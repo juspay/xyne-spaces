@@ -36,6 +36,10 @@ interface ClawChatMessage {
   content: string;
   status: string;
   createdAt: string;
+  /** Tree parent — set by claw-auth's branching path. Null/undefined on
+   *  legacy rows written before branching landed; we fall back to
+   *  chronological order in that case. */
+  parentId?: string | null;
   reasoning?: string;
   attachments?: Array<{
     id: string;
@@ -51,6 +55,8 @@ interface ClawMessagesResponse {
   data: ClawChatMessage[];
   toolInvocations?: unknown[];
   invocationsByMsgId?: Record<string, unknown[]>;
+  /** assistantMsgId → AgentRun.sessionId, for branching-safe debugger pairing. */
+  runByMsgId?: Record<string, string>;
 }
 
 // ============================================================================
@@ -133,11 +139,29 @@ export async function fetchV2ConversationMessages(
   const invocationsByMsgId =
     (response.data.invocationsByMsgId as Record<string, ToolInvocation[]> | undefined) || undefined;
 
+  const runByMsgId = response.data.runByMsgId || undefined;
+
+  // Backend now writes parentId on every chat_messages row (branching tree).
+  // Check whether ANY row in this conversation has a non-null parentId — if
+  // so, we trust the backend's tree fully. Otherwise the conversation is
+  // legacy (pre-branching) and we fall back to chronological pairing so the
+  // existing UI's branch-disabled gate (every message has parentId=null)
+  // continues to work and old threads still render.
+  const hasBackendParentId = response.data.data.some(
+    m => typeof m.parentId === 'string' && m.parentId.length > 0,
+  );
+
   const mappedMessages = response.data.data.map((msg, index, arr) => {
     const isUser = msg.role === 'user';
 
-    // Set parentId to the previous message's id, or null for the first message
-    const parentId = index > 0 ? arr[index - 1]!.id : null;
+    // Branching: prefer the backend's parentId — chronological order does
+    // NOT match tree order once a user has multiple assistant siblings.
+    // Legacy fallback keeps unmigrated conversations rendering as a list.
+    const parentId = hasBackendParentId
+      ? (msg.parentId ?? null)
+      : index > 0
+        ? arr[index - 1]!.id
+        : null;
 
     // For assistant messages, find tool invocations that were started just before this message was created
     // Tool invocations should be associated with the assistant response they helped generate
@@ -208,6 +232,7 @@ export async function fetchV2ConversationMessages(
       toolOutputs: [],
       toolInvocations: msgToolInvocations,
       pendingActions: [],
+      ...(!isUser && runByMsgId?.[msg.id] ? { debugSessionId: runByMsgId[msg.id] } : {}),
     };
 
     // Map attachments from claw format to frontend format

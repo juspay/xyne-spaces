@@ -226,6 +226,14 @@ export const useXyneAIStream = ({
       userTags?: Record<string, UserTag>,
       parentMessageId?: string,
       isRegenerate?: boolean,
+      // Branching: edit-user creates a sibling user under
+      // `parentAssistantMessageId`. The backend uses these to clone the PI
+      // session at the right cut point. Without them v2 edits land as a
+      // follow-up turn (LLM keeps running on the same session, so the
+      // pre-edit assistant response leaks into context).
+      isEditUserMessage?: boolean,
+      editedUserMessageId?: string,
+      parentAssistantMessageId?: string,
     ): Promise<void> => {
       // Allow empty query if there are selection contexts
       if (!query.trim() && (!selectionContexts || selectionContexts.length === 0)) return;
@@ -344,6 +352,9 @@ export const useXyneAIStream = ({
           attachments,
           parentMessageId,
           isRegenerate,
+          ...(isEditUserMessage ? { isEditUserMessage: true } : {}),
+          ...(editedUserMessageId ? { editedUserMessageId } : {}),
+          ...(parentAssistantMessageId ? { parentAssistantMessageId } : {}),
           localUserMessageId,
           ticketIds,
           canvasIds,

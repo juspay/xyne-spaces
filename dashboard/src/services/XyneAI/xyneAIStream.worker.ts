@@ -44,6 +44,14 @@ export interface WorkerStartStreamMessage {
       }>;
       parentMessageId?: string;
       isRegenerate?: boolean;
+      // Branching: edit-user signals that the new user message is a sibling
+      // of `editedUserMessageId` under `parentAssistantMessageId` (the
+      // assistant parent the original lived under). claw-auth uses these to
+      // clone the PI session BEFORE the original user msg so the LLM session
+      // doesn't include the old turn as context.
+      isEditUserMessage?: boolean;
+      editedUserMessageId?: string;
+      parentAssistantMessageId?: string;
       draftMode?: boolean;
       version?: 'v1' | 'v2';
       disableTools?: boolean;
@@ -159,6 +167,15 @@ async function executeStream(
           parent_message_id: requestBody.parentMessageId,
         }),
         ...(requestBody.isRegenerate && { is_regenerate: requestBody.isRegenerate }),
+        ...(requestBody.isEditUserMessage && {
+          is_edit_user_message: requestBody.isEditUserMessage,
+        }),
+        ...(requestBody.editedUserMessageId && {
+          edited_user_message_id: requestBody.editedUserMessageId,
+        }),
+        ...(requestBody.parentAssistantMessageId && {
+          parent_assistant_message_id: requestBody.parentAssistantMessageId,
+        }),
         ...(requestBody.draftMode && { draft_mode: true }),
         ...(requestBody.version && { version: requestBody.version }),
         ...(requestBody.disableTools && { disable_tools: true }),

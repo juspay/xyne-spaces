@@ -88,6 +88,13 @@ export interface StreamRequest {
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
   isRegenerate?: boolean | undefined;
+  /** Branching: edit-user signals that the new user message is a sibling of
+   *  `editedUserMessageId` under `parentAssistantMessageId`. claw-auth uses
+   *  these to clone the PI session BEFORE the edited user msg so the LLM
+   *  session reflects the new branch instead of continuing linearly. */
+  isEditUserMessage?: boolean | undefined;
+  editedUserMessageId?: string | undefined;
+  parentAssistantMessageId?: string | undefined;
   localUserMessageId?: string | undefined;
   suppressCompletionToast?: boolean | undefined;
   draftMode?: boolean | undefined;
@@ -910,6 +917,11 @@ class XyneAIStreamManager {
           }),
           ...(request.parentMessageId && { parentMessageId: request.parentMessageId }),
           ...(request.isRegenerate && { isRegenerate: request.isRegenerate }),
+          ...(request.isEditUserMessage && { isEditUserMessage: request.isEditUserMessage }),
+          ...(request.editedUserMessageId && { editedUserMessageId: request.editedUserMessageId }),
+          ...(request.parentAssistantMessageId && {
+            parentAssistantMessageId: request.parentAssistantMessageId,
+          }),
           ...(request.draftMode && { draftMode: true }),
           ...(request.version && { version: request.version }),
           ...(request.disableTools && { disableTools: true }),
@@ -1681,13 +1693,28 @@ class XyneAIStreamManager {
       return localMsg;
     });
 
-    // Check if we have any user messages that need to be synced with server IDs
-    // The backend assigns permanent IDs that we should adopt
+    // Check if we have any user messages that need to be synced with server IDs.
+    // Branching makes content matching ambiguous: a user can ask the same
+    // question ("repeat the above math") in two different branches, and the
+    // server returns BOTH copies — keyed differently in the tree. Match on
+    // (parentId, content) so a local user msg in branch A doesn't get its
+    // id rewritten to point at a same-content msg in branch B (which then
+    // makes the next turn's parentMessageId resolve to the wrong branch).
+    //
+    // Reserve each server id at most once, and only swap when the local id
+    // doesn't already match — both guards prevent the corruption that put
+    // the second "repeat" in the wrong branch chain on reload.
+    const usedRefreshedIds = new Set<string>(
+      currentState.messages.filter(m => m.type === 'user').map(m => m.id),
+    );
     const localUserMsgs = currentState.messages.filter(m => m.type === 'user');
     for (const localUserMsg of localUserMsgs) {
-      // Find matching user message in refreshed data
       const matchingRefreshed = refreshedMessages.find(
-        rm => rm.type === 'user' && rm.content === localUserMsg.content,
+        rm =>
+          rm.type === 'user' &&
+          rm.content === localUserMsg.content &&
+          (rm.parentId ?? null) === (localUserMsg.parentId ?? null) &&
+          !usedRefreshedIds.has(rm.id),
       );
       if (matchingRefreshed && matchingRefreshed.id !== localUserMsg.id) {
         // Update the ID to match server
@@ -1699,6 +1726,7 @@ class XyneAIStreamManager {
               ...targetMsg,
               id: matchingRefreshed.id,
             };
+            usedRefreshedIds.add(matchingRefreshed.id);
             // Also update parent references pointing to this message
             for (let i = 0; i < updatedMessages.length; i++) {
               const msg = updatedMessages[i];
@@ -1708,6 +1736,10 @@ class XyneAIStreamManager {
             }
           }
         }
+      } else if (matchingRefreshed) {
+        // Already aligned — still record the id so a later same-content
+        // local user can't collide with it.
+        usedRefreshedIds.add(matchingRefreshed.id);
       }
     }
 

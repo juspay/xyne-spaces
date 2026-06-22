@@ -148,6 +148,12 @@ const XyneAISidebar = ({
   const [debugArtifactsReadyVersion, setDebugArtifactsReadyVersion] = useState(0);
   const [showDebugger, setShowDebugger] = useState(false);
   const [debugTurnIndex, setDebugTurnIndex] = useState<number | null>(null);
+  // Branching-safe debugger selection: under sibling branches, the Nth visible
+  // assistant is no longer the Nth run by time, so an index-based selector
+  // routes to the wrong run. Pin selection by the message's AgentRun.sessionId
+  // (carried on Message.debugSessionId from /messages runByMsgId). Falls back
+  // to turn-index when not set (legacy rows, live streams pre-finalize).
+  const [debugSessionId, setDebugSessionId] = useState<string | null>(null);
   const [debuggerWidth] = useState(() => {
     if (typeof window === 'undefined') return 460;
     const persisted = Number(window.localStorage.getItem(DEBUGGER_WIDTH_STORAGE_KEY));
@@ -1483,7 +1489,13 @@ const XyneAISidebar = ({
     );
   }, [messages, displayMessages, submitQuery, abortCurrentRequest]);
 
-  // Edit: create a sibling branch with new content from the same parent
+  // Edit: create a sibling branch with new content from the same parent.
+  // For v2 (claw) edits we must signal `isEditUserMessage` + `editedUserMessageId`
+  // so claw-auth clones the PI session BEFORE the original user message
+  // (otherwise the LLM keeps running on the same session and the pre-edit
+  // assistant response leaks into the new turn's context — looks like a
+  // follow-up before reload, flattens after). The JAF v1 path infers the
+  // same intent from `parentMessageId`, so the extra params are no-ops there.
   const handleEditMessage = useCallback(
     async (messageId: string, newContent: string): Promise<void> => {
       if (isActiveSessionStreaming) return;
@@ -1493,6 +1505,8 @@ const XyneAISidebar = ({
 
       abortCurrentRequest();
 
+      const editedParentAssistant = messageToEdit.parentId ?? undefined;
+
       // Submit with new content, parentId = original message's parent (creates sibling branch)
       await submitQuery(
         newContent,
@@ -1500,7 +1514,11 @@ const XyneAISidebar = ({
         messageToEdit.selectionContexts,
         newContent,
         undefined, // userTags — not needed for edit
-        messageToEdit.parentId ?? undefined,
+        editedParentAssistant,
+        undefined, // isRegenerate
+        true, // isEditUserMessage — claw-auth branches PI session
+        messageToEdit.id, // editedUserMessageId — the user msg being replaced
+        editedParentAssistant, // parentAssistantMessageId — same as parentMessageId here
       );
     },
     [messages, abortCurrentRequest, submitQuery],
@@ -1845,6 +1863,7 @@ const XyneAISidebar = ({
                   isV2
                     ? () => {
                         setDebugTurnIndex(null);
+                        setDebugSessionId(null);
                         setShowDebugger(true);
                       }
                     : undefined
@@ -2026,6 +2045,12 @@ const XyneAISidebar = ({
                                     isV2 && message.type === 'bot'
                                       ? () => {
                                           setDebugTurnIndex(botTurnIndex);
+                                          // Prefer sessionId pinning when the
+                                          // run is known. Falls back to null
+                                          // (turn-index path) for live streams
+                                          // whose AgentRun hasn't been linked
+                                          // to chatMessageId yet.
+                                          setDebugSessionId(message.debugSessionId ?? null);
                                           setShowDebugger(true);
                                         }
                                       : undefined
@@ -2124,6 +2149,7 @@ const XyneAISidebar = ({
             artifactsReadyVersion={debugArtifactsReadyVersion}
             selectedTurnIndex={debugTurnIndex}
             selectedTurnLive={debugTurnIndex !== null && debugTurnIndex === streamingBotTurnIndex}
+            selectedSessionId={debugSessionId}
             onClose={() => setShowDebugger(false)}
           />
         </>

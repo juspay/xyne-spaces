@@ -58,6 +58,15 @@ export interface ClawRunRequest {
   researchContext?: { type: string; id?: string; name: string } | null;
   createCanvasEnabled: boolean;
   sessionId?: string;
+  // Branching: the dashboard already composes JAF/v1 calls with these names;
+  // we forward them through to claw-auth's /run/stream which understands the
+  // same tree model. `parentMessageId` is the v1-shared name — see the
+  // controller for how it's overloaded across flows.
+  isRegenerate?: boolean;
+  isEditUserMessage?: boolean;
+  parentMessageId?: string;
+  parentAssistantMessageId?: string;
+  editedUserMessageId?: string;
 }
 
 export interface ClawRunStreamResult {
@@ -88,6 +97,11 @@ export interface ClawMessagesResponse {
   data: unknown;
   toolInvocations?: unknown[];
   invocationsByMsgId?: Record<string, unknown[]>;
+  /** Branching-safe debugger pairing: assistantMessageId → AgentRun.sessionId.
+   *  Lets the dashboard pin "Debug this response" to the run that produced
+   *  the clicked message instead of routing by chronological turn index
+   *  (which doesn't survive sibling branches). */
+  runByMsgId?: Record<string, string>;
 }
 
 export interface ClawDebugArtifactBundle {
@@ -423,6 +437,20 @@ export async function runClawAgentStream(
 
   const additionalInstructions = buildAdditionalInstructions(request);
 
+  // Branching: the dashboard's v1 (JAF) path uses one `parentMessageId` slot
+  // that the JAF server interprets per `isRegenerate`. claw-auth's tree model
+  // expects the two parents separately:
+  //   - isRegenerate=true → `parentUserMessageId` is the user msg replayed
+  //   - normal send       → `parentAssistantMessageId` is the tree parent
+  // The dashboard sends parentAssistantMessageId explicitly when it has it,
+  // so we trust that field when present; otherwise we split parentMessageId
+  // by the flag.
+  const parentUserMessageId =
+    request.isRegenerate ? request.parentMessageId : undefined;
+  const parentAssistantMessageId =
+    request.parentAssistantMessageId
+    ?? (!request.isRegenerate ? request.parentMessageId : undefined);
+
   const payload: Record<string, unknown> = {
     userId: request.userId,
     userName: request.userName,
@@ -450,6 +478,11 @@ export async function runClawAgentStream(
       ...(request.conversationId && { SPACES_CONVERSATION_ID: request.conversationId }),
     },
     ...(additionalInstructions && { additionalInstructions }),
+    ...(request.isRegenerate && { isRegenerate: true }),
+    ...(request.isEditUserMessage && { isEditUserMessage: true }),
+    ...(parentUserMessageId && { parentUserMessageId }),
+    ...(parentAssistantMessageId && { parentAssistantMessageId }),
+    ...(request.editedUserMessageId && { editedUserMessageId: request.editedUserMessageId }),
   };
 
   const cookieHeader = extractCookieHeader(req);
@@ -575,6 +608,13 @@ export async function runClawAgentStream(
                   sessionId: clawConversationId,
                   content: parsed.content,
                   status: parsed.status,
+                  // Branching ids — XyneAIStreamManager already swaps these
+                  // (it expects `messageId` / `userMessageId`). The `parentId`
+                  // is informational; the manager re-stitches parent links
+                  // from the local optimistic ids during the swap.
+                  ...(parsed.id && { messageId: parsed.id }),
+                  ...(parsed.userMessageId && { userMessageId: parsed.userMessageId }),
+                  ...(parsed.parentId && { parentId: parsed.parentId }),
                   ...(parsed.attachments?.length && { attachments: parsed.attachments }),
                   ...(parsed.pendingActions?.length && { pendingActions: parsed.pendingActions }),
                 })}\n\n`

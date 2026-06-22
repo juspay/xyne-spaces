@@ -96,8 +96,30 @@ const XyneAIRequestSchemaV2 = z.object({
     )
     .optional(),
   messageAttachmentIds: z.array(z.string().min(1)).optional(),
+  // Branching: same names the JAF (v1) path uses, so the dashboard composes
+  // requests identically for both backends. `parentMessageId` plays two
+  // roles, disambiguated by the `isRegenerate` / `isEditUserMessage` flags:
+  //   - normal send:      tree parent the new user msg attaches under
+  //   - regenerate:       id of the user message being replayed
+  //   - edit-user:        id of the user message being replaced (the
+  //                       original); the new sibling lives under the same
+  //                       parentAssistantMessageId.
+  //
+  // The xyneAIStream web worker serializes branching params in snake_case
+  // (matches `parent_message_id`, `is_regenerate`, etc.). Zod's default is
+  // to STRIP unknown keys — without the snake_case aliases below, every
+  // branching flag was dropped at the schema layer and never reached
+  // claw-auth (so regen/edit silently behaved like normal sends).
   parentMessageId: z.string().optional(),
+  parent_message_id: z.string().optional(),
+  parentAssistantMessageId: z.string().optional(),
+  parent_assistant_message_id: z.string().optional(),
+  editedUserMessageId: z.string().optional(),
+  edited_user_message_id: z.string().optional(),
   isRegenerate: z.boolean().optional().default(false),
+  is_regenerate: z.boolean().optional().default(false),
+  isEditUserMessage: z.boolean().optional().default(false),
+  is_edit_user_message: z.boolean().optional().default(false),
   canvasIds: z.array(z.string().min(1)).optional(),
   canvas_ids: z.array(z.string().min(1)).optional(),
   ticketIds: z.array(z.string().min(1)).optional(),
@@ -159,8 +181,16 @@ export class XyneAIControllerV2 {
       research_context,
       attachments,
       messageAttachmentIds,
-      parentMessageId: _parentMessageId,
-      isRegenerate: _isRegenerate,
+      parentMessageId: parentMessageIdCC,
+      parent_message_id: parentMessageIdSC,
+      parentAssistantMessageId: parentAssistantMessageIdCC,
+      parent_assistant_message_id: parentAssistantMessageIdSC,
+      editedUserMessageId: editedUserMessageIdCC,
+      edited_user_message_id: editedUserMessageIdSC,
+      isRegenerate: isRegenerateCC,
+      is_regenerate: isRegenerateSC,
+      isEditUserMessage: isEditUserMessageCC,
+      is_edit_user_message: isEditUserMessageSC,
       canvasIds,
       canvas_ids,
       ticketIds,
@@ -189,6 +219,13 @@ export class XyneAIControllerV2 {
     const effectiveCanvasIds = canvasIds?.length ? canvasIds : canvas_ids;
     const effectiveTicketIds = ticketIds?.length ? ticketIds : ticket_ids;
     const effectiveCallIds = callIds?.length ? callIds : call_ids;
+    // Same snake-case fallback rationale for branching params — the worker
+    // sends snake_case; HTTP callers may use either.
+    const effectiveParentMessageId = parentMessageIdCC || parentMessageIdSC;
+    const effectiveParentAssistantMessageId = parentAssistantMessageIdCC || parentAssistantMessageIdSC;
+    const effectiveEditedUserMessageId = editedUserMessageIdCC || editedUserMessageIdSC;
+    const effectiveIsRegenerate = isRegenerateCC || isRegenerateSC;
+    const effectiveIsEditUserMessage = isEditUserMessageCC || isEditUserMessageSC;
     logger.info(
       `[XyneAIv2] Request context: ticketIds=${JSON.stringify(effectiveTicketIds)}, canvasIds=${JSON.stringify(effectiveCanvasIds)}, callIds=${JSON.stringify(effectiveCallIds)}, attachedContextCount=${effectiveAttachedContext?.length ?? 0}`
     );
@@ -277,6 +314,17 @@ export class XyneAIControllerV2 {
           researchContext: effectiveResearchContext,
           createCanvasEnabled,
           sessionId: effectiveSessionId,
+          // Branching: forward intent + tree position to claw-auth. The
+          // `parentMessageId` is the JAF/v1-shared name; here it doubles as
+          // `parentUserMessageId` for regenerate (the user msg being
+          // replayed) and as `parentAssistantMessageId` for normal sends
+          // (the tree parent the new user attaches under). Edit-user uses
+          // `editedUserMessageId` separately.
+          isRegenerate: effectiveIsRegenerate,
+          isEditUserMessage: effectiveIsEditUserMessage,
+          ...(effectiveParentMessageId ? { parentMessageId: effectiveParentMessageId } : {}),
+          ...(effectiveParentAssistantMessageId ? { parentAssistantMessageId: effectiveParentAssistantMessageId } : {}),
+          ...(effectiveEditedUserMessageId ? { editedUserMessageId: effectiveEditedUserMessageId } : {}),
         };
 
         // Set SSE headers
@@ -584,6 +632,7 @@ export class XyneAIControllerV2 {
         ...result,
         ...(result.toolInvocations && { toolInvocations: result.toolInvocations }),
         ...(result.invocationsByMsgId && { invocationsByMsgId: result.invocationsByMsgId }),
+        ...(result.runByMsgId && { runByMsgId: result.runByMsgId }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';

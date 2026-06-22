@@ -41,6 +41,11 @@ interface AskAIDebugPanelProps {
   artifactsReadyVersion: number;
   selectedTurnIndex: number | null;
   selectedTurnLive: boolean;
+  /** Branching-safe turn selection. When set, the panel renders ONLY the run
+   *  whose data.sessionId matches — chronological turn indexes don't survive
+   *  branching (the Nth visible assistant may not be the Nth run by time once
+   *  siblings exist). Caller derives this from Message.debugSessionId. */
+  selectedSessionId?: string | null;
   onClose: () => void;
 }
 
@@ -1375,9 +1380,11 @@ function persistedStreamStatus(
 function DebugSessionBody({
   bundle,
   selectedTurnIndex,
+  selectedSessionId,
 }: {
   bundle: DebugArtifactBundle;
   selectedTurnIndex?: number | null;
+  selectedSessionId?: string | null;
 }) {
   const root = bundle.debugSession;
   const rootEvents = getArray(root ?? {}, 'events') ?? bundle.debugEvents ?? [];
@@ -1407,6 +1414,10 @@ function DebugSessionBody({
       </div>
 
       {legacyPairs.map((pair, index) => {
+        // Hide legacy pairs entirely when a sessionId selector is active —
+        // those rows don't have a sessionId to match against, so the user's
+        // pinned run can't be among them. Mirrors v3 DebugDrawer.
+        if (selectedSessionId !== null) return null;
         if (selectedTurnIndex !== null && selectedTurnIndex !== index) return null;
         const useRootTimeline = persistedRuns.length === 0 && index === legacyPairs.length - 1;
         const rootSessionId = getString(root ?? {}, 'sessionId');
@@ -1440,23 +1451,34 @@ function DebugSessionBody({
       {persistedRuns.length > 0
         ? persistedRuns.map((run, index) => {
             const turnIndex = legacyPairs.length + index;
-            if (selectedTurnIndex !== null && selectedTurnIndex !== turnIndex) return null;
+            // Branching-safe: prefer sessionId match. Chronological turn order
+            // doesn't survive sibling branches (regenerate, edit-user), so the
+            // turn-index path picks the wrong run as soon as branches exist.
+            const runSessionId = getString(run.data, 'sessionId');
+            if (selectedSessionId !== null && runSessionId !== selectedSessionId) return null;
+            if (
+              selectedSessionId === null &&
+              selectedTurnIndex !== null &&
+              selectedTurnIndex !== turnIndex
+            )
+              return null;
             return (
               <TurnPanel
                 key={run.fileName}
                 title={`Turn ${legacyPairs.length + index + 1}: ${truncate(getString(run.data, 'task') || 'User request', 90)}`}
                 data={run.data}
                 defaultOpen={index === persistedRuns.length - 1}
-                isSelected={selectedTurnIndex !== null}
+                isSelected={selectedTurnIndex !== null || selectedSessionId !== null}
                 subagentTracesByParentToolCallId={subagentTraceMapForSession(
                   subagents,
-                  getString(run.data, 'sessionId'),
+                  runSessionId,
                 )}
               />
             );
           })
         : legacyPairs.length === 0 &&
           historicalPairs.length === 0 &&
+          selectedSessionId === null &&
           (selectedTurnIndex === null || selectedTurnIndex === 0) && (
             <TurnPanel
               title='Latest run'
@@ -1489,6 +1511,7 @@ export function AskAIDebugPanel({
   artifactsReadyVersion,
   selectedTurnIndex,
   selectedTurnLive,
+  selectedSessionId = null,
   onClose,
 }: AskAIDebugPanelProps) {
   const [bundle, setBundle] = useState<DebugArtifactBundle | null>(null);
@@ -1564,9 +1587,11 @@ export function AskAIDebugPanel({
         </div>
         <div className='min-w-0 flex-1'>
           <p className='truncate text-[12px] font-semibold text-xyne-fg-primary'>
-            {selectedTurnIndex === null
-              ? 'Ask AI Debugger'
-              : `Response ${selectedTurnIndex + 1} Debugger`}
+            {selectedSessionId
+              ? `Run ${selectedSessionId.slice(0, 8)}`
+              : selectedTurnIndex === null
+                ? 'Ask AI Debugger'
+                : `Response ${selectedTurnIndex + 1} Debugger`}
           </p>
           <p className='truncate text-[10px] text-xyne-fg-muted'>
             {agentSlug} {conversationId ? `· ${conversationId}` : ''}
@@ -1607,6 +1632,7 @@ export function AskAIDebugPanel({
         {conversationId &&
           running &&
           liveEvents.length > 0 &&
+          selectedSessionId === null &&
           (selectedTurnIndex === null || selectedTurnLive) && (
             <div className='mb-2.5'>
               <div className='mb-1 flex items-baseline gap-2'>
@@ -1660,7 +1686,11 @@ export function AskAIDebugPanel({
         ) : error && !bundle ? (
           <p className='py-4 text-[13px] text-red-700 dark:text-red-300'>{error}</p>
         ) : bundle ? (
-          <DebugSessionBody bundle={bundle} selectedTurnIndex={selectedTurnIndex} />
+          <DebugSessionBody
+            bundle={bundle}
+            selectedTurnIndex={selectedTurnIndex}
+            selectedSessionId={selectedSessionId}
+          />
         ) : (
           <p className='py-6 text-[13px] text-xyne-fg-muted'>
             No debugger artifacts found for this conversation.
