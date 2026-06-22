@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Plus, X, Check, Search, Pencil, Trash2 } from 'lucide-react';
 import type { EmailSignature } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -61,6 +61,22 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
 
   const [ccInputValue, setCcInputValue] = useState('');
   const [ccHighlightIndex, setCcHighlightIndex] = useState(0);
+  const [ownerSearch, setOwnerSearch] = useState('');
+  const ownerSearchInputRef = useRef<HTMLInputElement>(null);
+  const filteredOwnerUsers = useMemo(() => {
+    const q = ownerSearch.trim().toLowerCase();
+    const all = allUsers ?? [];
+    const matches = q
+      ? all.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+      : all;
+    // Always include the currently selected user so the trigger keeps showing
+    // its name/avatar even when the search filters it out of the list.
+    if (ownerId && !matches.some(u => u.id === ownerId)) {
+      const selected = all.find(u => u.id === ownerId);
+      if (selected) return [selected, ...matches];
+    }
+    return matches;
+  }, [allUsers, ownerSearch, ownerId]);
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [editingSignature, setEditingSignature] = useState<EmailSignature | undefined>();
   const [signatureAutoAppendEnabled, setSignatureAutoAppendEnabled] = useState(
@@ -99,24 +115,60 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               : 'This user will be used to create tickets in this channel'}
           </div>
         </div>
-        <Select value={ownerId} onValueChange={setOwner} disabled={!canManage}>
+        <Select
+          value={ownerId}
+          onValueChange={setOwner}
+          disabled={!canManage}
+          onOpenChange={open => {
+            if (!open) setOwnerSearch('');
+          }}
+        >
           <SelectTrigger className='w-full max-w-[300px] p-[8px] h-[36px] bg-background rounded-[10px] font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50'>
             <SelectValue placeholder='Select owner' />
           </SelectTrigger>
-          <SelectContent className='rounded-[10px]'>
-            {(allUsers ?? []).map(user => (
-              <SelectItem key={user.id} value={user.id} className='rounded-[8px]'>
-                <div className='flex items-center gap-2'>
-                  <Avatar
-                    userId={user.id}
-                    size='sm'
-                    showActiveStatus={false}
-                    className='!size-5 !text-[10px]'
-                  />
-                  <span>{user.name}</span>
-                </div>
-              </SelectItem>
-            ))}
+          <SelectContent
+            className='rounded-[10px]'
+            header={
+              <div className='flex items-center gap-2 border-b border-border bg-popover px-2 py-1.5'>
+                <Search size={14} className='text-muted-foreground shrink-0' />
+                <input
+                  ref={ownerSearchInputRef}
+                  type='text'
+                  value={ownerSearch}
+                  onChange={e => {
+                    setOwnerSearch(e.target.value);
+                    requestAnimationFrame(() => ownerSearchInputRef.current?.focus());
+                  }}
+                  onKeyDown={e => e.stopPropagation()}
+                  onPointerDown={e => e.stopPropagation()}
+                  placeholder='Search users…'
+                  autoFocus
+                  className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                  data-track-category='DeskSettings'
+                  data-track-name='SearchInboxOwner'
+                />
+              </div>
+            }
+          >
+            {filteredOwnerUsers.length === 0 ? (
+              <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
+                No users found
+              </div>
+            ) : (
+              filteredOwnerUsers.map(user => (
+                <SelectItem key={user.id} value={user.id} className='rounded-[8px]'>
+                  <div className='flex items-center gap-2'>
+                    <Avatar
+                      userId={user.id}
+                      size='sm'
+                      showActiveStatus={false}
+                      className='!size-5 !text-[10px]'
+                    />
+                    <span>{user.name}</span>
+                  </div>
+                </SelectItem>
+              ))
+            )}
           </SelectContent>
         </Select>
       </div>

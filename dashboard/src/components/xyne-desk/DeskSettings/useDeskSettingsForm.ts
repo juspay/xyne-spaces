@@ -198,12 +198,15 @@ export function useDeskSettingsForm(
   const defaultAssigneeGroupId = pref.draft.assigneeUserGroupId;
   const autoMergeEmails = pref.draft.autoMergeEmails;
   const autoAIDraft = pref.draft.autoAIDraft;
+  const autoAIDraftSaved = emailChannelPreference?.autoDraftMode === AutoDraftMode.DRAFT;
   const autoDraftAgentSlug = pref.draft.autoDraftAgentSlug;
   const classificationEnabledDraft = cls.draft.enabled;
+  const classificationEnabledSaved = classificationConfig?.enabled ?? false;
   const classificationPromptDraft = cls.draft.classificationPrompt;
   const categoryFieldDraft = cls.draft.categoryField;
   const subCategoryFieldDraft = cls.draft.subCategoryField;
   const priorityEnabledDraft = pri.draft.enabled;
+  const priorityEnabledSaved = priorityConfig?.enabled ?? false;
   const priorityPromptDraft = pri.draft.prompt;
   const priorityThresholdDraft = pri.draft.threshold;
 
@@ -381,13 +384,16 @@ export function useDeskSettingsForm(
     autoMergeEmails,
     setAutoMergeEmails,
     autoAIDraft,
+    autoAIDraftSaved,
     setAutoAIDraft,
     autoDraftAgentSlug,
     setAutoDraftAgentSlug,
     clawAgents,
     classificationEnabledDraft,
+    classificationEnabledSaved,
     setClassificationEnabled,
     priorityEnabledDraft,
+    priorityEnabledSaved,
     setPriorityEnabled,
     classificationPromptDraft,
     setClassificationPromptDraft,

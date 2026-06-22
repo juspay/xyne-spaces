@@ -34,6 +34,7 @@ import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
+import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { recoveryService } from './workflows/services/recovery-service'
 config()
 
@@ -224,6 +225,9 @@ class WorkerService {
       logger.info('Starting email classification worker...');
       await emailClassificationWorker.start();
 
+      logger.info('Starting auto draft worker...');
+      await autoDraftWorker.start();
+
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
       if (documentIngestionWorkerEnabled) {
         logger.info('Starting document ingestion worker...');
@@ -354,6 +358,7 @@ class WorkerService {
       }
 
       await emailClassificationWorker.shutdown();
+      await autoDraftWorker.shutdown();
 
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
       if (documentIngestionWorkerEnabled) {

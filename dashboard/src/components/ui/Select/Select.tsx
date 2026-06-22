@@ -52,14 +52,22 @@ function SelectContent({
   children,
   position = 'popper',
   showScrollButtons = true,
+  header,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content> & { showScrollButtons?: boolean }) {
+}: React.ComponentProps<typeof SelectPrimitive.Content> & {
+  showScrollButtons?: boolean;
+  /**
+   * Optional content rendered above the scrolling viewport — use this for a
+   * search input or other persistent UI that should not scroll with the items.
+   */
+  header?: React.ReactNode;
+}) {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         data-slot='select-content'
         className={cn(
-          'relative z-[70] max-h-[300px] min-w-[8rem] overflow-x-hidden overflow-y-auto rounded-md border bg-popover text-popover-foreground shadow-md',
+          'relative z-[70] flex max-h-[300px] min-w-[8rem] flex-col overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
           'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
           'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
           'data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
@@ -70,10 +78,11 @@ function SelectContent({
         position={position}
         {...props}
       >
+        {header}
         {showScrollButtons && <SelectScrollUpButton />}
         <SelectPrimitive.Viewport
           className={cn(
-            'p-1',
+            'flex-1 overflow-y-auto p-1',
             position === 'popper' &&
               'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1',
           )}

@@ -634,6 +634,37 @@ export class EmailService {
     }
   }
 
+  /**
+   * Public wrapper for re-triggering autodraft generation on an existing ticket.
+   * Used by the per-channel AI retrigger endpoint to fill in missing drafts on
+   * older tickets that pre-date the feature being enabled. Resolves the latest
+   * inbound email on the ticket's conversation and delegates to triggerAutoDraft.
+   * No-ops when ticket / email / autodraft config is missing.
+   */
+  async retriggerAutoDraftForTicket(ticketId: string): Promise<boolean> {
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, conversationId: true, channelId: true },
+    });
+    if (!ticket) return false;
+
+    const email = await this.prisma.email.findFirst({
+      where: { conversationId: ticket.conversationId },
+      orderBy: { createdAt: 'desc' },
+      select: { subject: true, body: true },
+    });
+    if (!email) return false;
+
+    await this.triggerAutoDraft({
+      ticketId: ticket.id,
+      conversationId: ticket.conversationId,
+      channelId: ticket.channelId,
+      emailSubject: email.subject ?? '',
+      emailBody: email.body ?? '',
+    });
+    return true;
+  }
+
   private async setAutoDraftGenerating(conversationId: string, channelId: string): Promise<void> {
     try {
       const existingSeed = await this.prisma.emailDraft.findFirst({

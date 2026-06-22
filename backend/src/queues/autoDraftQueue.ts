@@ -2,17 +2,14 @@ import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 
-export interface EmailClassificationJobData {
+export interface AutoDraftJobData {
   ticketId: string;
+  conversationId: string;
   channelId: string;
-  emailId: string;
-  groupId: string | null;
-  runClassification?: boolean;
-  runPriority?: boolean;
 }
 
-class EmailClassificationQueue {
-  private queue: Bull.Queue<EmailClassificationJobData> | null = null;
+class AutoDraftQueue {
+  private queue: Bull.Queue<AutoDraftJobData> | null = null;
   private isInitialized = false;
   private isInitializing = false;
 
@@ -21,7 +18,7 @@ class EmailClassificationQueue {
     this.isInitializing = true;
 
     try {
-      this.queue = new Bull<EmailClassificationJobData>('email-classification', {
+      this.queue = new Bull<AutoDraftJobData>('auto-draft', {
         redis: {
           ...redisService.getRedisConfig(),
           lazyConnect: false,
@@ -33,7 +30,7 @@ class EmailClassificationQueue {
           removeOnFail: false,
         },
         settings: {
-          lockDuration: 2 * 60 * 1000,
+          lockDuration: 5 * 60 * 1000,
           stalledInterval: 60 * 1000,
           maxStalledCount: 1,
         },
@@ -41,9 +38,9 @@ class EmailClassificationQueue {
 
       this.setupEventListeners();
       this.isInitialized = true;
-      logger.info('[EMAIL-CLASSIFICATION-QUEUE] Initialized');
+      logger.info('[AUTO-DRAFT-QUEUE] Initialized');
     } catch (error) {
-      logger.error('[EMAIL-CLASSIFICATION-QUEUE] Failed to initialize:', error);
+      logger.error('[AUTO-DRAFT-QUEUE] Failed to initialize:', error);
       this.isInitialized = false;
     } finally {
       this.isInitializing = false;
@@ -54,24 +51,21 @@ class EmailClassificationQueue {
     if (!this.queue) return;
 
     this.queue.on('failed', (job, err) => {
-      logger.error(
-        `[EMAIL-CLASSIFICATION-QUEUE] Job ${job.id} failed — ticket ${job.data.ticketId}:`,
-        err,
-      );
+      logger.error(`[AUTO-DRAFT-QUEUE] Job ${job.id} failed — ticket ${job.data.ticketId}:`, err);
     });
 
     this.queue.on('stalled', job => {
-      logger.warn(`[EMAIL-CLASSIFICATION-QUEUE] Job ${job.id} stalled — ticket ${job.data.ticketId}`);
+      logger.warn(`[AUTO-DRAFT-QUEUE] Job ${job.id} stalled — ticket ${job.data.ticketId}`);
     });
 
     this.queue.on('error', err => {
-      logger.error('[EMAIL-CLASSIFICATION-QUEUE] Queue error:', err);
+      logger.error('[AUTO-DRAFT-QUEUE] Queue error:', err);
     });
   }
 
-  getQueue(): Bull.Queue<EmailClassificationJobData> {
+  getQueue(): Bull.Queue<AutoDraftJobData> {
     if (!this.queue) {
-      throw new Error('[EMAIL-CLASSIFICATION-QUEUE] Queue not initialized — call initialize() first');
+      throw new Error('[AUTO-DRAFT-QUEUE] Queue not initialized — call initialize() first');
     }
     return this.queue;
   }
@@ -85,9 +79,9 @@ class EmailClassificationQueue {
       await this.queue.close();
       this.queue = null;
       this.isInitialized = false;
-      logger.info('[EMAIL-CLASSIFICATION-QUEUE] Closed');
+      logger.info('[AUTO-DRAFT-QUEUE] Closed');
     }
   }
 }
 
-export const emailClassificationQueue = new EmailClassificationQueue();
+export const autoDraftQueue = new AutoDraftQueue();
