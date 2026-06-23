@@ -1708,6 +1708,17 @@ class XyneAIStreamManager {
             ...(mergedReasoning !== undefined && { reasoning: mergedReasoning }),
             // Keep the local ID to avoid breaking React keys and parent references
             id: localMsg.id,
+            // Tree topology is owned LOCALLY during a stream's lifetime.
+            // Server-side parentId for run-stream conversations is null and
+            // gets synthesized chronologically by XyneAISessionsV2Service on
+            // reload (a server msg id). If we let the spread above clobber
+            // local parentId with a server id, follow-up bot messages become
+            // orphans (their parent points to a server id that doesn't exist
+            // in local state), which strands them outside resolveActivePath
+            // and they vanish from display until reload re-fetches the tree.
+            // Spread conditionally — exactOptionalPropertyTypes rejects an
+            // explicit `undefined` on an optional field.
+            ...(localMsg.parentId !== undefined && { parentId: localMsg.parentId }),
           };
           return mergedMsg;
         }

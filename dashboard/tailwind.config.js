@@ -218,6 +218,13 @@ export default {
           '0%': { opacity: '1', transform: 'translateY(0)' },
           '100%': { opacity: '0', transform: 'translateY(-100%)' },
         },
+        // Subtle fade-up — used by ActivityBlock's tool subtext to crossfade
+        // when the currently-running tool changes. Smaller travel distance
+        // than slideUpIn (4px instead of 100%) so consecutive swaps stay calm.
+        fadeInUp: {
+          '0%': { opacity: '0', transform: 'translateY(4px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -229,6 +236,7 @@ export default {
         'ai-pop': 'ai-pop 700ms ease-in-out',
         'slide-up-in': 'slideUpIn 280ms cubic-bezier(0.22, 0.9, 0.3, 1) both',
         'slide-up-out': 'slideUpOut 280ms cubic-bezier(0.22, 0.9, 0.3, 1) both',
+        'fade-in-up': 'fadeInUp 220ms ease-out both',
       },
     },
   },

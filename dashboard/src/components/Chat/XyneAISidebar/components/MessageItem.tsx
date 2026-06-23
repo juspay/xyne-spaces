@@ -61,8 +61,7 @@ import type {
   ToolInvocation as ToolInvocationType,
   ClawCitation,
 } from '../utils/XyneAITypes';
-import { ReasoningBlock } from './ReasoningBlock';
-import { ToolInvocationList } from './ToolInvocationList';
+import { ActivityBlock } from './ActivityBlock';
 import { PendingActionBlock } from './PendingActionBlock';
 import { Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -137,13 +136,17 @@ const ClawCitationChip = ({
   // `claw-citation-chip` is the hook for the `!important` override in
   // global.css that keeps the chip's text the paragraph's foreground colour
   // and un-underlined — otherwise `.xyne-ai-markdown a` would force link blue.
+  // Hover swaps the neutral muted background for a soft rose tint so the
+  // chip stands out without shouting. Dark-mode hover uses a low-opacity
+  // rose so it stays readable on a near-black surface.
   const chipClass =
     'claw-citation-chip ' +
     'inline-flex items-center justify-center align-baseline ' +
     'px-1 min-w-[1.125rem] h-[1.125rem] mx-[2px] rounded ' +
     'text-[9.5px] font-medium tabular-nums leading-none ' +
-    'bg-muted/60 border border-border/50 ' +
-    'hover:bg-accent hover:border-border ' +
+    'bg-orange-100/40 border border-orange-300/50 ' +
+    'hover:bg-orange-100/50 dark:hover:bg-orange-950 ' +
+    'hover:border-orange-200 dark:hover:border-orange-900/80 ' +
     'transition-colors';
 
   const trigger = url ? (
@@ -620,7 +623,11 @@ const AttachmentImagePreview = ({
 };
 
 // Attachment preview component
-const AttachmentPreview = ({ attachment }: { attachment: MessageAttachment }): ReactElement => {
+export const AttachmentPreview = ({
+  attachment,
+}: {
+  attachment: MessageAttachment;
+}): ReactElement => {
   const isImage = attachment.mimeType.startsWith('image/');
   const isPdf = attachment.mimeType === 'application/pdf';
   const hasBase64Data = !!attachment.data;
@@ -867,6 +874,20 @@ const BranchNavigator = ({
   </div>
 );
 
+/**
+ * Render a `2:43 PM`-style time label for a message. Defensive against the
+ * timestamp coming back from persisted history as a string/number instead of
+ * a Date (Zod/JSON roundtrips don't preserve Date instances). Returns null
+ * for invalid inputs so callers can skip the row entirely instead of showing
+ * "Invalid Date".
+ */
+function formatMessageTime(input: Date | string | number | undefined | null): string | null {
+  if (input === undefined || input === null) return null;
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 export const MessageItem = React.memo(
   ({
     message,
@@ -888,21 +909,12 @@ export const MessageItem = React.memo(
     const editTextareaRef = React.useRef<HTMLTextAreaElement>(null);
     const navigate = useNavigate();
 
-    // Rotating status for long-running tools (research_agent, create_ppt)
-    const [rotatingIndex, setRotatingIndex] = useState(0);
-    const statusPhrases = Array.isArray(message.statusMessage) ? message.statusMessage : null;
-    const displayStatus = statusPhrases
-      ? statusPhrases[rotatingIndex % statusPhrases.length]
-      : (message.statusMessage as string | undefined);
-
-    useEffect(() => {
-      if (!statusPhrases || !message.isStreaming) return;
-      setRotatingIndex(0);
-      const interval = setInterval(() => {
-        setRotatingIndex(prev => (prev + 1) % statusPhrases.length);
-      }, 4000);
-      return () => clearInterval(interval);
-    }, [statusPhrases, message.isStreaming]);
+    // The rotating `displayStatus` + bouncing-dots indicator that used to live
+    // here has been removed in favor of the single ActivityBlock shimmer
+    // header. The backend `statusMessage` field is now ignored on this
+    // surface; if we ever want to surface it again, route it through
+    // ActivityBlock as a subtext prop instead of re-introducing a second
+    // loading row.
 
     // Handle clicking selection context to navigate to canvas
     const handleSelectionContextClick = (canvasViewAccessId: string): void => {
@@ -1022,326 +1034,309 @@ export const MessageItem = React.memo(
               : 'flex-1 max-w-full overflow-hidden'
           }
         >
-          {/* Streaming status indicator - shows inline with icon when no content */}
-          {message.type === 'bot' && message.isStreaming && displayStatus && !displayContent ? (
-            <div className='flex items-center gap-0.5 mt-1'>
-              <span className="text-xs text-muted-foreground font-['Inter'] italic">
-                {displayStatus}
-              </span>
-              <span className='inline-flex gap-0.5'>
-                <span
-                  className='animate-bounce text-xs text-muted-foreground'
-                  style={{ animationDelay: '0ms', animationDuration: '1s' }}
-                >
-                  .
-                </span>
-                <span
-                  className='animate-bounce text-xs text-muted-foreground'
-                  style={{ animationDelay: '200ms', animationDuration: '1s' }}
-                >
-                  .
-                </span>
-                <span
-                  className='animate-bounce text-xs text-muted-foreground'
-                  style={{ animationDelay: '400ms', animationDuration: '1s' }}
-                >
-                  .
-                </span>
-              </span>
-            </div>
-          ) : (
-            <>
-              <div
-                className={`${
-                  message.type === 'user'
-                    ? isEditing
-                      ? 'rounded-2xl bg-muted p-3'
-                      : 'flex flex-col items-start gap-3 p-2 [border-radius:16px_4px_16px_16px] bg-[var(--chat-mobile-my-bubble)] text-foreground md:block md:rounded-2xl md:bg-muted md:text-foreground md:px-4 md:py-2 md:w-fit'
-                    : 'rounded-2xl bg-transparent text-foreground max-w-full'
-                }`}
-              >
-                {message.type === 'user' && isEditing ? (
-                  /* Inline edit mode */
-                  <div className='flex flex-col gap-2'>
-                    <textarea
-                      ref={editTextareaRef}
-                      value={editText}
-                      onChange={e => setEditText(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          if (editText.trim()) {
-                            onEditSubmit?.(editText.trim());
-                            setIsEditing(false);
-                          }
-                        }
-                        if (e.key === 'Escape') {
-                          setIsEditing(false);
-                        }
-                      }}
-                      className="w-full bg-transparent text-sm font-['Inter'] font-[450] text-foreground resize-none outline-none min-h-[60px] leading-relaxed"
-                      rows={Math.max(2, editText.split('\n').length)}
-                      data-track-category='XyneAI'
-                      data-track-name='EDIT_TEXTAREA'
-                    />
-                    <div className='flex justify-end gap-2'>
-                      <button
-                        onClick={() => setIsEditing(false)}
-                        className="px-3 py-1.5 text-xs font-medium rounded-full border border-border bg-background hover:bg-accent transition-colors font-['Inter']"
-                        data-track-category='XyneAI'
-                        data-track-name='EDIT_CANCEL'
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (editText.trim()) {
-                            onEditSubmit?.(editText.trim());
-                            setIsEditing(false);
-                          }
-                        }}
-                        disabled={!editText.trim()}
-                        className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
-                        data-track-category='XyneAI'
-                        data-track-name='EDIT_SUBMIT'
-                      >
-                        Send
-                      </button>
-                    </div>
-                  </div>
-                ) : message.type === 'user' ? (
-                  <>
-                    {/* Selection context previews */}
-                    {message.selectionContexts && message.selectionContexts.length > 0 && (
-                      <div className='mb-3 space-y-2'>
-                        {message.selectionContexts.map((selection, index) => (
-                          <SelectionContextPreview
-                            key={index}
-                            selection={selection}
-                            onClick={() =>
-                              handleSelectionContextClick(selection.canvasViewAccessId)
-                            }
-                          />
-                        ))}
-                      </div>
-                    )}
-                    {/* Attachment previews */}
-                    {message.attachments && message.attachments.length > 0 && (
-                      <div className='mb-3 space-y-2'>
-                        {message.attachments.map((attachment, index) => (
-                          <AttachmentPreview key={index} attachment={attachment} />
-                        ))}
-                      </div>
-                    )}
-                    <div className="text-sm font-['Inter'] whitespace-pre-wrap break-words font-[450] tracking-[0] md:leading-relaxed">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          p: ({ children }) => {
-                            const processed = processNodeForUserTags(children, message.userTags);
-                            return <span>{processed}</span>;
-                          },
-                          a: ({ href, children, ...props }) => {
-                            // Check if URL is external
-                            const isExternal = (() => {
-                              if (!href) return false;
-                              try {
-                                const urlObj = new URL(href, window.location.origin);
-                                return urlObj.origin !== window.location.origin;
-                              } catch {
-                                return true;
-                              }
-                            })();
-
-                            // API paths (e.g. /api/attachments/.../download) should bypass React Router
-                            const isApiPath = href?.startsWith('/api/');
-
-                            if (isExternal) {
-                              return (
-                                <a
-                                  href={href}
-                                  target='_blank'
-                                  rel='noopener noreferrer'
-                                  className='text-blue-500 hover:text-blue-600 underline'
-                                  {...props}
-                                >
-                                  {children}
-                                </a>
-                              );
-                            }
-
-                            if (isApiPath) {
-                              return (
-                                <a
-                                  href={href}
-                                  className='text-blue-500 hover:text-blue-600 underline'
-                                  data-track-category='xyne-ai'
-                                  data-track-name='api-download'
-                                  onClick={e => {
-                                    e.preventDefault();
-                                    window.location.href = href!;
-                                  }}
-                                  {...props}
-                                >
-                                  {children}
-                                </a>
-                              );
-                            }
-
-                            return (
-                              <a
-                                href={href}
-                                className='text-blue-500 hover:text-blue-600 underline'
-                                {...props}
-                              >
-                                {children}
-                              </a>
-                            );
-                          },
-                        }}
-                      >
-                        {displayContent}
-                      </ReactMarkdown>
-                    </div>
-                  </>
-                ) : (
-                  <MessageContent
-                    message={message}
-                    displayContent={displayContent}
-                    hasKeypoints={hasKeypoints}
-                    parsedContent={parsedContent}
-                    clawCitationToolNumbers={clawCitationToolNumbers}
-                    onCitationClick={onCitationClick}
-                    onSummarizerCitationClick={onSummarizerCitationClick}
-                  />
-                )}
-              </div>
-
-              {/* Error display for bot messages */}
-              {message.type === 'bot' && message.errorInfo && (
-                <div className='mt-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3'>
-                  <div className='flex items-start gap-2'>
-                    <AlertTriangle size={14} className='mt-0.5 shrink-0 text-destructive' />
-                    <div className='flex-1 min-w-0'>
-                      <div className='text-xs font-medium text-destructive'>
-                        {message.errorInfo.title}
-                        {message.errorInfo.code && (
-                          <span className='ml-1 text-[10px] opacity-70'>
-                            ({message.errorInfo.code})
-                          </span>
-                        )}
-                      </div>
-                      <div className='mt-0.5 text-xs text-muted-foreground'>
-                        {message.errorInfo.message}
-                      </div>
-                      {message.errorInfo.helpText && (
-                        <div className='mt-1 text-[11px] text-muted-foreground/80'>
-                          {message.errorInfo.helpText}
-                        </div>
-                      )}
-                      {message.errorInfo.rawError && (
-                        <details className='mt-2'>
-                          <summary className='text-[10px] text-muted-foreground/60 cursor-pointer hover:text-muted-foreground'>
-                            Technical details
-                          </summary>
-                          <pre className='mt-1 max-h-32 overflow-y-auto rounded bg-muted p-2 text-[10px] text-muted-foreground whitespace-pre-wrap break-all'>
-                            {message.errorInfo.rawError}
-                          </pre>
-                        </details>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Branch navigator for user messages (edit branches) - below the bubble */}
-              {message.type === 'user' && branchInfo && onBranchNavigate && (
-                <div className='flex justify-end mt-1'>
-                  <BranchNavigator
-                    index={branchInfo.index}
-                    total={branchInfo.total}
-                    onNavigate={onBranchNavigate}
-                  />
-                </div>
-              )}
-
-              {/* Streaming status indicator - shows below content when there's content */}
-              {message.type === 'bot' && message.isStreaming && displayStatus && displayContent && (
-                <div className='mt-2'>
-                  <span className="text-xs text-muted-foreground font-['Inter'] italic flex items-center gap-0.5">
-                    {displayStatus}
-                    <span className='inline-flex gap-0.5'>
-                      <span
-                        className='animate-bounce'
-                        style={{ animationDelay: '0ms', animationDuration: '1s' }}
-                      >
-                        .
-                      </span>
-                      <span
-                        className='animate-bounce'
-                        style={{ animationDelay: '200ms', animationDuration: '1s' }}
-                      >
-                        .
-                      </span>
-                      <span
-                        className='animate-bounce'
-                        style={{ animationDelay: '400ms', animationDuration: '1s' }}
-                      >
-                        .
-                      </span>
-                    </span>
-                  </span>
-                </div>
-              )}
-
-              {/* Subtle "Stopped" indicator for cancelled mid-stream responses */}
-              {message.type === 'bot' && !message.isStreaming && message.isAborted && (
-                <div className='mt-2'>
-                  <span className="text-xs text-muted-foreground font-['Inter'] italic">
-                    Stopped
-                  </span>
-                </div>
-              )}
-
-              {message.type === 'bot' && onDebug && (
-                <button
-                  type='button'
-                  onClick={onDebug}
-                  className='mt-2 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-                  title='Debug this response'
+          {/* The legacy "displayStatus + bouncing dots" loading state lived
+              here as the TRUE branch of a ternary. Removed in favor of the
+              single thinking indicator on ActivityBlock — when there's no
+              content yet, the transparent bot bubble is invisible and the
+              user sees only the ActivityBlock shimmer above. */}
+          <div
+            className={`${
+              message.type === 'user'
+                ? isEditing
+                  ? 'rounded-2xl bg-muted p-3'
+                  : 'flex flex-col items-start gap-3 p-2 [border-radius:16px_4px_16px_16px] bg-[var(--chat-mobile-my-bubble)] text-foreground md:block md:rounded-2xl md:bg-muted md:text-foreground md:px-4 md:py-2 md:w-fit'
+                : 'rounded-2xl bg-transparent text-foreground max-w-full'
+            }`}
+          >
+            {message.type === 'user' && isEditing ? (
+              /* Inline edit mode */
+              <div className='flex flex-col gap-2'>
+                <textarea
+                  ref={editTextareaRef}
+                  value={editText}
+                  onChange={e => setEditText(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (editText.trim()) {
+                        onEditSubmit?.(editText.trim());
+                        setIsEditing(false);
+                      }
+                    }
+                    if (e.key === 'Escape') {
+                      setIsEditing(false);
+                    }
+                  }}
+                  className="w-full bg-transparent text-sm font-['Inter'] font-[450] text-foreground resize-none outline-none min-h-[60px] leading-relaxed"
+                  rows={Math.max(2, editText.split('\n').length)}
                   data-track-category='XyneAI'
-                  data-track-name='DEBUG_RESPONSE'
-                >
-                  <Bug size={12} /> Debug this response
-                </button>
-              )}
-
-              {/* Branch navigator + Copy/Regenerate/Like/Dislike Buttons.
-                  Aborted messages still get actions when they carry partial
-                  content — user can copy the snippet or regenerate to retry. */}
-              {message.type === 'bot' && !message.isStreaming && !message.isAborted && (
-                <div className='flex items-center justify-between mt-4'>
-                  {branchInfo && onBranchNavigate ? (
-                    <BranchNavigator
-                      index={branchInfo.index}
-                      total={branchInfo.total}
-                      onNavigate={onBranchNavigate}
-                    />
-                  ) : (
-                    <div />
-                  )}
-                  <MessageActions
-                    message={message}
-                    copied={copied}
-                    onCopy={handleCopy}
-                    onFeedback={onFeedback}
-                    feedbackValue={feedbackValue}
-                    onRegenerate={isLatestBotMessage ? onRegenerate : undefined}
-                  />
+                  data-track-name='EDIT_TEXTAREA'
+                />
+                <div className='flex justify-end gap-2'>
+                  <button
+                    onClick={() => setIsEditing(false)}
+                    className="px-3 py-1.5 text-xs font-medium rounded-full border border-border bg-background hover:bg-accent transition-colors font-['Inter']"
+                    data-track-category='XyneAI'
+                    data-track-name='EDIT_CANCEL'
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (editText.trim()) {
+                        onEditSubmit?.(editText.trim());
+                        setIsEditing(false);
+                      }
+                    }}
+                    disabled={!editText.trim()}
+                    className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
+                    data-track-category='XyneAI'
+                    data-track-name='EDIT_SUBMIT'
+                  >
+                    Send
+                  </button>
                 </div>
-              )}
-            </>
+              </div>
+            ) : message.type === 'user' ? (
+              <>
+                {/* Selection context previews */}
+                {message.selectionContexts && message.selectionContexts.length > 0 && (
+                  <div className='mb-3 space-y-2'>
+                    {message.selectionContexts.map((selection, index) => (
+                      <SelectionContextPreview
+                        key={index}
+                        selection={selection}
+                        onClick={() => handleSelectionContextClick(selection.canvasViewAccessId)}
+                      />
+                    ))}
+                  </div>
+                )}
+                {/* Attachment previews */}
+                {message.attachments && message.attachments.length > 0 && (
+                  <div className='mb-3 space-y-2'>
+                    {message.attachments.map((attachment, index) => (
+                      <AttachmentPreview key={index} attachment={attachment} />
+                    ))}
+                  </div>
+                )}
+                <div className="text-sm font-['Inter'] whitespace-pre-wrap break-words font-[450] tracking-[0] md:leading-relaxed">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      p: ({ children }) => {
+                        const processed = processNodeForUserTags(children, message.userTags);
+                        return <span>{processed}</span>;
+                      },
+                      a: ({ href, children, ...props }) => {
+                        // Check if URL is external
+                        const isExternal = (() => {
+                          if (!href) return false;
+                          try {
+                            const urlObj = new URL(href, window.location.origin);
+                            return urlObj.origin !== window.location.origin;
+                          } catch {
+                            return true;
+                          }
+                        })();
+
+                        // API paths (e.g. /api/attachments/.../download) should bypass React Router
+                        const isApiPath = href?.startsWith('/api/');
+
+                        if (isExternal) {
+                          return (
+                            <a
+                              href={href}
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              className='text-blue-500 hover:text-blue-600 underline'
+                              {...props}
+                            >
+                              {children}
+                            </a>
+                          );
+                        }
+
+                        if (isApiPath) {
+                          return (
+                            <a
+                              href={href}
+                              className='text-blue-500 hover:text-blue-600 underline'
+                              data-track-category='xyne-ai'
+                              data-track-name='api-download'
+                              onClick={e => {
+                                e.preventDefault();
+                                window.location.href = href!;
+                              }}
+                              {...props}
+                            >
+                              {children}
+                            </a>
+                          );
+                        }
+
+                        return (
+                          <a
+                            href={href}
+                            className='text-blue-500 hover:text-blue-600 underline'
+                            {...props}
+                          >
+                            {children}
+                          </a>
+                        );
+                      },
+                    }}
+                  >
+                    {displayContent}
+                  </ReactMarkdown>
+                </div>
+              </>
+            ) : (
+              <MessageContent
+                message={message}
+                displayContent={displayContent}
+                hasKeypoints={hasKeypoints}
+                parsedContent={parsedContent}
+                clawCitationToolNumbers={clawCitationToolNumbers}
+                onCitationClick={onCitationClick}
+                onSummarizerCitationClick={onSummarizerCitationClick}
+              />
+            )}
+          </div>
+
+          {/* Error display for bot messages */}
+          {message.type === 'bot' && message.errorInfo && (
+            <div className='mt-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3'>
+              <div className='flex items-start gap-2'>
+                <AlertTriangle size={14} className='mt-0.5 shrink-0 text-destructive' />
+                <div className='flex-1 min-w-0'>
+                  <div className='text-xs font-medium text-destructive'>
+                    {message.errorInfo.title}
+                    {message.errorInfo.code && (
+                      <span className='ml-1 text-[10px] opacity-70'>
+                        ({message.errorInfo.code})
+                      </span>
+                    )}
+                  </div>
+                  <div className='mt-0.5 text-xs text-muted-foreground'>
+                    {message.errorInfo.message}
+                  </div>
+                  {message.errorInfo.helpText && (
+                    <div className='mt-1 text-[11px] text-muted-foreground/80'>
+                      {message.errorInfo.helpText}
+                    </div>
+                  )}
+                  {message.errorInfo.rawError && (
+                    <details className='mt-2'>
+                      <summary className='text-[10px] text-muted-foreground/60 cursor-pointer hover:text-muted-foreground'>
+                        Technical details
+                      </summary>
+                      <pre className='mt-1 max-h-32 overflow-y-auto rounded bg-muted p-2 text-[10px] text-muted-foreground whitespace-pre-wrap break-all'>
+                        {message.errorInfo.rawError}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
+
+          {/* Branch navigator for user messages (edit branches) - below the bubble */}
+          {message.type === 'user' && branchInfo && onBranchNavigate && (
+            <div className='flex justify-end mt-1'>
+              <BranchNavigator
+                index={branchInfo.index}
+                total={branchInfo.total}
+                onNavigate={onBranchNavigate}
+              />
+            </div>
+          )}
+
+          {/* Assistant footer — one consolidated row for Debug, Time,
+                  optional "Stopped" badge, branch navigator and message
+                  actions. Only renders once streaming is done so the in-flight
+                  message stays uncluttered. Layout:
+                    [Debug] [Time] [Stopped?]            [BranchNav] [Actions]
+                  Aborted messages still get the row (without MessageActions'
+                  destructive buttons disabled — the user may want to copy or
+                  regenerate the partial response). */}
+          {/* Assistant footer — Debug is ALWAYS available (it's for live
+                  debugging the agent loop, so streaming responses need it
+                  too). Time + Stopped + the MessageActions panel only show
+                  once the response is complete.
+                  Layout:
+                    [Debug] [Time?] [Stopped?]            [BranchNav?] [Actions?]
+                  Row renders only when there's at least Debug to show or the
+                  message is complete — otherwise it'd be an empty mt-3 row
+                  during streams without a debug handler. */}
+          {message.type === 'bot' &&
+            (onDebug || !message.isStreaming) &&
+            (() => {
+              const stamp = formatMessageTime(message.timestamp);
+              const complete = !message.isStreaming;
+              const showActions = complete && !message.isAborted;
+              return (
+                <div className='mt-3 flex items-center justify-between gap-2'>
+                  <div className='flex items-center gap-2 text-muted-foreground'>
+                    {onDebug && (
+                      <button
+                        type='button'
+                        onClick={onDebug}
+                        className='inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] transition-colors hover:bg-muted hover:text-foreground'
+                        title='Debug this response'
+                        data-track-category='XyneAI'
+                        data-track-name='DEBUG_RESPONSE'
+                      >
+                        <Bug size={12} /> Debug
+                      </button>
+                    )}
+                    {complete && stamp && (
+                      <span className='text-[10px] tabular-nums text-muted-foreground/60'>
+                        {stamp}
+                      </span>
+                    )}
+                    {complete && message.isAborted && (
+                      <span className="text-[11px] font-['Inter'] italic text-muted-foreground/70">
+                        Stopped
+                      </span>
+                    )}
+                  </div>
+                  {showActions && (
+                    <div className='flex items-center gap-2'>
+                      {branchInfo && onBranchNavigate && (
+                        <BranchNavigator
+                          index={branchInfo.index}
+                          total={branchInfo.total}
+                          onNavigate={onBranchNavigate}
+                        />
+                      )}
+                      <MessageActions
+                        message={message}
+                        copied={copied}
+                        onCopy={handleCopy}
+                        onFeedback={onFeedback}
+                        feedbackValue={feedbackValue}
+                        onRegenerate={isLatestBotMessage ? onRegenerate : undefined}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+          {/* User timestamp — right-aligned below the user bubble. Shown
+                  for all user messages (they're always "complete"), hidden
+                  only while the bubble is in edit mode. */}
+          {message.type === 'user' &&
+            !isEditing &&
+            (() => {
+              const stamp = formatMessageTime(message.timestamp);
+              if (!stamp) return null;
+              return (
+                <div className='mt-1 text-right text-[10px] tabular-nums text-muted-foreground/60'>
+                  {stamp}
+                </div>
+              );
+            })()}
         </div>
       </div>
     );
@@ -1397,18 +1392,15 @@ const MessageContent = ({
 
   return (
     <div className='space-y-4 max-w-full'>
-      {/* v2: Reasoning Block */}
-      {message.reasoning && message.reasoning.length > 0 && (
-        <ReasoningBlock text={message.reasoning} streaming={message.isStreaming} />
-      )}
-
-      {/* v2: Tool Invocations */}
-      {message.toolInvocations && message.toolInvocations.length > 0 && (
-        <ToolInvocationList
-          invocations={message.toolInvocations}
-          messageAborted={!!message.isAborted}
-        />
-      )}
+      {/* v2: Combined Thinking + Tool Calls panel. Inline block with the
+          8-bit loader header while live, expandable to inspect reasoning +
+          tool calls. */}
+      <ActivityBlock
+        reasoning={message.reasoning}
+        toolInvocations={message.toolInvocations}
+        streaming={message.isStreaming}
+        messageAborted={!!message.isAborted}
+      />
 
       {/* v2: Pending Actions (Human-in-the-loop) */}
       {message.pendingActions && message.pendingActions.length > 0 && (

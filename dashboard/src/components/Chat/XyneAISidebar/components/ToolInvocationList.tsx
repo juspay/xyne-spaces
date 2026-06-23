@@ -12,7 +12,7 @@ interface ToolInvocationListProps {
    *  Backend marks the message status='cancelled', but in-flight tool rows it
    *  emitted via pushInvocation never got their tool_execution_end frame —
    *  they stay 'running' in the array. Normalize at the render boundary. */
-  messageAborted?: boolean;
+  messageAborted?: boolean | undefined;
 }
 
 /**

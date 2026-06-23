@@ -916,9 +916,14 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onSelectedCollectionsChange?.(newCollections.map(c => c.id));
     };
 
-    // File size limits
-    const MAX_INDIVIDUAL_FILE_SIZE = 100 * 1024 * 1024; // 100MB in bytes
-    const MAX_TOTAL_SIZE = 200 * 1024 * 1024; // 200MB in bytes
+    // File attachment limits — kept in sync with claw-auth's run-stream
+    // rehydration caps (xyne-claw-auth/backend/src/routes/run-stream.ts).
+    // Without alignment, a user can attach a 50 MB file in turn 1 and have
+    // it silently dropped from the agent's context in turn 2 when claw-auth
+    // refuses to rehydrate it.
+    const MAX_INDIVIDUAL_FILE_SIZE = 10 * 1024 * 1024; // 10 MiB
+    const MAX_TOTAL_SIZE = 25 * 1024 * 1024; // 25 MiB
+    const MAX_FILE_COUNT = 20;
 
     // Blocked file extensions (security blocklist approach — all types allowed except dangerous ones)
     const blockedExtensions = new Set(DANGEROUS_EXTENSIONS.map(ext => ext.toLowerCase()));
@@ -959,9 +964,21 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       const oversizedFiles = validFiles.filter(file => file.size > MAX_INDIVIDUAL_FILE_SIZE);
       if (oversizedFiles.length > 0) {
         const fileNames = oversizedFiles.map(f => f.name).join(', ');
-        toast.error(`File(s) too large: ${fileNames}. Maximum file size is 100MB.`, {
+        toast.error(`File(s) too large: ${fileNames}. Maximum file size is 10MB.`, {
           duration: 4000,
         });
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
+
+      // Check attachment count
+      if (selectedAttachments.length + validFiles.length > MAX_FILE_COUNT) {
+        toast.error(
+          `You can attach up to ${MAX_FILE_COUNT} files per conversation. Remove some attachments before adding more.`,
+          { duration: 4000 },
+        );
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
@@ -978,7 +995,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       if (existingTotalSize + newFilesSize > MAX_TOTAL_SIZE) {
         const totalMB = Math.round((existingTotalSize + newFilesSize) / (1024 * 1024));
         toast.error(
-          `Total attachment size (${totalMB}MB) exceeds the 200MB limit. Please remove some attachments.`,
+          `Total attachment size (${totalMB}MB) exceeds the 25MB limit. Please remove some attachments.`,
           { duration: 4000 },
         );
         if (fileInputRef.current) {
@@ -1086,9 +1103,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         const oversizedFiles = validFiles.filter(file => file.size > MAX_INDIVIDUAL_FILE_SIZE);
         if (oversizedFiles.length > 0) {
           const fileNames = oversizedFiles.map(f => f.name).join(', ');
-          toast.error(`File(s) too large: ${fileNames}. Maximum file size is 100MB.`, {
+          toast.error(`File(s) too large: ${fileNames}. Maximum file size is 10MB.`, {
             duration: 4000,
           });
+          return;
+        }
+
+        // Check attachment count
+        if (selectedAttachments.length + validFiles.length > MAX_FILE_COUNT) {
+          toast.error(
+            `You can attach up to ${MAX_FILE_COUNT} files per conversation. Remove some attachments before adding more.`,
+            { duration: 4000 },
+          );
           return;
         }
 
@@ -1102,7 +1128,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         if (existingTotalSize + newFilesSize > MAX_TOTAL_SIZE) {
           const totalMB = Math.round((existingTotalSize + newFilesSize) / (1024 * 1024));
           toast.error(
-            `Total attachment size (${totalMB}MB) exceeds the 200MB limit. Please remove some attachments.`,
+            `Total attachment size (${totalMB}MB) exceeds the 25MB limit. Please remove some attachments.`,
             { duration: 4000 },
           );
           return;
