@@ -303,21 +303,3 @@ export async function discoverUserByName(
     };
   }
 }
-
-/**
- * Discover multiple users by name patterns
- */
-export async function discoverUsersByNames(
-  queries: string[],
-  channelId: string,
-  threshold: number = 0.5
-): Promise<Map<string, UserDiscoveryResult>> {
-  const results = new Map<string, UserDiscoveryResult>();
-
-  for (const query of queries) {
-    const result = await discoverUserByName(query, channelId, threshold);
-    results.set(query, result);
-  }
-
-  return results;
-}

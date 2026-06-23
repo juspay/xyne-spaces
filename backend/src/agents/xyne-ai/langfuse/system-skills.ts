@@ -8,7 +8,6 @@ import { getPromptFromLangfuse } from './prompts.js';
 import { getFallbackSystemSkill, SYSTEM_SKILL_PROMPT_NAMES } from './fallback-skills.js';
 
 export { SYSTEM_SKILL_PROMPT_NAMES };
-export type { SystemSkillPromptName } from './fallback-skills.js';
 
 export interface SystemSkill {
   name: string;

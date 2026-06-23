@@ -48,26 +48,6 @@ function longestCommonSubsequence(a: string, b: string): number {
 }
 
 /**
- * SequenceMatcher class for compatibility with Python's difflib pattern
- */
-export class SequenceMatcher {
-  private a: string;
-  private b: string;
-  
-  constructor(_isjunk: null, a: string, b: string) {
-    this.a = a;
-    this.b = b;
-  }
-  
-  /**
-   * Get similarity ratio between the two strings
-   */
-  ratio(): number {
-    return calculateSimilarity(this.a, this.b);
-  }
-}
-
-/**
  * Find best matches for a query string from a list of candidates
  * @param query The query string to match
  * @param candidates List of candidate strings to match against
@@ -91,21 +71,4 @@ export function findBestMatches(
     .slice(0, maxResults);
   
   return matches;
-}
-
-/**
- * Check if a query string has an exact match in candidates (case-insensitive)
- */
-export function hasExactMatch(query: string, candidates: string[]): boolean {
-  const queryLower = query.toLowerCase();
-  return candidates.some(c => c.toLowerCase() === queryLower);
-}
-
-/**
- * Find exact match in candidates (case-insensitive)
- * Returns the original candidate string if found
- */
-export function findExactMatch(query: string, candidates: string[]): string | null {
-  const queryLower = query.toLowerCase();
-  return candidates.find(c => c.toLowerCase() === queryLower) || null;
 }

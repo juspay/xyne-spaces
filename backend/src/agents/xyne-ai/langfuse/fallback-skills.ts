@@ -1139,8 +1139,6 @@ export const SYSTEM_SKILL_PROMPT_NAMES: readonly string[] = [
   'skill-skill-management',
 ];
 
-export type SystemSkillPromptName = (typeof SYSTEM_SKILL_PROMPT_NAMES)[number];
-
 /**
  * Get raw fallback content for a system skill prompt by Langfuse prompt name
  */

@@ -11,7 +11,6 @@
 
 export {
   getLangfuseConfig,
-  isLangfuseEnabled,
   type LangfuseConfig,
 } from './config.js';
 
@@ -29,11 +28,7 @@ export {
   getLangfuseClient,
   getPrompt,
   getPromptFromLangfuse,
-  compilePrompt,
-  prefetchPrompts,
-  clearPromptCache,
   PROMPT_NAMES,
-  type PromptName,
   type GetPromptOptions,
 } from './prompts.js';
 

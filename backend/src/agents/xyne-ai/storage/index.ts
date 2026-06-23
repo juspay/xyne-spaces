@@ -15,7 +15,6 @@
 export type {
   Citation,
   KeyPointWithCitation,
-  AgentOutput,
   UserMessageContent,
   UserMessage,
   AssistantMessage,
@@ -24,7 +23,6 @@ export type {
   XyneAISession,
   ToolInputContent,
   ToolOutputContent,
-  ToolContent,
 } from './types';
 
 // Session Store

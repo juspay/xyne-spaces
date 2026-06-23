@@ -56,7 +56,6 @@ export {
   shutdownSessionStore,
   type SessionContext,
   type XyneAISession,
-  type AgentOutput,
   type Citation,
   type HistoryMessage,
 } from './storage/index.js';
@@ -82,18 +81,13 @@ export {
 // Langfuse exports
 export {
   initializeLangfuseTracing,
-  isLangfuseEnabled,
   createOnEventHandler,
   getLangfuseConfig,
   getLangfuseClient,
   getPrompt,
   getPromptFromLangfuse,
-  compilePrompt,
-  prefetchPrompts,
-  clearPromptCache,
   PROMPT_NAMES,
   type LangfuseConfig,
-  type PromptName,
   type GetPromptOptions,
 } from './langfuse/index.js';
 

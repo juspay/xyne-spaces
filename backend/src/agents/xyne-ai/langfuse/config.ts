@@ -26,7 +26,3 @@ export function getLangfuseConfig(): LangfuseConfig {
     enabled,
   };
 }
-
-export function isLangfuseEnabled(): boolean {
-  return getLangfuseConfig().enabled;
-}
