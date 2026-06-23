@@ -1,3 +1,29 @@
+## [1.169.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.168.0...v1.169.0) (2026-06-23)
+
+
+### Features
+
+* add form field conditions to ticket-updated automation trigger ([293e739](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/293e739900ed545ee5b369e0d1420d9071e61186)), closes [#7907](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7907)
+* added support to attach doc in forms ([99beebd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/99beebd17efce15e51a76a2441f1e64489413247)), closes [#7740](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7740)
+* ask-ai ([e757e08](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e757e08d4ca45bd5a14cbbfdb12c7be1c440986c)), closes [#7929](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7929)
+* channel level email implementations ([d950c9b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d950c9b78f8cbb4d44fbe63eb5fd1b18f3092e66)), closes [#7909](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7909)
+* implemented older email sync - desk ([8a67475](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8a67475b7d1e3ab1381176386dddf7574da5b317)), closes [#7866](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7866)
+* optimizing replies_md update ([ce41209](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ce41209e438e1d2e13b64a6fab7f45db7eb2ec07)), closes [#7493](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7493)
+* PDF Zoom - Desktop ([637b6e9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/637b6e9362b78a99e7b9e2ceda5ab5612d48ee02)), closes [#7905](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7905)
+* ticket api move to xyneId for get ([4fdabb6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4fdabb6aa38489606f34939494c4ad09b9790625)), closes [#7971](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7971)
+
+
+### Bug Fixes
+
+* AskAI related code cleanup ([d5d6fc9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d5d6fc927e4274f8e84c28ca1ef6f120a712832f)), closes [#7956](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7956)
+* default search to All and make Cmd+F honor screen mode ([b142945](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b1429457ebc941a51fa42692a17601c5aef595af)), closes [#7742](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7742)
+* Exposed Attachment path for cli ([c87db2d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c87db2d19278630cd5c045eea3f37f7a862b0251)), closes [#7935](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7935)
+* Hide PR/QA filters when board tickets lack those roles ([b565eb7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b565eb7de4bcf4b19ce770e6000cf63c29c47ca7)), closes [#7852](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7852)
+* Move form permission check from mutator to ACLs with FORMS resource ADMIN ([6a79fe5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6a79fe530a8f48beabe4cc290fe52c1544517cc2)), closes [#7961](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7961)
+* remove generic error message in toast ([1513be2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1513be27514affd0949891d582e01ed01502a1a2)), closes [#7823](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7823)
+* slack migration code cleanup ([2280c91](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2280c916b986417214fffce1bdaac806f48dbca6)), closes [#7903](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7903)
+* userGroup related code cleanup ([4c7052f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4c7052f11aafc62ed6a22909150031bc5e83bdea)), closes [#7958](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7958)
+
 ## [1.168.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.167.0...v1.168.0) (2026-06-23)
 
 
