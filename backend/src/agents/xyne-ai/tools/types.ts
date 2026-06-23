@@ -7,8 +7,6 @@ import type { SelectionContext } from '../types.js';
 
 // Re-export types from JAF Streaming module
 export type StreamProvider = Streaming.StreamProvider;
-export type StreamEvent = Streaming.StreamEvent;
-
 // ============================================================================
 // Callback Types
 // ============================================================================
@@ -181,15 +179,6 @@ export interface ToolResult {
   };
 }
 
-/**
- * Extended ToolResult with date range capping info
- */
-export interface ToolResultWithCapping extends ToolResult {
-  dateRangeCapped?: boolean;
-  requestedDays?: number;
-  actualDays?: number;
-}
-
 // ============================================================================
 // Enhanced Types for Multi-Entity Support
 // ============================================================================
@@ -346,13 +335,6 @@ export type { ResearchAgentResponse, ResearchFollowUp } from '../../../services/
 // ============================================================================
 // Constants
 // ============================================================================
-
-/**
- * Hardcoded ExpressCheckout product ID
- * Note: This is the only product currently available
- */
-export const XYNE_SPACES_REPOSITORY_ID = '989d9105-d8f0-4549-b63b-ac2363054ec0';
-
 /**
  * Redis keys and TTL for citation mappings
  */

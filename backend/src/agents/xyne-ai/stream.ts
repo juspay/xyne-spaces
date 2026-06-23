@@ -84,27 +84,8 @@ function resolveAgentRunHttpStatus(err: Record<string, unknown>, detailStr: stri
   );
 }
 
-export async function initializeStreamProvider(): Promise<InMemoryStreamProvider> {
-  if (globalStreamProvider) {
-    return globalStreamProvider;
-  }
-  
-  globalStreamProvider = Streaming.createInMemoryStreamProvider({
-    maxEventsPerSession: 1000,
-  });
-  
-  return globalStreamProvider;
-}
-
 export function getStreamProvider(): InMemoryStreamProvider | undefined {
   return globalStreamProvider;
-}
-
-export async function shutdownStreamProvider(): Promise<void> {
-  if (globalStreamProvider) {
-    await globalStreamProvider.close();
-    globalStreamProvider = undefined;
-  }
 }
 
 // ============================================================================

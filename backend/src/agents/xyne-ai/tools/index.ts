@@ -13,7 +13,6 @@ import { config } from '../../../config/env.js';
 
 export type {
   StreamProvider,
-  StreamEvent,
   StreamEventCallback,
   UserInfo,
   XyneAIAgentContext,
@@ -21,7 +20,6 @@ export type {
   AgentRequestContext,
   ToolMessage,
   ToolResult,
-  ToolResultWithCapping,
   MessageMappings,
   EnhancedCitationMappings,
   ToolDescriptions,
@@ -29,7 +27,6 @@ export type {
 } from './types.js';
 
 export {
-  XYNE_SPACES_REPOSITORY_ID,
   REDIS_CITATION_PREFIX,
   REDIS_COUNTER_PREFIX,
   CITATION_TTL_SECONDS,
@@ -46,7 +43,6 @@ export {
   getISTTimestampForGenius,
   stripHtml,
   getDefaultDateRange,
-  formatMessages,
   buildMessageMappings,
   formatToolResultForContext,
   resolveUserName,

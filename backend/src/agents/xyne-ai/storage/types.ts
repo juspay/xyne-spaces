@@ -14,7 +14,6 @@
 export type { Citation, KeyPointWithCitation, XyneAIOutput, AttachmentData } from '../types';
 
 import type { XyneAIOutput, AttachmentData } from '../types';
-export type AgentOutput = XyneAIOutput;
 
 /**
  * GCS Attachment Metadata
@@ -72,8 +71,6 @@ export interface ToolOutputContent {
   toolName: string;
   content: unknown;
 }
-
-export type ToolContent = ToolInputContent | ToolOutputContent;
 
 // Session context - information about the channels/thread
 export interface SessionContext {

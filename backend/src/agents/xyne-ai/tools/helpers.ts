@@ -8,7 +8,6 @@ import { getPromptFromLangfuse, PROMPT_NAMES } from '../langfuse/index.js';
 import { getFallbackPrompt } from '../langfuse/fallback-prompts.js';
 import type { EnrichedCall } from '../../../services/aiContextService.js';
 import type {
-  ToolMessage,
   ToolResult,
   MessageMappings,
   ToolDescriptions,
@@ -212,39 +211,6 @@ export function getDefaultDateRange(channelCount: number = 1): { from: Date; to:
 // ============================================================================
 // Message Formatting
 // ============================================================================
-
-/**
- * Format messages for tool output
- */
-export function formatMessages(
-  messages: Array<{
-    messageId: string;
-    content: string;
-    senderId: string;
-    createdAt: Date;
-    conversationId: string;
-    hasAttachment: boolean;
-  }>,
-  userMap: Map<string, { name: string | null; email: string | null }>,
-  channelId: string,
-  channelName: string = ''
-): ToolMessage[] {
-  return messages.map((msg, idx) => {
-    const user = userMap.get(msg.senderId);
-    return {
-      messageId: msg.messageId,
-      messageIndex: idx + 1,
-      content: stripHtml(msg.content),
-      authorName: user?.name || user?.email || 'Unknown User',
-      authorId: msg.senderId,
-      timestamp: toIST(msg.createdAt),
-      conversationId: msg.conversationId,
-      channelId,
-      channelName,
-      hasAttachment: msg.hasAttachment,
-    };
-  });
-}
 
 /**
  * Build message mappings from tool result
@@ -580,34 +546,6 @@ export interface EnhancedEntityMetadata {
   readonly channelId: string;
   readonly externalUrl?: string;  // For web search results
   readonly isExternal?: boolean;  // Whether citation is external
-}
-
-/**
- * Build entity mapping for summarizer from tool result
- * Converts entities to Map format expected by summarizer
- * Frontend will build URLs from this metadata
- */
-export function buildEntityMappingForSummarizer(result: EnhancedToolResult): Map<number, EnhancedEntityMetadata> {
-  const entityMapping = new Map<number, EnhancedEntityMetadata>();
-
-  for (const entity of result.entities) {
-    const idx = entity.entityIndex;
-
-    entityMapping.set(idx, {
-      entityType: entity.entityType,
-      entityId: entity.entityId,
-      messageId: entity.messageId,
-      conversationId: entity.conversationId,
-      canvasId: entity.canvasId,
-      callId: entity.callId,
-      ticketId: entity.ticketId,
-      channelId: entity.channelId,
-      externalUrl: entity.externalUrl,
-      isExternal: entity.entityType === 'web_search',
-    });
-  }
-
-  return entityMapping;
 }
 
 /**

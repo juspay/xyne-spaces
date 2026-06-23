@@ -8,7 +8,6 @@ import { LangfuseClient } from '@langfuse/client';
 import { logger } from '../../../utils/logger.js';
 import { getLangfuseConfig } from './config.js';
 import { compileFallbackPrompt } from './fallback-prompts.js';
-import { SYSTEM_SKILL_PROMPT_NAMES } from './fallback-skills.js';
 
 const DEFAULT_PROMPT_CACHE_TTL = parseInt(process.env.LANGFUSE_PROMPT_CACHE_TTL || '300', 10) * 1000;
 
@@ -134,24 +133,6 @@ export async function getPromptFromLangfuse(
   }
 }
 
-export async function compilePrompt(
-  promptName: string, 
-  variables: Record<string, string>
-): Promise<string | string[] | null> {
-  const prompt = await getPrompt(promptName);
-  
-  if (!prompt) {
-    return null;
-  }
-  
-  try {
-    return prompt.compile(variables) as string | string[];
-  } catch (error) {
-    logger.error(`[Langfuse] Failed to compile prompt '${promptName}':`, error);
-    return null;
-  }
-}
-
 export const PROMPT_NAMES = {
   XYNE_AI_SYSTEM: 'xyne-ai',
   XYNE_AI_AGENT_SYSTEM: 'ask-ai-agent',
@@ -191,31 +172,3 @@ export const PROMPT_NAMES = {
   PROJECT_RECAP_CHANNEL_SUMMARY: 'project-recap-channel-summary',
   PROJECT_RECAP_AGGREGATOR: 'project-recap-aggregator',
 } as const;
-
-export type PromptName = typeof PROMPT_NAMES[keyof typeof PROMPT_NAMES];
-
-export async function prefetchPrompts(): Promise<void> {
-  const client = getLangfuseClient();
-  
-  if (!client) {
-    logger.info('[Langfuse] Prompt prefetch skipped - client not configured');
-    return;
-  }
-  
-  logger.info('[Langfuse] Prefetching prompts...');
-  
-  const promptNames = [...Object.values(PROMPT_NAMES), ...SYSTEM_SKILL_PROMPT_NAMES];
-  const results = await Promise.allSettled(
-    promptNames.map(name => getPrompt(name))
-  );
-  
-  const successful = results.filter(r => r.status === 'fulfilled' && r.value !== null).length;
-  const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === null)).length;
-  
-  logger.info(`[Langfuse] Prefetch complete: ${successful} loaded, ${failed} not found/failed`);
-}
-
-export function clearPromptCache(): void {
-  promptCache.clear();
-  logger.info('[Langfuse] Prompt cache cleared');
-}
