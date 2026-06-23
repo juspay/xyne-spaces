@@ -11,6 +11,8 @@ import {
   serializeInitialMessageMd,
 } from '../utils/activityMetadataParser.js';
 import type { InitialMessageSummary } from '../utils/activityMetadataParser.js';
+
+export { parseRepliesMd, addReplyToData, serializeRepliesMd } from '../utils/activityMetadataParser.js';
 import { zql } from './builder.js';
 
 /**

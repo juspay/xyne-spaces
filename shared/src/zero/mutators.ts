@@ -142,9 +142,16 @@ function buildParentMessageMd(msg: {
 }
 import { zql } from './builder.js';
 import {
+  parseDashboardConfig,
+  validateDashboardConfig,
+} from '../dashboard/dashboardConfig.js';
+import {
+  addReplyToData,
   buildRepliesMdFromMessages,
   isChatMessageType,
+  parseRepliesMd,
   resolveMessage,
+  serializeRepliesMd,
   updateReactionsMd,
   updateInitialMessageMdField,
   updateInitialMessageMdReaction,
@@ -2109,13 +2116,9 @@ export const mutators = defineMutators({
         await tx.mutate.messages.insert(message);
 
         if (type === MessageType.USER || type === MessageType.FORWARDED) {
-          const allMessages = await tx.run(
-            zql.messages.where('conversationId', conversation.conversationId),
-          );
-          const updatedRepliesMd = buildRepliesMdFromMessages(
-            allMessages,
-            conversation.initialMessageId,
-          );
+          const repliesData = parseRepliesMd(conversation.replies_md);
+          const updatedRepliesData = addReplyToData(repliesData, ctx.userID);
+          const updatedRepliesMd = serializeRepliesMd(updatedRepliesData);
 
           if (updatedRepliesMd !== conversation.replies_md) {
             await tx.mutate.conversations.update({

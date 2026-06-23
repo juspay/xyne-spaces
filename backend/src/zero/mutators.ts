@@ -79,6 +79,9 @@ import {
   MAX_NOTIFICATION_KEYWORDS,
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
+  parseRepliesMd,
+  addReplyToData,
+  serializeRepliesMd,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { generatePlainTextContent } from "@/utils/contentUtils";
@@ -2951,12 +2954,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           }
 
+          const repliesData = parseRepliesMd(conversation.replies_md);
+          const updatedRepliesData = addReplyToData(repliesData, authData.sub);
+          const updatedRepliesMd = serializeRepliesMd(updatedRepliesData);
+
           await tx.mutate.conversations.update({
             conversationId,
             replyCount: conversation.replyCount + 1,
             lastActivityAt: timestamp,
+            ...(updatedRepliesMd !== conversation.replies_md && { replies_md: updatedRepliesMd }),
           });
-
 
           if (showInChannel) {
             if (!childConversationId) {
