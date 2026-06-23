@@ -11,6 +11,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
+import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
 
 /**
  * Side effect handler for form_entity_values table.
@@ -147,11 +148,14 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       // Get ticket and board info
       const ticket = await db.ticket.findUnique({
         where: { id: ticketId },
-        select: { 
-          id: true, 
-          boardId: true, 
-          conversationId: true, 
+        select: {
+          id: true,
+          boardId: true,
+          channelId: true,
+          projectId: true,
+          conversationId: true,
           workspaceId: true,
+          createdBy: true,
         },
       });
 
@@ -202,6 +206,30 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       
       // Fire and forget - don't block the side effect processing
       void emitEventToWorkspaceApps(ticket.workspaceId, event);
+
+      // Also emit TICKET_UPDATED so automation engine can match formFieldIds conditions
+      const prevFormValue = operation === 'update' && previousValue
+        ? (previousValue as FormEntityValuePreviousValue).actualFieldValue
+        : null;
+
+      // Skip emit if value didn't actually change (no-op re-save)
+      if (operation === 'update' && prevFormValue === fieldValue) return;
+      const toTicketChangeValue = (v: unknown): string | number | null => {
+        if (typeof v === 'string' || typeof v === 'number') return v;
+        if (v === null || v === undefined) return null;
+        return String(v);
+      };
+      void emitTicketUpdated({
+        ticket,
+        changes: {},
+        formFieldChanges: {
+          [formEntityValue.fieldId]: {
+            previousValue: toTicketChangeValue(prevFormValue),
+            newValue: toTicketChangeValue(fieldValue),
+          },
+        },
+        performedById: this.ctx.userID,
+      });
 
     } catch (error) {
       logger.error('[FormEntityValuesSideEffectHandler] Failed to emit form field event:', {

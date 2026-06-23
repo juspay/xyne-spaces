@@ -52,6 +52,12 @@ const TicketUpdatedConfigSchema = z.object({
     .describe(
       'Fire only when at least one of these field transitions occurred. Empty matches any update on the tracked fields.',
     ),
+  formFieldIds: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Fire only when any of these board form fields changed. Empty matches any form field update.',
+    ),
 });
 
 const TicketChangeSchema = z.object({
@@ -61,6 +67,7 @@ const TicketChangeSchema = z.object({
 
 export const TicketUpdatedOutputSchema = TicketContextSchema.extend({
   changes: z.record(TicketUpdatedFieldSchema, TicketChangeSchema),
+  formFieldChanges: z.record(z.string(), TicketChangeSchema).optional(),
   performedBy: z.object({
     id: z.string().nullable(),
   }),
@@ -71,6 +78,7 @@ type TicketUpdatedPayload = z.infer<typeof TicketUpdatedOutputSchema>;
 type TicketChange = z.infer<typeof TicketChangeSchema>;
 
 export type TicketChanges = Partial<Record<TicketUpdatedField, TicketChange>>;
+export type FormFieldChanges = Record<string, TicketChange>;
 
 export class TicketUpdatedTrigger extends BaseTrigger<typeof TicketUpdatedConfigSchema> {
   readonly type = TICKET_UPDATED_EVENT;
@@ -140,8 +148,18 @@ export class TicketUpdatedTrigger extends BaseTrigger<typeof TicketUpdatedConfig
     const cfg = filter as TicketUpdatedConfig;
     const p = payload as TicketUpdatedPayload;
     if (!matchTicketScopeFilters(cfg, p.ticket)) return false;
-    if (cfg.transitions && cfg.transitions.length > 0) {
-      const matchesOne = (rule: z.infer<typeof FieldTransitionSchema>): boolean => {
+
+    const hasTransitionConfig = cfg.transitions && cfg.transitions.length > 0;
+    const hasFormFieldConfig = cfg.formFieldIds && cfg.formFieldIds.length > 0;
+    const isFormFieldOnlyEvent =
+      Object.keys(p.formFieldChanges ?? {}).length > 0 &&
+      Object.keys(p.changes).length === 0;
+
+    // Form field changes are ignored unless formFieldIds is explicitly configured.
+    if (isFormFieldOnlyEvent && !hasFormFieldConfig) return false;
+
+    if (hasTransitionConfig || hasFormFieldConfig) {
+      const matchesTransition = (rule: z.infer<typeof FieldTransitionSchema>): boolean => {
         const change = p.changes[rule.field];
         if (!change) return false;
         if (
@@ -158,8 +176,16 @@ export class TicketUpdatedTrigger extends BaseTrigger<typeof TicketUpdatedConfig
         }
         return true;
       };
-      if (!cfg.transitions.some(matchesOne)) return false;
+
+      const transitionMatches = hasTransitionConfig && cfg.transitions!.some(matchesTransition);
+      const changedFormFieldIds = Object.keys(p.formFieldChanges ?? {});
+      const formFieldMatches =
+        hasFormFieldConfig && cfg.formFieldIds!.some(id => changedFormFieldIds.includes(id));
+
+      // OR logic: fire if EITHER transition matches OR form field matches
+      if (!transitionMatches && !formFieldMatches) return false;
     }
+
     return true;
   }
 }
@@ -169,18 +195,19 @@ export const ticketUpdatedTrigger = new TicketUpdatedTrigger();
 export async function emitTicketUpdated(params: {
   ticket: TicketLike;
   changes: TicketChanges;
+  formFieldChanges?: FormFieldChanges;
   performedById: string | null;
 }): Promise<void> {
-  const { ticket, changes, performedById } = params;
-  if (Object.keys(changes).length === 0) return;
+  const { ticket, changes, formFieldChanges, performedById } = params;
+  if (Object.keys(changes).length === 0 && Object.keys(formFieldChanges ?? {}).length === 0) return;
   try {
-    // Lightweight payload: ticketId + the diff (`changes`, the only thing
-    // we can't re-derive at run-time) + performer id. The trigger's
+    // Lightweight payload: ticketId + the diff + performer id. The trigger's
     // hydratePayload fetches ticket + board + project + channel + ...
     // fresh from the DB when the automation actually runs.
     const payload = {
       ticketId: ticket.id,
       changes,
+      formFieldChanges: formFieldChanges ?? {},
       performedBy: { id: performedById },
     };
     await eventRouter.emit(
