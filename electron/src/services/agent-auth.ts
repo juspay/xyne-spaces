@@ -1,10 +1,12 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { randomBytes } from 'crypto';
-import { dialog, BrowserWindow, session, net } from 'electron';
+import { dialog, BrowserWindow, session, net, app } from 'electron';
 import log from 'electron-log/main';
 import { config } from '../app/config';
 import { Logger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const DEFAULT_PORT = 49231;
 
@@ -148,6 +150,20 @@ class AgentAuthService {
         await this.handleProxyPost(req, res, '/api/tickets');
       } else if (req.method === 'POST' && url.pathname === '/calls/schedule') {
         await this.handleProxyPost(req, res, '/api/calls/schedule');
+      } else if (req.method === 'GET' && url.pathname.startsWith('/message/') && url.pathname.endsWith('/attachments/info')) {
+        const id = url.pathname.split('/message/')[1]?.split('/attachments/info')[0];
+        if (id) {
+          await this.handleMessageAttachmentsInfo(req, res, id, url);
+        } else {
+          this.sendJson(res, 400, { error: 'Invalid messageId or conversationId' });
+        }
+      } else if (req.method === 'GET' && url.pathname.startsWith('/message/') && url.pathname.endsWith('/attachments')) {
+        const id = url.pathname.split('/message/')[1]?.split('/attachments')[0];
+        if (id) {
+          await this.handleMessageAttachments(req, res, id, url);
+        } else {
+          this.sendJson(res, 400, { error: 'Invalid messageId or conversationId' });
+        }
       } else if (req.method === 'GET' && url.pathname === '/health') {
         this.sendJson(res, 200, { status: 'ok' });
       } else {
@@ -889,6 +905,290 @@ class AgentAuthService {
       log.error(`[AgentAuth] Proxy POST to ${backendPath} failed:`, error);
       this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
     }
+  }
+
+  /**
+   * Fetch attachments for a message or conversation (common logic)
+   * Returns { messageId, conversationId, attachments } or null if not found
+   */
+  private async fetchMessageAttachments(
+    id: string,
+    accessToken: string
+  ): Promise<{ messageId: string; conversationId: string; attachments: any[] } | null> {
+    let actualMessageId = id;
+    let conversationId: string | null = null;
+
+    // 1. First, try to get conversation by messageId to find conversationId
+    log.info(`[AgentAuth] Getting conversation for messageId: ${id}`);
+    const conversationByMessageUrl = `${config.BACKEND_URL}/api/conversations/by-message/${id}`;
+    const conversationByMessageResponse = await this.makeBackendRequest({
+      url: conversationByMessageUrl,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (conversationByMessageResponse.statusCode === 200 && conversationByMessageResponse.data?.conversationId) {
+      // Got conversation from messageId
+      conversationId = conversationByMessageResponse.data.conversationId;
+      actualMessageId = id;
+      log.info(`[AgentAuth] Found conversation ${conversationId} for messageId ${id}`);
+    } else {
+      // 2. If not found, assume id is conversationId and get conversation to find initialMessageId
+      log.info(`[AgentAuth] Trying id as conversationId: ${id}`);
+      const conversationUrl = `${config.BACKEND_URL}/api/conversations/${id}`;
+      const conversationResponse = await this.makeBackendRequest({
+        url: conversationUrl,
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (conversationResponse.statusCode === 200 && conversationResponse.data?.initialMessageId) {
+        conversationId = id;
+        actualMessageId = conversationResponse.data.initialMessageId;
+        log.info(`[AgentAuth] Using conversationId ${conversationId} with initialMessageId ${actualMessageId}`);
+      } else {
+        return null;
+      }
+    }
+
+    // 3. Get message with attachments using existing endpoint
+    const messageUrl = `${config.BACKEND_URL}/api/conversations/${conversationId}/message/${actualMessageId}`;
+    log.info(`[AgentAuth] Getting message from ${messageUrl}`);
+
+    const messageResponse = await this.makeBackendRequest({
+      url: messageUrl,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (messageResponse.statusCode !== 200) {
+      return null;
+    }
+
+    const messageData = messageResponse.data;
+    const attachments = messageData?.attachments || [];
+
+    return {
+      messageId: actualMessageId,
+      conversationId: conversationId!,
+      attachments
+    };
+  }
+
+  /**
+   * Handle GET /message/:id/attachments with fallback to conversationId
+   * Downloads all attachments to a unique directory and returns the download path
+   */
+  private async handleMessageAttachments(
+    req: IncomingMessage,
+    res: ServerResponse,
+    id: string,
+    _url: URL
+  ): Promise<void> {
+    // 1. Validate agent token
+    const token = this.extractToken(req);
+    if (!token || !this.validateToken(token)) {
+      this.sendJson(res, 401, { error: 'Unauthorized: invalid or missing agent token' });
+      return;
+    }
+
+    try {
+      // 2. Retrieve the user's active access token from workspace-scoped cookies
+      const accessToken = await this.getUserAccessTokenFromSession();
+      if (!accessToken) {
+        this.sendJson(res, 401, { error: 'Unauthorized: no active user session' });
+        return;
+      }
+
+      // 3. Fetch attachments using common logic
+      const result = await this.fetchMessageAttachments(id, accessToken);
+
+      if (!result) {
+        this.sendJson(res, 404, {
+          error: 'Message or conversation not found',
+          providedId: id
+        });
+        return;
+      }
+
+      const { messageId: actualMessageId, attachments } = result;
+
+      if (attachments.length === 0) {
+        this.sendJson(res, 200, {
+          downloadPath: null,
+          message: 'No attachments found',
+          attachmentCount: 0,
+          messageId: actualMessageId
+        });
+        return;
+      }
+
+      // 4. Create download directory on desktop
+      const downloadDir = path.join(app.getPath('desktop'), 'xyne-attachments', actualMessageId);
+      await fs.promises.mkdir(downloadDir, { recursive: true });
+      log.info(`[AgentAuth] Created download directory: ${downloadDir}`);
+
+      // 5. Download each attachment
+      const downloadedFiles: Array<{ filename: string; path: string; size: number }> = [];
+      for (const attachment of attachments) {
+        try {
+          const filename = attachment.originalFilename || `attachment_${attachment.id}`;
+          const filePath = path.join(downloadDir, filename);
+
+          // Download attachment using the attachment download endpoint
+          const downloadUrl = `${config.BACKEND_URL}/api/attachments/${attachment.id}/download`;
+          log.info(`[AgentAuth] Downloading attachment: ${filename} from ${downloadUrl}`);
+
+          await this.downloadAttachmentToFile(downloadUrl, filePath, accessToken);
+
+          const stats = await fs.promises.stat(filePath);
+          downloadedFiles.push({
+            filename,
+            path: filePath,
+            size: stats.size
+          });
+
+          log.info(`[AgentAuth] Downloaded: ${filename} (${stats.size} bytes)`);
+        } catch (error: any) {
+          log.error(`[AgentAuth] Failed to download attachment ${attachment.id}:`, error);
+          // Continue with other attachments
+        }
+      }
+
+      // 6. Return success response with download path
+      this.sendJson(res, 200, {
+        downloadPath: downloadDir,
+        messageId: actualMessageId,
+        attachmentCount: attachments.length,
+        downloadedCount: downloadedFiles.length,
+        files: downloadedFiles
+      });
+
+    } catch (error: any) {
+      log.error(`[AgentAuth] Get message attachments failed:`, error);
+      this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
+    }
+  }
+
+  /**
+   * Handle GET /message/:id/attachments/info
+   * Returns attachment metadata without downloading files
+   */
+  private async handleMessageAttachmentsInfo(
+    req: IncomingMessage,
+    res: ServerResponse,
+    id: string,
+    _url: URL
+  ): Promise<void> {
+    // 1. Validate agent token
+    const token = this.extractToken(req);
+    if (!token || !this.validateToken(token)) {
+      this.sendJson(res, 401, { error: 'Unauthorized: invalid or missing agent token' });
+      return;
+    }
+
+    try {
+      // 2. Retrieve the user's active access token from workspace-scoped cookies
+      const accessToken = await this.getUserAccessTokenFromSession();
+      if (!accessToken) {
+        this.sendJson(res, 401, { error: 'Unauthorized: no active user session' });
+        return;
+      }
+
+      // 3. Fetch attachments using common logic
+      const result = await this.fetchMessageAttachments(id, accessToken);
+
+      if (!result) {
+        this.sendJson(res, 404, {
+          error: 'Message or conversation not found',
+          providedId: id
+        });
+        return;
+      }
+
+      const { messageId, conversationId, attachments } = result;
+
+      // 4. Return attachment metadata without downloading
+      this.sendJson(res, 200, {
+        messageId,
+        conversationId,
+        attachmentCount: attachments.length,
+        attachments: attachments.map((attachment: any) => ({
+          id: attachment.id,
+          filename: attachment.originalFilename,
+          mimetype: attachment.mimetype,
+          size: attachment.size,
+          width: attachment.width,
+          height: attachment.height,
+          url: attachment.url,
+          thumbnailUrl: attachment.thumbnailUrl,
+          createdAt: attachment.createdAt,
+          metadata: attachment.metadata
+        }))
+      });
+
+    } catch (error: any) {
+      log.error(`[AgentAuth] Get message attachments info failed:`, error);
+      this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
+    }
+  }
+
+  /**
+   * Download an attachment file using Electron's net module
+   */
+  private async downloadAttachmentToFile(
+    url: string,
+    filePath: string,
+    accessToken: string
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const request = net.request({
+        url,
+        method: 'GET',
+        useSessionCookies: false
+      });
+
+      request.setHeader('Authorization', `Bearer ${accessToken}`);
+
+      request.on('response', (response) => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Download failed with status ${response.statusCode}`));
+          return;
+        }
+
+        const writeStream = fs.createWriteStream(filePath);
+
+        response.on('data', (chunk) => {
+          writeStream.write(chunk);
+        });
+
+        response.on('end', () => {
+          writeStream.end();
+          writeStream.on('finish', () => resolve());
+          writeStream.on('error', reject);
+        });
+
+        response.on('error', (error) => {
+          writeStream.destroy();
+          reject(error);
+        });
+      });
+
+      request.on('error', (error) => {
+        reject(error);
+      });
+
+      request.end();
+    });
   }
 
   // ==================== End Memory Proxy Handlers ====================
