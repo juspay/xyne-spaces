@@ -1,3 +1,10 @@
+## [1.168.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.167.0...v1.168.0) (2026-06-23)
+
+
+### Features
+
+* added unreads section for messages ([3702e32](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3702e32d70c5836b4f68d0da4336cc42fb4e4d22)), closes [#7891](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7891)
+
 ## [1.167.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.166.0...v1.167.0) (2026-06-22)
 
 
