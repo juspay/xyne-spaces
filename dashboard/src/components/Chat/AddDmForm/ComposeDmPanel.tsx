@@ -22,7 +22,7 @@ import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { InputBox } from '../../ui/InputBox';
-import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
+import { SearchUserV2, type SearchEntry } from '../../ui/SearchUser/SearchUserV2';
 import ChatListV2 from '../ChatList/ChatListV2';
 import { useExistingDmChannel } from './useExistingDmChannel';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
@@ -173,6 +173,8 @@ export const ComposeDmPanel: React.FC = () => {
   // Get active users matching search query
   const searchResults = useActiveUserSearch(searchValue, 10);
 
+  const recipientChannelResults = useChannelSearch(searchValue, 10);
+
   // All active workspace users and visible channels – used for conversation-history ordering
   const allWorkspaceUsers = useActiveUsers();
   const visibleChannels = useAllVisibleChannels();
@@ -266,6 +268,73 @@ export const ComposeDmPanel: React.FC = () => {
 
     return otherResults;
   }, [searchResults, searchValue, context.userID, cachedDMParticipants, usersById]);
+
+  const mergedSearchItems = useMemo<SearchEntry[]>(() => {
+    const currentUserId = context.userID;
+    const q = searchValue.trim().toLowerCase();
+
+    const lastActivity = (ch: {
+      channelStats?: { lastActivityAt: number } | null | undefined;
+      lastActivityAt?: number | null | undefined;
+    }): number => ch.channelStats?.lastActivityAt ?? ch.lastActivityAt ?? 0;
+
+    const dmRecencyByUser = new Map<string, number>();
+    for (const ch of visibleChannels) {
+      if (ch.scopeType !== ChannelScopeType.DM && ch.scopeType !== ChannelScopeType.GROUP_DM) {
+        continue;
+      }
+      const ts = lastActivity(ch);
+      for (const pid of ch.name.split(',')) {
+        if (pid === currentUserId) continue;
+        if (ts > (dmRecencyByUser.get(pid) ?? 0)) dmRecencyByUser.set(pid, ts);
+      }
+    }
+
+    type Ranked = { entry: SearchEntry; name: string; recency: number };
+
+    const userRanked: Ranked[] = filteredUsers.map(u => ({
+      entry: { type: 'user', user: u },
+      name: (u.displayName || u.name || '').toLowerCase(),
+      recency: dmRecencyByUser.get(u.id) ?? 0,
+    }));
+
+    const channelSource = q
+      ? recipientChannelResults
+      : [...visibleChannels].sort((a, b) => lastActivity(b) - lastActivity(a));
+
+    const channelRanked: Ranked[] = channelSource
+      .filter(ch => ch.scopeType === ChannelScopeType.DEFAULT)
+      .map(ch => ({
+        entry: {
+          type: 'channel',
+          channel: {
+            id: ch.id,
+            name: ch.name,
+            isPrivate: ch.visibility === ChannelVisibility.PRIVATE,
+          },
+        },
+        name: ch.name.toLowerCase(),
+        recency: lastActivity(ch),
+      }));
+
+    const tier = (name: string): number => {
+      if (!q) return 0;
+      if (name.startsWith(q)) return 0;
+      if (name.includes(q)) return 1;
+      return 2;
+    };
+
+    return [...userRanked, ...channelRanked]
+      .sort((a, b) => {
+        const ta = tier(a.name);
+        const tb = tier(b.name);
+        if (ta !== tb) return ta - tb;
+        if (a.recency !== b.recency) return b.recency - a.recency;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, 15)
+      .map(r => r.entry);
+  }, [filteredUsers, recipientChannelResults, visibleChannels, searchValue, context.userID]);
 
   // Build chat list props
   const chatListProps = useMemo(() => {
@@ -362,6 +431,10 @@ export const ComposeDmPanel: React.FC = () => {
                 searchQuery={searchValue}
                 onSearchChange={setSearchValue}
                 currentUserId={context.userID}
+                mergedItems={mergedSearchItems}
+                onSelectChannel={(channelId: string) => {
+                  void navigate(`/chat/dir/${channelId}`);
+                }}
                 // className='p-0'
               />
               {/* Validation errors */}
