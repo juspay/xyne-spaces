@@ -318,49 +318,29 @@ export async function listClawAgentsInChannel(channelId: string): Promise<Channe
 // ============================================================================
 
 /**
- * Process attachments for a claw run request:
- *   - Images → forwarded as-is for LLM vision
- *   - Text files → decoded and embedded into the task
+ * Normalize the dashboard's attachments payload into the `{fileName, mimeType,
+ * data}` shape that claw-auth (GCS persistence) and claw (ingestAttachments →
+ * `.context/` + `## Attached Files` advertisement) both expect. All
+ * attachments — images, text, pdf, xlsx, docx, etc. — go through this single
+ * channel so they're persisted AND surfaced to the agent. Do NOT split text
+ * files out into a separate `contextFiles` payload: that bypassed claw-auth's
+ * GCS persistence (leaving `attachments: []` on reload) and duplicated files
+ * in claw (which also derives context files from `attachments`).
  */
-function processAttachmentsForRun(attachments?: ClawRunRequest['attachments']): {
-  imageAttachments: Array<{ fileName: string; mimeType: string; data: string }>;
-  textFileContents?: string;
-  contextFiles: Array<{ path: string; content: string }>;
-} {
-  const imageAttachments: Array<{ fileName: string; mimeType: string; data: string }> = [];
-  const contextFiles: Array<{ path: string; content: string }> = [];
-  let textFileContents: string | undefined;
-
-  if (!attachments?.length) {
-    return { imageAttachments, contextFiles };
+function normalizeAttachmentsForRun(
+  attachments?: ClawRunRequest['attachments']
+): Array<{ fileName: string; mimeType: string; data: string }> {
+  if (!attachments?.length) return [];
+  const result: Array<{ fileName: string; mimeType: string; data: string }> = [];
+  for (const att of attachments) {
+    if (!att.data) continue;
+    result.push({
+      fileName: att.filename || 'attachment',
+      mimeType: inferMimeType(att.filename, att.mimeType),
+      data: att.data,
+    });
   }
-
-  const withMime = attachments.map((att) => ({
-    ...att,
-    mimeType: inferMimeType(att.filename, att.mimeType),
-  }));
-
-  for (const att of withMime) {
-    if (att.mimeType.startsWith('image/') && att.data) {
-      imageAttachments.push({
-        fileName: att.filename || 'attachment',
-        mimeType: att.mimeType,
-        data: att.data,
-      });
-    } else if (att.data) {
-      let content = '';
-      try {
-        content = Buffer.from(att.data, 'base64').toString('utf-8');
-      } catch {
-        content = att.data;
-      }
-      if (!textFileContents) textFileContents = '';
-      textFileContents += `\n\n--- FILE: ${att.filename || 'untitled'} ---\n\`\`\`\n${content.slice(0, 100000)}\n\`\`\`\n--- END OF ${att.filename || 'untitled'} ---\n`;
-      contextFiles.push({ path: att.filename || 'file.txt', content });
-    }
-  }
-
-  return { imageAttachments, textFileContents, contextFiles };
+  return result;
 }
 
 /**
@@ -425,15 +405,10 @@ export async function runClawAgentStream(
     conversationId: clawConversationId,
   });
 
-  // Process attachments
-  const { imageAttachments, textFileContents, contextFiles } = processAttachmentsForRun(
-    request.attachments
-  );
-
-  let enhancedTask = request.query;
-  if (textFileContents) {
-    enhancedTask = `User query: ${request.query}\n\nThe user has attached the following files:\n${textFileContents}`;
-  }
+  // Normalize attachments. Single channel — claw-auth persists them to GCS
+  // here, and claw ingests them into `.context/` + advertises under
+  // `## Attached Files` on the other side.
+  const normalizedAttachments = normalizeAttachmentsForRun(request.attachments);
 
   const additionalInstructions = buildAdditionalInstructions(request);
 
@@ -455,7 +430,7 @@ export async function runClawAgentStream(
     userId: request.userId,
     userName: request.userName,
     userEmail: request.userEmail,
-    task: enhancedTask,
+    task: request.query,
     agentSlug: request.agentSlug,
     provider: request.provider,
     conversationId: clawConversationId,
@@ -464,10 +439,9 @@ export async function runClawAgentStream(
     ...(request.ticketIds?.length && { ticketIds: request.ticketIds }),
     ...(request.callIds?.length && { callIds: request.callIds }),
     ...(request.attachedContext?.length && { attachedContext: request.attachedContext }),
-    ...(imageAttachments.length > 0 && {
-      attachments: imageAttachments,
+    ...(normalizedAttachments.length > 0 && {
+      attachments: normalizedAttachments,
     }),
-    ...(contextFiles.length > 0 && { contextFiles }),
     ...(request.webSearchEnabled && { webSearchEnabled: true }),
     ...(request.deepResearchEnabled && { deepResearchEnabled: true }),
     ...(request.researchContext && { researchContext: request.researchContext }),

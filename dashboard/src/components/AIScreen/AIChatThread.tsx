@@ -5,33 +5,38 @@ import {
   useState,
   useCallback,
   useMemo,
+  forwardRef,
+  useImperativeHandle,
   type ReactElement,
+  type CSSProperties,
 } from 'react';
 import {
   Menu,
   Copy,
-  RefreshCw,
   ThumbsUp,
   ThumbsDown,
   ChevronRight,
   Link2,
   ArrowDown,
   Bug,
+  Upload,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { Link } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
+import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import type {
   Message,
+  MessageAttachment,
   ToolInvocation as ToolInvocationType,
   ClawCitation,
   DebugEventRecord,
 } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
-import { AIComposer } from './AIComposer';
+import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
@@ -50,7 +55,10 @@ import {
   getClawCitationLabel,
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
 import { Tooltip } from '../ui/Tooltip';
-import { ConversationToolInvocationsContext } from '../Chat/XyneAISidebar/components/MessageItem';
+import {
+  ConversationToolInvocationsContext,
+  AttachmentPreview,
+} from '../Chat/XyneAISidebar/components/MessageItem';
 import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
 
@@ -63,9 +71,25 @@ type FeedbackValue = 'LIKE' | 'DISLIKE' | null;
 interface AIChatThreadProps {
   sessionId?: string | undefined;
   initialQuery?: string | undefined;
+  initialAttachments?: AIComposerAttachment[] | undefined;
   onSetMobileSidebarOpen?: ((open: boolean) => void) | undefined;
   onConversationChange?: ((sessionId: string) => void) | undefined;
+  /** Forwarded to the composer's AIAgentSelector — fires when the user picks
+   *  a different agent from inside an active chat, so the parent can open a
+   *  fresh conversation scoped to that agent. */
+  onAgentChange?: ((slug: string | null) => void) | undefined;
 }
+
+export interface AIChatThreadHandle {
+  addFiles: (files: File[]) => void;
+}
+
+const toMessageAttachments = (attachments: AIComposerAttachment[]): MessageAttachment[] =>
+  attachments.map(att => ({
+    filename: att.filename,
+    mimeType: att.mimeType,
+    data: att.data,
+  }));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -172,16 +196,31 @@ function phaseLabelFor(reasoningLength: number): string {
   return STREAMING_PHASES[2];
 }
 
+// Top + bottom fade mask for the expanded panel — mirrors the sidebar's
+// ActivityBlock so the section bleeds into the surrounding message column
+// instead of ending in a hard edge.
+const REASONING_FADE_MASK_STYLE: CSSProperties = {
+  WebkitMaskImage:
+    'linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)',
+  maskImage:
+    'linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)',
+};
+
 function ReasoningSection({
   reasoning,
   isStreaming,
+  toolInvocations,
+  messageAborted,
 }: {
   reasoning: string;
   isStreaming?: boolean | undefined;
+  toolInvocations?: ToolInvocationType[] | undefined;
+  messageAborted?: boolean | undefined;
 }): ReactElement {
   const [expanded, setExpanded] = useState(false);
   const hasReasoning = reasoning.trim().length > 0;
-  const canExpand = hasReasoning;
+  const hasTools = !!toolInvocations && toolInvocations.length > 0;
+  const canExpand = hasReasoning || hasTools;
 
   // Throttled so the chip doesn't strobe through phases.
   const stablePhase = useStableLabel(phaseLabelFor(reasoning.length));
@@ -219,11 +258,32 @@ function ReasoningSection({
         </span>
       </button>
 
-      {expanded && hasReasoning && (
-        <div className='ml-2 mt-1.5 max-h-80 overflow-y-auto overscroll-contain border-l-2 border-border/70 pl-3 pr-1'>
-          <pre className='overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-relaxed text-muted-foreground'>
-            {reasoning}
-          </pre>
+      {expanded && canExpand && (
+        <div
+          className='mt-1.5 max-h-[28rem] overflow-y-auto pl-5 pr-0.5 py-2 space-y-3'
+          style={REASONING_FADE_MASK_STYLE}
+        >
+          {hasReasoning && (
+            <div>
+              <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
+                Reasoning
+              </div>
+              <pre className='whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground'>
+                {reasoning}
+              </pre>
+            </div>
+          )}
+
+          {hasTools && (
+            <div>
+              {hasReasoning && (
+                <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
+                  Tool calls
+                </div>
+              )}
+              <ToolInvocationList invocations={toolInvocations} messageAborted={messageAborted} />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -362,14 +422,12 @@ function InlineCitations({ citations }: { citations: InlineCitation[] }): ReactE
 function ChatMessageBubble({
   message,
   onCopy,
-  onRetry,
   onFeedback,
   feedbackValue,
   onDebug,
 }: {
   message: Message;
   onCopy?: () => void;
-  onRetry?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   feedbackValue?: FeedbackValue;
   onDebug?: (() => void) | undefined;
@@ -447,7 +505,7 @@ function ChatMessageBubble({
   // Only assign numbers to tool IDs that resolve to a real (or nested) tool.
   // Unknown clf tokens stay raw and get stripped by stripCitationMarks.
   const clawCitationToolNumbers = useMemo(() => {
-    const raw = message.content || '';
+    const raw = message.content || message.streamingContent || '';
     const all = buildClawCitationToolNumbers(raw);
     const filtered = new Map<string, number>();
     let next = 1;
@@ -457,23 +515,43 @@ function ChatMessageBubble({
       }
     }
     return filtered;
-  }, [message.content, knownToolCallIds]);
+  }, [message.content, message.streamingContent, knownToolCallIds]);
 
   const displayContent = useMemo(() => {
-    const raw = message.content || '';
+    // While streaming, the manager batches deltas into `streamingContent` and
+    // only writes `content` on completion. Reading content-only here is what
+    // made /ai wait until the end to render anything; mirror the sidebar's
+    // MessageItem and prefer streamingContent during streaming.
+    const raw =
+      message.type === 'bot' && message.isStreaming && message.streamingContent
+        ? message.streamingContent
+        : message.content || message.streamingContent || '';
     const linkified = linkifyClawCitations(raw, clawCitationToolNumbers);
     const stripped = stripCitationMarks(linkified);
     const nonClfStripped = stripNonClfCitationTokens(stripped);
     const cleaned = stripUnknownCiteLinks(nonClfStripped, validCitationKeys);
     return message.isStreaming ? cleaned + '\n' : cleaned;
-  }, [message.content, message.isStreaming, clawCitationToolNumbers, validCitationKeys]);
+  }, [
+    message.type,
+    message.content,
+    message.streamingContent,
+    message.isStreaming,
+    clawCitationToolNumbers,
+    validCitationKeys,
+  ]);
 
   const inlineCitations = useMemo(
-    () => extractInlineCitations(message.content || ''),
-    [message.content],
+    () => extractInlineCitations(message.content || message.streamingContent || ''),
+    [message.content, message.streamingContent],
   );
 
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
+
+  const hasUserContent = isUser && message.content.trim().length > 0;
+  const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
+  if (isUser && !hasUserContent && !hasUserAttachments) {
+    return null as unknown as ReactElement;
+  }
 
   return (
     <div
@@ -484,28 +562,35 @@ function ChatMessageBubble({
     >
       {isUser ? (
         <div className='ai-user-bubble max-w-[78%] rounded-3xl bg-[#ececec] px-4 py-2.5 text-[14.5px] leading-relaxed text-gray-900'>
-          <div className='whitespace-pre-wrap'>
-            {stripUnknownCiteLinks(
-              stripNonClfCitationTokens(stripCitationMarks(message.content)),
-              validCitationKeys,
-            )}
-          </div>
+          {hasUserAttachments && (
+            <div className={cn('flex flex-col gap-2', hasUserContent && 'mb-2')}>
+              {message.attachments!.map((attachment, index) => (
+                <AttachmentPreview key={index} attachment={attachment} />
+              ))}
+            </div>
+          )}
+          {hasUserContent && (
+            <div className='whitespace-pre-wrap'>
+              {stripUnknownCiteLinks(
+                stripNonClfCitationTokens(stripCitationMarks(message.content)),
+                validCitationKeys,
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <div className='flex min-w-0 flex-col gap-2'>
           {/* Reasoning section — also acts as the initial loading placeholder
               so the user sees "Reasoning" with bouncing dots from the moment
-              streaming starts, matching the xyne-search /ai behaviour. */}
-          {(message.isStreaming || (message.reasoning && message.reasoning.trim().length > 0)) && (
+              streaming starts. When expanded, also reveals the tool-call tree
+              inside (matching the sidebar's ActivityBlock layout). */}
+          {(message.isStreaming ||
+            (message.reasoning && message.reasoning.trim().length > 0) ||
+            (message.toolInvocations && message.toolInvocations.length > 0)) && (
             <ReasoningSection
               reasoning={message.reasoning ?? ''}
               isStreaming={message.isStreaming}
-            />
-          )}
-
-          {message.toolInvocations && message.toolInvocations.length > 0 && (
-            <ToolInvocationList
-              invocations={message.toolInvocations}
+              toolInvocations={message.toolInvocations}
               messageAborted={!!message.isAborted}
             />
           )}
@@ -593,7 +678,7 @@ function ChatMessageBubble({
 
           {inlineCitations.length > 0 && <InlineCitations citations={inlineCitations} />}
 
-          {!isUser && !message.isStreaming && onDebug && (
+          {!isUser && onDebug && (
             <button
               type='button'
               onClick={onDebug}
@@ -618,16 +703,6 @@ function ChatMessageBubble({
                 data-track-name='COPY_MESSAGE'
               >
                 <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-              </button>
-              <button
-                type='button'
-                onClick={onRetry}
-                title='Retry'
-                className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
-                data-track-category='XyneAI'
-                data-track-name='RETRY_MESSAGE'
-              >
-                <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
               </button>
               <button
                 type='button'
@@ -679,12 +754,91 @@ function ChatMessageBubble({
 // Main Chat Thread
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export function AIChatThread({
-  sessionId,
-  initialQuery,
-  onSetMobileSidebarOpen,
-  onConversationChange,
-}: AIChatThreadProps): ReactElement {
+export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(function AIChatThread(
+  {
+    sessionId,
+    initialQuery,
+    initialAttachments,
+    onSetMobileSidebarOpen,
+    onConversationChange,
+    onAgentChange,
+  },
+  ref,
+): ReactElement {
+  const composerRef = useRef<AIComposerHandle | null>(null);
+  const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  const dragCounterRef = useRef(0);
+  const [isDragging, setIsDragging] = useState(false);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      addFiles: (files: File[]): void => {
+        composerRef.current?.addFiles(files);
+      },
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    const el = dropZoneRef.current;
+    if (!el) return;
+
+    const hasFiles = (event: DragEvent): boolean =>
+      Boolean(event.dataTransfer?.types?.includes('Files'));
+
+    const handleDragEnter = (event: DragEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!hasFiles(event)) return;
+      dragCounterRef.current += 1;
+      if (dragCounterRef.current === 1) {
+        setIsDragging(true);
+      }
+    };
+    const handleDragOver = (event: DragEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!hasFiles(event)) return;
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'copy';
+      }
+    };
+    const handleDragLeave = (event: DragEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!hasFiles(event)) return;
+      dragCounterRef.current -= 1;
+      if (dragCounterRef.current <= 0) {
+        dragCounterRef.current = 0;
+        setIsDragging(false);
+      }
+    };
+    const handleDrop = (event: DragEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      dragCounterRef.current = 0;
+      setIsDragging(false);
+      const files = event.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      const fileArray = Array.from(files).filter(f => f instanceof File);
+      if (fileArray.length > 0) {
+        composerRef.current?.addFiles(fileArray);
+      }
+    };
+
+    el.addEventListener('dragenter', handleDragEnter);
+    el.addEventListener('dragover', handleDragOver);
+    el.addEventListener('dragleave', handleDragLeave);
+    el.addEventListener('drop', handleDrop);
+    return () => {
+      el.removeEventListener('dragenter', handleDragEnter);
+      el.removeEventListener('dragover', handleDragOver);
+      el.removeEventListener('dragleave', handleDragLeave);
+      el.removeEventListener('drop', handleDrop);
+    };
+  }, []);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string>('');
   const [streamThreadKey] = useState<string>(() => sessionId ?? newStreamSlotKey());
@@ -703,6 +857,7 @@ export function AIChatThread({
   const mountedWithSessionIdRef = useRef<boolean>(Boolean(sessionId));
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const tailRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   const [showJumpPill, setShowJumpPill] = useState(false);
@@ -719,6 +874,8 @@ export function AIChatThread({
 
   void threadId; // Used by stream manager via useXyneAIStream internally
 
+  const { selectedAgentSlug } = useSelectedAgent();
+
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: [],
     conversationId,
@@ -728,6 +885,7 @@ export function AIChatThread({
     setDebugEvents,
     setDebugArtifactsReadyVersion,
     isV2: true,
+    agentSlug: selectedAgentSlug,
   });
 
   // Load existing session messages when sessionId is provided
@@ -807,9 +965,9 @@ export function AIChatThread({
   useEffect(() => {
     if (initialQuery && !hasAutoSubmitted.current) {
       hasAutoSubmitted.current = true;
-      void submitQuery(initialQuery, []);
+      void submitQuery(initialQuery, toMessageAttachments(initialAttachments ?? []));
     }
-  }, [initialQuery, submitQuery]);
+  }, [initialQuery, initialAttachments, submitQuery]);
 
   // Notify parent when conversationId changes (draft -> real session)
   useEffect(() => {
@@ -846,6 +1004,20 @@ export function AIChatThread({
     );
     io.observe(tail);
 
+    // Re-pin the tail when content height grows while we're meant to be at
+    // bottom. On revisit, messages render synchronously but markdown / syntax
+    // highlight / KaTeX finish later, pushing the tail below the viewport
+    // after the initial scrollIntoView ran — the IO then flips to "not at
+    // bottom" and shows the jump pill even though the user never scrolled.
+    const content = contentRef.current;
+    const ro = content
+      ? new ResizeObserver((): void => {
+          if (!isAtBottomRef.current) return;
+          tail.scrollIntoView({ block: 'end', behavior: 'instant' as ScrollBehavior });
+        })
+      : null;
+    if (content && ro) ro.observe(content);
+
     const onWheel = (e: globalThis.WheelEvent): void => {
       if (e.deltaY < 0) isAtBottomRef.current = false;
     };
@@ -875,6 +1047,7 @@ export function AIChatThread({
 
     return () => {
       io.disconnect();
+      ro?.disconnect();
       scroll.removeEventListener('wheel', onWheel);
       scroll.removeEventListener('keydown', onKey);
       scroll.removeEventListener('touchstart', onTouchStart);
@@ -897,13 +1070,14 @@ export function AIChatThread({
   }, []);
 
   const handleSubmit = useCallback(
-    async (text: string): Promise<void> => {
-      if (!text.trim()) return;
+    async (text: string, attachments?: AIComposerAttachment[]): Promise<void> => {
+      const hasAttachments = (attachments?.length ?? 0) > 0;
+      if (!text.trim() && !hasAttachments) return;
       // Re-pin to the latest on submit so the new exchange is in view, matching
       // the xyne-search /ai composer behaviour.
       isAtBottomRef.current = true;
       setShowJumpPill(false);
-      await submitQuery(text, []);
+      await submitQuery(text, toMessageAttachments(attachments ?? []));
     },
     [submitQuery],
   );
@@ -989,7 +1163,22 @@ export function AIChatThread({
 
   return (
     <div className='flex h-full min-w-0 flex-1'>
-      <div className='flex h-full min-w-0 flex-1 flex-col'>
+      <div ref={dropZoneRef} className='relative flex h-full min-w-0 flex-1 flex-col'>
+        {isDragging && (
+          <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
+            <div className='flex flex-col items-center gap-3'>
+              <div className='rounded-full bg-primary/10 p-4'>
+                <Upload className='h-8 w-8 text-primary' />
+              </div>
+              <div className='text-center'>
+                <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
+                <p className='text-sm text-muted-foreground'>
+                  Images, PDF, text, office documents, or data files
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
         <ChatTopbar title={title} onOpenSidebar={(): void => onSetMobileSidebarOpen?.(true)} />
 
         {/* Messages area — tabIndex enables keyboard scroll (PageUp/Home/ArrowUp)
@@ -1003,7 +1192,7 @@ export function AIChatThread({
           aria-live='polite'
           aria-label='Chat messages'
         >
-          <div className='mx-auto flex max-w-3xl flex-col'>
+          <div ref={contentRef} className='mx-auto flex max-w-3xl flex-col'>
             <ConversationToolInvocationsContext.Provider value={conversationToolInvocations}>
               {messages.map((message, idx) => {
                 const feedbackValue: FeedbackValue =
@@ -1017,22 +1206,9 @@ export function AIChatThread({
                     key={message.id}
                     message={message}
                     onCopy={() => {
-                      void navigator.clipboard.writeText(message.content);
-                    }}
-                    onRetry={() => {
-                      // Retry = resubmit the user's last prompt
-                      const userMsg = messages[idx - 1];
-                      if (userMsg && userMsg.type === 'user') {
-                        void submitQuery(
-                          userMsg.content,
-                          [],
-                          undefined,
-                          undefined,
-                          undefined,
-                          message.id,
-                          true,
-                        );
-                      }
+                      void navigator.clipboard.writeText(
+                        message.content || message.streamingContent || '',
+                      );
                     }}
                     onFeedback={(id, type) => {
                       void handleFeedback(id, type);
@@ -1073,10 +1249,12 @@ export function AIChatThread({
           )}
           <div className='mx-auto max-w-3xl'>
             <AIComposer
+              ref={composerRef}
               autoFocus
-              onSubmit={(text): void => {
-                void handleSubmit(text);
+              onSubmit={(text, attachments): void => {
+                void handleSubmit(text, attachments);
               }}
+              onAgentChange={onAgentChange}
               pending={isAnyMessageStreaming}
               onStop={handleStop}
               placeholder='Write a message...'
@@ -1101,4 +1279,4 @@ export function AIChatThread({
       )}
     </div>
   );
-}
+});

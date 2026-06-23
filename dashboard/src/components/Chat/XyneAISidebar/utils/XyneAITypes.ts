@@ -112,10 +112,14 @@ export interface ClawCitation {
   kind: 'thread' | 'canvas' | 'ticket' | 'external';
   channelId?: string;
   conversationId?: string;
+  messageId?: string;
   channelName?: string;
   channelType?: string;
+  channelKind?: string;
   viewAccessId?: string;
   ticketId?: string;
+  xyneId?: string;
+  mailId?: string;
   url?: string;
   /**
    * 1-based index of the chunk in the tool's result text this citation

@@ -1,10 +1,15 @@
-import { type ReactElement, useState, useCallback, useEffect } from 'react';
+import { type ReactElement, useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Upload } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import { AISidebar } from '../../components/AIScreen/AISidebar';
 import { AIEmptyState } from '../../components/AIScreen/AIEmptyState';
-import { AIComposer } from '../../components/AIScreen/AIComposer';
-import { AIChatThread } from '../../components/AIScreen/AIChatThread';
+import {
+  AIComposer,
+  type AIComposerHandle,
+  type AIComposerAttachment,
+} from '../../components/AIScreen/AIComposer';
+import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen/AIChatThread';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 
@@ -20,9 +25,22 @@ const AIScreen = (): ReactElement => {
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [initialQuery, setInitialQuery] = useState<string>('');
+  const [initialAttachments, setInitialAttachments] = useState<AIComposerAttachment[] | undefined>(
+    undefined,
+  );
   const [chatKey, setChatKey] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  const landingComposerRef = useRef<AIComposerHandle | null>(null);
+  const chatThreadRef = useRef<AIChatThreadHandle | null>(null);
+  const dragCounterRef = useRef(0);
+  const showChatViewRef = useRef(showChatView);
   const navigate = useNavigate();
   const { invalidateSessions } = useV2SessionInvalidator();
+
+  useEffect(() => {
+    showChatViewRef.current = showChatView;
+  }, [showChatView]);
 
   useEffect(() => {
     if (activeSessionId) {
@@ -44,9 +62,75 @@ const AIScreen = (): ReactElement => {
     };
   }, []);
 
+  // Drag and drop on the main content area — routes dropped files into
+  // whichever composer is currently visible (landing or chat thread).
+  useEffect(() => {
+    const el = dropZoneRef.current;
+    if (!el) return;
+
+    const hasFiles = (event: DragEvent): boolean =>
+      Boolean(event.dataTransfer?.types?.includes('Files'));
+
+    const handleDragEnter = (event: DragEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!hasFiles(event)) return;
+      dragCounterRef.current += 1;
+      if (dragCounterRef.current === 1) {
+        setIsDragging(true);
+      }
+    };
+    const handleDragOver = (event: DragEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!hasFiles(event)) return;
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'copy';
+      }
+    };
+    const handleDragLeave = (event: DragEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!hasFiles(event)) return;
+      dragCounterRef.current -= 1;
+      if (dragCounterRef.current <= 0) {
+        dragCounterRef.current = 0;
+        setIsDragging(false);
+      }
+    };
+    const handleDrop = (event: DragEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      dragCounterRef.current = 0;
+      setIsDragging(false);
+      const files = event.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      const fileArray = Array.from(files).filter(f => f instanceof File);
+      if (fileArray.length === 0) return;
+      // AIChatThread has its own drop zone — only handle landing-view drops here.
+      if (!showChatViewRef.current) {
+        landingComposerRef.current?.addFiles(fileArray);
+      } else {
+        chatThreadRef.current?.addFiles(fileArray);
+      }
+    };
+
+    el.addEventListener('dragenter', handleDragEnter);
+    el.addEventListener('dragover', handleDragOver);
+    el.addEventListener('dragleave', handleDragLeave);
+    el.addEventListener('drop', handleDrop);
+    return () => {
+      el.removeEventListener('dragenter', handleDragEnter);
+      el.removeEventListener('dragover', handleDragOver);
+      el.removeEventListener('dragleave', handleDragLeave);
+      el.removeEventListener('drop', handleDrop);
+    };
+  }, []);
+
   const handleCreateChat = useCallback((): void => {
     setActiveSessionId('');
     setInitialQuery('');
+    setInitialAttachments(undefined);
     setChatKey(prev => prev + 1);
     setShowChatView(false); // Return to landing page
   }, []);
@@ -56,18 +140,23 @@ const AIScreen = (): ReactElement => {
       if (sessionId === activeSessionId) return;
       setActiveSessionId(sessionId);
       setInitialQuery('');
+      setInitialAttachments(undefined);
       setChatKey(prev => prev + 1);
       setShowChatView(true);
     },
     [activeSessionId],
   );
 
-  const handleComposerSubmit = useCallback((text: string): void => {
-    setInitialQuery(text);
-    setActiveSessionId('');
-    setChatKey(prev => prev + 1);
-    setShowChatView(true);
-  }, []);
+  const handleComposerSubmit = useCallback(
+    (text: string, attachments?: AIComposerAttachment[]): void => {
+      setInitialQuery(text);
+      setInitialAttachments(attachments);
+      setActiveSessionId('');
+      setChatKey(prev => prev + 1);
+      setShowChatView(true);
+    },
+    [],
+  );
 
   const handleConversationChange = useCallback(
     (sessionId: string): void => {
@@ -97,14 +186,32 @@ const AIScreen = (): ReactElement => {
       />
 
       {/* ─── Main content ─── */}
-      <div className='relative flex h-full min-w-0 flex-1 flex-col'>
+      <div ref={dropZoneRef} className='relative flex h-full min-w-0 flex-1 flex-col'>
+        {isDragging && !showChatView && (
+          <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
+            <div className='flex flex-col items-center gap-3'>
+              <div className='rounded-full bg-primary/10 p-4'>
+                <Upload className='h-8 w-8 text-primary' />
+              </div>
+              <div className='text-center'>
+                <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
+                <p className='text-sm text-muted-foreground'>
+                  Images, PDF, text, office documents, or data files
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
         {showChatView ? (
           <AIChatThread
+            ref={chatThreadRef}
             key={chatKey}
             sessionId={activeSessionId || undefined}
             initialQuery={initialQuery}
+            initialAttachments={initialAttachments}
             onSetMobileSidebarOpen={setMobileSidebarOpen}
             onConversationChange={handleConversationChange}
+            onAgentChange={handleCreateChat}
           />
         ) : (
           /* Landing page – centred greeting + composer */
@@ -112,7 +219,13 @@ const AIScreen = (): ReactElement => {
             <div className='flex w-full max-w-2xl flex-col'>
               <AIEmptyState />
               <div className='mt-6'>
-                <AIComposer autoFocus onSubmit={handleComposerSubmit} hideDisclaimer />
+                <AIComposer
+                  ref={landingComposerRef}
+                  autoFocus
+                  onSubmit={handleComposerSubmit}
+                  onAgentChange={handleCreateChat}
+                  hideDisclaimer
+                />
               </div>
             </div>
           </main>

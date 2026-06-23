@@ -12,6 +12,10 @@ import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 export interface AIAgentSelectorProps {
   /** Whether the selector is disabled (e.g. while streaming). */
   disabled?: boolean;
+  /** Called after the user picks a different agent — mirrors the sidebar's
+   *  handleSelectAgent: parent uses this to open a fresh chat scoped to that
+   *  agent. Skipped when the user re-selects the current agent. */
+  onAgentChange?: ((slug: string | null) => void) | undefined;
 }
 
 const MAX_VISIBLE_AGENTS = 6;
@@ -20,7 +24,10 @@ const MAX_VISIBLE_AGENTS = 6;
  * Agent selector for the /ai page composer.
  * Uses useSelectedAgent for persistence and fetchAccessibleClawAgents for the list.
  */
-export function AIAgentSelector({ disabled = false }: AIAgentSelectorProps): ReactElement {
+export function AIAgentSelector({
+  disabled = false,
+  onAgentChange,
+}: AIAgentSelectorProps): ReactElement {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
@@ -135,7 +142,10 @@ export function AIAgentSelector({ disabled = false }: AIAgentSelectorProps): Rea
             {/* Ask AI option */}
             <button
               onClick={() => {
-                setSelectedAgentSlug(null);
+                if (selectedAgentSlug !== null) {
+                  setSelectedAgentSlug(null);
+                  onAgentChange?.(null);
+                }
                 setOpen(false);
               }}
               className={cn(
@@ -165,7 +175,10 @@ export function AIAgentSelector({ disabled = false }: AIAgentSelectorProps): Rea
                 <button
                   key={agent.slug}
                   onClick={() => {
-                    setSelectedAgentSlug(agent.slug);
+                    if (selectedAgentSlug !== agent.slug) {
+                      setSelectedAgentSlug(agent.slug);
+                      onAgentChange?.(agent.slug);
+                    }
                     setOpen(false);
                   }}
                   className={cn(
