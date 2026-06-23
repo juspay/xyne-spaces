@@ -15,7 +15,13 @@ import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { EmailMergeMode, WorkspaceRole, DeskType } from '@prisma/client';
 import { config as appConfig } from '@/config/env';
-import { getFrontendUrl } from './urlHelpers';
+import {
+  appendQueryToReturnPath,
+  buildReturnPathOrSupportPath,
+  buildSupportPath,
+  getFrontendUrl,
+  sanitizeReturnPath,
+} from './urlHelpers';
 import { encrypt } from '@/services/encryptionService';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 
@@ -40,9 +46,10 @@ type PendingChannelData = {
 export type OAuthStateValue = {
   channelId?: string;
   channelData?: PendingChannelData;
-  mode?: 'reconnect' | 'workspace' | 'dl-member-sync';
+  mode?: 'reconnect' | 'workspace' | 'dl-member-sync' | 'channel-email-workspace';
   expectedEmail?: string;
   workspaceId?: string;
+  returnPath?: string;
   platform?: 'electron' | 'web';
   dlEmail?: string;
   startDate?: string;
@@ -50,6 +57,7 @@ export type OAuthStateValue = {
   userId?: string;
   timestamp: number;
 };
+
 const OAUTH_STATE_KEY_PREFIX = 'google_oauth_state:';
 const OAUTH_STATE_TTL_SECONDS = 60 * 60;
 
@@ -105,18 +113,6 @@ function buildPostOAuthRedirect(
     return `${frontendUrl}/launch?path=${encodeURIComponent(path)}`;
   }
   return `${frontendUrl}${path}`;
-}
-
-function buildSupportPath(
-  workspaceId: string | undefined,
-  channelId: string | undefined,
-  query: URLSearchParams,
-): string {
-  const queryString = query.toString();
-  const wsSegment = workspaceId ? `/${workspaceId}` : '';
-  const channelSegment = channelId ? `/${channelId}` : '';
-  const suffix = queryString ? `?${queryString}` : '';
-  return `${wsSegment}/support${channelSegment}${suffix}`;
 }
 
 function redirectError(
@@ -258,6 +254,60 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
       'workspace_google_connect_failed',
       platform,
       req.user!.workspaceId,
+    );
+  }
+});
+
+router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+  const platform: 'electron' | 'web' =
+    req.query.platform === 'electron' ? 'electron' : 'web';
+  const returnPath = sanitizeReturnPath(req.query.returnPath);
+  try {
+    const workspaceId = req.user!.workspaceId;
+    const role = req.user!.role as WorkspaceRole;
+    if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
+      res.status(403).json({ error: 'Workspace admin/owner role required to set up channel email' });
+      return;
+    }
+
+    GoogleService.validatePushInfrastructure();
+
+    const state = Math.random().toString(36).substring(7);
+    await setOAuthState(state, {
+      mode: 'channel-email-workspace',
+      workspaceId,
+      returnPath,
+      platform,
+      timestamp: Date.now(),
+    });
+
+    const authUrl = createOAuth2Client().generateAuthUrl({
+      access_type: 'offline',
+      scope: GMAIL_SCOPES,
+      prompt: 'consent',
+      state,
+    });
+
+    logger.info(`${TAG} Redirecting to Google OAuth for channel-email workspace mailbox`, {
+      workspaceId,
+    });
+    res.redirect(authUrl);
+  } catch (error: any) {
+    logger.error(`${TAG} Error initiating channel-email workspace Google connect:`, error);
+    const params = new URLSearchParams({
+      emailError: error?.message || 'channel_email_google_connect_failed',
+    });
+    res.redirect(
+      buildPostOAuthRedirect(
+        getFrontendUrl(req),
+        buildReturnPathOrSupportPath(
+          returnPath,
+          req.user!.workspaceId,
+          undefined,
+          params,
+        ),
+        platform,
+      ),
     );
   }
 });
@@ -584,6 +634,114 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         buildPostOAuthRedirect(
           frontendUrl,
           buildSupportPath(stateData.workspaceId, stateData.channelId, syncParams),
+          stateData.platform,
+        ),
+      );
+      return;
+    }
+
+    if (stateData.mode === 'channel-email-workspace' && stateData.workspaceId) {
+      const workspaceId = stateData.workspaceId;
+      const username = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '-');
+      const sourceName = `google-channel-email-${username}`;
+      const existingByName = await db.externalSource.findUnique({ where: { name: sourceName } });
+      if (existingByName?.isActive && existingByName.workspaceId !== workspaceId) {
+        const params = new URLSearchParams({
+          emailError: 'channel_email_mailbox_already_connected_elsewhere',
+        });
+        res.redirect(
+          buildPostOAuthRedirect(
+            frontendUrl,
+            buildReturnPathOrSupportPath(
+              stateData.returnPath,
+              workspaceId,
+              undefined,
+              params,
+            ),
+            stateData.platform,
+          ),
+        );
+        return;
+      }
+
+      const network = await GoogleService.prepareExternalSourceNetwork({
+        emailAddress,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        sourceName,
+      });
+
+      const existingSource = await db.externalSource.findFirst({
+        where: {
+          workspaceId,
+          sourceType: { in: ['google-channel-email', 'microsoft-channel-email'] },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (existingSource?.isActive && existingSource.sourceType !== 'google-channel-email') {
+        const params = new URLSearchParams({
+          emailError: 'channel_email_mailbox_already_exists',
+        });
+        res.redirect(
+          buildPostOAuthRedirect(
+            frontendUrl,
+            buildReturnPathOrSupportPath(
+              stateData.returnPath,
+              workspaceId,
+              undefined,
+              params,
+            ),
+            stateData.platform,
+          ),
+        );
+        return;
+      }
+
+      if (existingSource) {
+        await db.externalSource.update({
+          where: { id: existingSource.id },
+          data: {
+            name: network.sourceName,
+            sourceType: 'google-channel-email',
+            displayName: emailAddress,
+            credentials: network.encryptedCredentials,
+            isActive: true,
+          },
+        });
+      } else {
+        await db.externalSource.create({
+          data: {
+            name: network.sourceName,
+            sourceType: 'google-channel-email',
+            displayName: emailAddress,
+            channelId: null,
+            workspaceId,
+            credentials: network.encryptedCredentials,
+            isActive: true,
+          },
+        });
+      }
+
+      const params = new URLSearchParams({
+        channelEmailMailboxConnected: 'true',
+        provider: 'google',
+      });
+      if (stateData.returnPath) {
+        res.redirect(
+          buildPostOAuthRedirect(
+            frontendUrl,
+            appendQueryToReturnPath(stateData.returnPath, params),
+            stateData.platform,
+          ),
+        );
+        return;
+      }
+
+      res.redirect(
+        buildPostOAuthRedirect(
+          frontendUrl,
+          buildSupportPath(workspaceId, undefined, params),
           stateData.platform,
         ),
       );

@@ -14,12 +14,14 @@ import { config } from '../config/env';
 import { EmailMergeMode, DeskType } from '@prisma/client';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { AttachmentUploadError } from '../integrations/core/baseMailReplySender';
+import { CHANNEL_EMAIL_SOURCE_TYPES } from './channelEmailAliasService';
 
 export type PendingChannelData =
   | PendingChannelCreate
   | PendingChannelReconnect
   | PendingChannelWorkspace
-  | PendingChannelDlMemberSync;
+  | PendingChannelDlMemberSync
+  | PendingChannelEmailWorkspace;
 
 export interface PendingChannelCreate {
   mode?: 'create';
@@ -62,6 +64,14 @@ export interface PendingChannelDlMemberSync {
   platform?: 'electron' | 'web';
 }
 
+export interface PendingChannelEmailWorkspace {
+  mode: 'channel-email-workspace';
+  userId: string;
+  workspaceId: string;
+  returnPath?: string;
+  platform?: 'electron' | 'web';
+}
+
 export function isReconnectChannelData(
   data: PendingChannelData,
 ): data is PendingChannelReconnect {
@@ -78,6 +88,12 @@ export function isDlMemberSyncChannelData(
   data: PendingChannelData,
 ): data is PendingChannelDlMemberSync {
   return data.mode === 'dl-member-sync';
+}
+
+export function isChannelEmailWorkspaceData(
+  data: PendingChannelData,
+): data is PendingChannelEmailWorkspace {
+  return data.mode === 'channel-email-workspace';
 }
 
 interface MicrosoftCredentials {
@@ -418,6 +434,71 @@ export class MicrosoftDeskService {
         data: {
           name: sourceName,
           sourceType: 'microsoft',
+          displayName: credentials.email,
+          channelId: null,
+          workspaceId: channelData.workspaceId,
+          credentials: encryptedCredentials,
+          isActive: true,
+        },
+      });
+    }
+
+    await this.registerGraphWebhook(credentials.accessToken, webhookUrl);
+
+    return { sourceName };
+  }
+
+  async createChannelEmailWorkspaceSource(
+    channelData: PendingChannelEmailWorkspace,
+    credentials: { accessToken: string; refreshToken?: string; email: string; expiresAt?: string },
+    publicUrl: string,
+  ): Promise<{ sourceName: string }> {
+    const safeEmail = credentials.email.replace('@', '--');
+    const sourceName = `microsoft-channel-email-${safeEmail}`;
+    const encryptedCredentials = encrypt(JSON.stringify(credentials));
+    const webhookUrl = `${publicUrl}/api/external-source-sync/${sourceName}/ingest`;
+    const existingByName = await db.externalSource.findUnique({ where: { name: sourceName } });
+
+    if (existingByName?.isActive && existingByName.workspaceId !== channelData.workspaceId) {
+      const err = new Error(
+        'This mailbox is already connected to another workspace',
+      ) as Error & { code?: string };
+      err.code = 'CHANNEL_EMAIL_MAILBOX_CONNECTED_ELSEWHERE';
+      throw err;
+    }
+
+    const existingForWorkspace = await db.externalSource.findFirst({
+      where: {
+        workspaceId: channelData.workspaceId,
+        sourceType: { in: [...CHANNEL_EMAIL_SOURCE_TYPES] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (existingForWorkspace?.isActive && existingForWorkspace.sourceType !== 'microsoft-channel-email') {
+      const err = new Error(
+        'Workspace already has a separate channel-email mailbox configured',
+      ) as Error & { code?: string };
+      err.code = 'CHANNEL_EMAIL_MAILBOX_EXISTS';
+      throw err;
+    }
+
+    if (existingForWorkspace) {
+      await db.externalSource.update({
+        where: { id: existingForWorkspace.id },
+        data: {
+          name: sourceName,
+          sourceType: 'microsoft-channel-email',
+          displayName: credentials.email,
+          credentials: encryptedCredentials,
+          isActive: true,
+        },
+      });
+    } else {
+      await db.externalSource.create({
+        data: {
+          name: sourceName,
+          sourceType: 'microsoft-channel-email',
           displayName: credentials.email,
           channelId: null,
           workspaceId: channelData.workspaceId,

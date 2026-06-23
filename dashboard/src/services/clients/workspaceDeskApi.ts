@@ -9,16 +9,21 @@
 
 import { apiInstance } from './apiClient';
 
-export interface WorkspaceSharedMailboxStatus {
+export interface MailboxStatus {
   configured: boolean;
   displayName: string | null;
   sourceType: string | null;
   isActive: boolean;
 }
 
-export async function getWorkspaceSharedMailboxStatus(): Promise<WorkspaceSharedMailboxStatus> {
-  const res = await apiInstance.get<WorkspaceSharedMailboxStatus>(
-    '/integrations/workspace-desk/status',
+export async function getWorkspaceSharedMailboxStatus(): Promise<MailboxStatus> {
+  const res = await apiInstance.get<MailboxStatus>('/integrations/workspace-desk/status');
+  return res.data;
+}
+
+export async function getWorkspaceChannelEmailMailboxStatus(): Promise<MailboxStatus> {
+  const res = await apiInstance.get<MailboxStatus>(
+    '/integrations/workspace-desk/channel-email-status',
   );
   return res.data;
 }

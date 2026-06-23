@@ -20,6 +20,7 @@ import type { User as UserType } from '../../machines/stateMachine';
 import { WorkspaceRole } from '@xyne/shared';
 import { usePlatform } from '../../hooks/usePlatform';
 import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
+import { WorkspaceChannelEmailCard } from '../../components/xyne-desk/WorkspaceChannelEmailCard/WorkspaceChannelEmailCard';
 
 const Card = ({
   children,
@@ -287,6 +288,14 @@ export const GeneralAndMembersTab = ({
           </p>
         </div>
         <WorkspaceDeskEmailCard />
+        <div>
+          <h2 className='text-lg font-semibold text-foreground'>Email alerts to channel</h2>
+          <p className='text-sm text-muted-foreground'>
+            Separate mailbox used to route inbound emails into normal channels. Connect once at the
+            workspace level; each channel gets its own derived email address from that mailbox.
+          </p>
+        </div>
+        <WorkspaceChannelEmailCard />
       </div>
 
       {/* Members Section */}

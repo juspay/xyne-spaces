@@ -25,6 +25,13 @@ import { EmailRepository } from '@/database/repositories';
 import { findDuplicateEmailConversation } from '../../utils/vespaDuplicateDetector';
 import { collectDlCandidates } from '@/services/dlResolver';
 import { db } from '@/database/client';
+import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
+import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
+import {
+  buildChannelEmailMessageMetadata,
+} from './channelEmailMessageFormatter';
+
+const XYNE_MAIL_BOT_ID = 'xyne-mail';
 
 export class ExternalSourceCore {
   private externalSourceRepo: ExternalSourceRepository;
@@ -34,6 +41,7 @@ export class ExternalSourceCore {
   private channelRepo: ChannelRepository;
   private emailRepo: EmailRepository;
   private emailChannelPreferenceRepo: EmailChannelPreferenceRepository;
+  private channelEmailAliasService: ChannelEmailAliasService;
 
   constructor() {
     this.externalSourceRepo = new ExternalSourceRepository();
@@ -43,6 +51,28 @@ export class ExternalSourceCore {
     this.channelRepo = new ChannelRepository();
     this.emailRepo = new EmailRepository();
     this.emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
+    this.channelEmailAliasService = new ChannelEmailAliasService();
+  }
+
+  private async resolveChannelMessageSenderId(source: ExternalSource): Promise<string> {
+    if (
+      this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType) &&
+      source.workspaceId
+    ) {
+      let botUser = await unifiedBotUserService.getBotByBotId(XYNE_MAIL_BOT_ID, source.workspaceId);
+      if (!botUser) {
+        await unifiedBotUserService.syncAllBotUsers(source.workspaceId);
+        botUser = await unifiedBotUserService.getBotByBotId(XYNE_MAIL_BOT_ID, source.workspaceId);
+      }
+
+      if (!botUser) {
+        throw new Error(`Failed to resolve ${XYNE_MAIL_BOT_ID} bot user for workspace ${source.workspaceId}`);
+      }
+
+      return botUser.id;
+    }
+
+    return source.displayName;
   }
 
 
@@ -77,7 +107,7 @@ export class ExternalSourceCore {
     const normalizedData = parseResult.data;
 
     // 3. Sync to database (sourceName already resolved in authenticate.ts)
-    return await this.sync(adapter, sourceName, normalizedData);
+    return await this.sync(adapter, sourceName, normalizedData, source);
   }
 
   /**
@@ -88,7 +118,8 @@ export class ExternalSourceCore {
   async sync(
     adapter: ExternalSourceAdapter,
     sourceName: string,
-    normalizedData: NormalizedData
+    normalizedData: NormalizedData,
+    resolvedSource?: ExternalSource,
   ): Promise<IngestionResult[]> {
     logger.info(`Syncing ${sourceName}`, {
       externalId: normalizedData.externalId,
@@ -96,7 +127,7 @@ export class ExternalSourceCore {
     });
 
     // 1. Get external source from database
-    const source = await this.externalSourceRepo.findByName(sourceName);
+    const source = resolvedSource ?? (await this.externalSourceRepo.findByName(sourceName));
     if (!source) {
       throw new SourceNotFoundError(sourceName);
     }
@@ -286,6 +317,41 @@ export class ExternalSourceCore {
     normalizedData: NormalizedData,
   ): Promise<string[]> {
     const workspaceId = source.workspaceId!;
+    if (this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType)) {
+      const inboundRecipients = normalizedData.emailData?.to ?? [];
+      const taggedChannelId = this.channelEmailAliasService.extractChannelIdFromRecipients(
+        inboundRecipients,
+        source.displayName,
+      );
+      if (!taggedChannelId) {
+        logger.info('[CHANNEL_EMAIL_ROUTE] Dropping inbound: missing +ch_ recipient tag', {
+          sourceName: source.name,
+          workspaceId,
+          inboundRecipients,
+        });
+        return [];
+      }
+
+      const channel = await this.channelRepo.findById(taggedChannelId);
+      if (channel && channel.workspaceId === workspaceId) {
+        logger.info('[CHANNEL_EMAIL_ROUTE] Routed inbound alias to channel', {
+          sourceName: source.name,
+          workspaceId,
+          taggedChannelId,
+          inboundRecipients,
+        });
+        return [taggedChannelId];
+      }
+
+      logger.warn('[CHANNEL_EMAIL_ROUTE] Ignoring invalid or missing channel alias target', {
+        sourceName: source.name,
+        workspaceId,
+        taggedChannelId,
+        inboundRecipients,
+      });
+      return [];
+    }
+
     const addrs = collectDlCandidates(normalizedData.emailData ?? {});
     if (addrs.length === 0) {
       logger.info(`[DL_ROUTE] Dropping inbound: no from/to/cc addresses`, {
@@ -330,6 +396,8 @@ export class ExternalSourceCore {
       throw new Error(`External source ${source.name} does not have a channel binding`);
     }
 
+    const channelDisplayName = (await this.channelRepo.findById(source.channelId))?.name;
+
     // For desk channels, check exact duplicate for this channel first
     // before any cross-desk ExternalMessage lookups.
     if (isDeskChannel && normalizedData.emailData) {
@@ -368,6 +436,12 @@ export class ExternalSourceCore {
       logger.info(`Converting ${downloadedAttachments.length} downloaded attachments to uploaded format`);
       const uploadedFiles = AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
       logger.info(`Converted to ${uploadedFiles.length} uploaded files`);
+        const messageContent = normalizedData.content;
+        const senderId = await this.resolveChannelMessageSenderId(source);
+        const channelEmailMetadata = buildChannelEmailMessageMetadata(
+          normalizedData,
+          channelDisplayName,
+        );
 
       if (isDeskChannel) {
         if (!normalizedData.emailData?.to || !normalizedData?.emailData.from ) {
@@ -393,8 +467,8 @@ export class ExternalSourceCore {
       } else {
         const { message } = await conversationService.addMessageToConversation({
           conversationId: conversation.conversationId,
-          userId: source.displayName,
-          content: normalizedData.content,
+          userId: senderId,
+          content: messageContent,
           msgType: 'BOT',
           uploadedFiles: uploadedFiles,
           metadata: {
@@ -403,7 +477,8 @@ export class ExternalSourceCore {
             eventType: normalizedData.metadata.eventType,
             ticketNumber: normalizedData.metadata.ticketNumber,
             webUrl: normalizedData.metadata.webUrl,
-          },
+            ...(channelEmailMetadata ?? {}),
+        },
           isBot: true,
         });
         return { conversation, message, email: undefined, isNew: false };
@@ -612,10 +687,16 @@ export class ExternalSourceCore {
       const { conversation, email } = createResult as any;
       return { conversation, email, isNew: true };
     } else {
+      const messageContent = normalizedData.content;
+      const senderId = await this.resolveChannelMessageSenderId(source);
+      const channelEmailMetadata = buildChannelEmailMessageMetadata(
+        normalizedData,
+        channelDisplayName,
+      );
       const { conversation, message } = await conversationService.createConversationWithMessage({
         channelId: source.channelId,
-        userId: source.displayName,
-        content: normalizedData.content,
+        userId: senderId,
+        content: messageContent,
         msgType: 'BOT',
         uploadedFiles: uploadedFiles,
         metadata: {
@@ -630,6 +711,7 @@ export class ExternalSourceCore {
           eventType: normalizedData.metadata.eventType,
           ticketNumber: normalizedData.metadata.ticketNumber,
           webUrl: normalizedData.metadata.webUrl,
+          ...(channelEmailMetadata ?? {}),
         },
         isBot: true,
       });

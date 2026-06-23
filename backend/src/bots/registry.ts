@@ -29,6 +29,9 @@ import '@/bots/implementations/docs-publisher/docs-publisher.js';
 // Xyne Automatic Bot - system bot for posting automated messages like call summaries
 import '@/bots/implementations/xyne-automatic/xyne-automatic.js';
 
+// Xyne Mail Bot - system bot for posting inbound channel email messages
+import '@/bots/implementations/xyne-mail/xyne-mail.js';
+
 // Automations Bot - system bot for messages posted by the SEND_MESSAGE step in the automations builder
 import '@/bots/implementations/automations-bot/automations-bot.js';
 

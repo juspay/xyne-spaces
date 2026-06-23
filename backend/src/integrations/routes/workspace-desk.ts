@@ -18,13 +18,15 @@ import { WorkspaceRole } from '@prisma/client';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
+import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { logger } from '@/utils/logger';
 
 const TAG = '[WorkspaceDesk]';
 const router = express.Router();
 router.use(express.json());
+const channelEmailAliasService = new ChannelEmailAliasService();
 
-interface SharedMailboxStatus {
+interface MailboxStatus {
   configured: boolean;
   displayName: string | null;
   sourceType: string | null;
@@ -41,7 +43,7 @@ router.get(
         where: { workspaceId, sourceType: { in: ['google', 'microsoft'] } },
         select: { displayName: true, sourceType: true, isActive: true },
       });
-      const body: SharedMailboxStatus = {
+      const body: MailboxStatus = {
         configured: !!source,
         displayName: source?.displayName ?? null,
         sourceType: source?.sourceType ?? null,
@@ -51,6 +53,21 @@ router.get(
     } catch (err) {
       logger.error(`${TAG} /status failed`, err);
       res.status(500).json({ error: 'Failed to load shared mailbox status' });
+    }
+  },
+);
+
+router.get(
+  '/channel-email-status',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const workspaceId = req.user!.workspaceId;
+      const body = await channelEmailAliasService.getWorkspaceChannelEmailMailboxStatus(workspaceId);
+      res.json(body);
+    } catch (err) {
+      logger.error(`${TAG} /channel-email-status failed`, err);
+      res.status(500).json({ error: 'Failed to load channel email mailbox status' });
     }
   },
 );

@@ -13,6 +13,7 @@ router.post('/check-duplicate', channelController.checkDuplicate); // Check if c
 router.get('/search', channelController.searchForMentions); // Unified search for users and groups
 router.get('/publish-targets', channelController.getChannelsForDocs); // Get channels where user can publish docs
 router.get('/:channelId/connected-email', channelController.getConnectedEmail); // OAuth-connected inbox email for an email channel
+router.get('/:channelId/email-alias', channelController.getEmailAlias); // Derived inbound email alias for channel routing
 router.get('/:channelId/vespa-participants', channelController.getVespaParticipants); // Channel participant user IDs from Vespa chat_container.permissions
 
 // Conversation Routes (nested under channels)

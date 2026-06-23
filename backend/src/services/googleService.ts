@@ -495,6 +495,7 @@ export class GoogleService {
     emailAddress: string;
     accessToken: string;
     refreshToken: string;
+    sourceName?: string;
   }): Promise<{
     sourceName: string;
     webhookUrl: string;
@@ -503,7 +504,7 @@ export class GoogleService {
     encryptedCredentials: string;
   }> {
     const { emailAddress, accessToken, refreshToken } = params;
-    const sourceName = GoogleService.getSourceName(emailAddress);
+    const sourceName = params.sourceName || GoogleService.getSourceName(emailAddress);
     const credentials: GoogleCredentials = { accessToken, refreshToken, email: emailAddress };
     const encryptedCredentials = encrypt(JSON.stringify(credentials));
 
@@ -741,6 +742,18 @@ export class GoogleService {
   static getSourceName(emailAddress: string): string {
     const username = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '-');
     return `${SOURCE_NAME_PREFIX}${username}`;
+  }
+
+  static validatePushInfrastructure(): void {
+    if (!process.env.GOOGLE_CLOUD_PROJECT_ID) {
+      throw new Error('Google channel email mailbox requires GOOGLE_CLOUD_PROJECT_ID to be configured');
+    }
+
+    if (!process.env.GOOGLE_PUBSUB_TOPIC) {
+      throw new Error('Google channel email mailbox requires GOOGLE_PUBSUB_TOPIC to be configured');
+    }
+
+    GoogleService.loadPubSubServiceAccount();
   }
 
   // ─── Email sender (reply) ────────────────────────────────────────────────

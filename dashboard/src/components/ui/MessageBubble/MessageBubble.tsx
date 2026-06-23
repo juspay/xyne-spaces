@@ -86,6 +86,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { toast } from 'sonner';
 import { isPreviewableDocument } from '../../../services/documentThumbnailService';
+import { ChannelEmailCard } from './ChannelEmailCard';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -562,6 +563,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   }, [hasAppActions, message.content, user?.id]);
 
   const isPulseActionablesMessage = metadata?.['messageSubtype'] === 'pulse_actionables';
+  const isChannelEmailMessage = metadata?.['messageSubtype'] === 'channel_email';
 
   const { isMobile } = usePlatform();
   const sender = useUser(message.senderId);
@@ -1040,6 +1042,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   callId={metadata?.callId}
                   conversationId={message.conversationId}
                   messageId={message.messageId}
+                />
+              ) : isChannelEmailMessage ? (
+                <ChannelEmailCard
+                  subject={typeof metadata?.['subject'] === 'string' ? metadata['subject'] : ''}
+                  from={typeof metadata?.['from'] === 'string' ? metadata['from'] : ''}
+                  to={typeof metadata?.['to'] === 'string' ? metadata['to'] : ''}
+                  cc={Array.isArray(metadata?.['cc']) ? (metadata?.['cc'] as string[]) : []}
+                  bcc={Array.isArray(metadata?.['bcc']) ? (metadata?.['bcc'] as string[]) : []}
+                  body={message.content}
+                  emailId={message.messageId}
+                  attachments={attachments}
                 />
               ) : isMarkdownContent ? (
                 <>

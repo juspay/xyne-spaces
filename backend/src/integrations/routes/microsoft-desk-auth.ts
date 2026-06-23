@@ -10,6 +10,7 @@ import {
   isReconnectChannelData,
   isWorkspaceChannelData,
   isDlMemberSyncChannelData,
+  isChannelEmailWorkspaceData,
   MICROSOFT_OAUTH_SCOPES,
 } from '../../services/microsoftDeskService';
 import { encrypt } from '../../services/encryptionService';
@@ -17,7 +18,14 @@ import { db } from '../../database/client';
 import { emailFetchQueue } from '../../queues/emailFetchQueue';
 import { logger } from '../../utils/logger';
 import { WorkspaceRole } from '@prisma/client';
-import { getFrontendUrl, getBackendUrl } from './urlHelpers';
+import {
+  appendQueryToReturnPath,
+  buildReturnPathOrSupportPath,
+  buildSupportPath,
+  getFrontendUrl,
+  getBackendUrl,
+  sanitizeReturnPath,
+} from './urlHelpers';
 
 const router = Router();
 
@@ -34,18 +42,6 @@ function buildPostOAuthRedirect(
     return `${frontendUrl}/launch?path=${encodeURIComponent(path)}`;
   }
   return `${frontendUrl}${path}`;
-}
-
-function buildSupportPath(
-  workspaceId: string | undefined,
-  channelId: string | undefined,
-  query: URLSearchParams,
-): string {
-  const queryString = query.toString();
-  const wsSegment = workspaceId ? `/${workspaceId}` : '';
-  const channelSegment = channelId ? `/${channelId}` : '';
-  const suffix = queryString ? `?${queryString}` : '';
-  return `${wsSegment}/support${channelSegment}${suffix}`;
 }
 
 function redirectError(
@@ -182,6 +178,60 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
   }
 });
 
+router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, async (req: Request, res: Response) => {
+  const requestId = `MS_CHANNEL_EMAIL_WS_CONNECT_${Date.now()}`;
+  const platform: 'electron' | 'web' =
+    req.query.platform === 'electron' ? 'electron' : 'web';
+  const workspaceId = req.user!.workspaceId;
+  const returnPath = sanitizeReturnPath(req.query.returnPath);
+
+  try {
+    const role = req.user!.role as WorkspaceRole;
+    if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
+      res.status(403).json({ error: 'Workspace admin/owner role required to set up channel email' });
+      return;
+    }
+
+    const oauthClient = microsoftDeskService.getOAuthClient();
+    if (!oauthClient) {
+      redirectError(res, getFrontendUrl(), 'microsoft_not_configured', platform, workspaceId);
+      return;
+    }
+
+    const state = microsoftDeskService.generateState();
+    await microsoftDeskService.storePendingChannel(state, {
+      mode: 'channel-email-workspace',
+      userId: req.user!.id,
+      workspaceId,
+      returnPath,
+      platform,
+    });
+
+    const redirectUri = `${getPublicUrl(req)}/api/integrations/microsoft/callback`;
+    const authorizationUri = oauthClient.authorizeURL({
+      redirect_uri: redirectUri,
+      scope: MICROSOFT_OAUTH_SCOPES,
+      state,
+      prompt: 'consent',
+    } as Record<string, string | string[]>);
+
+    logger.info(`[${requestId}] Redirecting to Microsoft OAuth for channel-email workspace mailbox`, { workspaceId });
+    res.redirect(authorizationUri);
+  } catch (error) {
+    logger.error(`[${requestId}] Error initiating Microsoft channel-email workspace connect:`, error);
+    const params = new URLSearchParams({
+      emailError: 'microsoft_channel_email_connect_failed',
+    });
+    res.redirect(
+      buildPostOAuthRedirect(
+        getFrontendUrl(),
+        buildReturnPathOrSupportPath(returnPath, workspaceId, undefined, params),
+        platform,
+      ),
+    );
+  }
+});
+
 /**
  * GET /api/integrations/microsoft/callback
  * Handles Microsoft OAuth callback — creates channel + source + webhook
@@ -230,11 +280,30 @@ router.get('/callback', async (req: Request, res: Response) => {
     }
 
     const redirectUri = `${getPublicUrl(req)}/api/integrations/microsoft/callback`;
-    const tokenResult = await oauthClient.getToken({
-      code: code as string,
-      redirect_uri: redirectUri,
-      scope: MICROSOFT_OAUTH_SCOPES.join(' '),
-    });
+    let tokenResult;
+    try {
+      tokenResult = await oauthClient.getToken({
+        code: code as string,
+        redirect_uri: redirectUri,
+        scope: MICROSOFT_OAUTH_SCOPES.join(' '),
+      });
+    } catch (err) {
+      const oauthError = err as {
+        message?: string;
+        data?: {
+          res?: { statusCode?: number };
+          payload?: unknown;
+        };
+      };
+
+      logger.error(`[${requestId}] Microsoft token exchange failed`, {
+        errorMessage: oauthError.message ?? 'Unknown token exchange error',
+        statusCode: oauthError.data?.res?.statusCode,
+        payload: oauthError.data?.payload,
+        redirectUri,
+      });
+      throw err;
+    }
 
     const { token } = tokenResult;
     const accessToken = token.access_token as string;
@@ -431,6 +500,84 @@ router.get('/callback', async (req: Request, res: Response) => {
         buildPostOAuthRedirect(
           frontendUrl,
           buildSupportPath(channelData.workspaceId, channelData.channelId, syncParams),
+          platform,
+        ),
+      );
+      return;
+    }
+
+    if (isChannelEmailWorkspaceData(channelData)) {
+      try {
+        await microsoftDeskService.createChannelEmailWorkspaceSource(
+          channelData,
+          {
+            accessToken,
+            refreshToken: (token.refresh_token as string) ?? undefined,
+            email,
+            expiresAt: token.expires_at ? new Date(token.expires_at as string).toISOString() : undefined,
+          },
+          getPublicUrl(req),
+        );
+      } catch (err) {
+        const errCode = (err as Error & { code?: string })?.code;
+        if (errCode === 'CHANNEL_EMAIL_MAILBOX_EXISTS') {
+          const params = new URLSearchParams({
+            emailError: 'channel_email_mailbox_already_exists',
+          });
+          res.redirect(
+            buildPostOAuthRedirect(
+              frontendUrl,
+              buildReturnPathOrSupportPath(
+                channelData.returnPath,
+                channelData.workspaceId,
+                undefined,
+                params,
+              ),
+              platform,
+            ),
+          );
+          return;
+        }
+        if (errCode === 'CHANNEL_EMAIL_MAILBOX_CONNECTED_ELSEWHERE') {
+          const params = new URLSearchParams({
+            emailError: 'channel_email_mailbox_already_connected_elsewhere',
+          });
+          res.redirect(
+            buildPostOAuthRedirect(
+              frontendUrl,
+              buildReturnPathOrSupportPath(
+                channelData.returnPath,
+                channelData.workspaceId,
+                undefined,
+                params,
+              ),
+              platform,
+            ),
+          );
+          return;
+        }
+        throw err;
+      }
+
+      const params = new URLSearchParams({
+        channelEmailMailboxConnected: 'true',
+        provider: 'microsoft',
+      });
+      if (channelData.returnPath) {
+        res.redirect(
+          buildPostOAuthRedirect(
+            frontendUrl,
+            appendQueryToReturnPath(channelData.returnPath, params),
+            platform,
+          ),
+        );
+        return;
+      }
+
+      res.redirect(
+        buildPostOAuthRedirect(
+          frontendUrl,
+          buildSupportPath(channelData.workspaceId, undefined, params),
           platform,
         ),
       );
