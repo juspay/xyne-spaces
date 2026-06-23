@@ -1150,9 +1150,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       // Handle file upload failures and other API errors
       console.error('Failed to create ticket:', error);
 
-      // Show error for file upload failures
       toast.error('Ticket Creation Failed', {
-        description: 'Failed to upload attachments or create ticket. Please try again.',
+        description:
+          error instanceof Error ? error.message : 'Failed to create ticket. Please try again.',
       });
     }
   };
