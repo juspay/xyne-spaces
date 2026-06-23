@@ -8,6 +8,7 @@ import pdfMachine from '../../machines/pdfMachine';
 import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
+import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
 // Memoized PageWrapper to prevent unnecessary re-renders
 const PageWrapper = memo(
@@ -24,6 +25,10 @@ const PageWrapper = memo(
 );
 PageWrapper.displayName = 'PageWrapper';
 
+const MIN_DESKTOP_SCALE = 0.5;
+const MAX_DESKTOP_SCALE = 3;
+const DESKTOP_ZOOM_STEP = 0.25;
+
 export const PdfViewer: React.FC<BaseViewerProps> = ({
   source,
   initialPage,
@@ -31,6 +36,8 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfContentRef = useRef<HTMLDivElement>(null);
+  const containerSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const hasManualDesktopZoomRef = useRef(false);
   const [currentVisiblePage, setCurrentVisiblePage] = useState<number>(initialPage ?? 1);
   const [pageInput, setPageInput] = useState<string | null>(null);
   const { isMobile } = usePlatform();
@@ -38,6 +45,28 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
   const [state, send] = useMachine(pdfMachine);
 
   const { numPages, scale: pdfScale, heightMap, error } = state.context;
+
+  const setDesktopScale = useCallback(
+    (nextScale: number): void => {
+      const clampedScale = Math.min(Math.max(nextScale, MIN_DESKTOP_SCALE), MAX_DESKTOP_SCALE);
+      hasManualDesktopZoomRef.current = true;
+      send({ type: 'SCALE_CHANGED', scale: clampedScale });
+    },
+    [send],
+  );
+
+  const handleZoomIn = useCallback((): void => {
+    setDesktopScale(pdfScale + DESKTOP_ZOOM_STEP);
+  }, [pdfScale, setDesktopScale]);
+
+  const handleZoomOut = useCallback((): void => {
+    setDesktopScale(pdfScale - DESKTOP_ZOOM_STEP);
+  }, [pdfScale, setDesktopScale]);
+
+  const handleResetZoom = useCallback((): void => {
+    hasManualDesktopZoomRef.current = false;
+    send({ type: 'RESIZE' });
+  }, [send]);
 
   // Mobile zoom hook for pinch-to-zoom and pan
   const {
@@ -186,10 +215,59 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
   /* --------------------------- Resize handling --------------------------- */
 
   useEffect((): (() => void) => {
-    const handler = (): void => send({ type: 'RESIZE' });
+    const handler = (): void => {
+      hasManualDesktopZoomRef.current = false;
+      send({ type: 'RESIZE' });
+    };
     window.addEventListener('resize', handler);
     return () => window.removeEventListener('resize', handler);
   }, [send]);
+
+  useEffect((): (() => void) => {
+    const container = containerRef.current;
+    if (!container || isMobile) return () => {};
+
+    const handleWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const direction = event.deltaY < 0 ? 1 : -1;
+      setDesktopScale(pdfScale + direction * DESKTOP_ZOOM_STEP);
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [isMobile, pdfScale, setDesktopScale]);
+
+  /* --------------------------- Keyboard zoom shortcuts --------------------------- */
+
+  useEffect((): (() => void) => {
+    if (isMobile) return () => {};
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (!event.ctrlKey && !event.metaKey) return;
+
+      switch (event.code) {
+        case 'Equal':
+        case 'NumpadAdd':
+          event.preventDefault();
+          handleZoomIn();
+          break;
+        case 'Minus':
+        case 'NumpadSubtract':
+          event.preventDefault();
+          handleZoomOut();
+          break;
+        case 'Digit0':
+        case 'Numpad0':
+          event.preventDefault();
+          handleResetZoom();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isMobile, handleZoomIn, handleZoomOut, handleResetZoom]);
 
   /* --------------------------- Container resize handling --------------------------- */
 
@@ -197,10 +275,28 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
     const container = containerRef.current;
     if (!container) return () => {};
 
-    const resizeObserver = new ResizeObserver(() => {
-      send({ type: 'RESIZE' });
+    const resizeObserver = new ResizeObserver(entries => {
+      const entry = entries[0];
+      if (!entry) return;
+
+      const rect = container.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      const previousSize = containerSizeRef.current;
+      containerSizeRef.current = { width, height };
+
+      if (hasManualDesktopZoomRef.current) return;
+
+      if (!previousSize || previousSize.width !== width || previousSize.height !== height) {
+        send({ type: 'RESIZE' });
+      }
     });
 
+    const rect = container.getBoundingClientRect();
+    containerSizeRef.current = {
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
     resizeObserver.observe(container);
 
     return () => {
@@ -320,6 +416,51 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
                 {!isMobile && <span>Next</span>}
                 <span className='text-lg'>›</span>
               </button>
+
+              {!isMobile && (
+                <>
+                  <div className='w-px h-4 bg-muted-foreground/50 dark:bg-gray-600 mx-3'></div>
+
+                  <button
+                    onClick={handleZoomOut}
+                    disabled={pdfScale <= MIN_DESKTOP_SCALE}
+                    className='inline-flex items-center justify-center w-8 h-8 text-foreground dark:text-muted hover:text-foreground dark:hover:text-white disabled:text-muted-foreground dark:disabled:text-muted-foreground disabled:cursor-not-allowed hover:bg-background/60 dark:hover:bg-gray-600 rounded-md transition-colors'
+                    title='Zoom out (Ctrl -)'
+                    aria-label='Zoom out PDF'
+                    data-track-category='FileViewer'
+                    data-track-name='ZOOM_OUT_PDF'
+                  >
+                    <ZoomOut className='h-4 w-4' />
+                  </button>
+
+                  <span className='w-12 text-center text-sm text-muted-foreground dark:text-muted-foreground'>
+                    {Math.round(pdfScale * 100)}%
+                  </span>
+
+                  <button
+                    onClick={handleZoomIn}
+                    disabled={pdfScale >= MAX_DESKTOP_SCALE}
+                    className='inline-flex items-center justify-center w-8 h-8 text-foreground dark:text-muted hover:text-foreground dark:hover:text-white disabled:text-muted-foreground dark:disabled:text-muted-foreground disabled:cursor-not-allowed hover:bg-background/60 dark:hover:bg-gray-600 rounded-md transition-colors'
+                    title='Zoom in (Ctrl +)'
+                    aria-label='Zoom in PDF'
+                    data-track-category='FileViewer'
+                    data-track-name='ZOOM_IN_PDF'
+                  >
+                    <ZoomIn className='h-4 w-4' />
+                  </button>
+
+                  <button
+                    onClick={handleResetZoom}
+                    className='inline-flex items-center justify-center w-8 h-8 text-foreground dark:text-muted hover:text-foreground dark:hover:text-white hover:bg-background/60 dark:hover:bg-gray-600 rounded-md transition-colors'
+                    title='Reset zoom to fit (Ctrl 0)'
+                    aria-label='Reset PDF zoom to fit'
+                    data-track-category='FileViewer'
+                    data-track-name='RESET_PDF_ZOOM'
+                  >
+                    <Maximize2 className='h-4 w-4' />
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

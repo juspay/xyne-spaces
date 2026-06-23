@@ -222,6 +222,15 @@ export const pdfMachine = createMachine(
             target: 'ready',
           },
         },
+        on: {
+          SCALE_CHANGED: {
+            target: 'recomputingHeights',
+            reenter: true,
+            actions: assign(({ event }) => ({
+              scale: event.scale,
+            })),
+          },
+        },
       },
 
       /* ---------------- error -------------------- */
@@ -287,11 +296,12 @@ export const pdfMachine = createMachine(
       }),
 
       computeHeightMap: fromPromise<number[], { doc: PDFDocumentProxy; scale: number }>(
-        async ({ input }) => {
+        async ({ input, signal }) => {
           const pages = input.doc.numPages;
           const heights: Array<number> = new Array<number>(pages);
 
           for (let i = 1; i <= pages; i++) {
+            if (signal.aborted) throw new Error('computeHeightMap aborted');
             try {
               const page = await input.doc.getPage(i);
               const vp = page.getViewport({ scale: input.scale });
