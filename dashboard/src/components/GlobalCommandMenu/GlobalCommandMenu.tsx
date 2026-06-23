@@ -18,6 +18,7 @@ import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.
 import { TabType, type MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { VisibleChannel } from '../../machines/stateMachine';
 import { useShortcutById } from '../../shortcuts';
+import { useSearchMode } from '../../hooks/useSearchMode';
 import type { InitialQueryData } from '../Chat/ChatDirectory/LexicalSearchInput';
 import { useUsers } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -88,6 +89,7 @@ const GlobalCommandMenu = ({
   const effectiveHideTabs = hideTabs !== undefined ? hideTabs : internalHideTabs;
   const effectiveEnabledTabs = enabledTabs !== undefined ? enabledTabs : internalEnabledTabs;
   const location = useLocation();
+  const { searchMode } = useSearchMode();
   const allUsers = useUsers();
 
   const unreadCounts = useAllUnreadCount();
@@ -122,7 +124,20 @@ const GlobalCommandMenu = ({
       return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
     };
 
+    // Screen mode: open the same full-page search bar that Cmd+K screen mode opens
+    // (GlobalTopBar listens for this event), pre-scoped with the in:<channel> chip
+    // so the cursor lands ready to type. No mention → just opens the empty bar.
+    const openSearchBar = (mention: MentionData | null): void => {
+      window.dispatchEvent(
+        new CustomEvent('xyne:activate-search-bar', mention ? { detail: { mention } } : undefined),
+      );
+    };
+
     if (pathParts.includes('tickets') || pathParts.includes('projects')) {
+      if (searchMode === 'screen') {
+        openSearchBar(null);
+        return;
+      }
       setInternalInitialMention(null);
       setInternalContextualTab(TabType.TICKETS);
       setInternalHideTabs(false);
@@ -135,6 +150,10 @@ const GlobalCommandMenu = ({
     if (supportIndex !== -1) {
       const deskChannelId = pathParts[supportIndex + 1] || null;
       const deskChannel = deskChannelId ? channelData.find(c => c.id === deskChannelId) : undefined;
+      if (searchMode === 'screen') {
+        openSearchBar(deskChannel ? buildChannelMention(deskChannel) : null);
+        return;
+      }
       setInternalInitialMention(deskChannel ? buildChannelMention(deskChannel) : null);
       setInternalContextualTab(TabType.DESK);
       setInternalHideTabs(true);
@@ -162,6 +181,10 @@ const GlobalCommandMenu = ({
       if (channel) {
         // Desk (support) channel → open with Desk tab + in:<channel> scope
         if (channel.type === ChannelType.SUPPORT) {
+          if (searchMode === 'screen') {
+            openSearchBar(buildChannelMention(channel));
+            return;
+          }
           setInternalInitialMention(buildChannelMention(channel));
           setInternalContextualTab(TabType.DESK);
           setInternalHideTabs(false);
@@ -173,11 +196,19 @@ const GlobalCommandMenu = ({
         // `?tab=tickets`) → open with the Tickets tab + in:<channel> scope.
         const activeChannelTab = new URLSearchParams(location.search).get('tab');
         if (activeChannelTab === 'tickets') {
+          if (searchMode === 'screen') {
+            openSearchBar(buildChannelMention(channel));
+            return;
+          }
           setInternalContextualTab(TabType.TICKETS);
           setInternalInitialMention(buildChannelMention(channel));
           setInternalHideTabs(false);
           setInternalEnabledTabs(undefined);
           onOpenChange(true);
+          return;
+        }
+        if (searchMode === 'screen') {
+          openSearchBar(buildChannelMention(channel));
           return;
         }
         setInternalContextualTab(TabType.MESSAGES);
@@ -190,12 +221,24 @@ const GlobalCommandMenu = ({
     }
 
     // Fallback — open normally (ALL tab)
+    if (searchMode === 'screen') {
+      openSearchBar(null);
+      return;
+    }
     setInternalContextualTab(undefined);
     setInternalInitialMention(null);
     setInternalHideTabs(false);
     setInternalEnabledTabs(undefined);
     onOpenChange(true);
-  }, [location.pathname, location.search, channelData, allUsers, onOpenChange, context.userID]);
+  }, [
+    location.pathname,
+    location.search,
+    channelData,
+    allUsers,
+    onOpenChange,
+    context.userID,
+    searchMode,
+  ]);
 
   // Only the search-mode instance owns Cmd+F; the context-picker copy mounted in
   // ThreadPannel would otherwise win the tiebreak and hijack the shortcut.

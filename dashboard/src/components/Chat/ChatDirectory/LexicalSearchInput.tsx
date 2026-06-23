@@ -71,6 +71,22 @@ export interface InitialQueryData {
   text: string;
 }
 
+// Reuse the recursive chip-detection pattern from ClearEditorPlugin: a paste can
+// nest a chip, so walk the whole tree rather than only the top-level children.
+function $rootHasFilterChip(node: LexicalNode): boolean {
+  return (
+    $isFilterChipNode(node) || ($isElementNode(node) && node.getChildren().some($rootHasFilterChip))
+  );
+}
+
+// Seeding must be non-destructive: only seed when the editor is genuinely empty
+// (no user text, no existing chip). Otherwise typing would wipe the chip/text.
+function $isEditorSeedable(): boolean {
+  const root = $getRoot();
+  if ($rootHasFilterChip(root)) return false;
+  return root.getTextContent().trim().length === 0;
+}
+
 function InitialMentionPlugin({ initialMention }: { initialMention?: MentionData | null }) {
   const [editor] = useLexicalComposerContext();
   const appliedRef = useRef<string | null>(null);
@@ -83,10 +99,17 @@ function InitialMentionPlugin({ initialMention }: { initialMention?: MentionData
 
     const mentionKey = `${initialMention.id}-${initialMention.prefix}`;
     if (appliedRef.current === mentionKey) return;
-    appliedRef.current = mentionKey;
 
     const timeoutId = setTimeout(() => {
       editor.update(() => {
+        // Bail out before clearing if the user already has content/a chip; set
+        // the guard so this mention is treated as handled and never retried.
+        if (!$isEditorSeedable()) {
+          appliedRef.current = mentionKey;
+          return;
+        }
+        appliedRef.current = mentionKey;
+
         const root = $getRoot();
         root.clear();
         const paragraph = $createParagraphNode();
@@ -116,10 +139,17 @@ function InitialQueryPlugin({ initialQuery }: { initialQuery?: InitialQueryData 
 
     const queryKey = `${initialQuery.mentions.map(m => `${m.id}-${m.prefix}`).join('|')}::${initialQuery.text}`;
     if (appliedRef.current === queryKey) return;
-    appliedRef.current = queryKey;
 
     const timeoutId = setTimeout(() => {
       editor.update(() => {
+        // Non-destructive: never wipe user input on re-run (e.g. a parent
+        // re-render that re-triggers this effect after the user has typed).
+        if (!$isEditorSeedable()) {
+          appliedRef.current = queryKey;
+          return;
+        }
+        appliedRef.current = queryKey;
+
         const root = $getRoot();
         root.clear();
         const paragraph = $createParagraphNode();
