@@ -20,6 +20,7 @@ import { useSearchMode } from '../../hooks/useSearchMode';
 import { toast } from 'sonner';
 import { Tooltip } from '../ui/Tooltip';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
+import type { MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
 
 interface GlobalTopBarProps {
   onOpenErrorReport?: () => void;
@@ -41,6 +42,9 @@ const NavigationAndSearch = (): ReactElement => {
   // header search bar on the results screen — the global Cmd+K shortcut and the
   // empty-state still open with a blank input.
   const [restoreQuery, setRestoreQuery] = useState(false);
+  // Cmd+F (screen mode) opens this bar pre-scoped with an in:<channel> chip; the
+  // event carries the mention so the input renders cursor-ready with the chip.
+  const [pendingMention, setPendingMention] = useState<MentionData | null>(null);
 
   useEffect(() => {
     const historyState = window.history.state as { idx?: number } | null;
@@ -51,10 +55,13 @@ const NavigationAndSearch = (): ReactElement => {
     setCanGoForward(currentIndex < maxIndexRef.current);
   }, [location]);
 
-  // Listen for Cmd+K dispatch from ChannelCommandMenu when in screen mode.
-  // The shortcut opens an empty overlay (no query restore).
+  // Listen for the screen-mode search-bar activation event. Cmd+K dispatches it
+  // with no detail (empty bar); Cmd+F dispatches it with an in:<channel> mention
+  // so the bar opens pre-scoped. Either way it opens with no query restore.
   useEffect(() => {
-    const handler = (): void => {
+    const handler = (event: Event): void => {
+      const mention = (event as CustomEvent<{ mention?: MentionData }>).detail?.mention ?? null;
+      setPendingMention(mention);
       setRestoreQuery(false);
       setSearchOpen(true);
     };
@@ -138,6 +145,7 @@ const NavigationAndSearch = (): ReactElement => {
             if (!open) {
               setSearchOpen(false);
               setRestoreQuery(false);
+              setPendingMention(null);
             }
           }}
         >
@@ -184,7 +192,10 @@ const NavigationAndSearch = (): ReactElement => {
               align='start'
               sideOffset={-28}
               onOpenAutoFocus={e => e.preventDefault()}
-              onInteractOutside={() => setSearchOpen(false)}
+              onInteractOutside={() => {
+                setSearchOpen(false);
+                setPendingMention(null);
+              }}
               className='z-[9999] bg-background border border-border rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D] overflow-hidden max-h-[80vh]'
               style={{
                 width: 'calc(var(--radix-popper-anchor-width) + 96px)',
@@ -199,9 +210,11 @@ const NavigationAndSearch = (): ReactElement => {
                   if (!open) {
                     setSearchOpen(false);
                     setRestoreQuery(false);
+                    setPendingMention(null);
                   }
                 }}
                 hideTabs
+                initialMention={pendingMention}
                 restoreQueryFromUrl={restoreQuery}
               />
             </Popover.Content>

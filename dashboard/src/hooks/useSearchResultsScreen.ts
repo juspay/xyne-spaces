@@ -12,7 +12,7 @@ export interface SearchResultsFilters {
 }
 
 export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
-  docType: 'messages',
+  docType: 'all',
   fromUserIds: [],
   fromEmails: [],
   toEmails: [],
