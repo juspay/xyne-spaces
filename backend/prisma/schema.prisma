@@ -196,6 +196,7 @@ enum AttachmentEntityType {
   WORKFLOW_STEPS
   IMPACT
   COLLECTION
+  FORM_ENTITY_VALUE
   @@schema("public")
 }
 
@@ -2810,6 +2811,9 @@ enum NotificationType {
   EMAIL_REPLY_RECEIVED
   MESSAGE_DELETED
   MESSAGE_EDITED
+  STAGE_APPROVAL_REQUESTED
+  STAGE_APPROVAL_APPROVED
+  STAGE_APPROVAL_REJECTED
   @@schema("public")
 }
 
@@ -3307,6 +3311,7 @@ enum FormFieldType {
   SINGLE_SELECT
   MULTI_SELECT
   USER
+  DOC
   @@schema("public")
 }
 
@@ -3865,16 +3870,17 @@ enum TicketStageRequestStatus {
 }
 
 model TicketStageRequest {
-  id              String                    @id @default(cuid())
-  ticketId        String
-  stageId         String
-  formId          String?
-  status          TicketStageRequestStatus @default(DRAFT)
-  submittedBy     String
-  reviewedBy      String?
-  updatedBy       String
-  createdAt       DateTime                  @default(now())
-  updatedAt       DateTime                  @updatedAt
+  id                        String                    @id @default(cuid())
+  ticketId                  String
+  stageId                   String
+  formId                    String?
+  status                    TicketStageRequestStatus @default(DRAFT)
+  submittedBy               String
+  reviewedBy                String?
+  reviewerCommentMessageId  String?                   // messages.messageId of the reviewer's comment (required on REJECTED, optional on APPROVED). Bare-string FK to match this model's existing convention.
+  updatedBy                 String
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
 
   @@index([ticketId])
   @@index([stageId])

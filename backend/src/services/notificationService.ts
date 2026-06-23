@@ -1936,6 +1936,102 @@ class NotificationService {
     }
   }
 
+  /**
+   * Notify a user about a stage-change approval event. Used in three cases:
+   *  - kind=REQUESTED → approver is being asked to review a newly submitted request
+   *  - kind=APPROVED  → submitter is being told their request was approved
+   *  - kind=REJECTED  → submitter is being told their request was rejected
+   * Activity entries for these transitions are emitted separately by the
+   * ticketStageRequest.upsert mutator (as system messages); this method only
+   * handles the push-notification side.
+   */
+  async sendStageApprovalNotification(
+    recipientUserId: string,
+    ticketId: string,
+    kind: 'REQUESTED' | 'APPROVED' | 'REJECTED',
+    actorUserId: string,
+    stageName: string | null,
+  ): Promise<void> {
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`Stage approval notification: ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const notificationType: NotificationType =
+        kind === 'REQUESTED'
+          ? NotificationType.STAGE_APPROVAL_REQUESTED
+          : kind === 'APPROVED'
+            ? NotificationType.STAGE_APPROVAL_APPROVED
+            : NotificationType.STAGE_APPROVAL_REJECTED;
+
+      // Apply pause + channel-level filtering, same pattern as ticket-assignment.
+      const { desktopUsers, mobileUsers } = ticket.channelId
+        ? await notificationFilterService.filterUsers([recipientUserId], ticket.channelId, false, 'mention', {
+            notificationType,
+          })
+        : await notificationFilterService.filterGlobalUsers([recipientUserId], notificationType, 'mention');
+
+      const receiveDesktop = desktopUsers.includes(recipientUserId);
+      const receiveMobile = mobileUsers.includes(recipientUserId);
+
+      if (!receiveDesktop && !receiveMobile) {
+        return;
+      }
+
+      const stageLabel = stageName ? ` for stage "${stageName}"` : '';
+      const ticketLabel = ticket.title ? `"${ticket.title}"` : `#${ticket.xyneId}`;
+
+      const title =
+        kind === 'REQUESTED'
+          ? 'Stage change requested'
+          : kind === 'APPROVED'
+            ? 'Stage change approved'
+            : 'Stage change rejected';
+
+      const message =
+        kind === 'REQUESTED'
+          ? `A stage change${stageLabel} on ticket ${ticketLabel} is awaiting your approval`
+          : kind === 'APPROVED'
+            ? `Your stage change${stageLabel} on ticket ${ticketLabel} was approved`
+            : `Your stage change${stageLabel} on ticket ${ticketLabel} was rejected`;
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      await this.createNotification(recipientUserId, {
+        title,
+        message,
+        type: notificationType,
+        relatedEntityType: 'ticket',
+        relatedEntityId: ticketId,
+        actionUrl,
+        metadata: {
+          ticketId,
+          actorUserId,
+          channelId: ticket.channelId,
+          conversationId: ticket.conversationId,
+          stageName,
+          kind,
+        },
+      }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+    } catch (error) {
+      logger.error('Failed to send stage approval notification:', error);
+    }
+  }
+
   async getStats(): Promise<any> {
     return await realTimeNotificationService.getStats();
   }

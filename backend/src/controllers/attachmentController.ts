@@ -419,7 +419,11 @@ export class AttachmentController {
 
   /**
    * POST /api/attachments/upload
-   * Upload multiple attachments for an entity (e.g., IMPACT)
+   * Upload multiple attachments for an entity. Allowed entityTypes are limited
+   * to surfaces that have explicitly opted in (currently IMPACT and
+   * FORM_ENTITY_VALUE for stage-form DOC fields). The response includes the
+   * created attachment IDs so callers can wire them into subsequent mutations
+   * (e.g. FormEntityValues.actualFieldValue).
    */
   uploadAttachments = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -435,8 +439,14 @@ export class AttachmentController {
         return;
       }
 
-      if (entityType !== AttachmentEntityType.IMPACT) {
-        res.status(400).json({ error: 'Only IMPACT attachments are supported' });
+      const allowedEntityTypes: AttachmentEntityType[] = [
+        AttachmentEntityType.IMPACT,
+        AttachmentEntityType.FORM_ENTITY_VALUE,
+      ];
+      if (!allowedEntityTypes.includes(entityType)) {
+        res.status(400).json({
+          error: `entityType '${entityType}' not supported by this endpoint`,
+        });
         return;
       }
 
@@ -468,7 +478,7 @@ export class AttachmentController {
 
       const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map(file => ({
         entityId,
-        entityType: AttachmentEntityType.IMPACT,
+        entityType,
         originalFilename: file.originalName,
         size: file.fileSize,
         mimetype: file.mimeType,
@@ -486,8 +496,9 @@ export class AttachmentController {
 
       await this.messageAttachmentRepository.createMany(attachmentData);
 
-      // Fetch created attachments from database to get their real IDs for Vespa indexing
-      const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(entityId, AttachmentEntityType.IMPACT);
+      // Fetch the attachments we just created for this entity. Used to return
+      // IDs to the caller and to enqueue Vespa indexing.
+      const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(entityId, entityType);
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
@@ -496,7 +507,18 @@ export class AttachmentController {
         });
       }
 
-      res.status(200).json({ success: true, count: attachmentData.length });
+      res.status(200).json({
+        success: true,
+        count: attachmentData.length,
+        attachments: savedAttachments.map(a => ({
+          id: a.id,
+          originalFilename: a.originalFilename,
+          mimetype: a.mimetype,
+          size: a.size,
+          url: a.url,
+          thumbnailUrl: a.thumbnailUrl,
+        })),
+      });
     } catch (error) {
       logger.error('Error uploading attachments:', error);
       res.status(500).json({ error: 'Failed to upload attachments' });

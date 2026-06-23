@@ -16,6 +16,7 @@ import { WorkflowQuestionActivity } from './WorkflowQuestionActivity';
 import { ScheduledCallActivity } from './ScheduledCallActivity';
 import { EmailFetchActivity } from './EmailFetchActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
+import { StageApprovalActivity } from './StageApprovalActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -117,6 +118,11 @@ export const ActivityItem = memo(function ActivityItem({
     case 'canvas_role_changed':
     case 'canvas_access_revoked':
       return <CanvasSharedActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'stage_approval_requested':
+    case 'stage_approval_approved':
+    case 'stage_approval_rejected':
+      return <StageApprovalActivity activity={activity} isExpanded={isExpanded} />;
 
     default:
       return null;

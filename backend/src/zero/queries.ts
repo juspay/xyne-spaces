@@ -3096,6 +3096,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       return zql.form_entity_values
         .where('entityId', entityId)
         .related('formField')
+        .related('attachments')
         .orderBy('createdAt', 'asc');
     }
   ),
@@ -3409,7 +3410,10 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   getTicketStageRequests: defineQuery(
     z.object({ ticketId: z.string() }),
     ({ args: { ticketId } }) => {
-      return zql.ticket_stage_requests.where('ticketId', ticketId).orderBy('createdAt', 'desc');
+      return zql.ticket_stage_requests
+        .where('ticketId', ticketId)
+        .related('reviewerCommentMessage')
+        .orderBy('createdAt', 'desc');
     },
   ),
 

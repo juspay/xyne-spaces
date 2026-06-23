@@ -9,9 +9,17 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { mutators } from '../../../zero/mutators';
 import { useAuth } from '../../../hooks/useAuth';
+import { apiInstance } from '../../../services/clients/apiClient';
 import { FormEntityType, FormFieldType, TicketStageRequestStatus } from '@xyne/shared';
 import type { Ticket, FormEntityValues, FormFields, TicketStageRequest } from '@xyne/shared';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
+import { StageFormDocField } from './StageFormDocField';
+
+// Local in-session state for a DOC field. Tracked separately from formData
+// because the actual attachmentId doesn't exist until submit-time upload.
+//   { file: File }   → user picked a new file to upload
+//   { removed: true } → user removed the previously-persisted attachment
+type DocLocalChange = { file: File } | { removed: true };
 
 interface StageFormModalProps {
   isOpen: boolean;
@@ -45,6 +53,17 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
   const [formData, setFormData] = useState<Record<string, string[]>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [existingApproval, setExistingApproval] = useState<TicketStageRequest | null>(null);
+  // Reviewer's comment for APPROVE/REJECT. Required on REJECT; optional on APPROVE.
+  const [reviewerComment, setReviewerComment] = useState('');
+
+  // In-session DOC field changes — pure in-memory state, no DB writes happen
+  // until Submit. On submit, we POST each pending file to /attachments/upload
+  // (bound directly to a FormEntityValues row) and use the returned attachmentId
+  // in the Zero mutator. Closing the modal without submit discards everything
+  // here — no cleanup needed.
+  const [localDocChanges, setLocalDocChanges] = useState<Map<string, DocLocalChange>>(
+    () => new Map(),
+  );
 
   const [formFields, formFieldsDetails] = useCachedQuery(queries.getFormFieldsByFormId({ formId }));
 
@@ -119,15 +138,41 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
     isNonLinearBoard,
   ]);
 
-  const handleSubmit = (status: TicketStageRequestStatus): void => {
-    // Only validate required fields when submitting for approval, not when saving as draft
+  // True if the field has SOMETHING the user has effectively provided —
+  // either a persisted value in formData, or a pending in-session DOC upload.
+  // A DOC field marked as 'removed' is treated as empty.
+  const isFieldFilled = (field: FormFields): boolean => {
+    const change = localDocChanges.get(field.id);
+    if (change && 'file' in change) return true;
+    if (change && 'removed' in change) return false;
+    const value = formData[field.id];
+    return !!(value && value.length > 0 && value[0] !== '');
+  };
+
+  // Resolve the FormEntityValues row id we'd update (or undefined if a fresh
+  // create is required). Mirrors the existing mutator-time lookup logic so
+  // we can pre-compute the id before the upload — the upload needs to know
+  // it to set entityId on the new MessageAttachment row.
+  const resolveExistingValueId = (
+    fieldId: string,
+    values: FormEntityValues[],
+    forApproverPath: boolean,
+  ): string | undefined => {
+    if (forApproverPath && !existingApproval) return undefined;
+    return values
+      .filter(
+        (fev: FormEntityValues) => fev.fieldId === fieldId && fev.contextId === targetStage.id,
+      )
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]?.id;
+  };
+
+  const handleSubmit = async (status: TicketStageRequestStatus): Promise<void> => {
+    // Validate required fields on every submitter-initiated submit. The DRAFT
+    // path no longer has a UI entry point (Save-as-Draft was removed), so the
+    // only submitter status we'll see here is SUBMITTED.
     if (status === TicketStageRequestStatus.SUBMITTED) {
       const fields = Array.isArray(formFields) ? formFields : [];
-      const missingFields = fields.filter(field => {
-        if (field.isOptional) return false;
-        const value = formData[field.id];
-        return !value || value.length === 0 || value[0] === '';
-      });
+      const missingFields = fields.filter(field => !field.isOptional && !isFieldFilled(field));
 
       if (missingFields.length > 0) {
         toast.error(
@@ -137,9 +182,84 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
       }
     }
 
+    // Reviewer-side validation: a non-empty comment is mandatory on REJECT so the
+    // submitter knows why. APPROVE accepts an optional comment.
+    const trimmedComment = reviewerComment.trim();
+    if (status === TicketStageRequestStatus.REJECTED && hasApprovers && isReviewer) {
+      if (!trimmedComment) {
+        toast.error('Please add a comment explaining the rejection');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       const timestamp = Date.now();
+      const fields = Array.isArray(formFields) ? formFields : [];
+      const values = Array.isArray(formEntityValues) ? formEntityValues : [];
+
+      // Pre-compute upload plan for DOC fields with in-session changes. We
+      // need to allocate the FormEntityValues row id BEFORE uploading because
+      // the upload writes a MessageAttachment row whose entityId points at it.
+      const docUploadsByField = new Map<string, { file: File; formEntityValueId: string }>();
+      const docRemovedFields = new Set<string>();
+      for (const field of fields) {
+        if (field.fieldType !== FormFieldType.DOC) continue;
+        const change = localDocChanges.get(field.id);
+        if (!change) continue;
+        if ('file' in change) {
+          const existingValueId = resolveExistingValueId(field.id, values, hasApprovers);
+          docUploadsByField.set(field.id, {
+            file: change.file,
+            formEntityValueId: existingValueId ?? uuidv4(),
+          });
+        } else {
+          docRemovedFields.add(field.id);
+        }
+      }
+
+      // Upload pending DOC files. Each POST writes a MessageAttachment row with
+      // entityType=FORM_ENTITY_VALUE bound directly to our pre-allocated
+      // formEntityValueId — no DRAFT, no claim, no channel-draft tie. The
+      // server returns the attachment id which we then thread into the Zero
+      // mutator's newValue.
+      const uploadedAttachmentIdByField = new Map<string, string>();
+      for (const [fieldId, plan] of docUploadsByField) {
+        const uploadForm = new FormData();
+        uploadForm.append('files', plan.file);
+        uploadForm.append('entityId', plan.formEntityValueId);
+        uploadForm.append('entityType', 'FORM_ENTITY_VALUE');
+        uploadForm.append('fileMetadata', JSON.stringify([{ fileIndex: 0, hasThumbnail: false }]));
+        const response = await apiInstance.post('/attachments/upload', uploadForm, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        const attachmentId = (response.data as { attachments?: Array<{ id: string }> })
+          ?.attachments?.[0]?.id;
+        if (!attachmentId) {
+          throw new Error('Upload succeeded but no attachment id returned');
+        }
+        uploadedAttachmentIdByField.set(fieldId, attachmentId);
+      }
+
+      // Build the effective formData the rest of the submit uses. DOC fields
+      // with a fresh upload get the returned attachment id; DOC fields the
+      // user removed get an empty array so the mutator clears actualFieldValue.
+      const effectiveFormData: Record<string, string[]> = { ...formData };
+      for (const [fieldId, attachmentId] of uploadedAttachmentIdByField) {
+        effectiveFormData[fieldId] = [attachmentId];
+      }
+      for (const fieldId of docRemovedFields) {
+        effectiveFormData[fieldId] = [];
+      }
+
+      // For DOC fields needing a fresh CREATE, use the pre-allocated
+      // formEntityValues id so it matches the entityId we already wrote into
+      // MessageAttachment.entityId during upload. Without this, the relation
+      // wouldn't resolve.
+      const formEntityValueIdsByField = new Map<string, string>();
+      for (const [fieldId, plan] of docUploadsByField) {
+        formEntityValueIdsByField.set(fieldId, plan.formEntityValueId);
+      }
       // For revisits: reuse the existing record's ID to avoid the unique constraint on
       // (ticketId, stageId). existingApproval covers the SUBMITTED/DRAFT case; the
       // ticketStageRequestsForTicket lookup covers the APPROVED case from a prior visit.
@@ -147,8 +267,6 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
         ticketStageRequestsForTicket as TicketStageRequest[] | undefined
       )?.find((r: TicketStageRequest) => r.stageId === targetStage.id);
       const submissionId = existingApproval?.id ?? existingForStage?.id ?? uuidv4();
-      const fields = Array.isArray(formFields) ? formFields : [];
-      const values = Array.isArray(formEntityValues) ? formEntityValues : [];
 
       const isReviewed =
         status === TicketStageRequestStatus.APPROVED ||
@@ -184,7 +302,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
 
         // Save form entity values optimistically via Zero
         for (const field of fields) {
-          const fieldValue = formData[field.id] || [];
+          const fieldValue = effectiveFormData[field.id] || [];
           // Only reuse an existing value record when we're editing the CURRENT pending
           // submission (an active SUBMITTED/DRAFT request exists → existingApproval set).
           // On a fresh visit (existingApproval is null because any prior request was
@@ -208,9 +326,13 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
               }),
             );
           } else {
+            // For DOC fields with a fresh upload this turn, use the
+            // pre-allocated id so the relation joins back to the
+            // MessageAttachment row we already wrote during upload.
+            const formEntityValueId = formEntityValueIdsByField.get(field.id) ?? uuidv4();
             zero.mutate(
               mutators.formEntityValue.create({
-                id: uuidv4(),
+                id: formEntityValueId,
                 entityId: ticket.id,
                 entityType: FormEntityType.TICKET,
                 fieldId: field.id,
@@ -222,6 +344,17 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
             );
           }
         }
+
+        // Attach reviewer's comment when present (required on REJECT, optional on
+        // APPROVE — validated above). The mutator will atomically insert a USER
+        // message in the ticket conversation and link it on the request row.
+        const shouldAttachComment =
+          isReviewed &&
+          isReviewer &&
+          trimmedComment.length > 0 &&
+          (status === TicketStageRequestStatus.APPROVED ||
+            status === TicketStageRequestStatus.REJECTED);
+        const commentMessageId = shouldAttachComment ? uuidv4() : undefined;
 
         zero.mutate(
           mutators.ticketStageRequest.upsert({
@@ -235,14 +368,13 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
             ...(requestActivityId && { requestActivityId }),
             ...(approvedActivityId && { approvedActivityId }),
             ...(rejectedActivityId && { rejectedActivityId }),
+            ...(commentMessageId && { commentMessageId, comment: trimmedComment }),
             updatedAt: timestamp,
           }),
         );
 
         if (statusChanged) {
-          if (status === TicketStageRequestStatus.DRAFT) {
-            toast.success('Draft saved');
-          } else if (status === TicketStageRequestStatus.SUBMITTED) {
+          if (status === TicketStageRequestStatus.SUBMITTED) {
             toast.success('Form submitted for approval');
           } else if (status === TicketStageRequestStatus.APPROVED) {
             toast.success('Stage approved');
@@ -250,15 +382,14 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
             toast.success('Stage rejected');
           }
         }
+        // Clear the textarea so a subsequent open doesn't repeat the prior comment.
+        setReviewerComment('');
+        setLocalDocChanges(new Map());
         onSuccess?.();
         onClose();
       } else {
         // Validate required fields before submitting directly (no approval workflow).
-        const missingFields = fields.filter(field => {
-          if (field.isOptional) return false;
-          const value = formData[field.id];
-          return !value || value.length === 0 || value[0] === '';
-        });
+        const missingFields = fields.filter(field => !field.isOptional && !isFieldFilled(field));
         if (missingFields.length > 0) {
           toast.error(
             `Please fill in all required fields: ${missingFields.map(f => f.fieldName).join(', ')}`,
@@ -269,7 +400,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
         // Build fieldName→value map so the mutator can persist values by visitIndex
         const formValuesByName: Record<string, unknown> = {};
         for (const field of fields) {
-          const rawValue = formData[field.id];
+          const rawValue = effectiveFormData[field.id];
           if (rawValue !== undefined) {
             formValuesByName[field.fieldName] = rawValue.length === 1 ? rawValue[0] : rawValue;
           }
@@ -290,7 +421,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
           // Linear board: persist the submitted form values, then move the ticket stage
           // (matching the legacy behaviour — values saved + stage's default status applied).
           for (const field of fields) {
-            const fieldValue = formData[field.id] || [];
+            const fieldValue = effectiveFormData[field.id] || [];
             const existingValue = values.find(
               (fev: FormEntityValues) =>
                 fev.fieldId === field.id && fev.contextId === targetStage.id,
@@ -304,9 +435,12 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 }),
               );
             } else {
+              // Same DOC-id pre-allocation as the approver path — the relation
+              // needs MessageAttachment.entityId === FormEntityValues.id.
+              const formEntityValueId = formEntityValueIdsByField.get(field.id) ?? uuidv4();
               zero.mutate(
                 mutators.formEntityValue.create({
-                  id: uuidv4(),
+                  id: formEntityValueId,
                   entityId: ticket.id,
                   entityType: FormEntityType.TICKET,
                   fieldId: field.id,
@@ -333,6 +467,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
         if (statusChanged) {
           toast.success('Stage updated');
         }
+        setLocalDocChanges(new Map());
         onSuccess?.();
         onClose();
       }
@@ -351,6 +486,30 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
 
   const fields = Array.isArray(formFields) ? formFields : [];
   const isFieldsLoading = formFieldsDetails.type !== 'complete';
+  const valuesForRender = Array.isArray(formEntityValues) ? formEntityValues : [];
+
+  // Resolve the reviewer's last comment from the modal's own query
+  // (ticketStageRequestsForTicket, joined via .related('reviewerCommentMessage')).
+  // Reading via existingApproval prop is unreliable because the parent's query
+  // may not include the relation.
+  const requestForStage = (
+    ticketStageRequestsForTicket as unknown as
+      | Array<{
+          stageId: string;
+          reviewerCommentMessage?: {
+            content?: string | null;
+            metadata?: { rawComment?: string | null } | null;
+          } | null;
+        }>
+      | undefined
+  )?.find(r => r.stageId === targetStage.id);
+  // Prefer metadata.rawComment so the modal shows the unprefixed text under its
+  // own "Reason for rejection" label. Fall back to content for any legacy
+  // messages stored before the prefix was introduced.
+  const reviewerCommentContent =
+    requestForStage?.reviewerCommentMessage?.metadata?.rawComment ??
+    requestForStage?.reviewerCommentMessage?.content ??
+    null;
 
   const showReviewButtons = hasApprovers && isReviewer && existingApproval !== null && !isDraft;
 
@@ -405,6 +564,23 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
             {isSubmitted && (
               <div className='mb-4 px-3 py-1.5 bg-muted rounded text-sm text-foreground inline-block'>
                 Awaiting review
+              </div>
+            )}
+            {/* Persisted reviewer comment — appears once the reviewer has approved
+                or rejected with a comment. Pulled via the reviewerCommentMessage
+                relation on the TicketStageRequest. Stays visible after
+                resubmission (DRAFT/SUBMITTED) so the submitter has the prior
+                reason on hand while fixing things. */}
+            {reviewerCommentContent && (
+              <div className='mb-4 px-3 py-2 bg-muted/60 border border-border rounded text-sm text-foreground'>
+                <div className='text-xs text-muted-foreground mb-1'>
+                  {isRejected
+                    ? 'Reason for rejection'
+                    : isApproved
+                      ? 'Reviewer comment'
+                      : 'Last reviewer comment'}
+                </div>
+                <div className='whitespace-pre-wrap'>{reviewerCommentContent}</div>
               </div>
             )}
           </>
@@ -530,8 +706,75 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 })}
               />
             )}
+            {field.fieldType === FormFieldType.DOC &&
+              (() => {
+                // Latest persisted FormEntityValue for this DOC field at the target stage.
+                // Its `attachments` (joined via the relation on form_entity_values) carries
+                // the persisted MessageAttachment row from a prior submission.
+                const latestValue = valuesForRender
+                  .filter(
+                    (fev: FormEntityValues) =>
+                      fev.fieldId === field.id && fev.contextId === targetStage.id,
+                  )
+                  .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+                const persistedAttachment = latestValue?.attachments?.[0];
+                // If the user marked this DOC as removed in-session, hide the
+                // persisted preview so the dropzone shows.
+                const change = localDocChanges.get(field.id);
+                const effectiveExisting =
+                  change && 'removed' in change ? undefined : persistedAttachment;
+                return (
+                  <StageFormDocField
+                    fieldId={field.id}
+                    existingAttachment={effectiveExisting}
+                    onLocalChange={file => {
+                      setLocalDocChanges(prev => {
+                        const next = new Map(prev);
+                        if (file) {
+                          next.set(field.id, { file });
+                        } else if (persistedAttachment) {
+                          // Removing a persisted attachment — mark for clear on submit.
+                          next.set(field.id, { removed: true });
+                        } else {
+                          // Removing an in-session pick — just drop the change.
+                          next.delete(field.id);
+                        }
+                        return next;
+                      });
+                    }}
+                    disabled={isApproved}
+                    readOnly={isReviewer}
+                  />
+                );
+              })()}
           </div>
         ))}
+
+        {/* Reviewer comment textarea — visible only when the approver is acting
+            (showReviewButtons). Required on REJECT, optional on APPROVE. The
+            value is sent to the mutator as a USER message in the ticket
+            conversation and linked on the request via reviewerCommentMessageId. */}
+        {showReviewButtons && (
+          <div className='mt-4'>
+            <label
+              htmlFor='reviewer-comment'
+              className='block text-sm font-medium text-foreground mb-1'
+            >
+              Comment <span className='text-xs text-muted-foreground'>(required on reject)</span>
+            </label>
+            <textarea
+              id='reviewer-comment'
+              value={reviewerComment}
+              onChange={e => setReviewerComment(e.target.value)}
+              placeholder='Explain your decision…'
+              rows={3}
+              className='w-full px-3 py-2 border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-y'
+              disabled={isSubmitting}
+              data-track-category='Tickets'
+              data-track-name='StageFormReviewerCommentInput'
+            />
+          </div>
+        )}
 
         {/* Comment input and actions at bottom */}
         <div className='mt-4 pt-4 border-t border-border flex justify-end gap-3'>
@@ -562,30 +805,16 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
           ) : hasApprovers && isApproved ? (
             <Button disabled>Form approved</Button>
           ) : hasApprovers ? (
-            <>
-              {/* Draft status: Show both Save as Draft and Submit for Approval */}
-              <Button
-                variant='secondary'
-                onClick={() => {
-                  void handleSubmit(TicketStageRequestStatus.DRAFT);
-                }}
-                disabled={isSubmitting}
-                data-track-category='Tickets'
-                data-track-name='SaveStageFormAsDraft'
-              >
-                {isSubmitting ? 'Saving...' : 'Save as Draft'}
-              </Button>
-              <Button
-                onClick={() => {
-                  void handleSubmit(TicketStageRequestStatus.SUBMITTED);
-                }}
-                disabled={isSubmitting}
-                data-track-category='Tickets'
-                data-track-name='SubmitStageFormForApproval'
-              >
-                {isSubmitting ? 'Submitting...' : 'Submit for Approval'}
-              </Button>
-            </>
+            <Button
+              onClick={() => {
+                void handleSubmit(TicketStageRequestStatus.SUBMITTED);
+              }}
+              disabled={isSubmitting}
+              data-track-category='Tickets'
+              data-track-name='SubmitStageFormForApproval'
+            >
+              {isSubmitting ? 'Submitting...' : 'Submit for Approval'}
+            </Button>
           ) : (
             <Button
               onClick={() => {

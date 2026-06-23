@@ -104,7 +104,15 @@ export type PreviousValue =
   | EmailReadPreviousValue
   | CanvasParticipantPreviousValue
   | ChannelUserStatusPreviousValue
-  | ConversationParticipantPreviousValue;
+  | ConversationParticipantPreviousValue
+  | TicketStageRequestPreviousValue;
+
+export interface TicketStageRequestPreviousValue {
+  status: string;
+  stageId: string;
+  submittedBy: string;
+  ticketId: string;
+}
 
 export interface SideEffectJobConfig {
   entityType: TableName;
@@ -143,6 +151,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   email_reads: ['insert', 'update'],
   channel_user_status: ['update'],
   conversation_participants: ['update'],
+  ticket_stage_requests: ['insert', 'update', 'upsert'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {
