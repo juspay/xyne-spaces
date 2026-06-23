@@ -381,6 +381,7 @@ async function assertCanvasChannelNotArchived(
   }
 }
 
+
 async function hasCanvasVersionEditAccess(
   tx: Transaction<Schema>,
   canvas: { id: string; createdBy: string },
@@ -9730,6 +9731,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
           const actualFieldValue = isMultiValue ? newValue : newValue[0] || null;
 
+          // DOC fields no longer require a claim here — the upload pipeline
+          // (POST /attachments/upload from StageFormModal.handleSubmit) writes
+          // the MessageAttachment row directly with entityType=FORM_ENTITY_VALUE
+          // and entityId = this row's id (pre-allocated client-side). So by the
+          // time we insert the form value row, the attachment is already
+          // pointing at it correctly.
+
           // Upsert the form entity value
           await tx.mutate.form_entity_values.insert({
             id,
@@ -9778,6 +9786,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const valueToStore = isMultiValue
             ? newValue              // Store array for MULTI_SELECT/USER (including empty arrays)
             : newValue[0] || null;  // Store first element or null for other types
+
+          // For DOC fields where the value is changing, delete the prior
+          // MessageAttachment row so we don't accumulate orphans pointing at
+          // the same FormEntityValues row. The new attachment (if any) was
+          // already written directly via the upload pipeline before this
+          // mutator runs.
+          if (
+            fieldType === FormFieldType.DOC &&
+            typeof formEntityValue.actualFieldValue === 'string' &&
+            formEntityValue.actualFieldValue &&
+            formEntityValue.actualFieldValue !== valueToStore
+          ) {
+            await tx.mutate.message_attachments.delete({
+              id: formEntityValue.actualFieldValue,
+            });
+          }
 
           await tx.mutate.form_entity_values.update({
             id: formEntityValueId,
@@ -10347,6 +10371,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           requestActivityId: z.string().optional(),
           approvedActivityId: z.string().optional(),
           rejectedActivityId: z.string().optional(),
+          comment: z.string().optional(),
+          commentMessageId: z.string().optional(),
         }),
         async ({
           tx,
@@ -10362,6 +10388,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             requestActivityId,
             approvedActivityId,
             rejectedActivityId,
+            comment,
+            commentMessageId,
           },
         }) => {
           let existingApproval = await tx.run(zql.ticket_stage_requests.where('id', id).one());
@@ -10421,6 +10449,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 createdAt: updatedAt,
               }),
             ...(reviewedBy !== undefined && { reviewedBy }),
+            ...(commentMessageId !== undefined && { reviewerCommentMessageId: commentMessageId }),
           };
 
           // Upsert ticket stage request
@@ -10738,6 +10767,48 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 isTicketActivity: true,
                 stageName: stage.name,
                 hasForm,
+              },
+            });
+          }
+
+          // Reviewer's comment, attached to APPROVE/REJECT decisions. Stored as
+          // a regular USER message in the ticket conversation (so it renders
+          // inline with the rest of the ticket timeline) and linked from the
+          // request row via reviewerCommentMessageId for direct lookup from the
+          // form modal. The content is prefixed with "Rejection comment:" /
+          // "Approval comment:" so it reads sensibly in the ticket thread (the
+          // action + actor are already carried by the sibling SYSTEM message
+          // just above). The raw comment text is kept in metadata.rawComment
+          // for places that want to display it without the prefix (e.g. the
+          // modal's "Reason for rejection" block).
+          if (
+            comment &&
+            commentMessageId &&
+            (status === TicketStageRequestStatus.APPROVED ||
+              status === TicketStageRequestStatus.REJECTED)
+          ) {
+            const commentLabel =
+              status === TicketStageRequestStatus.REJECTED
+                ? 'Rejection comment'
+                : 'Approval comment';
+            await tx.mutate.messages.insert({
+              messageId: commentMessageId,
+              conversationId: ticket.conversationId,
+              senderId: updatedBy,
+              ...(authData.workspaceId ? { workspaceId: authData.workspaceId } : {}),
+              content: `${commentLabel}: ${comment}`,
+              msgType: MessageType.USER,
+              hasAttachment: false,
+              edited: false,
+              isDeleted: false,
+              isSent: true,
+              showInChannel: false,
+              createdAt: updatedAt,
+              metadata: {
+                isTicketActivity: true,
+                ticketStageRequestId: effectiveId,
+                decision: status,
+                rawComment: comment,
               },
             });
           }
@@ -14102,15 +14173,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               );
               // NULL version (legacy rows predate the column) is treated as visit 1.
               const existingEntry = existing.find(e => (e.version ?? 1) === newVisitIndex);
+              let formEntityValueId: string;
+              const priorValue = existingEntry?.actualFieldValue ?? null;
               if (existingEntry) {
+                formEntityValueId = existingEntry.id;
                 await tx.mutate.form_entity_values.update({
                   id: existingEntry.id,
                   actualFieldValue: value as any,
                   updatedAt: now,
                 });
               } else {
+                formEntityValueId = uuidv4();
                 await tx.mutate.form_entity_values.insert({
-                  id: uuidv4(),
+                  id: formEntityValueId,
                   formId: effectiveFormId,
                   entityId: ticketId,
                   entityType: FormEntityType.TICKET,
@@ -14122,6 +14197,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   createdAt: now,
                   updatedAt: now,
                 });
+              }
+              // DOC field replace cleanup: when the value changes, delete the
+              // prior MessageAttachment row. New attachment (if any) was
+              // already written by the upload pipeline before this mutator
+              // runs and is already bound to formEntityValueId.
+              if (
+                field.fieldType === FormFieldType.DOC &&
+                typeof priorValue === 'string' &&
+                priorValue &&
+                priorValue !== value
+              ) {
+                await tx.mutate.message_attachments.delete({ id: priorValue });
               }
             }
           }

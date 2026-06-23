@@ -4555,6 +4555,8 @@ export const mutators = defineMutators({
         requestActivityId: z.string().optional(),
         approvedActivityId: z.string().optional(),
         rejectedActivityId: z.string().optional(),
+        comment: z.string().optional(),
+        commentMessageId: z.string().optional(),
       }),
       async ({
         tx,
@@ -4571,6 +4573,8 @@ export const mutators = defineMutators({
           requestActivityId,
           approvedActivityId,
           rejectedActivityId,
+          comment,
+          commentMessageId,
         },
       }) => {
         let existingApproval = await tx.run(zql.ticket_stage_requests.where('id', id).one());
@@ -4624,6 +4628,7 @@ export const mutators = defineMutators({
               createdAt: updatedAt,
             }),
           ...(reviewedBy !== undefined && { reviewedBy }),
+          ...(commentMessageId !== undefined && { reviewerCommentMessageId: commentMessageId }),
         };
 
         // Upsert ticket stage request
@@ -4786,6 +4791,48 @@ export const mutators = defineMutators({
               isTicketActivity: true,
               stageName: stage.name,
               hasForm,
+            },
+          });
+        }
+
+        // Reviewer's comment, attached to APPROVE/REJECT decisions. Stored as a
+        // regular USER message in the ticket conversation (so it renders inline
+        // with the rest of the ticket timeline) and linked from the request row
+        // via reviewerCommentMessageId for direct lookup from the form modal.
+        // The content is prefixed with "Rejection comment:" / "Approval comment:"
+        // so it reads sensibly in the ticket thread (the action + actor are
+        // already carried by the sibling SYSTEM message just above). The raw
+        // comment text is kept in metadata.rawComment for places that want to
+        // display it without the prefix (e.g. the modal's "Reason for rejection"
+        // block).
+        if (
+          comment &&
+          commentMessageId &&
+          (status === TicketStageRequestStatus.APPROVED ||
+            status === TicketStageRequestStatus.REJECTED)
+        ) {
+          const commentLabel =
+            status === TicketStageRequestStatus.REJECTED
+              ? 'Rejection comment'
+              : 'Approval comment';
+          await tx.mutate.messages.insert({
+            messageId: commentMessageId,
+            conversationId: ticket.conversationId,
+            workspaceId: ctx.workspaceId,
+            senderId: updatedBy,
+            content: `${commentLabel}: ${comment}`,
+            msgType: MessageType.USER,
+            hasAttachment: false,
+            edited: false,
+            isDeleted: false,
+            isSent: true,
+            showInChannel: false,
+            createdAt: updatedAt,
+            metadata: {
+              isTicketActivity: true,
+              ticketStageRequestId: effectiveId,
+              decision: status,
+              rawComment: comment,
             },
           });
         }
@@ -7110,6 +7157,21 @@ export const mutators = defineMutators({
         const valueToStore = isMultiValue
           ? newValue // Store array for MULTI_SELECT/USER (including empty arrays)
           : newValue[0] || null; // Store first element or null for other types
+
+        // For DOC fields where the value is changing, delete the prior
+        // MessageAttachment row so we don't accumulate orphans pointing at the
+        // same FormEntityValues row. The new attachment (if any) was already
+        // written directly via the upload pipeline before this mutator runs.
+        if (
+          fieldType === FormFieldType.DOC &&
+          typeof formEntityValue.actualFieldValue === 'string' &&
+          formEntityValue.actualFieldValue &&
+          formEntityValue.actualFieldValue !== valueToStore
+        ) {
+          await tx.mutate.message_attachments.delete({
+            id: formEntityValue.actualFieldValue,
+          });
+        }
 
         await tx.mutate.form_entity_values.update({
           id: formEntityValueId,

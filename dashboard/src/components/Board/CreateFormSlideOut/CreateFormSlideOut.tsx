@@ -39,7 +39,7 @@ const SelectDropdown = ({
           <ChevronDown size={14} className='text-muted-foreground shrink-0 ml-1' />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className='w-full max-h-[200px] overflow-y-auto'>
+      <DropdownMenuContent className='w-full max-h-[280px] overflow-y-auto'>
         {options.map(option => (
           <DropdownMenuItem
             key={option.value}

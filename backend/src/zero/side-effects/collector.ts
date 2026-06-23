@@ -194,6 +194,27 @@ export async function collectSideEffectJobs(
     }
   }
 
+  // Capture previous TicketStageRequest state so the side-effect handler can
+  // detect actual status transitions (SUBMITTED → APPROVED / REJECTED, etc.) and
+  // avoid firing duplicate notifications on no-op updates.
+  // Also covers upsert because the mutator uses tx.mutate.ticket_stage_requests
+  // .upsert() — without this, the handler can't tell "fresh insert" from
+  // "status changed on an existing row" (undefined previousValue ⇒ insert).
+  if (
+    (operation === 'update' || operation === 'upsert') &&
+    table === 'ticket_stage_requests'
+  ) {
+    const entity = await tx.run(zql.ticket_stage_requests.where('id', entityId).one());
+    if (entity) {
+      previousValue = {
+        status: entity.status,
+        stageId: entity.stageId,
+        submittedBy: entity.submittedBy,
+        ticketId: entity.ticketId,
+      };
+    }
+  }
+
   accumulator.push({
     entityType: table,
     entityId,
@@ -299,7 +320,8 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'stage_pr_status_mappings':
     case 'links':
     case 'link_access':
-    case 'rcas': {
+    case 'rcas':
+    case 'ticket_stage_requests': {
       const typedArgs = args as { id: string };
       return typedArgs.id;
     }

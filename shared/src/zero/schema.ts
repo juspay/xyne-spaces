@@ -128,6 +128,7 @@ export enum AttachmentEntityType {
   EMAIL = 'EMAIL',
   IMPACT = 'IMPACT',
   COLLECTION = 'COLLECTION',
+  FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
 }
 
 // @ts-ignore TS1294
@@ -478,6 +479,9 @@ export enum NotificationType {
   EMAIL_REPLY_RECEIVED = "EMAIL_REPLY_RECEIVED",
   MESSAGE_DELETED = "MESSAGE_DELETED",
   MESSAGE_EDITED = "MESSAGE_EDITED",
+  STAGE_APPROVAL_REQUESTED = "STAGE_APPROVAL_REQUESTED",
+  STAGE_APPROVAL_APPROVED = "STAGE_APPROVAL_APPROVED",
+  STAGE_APPROVAL_REJECTED = "STAGE_APPROVAL_REJECTED",
 }
 
 // @ts-ignore TS1294
@@ -587,6 +591,7 @@ export enum FormFieldType {
   SINGLE_SELECT = 'SINGLE_SELECT',
   MULTI_SELECT = 'MULTI_SELECT',
   USER = 'USER',
+  DOC = 'DOC',
 }
 
 // @ts-ignore TS1294
@@ -2195,6 +2200,7 @@ export const ticketStageRequestTable = table('ticket_stage_requests')
     status: enumeration<TicketStageRequestStatus>(),
     submittedBy: string(),
     reviewedBy: string().optional(),
+    reviewerCommentMessageId: string().optional(),
     updatedBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -4273,7 +4279,7 @@ export const formFieldsTableRelationships = relationships(formFieldsTable, ({ on
   }),
 }));
 
-export const formEntityValuesTableRelationships = relationships(formEntityValuesTable, ({ one }) => ({
+export const formEntityValuesTableRelationships = relationships(formEntityValuesTable, ({ one, many }) => ({
   formField: one({
     sourceField: ['fieldId'],
     destField: ['id'],
@@ -4283,6 +4289,11 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
     sourceField: ['formId'],
     destField: ['id'],
     destSchema: formTable,
+  }),
+  attachments: many({
+    sourceField: ['id'],
+    destField: ['entityId'],
+    destSchema: messageAttachmentTable,
   }),
 }));
 
@@ -4296,6 +4307,11 @@ export const ticketStageRequestTableRelationships = relationships(ticketStageReq
     sourceField: ['ticketId'],
     destField: ['id'],
     destSchema: ticketTable,
+  }),
+  reviewerCommentMessage: one({
+    sourceField: ['reviewerCommentMessageId'],
+    destField: ['messageId'],
+    destSchema: messageTable,
   }),
 }));
 

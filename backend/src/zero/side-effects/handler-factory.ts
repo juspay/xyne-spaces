@@ -23,6 +23,7 @@ import { FormEntityValuesSideEffectHandler } from './tables/form-entity-values-h
 import { RcasSideEffectHandler } from './tables/rcas-handler';
 import { TicketSubTicketMappingsSideEffectHandler } from './tables/ticket-sub-ticket-mappings-handler';
 import { TicketReferenceMappingsSideEffectHandler } from './tables/ticket-reference-mappings-handler';
+import { TicketStageRequestsSideEffectHandler } from './tables/ticket-stage-requests-handler';
 
 export class SideEffectHandlerFactory {
 
@@ -74,6 +75,8 @@ export class SideEffectHandlerFactory {
         return new ConversationParticipantsSideEffectHandler(ctx);
       case 'form_entity_values':
         return new FormEntityValuesSideEffectHandler(ctx);
+      case 'ticket_stage_requests':
+        return new TicketStageRequestsSideEffectHandler(ctx);
 
       default:
         return new BaseSideEffectHandler(ctx);

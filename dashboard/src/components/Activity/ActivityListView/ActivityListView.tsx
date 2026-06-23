@@ -309,6 +309,9 @@ const ActivityListView = (): ReactElement => {
           'ticket_reference_removed',
           'ticket_multi_updated',
           'workflow_question',
+          'stage_approval_requested',
+          'stage_approval_approved',
+          'stage_approval_rejected',
         ];
       case 'canvas':
         return ['canvas_shared', 'canvas_role_changed', 'canvas_access_revoked', 'mentioned_user'];
