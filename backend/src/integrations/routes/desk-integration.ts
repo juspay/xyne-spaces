@@ -45,9 +45,8 @@ const router = express.Router();
 router.use(express.json());
 
 /**
- * Throws on auth failures. Either the channel creator OR the email-channel
- * owner can manage the integration. Workspace admins are intentionally not
- * granted a bypass — keep that decision explicit at the user's request.
+ * Throws on auth failures. The channel creator, the email-channel owner,
+ * or a channel admin can manage the integration.
  */
 async function assertChannelOwner(channelId: string, userId: string): Promise<void> {
   const channel = await db.channel.findUnique({
@@ -67,7 +66,13 @@ async function assertChannelOwner(channelId: string, userId: string): Promise<vo
   });
   if (pref?.ownerUserId === userId) return;
 
-  const err = new Error('Forbidden: only the desk owner can manage this integration') as Error & {
+  const participant = await db.channelParticipant.findFirst({
+    where: { channelId, userId, role: 'ADMIN' },
+    select: { id: true },
+  });
+  if (participant) return;
+
+  const err = new Error('Forbidden: only the desk owner or admin can manage this integration') as Error & {
     status?: number;
   };
   err.status = 403;
@@ -83,6 +88,55 @@ async function findActiveSourceForChannel(
     orderBy: { createdAt: 'desc' },
   });
 }
+
+/**
+ * GET /api/integrations/desk/:channelId/dl-member-sync-status
+ * Returns the active one-time DL older-email sync, if any.
+ */
+router.get(
+  '/:channelId/dl-member-sync-status',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    const { channelId } = req.params;
+    const userId = req.user!.id;
+
+    try {
+      await assertChannelOwner(channelId, userId);
+
+      const activeSync = await db.externalSource.findFirst({
+        where: {
+          channelId,
+          name: { contains: 'dl-sync' },
+          isActive: true,
+        },
+        select: {
+          displayName: true,
+          sourceType: true,
+          updatedAt: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      if (!activeSync) {
+        res.json({ active: false });
+        return;
+      }
+
+      res.json({
+        active: true,
+        memberEmail: activeSync.displayName,
+        provider: activeSync.sourceType,
+        startedAt: activeSync.updatedAt.toISOString(),
+      });
+    } catch (error: unknown) {
+      const status = (error as { status?: number })?.status ?? 500;
+      const message =
+        error instanceof Error ? error.message : 'Failed to fetch DL member sync status';
+      logger.error(`${TAG} DL member sync status failed`, { channelId, status, message });
+      res.status(status).json({ error: message });
+    }
+  },
+);
 
 /**
  * POST /api/integrations/desk/:channelId/disconnect
@@ -266,6 +320,132 @@ router.post(
       const message =
         error instanceof Error ? error.message : 'Failed to initiate reconnect';
       logger.error(`${TAG} Reconnect init failed`, { channelId, status, message });
+      res.status(status).json({ error: message });
+    }
+  },
+);
+
+/**
+ * POST /api/integrations/desk/:channelId/dl-member-sync-init
+ * Body: { startDate: string, endDate: string, provider: 'google' | 'microsoft', platform?: 'electron' | 'web' }
+ * Returns: { authUrl: string }
+ * Initiates OAuth to connect a DL member's mailbox for one-time backfill
+ * of older distribution list emails.
+ */
+router.post(
+  '/:channelId/dl-member-sync-init',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    const { channelId } = req.params;
+    const userId = req.user!.id;
+    const workspaceId = req.user!.workspaceId;
+    const { startDate, endDate, provider, platform: rawPlatform } = req.body as {
+      startDate?: string;
+      endDate?: string;
+      provider?: string;
+      platform?: string;
+    };
+    const platform: 'electron' | 'web' = rawPlatform === 'electron' ? 'electron' : 'web';
+
+    try {
+      await assertChannelOwner(channelId, userId);
+
+      if (!startDate || !endDate) {
+        res.status(400).json({ error: 'startDate and endDate are required' });
+        return;
+      }
+      if (provider !== 'google' && provider !== 'microsoft') {
+        res.status(400).json({ error: 'provider must be "google" or "microsoft"' });
+        return;
+      }
+
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+        res.status(400).json({ error: 'Invalid date range' });
+        return;
+      }
+      const daysDiff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysDiff > 365) {
+        res.status(400).json({ error: 'Date range cannot exceed 365 days' });
+        return;
+      }
+
+      const pref = await db.emailChannelPreference.findUnique({
+        where: { channelId },
+        select: { deskType: true, dlEmail: true },
+      });
+      if (!pref || pref.deskType !== 'DL' || !pref.dlEmail) {
+        res.status(400).json({ error: 'Channel is not a DL desk or has no DL email configured' });
+        return;
+      }
+
+      const existingSync = await db.externalSource.findFirst({
+        where: {
+          channelId,
+          name: { contains: 'dl-sync' },
+          isActive: true,
+        },
+      });
+      if (existingSync) {
+        res.status(409).json({ error: 'A member sync is already in progress for this desk' });
+        return;
+      }
+
+      if (provider === 'google') {
+        const state = Math.random().toString(36).substring(7);
+        await setGoogleOAuthState(state, {
+          mode: 'dl-member-sync',
+          channelId,
+          workspaceId,
+          dlEmail: pref.dlEmail,
+          startDate,
+          endDate,
+          userId,
+          platform,
+          timestamp: Date.now(),
+        });
+
+        const authUrl = createGoogleOAuth2Client().generateAuthUrl({
+          access_type: 'offline',
+          scope: GMAIL_SCOPES,
+          prompt: 'consent',
+          state,
+        });
+        res.json({ authUrl });
+        return;
+      }
+
+      const oauthClient = microsoftDeskService.getOAuthClient();
+      if (!oauthClient) {
+        res.status(503).json({ error: 'Microsoft OAuth not configured' });
+        return;
+      }
+      const state = microsoftDeskService.generateState();
+      await microsoftDeskService.storePendingChannel(state, {
+        mode: 'dl-member-sync',
+        userId,
+        workspaceId,
+        channelId,
+        dlEmail: pref.dlEmail,
+        startDate,
+        endDate,
+        platform,
+      });
+
+      const redirectUri = `${getBackendUrl(req)}/api/integrations/microsoft/callback`;
+      const authUrl = oauthClient.authorizeURL({
+        redirect_uri: redirectUri,
+        scope: MICROSOFT_OAUTH_SCOPES,
+        state,
+        prompt: 'consent',
+      } as Record<string, string | string[]>);
+      res.json({ authUrl });
+    } catch (error: unknown) {
+      const status = (error as { status?: number })?.status ?? 500;
+      const message =
+        error instanceof Error ? error.message : 'Failed to initiate DL member sync';
+      logger.error(`${TAG} DL member sync init failed`, { channelId, status, message });
       res.status(status).json({ error: message });
     }
   },

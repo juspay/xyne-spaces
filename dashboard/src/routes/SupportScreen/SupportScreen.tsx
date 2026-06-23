@@ -37,11 +37,14 @@ import {
   ListFilter,
   BarChart4Icon,
   Circle,
+  UserPlus,
+  Info as InfoIcon,
 } from 'lucide-react';
 import {
   ChannelVisibility,
   ChannelType,
   EmailType,
+  DeskType,
   NotificationLevel,
   AutoDraftStatus,
 } from '@xyne/shared';
@@ -64,7 +67,10 @@ import {
   useUserChannelStatuses,
 } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
+import { useDlMemberSyncStatus } from '../../hooks/useDlMemberSyncStatus';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
+import { DlMemberSyncDialog } from '../../components/Chat/EmailRefetch/DlMemberSyncDialog';
+import { useEmailChannelPreference } from '../../hooks/useEmailChannelPreference';
 import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
 import * as Popover from '@radix-ui/react-popover';
 import {
@@ -74,6 +80,12 @@ import {
 } from '../../components/Tickets/TicketFilters/Submenus';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { Switch } from '../../components/ui/Switch';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../../components/ui/dropdown-menu';
 import { StageFilterPopup } from '../../components/Tickets/TicketFilters/Submenus/StagesSubmenu/StageFilterPopup';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
@@ -649,6 +661,7 @@ const SupportScreen = (): ReactElement => {
   );
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showRefetchDialog, setShowRefetchDialog] = useState(false);
+  const [showDlMemberSyncDialog, setShowDlMemberSyncDialog] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Multi-compose state — each entry is one floating compose window.
@@ -904,6 +917,22 @@ const SupportScreen = (): ReactElement => {
         );
       }
     }
+
+    const dlMemberSyncStarted = searchParams.get('dlMemberSyncStarted');
+    if (dlMemberSyncStarted === 'true') {
+      toast.success('Syncing older DL emails in background', {
+        description: "We'll notify you when this finishes.",
+      });
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('dlMemberSyncStarted');
+          p.delete('provider');
+          return p;
+        },
+        { replace: true },
+      );
+    }
   }, [searchParams, setSearchParams, navigate]);
 
   // Sync panel open/close with the URL so back button works correctly
@@ -1001,6 +1030,13 @@ const SupportScreen = (): ReactElement => {
   const { refetch: handleRefetch, isPending: isRefetching } =
     useRefetchExternalSource(refetchChannelId);
   const canRefetch = !!refetchChannelId;
+  const selectedChannelPref = useEmailChannelPreference(refetchChannelId ?? null);
+  const isDlDesk = selectedChannelPref?.deskType === DeskType.DL;
+  const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
+  const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
+  const dlMemberSyncTooltip = isDlMemberSyncing
+    ? `Syncing older emails from ${dlMemberSyncStatus.memberEmail}`
+    : 'Fetch latest emails or sync older DL emails';
   const { markAsRead: markBulkAsRead } = useMarkTicketsAsRead();
 
   type SelectedTicket = {
@@ -1560,26 +1596,98 @@ const SupportScreen = (): ReactElement => {
                             <span>{selectedChannelFull.channelStats?.participantCount ?? 0}</span>
                           </Button>
                         )}
-                      {canRefetch && isSelectedChannelJoined && (
-                        <Tooltip
-                          content={isRefetching ? 'Fetching latest…' : 'Fetch latest emails'}
-                          side='bottom'
-                        >
-                          <button
-                            onClick={() => setShowRefetchDialog(true)}
-                            disabled={isRefetching}
-                            className={cn(
-                              'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
-                              isRefetching && 'opacity-60 cursor-not-allowed',
-                            )}
-                            data-track-category='Support'
-                            data-track-name='RefetchExternalSource'
-                            data-track-metadata={JSON.stringify({ channelId: refetchChannelId })}
+                      {canRefetch &&
+                        isSelectedChannelJoined &&
+                        (isDlDesk ? (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <span>
+                                <Tooltip content={dlMemberSyncTooltip} side='bottom'>
+                                  <button
+                                    disabled={isRefetching}
+                                    className={cn(
+                                      'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
+                                      isRefetching && 'opacity-60 cursor-not-allowed',
+                                    )}
+                                    data-track-category='Support'
+                                    data-track-name='SyncDropdown'
+                                  >
+                                    <RefreshCw
+                                      size={16}
+                                      className={cn(
+                                        (isRefetching || isDlMemberSyncing) && 'animate-spin',
+                                      )}
+                                    />
+                                  </button>
+                                </Tooltip>
+                              </span>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align='end' className='w-80'>
+                              <DropdownMenuItem onClick={() => setShowRefetchDialog(true)}>
+                                <RefreshCw size={14} className='mr-2 shrink-0' />
+                                <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
+                                  <span className='truncate'>Fetch latest emails</span>
+                                  <Tooltip
+                                    content='Fetch recent emails from the connected shared mailbox for this desk.'
+                                    side='left'
+                                    className='max-w-72'
+                                  >
+                                    <InfoIcon
+                                      size={13}
+                                      className='shrink-0 text-muted-foreground'
+                                      onClick={event => event.stopPropagation()}
+                                    />
+                                  </Tooltip>
+                                </span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  if (!isDlMemberSyncing) setShowDlMemberSyncDialog(true);
+                                }}
+                                disabled={isDlMemberSyncing}
+                              >
+                                <UserPlus size={14} className='mr-2 shrink-0' />
+                                <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
+                                  <span className='truncate'>
+                                    {isDlMemberSyncing
+                                      ? 'Older email sync in progress'
+                                      : 'Sync older emails'}
+                                  </span>
+                                  <Tooltip
+                                    content='Fetch emails sent to this distribution list before the shared mailbox was added. Sign in with a member mailbox that has the older emails.'
+                                    side='left'
+                                    className='max-w-72'
+                                  >
+                                    <InfoIcon
+                                      size={13}
+                                      className='shrink-0 text-muted-foreground'
+                                      onClick={event => event.stopPropagation()}
+                                    />
+                                  </Tooltip>
+                                </span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        ) : (
+                          <Tooltip
+                            content={isRefetching ? 'Fetching latest…' : 'Fetch latest emails'}
+                            side='bottom'
                           >
-                            <RefreshCw size={16} className={cn(isRefetching && 'animate-spin')} />
-                          </button>
-                        </Tooltip>
-                      )}
+                            <button
+                              onClick={() => setShowRefetchDialog(true)}
+                              disabled={isRefetching}
+                              className={cn(
+                                'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
+                                isRefetching && 'opacity-60 cursor-not-allowed',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='RefetchExternalSource'
+                              data-track-metadata={JSON.stringify({ channelId: refetchChannelId })}
+                            >
+                              <RefreshCw size={16} className={cn(isRefetching && 'animate-spin')} />
+                            </button>
+                          </Tooltip>
+                        ))}
                       {isSelectedChannelJoined && (
                         <button
                           onClick={() => {
@@ -2119,6 +2227,15 @@ const SupportScreen = (): ReactElement => {
             setShowRefetchDialog(false);
             handleRefetch(range);
           }}
+        />
+      )}
+
+      {/* DL Member Sync Dialog */}
+      {canRefetch && isDlDesk && refetchChannelId && (
+        <DlMemberSyncDialog
+          open={showDlMemberSyncDialog}
+          onOpenChange={setShowDlMemberSyncDialog}
+          channelId={refetchChannelId}
         />
       )}
 

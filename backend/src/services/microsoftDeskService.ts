@@ -18,7 +18,8 @@ import { AttachmentUploadError } from '../integrations/core/baseMailReplySender'
 export type PendingChannelData =
   | PendingChannelCreate
   | PendingChannelReconnect
-  | PendingChannelWorkspace;
+  | PendingChannelWorkspace
+  | PendingChannelDlMemberSync;
 
 export interface PendingChannelCreate {
   mode?: 'create';
@@ -50,6 +51,17 @@ export interface PendingChannelWorkspace {
   platform?: 'electron' | 'web';
 }
 
+export interface PendingChannelDlMemberSync {
+  mode: 'dl-member-sync';
+  userId: string;
+  workspaceId: string;
+  channelId: string;
+  dlEmail: string;
+  startDate: string;
+  endDate: string;
+  platform?: 'electron' | 'web';
+}
+
 export function isReconnectChannelData(
   data: PendingChannelData,
 ): data is PendingChannelReconnect {
@@ -60,6 +72,12 @@ export function isWorkspaceChannelData(
   data: PendingChannelData,
 ): data is PendingChannelWorkspace {
   return data.mode === 'workspace';
+}
+
+export function isDlMemberSyncChannelData(
+  data: PendingChannelData,
+): data is PendingChannelDlMemberSync {
+  return data.mode === 'dl-member-sync';
 }
 
 interface MicrosoftCredentials {

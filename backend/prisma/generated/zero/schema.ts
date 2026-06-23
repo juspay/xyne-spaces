@@ -1819,6 +1819,7 @@ export const emailTable = table("emails")
     channelId: string(),
     externalThreadId: string(),
     externalMessageId: string(),
+    rfcMessageId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

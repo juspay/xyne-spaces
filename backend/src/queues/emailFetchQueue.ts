@@ -11,6 +11,7 @@ export interface EmailFetchJobData {
   endDate?: string;
   targetChannelId?: string;
   dlEmail?: string;
+  isDlMemberSync?: boolean;
 }
 
 class EmailFetchQueue {

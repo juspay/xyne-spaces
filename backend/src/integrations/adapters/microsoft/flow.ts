@@ -23,7 +23,7 @@ const GRAPH_MESSAGE_FIELDS = [
   'id', 'subject', 'body', 'bodyPreview', 'from',
   'toRecipients', 'ccRecipients', 'bccRecipients', 'replyTo',
   'conversationId', 'internetMessageId', 'receivedDateTime',
-  'hasAttachments', 'parentFolderId',
+  'hasAttachments', 'parentFolderId', 'internetMessageHeaders',
 ].join(',');
 
 const externalMessageRepo = new ExternalMessageRepository();

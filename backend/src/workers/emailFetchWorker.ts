@@ -44,7 +44,8 @@ class EmailFetchWorker {
       `[EMAIL-FETCH-WORKER] Processing job ${job.id} — source ${sourceId} (channel ${channelId})`,
     );
 
-    const source = await new ExternalSourceRepository().findById(sourceId);
+    const sourceRepo = new ExternalSourceRepository();
+    const source = await sourceRepo.findById(sourceId);
     if (!source || !source.isActive) {
       logger.warn(
         `[EMAIL-FETCH-WORKER] Source ${sourceId} missing or inactive — skipping`,
@@ -69,13 +70,45 @@ class EmailFetchWorker {
             ...(dlEmail && { dlEmail }),
           }
         : undefined;
-    const result = await adapter.refetch(source, options);
+    let result: Awaited<ReturnType<NonNullable<typeof adapter.refetch>>>;
+    try {
+      result = await adapter.refetch(source, options);
+    } catch (error) {
+      if (job.data.isDlMemberSync && this.isFinalAttempt(job)) {
+        await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
+      }
+      throw error;
+    }
 
     logger.info(
       `[EMAIL-FETCH-WORKER] Job ${job.id} done — processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
     );
 
     await this.notifySuccess(job.data, result);
+
+    if (job.data.isDlMemberSync) {
+      await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
+    }
+  }
+
+  private isFinalAttempt(job: Bull.Job<EmailFetchJobData>): boolean {
+    const maxAttempts = job.opts.attempts ?? 1;
+    return job.attemptsMade + 1 >= maxAttempts;
+  }
+
+  private async cleanupDlMemberSyncSource(
+    sourceRepo: ExternalSourceRepository,
+    sourceId: string,
+  ): Promise<void> {
+    try {
+      await sourceRepo.update(sourceId, { isActive: false, credentials: '' });
+      logger.info('[EMAIL-FETCH-WORKER] Deactivated temporary DL member sync source', { sourceId });
+    } catch (cleanupErr) {
+      logger.warn('[EMAIL-FETCH-WORKER] Failed to deactivate DL sync source', {
+        sourceId,
+        error: cleanupErr,
+      });
+    }
   }
 
   private async notifySuccess(
@@ -85,14 +118,21 @@ class EmailFetchWorker {
     try {
       const newCount = result.newTickets;
       const skipped = result.skipped;
-      const title =
-        newCount > 0
+      const isMemberSync = data.isDlMemberSync;
+      const title = isMemberSync
+        ? (newCount > 0
+          ? `Synced ${newCount} older ${newCount === 1 ? 'email' : 'emails'} from DL member`
+          : 'No older emails found to sync')
+        : (newCount > 0
           ? `Fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'}`
-          : 'Inbox is up to date';
-      const message =
-        newCount > 0
+          : 'Inbox is up to date');
+      const message = isMemberSync
+        ? (newCount > 0
+          ? `${newCount} new, ${skipped} already existed.`
+          : `All ${skipped} emails were already in the desk.`)
+        : (newCount > 0
           ? `${newCount} new, ${skipped} already imported.`
-          : `${skipped} emails were already imported.`;
+          : `${skipped} emails were already imported.`);
 
       await notificationService.sendNotification(
         data.requesterUserId,

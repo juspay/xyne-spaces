@@ -17,8 +17,10 @@ import { emailService } from '@/services/emailService';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { AttachmentConversionService } from '@/services/externalAttachmentService';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
+import { EmailRepository } from '@/database/repositories/emailRepository';
+import { db } from '@/database/client';
 import { emailMatchesDl } from '@/services/dlResolver';
-import { EmailRepository } from '@/database/repositories';
+import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 
 const TAG = '[MicrosoftRefetch]';
 const RANGE_MAX_MESSAGES = 2000;
@@ -32,6 +34,7 @@ const GRAPH_MESSAGE_FIELDS = [
   'toRecipients', 'ccRecipients', 'bccRecipients', 'replyTo',
   'conversationId', 'internetMessageId',
   'receivedDateTime', 'hasAttachments', 'parentFolderId',
+  'internetMessageHeaders',
 ].join(',');
 
 type GraphRecipient = { emailAddress?: { address?: string } };
@@ -81,6 +84,7 @@ export class MicrosoftRefetch extends BaseRefetch {
       options.startDate,
       options.endDate,
       targetDl,
+      targetDl ? null : RANGE_MAX_MESSAGES,
     );
     logger.info(`${TAG} range listing returned ${value.length} messages`, {
       startDate: options.startDate,
@@ -107,6 +111,19 @@ export class MicrosoftRefetch extends BaseRefetch {
       const existing = await emailRepo.findExistingExternalMessageIds(allLookupIds, ingestChannelId);
       if (existing.length > 0) {
         const existingSet = new Set(existing);
+        const backfilled = await emailRepo.backfillRfcMessageIdsByExternalMessageId(
+          ingestChannelId,
+          Array.from(groupedByThread.values())
+            .flat()
+            .filter(s => existingSet.has(stubLookupId(s)))
+            .map(s => ({
+              externalMessageId: stubLookupId(s),
+              rfcMessageId: s.internetMessageId,
+            })),
+        );
+        if (backfilled > 0) {
+          logger.info(`${TAG} backfilled RFC Message-ID for ${backfilled} already-ingested emails`);
+        }
         let skippedBeforeFetch = 0;
         for (const [threadId, stubs] of Array.from(groupedByThread.entries())) {
           const remaining = stubs.filter(s => !existingSet.has(stubLookupId(s)));
@@ -117,6 +134,80 @@ export class MicrosoftRefetch extends BaseRefetch {
         logger.info(
           `${TAG} pre-dedup: skipped ${skippedBeforeFetch} already-ingested messages; ${groupedByThread.size} threads remain`,
         );
+      }
+    }
+
+    if (options?.dlEmail && ingestChannelId && groupedByThread.size > 0) {
+      const allInternetMsgIds = Array.from(groupedByThread.values())
+        .flatMap(stubs => stubs.map(s => s.internetMessageId).filter(Boolean) as string[]);
+      const normalizedInternetMsgIds = normalizeRfcMessageIds(allInternetMsgIds);
+
+      if (allInternetMsgIds.length > 0) {
+        const existingInChannel = await db.email.findMany({
+          where: {
+            channelId: ingestChannelId,
+            OR: [
+              ...(normalizedInternetMsgIds.length > 0 ? [{ rfcMessageId: { in: normalizedInternetMsgIds } }] : []),
+              { externalMessageId: { in: allInternetMsgIds } },
+            ],
+          },
+          select: { externalMessageId: true, rfcMessageId: true, externalThreadId: true },
+        });
+        if (existingInChannel.length > 0) {
+          // Map: internetMessageId → channel's externalThreadId
+          const msgIdToChannelThreadId = new Map<string, string>();
+          for (const e of existingInChannel) {
+            if (e.rfcMessageId && e.externalThreadId) {
+              msgIdToChannelThreadId.set(e.rfcMessageId, e.externalThreadId);
+            }
+            if (e.externalMessageId && e.externalThreadId) {
+              msgIdToChannelThreadId.set(e.externalMessageId, e.externalThreadId);
+            }
+          }
+
+          const remapped = new Map<string, GraphMessageStub[]>();
+          let remappedCount = 0;
+          let skippedCount = 0;
+
+          for (const [memberThreadId, stubs] of Array.from(groupedByThread.entries())) {
+            let channelThreadId: string | null = null;
+            for (const s of stubs) {
+              const normalizedInternetMessageId = normalizeRfcMessageId(s.internetMessageId);
+              const lookupIds = [
+                ...(normalizedInternetMessageId ? [normalizedInternetMessageId] : []),
+                ...(s.internetMessageId && s.internetMessageId !== normalizedInternetMessageId ? [s.internetMessageId] : []),
+              ];
+              const matchedId = lookupIds.find(id => msgIdToChannelThreadId.has(id));
+              if (matchedId) {
+                channelThreadId = msgIdToChannelThreadId.get(matchedId)!;
+                break;
+              }
+            }
+
+            if (channelThreadId) {
+              const existing = remapped.get(channelThreadId) ?? [];
+              const existingIds = new Set(existing.map(s => s.internetMessageId).filter((id): id is string => !!id));
+              const newStubs = stubs.filter(s => !(s.internetMessageId && existingIds.has(s.internetMessageId)));
+
+              if (newStubs.length > 0) {
+                remapped.set(channelThreadId, [...existing, ...newStubs]);
+                remappedCount++;
+              } else {
+                skippedCount++;
+              }
+            } else {
+              remapped.set(memberThreadId, stubs);
+            }
+          }
+
+          groupedByThread.clear();
+          for (const [k, v] of remapped) groupedByThread.set(k, v);
+
+          logger.info(
+            `${TAG} DL cross-source thread dedup: remapped ${remappedCount} threads, skipped ${skippedCount} empty; ${groupedByThread.size} remain`,
+            { channelId: ingestChannelId },
+          );
+        }
       }
     }
 
@@ -172,14 +263,19 @@ export class MicrosoftRefetch extends BaseRefetch {
         );
         if (validParsed.length === 0) return;
 
+        const allRefs = validParsed.flatMap(d => d.data.referencedMessageIds ?? []);
+        const referencedMessageIds = allRefs.length > 0 ? [...new Set(allRefs)] : undefined;
+
         const result = await emailService.ingestEmailThread({
           channelId: ingestChannelId,
           externalThreadId: threadId,
           externalSourceId: source.id,
           userId,
           ticketMetadata: validParsed[0]!.data.metadata,
+          referencedMessageIds,
           emails: validParsed.map(({ data: d, uploadedFiles }) => ({
             externalMessageId: d.externalId,
+            rfcMessageId: d.rfcMessageId,
             subject: d.emailData!.subject ?? '',
             body: d.content,
             from: d.emailData!.from!,
@@ -242,6 +338,7 @@ export class MicrosoftRefetch extends BaseRefetch {
     startDate: string,
     endDate: string,
     targetDl: string | null,
+    maxMessages: number | null,
   ): Promise<GraphMessageStub[]> {
     const selectFields = targetDl
       ? 'id,receivedDateTime,conversationId,internetMessageId,from,toRecipients,ccRecipients'
@@ -260,7 +357,7 @@ export class MicrosoftRefetch extends BaseRefetch {
     let nextLink: string | undefined = initialUrl.toString();
     let droppedNoMatch = 0;
 
-    while (nextLink && collected.length < RANGE_MAX_MESSAGES) {
+    while (nextLink && (maxMessages === null || collected.length < maxMessages)) {
       const response = await fetch(nextLink, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -278,7 +375,7 @@ export class MicrosoftRefetch extends BaseRefetch {
           continue;
         }
         collected.push(m);
-        if (collected.length >= RANGE_MAX_MESSAGES) break;
+        if (maxMessages !== null && collected.length >= maxMessages) break;
       }
       nextLink = json['@odata.nextLink'];
     }
