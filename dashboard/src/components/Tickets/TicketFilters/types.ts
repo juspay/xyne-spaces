@@ -50,6 +50,8 @@ export interface TicketFiltersProps {
   availableTags?: string[] | undefined;
   availableStages?: { name: string; status?: TicketStatusV2 | undefined }[] | undefined;
   hideAssigneeFilter?: boolean;
+  hasPrReviewers?: boolean;
+  hasQaAssigned?: boolean;
   formMappings?: readonly FormContextMapping[] | undefined;
   /** Board name from parent (avoids waiting for lazy board list fetch) */
   selectedBoardName?: string | undefined;

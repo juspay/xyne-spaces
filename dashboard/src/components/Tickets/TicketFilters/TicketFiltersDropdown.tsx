@@ -113,6 +113,8 @@ export const TicketFiltersDropdown = ({
   availableTags,
   availableStages,
   hideAssigneeFilter = false,
+  hasPrReviewers,
+  hasQaAssigned,
   formMappings,
   searchValue,
   onSearchChange,
@@ -818,7 +820,9 @@ export const TicketFiltersDropdown = ({
                 .filter(
                   item =>
                     (item.id !== 'boards' || showBoardsFilter) &&
-                    (item.id !== 'stages' || selectedBoards.length > 0),
+                    (item.id !== 'stages' || selectedBoards.length > 0) &&
+                    (item.id !== 'prReviewers' || hasPrReviewers === true) &&
+                    (item.id !== 'qaAssigned' || hasQaAssigned === true),
                 )
                 .map(item => {
                   const Icon = item.icon;

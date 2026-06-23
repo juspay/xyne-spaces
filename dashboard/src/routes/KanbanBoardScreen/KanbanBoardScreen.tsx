@@ -86,7 +86,12 @@ import {
   getPriorityIcon,
   isStageEtaOverdue,
 } from '../../components/Tickets/TicketCard/TicketCard.utils';
-import { TicketPriority, SavedConfigVisibility, SavedConfigEntityName } from '@xyne/shared';
+import {
+  TicketPriority,
+  SavedConfigVisibility,
+  SavedConfigEntityName,
+  UserResponsibility,
+} from '@xyne/shared';
 import AcOnSlow from '../../assets/icons/AcOnSlowIcon';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useUsers } from '../../hooks/useUsers';
@@ -1151,18 +1156,26 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return Object.values(TicketPriority);
   }, []);
 
-  const availableUsers = useMemo(() => {
+  const { availableUsers, hasPrReviewers, hasQaAssigned } = useMemo(() => {
     const userIds = new Set<string>();
+    let hasPrReviewers = false;
+    let hasQaAssigned = false;
     (kanbanSourceTickets as KanbanLocalTicket[] | undefined)?.forEach(ticket => {
       if (ticket.assignedTo) userIds.add(ticket.assignedTo);
       userIds.add(ticket.createdBy);
       if (Array.isArray(ticket.assignments)) {
         ticket.assignments.forEach(assignment => {
           if (assignment.userId) userIds.add(assignment.userId);
+          const responsibility = assignment.userResponsibility as UserResponsibility;
+          if (!hasPrReviewers && responsibility === UserResponsibility.PR_REVIEWER) {
+            hasPrReviewers = true;
+          } else if (!hasQaAssigned && responsibility === UserResponsibility.QA) {
+            hasQaAssigned = true;
+          }
         });
       }
     });
-    return Array.from(userIds);
+    return { availableUsers: Array.from(userIds), hasPrReviewers, hasQaAssigned };
   }, [kanbanSourceTickets]);
 
   const availableUserGroups = useMemo(() => {
@@ -1936,6 +1949,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               showBoardsFilter={!!channelId || isMyTicketsView}
               availableTags={availableTags}
               availableStages={availableStages}
+              hasPrReviewers={hasPrReviewers}
+              hasQaAssigned={hasQaAssigned}
               hideAssigneeFilter={viewMode === 'my-tickets' ? true : false}
               isTicketsSyncing={isTicketsSyncing}
               onBoardDropdownOpenChange={handleBoardDropdownOpenChange}
