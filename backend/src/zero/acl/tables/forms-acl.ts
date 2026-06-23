@@ -3,11 +3,41 @@ import {
   MutationACLError,
   type TableSchema,
 } from '../core/types';
-import { Schema } from '@xyne/shared';
+import { AccessType, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 
+const FORMS_RESOURCE_NAME = 'FORMS';
+
 export class FormsACL extends BaseACL<'forms'> {
+
+  /**
+   * Check if user has ADMIN access to FORMS resource (direct or via group).
+   */
+  private async hasFormsAdminAccess(tx: Transaction<Schema>): Promise<boolean> {
+    const formsResource = await tx.run(zql.resources.where('name', FORMS_RESOURCE_NAME).one());
+    if (!formsResource) return false;
+
+    // Direct user grants on the resource
+    const directGrants = await tx.run(
+      zql.resource_access
+        .where('userId', this.ctx.userID)
+        .where('resourceId', formsResource.id),
+    );
+    if (directGrants.some(g => g.accessType === AccessType.ADMIN)) return true;
+
+    // Group grants: find user's group memberships, then check group access
+    const memberships = await tx.run(
+      zql.user_group_mappings.where('userId', this.ctx.userID),
+    );
+    const groupIds = new Set(memberships.map(m => m.userGroupId));
+    const groupGrants = await tx.run(
+      zql.resource_access.where('resourceId', formsResource.id),
+    );
+    return groupGrants.some(
+      g => g.groupId != null && groupIds.has(g.groupId) && g.accessType === AccessType.ADMIN,
+    );
+  }
 
   async canInsert(args: InsertValue<TableSchema<'forms'>>, _tx: Transaction<Schema>): Promise<void> {
     if (args.createdBy !== this.ctx.userID) {
@@ -28,10 +58,11 @@ export class FormsACL extends BaseACL<'forms'> {
     if (form.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Form update failed: workspace ID mismatch', 'forms');
     }
-    // Allow OWNER and ADMIN roles to update any form in their workspace
-    if (this.ctx.orgRole === 'OWNER' || this.ctx.orgRole === 'ADMIN') {
+    // Allow FORMS resource ADMIN to update any form
+    if (await this.hasFormsAdminAccess(tx)) {
       return;
     }
+    // Otherwise, only creator can update
     if (form.createdBy !== this.ctx.userID) {
       throw new MutationACLError('Form update failed: only the creator can update this form', 'forms');
     }
@@ -46,10 +77,11 @@ export class FormsACL extends BaseACL<'forms'> {
     if (form.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Form delete failed: workspace ID mismatch', 'forms');
     }
-    // Allow OWNER and ADMIN roles to delete any form in their workspace
-    if (this.ctx.orgRole === 'OWNER' || this.ctx.orgRole === 'ADMIN') {
+    // Allow FORMS resource ADMIN to delete any form
+    if (await this.hasFormsAdminAccess(tx)) {
       return;
     }
+    // Otherwise, only creator can delete
     if (form.createdBy !== this.ctx.userID) {
       throw new MutationACLError('Form delete failed: only the creator can delete this form', 'forms');
     }
