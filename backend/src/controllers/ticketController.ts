@@ -500,8 +500,12 @@ export class TicketController {
           select: { id: true },
         });
         if (parentAsSubTicket) {
+          logger.warn('[Ticket Creation] Rejected sub-ticket: parent is already a sub-ticket', {
+            parentTicketId,
+            userId: req.user?.id,
+          });
           res.status(400).json({
-            error: `Cannot create a sub-ticket under a sub-ticket. Parent ticket ${parentTicketId} is already a sub-ticket.`,
+            error: `Cannot create a sub-ticket under a sub-ticket.`,
           });
           return;
         }
