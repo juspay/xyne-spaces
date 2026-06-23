@@ -755,6 +755,18 @@ export class TicketRepository {
   }
 
   /**
+   * Get ticket by external xyneId or internal ticket id within a workspace.
+   */
+  async getTicketByXyneIdOrId(identifier: string, workspaceId: string) {
+    return await prisma.ticket.findFirst({
+      where: {
+        workspaceId,
+        OR: [{ xyneId: identifier }, { id: identifier }],
+      },
+    });
+  }
+
+  /**
    * Get ticket by ID with id and xyneId selection
    */
   async getTicketById(ticketId: string) {

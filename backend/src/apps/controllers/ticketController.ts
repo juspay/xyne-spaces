@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
-import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, FormContextType, FormEntityType, FormFieldType, Prisma, DeskType } from '@prisma/client';
+import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, FormContextType, FormEntityType, Prisma, DeskType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
@@ -27,6 +27,11 @@ import type { MerchantTicketListItem } from '../types';
 import { validateChannelIdsAccess } from '../middelware/channelValidation';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { generateKeyBetween } from 'fractional-indexing';
+import {
+  fetchTicketInfoByIdentifier,
+  normalizeCustomFieldValue,
+  normalizeHistoryLimit,
+} from './ticketController.helpers';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
@@ -159,142 +164,6 @@ type CustomFieldWritePayload = {
     fieldValue: string;
     actualFieldValue: Prisma.InputJsonValue;
   }>;
-};
-
-const parseFieldOptions = (fieldEnum: Prisma.JsonValue | null): string[] => {
-  if (!Array.isArray(fieldEnum)) return [];
-  return fieldEnum
-    .filter((value): value is string => typeof value === 'string')
-    .map(value => value.trim())
-    .filter(Boolean);
-};
-
-const normalizeCustomFieldValue = (
-  field: {
-    fieldName: string;
-    fieldType: FormFieldType;
-    fieldEnum: Prisma.JsonValue | null;
-  },
-  rawValue: unknown,
-): { actualFieldValue: Prisma.InputJsonValue; fieldValue: string } => {
-  switch (field.fieldType) {
-    case FormFieldType.STRING: {
-      if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
-        throw new Error(`Field "${field.fieldName}" must be a non-empty string`);
-      }
-
-      const value = rawValue.trim();
-      return { actualFieldValue: value, fieldValue: value };
-    }
-
-    case FormFieldType.USER: {
-      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
-      const normalizedValues = values
-        .filter((value): value is string => typeof value === 'string')
-        .map(value => value.trim())
-        .filter(Boolean);
-
-      if (normalizedValues.length === 0) {
-        throw new Error(`Field "${field.fieldName}" must be a non-empty string or array of strings`);
-      }
-
-      if (normalizedValues.length === 1) {
-        return { actualFieldValue: normalizedValues[0], fieldValue: normalizedValues[0] };
-      }
-
-      const dedupedValues = Array.from(new Set(normalizedValues));
-      return { actualFieldValue: dedupedValues, fieldValue: dedupedValues.join(',') };
-    }
-
-    case FormFieldType.NUMBER: {
-      const numericValue =
-        typeof rawValue === 'number'
-          ? rawValue
-          : typeof rawValue === 'string' && rawValue.trim().length > 0
-            ? Number(rawValue)
-            : Number.NaN;
-
-      if (!Number.isFinite(numericValue)) {
-        throw new Error(`Field "${field.fieldName}" must be a valid number`);
-      }
-
-      return { actualFieldValue: numericValue, fieldValue: String(numericValue) };
-    }
-
-    case FormFieldType.BOOLEAN: {
-      if (typeof rawValue === 'boolean') {
-        return { actualFieldValue: rawValue, fieldValue: String(rawValue) };
-      }
-
-      if (typeof rawValue === 'string') {
-        const normalized = rawValue.trim().toLowerCase();
-        if (normalized === 'true' || normalized === 'false') {
-          const boolValue = normalized === 'true';
-          return { actualFieldValue: boolValue, fieldValue: String(boolValue) };
-        }
-      }
-
-      throw new Error(`Field "${field.fieldName}" must be a boolean`);
-    }
-
-    case FormFieldType.DATE: {
-      const dateValue =
-        rawValue instanceof Date
-          ? rawValue
-          : typeof rawValue === 'string' || typeof rawValue === 'number'
-            ? new Date(rawValue)
-            : null;
-
-      if (!dateValue || Number.isNaN(dateValue.getTime())) {
-        throw new Error(`Field "${field.fieldName}" must be a valid date`);
-      }
-
-      const isoValue = dateValue.toISOString();
-      return { actualFieldValue: isoValue, fieldValue: isoValue };
-    }
-
-    case FormFieldType.SINGLE_SELECT: {
-      if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
-        throw new Error(`Field "${field.fieldName}" must be a non-empty string`);
-      }
-
-      const value = rawValue.trim();
-      const options = parseFieldOptions(field.fieldEnum);
-      if (options.length > 0 && !options.includes(value)) {
-        throw new Error(`Field "${field.fieldName}" must be one of: ${options.join(', ')}`);
-      }
-
-      return { actualFieldValue: value, fieldValue: value };
-    }
-
-    case FormFieldType.MULTI_SELECT: {
-      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
-      const normalizedValues = values
-        .filter((value): value is string => typeof value === 'string')
-        .map(value => value.trim())
-        .filter(Boolean);
-
-      if (normalizedValues.length === 0) {
-        throw new Error(`Field "${field.fieldName}" must be a non-empty array of strings`);
-      }
-
-      const options = parseFieldOptions(field.fieldEnum);
-      if (options.length > 0) {
-        const invalidValues = normalizedValues.filter(value => !options.includes(value));
-        if (invalidValues.length > 0) {
-          throw new Error(
-            `Field "${field.fieldName}" has invalid values: ${invalidValues.join(', ')}. Allowed values: ${options.join(', ')}`,
-          );
-        }
-      }
-
-      const dedupedValues = Array.from(new Set(normalizedValues));
-      return { actualFieldValue: dedupedValues, fieldValue: dedupedValues.join(',') };
-    }
-
-    default:
-      throw new Error(`Unsupported field type for "${field.fieldName}"`);
-  }
 };
 
 const buildCustomFieldWritePayload = async (
@@ -1247,46 +1116,55 @@ export class TicketController {
   };
 
   /**
-   * Get ticket information by ID
-   * GET /:ticketId
+   * Get ticket information by xyneId
+   * GET /:xyneId
    */
   getInfo = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { ticketId } = req.params;
+      const { xyneId } = req.params;
+      const workspaceId = req.user?.workspaceId;
 
-      if (!ticketId) {
+      if (!xyneId) {
         res.status(400).json({
-          error: 'Ticket ID is required',
+          error: 'xyneId is required',
           code: 'VALIDATION_ERROR',
         });
         return;
       }
 
-      const ticket = await repositories.tickets.getTicketById(ticketId);
+      if (!workspaceId) {
+        res.status(400).json({
+          error: 'Authenticated workspace is required',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
 
-      if (!ticket) {
+      const ticketInfo = await fetchTicketInfoByIdentifier(
+        {
+          identifier: xyneId,
+          workspaceId,
+          historyLimit: normalizeHistoryLimit(req.query.historyLimit),
+        },
+        {
+          getTicketByIdentifier: repositories.tickets.getTicketByXyneIdOrId.bind(repositories.tickets),
+          getTicketCustomFormData: repositories.forms.getTicketCustomFormData.bind(repositories.forms),
+          getTicketHistory: repositories.tickets.getTicketHistory.bind(repositories.tickets),
+        },
+      );
+
+      if (!ticketInfo) {
         res.status(404).json({
-          error: `Ticket with ID ${ticketId} not found`,
+          error: `Ticket with xyneId ${xyneId} not found`,
           code: 'TICKET_NOT_FOUND',
         });
         return;
       }
 
-      const parsedHistoryLimit = Number(req.query.historyLimit);
-      const historyLimit =
-        Number.isFinite(parsedHistoryLimit) && parsedHistoryLimit > 0
-          ? Math.min(Math.floor(parsedHistoryLimit), 200)
-          : 100;
-
-      const [customFormData, history] = await Promise.all([
-        repositories.forms.getTicketCustomFormData(ticket.id, ticket.boardId),
-        repositories.tickets.getTicketHistory(ticket.id, historyLimit),
-      ]);
-
       res.status(200).json({
-        ...ticket,
-        customFormData,
-        history,
+        ...ticketInfo.ticket,
+        customFormData: ticketInfo.customFormData,
+        history: ticketInfo.history,
       });
     } catch (error) {
       logger.error('[TicketController] Error fetching ticket info:', error);
