@@ -124,25 +124,3 @@ export function getWorkspaceIdByTeamId(teamId: string): string {
   }
   return config.defaultWorkspaceId || '';
 }
-
-/**
- * Returns all configured signing secrets (deduplicated).
- * The verify middleware tries each one so that multi-workspace setups work
- * without needing to parse the team_id before body is verified.
- */
-export function getAllSigningSecrets(): string[] {
-  const entries = Object.values(getParsedConfigs());
-
-  if (entries.length === 0) {
-    return config.slackSigningSecret ? [config.slackSigningSecret] : [];
-  }
-
-  const secrets = new Set<string>();
-  for (const entry of entries) {
-    if (entry.slackSigningSecret) secrets.add(entry.slackSigningSecret);
-  }
-  // Always include the global fallback too
-  if (config.slackSigningSecret) secrets.add(config.slackSigningSecret);
-
-  return [...secrets];
-}

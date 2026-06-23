@@ -73,27 +73,22 @@ TS_HELPER_SCRIPT = "scripts/deadcode-analyzer/remove-declaration.cjs"
 
 
 def get_workspace_info(filepath: str) -> tuple[Path | None, str | None]:
-    """Get the workspace root and tsconfig path from a monorepo filepath.
-    
-    Returns (workspace_root, tsconfig_path) or (None, None).
+    """Walk up from the file's directory to find the nearest enclosing tsconfig.
+
+    Returns (tsconfig_dir, tsconfig_path) or (None, None). Supports both flat
+    workspaces (xyne-claw/tsconfig.json) and nested ones
+    (xyne-claw-auth/backend/tsconfig.json) — same lookup rule tsc itself uses.
     """
-    parts = filepath.split("/")
-    if len(parts) < 2:
-        return None, None
-    
-    workspace_name = parts[0]
-    workspace_root = MONOREPO_ROOT / workspace_name
-    tsconfig = workspace_root / "tsconfig.json"
-    
-    if tsconfig.exists():
-        return workspace_root, str(tsconfig)
-    
-    # Fallback: some workspaces might have nested tsconfigs
-    app_tsconfig = workspace_root / "tsconfig.app.json"
-    if app_tsconfig.exists():
-        return workspace_root, str(app_tsconfig)
-    
-    return None, None
+    current = (MONOREPO_ROOT / filepath).parent
+
+    while True:
+        for name in ("tsconfig.json", "tsconfig.app.json"):
+            cfg = current / name
+            if cfg.exists():
+                return current, str(cfg)
+        if current == MONOREPO_ROOT or MONOREPO_ROOT not in current.parents:
+            return None, None
+        current = current.parent
 
 
 def run_ts_morph(filepath: str, line_no: int, symbol: str, dry_run: bool) -> bool:
@@ -347,16 +342,37 @@ def main():
     else:
         print(f"Done: {total_removed} removed/edited, {total_failed} failed")
         
-        # Auto-fix tsc errors from our modifications
+        # Auto-fix tsc errors from our modifications.
+        # Group files by their nearest tsconfig so each tsc invocation runs
+        # against the project that actually owns those files. Honour
+        # --workspace as a prefix filter when set.
         if all_modified_files and not args.skip_tsc:
             print()
             print("Running tsc auto-cleanup...")
-            tsconfig = get_tsconfig_for_workspace(args.workspace)
-            if tsconfig:
-                fixes, iters = run_tsc_cleanup(tsconfig, list(all_modified_files), max_iterations=args.tsc_max_iterations)
-                print(f"  Auto-fixed {fixes} tsc errors in {iters} iterations")
+
+            files_by_tsconfig: dict[str, list[str]] = {}
+            no_tsconfig: list[str] = []
+            for f in all_modified_files:
+                if args.workspace and not f.startswith(args.workspace.rstrip("/") + "/"):
+                    continue
+                _, tsconfig = get_workspace_info(f)
+                if tsconfig:
+                    files_by_tsconfig.setdefault(tsconfig, []).append(f)
+                else:
+                    no_tsconfig.append(f)
+
+            if not files_by_tsconfig:
+                print("  No tsconfig found for modified files — skipping tsc check")
             else:
-                print("  No tsconfig found for workspace — skipping tsc check")
+                total_fixes = 0
+                for tsconfig, files in files_by_tsconfig.items():
+                    rel_cfg = Path(tsconfig).relative_to(MONOREPO_ROOT)
+                    print(f"  tsc cleanup for {rel_cfg} ({len(files)} files)")
+                    fixes, iters = run_tsc_cleanup(tsconfig, files, max_iterations=args.tsc_max_iterations)
+                    total_fixes += fixes
+                print(f"  Auto-fixed {total_fixes} tsc errors across {len(files_by_tsconfig)} tsconfig(s)")
+                if no_tsconfig:
+                    print(f"  ({len(no_tsconfig)} file(s) had no enclosing tsconfig and were skipped)")
         
         # Cleanup empty files and directories
         print()
@@ -436,23 +452,6 @@ def cleanup_empty_files_and_dirs(modified_files: set[str]):
                 break
     
     return deleted
-
-
-def get_tsconfig_for_workspace(workspace: str | None) -> str | None:
-    """Determine tsconfig path for a workspace."""
-    if workspace:
-        configs = [
-            f"{workspace}/tsconfig.app.json",
-            f"{workspace}/tsconfig.json",
-        ]
-    else:
-        # Default to dashboard since it's the primary target
-        configs = ["dashboard/tsconfig.app.json", "dashboard/tsconfig.json"]
-    
-    for cfg in configs:
-        if (MONOREPO_ROOT / cfg).exists():
-            return cfg
-    return None
 
 
 from tsc_cleanup import run_tsc_cleanup

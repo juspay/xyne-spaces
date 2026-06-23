@@ -210,12 +210,6 @@ export interface SlackChannelObject {
 	topic: { value: string; creator: string; last_set: number };
 }
 
-export interface SlackConversationsInfoRequest {
-	channel: string;
-	include_num_members?: boolean;
-	include_locale?: boolean;
-}
-
 export interface SlackConversationsInfoResponse {
 	ok: true;
 	channel: SlackChannelObject;
@@ -238,12 +232,6 @@ export interface SlackConversationsListResponse {
 }
 
 // ========== conversations.open ==========
-
-export interface SlackConversationsOpenRequest {
-	users?: string;
-	channel?: string;
-	return_im?: boolean;
-}
 
 export interface SlackConversationsOpenResponse {
 	ok: true;
@@ -290,29 +278,4 @@ export interface SlackUsergroupsListResponse {
 }
 
 // ========== files.getUploadURLExternal (v2 step 1) ==========
-
-export interface SlackGetUploadURLExternalRequest {
-	filename: string;
-	length: number;
-}
-
-export interface SlackGetUploadURLExternalResponse {
-	ok: true;
-	upload_url: string;
-	file_id: string;
-}
-
 // ========== files.completeUploadExternal (v2 step 3) ==========
-
-export interface SlackCompleteUploadExternalRequest {
-	files: Array<{ id: string; title?: string }>;
-	channel_id?: string;
-	channels?: string;
-	initial_comment?: string;
-	thread_ts?: string;
-}
-
-export interface SlackCompleteUploadExternalResponse {
-	ok: true;
-	files: SlackFileObject[];
-}
