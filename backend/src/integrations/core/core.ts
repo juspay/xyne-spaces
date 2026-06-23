@@ -369,22 +369,45 @@ export class ExternalSourceCore {
       const uploadedFiles = AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
       logger.info(`Converted to ${uploadedFiles.length} uploaded files`);
 
-      const { message } = await conversationService.addMessageToConversation({
-        conversationId: conversation.conversationId,
-        userId: source.displayName,
-        content: normalizedData.content,
-        msgType: 'BOT',
-        uploadedFiles: uploadedFiles,
-        metadata: {
-          externalSource: source.name,
-          externalAuthor: normalizedData.author,
-          eventType: normalizedData.metadata.eventType,
-          ticketNumber: normalizedData.metadata.ticketNumber,
-          webUrl: normalizedData.metadata.webUrl,
-        },
-        isBot: true,
-      });
-      return { conversation, message, email: undefined, isNew: false };
+      if (isDeskChannel) {
+        if (!normalizedData.emailData?.to || !normalizedData?.emailData.from ) {
+          throw new Error(
+            'Missing required email fields in normalizedData. Required: subject, body, to, from'
+          );
+        }
+        const { email } = await emailService.addEmailToConversation({
+          conversationId: conversation.conversationId,
+          emailSubject: normalizedData.emailData.subject || "",
+          emailBody: normalizedData.content,
+          emailTo: normalizedData.emailData.to,
+          emailFrom: normalizedData.emailData.from,
+          emailCc: normalizedData?.emailData?.cc,
+          emailBcc: normalizedData?.emailData?.bcc,
+          externalThreadId: normalizedData.externalThreadId,
+          externalMessageId: normalizedData.externalId,
+          rfcMessageId: normalizedData.rfcMessageId,
+          uploadedFiles: uploadedFiles,
+          receivedAt: normalizedData.metadata.timestamp,
+        });
+        return { conversation, message: undefined, email, isNew: false };
+      } else {
+        const { message } = await conversationService.addMessageToConversation({
+          conversationId: conversation.conversationId,
+          userId: source.displayName,
+          content: normalizedData.content,
+          msgType: 'BOT',
+          uploadedFiles: uploadedFiles,
+          metadata: {
+            externalSource: source.name,
+            externalAuthor: normalizedData.author,
+            eventType: normalizedData.metadata.eventType,
+            ticketNumber: normalizedData.metadata.ticketNumber,
+            webUrl: normalizedData.metadata.webUrl,
+          },
+          isBot: true,
+        });
+        return { conversation, message, email: undefined, isNew: false };
+      }
     }
 
     if (isDeskChannel && normalizedData.emailData) {
@@ -415,8 +438,50 @@ export class ExternalSourceCore {
             emailReplyTo: normalizedData.emailData.replyTo || [],
             externalThreadId: normalizedData.externalThreadId,
             externalMessageId: normalizedData.externalId,
+            rfcMessageId: normalizedData.rfcMessageId,
             emailType: EmailType.DEFAULT,
             uploadedFiles: uploadedFilesForThread,
+            receivedAt: normalizedData.metadata.timestamp,
+          });
+
+          return { conversation, email, isNew: false };
+        }
+      }
+    }
+
+    // Cross-mailbox thread lookup via RFC References/In-Reply-To.
+    // When externalThreadId differs across mailboxes (e.g. DL member sync),
+    // match by RFC Message-ID because it is stable across mailboxes.
+    if (isDeskChannel && !existingExtMsg && normalizedData.referencedMessageIds?.length && normalizedData.emailData) {
+      const refMatch = await this.emailRepo.findByRfcMessageIds(
+        source.channelId!,
+        normalizedData.referencedMessageIds,
+      );
+      if (refMatch) {
+        const conversation = await this.conversationRepo.findById(refMatch.conversationId);
+        if (conversation) {
+          logger.info('[RFC_REFS_THREAD_FOUND] Cross-mailbox thread matched via References header', {
+            conversationId: conversation.conversationId,
+            matchedRefs: normalizedData.referencedMessageIds.length,
+            channelId: source.channelId,
+          });
+
+          const uploadedFilesForRefs =
+            AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
+
+          const { email } = await emailService.addEmailToConversation({
+            conversationId: conversation.conversationId,
+            emailSubject: normalizedData.emailData.subject || '',
+            emailBody: normalizedData.content,
+            emailTo: normalizedData.emailData.to || [],
+            emailFrom: normalizedData.emailData.from || '',
+            emailCc: normalizedData.emailData.cc || [],
+            emailBcc: normalizedData.emailData.bcc || [],
+            externalThreadId: normalizedData.externalThreadId,
+            externalMessageId: normalizedData.externalId,
+            rfcMessageId: normalizedData.rfcMessageId,
+            emailType: EmailType.DEFAULT,
+            uploadedFiles: uploadedFilesForRefs,
             receivedAt: normalizedData.metadata.timestamp,
           });
 
@@ -480,6 +545,7 @@ export class ExternalSourceCore {
           emailReplyTo: normalizedData.emailData.replyTo || [],
           externalThreadId: normalizedData.externalThreadId,
           externalMessageId: normalizedData.externalId,
+          rfcMessageId: normalizedData.rfcMessageId,
           emailType: EmailType.DEFAULT,
           uploadedFiles: uploadedFiles,
           receivedAt: normalizedData.metadata.timestamp,
@@ -534,6 +600,7 @@ export class ExternalSourceCore {
         emailReplyTo: normalizedData.emailData.replyTo,
         externalThreadId: normalizedData.externalThreadId,
         externalMessageId: normalizedData.externalId,
+        rfcMessageId: normalizedData.rfcMessageId,
         ticketMetadata: normalizedData.metadata,
         uploadedFiles: uploadedFiles,
         sourceName: source.name, // Pass sourceName for Superposition context

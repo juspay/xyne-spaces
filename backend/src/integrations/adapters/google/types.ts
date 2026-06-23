@@ -76,6 +76,7 @@ export interface ParsedEmailData {
   htmlBody?: string;
   textBody?: string;
   attachments?: GmailAttachment[];
+  rfcMessageId?: string;
   inReplyTo?: string;
   references?: string[];
 }

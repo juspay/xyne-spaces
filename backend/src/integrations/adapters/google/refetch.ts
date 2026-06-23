@@ -15,7 +15,7 @@ import { emailService } from '@/services/emailService';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { AttachmentConversionService } from '@/services/externalAttachmentService';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
-import { EmailRepository } from '@/database/repositories';
+import { EmailRepository } from '@/database/repositories/emailRepository';
 
 const TAG = '[GoogleRefetch]';
 const transformer = new GoogleTransformer();
@@ -30,7 +30,7 @@ export class GoogleRefetch extends BaseRefetch {
         '[GoogleRefetch] startDate and endDate are required — manual refetch is range-only',
       );
     }
-    
+
     const ingestChannelId = options.targetChannelId ?? source.channelId;
     if (!ingestChannelId) {
       throw new Error(`[GoogleRefetch] source ${source.name} has no channel to ingest into`);
@@ -48,6 +48,7 @@ export class GoogleRefetch extends BaseRefetch {
       startDate: options.startDate,
       endDate: options.endDate,
       ...(extraQuery && { extraQuery }),
+      ...(options.dlEmail && { maxMessages: null }),
     });
     logger.info(`${TAG} range listing returned ${messages.length} messages`, {
       startDate: options.startDate,
@@ -68,6 +69,10 @@ export class GoogleRefetch extends BaseRefetch {
       const existing = await emailRepo.findExistingExternalMessageIds(allMessageIds, ingestChannelId);
       if (existing.length > 0) {
         const existingSet = new Set(existing);
+        const skippedIds = allMessageIds.filter(id => existingSet.has(id));
+        if (skippedIds.length > 0) {
+          await this.backfillSkippedRfcMessageIds(google, ingestChannelId, skippedIds);
+        }
         let skippedBeforeFetch = 0;
         const filtered: typeof threadGroups = [];
         for (const [threadId, ids] of threadGroups) {
@@ -131,14 +136,19 @@ export class GoogleRefetch extends BaseRefetch {
         );
         if (validParsed.length === 0) return;
 
+        const allRefs = validParsed.flatMap(d => d.data.referencedMessageIds ?? []);
+        const referencedMessageIds = allRefs.length > 0 ? [...new Set(allRefs)] : undefined;
+
         const result = await emailService.ingestEmailThread({
           channelId: ingestChannelId,
           externalThreadId: threadId,
           externalSourceId: source.id,
           userId,
           ticketMetadata: validParsed[0]!.data.metadata,
+          referencedMessageIds,
           emails: validParsed.map(({ data: d, uploadedFiles }) => ({
             externalMessageId: d.externalId,
+            rfcMessageId: d.rfcMessageId,
             subject: d.emailData!.subject ?? '',
             body: d.content,
             from: d.emailData!.from!,
@@ -201,5 +211,34 @@ export class GoogleRefetch extends BaseRefetch {
 
     logger.info(`${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`);
     return { processed, newTickets, skipped, errors };
+  }
+
+  private async backfillSkippedRfcMessageIds(
+    google: GoogleService,
+    channelId: string,
+    messageIds: string[],
+  ): Promise<void> {
+    try {
+      const rows = await Promise.all(
+        messageIds.map(async id => {
+          const messageData = await google.getMessageById(id);
+          if (!messageData) return null;
+          const parsedEmail = google.parseEmailData(messageData);
+          return {
+            externalMessageId: id,
+            rfcMessageId: parsedEmail.rfcMessageId,
+          };
+        }),
+      );
+      const backfilled = await emailRepo.backfillRfcMessageIdsByExternalMessageId(
+        channelId,
+        rows.filter((row): row is NonNullable<typeof row> => row !== null),
+      );
+      if (backfilled > 0) {
+        logger.info(`${TAG} backfilled RFC Message-ID for ${backfilled} already-ingested emails`);
+      }
+    } catch (error) {
+      logger.warn(`${TAG} RFC Message-ID backfill for skipped emails failed`, { error });
+    }
   }
 }

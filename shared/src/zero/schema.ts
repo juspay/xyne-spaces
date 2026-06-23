@@ -565,6 +565,13 @@ export enum ChannelType {
 }
 
 // @ts-ignore TS1294
+export enum DeskType {
+  EMAIL = 'EMAIL',
+  DL = 'DL',
+  SLACK = 'SLACK',
+}
+
+// @ts-ignore TS1294
 export enum ExternalEntityType {
   MESSAGE = 'MESSAGE',
   EMAIL = 'EMAIL',
@@ -1975,6 +1982,7 @@ export const emailTable = table('emails')
     channelId: string(),
     externalThreadId: string(),
     externalMessageId: string(),
+    rfcMessageId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2035,6 +2043,9 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     priorityClassificationPrompt: string().optional(),
     priorityClassificationThreshold: number(),
     autoDraftMode: enumeration<AutoDraftMode>().optional(),
+    deskType: enumeration<DeskType>(),
+    dlEmail: string().optional(),
+    workspaceId: string().optional(),
     autoDraftAgentSlug: string().optional(),
   })
   .primaryKey('channelId');

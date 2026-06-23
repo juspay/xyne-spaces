@@ -7,6 +7,7 @@ import { BaseTransformer } from '../../core/baseTransformer';
 import { NormalizedData, ParseResult } from '../../core/types';
 import { ParsedEmailData } from './types';
 import { cleanEmailBodyHtml, cleanEmailBodyText } from '@/utils/contentUtils';
+import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 
 export class GoogleTransformer extends BaseTransformer<any, NormalizedData> {
   async transform(rawPayload: any): Promise<ParseResult<NormalizedData>> {
@@ -27,10 +28,18 @@ export class GoogleTransformer extends BaseTransformer<any, NormalizedData> {
         NormalizedData['preDownloadedAttachments']
         | undefined;
 
+      const refs = normalizeRfcMessageIds([
+        ...(email.references ?? []),
+        ...(email.inReplyTo ? [email.inReplyTo] : []),
+      ]);
+      const rfcMessageId = normalizeRfcMessageId(email.rfcMessageId);
+
       const normalized: NormalizedData = {
         externalId: email.messageId,
         externalThreadId: email.threadId,
         externalParentId: this.extractAngleBracket(email.inReplyTo),
+        ...(rfcMessageId && { rfcMessageId }),
+        ...(refs.length > 0 && { referencedMessageIds: [...new Set(refs)] }),
         author: this.extractAuthor(email.from),
         content: this.formatContent(email),
         attachments: email.attachments?.map(att => ({

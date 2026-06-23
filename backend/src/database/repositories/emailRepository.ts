@@ -1,6 +1,7 @@
 import { DatabaseClient } from '../client';
 import { Email, EmailType } from '@prisma/client';
 import { syncTicketEmailCount } from '../syncTicketEmailCount';
+import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 
 export class EmailRepository {
   private db = DatabaseClient.getInstance();
@@ -18,8 +19,10 @@ export class EmailRepository {
     channelId: string;
     externalThreadId: string;
     externalMessageId: string;
+    rfcMessageId?: string | null;
     createdAt?: Date;
   }): Promise<Email> {
+    const rfcMessageId = normalizeRfcMessageId(data.rfcMessageId);
     const email = await this.db.email.upsert({
       where: {
         externalMessageId_channelId: {
@@ -41,9 +44,17 @@ export class EmailRepository {
         channelId: data.channelId,
         externalThreadId: data.externalThreadId,
         externalMessageId: data.externalMessageId,
+        ...(rfcMessageId && { rfcMessageId }),
         ...(data.createdAt && { createdAt: data.createdAt }),
       },
     });
+    if (rfcMessageId) {
+      await this.backfillRfcMessageIdByExternalMessageId(
+        data.channelId,
+        data.externalMessageId,
+        rfcMessageId,
+      );
+    }
     await syncTicketEmailCount(this.db, data.conversationId);
     return email;
   }
@@ -150,6 +161,99 @@ export class EmailRepository {
     });
   }
 
+  async findByExternalMessageIds(
+    channelId: string,
+    externalMessageIds: string[],
+  ): Promise<{ conversationId: string; externalThreadId: string } | null> {
+    const expandedIds = [
+      ...new Set(
+        externalMessageIds.flatMap(id => {
+          const trimmed = id.trim();
+          if (!trimmed) return [];
+          const withoutAngles = trimmed.replace(/^<|>$/g, '');
+          return [trimmed, withoutAngles, `<${withoutAngles}>`];
+        }),
+      ),
+    ];
+    if (expandedIds.length === 0) return null;
+
+    return this.db.email.findFirst({
+      where: { channelId, externalMessageId: { in: expandedIds } },
+      select: { conversationId: true, externalThreadId: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async findByRfcMessageIds(
+    channelId: string,
+    rfcMessageIds: string[],
+  ): Promise<{ conversationId: string; externalThreadId: string } | null> {
+    const normalizedRfcIds = normalizeRfcMessageIds(rfcMessageIds);
+    const fallbackIds = [
+      ...new Set(
+        rfcMessageIds.flatMap(id => {
+          const trimmed = id.trim();
+          const normalized = normalizeRfcMessageId(trimmed);
+          if (!trimmed && !normalized) return [];
+          return [
+            ...(trimmed ? [trimmed] : []),
+            ...(normalized ? [normalized, `<${normalized}>`] : []),
+          ];
+        }),
+      ),
+    ];
+    if (normalizedRfcIds.length === 0 && fallbackIds.length === 0) return null;
+
+    return this.db.email.findFirst({
+      where: {
+        channelId,
+        OR: [
+          ...(normalizedRfcIds.length > 0 ? [{ rfcMessageId: { in: normalizedRfcIds } }] : []),
+          ...(fallbackIds.length > 0 ? [{ externalMessageId: { in: fallbackIds } }] : []),
+        ],
+      },
+      select: { conversationId: true, externalThreadId: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async backfillRfcMessageIdByExternalMessageId(
+    channelId: string,
+    externalMessageId: string,
+    rfcMessageId?: string | null,
+  ): Promise<{ count: number }> {
+    const normalized = normalizeRfcMessageId(rfcMessageId);
+    if (!normalized) return { count: 0 };
+
+    return this.db.email.updateMany({
+      where: { channelId, externalMessageId, rfcMessageId: null },
+      data: { rfcMessageId: normalized },
+    });
+  }
+
+  async backfillRfcMessageIdsByExternalMessageId(
+    channelId: string,
+    rows: Array<{ externalMessageId: string; rfcMessageId?: string | null }>,
+  ): Promise<number> {
+    const grouped = new Map<string, string[]>();
+    for (const row of rows) {
+      const normalized = normalizeRfcMessageId(row.rfcMessageId);
+      if (!normalized) continue;
+      const ids = grouped.get(normalized) ?? [];
+      ids.push(row.externalMessageId);
+      grouped.set(normalized, ids);
+    }
+    const results = await Promise.all(
+      Array.from(grouped.entries()).map(([rfcId, extIds]) =>
+        this.db.email.updateMany({
+          where: { channelId, externalMessageId: { in: extIds }, rfcMessageId: null },
+          data: { rfcMessageId: rfcId },
+        }),
+      ),
+    );
+    return results.reduce((sum, r) => sum + r.count, 0);
+  }
+
   async updateConversationId(emailId: string, conversationId: string): Promise<Email> {
     return await this.db.email.update({
       where: { id: emailId },
@@ -170,4 +274,3 @@ export class EmailRepository {
     });
   }
 }
-

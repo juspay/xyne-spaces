@@ -8,6 +8,7 @@ import { NormalizedData, ParseResult } from '../../core/types';
 import { GraphMailMessage } from './types';
 import { logger } from '@/utils/logger';
 import { cleanEmailBodyHtml, cleanEmailBodyText } from '@/utils/contentUtils';
+import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 
 interface EnrichedPayload {
   notification: any;
@@ -29,9 +30,12 @@ export class MicrosoftTransformer extends BaseTransformer<any, NormalizedData> {
       // Clean the email body — strip quoted reply history
       const cleanedContent = this.cleanEmailBody(email.body?.content || email.bodyPreview || '', email.body?.contentType || 'text');
 
+      const rfcMessageId = normalizeRfcMessageId(email.internetMessageId);
+
       const normalized: NormalizedData = {
         externalId: email.internetMessageId || email.id,
         externalThreadId: email.conversationId,
+        ...(rfcMessageId && { rfcMessageId }),
 
         author: {
           name: email.from?.emailAddress?.name || 'Unknown',
@@ -66,6 +70,16 @@ export class MicrosoftTransformer extends BaseTransformer<any, NormalizedData> {
           ...(email.receivedDateTime && { syncCursor: email.receivedDateTime }),
         },
       };
+
+      const getHeader = (name: string) =>
+        email.internetMessageHeaders?.find(
+          h => h.name.toLowerCase() === name.toLowerCase(),
+        )?.value;
+      const rawRefs = getHeader('References')?.split(/\s+/).filter(Boolean) ?? [];
+      const inReplyTo = getHeader('In-Reply-To')?.trim();
+      if (inReplyTo) rawRefs.push(inReplyTo);
+      const cleaned = normalizeRfcMessageIds(rawRefs);
+      if (cleaned.length > 0) normalized.referencedMessageIds = cleaned;
 
       return { success: true, data: normalized };
     } catch (error) {

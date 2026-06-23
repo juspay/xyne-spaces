@@ -61,6 +61,7 @@ import { TicketIdService } from './ticketIdService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateDescription } from './agents/description-generator';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
+import { normalizeRfcMessageId } from '@/utils/emailRfcMessageId';
 import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
@@ -100,6 +101,7 @@ export interface CreateConversationWithEmailParams {
   emailReplyTo?: string[];
   externalThreadId: string;
   externalMessageId: string;
+  rfcMessageId?: string | null;
   ticketMetadata?: Record<string, unknown>;
   uploadedFiles?: UploadedFileResult[];
   sourceName?: string; // External source name for Superposition context
@@ -117,6 +119,7 @@ export interface AddEmailToConversationParams {
   emailReplyTo?: string[];
   externalThreadId: string;
   externalMessageId: string;
+  rfcMessageId?: string | null;
   emailType?: EmailType;
   uploadedFiles?: UploadedFileResult[];
   receivedAt?: Date;
@@ -133,6 +136,7 @@ export interface CreateConversationFromEmailParams {
   emailBcc?: string[];
   externalThreadId: string;
   externalMessageId: string;
+  rfcMessageId?: string | null;
   projectId: string;
   boardId: string;
   stageName: string;
@@ -147,6 +151,7 @@ export interface IngestEmailThreadParams {
   userId: string;
   emails: Array<{
     externalMessageId: string;
+    rfcMessageId?: string | null;
     subject: string;
     body: string;
     from: string;
@@ -160,6 +165,7 @@ export interface IngestEmailThreadParams {
   }>;
   ticketMetadata?: Record<string, unknown>;
   sourceName?: string;
+  referencedMessageIds?: string[];
 }
 
 export interface IngestEmailThreadResult {
@@ -181,6 +187,7 @@ interface ThreadTxResult {
   duplicates: number;
   isNew: boolean;
   wasVespaMerge?: boolean;
+  insertedEmailIds: string[];
 }
 
 const SUBJECT_PREFIX_REGEX = /^(\s*(re|fwd|fw)\s*:\s*)+/i;
@@ -872,11 +879,13 @@ export class EmailService {
       emailReplyTo = [],
       externalThreadId,
       externalMessageId,
+      rfcMessageId,
       ticketMetadata,
       uploadedFiles = [],
       sourceName,
       receivedAt,
     } = params;
+    const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
     // Check if channel exists and get projectId
     const channel = await this.channelRepository.findById(channelId);
@@ -1037,6 +1046,7 @@ export class EmailService {
           channelId,
           externalThreadId,
           externalMessageId,
+          ...(normalizedRfcMessageId && { rfcMessageId: normalizedRfcMessageId }),
           ...(receivedAt && { createdAt: receivedAt }),
         } as Prisma.EmailUncheckedCreateInput,
       });
@@ -1080,6 +1090,11 @@ export class EmailService {
     });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        await this.emailRepository.backfillRfcMessageIdByExternalMessageId(
+          channelId,
+          externalMessageId,
+          normalizedRfcMessageId,
+        );
         logger.warn(`[EmailService] Duplicate externalMessageId skipped: ${externalMessageId}`);
         return { isDuplicate: true };
       }
@@ -1270,6 +1285,7 @@ export class EmailService {
         emailReplyTo = [],
         externalThreadId,
         externalMessageId,
+        rfcMessageId,
         emailType = EmailType.DEFAULT,
         uploadedFiles = [],
         receivedAt,
@@ -1303,6 +1319,7 @@ export class EmailService {
         channelId: conversation.channelId,
         externalThreadId: externalThreadId,
         externalMessageId: externalMessageId,
+        rfcMessageId,
         ...(receivedAt && { createdAt: receivedAt }),
       };
 
@@ -1795,6 +1812,22 @@ export class EmailService {
       channelId,
     );
 
+    // Cross-mailbox thread lookup via RFC References/In-Reply-To.
+    let refsMatchEmail: { conversationId: string; externalThreadId: string } | null = null;
+    if (!existingFirstEmail && params.referencedMessageIds?.length) {
+      refsMatchEmail = await this.emailRepository.findByRfcMessageIds(
+        channelId,
+        params.referencedMessageIds,
+      );
+      if (refsMatchEmail) {
+        logger.info('[EmailService] ingestEmailThread: RFC References match found', {
+          conversationId: refsMatchEmail.conversationId,
+          channelId,
+          refsCount: params.referencedMessageIds.length,
+        });
+      }
+    }
+
     // Cross-thread duplicate check: same subject + sender in same channel.
     // Gated by per-inbox setting — only runs when auto-merge is enabled for this channel.
     let vespaMatchConversationId: string | null = null;
@@ -1870,6 +1903,7 @@ export class EmailService {
       channelId,
       externalThreadId,
       externalMessageId: e.externalMessageId,
+      rfcMessageId: normalizeRfcMessageId(e.rfcMessageId),
       ...(e.receivedAt && { createdAt: e.receivedAt }),
     }));
 
@@ -1973,6 +2007,39 @@ export class EmailService {
           });
           ticketId = ticketRow?.id;
           ticketXyneId = ticketRow?.xyneId;
+        } else if (refsMatchEmail) {
+          conversationId = refsMatchEmail.conversationId;
+          isNew = false;
+          const existingConv = await tx.conversation.findUnique({
+            where: { conversationId },
+            select: { conversationId: true },
+          });
+          if (!existingConv) {
+            logger.warn('[EmailService] ingestEmailThread: stale RFC refs match ignored, creating new conversation', {
+              conversationId,
+              channelId,
+              externalThreadId,
+            });
+            const created = await createNewConversation();
+            conversationId = created.conversationId;
+            ticketId = created.ticketId;
+            ticketXyneId = created.ticketXyneId;
+            isNew = true;
+          } else {
+            const ticketRow = await tx.ticket.findFirst({
+              where: { conversationId },
+              select: { id: true, xyneId: true, lastEmailAt: true },
+            });
+            ticketId = ticketRow?.id;
+            ticketXyneId = ticketRow?.xyneId;
+            existingTicketLastEmailAt = ticketRow?.lastEmailAt ?? null;
+            const previousLatest = await tx.email.findFirst({
+              where: { conversationId },
+              orderBy: { createdAt: 'desc' },
+              select: { id: true },
+            });
+            previousLatestEmailId = previousLatest?.id ?? null;
+          }
         } else if (vespaMatchConversationId) {
           let shouldCreateConversation = false;
           conversationId = vespaMatchConversationId;
@@ -2022,14 +2089,58 @@ export class EmailService {
           isNew = true;
         }
 
-        const emailInsert = await tx.email.createMany({
-          data: emailRows.map(row => ({ ...row, conversationId })),
-          skipDuplicates: true,
-        });
+        const incomingRfcIds = [
+          ...new Set(emailRows.map(row => row.rfcMessageId).filter((id): id is string => !!id)),
+        ];
+        const existingRfcRows = incomingRfcIds.length > 0
+          ? await tx.email.findMany({
+              where: { channelId, rfcMessageId: { in: incomingRfcIds } },
+              select: { rfcMessageId: true },
+            })
+          : [];
+        const existingRfcIds = new Set(
+          existingRfcRows.map(row => row.rfcMessageId).filter((id): id is string => !!id),
+        );
+        const rowsToInsert = emailRows.filter(
+          row => !row.rfcMessageId || !existingRfcIds.has(row.rfcMessageId),
+        );
+
+        const emailInsert = rowsToInsert.length > 0
+          ? await tx.email.createMany({
+              data: rowsToInsert.map(row => ({ ...row, conversationId })),
+              skipDuplicates: true,
+            })
+          : { count: 0 };
+        const backfillPairs = emailRows
+          .map(row => ({ externalMessageId: row.externalMessageId, rfcMessageId: normalizeRfcMessageId(row.rfcMessageId) }))
+          .filter((p): p is { externalMessageId: string; rfcMessageId: string } => !!p.rfcMessageId);
+        if (backfillPairs.length > 0) {
+          const grouped = new Map<string, string[]>();
+          for (const p of backfillPairs) {
+            const ids = grouped.get(p.rfcMessageId) ?? [];
+            ids.push(p.externalMessageId);
+            grouped.set(p.rfcMessageId, ids);
+          }
+          await Promise.all(
+            Array.from(grouped.entries()).map(([rfcId, extIds]) =>
+              tx.email.updateMany({
+                where: { channelId, rfcMessageId: null, externalMessageId: { in: extIds } },
+                data: { rfcMessageId: rfcId },
+              }),
+            ),
+          );
+        }
         await syncTicketEmailCount(tx, conversationId);
 
+        const persistedEmails = emailInsert.count > 0
+          ? await tx.email.findMany({
+              where: { id: { in: rowsToInsert.map(row => row.id) }, conversationId },
+              select: { id: true, externalMessageId: true },
+            })
+          : [];
+
         await tx.externalMessage.createMany({
-          data: emailRows.map(row => ({
+          data: persistedEmails.map(row => ({
             externalSourceId,
             externalId: row.externalMessageId,
             externalThreadId,
@@ -2075,6 +2186,7 @@ export class EmailService {
           duplicates: emails.length - emailInsert.count,
           isNew,
           wasVespaMerge: !!(vespaMatchConversationId && previousLatestEmailId && ticketId),
+          insertedEmailIds: persistedEmails.map(row => row.id),
         };
       });
     } catch (error) {
@@ -2093,12 +2205,15 @@ export class EmailService {
       throw error;
     }
 
-    const insertedEmails = emailRows.map((row, i) => ({
-      id: row.id,
-      body: emails[i]!.body,
-      externalMessageId: row.externalMessageId,
-      uploadedFiles: emails[i]!.uploadedFiles ?? [],
-    }));
+    const insertedIdSet = new Set(txResult.insertedEmailIds);
+    const insertedEmails = emailRows
+      .map((row, i) => ({
+        id: row.id,
+        body: emails[i]!.body,
+        externalMessageId: row.externalMessageId,
+        uploadedFiles: emails[i]!.uploadedFiles ?? [],
+      }))
+      .filter(row => insertedIdSet.has(row.id));
 
     // Initial message + conversation pointer are now seeded inside the
     // transaction above. Only the metadata md sync (which reads committed

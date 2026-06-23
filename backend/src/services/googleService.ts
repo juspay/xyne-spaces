@@ -233,7 +233,7 @@ export class GoogleService {
   async listMessagesByDateRange(params: {
     startDate: string;
     endDate: string;
-    maxMessages?: number;
+    maxMessages?: number | null;
     extraQuery?: string;
   }): Promise<Array<{ id: string; threadId: string }>> {
     const { startDate, endDate, maxMessages = 2000, extraQuery } = params;
@@ -254,7 +254,7 @@ export class GoogleService {
         const response = await this.gmail.users.messages.list({
           userId: 'me',
           q,
-          maxResults: Math.min(500, maxMessages - messages.length),
+          maxResults: maxMessages === null ? 100 : Math.min(100, maxMessages - messages.length),
           ...(pageToken && { pageToken }),
         });
 
@@ -262,11 +262,11 @@ export class GoogleService {
           if (msg.id) {
             messages.push({ id: msg.id, threadId: msg.threadId ?? msg.id });
           }
-          if (messages.length >= maxMessages) break;
+          if (maxMessages !== null && messages.length >= maxMessages) break;
         }
 
         pageToken = response.data.nextPageToken ?? undefined;
-      } while (pageToken && messages.length < maxMessages);
+      } while (pageToken && (maxMessages === null || messages.length < maxMessages));
 
       return messages;
     } catch (error) {
@@ -399,6 +399,7 @@ export class GoogleService {
       htmlBody,
       body: htmlBody || textBody,
       attachments: GoogleService.extractAttachments(messageData.payload),
+      rfcMessageId: getHeader('Message-ID') ?? getHeader('Message-Id'),
       inReplyTo: getHeader('In-Reply-To'),
       references: getHeader('References')?.split(/\s+/) || [],
     };

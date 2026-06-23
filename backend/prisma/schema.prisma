@@ -2233,6 +2233,7 @@ model Email {
   channelId String
   externalThreadId String
   externalMessageId String
+  rfcMessageId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2241,6 +2242,7 @@ model Email {
   @@index([conversationId])
   @@index([externalThreadId])
   @@index([channelId])
+  @@index([channelId, rfcMessageId])
   @@index([conversationId, id])
   @@map("emails")
   @@schema("public")

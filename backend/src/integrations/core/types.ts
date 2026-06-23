@@ -44,6 +44,8 @@ export interface NormalizedData {
   externalId: string; // Unique message ID from external system
   externalThreadId: string; // Thread/ticket ID
   externalParentId?: string; // Parent message ID (for replies)
+  rfcMessageId?: string; // RFC Message-ID header, stable across mailboxes
+  referencedMessageIds?: string[]; // RFC Message-IDs from In-Reply-To + References headers
 
   author: {
     name: string;

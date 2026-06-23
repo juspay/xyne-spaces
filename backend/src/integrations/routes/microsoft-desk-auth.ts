@@ -9,10 +9,12 @@ import {
   microsoftDeskService,
   isReconnectChannelData,
   isWorkspaceChannelData,
+  isDlMemberSyncChannelData,
   MICROSOFT_OAUTH_SCOPES,
 } from '../../services/microsoftDeskService';
 import { encrypt } from '../../services/encryptionService';
 import { db } from '../../database/client';
+import { emailFetchQueue } from '../../queues/emailFetchQueue';
 import { logger } from '../../utils/logger';
 import { WorkspaceRole } from '@prisma/client';
 import { getFrontendUrl, getBackendUrl } from './urlHelpers';
@@ -364,6 +366,71 @@ router.get('/callback', async (req: Request, res: Response) => {
         buildPostOAuthRedirect(
           frontendUrl,
           `/${channelData.workspaceId}/workspace-management?${workspaceParams.toString()}`,
+          platform,
+        ),
+      );
+      return;
+    }
+
+    if (isDlMemberSyncChannelData(channelData)) {
+      const expiresAt = token.expires_at
+        ? new Date(token.expires_at as string).toISOString()
+        : undefined;
+
+      const sanitizedEmail = email.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const sourceName = `microsoft-dl-sync--${sanitizedEmail}--${channelData.channelId.slice(0, 8)}`;
+      const encryptedCredentials = encrypt(JSON.stringify({
+        accessToken,
+        refreshToken: (token.refresh_token as string) ?? undefined,
+        email,
+        expiresAt,
+      }));
+
+      const tempSource = await db.externalSource.upsert({
+        where: { name: sourceName },
+        update: {
+          displayName: email,
+          channelId: channelData.channelId,
+          credentials: encryptedCredentials,
+          isActive: true,
+        },
+        create: {
+          name: sourceName,
+          sourceType: 'microsoft',
+          displayName: email,
+          channelId: channelData.channelId,
+          credentials: encryptedCredentials,
+          isActive: true,
+        },
+      });
+
+      if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
+      await emailFetchQueue.getQueue().add('refetch', {
+        sourceId: tempSource.id,
+        channelId: channelData.channelId,
+        requesterUserId: channelData.userId,
+        workspaceId: channelData.workspaceId,
+        startDate: channelData.startDate,
+        endDate: channelData.endDate,
+        targetChannelId: channelData.channelId,
+        dlEmail: channelData.dlEmail,
+        isDlMemberSync: true,
+      });
+
+      logger.info(`[${requestId}] DL member sync started`, {
+        channelId: channelData.channelId,
+        sourceId: tempSource.id,
+        email,
+      });
+
+      const syncParams = new URLSearchParams({
+        dlMemberSyncStarted: 'true',
+        provider: 'microsoft',
+      });
+      res.redirect(
+        buildPostOAuthRedirect(
+          frontendUrl,
+          buildSupportPath(channelData.workspaceId, channelData.channelId, syncParams),
           platform,
         ),
       );

@@ -74,4 +74,5 @@ export interface GraphMailMessage {
   receivedDateTime: string;
   hasAttachments: boolean;
   parentFolderId: string;
+  internetMessageHeaders?: Array<{ name: string; value: string }>;
 }

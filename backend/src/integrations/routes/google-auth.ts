@@ -16,6 +16,8 @@ import { redisService } from '@/services/redisService';
 import { EmailMergeMode, WorkspaceRole, DeskType } from '@prisma/client';
 import { config as appConfig } from '@/config/env';
 import { getFrontendUrl } from './urlHelpers';
+import { encrypt } from '@/services/encryptionService';
+import { emailFetchQueue } from '@/queues/emailFetchQueue';
 
 const TAG = '[GoogleAuth]';
 const router = express.Router();
@@ -38,10 +40,14 @@ type PendingChannelData = {
 export type OAuthStateValue = {
   channelId?: string;
   channelData?: PendingChannelData;
-  mode?: 'reconnect' | 'workspace';
+  mode?: 'reconnect' | 'workspace' | 'dl-member-sync';
   expectedEmail?: string;
   workspaceId?: string;
   platform?: 'electron' | 'web';
+  dlEmail?: string;
+  startDate?: string;
+  endDate?: string;
+  userId?: string;
   timestamp: number;
 };
 const OAUTH_STATE_KEY_PREFIX = 'google_oauth_state:';
@@ -341,7 +347,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
     const username = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9-_]/g, '-');
     const sourceName = `google-${username}`;
     const existingSource = await db.externalSource.findUnique({ where: { name: sourceName } });
-    if (existingSource) {
+    if (existingSource && stateData.mode !== 'dl-member-sync') {
       const isConnectFlow = !!stateData.channelData;
       const isDifferentChannel =
         !!stateData.channelId && !!existingSource.channelId && existingSource.channelId !== stateData.channelId;
@@ -503,6 +509,81 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         buildPostOAuthRedirect(
           frontendUrl,
           `/${workspaceId}/workspace-management?${params.toString()}`,
+          stateData.platform,
+        ),
+      );
+      return;
+    }
+
+    if (stateData.mode === 'dl-member-sync' && stateData.channelId && stateData.dlEmail) {
+      // Guard: these fields are required for DL member sync jobs. They are always
+      // set by desk-integration.ts before kicking off the OAuth flow, but validate
+      // explicitly here to avoid silent `!` panics if state was somehow corrupted.
+      if (!stateData.userId || !stateData.workspaceId || !stateData.startDate || !stateData.endDate) {
+        logger.error(`${TAG} DL member sync: missing required state fields`, {
+          hasUserId: !!stateData.userId,
+          hasWorkspaceId: !!stateData.workspaceId,
+          hasStartDate: !!stateData.startDate,
+          hasEndDate: !!stateData.endDate,
+        });
+        redirectError(res, frontendUrl, 'dl_sync_invalid_state', stateData.platform, stateData.workspaceId, stateData.channelId);
+        return;
+      }
+
+      const credentials = {
+        accessToken: tokens.access_token!,
+        refreshToken: tokens.refresh_token ?? undefined,
+        email: emailAddress,
+      };
+      const encryptedCredentials = encrypt(JSON.stringify(credentials));
+      const sanitized = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '_');
+      const sourceName = `google-dl-sync--${sanitized}--${stateData.channelId.slice(0, 8)}`;
+
+      const tempSource = await db.externalSource.upsert({
+        where: { name: sourceName },
+        update: {
+          displayName: emailAddress,
+          channelId: stateData.channelId,
+          credentials: encryptedCredentials,
+          isActive: true,
+        },
+        create: {
+          name: sourceName,
+          sourceType: ExternalSourcePlatform.GOOGLE,
+          displayName: emailAddress,
+          channelId: stateData.channelId,
+          credentials: encryptedCredentials,
+          isActive: true,
+        },
+      });
+
+      if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
+      await emailFetchQueue.getQueue().add('refetch', {
+        sourceId: tempSource.id,
+        channelId: stateData.channelId,
+        requesterUserId: stateData.userId,
+        workspaceId: stateData.workspaceId,
+        startDate: stateData.startDate,
+        endDate: stateData.endDate,
+        targetChannelId: stateData.channelId,
+        dlEmail: stateData.dlEmail,
+        isDlMemberSync: true,
+      });
+
+      logger.info(`${TAG} DL member sync started`, {
+        channelId: stateData.channelId,
+        sourceId: tempSource.id,
+        emailAddress,
+      });
+
+      const syncParams = new URLSearchParams({
+        dlMemberSyncStarted: 'true',
+        provider: 'google',
+      });
+      res.redirect(
+        buildPostOAuthRedirect(
+          frontendUrl,
+          buildSupportPath(stateData.workspaceId, stateData.channelId, syncParams),
           stateData.platform,
         ),
       );
