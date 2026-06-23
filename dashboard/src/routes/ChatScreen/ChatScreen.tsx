@@ -151,9 +151,11 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             <Panel defaultSize={80} minSize={30}>
               <main
                 data-id='conversation-view'
-                className='flex-1 h-full overflow-hidden bg-background'
+                className='flex-1 h-full overflow-hidden bg-background relative flex flex-col'
               >
-                <Outlet context={{ shouldStackThread }} />
+                <div className='flex-1 overflow-hidden relative'>
+                  <Outlet context={{ shouldStackThread }} />
+                </div>
               </main>
             </Panel>
           </PanelGroup>
@@ -182,8 +184,13 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
               pathnameWithoutWorkspace !== '/chat/dir/' &&
               !pathnameWithoutWorkspace.startsWith('/chat/dir/my-tickets') && (
                 <div className='absolute inset-0 z-40 bg-background'>
-                  <main data-id='chat-screen' className='h-full overflow-hidden'>
-                    <Outlet context={{ shouldStackThread }} />
+                  <main
+                    data-id='chat-screen'
+                    className='h-full overflow-hidden flex flex-col relative'
+                  >
+                    <div className='flex-1 overflow-hidden relative'>
+                      <Outlet context={{ shouldStackThread }} />
+                    </div>
                   </main>
                 </div>
               )}

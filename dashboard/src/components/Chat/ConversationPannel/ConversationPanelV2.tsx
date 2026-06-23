@@ -85,12 +85,14 @@ const ConversationPanelV2 = ({
   linkedConversationIdOverride,
   linkedItemCreatedAtOverride,
   onClose,
+  showHeader = true,
 }: {
   channelId: string;
   previousChannelId: string | null;
   linkedConversationIdOverride?: string | null;
   linkedItemCreatedAtOverride?: number | null;
   onClose?: () => void;
+  showHeader?: boolean;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -213,15 +215,19 @@ const ConversationPanelV2 = ({
   return (
     <ConversationTabContext.Provider value={conversationTabContextValue}>
       <div key={`${channelId}-conversation-panel`} className='w-full relative h-full flex flex-col'>
-        <ConversationHeader
-          channelId={channelId}
-          previousChannelId={previousChannelId}
-          channelTabs={availableTabs}
-          activeTab={tab}
-          setActiveTab={handleTabChange}
-          {...(onClose && { onClose })}
-        />
-        <div className='flex-1 flex flex-col overflow-hidden pt-16 [@media(min-width:500px)]:pt-0'>
+        {showHeader && (
+          <ConversationHeader
+            channelId={channelId}
+            previousChannelId={previousChannelId}
+            channelTabs={availableTabs}
+            activeTab={tab}
+            setActiveTab={handleTabChange}
+            {...(onClose && { onClose })}
+          />
+        )}
+        <div
+          className={`flex-1 flex flex-col overflow-hidden ${showHeader ? 'pt-16 [@media(min-width:500px)]:pt-0' : ''}`}
+        >
           {tab === 'messages' && (
             <div
               ref={dragAndDropAreaRef}

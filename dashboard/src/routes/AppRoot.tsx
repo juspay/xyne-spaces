@@ -139,6 +139,7 @@ import {
   clearAIOnboardingPending,
   isAIOnboardingActive,
 } from '../contexts/AIOnboardingContext';
+import UnreadsInbox from '../components/Chat/UnreadsInbox/UnreadsInbox';
 import DocsScreen from './DocsScreen/DocsScreen';
 import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
@@ -814,6 +815,11 @@ export const router = createBrowserRouter([
                       {
                         path: 'threads',
                         element: <UserThreads />,
+                      },
+                      // Unreads inbox (must come before :channelId)
+                      {
+                        path: 'unreads',
+                        element: <UnreadsInbox />,
                       },
                       // Recap (must come before :channelId)
                       {
