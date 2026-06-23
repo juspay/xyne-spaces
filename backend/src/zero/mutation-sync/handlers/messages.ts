@@ -2,8 +2,6 @@ import type { Transaction } from '@rocicorp/zero';
 import { MessageType, Schema } from '@xyne/shared';
 import { zql } from '../../queries';
 import {
-  addReplyToData,
-  parseRepliesMd,
   serializeRepliesMd,
   serializeInitialMessageMd,
   serializeParentMessageMd,
@@ -167,15 +165,6 @@ async function handleMessageInsert(
   if (message.msgType === MessageType.SYSTEM) {
     return;
   }
-
-  const repliesData = parseRepliesMd(conversation.replies_md);
-  const updatedRepliesData = addReplyToData(repliesData, message.senderId);
-  const updatedRepliesMd = serializeRepliesMd(updatedRepliesData);
-
-  await tx.mutate.conversations.update({
-    conversationId: conversation.conversationId,
-    replies_md: updatedRepliesMd,
-  });
 
   return;
 }
