@@ -5,6 +5,7 @@ import { TICKET_CREATED_EVENT } from '../triggers/ticket-created.trigger';
 import {
   TICKET_UPDATED_EVENT,
   type TicketChanges,
+  type FormFieldChanges,
 } from '../triggers/ticket-updated.trigger';
 import { MESSAGE_RECEIVED_EVENT } from '../triggers/message-received.trigger';
 import type { MessageType } from '@prisma/client';
@@ -16,6 +17,7 @@ export interface TicketCreatedEventPayload {
 export interface TicketUpdatedEventPayload {
   ticketId: string;
   changes: TicketChanges;
+  formFieldChanges?: FormFieldChanges;
   performedBy: { id: string | null };
 }
 

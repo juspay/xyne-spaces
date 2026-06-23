@@ -108,7 +108,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     if (Object.keys(changes).length > 0) {
       const fullTicket = await db.ticket.findUnique({ where: { id: ticketId } });
       if (fullTicket) {
-        await emitTicketUpdated({ ticket: fullTicket, changes, performedById: actorId });
+        void emitTicketUpdated({ ticket: fullTicket, changes, performedById: actorId });
         const snapshot = (await buildKanbanCountsSnapshot(ticketId)) ?? {
           id: fullTicket.id,
           workspaceId: fullTicket.workspaceId,

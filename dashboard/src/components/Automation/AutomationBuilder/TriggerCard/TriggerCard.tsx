@@ -15,8 +15,24 @@ import { Popover } from '../../../ui/Popover/Popover';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
 import { EmailReceivedFilterForm } from './EmailReceivedFilterForm';
 import { WebhookTriggerForm } from './WebhookTriggerForm';
+import { TicketUpdatedFormFieldsSection } from './TicketUpdatedFormFieldsSection';
 import type { TriggerCardProps } from './TriggerCard.types';
-import type { TriggerCatalogItem } from '../../Automation.types';
+import type { TriggerCatalogItem, JsonSchema } from '../../Automation.types';
+
+function omitProperty(schema: JsonSchema, key: string): JsonSchema {
+  if (schema.properties && key in schema.properties) {
+    const { [key]: _omit, ...rest } = schema.properties;
+    return { ...schema, properties: rest };
+  }
+  if (schema.definitions) {
+    const newDefs: Record<string, JsonSchema> = {};
+    for (const [defKey, def] of Object.entries(schema.definitions)) {
+      newDefs[defKey] = omitProperty(def, key);
+    }
+    return { ...schema, definitions: newDefs };
+  }
+  return schema;
+}
 
 function ResolveIcon({
   name,
@@ -127,6 +143,21 @@ export function TriggerCard({
             issues={issues ?? null}
             pathPrefix='trigger.config.'
           />
+        ) : trigger.type === 'TICKET_UPDATED' ? (
+          <>
+            <SchemaForm
+              schema={omitProperty(schema.configSchema, 'formFieldIds')}
+              value={trigger.config}
+              onChange={onConfigChange}
+              issues={issues ?? null}
+              pathPrefix='trigger.config.'
+            />
+            <TicketUpdatedFormFieldsSection
+              boardIds={(trigger.config?.['boardIds'] as string[] | undefined) ?? []}
+              formFieldIds={(trigger.config?.['formFieldIds'] as string[] | undefined) ?? []}
+              onChange={ids => onConfigChange({ ...trigger.config, formFieldIds: ids })}
+            />
+          </>
         ) : (
           <SchemaForm
             schema={schema.configSchema}
