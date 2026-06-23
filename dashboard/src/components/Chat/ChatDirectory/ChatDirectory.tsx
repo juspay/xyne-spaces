@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useRef } from 'react';
+import { ReactElement, useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -21,6 +21,7 @@ import {
   Star,
   Hash,
   MessageCircle,
+  MessageSquareDot,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -58,7 +59,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { useChannelSort } from '../../../hooks/useChannelSort';
 import { useChannelSectionDnd } from './useChannelSectionDnd';
-import { ChannelSortOrder, ChannelSection } from '@xyne/shared';
+import { ChannelSortOrder, ChannelSection, ChannelType, ChannelScopeType } from '@xyne/shared';
 import { DndContext, DragOverlay } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Accordion } from 'radix-ui';
@@ -148,6 +149,37 @@ const ChatDirectory = ({
 
   // Get unread counts for all channels (for DMs)
   const unreadCounts = useAllUnreadCount();
+
+  const unreadActivityStats = useMemo(() => {
+    const allOrdered = [...starred, ...channels, ...directMessages];
+    let sum = 0;
+    let hasUnread = false;
+    for (const c of allOrdered) {
+      if (c.type === ChannelType.EMAIL || c.type === ChannelType.SUPPORT) continue;
+
+      const count = unreadCounts[c.id] ?? 0;
+      sum += count;
+
+      const status = allChannelsUserStatus.find(
+        s => s.channelId === c.id && s.userId === context.userID,
+      );
+      const isDM = c.scopeType === ChannelScopeType.DM || c.scopeType === ChannelScopeType.GROUP_DM;
+
+      if (count > 0) {
+        hasUnread = true;
+      } else if (!isDM) {
+        const hasNewActivity =
+          !!status?.lastViewedAt &&
+          !!c.channelStats?.lastActivityAt &&
+          c.channelStats.lastActivityAt > status.lastViewedAt;
+        if (hasNewActivity) {
+          hasUnread = true;
+        }
+      }
+    }
+    return { sum, hasUnread };
+  }, [starred, channels, directMessages, unreadCounts, allChannelsUserStatus, context.userID]);
+
   const starredUnreadCount = sumSectionUnread(starred, unreadCounts, activeChannelId);
   const channelsUnreadCount = sumSectionUnread(
     defaultDisplayChannels,
@@ -394,6 +426,36 @@ const ChatDirectory = ({
                 className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
               >
                 {threadCount > 10 ? '10+' : threadCount}
+              </Badge>
+            </span>
+          )}
+        </button>
+        <button
+          className={cn(
+            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
+            location.pathname.includes('/chat/dir/unreads')
+              ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
+              : unreadActivityStats.hasUnread
+                ? 'text-sidebar-unread-foreground font-semibold'
+                : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
+          )}
+          onClick={() => {
+            void navigate('/chat/dir/unreads');
+          }}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='OPEN_UNREADS'
+        >
+          <span className='size-5 flex items-center justify-center shrink-0'>
+            <MessageSquareDot className='size-4' />
+          </span>
+          <span className='flex-1 min-w-0 text-left truncate block'>Unreads</span>
+          {unreadActivityStats.sum > 0 && (
+            <span className='size-5 flex items-center justify-center shrink-0'>
+              <Badge
+                variant='success'
+                className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
+              >
+                {unreadActivityStats.sum > 99 ? '99+' : unreadActivityStats.sum}
               </Badge>
             </span>
           )}
