@@ -9482,17 +9482,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           fieldIds: z.record(z.string(), z.string()).optional(),
         }),
-        async ({ tx, ctx, args: { formId, formDescription, fields, timestamp, fieldIds = {} } }) => {
+        async ({ tx, args: { formId, formDescription, fields, timestamp, fieldIds = {} } }) => {
           // Validate form exists
           const form = await tx.run(zql.forms.where('id', formId).one());
           if (!form) {
             throw new Error('Form not found');
           }
 
-          // Check if user is the form creator
-          if (form.createdBy !== ctx.userID) {
-            throw new Error('Only the form creator can update the form');
-          }
 
           // Update form description if provided
           if (formDescription !== undefined) {
