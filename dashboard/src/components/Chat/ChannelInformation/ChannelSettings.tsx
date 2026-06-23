@@ -7,13 +7,17 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { useClipboard } from '../../../hooks/useClipboard';
+import {
+  clearChannelEmailAliasCache,
+  useChannelEmailAlias,
+} from '../../../hooks/useChannelEmailAlias';
 import { useUsers } from '../../../hooks/useUsers';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import { Switch } from '../../ui/Switch';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { stateMachineActor } from '../../../machines/stateMachine';
 
 const POLICY_OPTIONS = [
@@ -81,8 +85,11 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
 }) => {
   const zero = useZero();
   const context = useAuthContextValues();
+  const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { copy } = useClipboard();
+  const { emailAlias, configured, isActive, mailboxEmail } = useChannelEmailAlias(channel.id);
   const allUsers = useUsers();
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
 
@@ -95,6 +102,33 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
     setSelectedPolicy(currentPolicy);
   }, [currentPolicy]);
 
+  useEffect(() => {
+    const channelEmailConnected = searchParams.get('channelEmailMailboxConnected');
+    const emailError = searchParams.get('emailError');
+
+    if (channelEmailConnected !== 'true' && !emailError) {
+      return;
+    }
+
+    if (channelEmailConnected === 'true') {
+      const provider = searchParams.get('provider') ?? 'Email';
+      clearChannelEmailAliasCache(channel.id);
+      toast.success(
+        `${provider.charAt(0).toUpperCase() + provider.slice(1)} channel email mailbox connected successfully`,
+      );
+    } else if (emailError) {
+      toast.error(emailError);
+    }
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('channelEmailMailboxConnected');
+    next.delete('provider');
+    next.delete('emailError');
+
+    const nextQuery = next.toString();
+    void navigate(`${location.pathname}${nextQuery ? `?${nextQuery}` : ''}`, { replace: true });
+  }, [location.pathname, navigate, searchParams]);
+
   const showTicketsInChat = channel.showTicketsTabTicketsInChat ?? true;
 
   // Admins or the channel owner (creator) can change the ticket-visibility setting.
@@ -104,6 +138,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
   const isPrivateChannel = channel.visibility === ChannelVisibility.PRIVATE;
   const isArchived = channel.isArchived;
+  const canManageChannelEmail = context.role === 'OWNER' || context.role === 'ADMIN';
 
   const fetchParticipants = () => zero.run(queries.channelParticipants({ channelId: channel.id }));
 
@@ -135,6 +170,24 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
     } else {
       toast.error('Failed to copy emails to clipboard');
     }
+  };
+
+  const handleCopyChannelEmail = async (): Promise<void> => {
+    if (!emailAlias) {
+      toast.error('Channel email is not available');
+      return;
+    }
+
+    const success = await copy(emailAlias);
+    if (success) {
+      toast.success('Copied channel email to clipboard');
+    } else {
+      toast.error('Failed to copy channel email');
+    }
+  };
+
+  const handleOpenWorkspaceSettings = (): void => {
+    void navigate(`/${context.workspaceId}/workspace-management`);
   };
 
   const handlePolicyChange = (policy: ChannelAddUserPolicy): void => {
@@ -254,6 +307,52 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
             </div>
           </div>
         )}
+
+        <div className='bg-card p-[12px] rounded-[12px] border border-border'>
+          <div className='flex items-start justify-between gap-3'>
+            <div className='min-w-0'>
+              <p className='text-sm font-medium text-foreground'>Email to channel</p>
+              {emailAlias ? (
+                <p className='mt-1 break-all text-sm text-muted-foreground'>{emailAlias}</p>
+              ) : (
+                <p className='mt-1 text-sm text-muted-foreground'>
+                  {configured
+                    ? isActive
+                      ? 'Channel email is not available right now.'
+                      : 'The separate channel-email mailbox is connected but currently inactive.'
+                    : 'No separate channel-email mailbox is configured for this workspace yet.'}
+                </p>
+              )}
+              {mailboxEmail && (
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  Mailbox: <span className='font-mono'>{mailboxEmail}</span>
+                </p>
+              )}
+              {canManageChannelEmail && (
+                <div className='mt-3 flex flex-wrap gap-2'>
+                  <Button
+                    variant='secondary'
+                    onClick={handleOpenWorkspaceSettings}
+                    className='shrink-0'
+                  >
+                    Manage in Workspace Settings
+                  </Button>
+                </div>
+              )}
+            </div>
+            <div className='flex shrink-0 items-center gap-2'>
+              {emailAlias && (
+                <Button
+                  variant='secondary'
+                  onClick={() => void handleCopyChannelEmail()}
+                  className='shrink-0'
+                >
+                  Copy
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* Copy actions card */}
         <div className='bg-card rounded-[12px] border border-border overflow-hidden'>

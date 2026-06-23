@@ -53,7 +53,27 @@ export async function authenticate(
     }
     const resolvedSourceName = adapter.getSourceNameFromDB?.(rawBodyReq.body) || sourceName;
 
-    const source = await externalSourceRepository.findByName(resolvedSourceName);
+    let source = await externalSourceRepository.findByName(resolvedSourceName);
+    if (!source && sourceName === 'google') {
+      try {
+        const message = rawBodyReq.body?.message;
+        const encodedData = typeof message?.data === 'string' ? message.data : '';
+        if (encodedData) {
+          const decoded = Buffer.from(encodedData, 'base64').toString('utf-8');
+          const parsed = JSON.parse(decoded) as { emailAddress?: string };
+          if (parsed.emailAddress) {
+            source = await externalSourceRepository.findGoogleSourceByDisplayEmail(
+              parsed.emailAddress,
+            );
+          }
+        }
+      } catch (error) {
+        logger.warn('Failed Google source fallback by display email', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     if (!source) {
       logger.warn(
         `Sync request received for unknown source: ${resolvedSourceName} (route: ${sourceName})`

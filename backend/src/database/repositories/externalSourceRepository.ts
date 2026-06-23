@@ -125,4 +125,33 @@ export class ExternalSourceRepository {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  /**
+   * Find a Google-backed source by the connected mailbox address.
+   * Prefers the separate channel-email source over the legacy desk source.
+   */
+  async findGoogleSourceByDisplayEmail(displayEmail: string) {
+    const normalized = displayEmail.trim().toLowerCase();
+    const channelEmailSource = await this.db.externalSource.findFirst({
+      where: {
+        displayName: { equals: normalized, mode: 'insensitive' },
+        sourceType: 'google-channel-email',
+        isActive: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (channelEmailSource) {
+      return channelEmailSource;
+    }
+
+    return await this.db.externalSource.findFirst({
+      where: {
+        displayName: { equals: normalized, mode: 'insensitive' },
+        sourceType: 'google',
+        isActive: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 }

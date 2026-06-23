@@ -32,6 +32,7 @@ import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
+import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 
 export class ChannelController {
   private channelRepository: ChannelRepository;
@@ -44,6 +45,7 @@ export class ChannelController {
   private channelUserStatusRepository: ChannelUserStatusRepository;
   private projectRepository: ProjectRepository;
   private emailChannelPreferenceRepository: EmailChannelPreferenceRepository;
+  private channelEmailAliasService: ChannelEmailAliasService;
 
   constructor() {
     this.channelRepository = new ChannelRepository();
@@ -56,6 +58,7 @@ export class ChannelController {
     this.channelUserStatusRepository = new ChannelUserStatusRepository();
     this.projectRepository = new ProjectRepository();
     this.emailChannelPreferenceRepository = new EmailChannelPreferenceRepository();
+    this.channelEmailAliasService = new ChannelEmailAliasService();
   }
 
   // Helper method to get user info
@@ -1235,6 +1238,44 @@ export class ChannelController {
       res.status(200).json({ email: null, isConnected, hasSource, sourceType });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getEmailAlias = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const { channelId } = req.params;
+
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      if (!channelId) {
+        res.status(400).json({ error: 'channelId is required' });
+        return;
+      }
+
+      const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
+      if (!isParticipant) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+
+      const channel = await this.channelRepository.findById(channelId);
+      if (!channel) {
+        res.status(404).json({ error: 'Channel not found' });
+        return;
+      }
+
+      const info = await this.channelEmailAliasService.getChannelEmailInfo(
+        channel.workspaceId,
+        channelId,
+      );
+      res.status(200).json(info);
+    } catch (error) {
+      logger.error('Error in getEmailAlias:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };
