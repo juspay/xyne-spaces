@@ -1,6 +1,6 @@
 import { Combobox as BaseCombobox } from '@base-ui/react/combobox';
 import { User } from '@xyne/shared';
-import { X } from 'lucide-react';
+import { Hash, Lock, X } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useUsersPresence } from '../../../hooks/usePresence';
@@ -8,6 +8,16 @@ import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDispla
 import Avatar from '../Avatar/Avatar';
 import Button from '../Button';
 import { StatusIndicator } from '../StatusIndicator';
+
+export interface ChannelOption {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+}
+
+export type SearchEntry =
+  | { type: 'user'; user: User }
+  | { type: 'channel'; channel: ChannelOption };
 
 interface SearchParticipantsProps {
   options: User[];
@@ -20,6 +30,8 @@ interface SearchParticipantsProps {
   setIsOpen?: (isOpen: boolean) => void;
   className?: string;
   currentUserId?: string;
+  mergedItems?: SearchEntry[];
+  onSelectChannel?: (channelId: string) => void;
 }
 
 export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
@@ -33,6 +45,8 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
   setIsOpen,
   className,
   currentUserId,
+  mergedItems,
+  onSelectChannel,
 }) => {
   const [pillsWidth, setPillsWidth] = useState(0);
   const [pillsHeight, setPillsHeight] = useState(0);
@@ -122,9 +136,37 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
     return baseOptions.filter(opt => !selectedUserIds.has(opt.id));
   }, [options, searchQuery, selectedUserIds, currentUserId]);
 
-  const handleSelect = (userId: string | null) => {
-    if (userId && !selectedUserIds.has(userId)) {
-      const user = options.find(u => u.id === userId);
+  const filteredMergedItems = useMemo(() => {
+    if (!mergedItems) return null;
+    return mergedItems.filter(
+      item => item.type === 'channel' || !selectedUserIds.has(item.user.id),
+    );
+  }, [mergedItems, selectedUserIds]);
+
+  const findUserById = useCallback(
+    (id: string): User | undefined => {
+      const fromOptions = options.find(u => u.id === id);
+      if (fromOptions) return fromOptions;
+      const fromMerged = mergedItems?.find(
+        (item): item is Extract<SearchEntry, { type: 'user' }> =>
+          item.type === 'user' && item.user.id === id,
+      );
+      return fromMerged?.user;
+    },
+    [options, mergedItems],
+  );
+
+  const handleSelect = (value: string | null) => {
+    if (!value) return;
+    if (value.startsWith('channel:')) {
+      const channelId = value.slice('channel:'.length);
+      onSelectChannel?.(channelId);
+      onSearchChange('');
+      setIsOpen?.(false);
+      return;
+    }
+    if (!selectedUserIds.has(value)) {
+      const user = findUserById(value);
       if (user) {
         onSelect([...selectedUsers, user]);
         onSearchChange('');
@@ -185,6 +227,79 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
     [searchQuery, selectedUsers, focusedIndex, handleRemove, setIsOpen, isOpen],
   );
 
+  const renderUserItem = (user: User): React.ReactElement => {
+    const displayName = getUserDisplayName(user);
+    const deactivated = isUserDeactivated(user);
+    const isCurrentUser = currentUserId && user.id === currentUserId;
+    return (
+      <BaseCombobox.Item
+        key={user.id}
+        value={user.id}
+        className={cn(
+          'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-[highlighted]:bg-accent',
+        )}
+      >
+        <Avatar
+          userId={user.id}
+          size={'sm'}
+          showActiveStatus={false}
+          className='rounded-md size-[18px] flex items-center justify-center bg-background'
+        />
+        <div className='flex-1 w-full flex items-center gap-2'>
+          <span className={`text-sm ${deactivated ? 'text-muted-foreground' : ''}`}>
+            {displayName.split(' ')[0]}
+          </span>
+          {onlineUserIdsSet.has(user.id) ? (
+            <span className='w-1.5 h-1.5 bg-green-600 rounded-full'></span>
+          ) : (
+            <span className='w-1.5 h-1.5 border border-muted-foreground rounded-full'></span>
+          )}
+          {(user.statusEmoji || user.statusContent) && (
+            <StatusIndicator
+              statusEmoji={user.statusEmoji}
+              statusContent={user.statusContent}
+              statusExpiryAt={user.statusExpiryAt}
+              size='sm'
+            />
+          )}
+          <span
+            className={`text-sm ${deactivated ? 'text-muted-foreground' : 'text-muted-foreground'}`}
+          >
+            {displayName}
+
+            {isCurrentUser ? ' (you)' : ''}
+          </span>
+          {deactivated && (
+            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+              Deactivated
+            </span>
+          )}
+        </div>
+      </BaseCombobox.Item>
+    );
+  };
+
+  const renderChannelItem = (channel: ChannelOption): React.ReactElement => (
+    <BaseCombobox.Item
+      key={`channel:${channel.id}`}
+      value={`channel:${channel.id}`}
+      className={cn(
+        'flex w-full items-center gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-[highlighted]:bg-accent',
+      )}
+    >
+      {channel.isPrivate ? (
+        <Lock className='size-[18px] shrink-0 text-muted-foreground' />
+      ) : (
+        <Hash className='size-[18px] shrink-0 text-muted-foreground' />
+      )}
+      <span className='truncate text-sm text-foreground'>{channel.name}</span>
+    </BaseCombobox.Item>
+  );
+
+  const isEmpty = filteredMergedItems
+    ? filteredMergedItems.length === 0
+    : filteredOptions.length === 0;
+
   return (
     <BaseCombobox.Root
       autoHighlight={true}
@@ -243,7 +358,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                 data-combobox-popup
                 className='border border-border min-w-[var(--anchor-width)] max-h-[14rem] rounded-lg bg-background text-foreground transition duration-100 origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 shadow-lg pointer-events-auto'
               >
-                {filteredOptions.length === 0 ? (
+                {isEmpty ? (
                   <BaseCombobox.Empty>
                     <p className='text-sm text-muted-foreground px-4 py-3'>No options found</p>
                   </BaseCombobox.Empty>
@@ -255,59 +370,13 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                       'no-scrollbar',
                     )}
                   >
-                    {filteredOptions.map(user => {
-                      const displayName = getUserDisplayName(user);
-                      const deactivated = isUserDeactivated(user);
-                      const isCurrentUser = currentUserId && user.id === currentUserId;
-                      return (
-                        <BaseCombobox.Item
-                          key={user.id}
-                          value={user.id}
-                          className={cn(
-                            'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-[highlighted]:bg-accent',
-                          )}
-                        >
-                          <Avatar
-                            userId={user.id}
-                            size={'sm'}
-                            showActiveStatus={false}
-                            className='rounded-md size-[18px] flex items-center justify-center bg-background'
-                          />
-                          <div className='flex-1 w-full flex items-center gap-2'>
-                            <span
-                              className={`text-sm ${deactivated ? 'text-muted-foreground' : ''}`}
-                            >
-                              {displayName.split(' ')[0]}
-                            </span>
-                            {onlineUserIdsSet.has(user.id) ? (
-                              <span className='w-1.5 h-1.5 bg-green-600 rounded-full'></span>
-                            ) : (
-                              <span className='w-1.5 h-1.5 border border-muted-foreground rounded-full'></span>
-                            )}
-                            {(user.statusEmoji || user.statusContent) && (
-                              <StatusIndicator
-                                statusEmoji={user.statusEmoji}
-                                statusContent={user.statusContent}
-                                statusExpiryAt={user.statusExpiryAt}
-                                size='sm'
-                              />
-                            )}
-                            <span
-                              className={`text-sm ${deactivated ? 'text-muted-foreground' : 'text-muted-foreground'}`}
-                            >
-                              {displayName}
-
-                              {isCurrentUser ? ' (you)' : ''}
-                            </span>
-                            {deactivated && (
-                              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-                                Deactivated
-                              </span>
-                            )}
-                          </div>
-                        </BaseCombobox.Item>
-                      );
-                    })}
+                    {filteredMergedItems
+                      ? filteredMergedItems.map(item =>
+                          item.type === 'user'
+                            ? renderUserItem(item.user)
+                            : renderChannelItem(item.channel),
+                        )
+                      : filteredOptions.map(user => renderUserItem(user))}
                   </BaseCombobox.List>
                 )}
               </BaseCombobox.Popup>
