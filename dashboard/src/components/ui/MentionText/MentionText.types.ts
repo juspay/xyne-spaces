@@ -13,24 +13,6 @@ export interface GroupMentionAction {
   icon?: React.ReactNode;
 }
 
-export interface MentionItem {
-  id: string;
-  name: string;
-  type: 'user' | 'group';
-}
-
-export interface PopoverPosition {
-  top: number;
-  left: number;
-}
-
-export type MentionItemType = 'user' | 'group';
-
-export interface MentionActionHandlers {
-  onUserAction?: (userId: string, action: UserMentionActionType) => void;
-  onGroupAction?: (groupId: string, action: GroupMentionActionType) => void;
-}
-
 export interface MentionHoverOptions {
   enterDelay?: number;
   leaveDelay?: number;

@@ -45,10 +45,3 @@ export interface ChannelResult {
   isPrivate: boolean;
   description?: string;
 }
-
-export interface ChannelSelectorProps {
-  editor: Editor | null;
-  channelItems: ChannelResult[];
-  onChannelSearch?: (query: string) => void;
-  onChannelSelect?: (channel: ChannelResult) => void;
-}

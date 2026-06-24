@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactElement, type FC } from 'react';
+import { useEffect, useState, CSSProperties, ReactElement } from 'react';
 
 /**
  * Text-based agent spinners (ported from expo-agent-spinners, web flavor).
@@ -87,25 +87,6 @@ function TextSpinner({
   );
 }
 TextSpinner.displayName = 'TextSpinner';
-
-function make(v: Variant, displayName: string): FC<AgentSpinnerProps> {
-  const Component: FC<AgentSpinnerProps> = props => (
-    <TextSpinner frames={FRAMES[v]} defaultInterval={DEFAULT_INTERVAL[v]} {...props} />
-  );
-  Component.displayName = displayName;
-  return Component;
-}
-
-export const DotsSpinner = make('dots', 'DotsSpinner');
-export const ArcSpinner = make('arc', 'ArcSpinner');
-export const ClockSpinner = make('clock', 'ClockSpinner');
-export const SparkleSpinner = make('sparkle', 'SparkleSpinner');
-export const PulseSpinner = make('pulse', 'PulseSpinner');
-export const EarthSpinner = make('earth', 'EarthSpinner');
-export const BounceSpinner = make('bounce', 'BounceSpinner');
-export const OrbitSpinner = make('orbit', 'OrbitSpinner');
-export const ScanSpinner = make('scan', 'ScanSpinner');
-export const HelixSpinner = make('helix', 'HelixSpinner');
 
 /**
  * Generic picker: <AgentSpinner variant="sparkle" />.

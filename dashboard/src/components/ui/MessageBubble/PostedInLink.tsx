@@ -139,5 +139,3 @@ export const PostedInLink: React.FC<PostedInLinkProps> = ({
 
   return linkContent;
 };
-
-export default PostedInLink;

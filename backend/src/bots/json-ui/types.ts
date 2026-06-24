@@ -329,14 +329,6 @@ export const ComponentSchema: z.ZodType<Component> = z.lazy(() =>
     }),
   ])
 );
-
-/**
- * Flex Layout Schema (for export)
- */
-export const FlexLayoutSchema: z.ZodType<FlexLayout> = BaseFlexLayoutSchema.extend({
-  children: z.array(ComponentSchema).optional(),
-});
-
 /**
  * Flow JSON structure
  */

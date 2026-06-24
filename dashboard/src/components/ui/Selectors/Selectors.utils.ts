@@ -116,17 +116,6 @@ export const getAbsolutePosition = (editor: Editor, pos: number): EditorPosition
     left: coords.left,
   };
 };
-
-export const getPopoverPosition = (editor: Editor, queryLength: number): EditorPosition | null => {
-  const { from } = editor.state.selection;
-  const basePosition = getAbsolutePosition(editor, from - queryLength - 1);
-
-  if (!basePosition) return null;
-
-  // Calculate smart positioning based on available space
-  return getSmartPopoverPosition(basePosition);
-};
-
 export const getSmartPopoverPosition = (basePosition: EditorPosition): EditorPosition => {
   const popoverWidth = 320; // Default width (w-80 = 320px)
   const viewportWidth = window.innerWidth;

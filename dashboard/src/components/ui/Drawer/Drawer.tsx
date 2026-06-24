@@ -94,5 +94,3 @@ export const Drawer = ({
 };
 
 Drawer.displayName = 'Drawer';
-
-export default Drawer;

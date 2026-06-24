@@ -355,5 +355,3 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
     </>
   );
 };
-
-export default MobileMessageMyBubble;

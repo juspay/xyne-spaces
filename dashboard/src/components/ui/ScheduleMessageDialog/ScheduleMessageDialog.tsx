@@ -297,5 +297,3 @@ export const ScheduleMessageDialog = ({
     </Dialog>
   );
 };
-
-export default ScheduleMessageDialog;
