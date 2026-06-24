@@ -1,3 +1,10 @@
+## [1.169.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.169.0...v1.169.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* adding tickettype and labels as board config ([48d4f2a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/48d4f2ad40759714956e740a54a519ee790f25ca)), closes [#7974](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7974)
+
 ## [1.169.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.168.0...v1.169.0) (2026-06-23)
 
 
