@@ -196,7 +196,20 @@ const ChatView = (): ReactElement => {
   }
 
   if (isDeskChannelType(channel?.type) && channelId && workspaceId) {
-    return <Navigate to={`/${workspaceId}/support/${channelId}`} replace />;
+    // Desk/email channels live in the support screen, not the chat view.
+    // Preserve the conversation (and mail, if present) so SupportScreen's
+    // deeplink resolver can land on the exact ticket + email instead of
+    // dropping context at the channel root. conversationId may sit in the
+    // route param (/chat/dir/:channelId/:conversationId) or in the
+    // `#origin=` hash (/chat/dir/:channelId#origin=:conversationId).
+    const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+    const deeplinkConversationId = conversationId || hashParams.get('origin') || undefined;
+    const mailId = searchParams.get('mail');
+    const params = new URLSearchParams();
+    if (deeplinkConversationId) params.set('conversationId', deeplinkConversationId);
+    if (mailId) params.set('mail', mailId);
+    const qs = params.toString();
+    return <Navigate to={`/${workspaceId}/support/${channelId}${qs ? `?${qs}` : ''}`} replace />;
   }
 
   // Check for the problematic URL pattern on mobile:
