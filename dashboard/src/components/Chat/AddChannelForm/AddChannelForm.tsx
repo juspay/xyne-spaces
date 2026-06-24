@@ -95,16 +95,11 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
 
   const workspaceDomain = workspaceMailbox?.displayName?.split('@')[1]?.toLowerCase() ?? '';
   const isValidDlEmail = (value: string): boolean => {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return false;
-    if (workspaceDomain && value.split('@')[1]?.toLowerCase() !== workspaceDomain) return false;
-    return true;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   };
   const dlEmailError = ((): string | null => {
     if (!dlEmailInput) return null;
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dlEmailInput)) return 'Enter a valid email address';
-    if (workspaceDomain && dlEmailInput.split('@')[1]?.toLowerCase() !== workspaceDomain) {
-      return `DL must be on @${workspaceDomain} (the workspace mailbox domain)`;
-    }
     return null;
   })();
 
