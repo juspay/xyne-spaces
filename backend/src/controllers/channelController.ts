@@ -760,21 +760,6 @@ export class ChannelController {
             res.status(409).json({ error: 'Shared mailbox is disconnected' });
             return;
           }
-          const sharedDomain = sharedSource.displayName.split('@')[1]?.toLowerCase();
-          const dlDomain = dlEmail.split('@')[1]?.toLowerCase();
-          if (!sharedDomain || !dlDomain || sharedDomain !== dlDomain) {
-            logger.warn('DL domain mismatch on desk create', {
-              workspaceId,
-              sharedMailbox: sharedSource.displayName,
-              sharedDomain,
-              dlEmail,
-              dlDomain,
-            });
-            res.status(400).json({
-              error: `DL "${dlEmail}" (@${dlDomain}) must be on the same domain as the workspace shared mailbox "${sharedSource.displayName}" (@${sharedDomain}). You may be looking at the wrong workspace — try switching workspaces and retry.`,
-            });
-            return;
-          }
           const alreadyClaimed = await db.emailChannelPreference.findUnique({
             where: { workspaceId_dlEmail: { workspaceId, dlEmail } },
             select: { channelId: true },
