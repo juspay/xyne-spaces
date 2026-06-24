@@ -11,7 +11,7 @@ import { MessageRepository } from '../../database/repositories/messageRepository
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
-import { AuthProvider, ExternalEntityType, MessageDirection } from '@prisma/client';
+import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole } from '@prisma/client';
 import { SlackMessage, SlackFile, UserInfoCache } from '../slack/utils/extractConversation';
 import { installApp } from '../../apps/core/appUtils';
 import {
@@ -22,6 +22,7 @@ import {
 import { encrypt } from '../../services/encryptionService';
 import { config } from '../../config/env';
 import { conversationService } from '../../services/conversationService';
+import { grantPermissionsForRole } from '../../services/permissionMatrix';
 import { db } from '@/database/client';
 
 // ============================================================================
@@ -126,6 +127,7 @@ export const findOrCreateUser = async (
       orgMember: { connect: { memberId: orgMember.memberId } },
     });
     logger.info('[IngestSlack] User created', { userId: user.id, userEmail });
+    await grantPermissionsForRole(user.id, userEmail, WorkspaceRole.MEMBER, workspaceId);
   }
 
   if (userCache) {

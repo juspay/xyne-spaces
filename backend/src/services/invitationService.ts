@@ -7,7 +7,7 @@ import { PrismaClient, WorkspaceRole, Invitation, AuthProvider } from '@prisma/c
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';
-import { UserService } from './userService';
+import { grantPermissionsForRole } from './permissionMatrix';
 import crypto from 'crypto';
 import { hashPassword } from '../utils/passwordUtils';
 
@@ -32,11 +32,9 @@ export interface InvitationWithDetails extends Invitation {
 
 export class InvitationService {
   private prisma: PrismaClient;
-  private userService: UserService;
 
   constructor() {
     this.prisma = DatabaseClient.getInstance();
-    this.userService = new UserService();
   }
 
   /**
@@ -378,15 +376,14 @@ export class InvitationService {
       },
     });
 
-    // Grant full admin resource access when the invitee is the workspace OWNER
-    if (invitation.role === 'OWNER') {
-      await this.userService.grantWorkspaceOwnerResources(newWorkspaceUser.id, newWorkspaceUser.email);
-      logger.info(`[InvitationService] Owner resource access granted to ${userData.email}`);
-    } else {
-      // Grant default resource access for ADMIN and MEMBER invitees
-      await this.userService.grantDefaultResources(newWorkspaceUser.id, newWorkspaceUser.email, invitation.role);
-      logger.info(`[InvitationService] Default resource access granted to invited ${invitation.role.toLowerCase()} ${userData.email}`);
-    }
+    // Grant role-based resource permissions via the centralized permission matrix
+    await grantPermissionsForRole(
+      newWorkspaceUser.id,
+      newWorkspaceUser.email,
+      invitation.role,
+      invitation.workspaceId ?? undefined,
+    );
+    logger.info(`[InvitationService] Permission grants completed for ${invitation.role} user ${userData.email}`);
 
     logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
   }
