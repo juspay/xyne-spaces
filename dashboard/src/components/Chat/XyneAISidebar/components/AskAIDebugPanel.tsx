@@ -976,6 +976,44 @@ function DebugEventItem({
                 />
               </div>
             )}
+            {/* Vespa query — emitted by kb-search and spaces-search. Lives on
+                  data.debug.payloads (one entry per Vespa hit: "exact" + optional
+                  "fuzzy-fallback"). Renders the YQL string verbatim so it can be
+                  copy-pasted into a Vespa shell for replay. */}
+            {(() => {
+              const debugBlock = get<Record<string, unknown>>(data, 'debug');
+              const payloads = isRecord(debugBlock)
+                ? getArray<Record<string, unknown>>(debugBlock, 'payloads')
+                : undefined;
+              if (!payloads || payloads.length === 0) return null;
+              return (
+                <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
+                  <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Vespa query</p>
+                  {payloads.map((p, i) => (
+                    <div key={i} className='space-y-1'>
+                      {typeof p['stage'] === 'string' && (
+                        <p className='text-[11px] text-xyne-fg-muted'>stage: {p['stage']}</p>
+                      )}
+                      {typeof p['yql'] === 'string' && (
+                        <pre className='max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-xyne-bg p-2 text-[11px] leading-relaxed text-xyne-fg-secondary'>
+                          {p['yql']}
+                        </pre>
+                      )}
+                      {isRecord(p['vespaParams']) && (
+                        <details className='rounded-md bg-xyne-bg'>
+                          <summary className='cursor-pointer list-none px-2 py-1.5 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
+                            Bound params + ranking inputs
+                          </summary>
+                          <div className='px-2 pb-2 pt-1'>
+                            <JsonViewer value={p['vespaParams']} title='vespaParams' />
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             {get(data, 'result') !== undefined && (
               <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
                 <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Result</p>

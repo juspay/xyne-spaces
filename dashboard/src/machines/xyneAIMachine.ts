@@ -60,6 +60,10 @@ export interface XyneAIContext {
   // Single-file scope when Ask AI is opened from a file viewer
   kbDocId: string | null;
   kbDocName: string | null;
+  // Bumped on every OPEN dispatched with a kbCollectionId. Lets the input box
+  // re-attach the KB collection chip when the user clicks the Ask AI button
+  // again from /knowledge-base after manually removing the chip.
+  kbOpenNonce: number;
 }
 
 // Event types for XyneAI machine
@@ -409,6 +413,11 @@ export const xyneAIMachine = setup({
           kbChannelId: event.kbChannelId ?? null,
           kbDocId: event.kbDocId ?? null,
           kbDocName: event.kbDocName ?? null,
+          // Bump the nonce on every KB-scoped OPEN (collection OR file) so the
+          // sidebar re-attaches the collection chip and/or file scope even if
+          // the user previously removed them.
+          kbOpenNonce:
+            event.kbCollectionId || event.kbDocId ? context.kbOpenNonce + 1 : context.kbOpenNonce,
         };
 
         // Persist to IndexedDB
@@ -471,6 +480,9 @@ export const xyneAIMachine = setup({
           kbChannelId: event.kbChannelId !== undefined ? event.kbChannelId : context.kbChannelId,
           kbDocId: event.kbDocId !== undefined ? event.kbDocId : context.kbDocId,
           kbDocName: event.kbDocName !== undefined ? event.kbDocName : context.kbDocName,
+          // Re-bump on every KB-scoped OPEN (collection OR file).
+          kbOpenNonce:
+            event.kbCollectionId || event.kbDocId ? context.kbOpenNonce + 1 : context.kbOpenNonce,
         };
 
         // Persist to IndexedDB
@@ -501,7 +513,7 @@ export const xyneAIMachine = setup({
       }
       return {};
     }),
-    setClosed: assign(() => {
+    setClosed: assign(({ context }) => {
       const newContext = {
         xyneAIState: 'closed' as XyneAIState,
         contextType: 'general' as XyneAIContextType,
@@ -516,6 +528,7 @@ export const xyneAIMachine = setup({
         kbChannelId: null,
         kbDocId: null,
         kbDocName: null,
+        kbOpenNonce: context.kbOpenNonce,
       };
 
       // Clear from IndexedDB when closing
@@ -658,6 +671,7 @@ export const xyneAIMachine = setup({
     kbChannelId: null,
     kbDocId: null,
     kbDocName: null,
+    kbOpenNonce: 0,
   }),
   id: 'xyneAIMachine',
   initial: 'closed',

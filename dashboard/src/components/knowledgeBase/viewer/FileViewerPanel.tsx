@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ArrowLeft, Download } from 'lucide-react';
 import { Button } from '../../ui/Button';
+import Tooltip from '../../ui/Tooltip';
+import { XyneAIStar } from '../../icons/xyne-ai';
 import { detectFileType, FILE_TYPE_CONFIG } from '../../FileViewer/utils';
 import { fetchFile, downloadFile } from '../../../services/clients/fileFetchService';
 import { useProjectCollections } from '../hooks/useProjectCollections';
@@ -49,7 +51,8 @@ function extLabel(name: string): string {
 export const FileViewerPanel: React.FC<{
   handleBackNavigation: () => void;
   fileId: string | undefined;
-}> = ({ handleBackNavigation, fileId }) => {
+  onOpenChat?: (docId: string, docName: string) => void;
+}> = ({ handleBackNavigation, fileId, onOpenChat }) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -299,6 +302,21 @@ export const FileViewerPanel: React.FC<{
             {extLabel(file.name)} · {formatBytes(file.size)}
           </span>
         </div>
+
+        {onOpenChat && (
+          <Tooltip content='Ask AI about this file' side='bottom'>
+            <button
+              type='button'
+              onClick={() => onOpenChat(file.fileId, file.name)}
+              data-track-category='knowledge-base'
+              data-track-name='file-viewer-open-ai-chat'
+              className='inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+            >
+              <XyneAIStar size={14} />
+              <span>Ask AI</span>
+            </button>
+          </Tooltip>
+        )}
 
         <button
           type='button'
