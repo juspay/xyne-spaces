@@ -500,8 +500,15 @@ export class AttachmentController {
       // IDs to the caller and to enqueue Vespa indexing.
       const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(entityId, entityType);
 
-      if (savedAttachments.length > 0) {
-        const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
+      const responseAttachments =
+        entityType === AttachmentEntityType.FORM_ENTITY_VALUE
+          ? [...savedAttachments]
+              .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+              .slice(0, files.length)
+          : savedAttachments;
+
+      if (responseAttachments.length > 0) {
+        const attachments = responseAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
         this.pushVespaJobForAttachments(attachments, userId, req.user?.workspaceId).catch(error => {
           logger.error(`[AttachmentController] Error pushing Vespa job for attachments for entity ${entityId}:`, error);
         });
@@ -510,7 +517,7 @@ export class AttachmentController {
       res.status(200).json({
         success: true,
         count: attachmentData.length,
-        attachments: savedAttachments.map(a => ({
+        attachments: responseAttachments.map(a => ({
           id: a.id,
           originalFilename: a.originalFilename,
           mimetype: a.mimetype,
