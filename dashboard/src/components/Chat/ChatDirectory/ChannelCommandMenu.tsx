@@ -126,6 +126,7 @@ const ChannelCommandItem = ({
     <Command.Item
       key={channel.id}
       value={`channel-${channel.id}-${displayName}`}
+      data-item-label={displayName}
       onSelect={() => onSelect(displayName)}
       onMouseDownCapture={onItemMouseDown}
       className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'aria-selected:bg-muted'}`}
@@ -461,9 +462,38 @@ const ChannelCommandMenu = ({
       match,
     };
   }, [searchText]);
+  // Highlighted-row state, synced from the DOM (aria-selected) by syncEnterIntent:
+  // enterWillOpen = Enter opens the row vs. runs a search; activeItemLabel = its name.
+  const [enterWillOpen, setEnterWillOpen] = useState(false);
+  const [activeItemLabel, setActiveItemLabel] = useState<string | null>(null);
+  const syncEnterIntent = useCallback((): void => {
+    const active = commandRef.current?.querySelector('[cmdk-item][aria-selected="true"]');
+    const willOpen = !!active && active.getAttribute('data-show-results-item') !== 'true';
+    setEnterWillOpen(willOpen);
+    setActiveItemLabel(willOpen ? (active?.getAttribute('data-item-label') ?? null) : null);
+  }, []);
+
+  // Ghost suffix telling the user what Enter does: completes the highlighted row's
+  // name + " - Open" when it prefix-matches, else bare " - Open"; " - Search" otherwise.
+  const screenSearchActive =
+    hideTabs && searchMode === 'screen' && !mentionSearchType && Boolean(searchText.trim());
+  const getScreenSearchSuffix = (): string => {
+    if (!enterWillOpen) return '\u00a0\u2013 Search';
+    // Match the RAW typed text so the completion lines up after it (the ghost sits
+    // right after the input); bare " - Open" when it can't (e.g. a filter prefix).
+    if (activeItemLabel && activeItemLabel.toLowerCase().startsWith(searchText.toLowerCase())) {
+      // nbsp: a leading space in the remainder would collapse in the ghost span.
+      const completion = activeItemLabel.slice(searchText.length).replace(/^ /, '\u00a0');
+      return `${completion}\u00a0\u2013 Open`;
+    }
+    return '\u00a0\u2013 Open';
+  };
   const autocompleteSuffix =
-    typeAutocomplete.suffix ||
-    (hideTabs && searchMode === 'screen' && searchText.trim() ? '\u00a0\u2013 Search' : undefined);
+    typeAutocomplete.suffix || (screenSearchActive ? getScreenSearchSuffix() : undefined);
+
+  // Empty-query browse: replace the placeholder with "<name> - Open" for the hovered row.
+  const openTargetLabel =
+    hideTabs && searchMode === 'screen' && !searchText.trim() ? activeItemLabel : null;
 
   // Build URLSearchParams for navigating to the search results screen,
   // including human-readable display text resolved from mention IDs.
@@ -1210,8 +1240,9 @@ const ChannelCommandMenu = ({
       items.forEach(item => {
         item.setAttribute('aria-selected', item === hovered ? 'true' : 'false');
       });
+      syncEnterIntent();
     });
-  }, []);
+  }, [syncEnterIntent]);
 
   const handleFilePreview = useCallback((result: DisplaySearchResult): void => {
     // Handle attachment preview - show file preview modal
@@ -1444,6 +1475,7 @@ const ChannelCommandMenu = ({
           item.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
         });
       }
+      syncEnterIntent();
     }, 50);
     return () => clearTimeout(timer);
   }, [
@@ -1453,6 +1485,7 @@ const ChannelCommandMenu = ({
     filteredLocalChannels.length,
     filteredLocalUsers.length,
     backendResults.length,
+    syncEnterIntent,
   ]);
 
   // Render backend results for the search-active branch (flat list filtered by activeTab)
@@ -2011,6 +2044,7 @@ const ChannelCommandMenu = ({
       items.forEach((item, i) => {
         item.setAttribute('aria-selected', i === nextIndex ? 'true' : 'false');
       });
+      syncEnterIntent();
 
       // Scroll into view if needed
       items[nextIndex]?.scrollIntoView({ block: 'nearest' });
@@ -2310,9 +2344,11 @@ const ChannelCommandMenu = ({
           <LexicalSearchInput
             value={searchText}
             placeholder={
-              hideTabs || activeTab === TabType.ALL
-                ? 'Search everything...'
-                : `Search ${activeTab}...`
+              openTargetLabel
+                ? `${openTargetLabel} – Open`
+                : hideTabs || activeTab === TabType.ALL
+                  ? 'Search everything...'
+                  : `Search ${activeTab}...`
             }
             onChange={handleEditorChange}
             onUserSearch={handleUserSearch}
@@ -2656,6 +2692,7 @@ const ChannelCommandMenu = ({
             {/* Show results for: [query] — screen mode only */}
             {hideTabs &&
               searchMode === 'screen' &&
+              !mentionSearchType &&
               (searchText.trim() || selectedMentions.length > 0) && (
                 <Command.Item
                   value='__show-results-for__'
