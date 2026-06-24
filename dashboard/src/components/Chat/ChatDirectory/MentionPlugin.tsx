@@ -462,13 +462,17 @@ export function MentionPlugin({
         const fromMatch = textBeforeCursor.match(/\bfrom:\s*(.*)$/i);
         const toMatch = enableToTrigger ? textBeforeCursor.match(/\bto:\s*(.*)$/i) : null;
         const withMatch = textBeforeCursor.match(/\bwith:\s*(.*)$/i);
-        const atMatch = textBeforeCursor.match(/@(\S*)$/);
+        // Require the trigger char to start the input or follow whitespace, so a
+        // `#`/`@` embedded mid-token (e.g. a pasted spaces URL fragment
+        // `.../chat/dir/cmp...#origin=<uuid>` or an email `john@acme.com`) is NOT
+        // mistaken for a channel/user trigger and hijacked into mention mode.
+        const atMatch = textBeforeCursor.match(/(?:^|\s)@(\S*)$/);
 
         const assigneeMatch = textBeforeCursor.match(/\bassignee:\s*(.*)$/i);
 
         // Check for "in:" or "#" (channel triggers)
         const inMatch = textBeforeCursor.match(/\bin:\s*(.*)$/i);
-        const hashMatch = textBeforeCursor.match(/#(\S*)$/);
+        const hashMatch = textBeforeCursor.match(/(?:^|\s)#(\S*)$/);
 
         // `priority:` trigger. Prefix is case-sensitive (no /i) so it stays in sync with
         // the lowercase `lastIndexOf('priority:')` insert offset; the value is matched
