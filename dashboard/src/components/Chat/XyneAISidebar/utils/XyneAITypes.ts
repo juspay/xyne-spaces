@@ -109,7 +109,7 @@ export interface StoredMessage {
  */
 export interface ClawCitation {
   label?: string;
-  kind: 'thread' | 'canvas' | 'ticket' | 'external';
+  kind: 'thread' | 'canvas' | 'ticket' | 'external' | 'collection-item';
   channelId?: string;
   conversationId?: string;
   messageId?: string;
@@ -121,6 +121,13 @@ export interface ClawCitation {
   xyneId?: string;
   mailId?: string;
   url?: string;
+  // For kind="collection-item" (KB tools: kb-search / kb-read-file /
+  // kb-get-chunks / kb-search-within-doc). The backend (kb-handlers.ts)
+  // populates `url` with a deep-link to the v2 file viewer; the other
+  // fields are display metadata.
+  collectionItemId?: string;
+  collectionId?: string;
+  fileName?: string;
   /**
    * 1-based index of the chunk in the tool's result text this citation
    * corresponds to. Used to resolve inline `[clf-<toolCallId>#<N>]` tokens

@@ -5,7 +5,7 @@ import config from 'vespa/src/config';
 import { transformVespaResults } from './resultTransform';
 import { db } from '@/database/client';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
-import { MatchFeatures, RankProfile, VespaDocType, VespaSearchHit } from '@/vespa/src/types';
+import { MatchFeatures, RankProfile, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
 
 
 // Create dependencies
@@ -158,6 +158,15 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       onlyMyChannels,      // 'true'|'false' string from cmd-K toggle; default behavior includes public channels
       includeDebugInfo,    // 'true' => attach matchfeatures/rankfeatures debug info to each result
       groupBy,    // Override Vespa grouping. Empty string => flat ranked list (no grouping).
+      // Chunk-level KB drill-in mode used by claw-auth's kb-get-chunks /
+      // kb-search-within-doc tools. Opt-in via includeChunkLevel='true' AND a
+      // fileId — short-circuits the normal pipeline and returns raw chunk-level
+      // data (chunks_summary + matchfeatures.chunk_scores + chunks_map_summary)
+      // instead of the single-snippet shape transformCollection() produces.
+      // Every other request flows through the unchanged search path.
+      includeChunkLevel,   // 'true' => emit chunk-level data for KB drill-in
+      startChunkIndex,     // 0-based offset into the doc's chunks (no-query mode)
+      chunkLimit,          // max chunks to return in no-query mode (1-30, default 15)
       // Note: subApp was moved up to be with other frontend filters
     } = req.query;
 
@@ -172,7 +181,293 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
-    
+
+    // ── Chunk-level KB drill-in (additive, opt-in) ─────────────────────────
+    //
+    // When `includeChunkLevel='true'` and a `fileId` is supplied, return raw
+    // chunk-level data for that ONE document instead of the normal snippet-
+    // per-doc list. Two sub-modes:
+    //   - `q` empty  → fetch the doc via Vespa's document API and slice
+    //                  `chunks` by [startChunkIndex, +chunkLimit). Used by
+    //                  kb-get-chunks.
+    //   - `q` set    → run searchVespa scoped to that docId, pull chunk
+    //                  scores + snippets from the hit's matchfeatures. Used
+    //                  by kb-search-within-doc.
+    //
+    // SECURITY: both paths re-verify the calling user against the doc's
+    // `permissions` array (the same field YqlBuilder gates search results on
+    // via `permissions contains <userId>` — see YqlBuilder.ts:451). Direct
+    // Vespa document fetches don't filter by user, so this check is the trust
+    // boundary.
+    if (String(includeChunkLevel) === 'true') {
+      const fileIdsCsv = toCommaSeparatedValues(fileId);
+      const targetDocId = Array.isArray(fileIdsCsv) ? fileIdsCsv[0] : undefined;
+      if (!targetDocId) {
+        res.status(400).json({
+          success: false,
+          error: 'includeChunkLevel=true requires a fileId (Vespa docId)',
+        });
+        return;
+      }
+      const wantQuery = typeof q === 'string' && q.trim().length > 0;
+      const limitParsed = Math.min(
+        Math.max(Number(chunkLimit ?? 15), 1),
+        30,
+      );
+
+      try {
+        if (!wantQuery) {
+          // No-query: direct doc fetch. The Vespa document API returns the
+          // raw stored fields (no `chunks_summary` projection), so we read
+          // `chunks` first and fall back to `chunks_summary` for parity with
+          // the SEBI getChunks implementation.
+          const startIdx = Math.max(Number(startChunkIndex ?? 0), 0);
+          const raw = await vespaService.vespaClient.getDocument({
+            docId: targetDocId,
+            namespace: config.namespace,
+            schema: fileSchema,
+            cluster: config.cluster,
+          });
+          const fields = (raw?.fields ?? {}) as Record<string, any>;
+          // Enforce the same per-user gate the YQL-based search does.
+          const perms = Array.isArray(fields.permissions) ? fields.permissions : [];
+          if (perms.length > 0 && !perms.includes(userId)) {
+            res.status(403).json({ success: false, error: 'Forbidden' });
+            return;
+          }
+          const rawChunks: unknown =
+            (Array.isArray(fields.chunks) && fields.chunks) ||
+            (Array.isArray(fields.chunks_summary) && fields.chunks_summary) ||
+            [];
+          const allChunks: string[] = (rawChunks as unknown[]).map((c) => {
+            if (typeof c === 'string') return c;
+            if (c && typeof c === 'object') {
+              const o = c as { chunk?: string; text?: string };
+              return o.chunk ?? o.text ?? '';
+            }
+            return '';
+          });
+          const total = allChunks.length;
+          if (total === 0) {
+            res.json({
+              success: true,
+              data: {
+                mode: 'chunks',
+                docId: targetDocId,
+                title: fields.title ?? fields.fileName ?? targetDocId,
+                total_chunks: 0,
+                returned: 0,
+                start: startIdx,
+                end: startIdx,
+                has_more: false,
+                chunks: [],
+              },
+            });
+            return;
+          }
+          if (startIdx >= total) {
+            res.status(400).json({
+              success: false,
+              error: `startChunkIndex ${startIdx} is past the end of the document (total chunks: ${total}).`,
+            });
+            return;
+          }
+          const end = Math.min(startIdx + limitParsed, total);
+          const slice = allChunks.slice(startIdx, end);
+          const chunksMap = Array.isArray(fields.chunks_map)
+            ? (fields.chunks_map as Array<{
+                chunk_index: number;
+                page_numbers?: number[];
+                block_labels?: string[];
+              }>)
+            : [];
+          const mapByIndex = new Map(chunksMap.map((m) => [m.chunk_index, m]));
+          const chunks = slice.map((text, i) => {
+            const index = startIdx + i;
+            const meta = mapByIndex.get(index);
+            const cleaned = String(text).replace(/^\[Page \d+(-\d+)?\]\s*/, '');
+            return {
+              index,
+              text: cleaned,
+              ...(meta?.page_numbers ? { page_numbers: meta.page_numbers } : {}),
+              ...(meta?.block_labels ? { block_labels: meta.block_labels } : {}),
+            };
+          });
+          res.json({
+            success: true,
+            data: {
+              mode: 'chunks',
+              docId: targetDocId,
+              title: fields.title ?? fields.fileName ?? targetDocId,
+              total_chunks: total,
+              returned: slice.length,
+              start: startIdx,
+              end: end - 1,
+              has_more: end < total,
+              chunks,
+            },
+          });
+          return;
+        }
+
+        // With-query: semantic search scoped to one docId. Reuse the existing
+        // searchVespa pipeline so per-user permissions + YQL builder stay in
+        // play; we just emit chunk-level data from the hit instead of running
+        // it through transformCollection().
+        const searchOpts: any = {
+          offset: 0,
+          limit: limitParsed,
+          slack: {},
+          ticket: {},
+          file: {
+            fileId: [targetDocId],
+            subApp: ['collections'],
+          },
+          mail: { userEmail },
+          workspaceId,
+        };
+        if (wantDebugInfo) {
+          searchOpts.captureDebug = (info: {
+            stage: string;
+            yql: string;
+            vespaParams: Record<string, unknown>;
+          }) => {
+            // Inline capture; surfaced on the response below.
+            (searchOpts as any).__debug = (searchOpts as any).__debug ?? [];
+            (searchOpts as any).__debug.push(info);
+          };
+        }
+        const searchResp = await vespaService.searchService.searchVespa(
+          q as string,
+          userId,
+          ['file'],
+          searchOpts,
+          searchId as string,
+        );
+        const children = searchResp?.root?.children ?? [];
+        const hits: Array<{
+          rank: number;
+          chunk_index: number | null;
+          score: number;
+          snippet: string;
+          page_numbers?: number[];
+          block_labels?: string[];
+        }> = [];
+        let docTitle: string | undefined;
+        let docTotalChunks: number | undefined;
+
+        const firstFields = (children[0]?.fields ?? {}) as Record<string, any>;
+        docTitle = firstFields.title ?? firstFields.fileName ?? targetDocId;
+        if (Array.isArray(firstFields.chunks_map_summary)) {
+          docTotalChunks = firstFields.chunks_map_summary.length;
+        } else if (Array.isArray(firstFields.chunks_map)) {
+          docTotalChunks = firstFields.chunks_map.length;
+        }
+
+        // A single hit (the doc) carries N ranked chunks inside its
+        // matchfeatures.chunk_scores.cells map. We expand into per-chunk rows
+        // up to `limitParsed`, sorted by descending score.
+        for (let i = 0; i < children.length && hits.length < limitParsed; i++) {
+          const hit = children[i] as any;
+          const fields = (hit?.fields ?? {}) as Record<string, any>;
+          const mf = fields.matchfeatures as
+            | { chunk_scores?: { cells?: Record<string, number> } }
+            | undefined;
+          const cells = mf?.chunk_scores?.cells ?? {};
+          const ranked: Array<{ index: number; score: number }> = [];
+          for (const [k, v] of Object.entries(cells)) {
+            const idx = Number(k);
+            if (typeof v === 'number' && Number.isFinite(idx)) {
+              ranked.push({ index: idx, score: v });
+            }
+          }
+          ranked.sort((a, b) => b.score - a.score);
+          const chunksSummary = Array.isArray(fields.chunks_summary)
+            ? (fields.chunks_summary as unknown[])
+            : [];
+          const chunksPosSummary = Array.isArray(fields.chunks_pos_summary)
+            ? (fields.chunks_pos_summary as number[])
+            : [];
+          // For small or few-chunk docs Vespa skips the chunks_summary
+          // projection and returns the raw `chunks` array on the hit instead;
+          // fall back to that so the snippet isn't empty.
+          const chunksFull = Array.isArray(fields.chunks)
+            ? (fields.chunks as unknown[])
+            : [];
+          const chunksMapSummary = Array.isArray(fields.chunks_map_summary)
+            ? (fields.chunks_map_summary as Array<{
+                chunk_index: number;
+                page_numbers?: number[];
+                block_labels?: string[];
+              }>)
+            : Array.isArray(fields.chunks_map)
+              ? (fields.chunks_map as Array<{
+                  chunk_index: number;
+                  page_numbers?: number[];
+                  block_labels?: string[];
+                }>)
+              : [];
+          const pickToText = (pick: unknown): string => {
+            if (typeof pick === 'string') return pick;
+            if (pick && typeof pick === 'object') {
+              const o = pick as { chunk?: string; text?: string };
+              return o.chunk ?? o.text ?? '';
+            }
+            return '';
+          };
+          const snippetForIdx = (chunkIndex: number): string => {
+            const at = chunksPosSummary.indexOf(chunkIndex);
+            const fromSummary =
+              at >= 0 ? chunksSummary[at] : chunksSummary[chunkIndex];
+            const fromSummaryText = pickToText(fromSummary);
+            if (fromSummaryText) return fromSummaryText;
+            // Strip the [Page N] ingestion prefix to match kb-get-chunks output.
+            return pickToText(chunksFull[chunkIndex]).replace(
+              /^\[Page \d+(-\d+)?\]\s*/,
+              '',
+            );
+          };
+          for (const r of ranked) {
+            if (hits.length >= limitParsed) break;
+            const meta = chunksMapSummary.find(
+              (m) => m.chunk_index === r.index,
+            );
+            hits.push({
+              rank: hits.length + 1,
+              chunk_index: r.index,
+              score: r.score,
+              snippet: snippetForIdx(r.index),
+              ...(meta?.page_numbers ? { page_numbers: meta.page_numbers } : {}),
+              ...(meta?.block_labels ? { block_labels: meta.block_labels } : {}),
+            });
+          }
+        }
+
+        res.json({
+          success: true,
+          data: {
+            mode: 'within-doc',
+            docId: targetDocId,
+            title: docTitle,
+            query: q,
+            total_chunks: docTotalChunks,
+            hits,
+            ...(wantDebugInfo && (searchOpts as any).__debug
+              ? { debug: { payloads: (searchOpts as any).__debug } }
+              : {}),
+          },
+        });
+        return;
+      } catch (err: any) {
+        logger.error(`includeChunkLevel error for fileId=${targetDocId}:`, err);
+        res.status(500).json({
+          success: false,
+          error: err?.message ?? 'chunk-level fetch failed',
+        });
+        return;
+      }
+    }
+
     // Allow empty query if filterOnly is true
     if (!q && filterOnly !== 'true') {
       res.status(400).json({ success: false, error: 'Query parameter "q" is required' });

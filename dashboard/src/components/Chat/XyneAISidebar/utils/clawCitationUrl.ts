@@ -82,6 +82,15 @@ export function buildClawCitationUrl(citation: ClawCitation): string | null {
     return `/chat/dir/${citation.channelId}/${citation.conversationId}/${citation.ticketId}?selectedTab=thread`;
   }
 
+  // KB tools attach `url` directly (built server-side via deepLinkForFile in
+  // kb-handlers.ts), so just forward it. If url is missing, the backend
+  // couldn't build a full v2 file-viewer path (e.g. workspace-scoped
+  // collection without projectId/channelId) — fall through to null and the
+  // chip renders without a link.
+  if (citation.kind === 'collection-item' && citation.url) {
+    return citation.url;
+  }
+
   return null;
 }
 
@@ -93,6 +102,7 @@ export function getClawCitationLabel(citation: ClawCitation): string {
   if (citation.kind === 'canvas') return 'Canvas';
   if (citation.kind === 'ticket') return `Ticket ${citation.ticketId || ''}`.trim();
   if (citation.kind === 'external') return 'Source link';
+  if (citation.kind === 'collection-item') return citation.fileName || 'Knowledge base file';
   return 'Reference';
 }
 

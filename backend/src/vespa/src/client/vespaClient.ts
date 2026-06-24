@@ -111,6 +111,12 @@ class VespaClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // Disable response compression: undici's custom Agent dispatcher we
+          // configure above doesn't auto-decompress gzip, and Vespa otherwise
+          // gzips any response above its threshold (hit by within-doc searches
+          // that include chunks_summary + full matchfeatures). Without this,
+          // response.json() chokes on raw 1f 8b... gzip bytes.
+          'Accept-Encoding': 'identity',
         },
         body: JSON.stringify(payload),
       });
@@ -194,6 +200,11 @@ class VespaClient {
         method: 'GET',
         headers: {
           Accept: 'application/json',
+          // Same reason as VespaClient.search() — our custom undici Agent
+          // dispatcher doesn't auto-decompress, and the document API gzips
+          // KB docs (full chunks array is large). 'identity' tells Vespa
+          // to skip compression so response.json() can parse it.
+          'Accept-Encoding': 'identity',
         },
       });
       if (!response.ok) {
