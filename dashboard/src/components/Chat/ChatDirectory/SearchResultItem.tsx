@@ -108,6 +108,7 @@ const UserSearchResultItem = ({
       value={`backend-${result.type}-${result.id}`}
       data-result-id={result.id}
       data-result-type={result.type}
+      data-item-label={result.title}
       onSelect={() => void onSelect(result)}
       onMouseDownCapture={handleMouseDown}
       className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
@@ -156,6 +157,10 @@ const SearchResultItem = ({
 
   const handleMouseEnter = onItemMouseEnter ? () => onItemMouseEnter(result) : undefined;
   const handleMouseLeave = onItemMouseLeave || undefined;
+
+  // Plain-text title for the Cmd+K data-item-label; strip <hi> tags (regex, not a
+  // DOM parser, since it runs per result row per keystroke).
+  const itemLabel = (result.title || '').replace(/<[^>]*>/g, '');
 
   switch (result.type) {
     case 'user':
@@ -224,6 +229,7 @@ const SearchResultItem = ({
           value={`backend-${result.type}-${result.id}`}
           data-result-id={result.id}
           data-result-type={result.type}
+          data-item-label={itemLabel}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
           className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
@@ -289,6 +295,7 @@ const SearchResultItem = ({
           value={`backend-${result.type}-${result.id}`}
           data-result-id={result.id}
           data-result-type={result.type}
+          data-item-label={itemLabel}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
           className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
@@ -336,6 +343,7 @@ const SearchResultItem = ({
           value={`backend-${result.type}-${result.id}`}
           data-result-id={result.id}
           data-result-type={result.type}
+          data-item-label={itemLabel}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
           className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
