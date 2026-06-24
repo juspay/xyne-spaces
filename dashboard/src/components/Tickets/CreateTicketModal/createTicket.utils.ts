@@ -41,6 +41,7 @@ interface MissingMandatoryFieldInput {
   showWorkflows: boolean;
   showLabels: boolean;
   showMerchantId: boolean;
+  showTicketType: boolean;
   mandatoryUserGroupsOnly: boolean;
   mandatoryAssignee: boolean;
   mandatoryTodo: boolean;
@@ -48,6 +49,7 @@ interface MissingMandatoryFieldInput {
   mandatoryWorkflows: boolean;
   mandatoryLabels: boolean;
   mandatoryMerchantId: boolean;
+  mandatoryTicketType: boolean;
 }
 
 // Returns the tooltip message for the first missing mandatory field on the
@@ -64,6 +66,7 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     showWorkflows,
     showLabels,
     showMerchantId,
+    showTicketType,
     mandatoryUserGroupsOnly,
     mandatoryAssignee,
     mandatoryTodo,
@@ -71,6 +74,7 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     mandatoryWorkflows,
     mandatoryLabels,
     mandatoryMerchantId,
+    mandatoryTicketType,
   } = input;
 
   if (!formValues?.boardId?.trim()) return 'Select a board first';
@@ -89,6 +93,8 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     return 'Labels are required';
   if (showMerchantId && mandatoryMerchantId && !formValues?.merchantId?.trim())
     return 'Merchant ID is required';
+  if (showTicketType && mandatoryTicketType && !formValues?.ticketType)
+    return 'Ticket Type is required';
 
   if (formMapping?.formFields && formMapping.formFields.length > 0) {
     const missing = formMapping.formFields.find(field => {
