@@ -21,11 +21,7 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
-import {
-  NotificationLevel,
-  MAX_NOTIFICATION_KEYWORDS,
-  MAX_NOTIFICATION_KEYWORD_LENGTH,
-} from '@xyne/shared';
+import { NotificationLevel } from '@xyne/shared';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { format } from 'date-fns';
 
@@ -48,8 +44,6 @@ import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentSt
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
 import HuddleIcon from '../../icons/HuddleIcon';
 import { useGlobalNotificationSettings } from '../../../hooks/useGlobalNotificationSettings';
-import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords';
-import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
@@ -151,77 +145,6 @@ const GLOBAL_NOTIFICATION_LEVELS: Array<{ value: NotificationLevel; label: strin
   { value: NotificationLevel.MENTIONS_ONLY, label: 'Mentions & DMs' },
 ];
 
-const KEYWORD_ERROR_MESSAGES: Record<'duplicate' | 'too_long' | 'limit_reached', string> = {
-  duplicate: 'This keyword is already in your list',
-  too_long: `Keywords can be at most ${MAX_NOTIFICATION_KEYWORD_LENGTH} characters`,
-  limit_reached: `Maximum ${MAX_NOTIFICATION_KEYWORDS} keywords`,
-};
-
-const NotificationKeywordsCard: FC = () => {
-  const { keywords, addKeyword, removeKeyword } = useNotificationKeywords();
-  const [draft, setDraft] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const handleAdd = (): void => {
-    const result = addKeyword(draft);
-    if (result.ok) {
-      setDraft('');
-      setError(null);
-    } else if (result.reason !== 'empty') {
-      setError(KEYWORD_ERROR_MESSAGES[result.reason]);
-    }
-  };
-
-  return (
-    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-2'>
-      <p className='text-sm font-medium text-foreground'>Keywords</p>
-      <p className='text-xs text-muted-foreground'>
-        Get notified when these words appear in any channel you&apos;re in.
-      </p>
-
-      {keywords.length > 0 && (
-        <div className='flex flex-wrap gap-2'>
-          {keywords.map(keyword => (
-            <Badge key={keyword} variant='primary' className='flex items-center gap-1.5 pr-1'>
-              <span className='text-xs'>{keyword}</span>
-              <button
-                type='button'
-                onClick={() => removeKeyword(keyword)}
-                className='rounded-full p-0.5 transition-colors'
-                aria-label={`Remove ${keyword}`}
-                data-track-category='PREFERENCES'
-                data-track-name='RemoveNotificationKeyword'
-              >
-                <X className='h-3 w-3' />
-              </button>
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      <input
-        type='text'
-        value={draft}
-        onChange={e => {
-          setDraft(e.target.value);
-          setError(null);
-        }}
-        onKeyDown={e => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            handleAdd();
-          }
-        }}
-        placeholder='Add a keyword and press Enter'
-        className='w-full px-2 py-1.5 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
-        data-track-category='PREFERENCES'
-        data-track-name='AddNotificationKeyword'
-      />
-      {error && <p className='text-xs text-destructive'>{error}</p>}
-    </div>
-  );
-};
-
 const NotificationsSection: FC<{ state: PreferencesState }> = () => {
   const settings = useGlobalNotificationSettings();
   return (
@@ -321,8 +244,6 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
         </div>
 
         <MeetingDetectionToggle />
-
-        <NotificationKeywordsCard />
       </div>
     </div>
   );

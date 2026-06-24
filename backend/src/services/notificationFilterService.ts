@@ -22,7 +22,6 @@ type UserPreferenceRow = {
   globalMobileNotificationLevel: NotificationLevel;
   threadReplyNotificationsEnabled: boolean;
   channelWideMentionsEnabled: boolean;
-  notificationKeywords?: string[];
 };
 
 /**
@@ -72,7 +71,6 @@ export async function prefetchFilterData(
         globalMobileNotificationLevel: true,
         threadReplyNotificationsEnabled: true,
         channelWideMentionsEnabled: true,
-        notificationKeywords: true,
       },
     }),
   ]);

@@ -25,7 +25,6 @@ export * from './utils/fileTypes';
 export * from './utils/channel';
 export * from './utils/csv';
 export * from './release/releaseReport';
-export * from './utils/notificationKeywords';
 export {
   parseTicketMd,
   serializeTicketMd,
