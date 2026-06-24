@@ -1,3 +1,12 @@
+## [1.169.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.169.1...v1.169.2) (2026-06-24)
+
+
+### Bug Fixes
+
+* citation url of mail ([c133856](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c133856249266a5a6bbcbb94a65dc9af6b34330c)), closes [#7938](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7938)
+* Clean up UI related codebase ([636a1c2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/636a1c25dcdf8e686cf2a2d21e18c9ec17560407)), closes [#7965](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7965)
+* Delete a call from calendar ([722939e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/722939e6a2db7ef141558d9bfdcdd777986389ff)), closes [#7977](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7977)
+
 ## [1.169.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.169.0...v1.169.1) (2026-06-24)
 
 
