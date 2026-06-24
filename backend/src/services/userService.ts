@@ -1,8 +1,9 @@
-import { PrismaClient, User, AccessType, UserPresenceStatus, AuthProvider, ProjectType, UserStatus } from '@prisma/client';
+import { PrismaClient, User, UserPresenceStatus, AuthProvider, ProjectType, UserStatus, WorkspaceRole } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { DatabaseClient } from '@/database/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
+import { grantPermissionsForRole } from './permissionMatrix';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -125,58 +126,8 @@ export class UserService {
         `Created new user: ${user.email} (${user.id}) without assigning to a default group.`
       );
 
-      // Grant explicit default access to predefined resources
-      // This ensures new admin-level resources like USER-MANAGEMENT require explicit grants
-      const DEFAULT_USER_RESOURCES = [
-        { resourceName: 'TICKETS', accessType: AccessType.WRITE },
-        { resourceName: 'WORKFLOWS', accessType: AccessType.WRITE },
-        { resourceName: 'AGENTS', accessType: AccessType.WRITE },
-        { resourceName: 'MODELS', accessType: AccessType.WRITE },
-        { resourceName: 'TOOLS', accessType: AccessType.WRITE },
-        { resourceName: 'AGENT-TOOLS-MAPPINGS', accessType: AccessType.WRITE },
-        { resourceName: 'EXTERNAL-STEP-RESPONSE', accessType: AccessType.WRITE },
-        { resourceName: 'ANALYTICS', accessType: AccessType.WRITE },
-        // USER-MANAGEMENT deliberately excluded - requires explicit admin grant
-      ];
-
-      try {
-        logger.info(
-          `Granting default access to ${DEFAULT_USER_RESOURCES.length} resources for new user ${user.email}`
-        );
-
-        for (const defaultResource of DEFAULT_USER_RESOURCES) {
-          try {
-            const resource = await repositories.resources.findByName(defaultResource.resourceName);
-            if (resource) {
-              await repositories.resourceAccess.grantAccess(
-                {
-                  userId: user.id,
-                  resourceId: resource.id,
-                  accessType: defaultResource.accessType,
-                },
-                user.id
-              );
-              logger.debug(
-                `Granted ${defaultResource.accessType} access to ${defaultResource.resourceName} for user ${user.email}`
-              );
-            } else {
-              logger.warn(
-                `Resource ${defaultResource.resourceName} not found in database for user ${user.email}`
-              );
-            }
-          } catch (resourceError) {
-            logger.error(
-              `Failed to grant ${defaultResource.accessType} access to ${defaultResource.resourceName} for user ${user.email}:`,
-              resourceError
-            );
-          }
-        }
-
-        logger.info(`Successfully granted default access to resources for user ${user.email}`);
-      } catch (accessError) {
-        logger.error(`Failed to grant default access for user ${user.email}:`, accessError);
-        // Don't throw here - user creation succeeded, access grant failure shouldn't rollback user creation
-      }
+      // grantPermissionsForRole swallows errors internally — user creation must not rollback on grant failure
+      await grantPermissionsForRole(user.id, user.email, WorkspaceRole.MEMBER, workspaceId);
 
       // Add user to general channel
       await this.ensureUserInGeneralChannel(user);
@@ -812,6 +763,9 @@ export class UserService {
         }
       });
 
+      // Grant permissions based on invitation role (fixes V2 auth zero-permissions bug)
+      await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, role, userData.workspaceId);
+
       logger.info(`Created workspace user for ${userData.email} in workspace ${userData.workspaceId}`);
       return { user: workspaceUser, isNewUser: true };
     } catch (error) {
@@ -920,7 +874,7 @@ export class UserService {
       });
 
       // Grant full admin resource access to the workspace owner
-      await this.grantWorkspaceOwnerResources(workspaceUser.id, workspaceUser.email);
+      await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);
 
       // Sync all hardcoded bots into the new workspace
       await unifiedBotUserService.syncAllBotUsers(workspace.id);
@@ -1022,93 +976,13 @@ export class UserService {
     });
 
     // Grant full admin resource access to the workspace owner
-    await this.grantWorkspaceOwnerResources(workspaceUser.id, workspaceUser.email);
+    await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);
 
     // Sync all hardcoded bots into the new workspace
     await unifiedBotUserService.syncAllBotUsers(workspace.id);
 
     logger.info(`Created workspace "${workspaceName}" under org "${org.name}" for ${userData.email}`);
     return { organization: org, workspace, workspaceUser };
-  }
-
-  /**
-   * Grant full admin-level resource access to a workspace owner/creator.
-   * Called when a user creates a new org+workspace or a new workspace in an existing org.
-   */
-  async grantWorkspaceOwnerResources(userId: string, email: string): Promise<void> {
-    const ADMIN_RESOURCES = [
-      'TICKETS', 'WORKFLOWS', 'AGENTS', 'MODELS', 'TOOLS',
-      'AGENT-TOOLS-MAPPINGS', 'EXTERNAL-STEP-RESPONSE', 'ANALYTICS',
-      'USER-MANAGEMENT', 'USERS', 'FORMS', 'SUPPORT', 'PROJECTS',
-      'PRODUCT-INSIGHTS', 'LISTPROJECTS', 'CHANNELS', 'CANVASES',
-      'WORKSPACE', 'TICKET-MIGRATION', 'CONFLUENCE-MIGRATION', 'XYNE-APPS',
-    ];
-    try {
-      for (const resourceName of ADMIN_RESOURCES) {
-        try {
-          const resource = await repositories.resources.findByName(resourceName);
-          if (resource) {
-            await repositories.resourceAccess.grantAccess(
-              { userId, resourceId: resource.id, accessType: AccessType.ADMIN },
-              userId,
-            );
-            logger.debug(`[grantWorkspaceOwnerResources] Granted WRITE on ${resourceName} for ${email}`);
-          }
-        } catch (err) {
-          logger.error(`[grantWorkspaceOwnerResources] Failed to grant ${resourceName} for ${email}:`, err);
-        }
-      }
-      logger.info(`[grantWorkspaceOwnerResources] Admin resources granted to workspace owner ${email}`);
-    } catch (err) {
-      logger.error(`[grantWorkspaceOwnerResources] Outer error for ${email}:`, err);
-    }
-  }
-
-  /**
-   * Grant default resource access for invited ADMIN and MEMBER users.
-   * Mirrors the first-time login behavior (DEFAULT_USER_RESOURCES).
-   * Admins additionally get USER-MANAGEMENT access.
-   */
-  async grantDefaultResources(userId: string, email: string, role: string): Promise<void> {
-    const baseResources = [
-      { resourceName: 'TICKETS', accessType: AccessType.WRITE },
-      { resourceName: 'WORKFLOWS', accessType: AccessType.WRITE },
-      { resourceName: 'PROJECTS', accessType: AccessType.WRITE },
-      { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
-    ];
-
-    const defaultResources = role === 'ADMIN'
-      ? [...baseResources, { resourceName: 'USER-MANAGEMENT', accessType: AccessType.ADMIN }]
-      : baseResources;
-
-    try {
-      for (const defaultResource of defaultResources) {
-        try {
-          const resource = await repositories.resources.findByName(defaultResource.resourceName);
-          if (resource) {
-            await repositories.resourceAccess.grantAccess(
-              {
-                userId,
-                resourceId: resource.id,
-                accessType: defaultResource.accessType,
-              },
-              userId,
-            );
-            logger.debug(
-              `[grantDefaultResources] Granted ${defaultResource.accessType} access to ${defaultResource.resourceName} for ${email}`
-            );
-          }
-        } catch (resourceError) {
-          logger.error(
-            `[grantDefaultResources] Failed to grant ${defaultResource.accessType} access to ${defaultResource.resourceName} for ${email}:`,
-            resourceError
-          );
-        }
-      }
-      logger.info(`[grantDefaultResources] Default resources granted to invited ${role.toLowerCase()} ${email}`);
-    } catch (err) {
-      logger.error(`[grantDefaultResources] Outer error for ${email}:`, err);
-    }
   }
 
   /**

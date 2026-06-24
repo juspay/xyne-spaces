@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
 import { createId } from '@paralleldrive/cuid2';
+import { WorkspaceRole } from '@prisma/client';
 import { DatabaseClient, db } from '@/database/client';
 import {logger} from '@/utils/logger';
+import { grantPermissionsForRole } from '../services/permissionMatrix';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -51,23 +53,7 @@ export const createUser = async (req: Request, res: Response) => {
       },
     });
 
-    const resources = await prisma.resource.findMany({
-      where: {
-        name: {
-          notIn: ['USER-MANAGEMENT', 'USER-GROUPS'],
-        },
-      },
-    });
-
-    for (const resource of resources) {
-      await prisma.resourceAccess.create({
-        data: {
-          userId: newUser.id,
-          resourceId: resource.id,
-          accessType: 'READ',
-        },
-      });
-    }
+    await grantPermissionsForRole(newUser.id, newUser.email, WorkspaceRole.MEMBER, newUser.workspaceId);
 
     return res.status(201).json(newUser);
   } catch (error) {
