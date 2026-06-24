@@ -59,6 +59,20 @@ function escapeQueryForUserInput(query: string): string {
     .replace(/'/g, "\\'");
 }
 
+/**
+ * Optional debug hook: when supplied, searchVespa calls back with the actual
+ * YQL string and the full Vespa request payload (including bound `@placeholder`
+ * params and ranking inputs) for every Vespa hit — exact pass, fuzzy fallback
+ * pass, etc. Lets the searchHandler bubble those up to callers that opted into
+ * `includeDebugInfo=true` so e.g. claw-auth's kb-search/spaces-search can log
+ * the exact YQL to disk for offline replay.
+ */
+export interface VespaSearchDebugInfo {
+  stage: "exact" | "fuzzy-fallback";
+  yql: string;
+  vespaParams: Record<string, unknown>;
+}
+
 interface SearchOptions {
   rankProfile?: string;
   offset?: number;
@@ -74,6 +88,7 @@ interface SearchOptions {
   mail?: MailFilters;
   prefixBoostWeight?: number;
   presentationSummary?: string;
+  captureDebug?: (info: VespaSearchDebugInfo) => void;
 }
 
 export interface ILogger {
@@ -130,6 +145,7 @@ export class SearchService {
         prefixBoostWeight = 0.2,
         presentationSummary,
         workspaceId,
+        captureDebug,
       } = options;
 
       // Derive workspaceId from userId when not explicitly provided
@@ -286,6 +302,13 @@ export class SearchService {
       );
       const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
       this.logger.info(`Payload: ${JSON.stringify(payload)}`);
+      if (captureDebug) {
+        captureDebug({
+          stage: "exact",
+          yql: payload.yql as string,
+          vespaParams: payload as Record<string, unknown>,
+        });
+      }
 
       const totalStartTime = Date.now();
       const exactStartTime = Date.now();
@@ -339,6 +362,13 @@ export class SearchService {
         async () => {
           const fuzzyPayload = buildPayload(true, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
           this.logger.info(`Fuzzy Search Payload: ${JSON.stringify(fuzzyPayload)}`);
+          if (captureDebug) {
+            captureDebug({
+              stage: "fuzzy-fallback",
+              yql: fuzzyPayload.yql as string,
+              vespaParams: fuzzyPayload as Record<string, unknown>,
+            });
+          }
           return this.vespa.search<VespaSearchResponse>(fuzzyPayload);
         },
         

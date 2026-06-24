@@ -46,6 +46,9 @@ import { SearchResultsV2 } from '../../components/knowledgeBaseV2/components/Sea
 import { NameDialogV2 } from '../../components/knowledgeBaseV2/components/NameDialogV2';
 import { toast } from 'sonner';
 import { useGlobalCollections } from './hooks/useGlobalCollections';
+import { xyneAIActor } from '../../machines/xyneAIMachine';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
+import Tooltip from '../../components/ui/Tooltip';
 
 const KB_COLUMNS: ReadonlyArray<ColumnDef> = [
   { key: 'kind', header: 'Kind', width: '120px' },
@@ -635,6 +638,21 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     updateParams({ q: next === '' ? null : next }, /* replace */ true);
   };
 
+  // ── Ask AI ──────────────────────────────────────────────────────────
+  // Only rendered when `!isAtRoot` (i.e. a collection is open), so we always
+  // have a real collectionId to scope to. The channelId comes from the global
+  // collections cache because V2 doesn't carry it in the URL.
+  const handleOpenAI = useCallback((): void => {
+    if (!collectionId) return;
+    const owning = globalCollections.byId(collectionId);
+    xyneAIActor.send({
+      type: 'OPEN',
+      startFreshChat: true,
+      kbCollectionId: collectionId,
+      kbChannelId: owning?.scopeId ?? null,
+    });
+  }, [collectionId, globalCollections]);
+
   // ── Header label ─────────────────────────────────────────────────────
   const rootLabel = isAtRoot
     ? 'Knowledge'
@@ -704,6 +722,23 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         </div>
 
         <div className='flex items-center gap-2'>
+          {!isAtRoot && (
+            <Tooltip
+              content={`Ask AI about this ${spParentId ? 'folder' : 'collection'}`}
+              side='bottom'
+            >
+              <button
+                type='button'
+                onClick={handleOpenAI}
+                data-track-category='knowledge-base'
+                data-track-name='kb-open-ai-chat'
+                className='inline-flex h-7 items-center gap-1 rounded-md border border-border bg-secondary px-2 text-[12px] text-foreground transition hover:bg-muted'
+              >
+                <XyneAIStar size={14} />
+                Ask AI
+              </button>
+            </Tooltip>
+          )}
           {isAtRoot ? (
             // Collections are channel-scoped, so creation must go through the
             // CreateCollectionModal (it owns the channel picker + file step).

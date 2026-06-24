@@ -117,6 +117,9 @@ interface XyneAISidebarProps {
   kbChannelId?: string;
   kbDocId?: string;
   kbDocName?: string;
+  // Bumped by xyneAIMachine each time OPEN is dispatched with a kbCollectionId.
+  // The input box re-attaches the KB collection chip on every bump.
+  kbOpenNonce?: number;
   visible?: boolean;
 }
 
@@ -133,6 +136,7 @@ const XyneAISidebar = ({
   kbCollectionId: kbCollectionIdProp,
   kbDocId: kbDocIdProp,
   kbDocName: kbDocNameProp,
+  kbOpenNonce,
   visible = true,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
@@ -176,9 +180,13 @@ const XyneAISidebar = ({
   const [fileScope, setFileScope] = useState<{ id: string; name: string } | null>(
     kbDocIdProp ? { id: kbDocIdProp, name: kbDocNameProp || 'this file' } : null,
   );
+  // Re-sync the file scope on every KB-scoped OPEN, even when kbDocIdProp/Name
+  // are unchanged. Without kbOpenNonce in the deps, removing the file chip and
+  // clicking Ask AI on the same file again would not re-attach (props identical
+  // → effect skipped). The machine bumps the nonce on every OPEN with a KB id.
   useEffect(() => {
     setFileScope(kbDocIdProp ? { id: kbDocIdProp, name: kbDocNameProp || 'this file' } : null);
-  }, [kbDocIdProp, kbDocNameProp]);
+  }, [kbDocIdProp, kbDocNameProp, kbOpenNonce]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
@@ -521,6 +529,30 @@ const XyneAISidebar = ({
   const selectedAgentColor =
     selectedAgent && selectedAgent.slug !== 'ask-ai' ? selectedAgent.color : null;
   const selectedAgentName = selectedAgent?.name ?? null;
+
+  // Ask AI v2 context-picker scope: when a claw agent is active, narrow the
+  // collections list to what THAT agent can actually read.
+  //   • v1 (selectedAgent === null) → unchanged, full list.
+  //   • USER-scoped agent           → agent inherits caller's full KB, so
+  //                                   showing the full list is the truthful
+  //                                   reflection of agent reach.
+  //   • COLLECTIONS-scoped agent    → filter to ids in agent.collections.
+  //                                   A collection appears if there's a
+  //                                   whole-collection grant OR a file-level
+  //                                   grant within it (the agent can still
+  //                                   read at least one doc inside).
+  // The downstream MCP layer is the hard gate; this filter just keeps the
+  // picker honest about what attaching a collection will get you.
+  const effectiveCollectionsList: CollectionSummary[] = useMemo(() => {
+    if (!selectedAgent) return collectionsList;
+    if (selectedAgent.kbScope === 'USER') return collectionsList;
+    // Top-level picker only lists ROOT collections — match against the
+    // resolved rootCollectionId (claw-auth stores the file's immediate
+    // parent, which can be a sub-folder).
+    const allowedRoots = new Set((selectedAgent.collections ?? []).map(g => g.rootCollectionId));
+    if (allowedRoots.size === 0) return [];
+    return collectionsList.filter(c => allowedRoots.has(c.id));
+  }, [collectionsList, selectedAgent]);
 
   // Auto-enable web search when browser context is provided (and user has access)
   // Web search stays enabled for the session to allow follow-up questions
@@ -1747,7 +1779,13 @@ const XyneAISidebar = ({
     onRemoveChannel: handleRemoveChannel,
     onAddChannel: handleAddChannel,
     nonDMChannels,
-    collectionsList,
+    collectionsList: effectiveCollectionsList,
+    // Only pass grants when the agent is COLLECTIONS-scoped — USER scope
+    // and v1 (no agent) should keep the legacy "no drill-down gating"
+    // behavior, which the input box achieves when this prop is absent.
+    ...(selectedAgent && selectedAgent.kbScope === 'COLLECTIONS'
+      ? { agentKbGrants: selectedAgent.collections }
+      : {}),
     fileScope,
     onRemoveFileScope: () => setFileScope(null),
     onSelectFileScope: (file: { id: string; name: string }) => setFileScope(file),
@@ -2145,6 +2183,7 @@ const XyneAISidebar = ({
                     tightToolbar={isTightSidebar}
                     {...sharedInputSectionProps}
                     kbCollectionId={kbCollectionIdProp}
+                    kbOpenNonce={kbOpenNonce}
                     onSelectedCollectionsChange={setSelectedCollectionIds}
                   />
                 </div>

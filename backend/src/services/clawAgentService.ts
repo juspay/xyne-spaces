@@ -33,7 +33,10 @@ export interface ClawRunRequest {
   ticketIds?: string[];
   callIds?: string[];
   attachedContext?: Array<{
-    type: string;
+    // 'collection' + 'file' carry KB picks from the ask-ai v2 picker.
+    // claw-auth's resolveSection emits a prompt block that points the agent
+    // at kb-list-files / kb-read-file with the right id.
+    type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity' | 'collection' | 'file' | string;
     id: string;
     title: string;
     threadId?: string;
@@ -83,6 +86,28 @@ export interface AccessibleClawAgent {
   tools?: string[];
   skills?: string[];
   subagents?: string[];
+  /** Knowledge Base scoping mode for this agent.
+   *  "COLLECTIONS" — explicit allowlist in `collections`.
+   *  "USER"        — inherits the calling user's full spaces KB at runtime.
+   *  See xyne-claw-auth Prisma schema (`Agent.kbScope`). */
+  kbScope?: 'COLLECTIONS' | 'USER';
+  /** Per-agent KB grants (only meaningful when kbScope==="COLLECTIONS").
+   *  `collectionId`     — the grant's immediate-parent collection id as stored
+   *                       in claw-auth. CAN be a sub-folder (not a root). Used
+   *                       by the ask-ai picker's in-collection drill-down to
+   *                       gate which sub-folders / files render.
+   *  `fileId === null`  — whole-collection grant on `collectionId`.
+   *  `fileId` set       — single-file grant; the file lives in `collectionId`.
+   *  `rootCollectionId` — resolved root for `collectionId` (the ROOT of the
+   *                       collection tree this grant belongs to). The ask-ai
+   *                       top-level picker only lists root collections, so
+   *                       filtering happens on this field. Equal to
+   *                       `collectionId` when the grant is on a root. */
+  collections?: Array<{
+    collectionId: string;
+    fileId: string | null;
+    rootCollectionId: string;
+  }>;
 }
 
 export interface ClawConversationSummary {
@@ -696,6 +721,9 @@ interface RawClawAgent {
     skillId: string;
     skill?: { name: string; slug?: string; label?: string };
   }>;
+  /** Claw-auth's `INCLUDE_TOOLS_SKILLS` always loads collections + kbScope. */
+  kbScope?: string;
+  collections?: Array<{ id: string; agentId: string; collectionId: string; fileId: string | null }>;
 }
 
 export async function listAccessibleClawAgents(req: {
@@ -718,6 +746,30 @@ export async function listAccessibleClawAgents(req: {
 
   const result = (await response.json()) as { success: boolean; data: RawClawAgent[] };
 
+  // Resolve every grant's collectionId to its ROOT collection id. Claw-auth
+  // stores the file's IMMEDIATE parent collection — which can be a sub-folder.
+  // The dashboard's ask-ai picker only lists ROOT collections (Zero's
+  // scopedCollections filters parentId IS NULL), so without this resolution a
+  // sub-folder grant never matches anything in the picker. One batched query
+  // covers every grant across every agent.
+  const allGrantCollectionIds = new Set<string>();
+  for (const a of result.data) {
+    for (const c of a.collections ?? []) {
+      if (c.collectionId) allGrantCollectionIds.add(c.collectionId);
+    }
+  }
+  const rootByCollectionId = new Map<string, string>();
+  if (allGrantCollectionIds.size > 0) {
+    const rows = await db.collection.findMany({
+      where: { id: { in: Array.from(allGrantCollectionIds) } },
+      select: { id: true, rootCollectionId: true },
+    });
+    for (const r of rows) {
+      // For a row that IS a root, rootCollectionId is null — its own id is the root.
+      rootByCollectionId.set(r.id, r.rootCollectionId ?? r.id);
+    }
+  }
+
   // Transform raw agent data to extract tool/skill/subagent names from nested structures
   const transformedData: AccessibleClawAgent[] = result.data.map((agent) => {
     return {
@@ -735,6 +787,23 @@ export async function listAccessibleClawAgents(req: {
         .filter((n): n is string => Boolean(n)),
       // Subagents are stored in agent.config.tools.subagents (matches xyne-claw dashboard)
       subagents: agent.config?.tools?.subagents ?? [],
+      // KB scoping — passed through so the dashboard's ask-ai v2 context
+      // picker can filter the collections list to what the agent can read.
+      // Anything other than the two known literals normalizes to COLLECTIONS
+      // (the safe default).
+      kbScope: agent.kbScope === 'USER' ? 'USER' : 'COLLECTIONS',
+      // Keep `collectionId` as the original (the file's IMMEDIATE parent
+      // collection — possibly a sub-folder) AND surface a resolved
+      // `rootCollectionId`. The top-level picker filters on root; the
+      // in-collection drill-down (sub-folders / files) needs the immediate
+      // parent to know which folders contain a granted file. Unknown ids
+      // fall back to the raw id — they still won't match anything but at
+      // least they don't get silently dropped from the wire response.
+      collections: (agent.collections ?? []).map((c) => ({
+        collectionId: c.collectionId,
+        fileId: c.fileId,
+        rootCollectionId: rootByCollectionId.get(c.collectionId) ?? c.collectionId,
+      })),
     };
   });
 

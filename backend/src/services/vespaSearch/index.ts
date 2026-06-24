@@ -150,6 +150,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       stage,       // Ticket stage
       assignee,    // Assigned user name
       filterOnly,  // Flag for filter-only search (no query text)
+      collectionId, // KB collection id(s) - comma-separated; restricts file results to those clIds
+      fileId,      // KB file id(s) - comma-separated; restricts file results to those Vespa docIds (collectionItem.fileId)
       callType,   // Call type filter (e.g. HEADLESS for recordings)
       presentationSummary, // Optional Vespa presentation.summary profile (e.g. 'lean')
       includeBotMessages,  // 'true'|'false' string from cmd-K toggle; default behavior excludes BOT messages
@@ -193,6 +195,17 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       mail: { userEmail },
       workspaceId,
     };
+
+    // When includeDebugInfo=true, capture every Vespa payload (exact + any
+    // fuzzy fallback) emitted by searchService so we can return them in the
+    // response. Tools like claw-auth's kb-search/spaces-search use this to
+    // persist the actual YQL + bound params for offline replay.
+    const capturedDebug: Array<{ stage: string; yql: string; vespaParams: Record<string, unknown> }> = [];
+    if (wantDebugInfo) {
+      options.captureDebug = (info: { stage: string; yql: string; vespaParams: Record<string, unknown> }) => {
+        capturedDebug.push(info);
+      };
+    }
     
      if (rankProfile) {
       options.rankProfile = rankProfile as string;
@@ -345,25 +358,30 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.ticket.dynamicFieldDateRanges = parsedDynamicFieldDateRanges;
     }
 
-    // Date filters (apply to both slack and ticket)
+    // Date filters apply to slack, ticket, AND file (FileFilters has its own
+    // createdBefore/createdAfter/createdOn/createdRange — see YqlBuilder).
     if (before) {
       options.slack.createdBefore = before as string;
       options.ticket.createdBefore = before as string;
+      options.file.createdBefore = before as string;
     }
 
     if (after) {
       options.slack.createdAfter = after as string;
       options.ticket.createdAfter = after as string;
+      options.file.createdAfter = after as string;
     }
 
     if (on) {
       options.slack.createdOn = on as string;
       options.ticket.createdOn = on as string;
+      options.file.createdOn = on as string;
     }
 
     if (range) {
       options.slack.createdRange = range as string;
       options.ticket.createdRange = range as string;
+      options.file.createdRange = range as string;
     }
 
     if (stage) {
@@ -376,6 +394,14 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     if (subApp) {
       options.file.subApp = toCommaSeparatedValues(subApp);
+    }
+
+    if (collectionId) {
+      options.file.collectionId = toCommaSeparatedValues(collectionId);
+    }
+
+    if (fileId) {
+      options.file.fileId = toCommaSeparatedValues(fileId);
     }
 
     if (callType) {
@@ -448,7 +474,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
           groups: groupedResults,
           totalCount: (parsedResults.cntRemoved && groupedResults.length > 0) ? (Number(offset) + groupedResults[0].count) : results.root.fields?.totalCount,
           offset: Number(offset),
-          limit: effectiveLimit
+          limit: effectiveLimit,
+          ...(wantDebugInfo ? { debug: { payloads: capturedDebug } } : {}),
         }
       });
     } else {
@@ -465,7 +492,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
           results: transformedResults,
           totalCount: results.root.fields?.totalCount || 0,
           offset: Number(offset),
-          limit: effectiveLimit
+          limit: effectiveLimit,
+          ...(wantDebugInfo ? { debug: { payloads: capturedDebug } } : {}),
         }
       });
     }

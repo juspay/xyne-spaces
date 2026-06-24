@@ -346,6 +346,7 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
+  const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
   const { isMobile } = usePlatform();
   const isInPanelWebview = useIsInPanelWebview();
 
@@ -583,6 +584,7 @@ const AppRoot = (): ReactElement => {
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
                             kbDocName={xyneAIKbDocName ?? ''}
+                            kbOpenNonce={xyneAIKbOpenNonce}
                             onDebuggerOpenChange={setIsXyneDebuggerOpen}
                           />
                         </XyneAISidebarZIndexShell>
@@ -714,6 +716,7 @@ const AppRoot = (): ReactElement => {
                       kbChannelId={xyneAIKbChannelId ?? ''}
                       kbDocId={xyneAIKbDocId ?? ''}
                       kbDocName={xyneAIKbDocName ?? ''}
+                      kbOpenNonce={xyneAIKbOpenNonce}
                       onDebuggerOpenChange={setIsXyneDebuggerOpen}
                       visible={false}
                     />
@@ -740,6 +743,7 @@ const AppRoot = (): ReactElement => {
                       kbChannelId={xyneAIKbChannelId ?? ''}
                       kbDocId={xyneAIKbDocId ?? ''}
                       kbDocName={xyneAIKbDocName ?? ''}
+                      kbOpenNonce={xyneAIKbOpenNonce}
                       onDebuggerOpenChange={setIsXyneDebuggerOpen}
                     />
                   </Drawer>

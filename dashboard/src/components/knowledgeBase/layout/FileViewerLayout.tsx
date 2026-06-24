@@ -1,13 +1,14 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FileViewerPanel } from '../viewer/FileViewerPanel';
+import { xyneAIActor } from '../../../machines/xyneAIMachine';
 
-// Minimal layout: no sidebar, no Ask-AI plumbing, no gradient header.
-// FileViewerPanel renders its own thin toolbar (back / filename / download)
-// above the preview body, matching xyne-search's PdfViewer chrome.
+// Minimal layout above FileViewerPanel's thin toolbar. The toolbar exposes an
+// Ask-AI affordance that opens XyneAI scoped to this single file (kbDocId is
+// the Vespa fileId, not the route cuid).
 export const FileViewerLayout: React.FC = () => {
   const navigate = useNavigate();
-  const { collectionId, folderId, fileId } = useParams<{
+  const { projectId, channelId, collectionId, folderId, fileId } = useParams<{
     projectId: string;
     channelId: string;
     collectionId: string;
@@ -37,9 +38,32 @@ export const FileViewerLayout: React.FC = () => {
     void navigate(getBackNavigationPath());
   };
 
+  const handleOpenChat = (docId: string, docName: string): void => {
+    const kbContext = {
+      projectId: projectId || 'default',
+      collectionId: collectionId || undefined,
+      parentDocId: resolvedFolderId || undefined,
+      docId,
+    };
+    sessionStorage.setItem('kb_xyne_ai_context', JSON.stringify(kbContext));
+
+    xyneAIActor.send({
+      type: 'OPEN',
+      startFreshChat: true,
+      kbCollectionId: collectionId ?? null,
+      kbChannelId: channelId ?? null,
+      kbDocId: docId,
+      kbDocName: docName,
+    });
+  };
+
   return (
     <div className='flex h-full overflow-hidden'>
-      <FileViewerPanel handleBackNavigation={handleBack} fileId={fileId} />
+      <FileViewerPanel
+        handleBackNavigation={handleBack}
+        fileId={fileId}
+        onOpenChat={handleOpenChat}
+      />
     </div>
   );
 };

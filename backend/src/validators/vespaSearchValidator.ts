@@ -209,6 +209,36 @@ export const vespaSearchQuerySchema = Joi.object({
     'any.only': 'SubApp must be one of: canvas, transcript, recording, rca, collections'
   }),
 
+  // Restrict file results to one or more knowledge-base collections (matches clId in Vespa).
+  // Used by claw-auth's kb-search to scope Vespa search to an agent's allowed KB collections.
+  collectionId: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'collectionId must be a string or array of collection IDs'
+    }),
+
+  // Restrict file results to one or more specific document ids (matches Vespa
+  // `docId` on the file schema — which for collection items is collectionItem.fileId).
+  // Used by claw-auth's kb-search when an agent's grants are all single-file
+  // (so Vespa ranks only over in-scope docs instead of pre-fetching siblings).
+  fileId: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'fileId must be a string or array of file IDs'
+    }),
+
   callType: Joi.string().optional().messages({
     'string.base': 'callType must be a string'
   }),

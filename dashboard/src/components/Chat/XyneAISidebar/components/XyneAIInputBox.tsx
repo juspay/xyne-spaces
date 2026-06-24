@@ -162,7 +162,20 @@ export interface XyneAIInputBoxProps {
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
   kbCollectionId?: string | undefined;
+  // Bumped by xyneAIMachine on every OPEN with a kbCollectionId. When this
+  // changes, the auto-add effect re-attaches the KB collection chip even if
+  // the user previously removed it (e.g. clicking Ask AI again from /knowledge-base).
+  kbOpenNonce?: number | undefined;
   collectionsList?: CollectionSummary[];
+  /** When set, narrows the in-collection drill-down (sub-folders + files) to
+   *  what the selected agent is actually scoped to. Same source as the
+   *  top-level collections filter — see XyneAISidebar.tsx. When undefined or
+   *  empty, no drill-down filtering happens (legacy behavior). */
+  agentKbGrants?: Array<{
+    collectionId: string;
+    fileId: string | null;
+    rootCollectionId: string;
+  }>;
   /** When Ask AI is opened from a file viewer, scopes retrieval to this single file. */
   fileScope?: { id: string; name: string } | null;
   onRemoveFileScope?: () => void;
@@ -239,6 +252,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       createCanvasEnabled = false,
       onCreateCanvasToggle,
       kbCollectionId = '',
+      kbOpenNonce,
       fileScope = null,
       onRemoveFileScope,
       onSelectFileScope,
@@ -248,6 +262,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       agents = [],
       onSelectAgent,
       collectionsList: collectionsListProp = [],
+      agentKbGrants,
       compactToolbar = false,
       tightToolbar = false,
     },
@@ -335,6 +350,26 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     }, [kbCollectionId, collectionsList, selectedCollections.length, onSelectedCollectionsChange]);
 
+    // Re-attach the KB collection chip each time the user clicks the Ask AI
+    // button from /knowledge-base. xyneAIMachine bumps kbOpenNonce on every
+    // OPEN with a kbCollectionId; that bump signals "treat this as a fresh
+    // scope intent", so we clear the manual-removal flag and force-re-add the
+    // collection (overriding the prior chip set so the latest kbCollectionId
+    // wins if the user opens AI from a different collection mid-session).
+    const lastSeenOpenNonce = useRef<number | undefined>(kbOpenNonce);
+    useEffect(() => {
+      if (kbOpenNonce === undefined) return;
+      if (kbOpenNonce === lastSeenOpenNonce.current) return;
+      lastSeenOpenNonce.current = kbOpenNonce;
+      if (!kbCollectionId) return;
+      autoAddedCollectionRemoved.current = false;
+      const collection = collectionsList.find(c => c.id === kbCollectionId);
+      if (!collection) return;
+      const newCollection = [{ id: collection.id, name: collection.name }];
+      setSelectedCollections(newCollection);
+      onSelectedCollectionsChange?.(newCollection.map(c => c.id));
+    }, [kbOpenNonce, kbCollectionId, collectionsList, onSelectedCollectionsChange]);
+
     // Filter collections based on search query
     const filteredCollections = useMemo(() => {
       if (!collectionSearchQuery.trim()) return collectionsList;
@@ -364,24 +399,141 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     );
 
     const fileQuery = collectionSearchQuery.trim().toLowerCase();
-    const currentSubfolders = useMemo(
-      () =>
-        (allSubfolders ?? [])
-          .filter(f => (f as { parentId?: string | null }).parentId === currentFolderId)
-          .filter(f => !fileQuery || (f as { name: string }).name.toLowerCase().includes(fileQuery))
-          .map(f => ({ id: (f as { id: string }).id, name: (f as { name: string }).name })),
-      [allSubfolders, currentFolderId, fileQuery],
+
+    /*
+     * Agent-scope drill-down gating
+     * ─────────────────────────────
+     * When the active agent runs in COLLECTIONS scope (we receive a non-empty
+     * `agentKbGrants`), the picker's in-collection drill-down must only show
+     * what the agent can actually read. Three rules:
+     *
+     *   1. A FILE is shown iff
+     *        (a) some grant has the matching `fileId`, OR
+     *        (b) some WHOLE-collection grant (`fileId === null`) covers the
+     *            current folder or any of its ancestors up to the root.
+     *
+     *   2. A SUB-FOLDER is shown iff
+     *        (a) some whole-collection grant covers that sub-folder itself or
+     *            any of its ancestors (drilling further would reveal granted
+     *            files), OR
+     *        (b) some grant (file or collection) has its immediate-parent
+     *            `collectionId` equal to the sub-folder OR a descendant of
+     *            it (there's a granted thing somewhere underneath).
+     *
+     *   3. When `agentKbGrants` is undefined/empty, no gating — legacy
+     *      behavior (v1, USER scope, agents without KB grants).
+     *
+     * `allSubfolders` is the FULL sub-folder tree under the current root, so
+     * we build a parentId lookup once and reuse it for ancestor walks. Grant
+     * matching is restricted to those whose `rootCollectionId` equals the
+     * current root to avoid mixing scopes when multiple roots are granted.
+     */
+    const grantsForCurrentRoot = useMemo(
+      () => (agentKbGrants ?? []).filter(g => g.rootCollectionId === rootCollectionId),
+      [agentKbGrants, rootCollectionId],
     );
-    const currentFiles = useMemo(
-      () =>
-        (currentFolderItems ?? [])
-          .map(it => ({
-            fileId: (it as { fileId?: string }).fileId ?? '',
-            name: (it as { name: string }).name,
-          }))
-          .filter(it => it.fileId && (!fileQuery || it.name.toLowerCase().includes(fileQuery))),
-      [currentFolderItems, fileQuery],
+    const subfolderParentById = useMemo(() => {
+      const m = new Map<string, string | null>();
+      for (const f of allSubfolders ?? []) {
+        const node = f as { id: string; parentId?: string | null };
+        m.set(node.id, node.parentId ?? null);
+      }
+      return m;
+    }, [allSubfolders]);
+    const isAncestorOrSelf = useCallback(
+      (maybeAncestor: string, descendant: string): boolean => {
+        let cursor: string | null | undefined = descendant;
+        while (cursor) {
+          if (cursor === maybeAncestor) return true;
+          // Root collection has no entry in `subfolderParentById` (the query
+          // only returns sub-folders) — stop the walk there.
+          cursor = subfolderParentById.has(cursor)
+            ? (subfolderParentById.get(cursor) ?? null)
+            : null;
+        }
+        return false;
+      },
+      [subfolderParentById],
     );
+    /** True when a whole-collection grant covers `folderId` OR any of its
+     *  ancestors up to and including the root. */
+    const folderCoveredByWholeGrant = useCallback(
+      (folderId: string): boolean => {
+        for (const g of grantsForCurrentRoot) {
+          if (g.fileId !== null) continue;
+          if (isAncestorOrSelf(g.collectionId, folderId)) return true;
+        }
+        return false;
+      },
+      [grantsForCurrentRoot, isAncestorOrSelf],
+    );
+
+    const hasAgentGating = grantsForCurrentRoot.length > 0;
+
+    const currentSubfolders = useMemo(() => {
+      const all = (allSubfolders ?? [])
+        .filter(f => (f as { parentId?: string | null }).parentId === currentFolderId)
+        .map(f => ({ id: (f as { id: string }).id, name: (f as { name: string }).name }));
+      const searched = !fileQuery ? all : all.filter(f => f.name.toLowerCase().includes(fileQuery));
+      if (!hasAgentGating) return searched;
+      // Whole-grant coverage of the current folder cascades down — show
+      // every sub-folder unchanged.
+      if (folderCoveredByWholeGrant(currentFolderId)) return searched;
+      return searched.filter(sf => {
+        // Whole-grant covers this sub-folder (or an ancestor) — show.
+        if (folderCoveredByWholeGrant(sf.id)) return true;
+        // Some grant lives at or below this sub-folder — show so the user
+        // can keep drilling toward it.
+        for (const g of grantsForCurrentRoot) {
+          if (isAncestorOrSelf(sf.id, g.collectionId)) return true;
+        }
+        return false;
+      });
+    }, [
+      allSubfolders,
+      currentFolderId,
+      fileQuery,
+      hasAgentGating,
+      folderCoveredByWholeGrant,
+      grantsForCurrentRoot,
+      isAncestorOrSelf,
+    ]);
+
+    const currentFiles = useMemo(() => {
+      // CollectionItem has TWO ids:
+      //   • `id`     — the row id (cuid). Claw-auth stores THIS in
+      //                AgentCollection.fileId when the user picks a file in
+      //                the KB picker (see xyne-claw-auth/.../KnowledgeBasePicker.tsx).
+      //   • `fileId` — the stable UUID across versions. The dashboard's
+      //                fileScope / Vespa lookup uses this downstream.
+      // We need both: `rowId` for grant matching, `fileId` for downstream.
+      const all = (currentFolderItems ?? [])
+        .map(it => ({
+          rowId: (it as { id?: string }).id ?? '',
+          fileId: (it as { fileId?: string }).fileId ?? '',
+          name: (it as { name: string }).name,
+        }))
+        .filter(it => it.fileId && (!fileQuery || it.name.toLowerCase().includes(fileQuery)));
+      if (!hasAgentGating) return all.map(({ fileId, name }) => ({ fileId, name }));
+      // Whole-grant coverage of the current folder (or any ancestor) lets
+      // every file pass through.
+      if (folderCoveredByWholeGrant(currentFolderId)) {
+        return all.map(({ fileId, name }) => ({ fileId, name }));
+      }
+      const allowedRowIds = new Set(
+        grantsForCurrentRoot.filter(g => g.fileId !== null).map(g => g.fileId as string),
+      );
+      return all
+        .filter(it => allowedRowIds.has(it.rowId))
+        .map(({ fileId, name }) => ({ fileId, name }));
+    }, [
+      currentFolderItems,
+      fileQuery,
+      hasAgentGating,
+      folderCoveredByWholeGrant,
+      currentFolderId,
+      grantsForCurrentRoot,
+    ]);
 
     // Reset navigation whenever the picker closes.
     useEffect(() => {
@@ -407,6 +559,13 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         if (collectionClickTimer.current) return; // a double-click is in progress
         collectionClickTimer.current = setTimeout(() => {
           collectionClickTimer.current = null;
+          // Picking from the picker is an explicit override of the KB auto-add,
+          // so suppress further auto-re-adds for this session. Without this, the
+          // user can: open Ask AI from /knowledge-base (auto-adds collection A) →
+          // pick collection B → remove B → and A snaps back, because the auto-add
+          // effect re-fires on selectedCollections.length=0. The Ask AI button
+          // still re-attaches A via the kbOpenNonce-driven effect.
+          autoAddedCollectionRemoved.current = true;
           // Single-select: at most ONE collection. Clicking the selected one clears it.
           setSelectedCollections(prev => {
             const isCurrent = prev.length === 1 && prev[0]?.id === collection.id;
@@ -426,6 +585,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     const handleSelectFile = useCallback(
       (file: { fileId: string; name: string }) => {
         onSelectFileScope?.({ id: file.fileId, name: file.name });
+        // Same rationale as handleCollectionSingleClick: explicit file pick is
+        // user-driven scope, so don't let the KB auto-add bring back the original
+        // collection if the user later clears these chips.
+        autoAddedCollectionRemoved.current = true;
         // Single-select: the file's (root) collection becomes the ONLY selected collection.
         const col = navStack[0];
         const updated = col ? [col] : [];
