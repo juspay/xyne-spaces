@@ -274,6 +274,24 @@ export const vespaSearchQuerySchema = Joi.object({
   groupBy: Joi.string().allow('').optional().messages({
     'string.base': 'groupBy must be a string'
   }),
+
+  // Chunk-level KB drill-in (opt-in). Used by claw-auth's kb-get-chunks /
+  // kb-search-within-doc tools. When 'true' AND fileId is set, the handler
+  // short-circuits the normal pipeline and emits raw chunk-level data.
+  includeChunkLevel: Joi.string().valid('true', 'false').optional().messages({
+    'any.only': 'includeChunkLevel must be "true" or "false"'
+  }),
+  startChunkIndex: Joi.number().integer().min(0).optional().messages({
+    'number.base': 'startChunkIndex must be a number',
+    'number.integer': 'startChunkIndex must be an integer',
+    'number.min': 'startChunkIndex cannot be negative'
+  }),
+  chunkLimit: Joi.number().integer().min(1).max(30).optional().messages({
+    'number.base': 'chunkLimit must be a number',
+    'number.integer': 'chunkLimit must be an integer',
+    'number.min': 'chunkLimit must be at least 1',
+    'number.max': 'chunkLimit cannot exceed 30'
+  }),
 }).messages({
   'object.unknown': 'Unknown query parameter: {{#label}}'
 });

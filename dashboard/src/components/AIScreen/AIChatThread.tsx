@@ -310,6 +310,12 @@ const buildClawCitationTooltip = (citation: ClawCitation | null): string => {
   if (citation.kind === 'external') {
     return citation.label || citation.url || 'External link';
   }
+  if (citation.kind === 'collection-item') {
+    const name = citation.fileName || citation.label || 'Knowledge base file';
+    return typeof citation.chunkIndex === 'number'
+      ? `KB · ${name} (chunk ${citation.chunkIndex})`
+      : `KB · ${name}`;
+  }
   return getClawCitationLabel(citation);
 };
 
