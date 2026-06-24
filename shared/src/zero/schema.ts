@@ -1329,7 +1329,6 @@ export const userPreferenceTable = table('user_preferences')
     globalMobileNotificationLevel: enumeration<NotificationLevel>(),  // Default mobile level across all channels
     threadReplyNotificationsEnabled: boolean(), // Receive thread reply notifications globally
     channelWideMentionsEnabled: boolean(),      // Receive @channel and @here notifications
-    notificationKeywords: json<string[]>(), // Global keyword-notification list (max 50, each <= 80 chars)
     createdAt: number(),
     updatedAt: number(),
   })

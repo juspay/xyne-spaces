@@ -76,9 +76,6 @@ import {
   DeskType,
   VCSProviderType,
   ReleaseTrackingMode,
-  MAX_NOTIFICATION_KEYWORDS,
-  MAX_NOTIFICATION_KEYWORD_LENGTH,
-  normalizeNotificationKeywords,
   parseRepliesMd,
   addReplyToData,
   serializeRepliesMd,
@@ -12325,7 +12322,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
-              notificationKeywords: [],
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -12359,7 +12355,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
-              notificationKeywords: [],
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -12393,7 +12388,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
-              notificationKeywords: [],
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -12443,42 +12437,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               globalMobileNotificationLevel: (globalMobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY) as NotificationLevel,
               threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
               channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
-              notificationKeywords: [],
-              createdAt: timestamp,
-              updatedAt: timestamp,
-            });
-          }
-        },
-      ),
-      setNotificationKeywords: defineMutator(
-        z.object({
-          id: z.string(),
-          keywords: z.array(z.string().min(1).max(MAX_NOTIFICATION_KEYWORD_LENGTH)).max(MAX_NOTIFICATION_KEYWORDS),
-          timestamp: z.number(),
-        }),
-        async ({ tx, args: { id, keywords, timestamp } }) => {
-          const notificationKeywords = normalizeNotificationKeywords(keywords);
-          const existing = await tx.run(
-            zql.user_preferences.where('userId', authData.sub).one(),
-          );
-          if (existing) {
-            await tx.mutate.user_preferences.update({
-              id: existing.id,
-              notificationKeywords,
-              updatedAt: timestamp,
-            });
-          } else {
-            await tx.mutate.user_preferences.insert({
-              id,
-              userId: authData.sub,
-              channelSortOrder: ChannelSortOrder.RECENCY,
-              enterSendsMessage: true,
-              allowThreadBroadcastMentions: false,
-              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
-              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
-              threadReplyNotificationsEnabled: true,
-              channelWideMentionsEnabled: true,
-              notificationKeywords,
               createdAt: timestamp,
               updatedAt: timestamp,
             });

@@ -1221,7 +1221,6 @@ model UserPreference {
   globalMobileNotificationLevel   NotificationLevel @default(MENTIONS_ONLY) // Default level for all channels (mobile)
   threadReplyNotificationsEnabled Boolean           @default(true) // Receive thread reply notifications globally
   channelWideMentionsEnabled      Boolean           @default(true) // Receive @channel and @here mention notifications
-  notificationKeywords            String[]          @default([]) // Global keyword-notification list (max 50, each <= 80 chars)
 
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
