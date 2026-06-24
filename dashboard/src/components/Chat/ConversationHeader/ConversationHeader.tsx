@@ -3,7 +3,7 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import { useVisibleChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import useMeasure from '../../../hooks/useMeasure';
-import { Star, Users2, Bell, ExternalLink, X } from 'lucide-react';
+import { Star, Users2, Bell, ExternalLink, Search, X } from 'lucide-react';
 import CompactActionsMenu, { ActionMenuItem } from '../../ui/CompactActionsMenu';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Dialog from '../../ui/Dialog';
@@ -28,6 +28,7 @@ import { standaloneNavigate } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
+import { invokeShortcut } from '../../../shortcuts';
 
 interface ConversationHeaderProps {
   channelId: string;
@@ -154,6 +155,11 @@ const ConversationHeader = ({
       icon: <ExternalLink className='w-4 h-4' />,
       label: 'Open all links',
       onSelect: () => handleOpenAllLinks({} as React.MouseEvent),
+    },
+    {
+      icon: <Search className='w-4 h-4' />,
+      label: 'Search in this channel',
+      onSelect: () => invokeShortcut('mod+f'),
     },
   ];
 
@@ -315,6 +321,21 @@ const ConversationHeader = ({
               items={compactMenuItems}
               triggerClassName='p-2 border border-border rounded-lg h-8 w-8'
             />
+          )}
+          {!isCompact && (
+            <Tooltip content='Search in this channel'>
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={() => invokeShortcut('mod+f')}
+                className='p-2 border border-border rounded-lg h-8 w-8'
+                data-track-category='CHANNELS'
+                data-track-name='SEARCH_IN_CHANNEL'
+                data-track-metadata={JSON.stringify({ channelId })}
+              >
+                <Search className='w-4 h-4' />
+              </Button>
+            </Tooltip>
           )}
           <CallTriggerModal
             channelId={channelId}
