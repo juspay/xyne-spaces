@@ -428,6 +428,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const showWorkflows = ticketFormConfig?.workflows?.enabled ?? true;
   const showLabels = ticketFormConfig?.labels?.enabled ?? true;
   const showMerchantId = ticketFormConfig?.merchantId?.enabled ?? false;
+  const showTicketType = ticketFormConfig?.ticketType?.enabled ?? true;
 
   // Determine which fields are mandatory
   const mandatoryUserGroupsOnly = ticketFormConfig?.userGroupsOnly?.mandatory ?? false;
@@ -437,6 +438,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const mandatoryWorkflows = ticketFormConfig?.workflows?.mandatory ?? false;
   const mandatoryLabels = ticketFormConfig?.labels?.mandatory ?? false;
   const mandatoryMerchantId = ticketFormConfig?.merchantId?.mandatory ?? false;
+  const mandatoryTicketType = ticketFormConfig?.ticketType?.mandatory ?? false;
 
   // Fetch form mapping for the selected board (TICKET entity type)
   const [formMapping] = useCachedQuery(
@@ -865,6 +867,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         showWorkflows,
         showLabels,
         showMerchantId,
+        showTicketType,
         mandatoryUserGroupsOnly,
         mandatoryAssignee,
         mandatoryTodo,
@@ -872,6 +875,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         mandatoryWorkflows,
         mandatoryLabels,
         mandatoryMerchantId,
+        mandatoryTicketType,
       }),
     [
       formValues,
@@ -884,6 +888,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       showWorkflows,
       showLabels,
       showMerchantId,
+      showTicketType,
       mandatoryUserGroupsOnly,
       mandatoryAssignee,
       mandatoryTodo,
@@ -891,6 +896,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       mandatoryWorkflows,
       mandatoryLabels,
       mandatoryMerchantId,
+      mandatoryTicketType,
     ],
   );
 
@@ -2341,34 +2347,36 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               </form.Field>
             )}
 
-            {/* Ticket Type Selection */}
-            <form.Field name='ticketType'>
-              {field => {
-                const typeOptions =
-                  ticketTypeOptions?.map(type => ({
-                    label: type.value,
-                    value: type.value,
-                    icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
-                  })) ?? [];
+            {/* Ticket Type Selection - conditionally rendered */}
+            {showTicketType && (
+              <form.Field name='ticketType'>
+                {field => {
+                  const typeOptions =
+                    ticketTypeOptions?.map(type => ({
+                      label: type.value,
+                      value: type.value,
+                      icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                    })) ?? [];
 
-                return (
-                  <EntitySelector
-                    showSearch={false}
-                    options={typeOptions}
-                    selectedValue={field.state.value || ''}
-                    onSelect={(value: string | null) =>
-                      field.handleChange(value as CreateTicketFormData['ticketType'])
-                    }
-                    searchPlaceholder='ticket type'
-                    placeholder='ticket type'
-                    inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
-                    inputClassName='rounded-md h-7'
-                    showClearButton={true}
-                    showIndicator={false}
-                  />
-                );
-              }}
-            </form.Field>
+                  return (
+                    <EntitySelector
+                      showSearch={false}
+                      options={typeOptions}
+                      selectedValue={field.state.value || ''}
+                      onSelect={(value: string | null) =>
+                        field.handleChange(value as CreateTicketFormData['ticketType'])
+                      }
+                      searchPlaceholder='ticket type'
+                      placeholder={`ticket type${mandatoryTicketType ? ' *' : ''}`}
+                      inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
+                      inputClassName='rounded-md h-7'
+                      showClearButton={true}
+                      showIndicator={false}
+                    />
+                  );
+                }}
+              </form.Field>
+            )}
 
             {/* Merchant ID - conditionally rendered */}
             {showMerchantId && (

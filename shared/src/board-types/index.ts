@@ -31,6 +31,10 @@ export interface TicketFormConfig {
     enabled: boolean;
     mandatory?: boolean;
   };
+  ticketType?: {
+    enabled: boolean;
+    mandatory?: boolean;
+  };
 }
 
 export interface FieldOrderItem {

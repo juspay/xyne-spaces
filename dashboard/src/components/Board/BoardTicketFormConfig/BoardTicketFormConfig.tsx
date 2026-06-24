@@ -20,6 +20,7 @@ export const DEFAULT_CONFIG: Required<TicketFormConfig> = {
   workflows: { enabled: true, mandatory: false },
   labels: { enabled: true, mandatory: false },
   merchantId: { enabled: false, mandatory: false },
+  ticketType: { enabled: true, mandatory: false },
 };
 
 export const BoardTicketFormConfig = ({

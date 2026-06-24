@@ -113,6 +113,7 @@ export const BoardForm = ({
     workflows: boardMetadata?.ticketFormConfig?.workflows || DEFAULT_CONFIG.workflows,
     labels: boardMetadata?.ticketFormConfig?.labels || DEFAULT_CONFIG.labels,
     merchantId: boardMetadata?.ticketFormConfig?.merchantId || DEFAULT_CONFIG.merchantId,
+    ticketType: boardMetadata?.ticketFormConfig?.ticketType || DEFAULT_CONFIG.ticketType,
   };
   const [ticketFormConfig, setTicketFormConfig] =
     useState<Required<TicketFormConfig>>(initialConfig);

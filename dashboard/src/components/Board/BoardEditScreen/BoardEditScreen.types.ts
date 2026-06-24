@@ -33,7 +33,9 @@ export interface TicketField {
     | 'project'
     | 'boolean'
     | 'workflow'
-    | 'doc';
+    | 'doc'
+    | 'tags'
+    | 'ticketType';
   label: string;
   required: boolean;
   order: number;
@@ -153,6 +155,24 @@ export const DEFAULT_TICKET_FIELDS: TicketField[] = [
     required: false,
     order: 6,
     visibleInCreate: false,
+  },
+  {
+    id: '14',
+    name: 'tags',
+    type: 'tags',
+    label: 'Labels',
+    required: false,
+    order: 7,
+    visibleInCreate: true,
+  },
+  {
+    id: '15',
+    name: 'ticketType',
+    type: 'ticketType',
+    label: 'Ticket Type',
+    required: false,
+    order: 8,
+    visibleInCreate: true,
   },
 ];
 

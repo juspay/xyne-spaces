@@ -101,6 +101,8 @@ export const getFieldConfigKey = (fieldName: string): string => {
       return 'workflows';
     case 'tags':
       return 'labels';
+    case 'ticketType':
+      return 'ticketType';
     default:
       return fieldName;
   }
