@@ -14,7 +14,9 @@ import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import ThreadMessages from '../Chat/ThreadPannel';
 import { ChatBubble } from '../Chat/ChatBubble/ChatBubble';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useGetChannelUserStatus } from '../../hooks/useChannels';
 import { queries } from '../../zero/queries';
+import { QueryResultType } from '@rocicorp/zero';
 import {
   AttachmentRef,
   attachmentViewerActor,
@@ -878,21 +880,37 @@ export const AttachmentGalleryModal: React.FC = () => {
     currentAttachment?.channelId &&
     (currentAttachment?.replyCount ?? 0) > 0;
 
-  // Query thread messages if single attachment with thread context
-  // This enables navigation when clicking from channel view
+  const threadChannelId = currentAttachment?.channelId ?? '';
+  const participationStatus = useGetChannelUserStatus(threadChannelId);
+  const isMember = !!participationStatus;
+
   const shouldQueryThread =
-    attachments.length === 1 &&
     !!currentAttachment?.conversationId &&
     !!currentAttachment?.channelId &&
     (currentAttachment.replyCount ?? 0) > 0;
 
-  const [threadMessages] = useCachedQuery(
-    queries.conversationMessagesV2({
-      conversationId: currentAttachment?.conversationId ?? '',
-    }),
-    {
-      enabled: shouldQueryThread,
-    },
+  const threadConversationQuery = useMemo(
+    () =>
+      queries.threadConversation({
+        conversationId: currentAttachment?.conversationId ?? ' ',
+        ...(threadChannelId ? { channelId: threadChannelId, isMember } : {}),
+      }),
+    [currentAttachment?.conversationId, threadChannelId, isMember],
+  );
+  const [threadConversation] = useCachedQuery(threadConversationQuery, {
+    enabled: shouldQueryThread,
+  });
+  // threadConversation is a conversation object (`.one()`); extract its messages array.
+  // Row shape == conversationMessagesV2 rows (same messageTable + attachments relation),
+  // so this satisfies the ThreadList/ThreadMessages expected prop type via the cast.
+  const threadMessages = useMemo(
+    () =>
+      threadConversation?.messages
+        ? ([...threadConversation.messages] as QueryResultType<
+            typeof queries.conversationMessagesV2
+          >)
+        : undefined,
+    [threadConversation?.messages],
   );
 
   // Reset refs and thread-ready gate when modal closes
@@ -1519,7 +1537,7 @@ export const AttachmentGalleryModal: React.FC = () => {
             {...(currentAttachment?.conversationId && {
               conversationId: currentAttachment.conversationId,
             })}
-            threadMessages={threadMessages}
+            {...(threadMessages && threadMessages.length > 0 ? { threadMessages } : {})}
             hideHeader={true}
             disableAskAI={true}
           />
