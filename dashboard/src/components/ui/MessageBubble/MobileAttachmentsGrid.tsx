@@ -201,5 +201,3 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
     </>
   );
 };
-
-export default MobileAttachmentsGrid;

@@ -191,5 +191,3 @@ export const HoverCard = ({
 };
 
 HoverCard.displayName = 'HoverCard';
-
-export default HoverCard;

@@ -402,5 +402,3 @@ const MonthView: React.FC<{
 
   return <div className='grid grid-cols-7 gap-1'>{days}</div>;
 };
-
-export default DateTimePicker;

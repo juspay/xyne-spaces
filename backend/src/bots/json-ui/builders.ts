@@ -1,4 +1,4 @@
-import type { SingleLineText, MultiLineText, Icon, Tag, SplitTag, Image, KeyValue, AvatarGroup, Dropdown, FlexLayout, Component } from './types';
+import type { SingleLineText, MultiLineText, Tag, SplitTag, AvatarGroup, FlexLayout, Component } from './types';
 
 /**
  * Create a single line text component
@@ -41,26 +41,6 @@ export function createMultiLineText(
       ...(options?.maxLines && { maxLines: options.maxLines }),
       weight: options?.weight || 'normal',
       size: options?.size || 'md',
-      ...(options?.color && { color: options.color }),
-    },
-  };
-}
-
-/**
- * Create an icon component
- */
-export function createIcon(
-  name: string,
-  options?: {
-    size?: number;
-    color?: string;
-  }
-): Icon {
-  return {
-    type: 'icon',
-    props: {
-      name,
-      size: options?.size || 24,
       ...(options?.color && { color: options.color }),
     },
   };
@@ -115,56 +95,6 @@ export function createSplitTag(
 }
 
 /**
- * Create an image component
- */
-export function createImage(
-  src: string,
-  options?: {
-    alt?: string;
-    width?: number | string;
-    height?: number | string;
-    objectFit?: 'contain' | 'cover' | 'fill' | 'none' | 'scale-down';
-  }
-): Image {
-  return {
-    type: 'image',
-    props: {
-      src,
-      ...(options?.alt && { alt: options.alt }),
-      ...(options?.width && { width: options.width }),
-      ...(options?.height && { height: options.height }),
-      objectFit: options?.objectFit || 'cover',
-    },
-  };
-}
-
-/**
- * Create a key-value pair component
- */
-export function createKeyValue(
-  keyString: string,
-  value: string,
-  options?: {
-    keyWeight?: 'normal' | 'medium' | 'semibold' | 'bold';
-    valueWeight?: 'normal' | 'medium' | 'semibold' | 'bold';
-    keySize?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
-    valueSize?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
-  }
-): KeyValue {
-  return {
-    type: 'keyValue',
-    props: {
-      keyString,
-      value,
-      keyWeight: options?.keyWeight || 'semibold',
-      valueWeight: options?.valueWeight || 'normal',
-      keySize: options?.keySize || 'sm',
-      valueSize: options?.valueSize || 'sm',
-    },
-  };
-}
-
-/**
  * Create an avatar group component
  */
 export function createAvatarGroup(
@@ -180,51 +110,6 @@ export function createAvatarGroup(
       avatars,
       size: options?.size || 'md',
       ...(options?.maxVisible && { maxVisible: options.maxVisible }),
-    },
-  };
-}
-
-/**
- * Create a dropdown component
- */
-export function createDropdown(
-  placeholder: string,
-  items: Array<{
-    groupLabel?: string;
-    items: Array<{
-      value: string;
-      label: string;
-      subLabel?: string;
-      disabled?: boolean;
-    }>;
-    showSeparator?: boolean;
-  }>,
-  options?: {
-    label?: string;
-    subLabel?: string;
-    selected?: string;
-    disabled?: boolean;
-    required?: boolean;
-    fullWidth?: boolean;
-    enableSearch?: boolean;
-    error?: boolean;
-    errorMessage?: string;
-  }
-): Dropdown {
-  return {
-    type: 'dropdown',
-    props: {
-      placeholder,
-      items,
-      ...(options?.label !== undefined && { label: options.label }),
-      ...(options?.subLabel !== undefined && { subLabel: options.subLabel }),
-      selected: options?.selected || '',
-      disabled: options?.disabled || false,
-      required: options?.required || false,
-      fullWidth: options?.fullWidth || false,
-      enableSearch: options?.enableSearch || false,
-      error: options?.error || false,
-      ...(options?.errorMessage && { errorMessage: options.errorMessage }),
     },
   };
 }
@@ -271,56 +156,4 @@ export function createFlexLayout(
       ...(options?.minHeight && { minHeight: options.minHeight }),
     },
   };
-}
-
-/**
- * Helper to create a simple text response (single component)
- */
-export function createSimpleTextResponse(
-  text: string,
-  multiLine: boolean = false,
-  options?: {
-    weight?: 'normal' | 'medium' | 'semibold' | 'bold';
-    size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
-    color?: string;
-    maxLines?: number;
-  }
-): Component {
-  return multiLine 
-    ? createMultiLineText(text, options)
-    : createSingleLineText(text, options);
-}
-
-/**
- * Helper to create a structured response with multiple text elements
- */
-export function createStructuredTextResponse(
-  elements: Array<{
-    text: string;
-    multiLine?: boolean;
-    weight?: 'normal' | 'medium' | 'semibold' | 'bold';
-    size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
-    color?: string;
-    maxLines?: number;
-  }>,
-  layoutOptions?: {
-    direction?: 'row' | 'column';
-    justify?: 'start' | 'center' | 'end' | 'between' | 'around';
-    align?: 'start' | 'center' | 'end' | 'stretch';
-    gap?: number;
-  }
-): Component {
-  const children: Component[] = [];
-
-  // Create text components
-  for (const element of elements) {
-    const textComponent = element.multiLine
-      ? createMultiLineText(element.text, element)
-      : createSingleLineText(element.text, element);
-    
-    children.push(textComponent);
-  }
-
-  // Create flex layout
-  return createFlexLayout(children, layoutOptions);
 }

@@ -360,5 +360,3 @@ export const FilePill: React.FC<FilePillProps> = ({
     </div>
   );
 };
-
-export default FilePill;

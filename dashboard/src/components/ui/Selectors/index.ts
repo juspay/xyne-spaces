@@ -26,7 +26,6 @@ export {
   detectChannelTrigger,
   detectEmojiTrigger,
   detectRecipientTrigger,
-  getPopoverPosition,
   getAbsolutePosition,
   getTextBeforeCursor,
   createVirtualAnchor,

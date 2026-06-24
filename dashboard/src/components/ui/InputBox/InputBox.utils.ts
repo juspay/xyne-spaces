@@ -1,43 +1,6 @@
-import { useRef, useEffect, useCallback } from 'react';
-
 export const TIMING_CONSTANTS = {
   SEARCH_DEBOUNCE_MS: 300,
   TYPING_DEBOUNCE_MS: 1000,
-};
-
-export const useTypingDebounce = (
-  callback: (() => void) | undefined,
-  delay: number = TIMING_CONSTANTS.TYPING_DEBOUNCE_MS,
-): (() => void) => {
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isFirstCallRef = useRef(true);
-
-  useEffect(() => {
-    return (): void => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-  }, []);
-
-  return useCallback((): void => {
-    if (!callback) return;
-
-    //Call immediately on first keystroke
-    if (isFirstCallRef.current) {
-      callback();
-      isFirstCallRef.current = false; // Mark as "already fired"
-    }
-
-    // Cancel any existing timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    timeoutRef.current = setTimeout(() => {
-      isFirstCallRef.current = true;
-    }, delay);
-  }, [callback, delay]);
 };
 /**
  * Extracts the argument text from a slash-command HTML string, resolving

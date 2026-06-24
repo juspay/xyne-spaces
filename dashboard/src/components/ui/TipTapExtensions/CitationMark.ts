@@ -352,64 +352,6 @@ export function extractInlineCitations(content: string): InlineCitation[] {
   return citations;
 }
 
-export function stripOrphanCitations(
-  html: string | null | undefined,
-  validRefs: ReadonlySet<string> | null,
-): string {
-  if (!html) return '';
-  if (!validRefs) return html;
-  return html.replace(
-    /<cite\b([^>]*)>([\s\S]*?)<\/cite>/gi,
-    (match, attrs: string, inner: string) => {
-      const refMatch = /(?:data-citation-ref|ref)="([^"]+)"/i.exec(attrs);
-      if (!refMatch || !refMatch[1]) return match;
-      return validRefs.has(refMatch[1]) ? match : inner;
-    },
-  );
-}
-
-export function extractCitationRefs(html: string | null | undefined): string[] {
-  if (!html) return [];
-  const refs: string[] = [];
-  const seen = new Set<string>();
-  const re = /<cite\b[^>]*?(?:data-citation-ref|ref)="([^"]+)"/gi;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(html)) !== null) {
-    const ref = match[1];
-    if (ref && !seen.has(ref)) {
-      seen.add(ref);
-      refs.push(ref);
-    }
-  }
-  return refs;
-}
-
-export function extractCitationContents(html: string | null | undefined): Map<string, string> {
-  const out = new Map<string, string>();
-  if (!html) return out;
-  const re = /<cite\b([^>]*)>([\s\S]*?)<\/cite>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    const attrs = m[1] ?? '';
-    const inner = m[2] ?? '';
-    const refMatch = /(?:data-citation-ref|ref)="([^"]+)"/i.exec(attrs);
-    const ref = refMatch?.[1];
-    if (!ref || out.has(ref)) continue;
-    const text = inner
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/gi, '&')
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      .replace(/&quot;/gi, '"')
-      .replace(/&#39;/gi, "'")
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (text) out.set(ref, text);
-  }
-  return out;
-}
-
 export function getCitationRefFromTarget(target: EventTarget | null): string | null {
   if (!(target instanceof Node)) return null;
   const el = target instanceof Element ? target : target.parentElement;
@@ -418,5 +360,3 @@ export function getCitationRefFromTarget(target: EventTarget | null): string | n
   if (!refEl) return null;
   return refEl.getAttribute(CITATION_DATA_ATTR);
 }
-
-export default CitationMark;

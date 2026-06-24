@@ -142,4 +142,3 @@ export function Table<TData extends Record<string, unknown>>({
 }
 
 export { tableVariants };
-export default Table;

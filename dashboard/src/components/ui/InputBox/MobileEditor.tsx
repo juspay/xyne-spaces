@@ -409,5 +409,3 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
     </div>
   );
 };
-
-export default MobileEditor;
