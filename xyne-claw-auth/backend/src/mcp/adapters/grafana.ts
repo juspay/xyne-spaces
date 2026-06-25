@@ -1,4 +1,13 @@
 import type { StdioMcpAdapter, McpToolInfo } from "../types.js";
+import type { Citation } from "xyne-claw-shared";
+import { CONFIG } from "../../config.js";
+
+/** Base URL for the Explore citation link. Prefers the `GRAFANA_BASE_URL`
+ *  env override so a single deployed Grafana can be the link target; falls
+ *  back to the connection's credential `url` (the same URL the query uses). */
+function citationBaseUrl(credentialUrl: string): string {
+  return CONFIG.grafanaBaseUrl.trim() || credentialUrl;
+}
 
 export const grafanaAdapter: StdioMcpAdapter = {
   transport: "stdio",
@@ -48,6 +57,16 @@ export const GRAFANA_CUSTOM_TOOLS: McpToolInfo[] = [
         },
         end: { type: "string", description: "Optional end time (ISO timestamp). Omit for now." },
         limit: { type: "number", description: "Max log lines to return (default 50, max 200)" },
+        datasourceUid: {
+          type: "string",
+          description:
+            "Optional VictoriaLogs datasource UID for building an Explore citation link. " +
+            "Defaults to the configured VictoriaLogs proxy datasource.",
+        },
+        datasourceType: {
+          type: "string",
+          description: 'Optional datasource type for the citation link (default "victorialogs").',
+        },
       },
       required: ["query", "start"],
     },
@@ -128,10 +147,91 @@ async function grafanaFetch(baseUrl: string, token: string, path: string, option
   });
 }
 
+/**
+ * Build a Grafana Explore deep link. The query is carried as a URL-encoded
+ * JSON `panes` data parameter — it can never alter the host/path (F1). Base
+ * URL comes from the Grafana connection's credential `url` (server-side, never
+ * the model). `expr` for logs/prometheus, `rawSql` for SQL datasources.
+ */
+function buildGrafanaExploreUrl(baseUrl: string, opts: {
+  datasourceUid: string;
+  datasourceType: string;
+  query: string;
+  from?: string | undefined;
+  to?: string | undefined;
+}): string {
+  const base = baseUrl.replace(/\/+$/, "");
+  const type = opts.datasourceType.toLowerCase();
+  const queryField = /postgres|mysql|mssql|clickhouse|sql/.test(type) ? "rawSql" : "expr";
+  // Pane shape matches what Grafana's own "Share" emits: the pane-level
+  // `datasource` is the bare uid STRING, and the per-query `datasource` is the
+  // {type, uid} object. The query goes under `expr` (logs/prometheus) or
+  // `rawSql` (SQL). `orgId=1` is required by Grafana when orgs are enabled.
+  const panes = {
+    xyne: {
+      datasource: opts.datasourceUid,
+      queries: [
+        {
+          refId: "A",
+          datasource: { type: opts.datasourceType, uid: opts.datasourceUid },
+          [queryField]: opts.query,
+        },
+      ],
+      range: { from: opts.from ?? "now-1h", to: opts.to ?? "now" },
+    },
+  };
+  return `${base}/explore?schemaVersion=1&panes=${encodeURIComponent(JSON.stringify(panes))}&orgId=1`;
+}
+
+/** Convert a LogsQL duration ("15m", "1h") or ISO timestamp to a Grafana
+ *  now-relative/epoch `from` value. Pass-through for now-relative/epoch. */
+function grafanaFromTime(start: string | undefined): string | undefined {
+  if (!start) return undefined;
+  if (/^now/.test(start) || /T\d{2}:\d{2}/.test(start) || /^\d{13}$/.test(start)) return start;
+  const m = /^(\d+)([smhd])$/.exec(start);
+  if (m) return `now-${m[1]}${m[2]}`;
+  return start;
+}
+
+/** Build a Desk-readable citation label for an Explore link. Mirrors the
+ *  label-enrichment step spaces-tools does via applyChannelInfo: centralize
+ *  the label construction so every handler produces the same shape. */
+function grafanaCitationLabel(kind: "logs" | "metrics" | "sql", query: string): string {
+  const trimmed = query.trim().replace(/\s+/g, " ").slice(0, 60);
+  const prefix =
+    kind === "logs" ? "Grafana logs" : kind === "metrics" ? "Grafana metrics" : "Grafana SQL";
+  return trimmed ? `${prefix}: ${trimmed}` : prefix;
+}
+
+/** Push an `external`-kind citation into `out`, deduped by URL. Mirrors the
+ *  pushThreadCitation/pushCanvasCitation(out, seen, ...) pattern in
+ *  xyne-spaces-tools.ts so external-connector citations flow through the same
+ *  dedupe shape. `chunkIndex` defaults to 1 — Desk's findCitationForChunk
+ *  matches it exactly against the `[clf-<toolCallId>#1]` token. */
+function pushExternalCitation(
+  out: Citation[],
+  seen: Set<string>,
+  url: string | undefined | null,
+  label?: string,
+  chunkIndex = 1,
+): void {
+  if (!url || seen.has(url)) return;
+  seen.add(url);
+  out.push({ kind: "external", url, ...(label ? { label } : {}), chunkIndex });
+}
+
+/** Attach citations to a handler result only when non-empty. Mirrors the
+ *  okCited(text, citations) wrapper in xyne-spaces-tools.ts — local handlers
+ *  return { content, citations? } (no MCP _meta transport) consumed by the
+ *  mcp.ts unwrap() dispatch. */
+function okCited(content: string, citations: Citation[]): { content: string; citations?: Citation[] } {
+  return citations.length > 0 ? { content, citations } : { content };
+}
+
 export async function handleGrafanaQueryLogs(
   credentials: Record<string, unknown>,
   params: Record<string, unknown>,
-): Promise<string> {
+): Promise<{ content: string; citations?: Citation[] }> {
   const baseUrl = credentials["url"] as string;
   const token = credentials["token"] as string;
 
@@ -148,7 +248,7 @@ export async function handleGrafanaQueryLogs(
 
   const text = await res.text();
   const lines = text.trim().split("\n").filter(Boolean);
-  if (lines.length === 0) return "No logs found matching the query.";
+  if (lines.length === 0) return { content: "No logs found matching the query." };
 
   const entries: string[] = [];
   const errorPatterns: Record<string, number> = {};
@@ -181,7 +281,20 @@ export async function handleGrafanaQueryLogs(
     result += "\n";
   }
   result += "**Logs:**\n```\n" + entries.join("\n") + "\n```";
-  return result;
+
+  const datasourceUid = (params["datasourceUid"] as string | undefined) ?? "victoria-logs";
+  const datasourceType = (params["datasourceType"] as string | undefined) ?? "victoriametrics-logs-datasource";
+  const url = buildGrafanaExploreUrl(citationBaseUrl(baseUrl), {
+    datasourceUid,
+    datasourceType,
+    query,
+    from: grafanaFromTime(start),
+    to: end,
+  });
+  const citations: Citation[] = [];
+  const seen = new Set<string>();
+  pushExternalCitation(citations, seen, url, grafanaCitationLabel("logs", query));
+  return okCited(result, citations);
 }
 
 export async function handleGrafanaListMetrics(
@@ -210,7 +323,7 @@ export async function handleGrafanaListMetrics(
 export async function handleGrafanaQueryMetrics(
   credentials: Record<string, unknown>,
   params: Record<string, unknown>,
-): Promise<string> {
+): Promise<{ content: string; citations?: Citation[] }> {
   const baseUrl = credentials["url"] as string;
   const token = credentials["token"] as string;
 
@@ -247,7 +360,7 @@ export async function handleGrafanaQueryMetrics(
   };
 
   const results = data.data?.result ?? [];
-  if (results.length === 0) return "No data returned for this query.";
+  if (results.length === 0) return { content: "No data returned for this query." };
 
   let output = `**Query:** \`${query}\`\n**Type:** ${data.data?.resultType ?? queryType}\n**Results:** ${results.length} series\n\n`;
 
@@ -266,13 +379,28 @@ export async function handleGrafanaQueryMetrics(
     }
   }
 
-  return output;
+  // Read datasource uid/type from params (defaults match the xyne Grafana's
+  // VictoriaMetrics datasource) so callers can override per-instance — fixes
+  // the inconsistency the logs handler already had.
+  const datasourceUid = (params["datasourceUid"] as string | undefined) ?? "victoria-metrics";
+  const datasourceType = (params["datasourceType"] as string | undefined) ?? "victoriametrics-datasource";
+  const url = buildGrafanaExploreUrl(citationBaseUrl(baseUrl), {
+    datasourceUid,
+    datasourceType,
+    query,
+    from: start,
+    to: end,
+  });
+  const citations: Citation[] = [];
+  const seen = new Set<string>();
+  pushExternalCitation(citations, seen, url, grafanaCitationLabel("metrics", query));
+  return okCited(output, citations);
 }
 
 export async function handleGrafanaQueryDatabase(
   credentials: Record<string, unknown>,
   params: Record<string, unknown>,
-): Promise<string> {
+): Promise<{ content: string; citations?: Citation[] }> {
   const baseUrl = credentials["url"] as string;
   const token = credentials["token"] as string;
 
@@ -282,11 +410,11 @@ export async function handleGrafanaQueryDatabase(
   const timeRange = (params["timeRange"] as string) || "1h";
 
   if (!datasourceUid || !datasourceType) {
-    return "Error: datasourceUid and datasourceType are required. Call list_datasources first to discover them.";
+    return { content: "Error: datasourceUid and datasourceType are required. Call list_datasources first to discover them." };
   }
-  if (!/^(SELECT|WITH)\b/i.test(sql)) return "Error: Only SELECT (or WITH ... SELECT) queries are allowed.";
+  if (!/^(SELECT|WITH)\b/i.test(sql)) return { content: "Error: Only SELECT (or WITH ... SELECT) queries are allowed." };
   if (/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|ATTACH|DETACH|OPTIMIZE)\b/i.test(sql)) {
-    return "Error: Write/DDL operations are not allowed.";
+    return { content: "Error: Write/DDL operations are not allowed." };
   }
 
   const res = await grafanaFetch(baseUrl, token, "/api/ds/query", {
@@ -310,11 +438,11 @@ export async function handleGrafanaQueryDatabase(
   };
 
   const frame = data.results?.["A"]?.frames?.[0];
-  if (!frame) return "No results returned.";
+  if (!frame) return { content: "No results returned." };
 
   const columns = frame.schema?.fields?.map((f) => f.name) ?? [];
   const values = frame.data?.values ?? [];
-  if (columns.length === 0) return "Empty result set.";
+  if (columns.length === 0) return { content: "Empty result set." };
 
   const rowCount = values[0]?.length ?? 0;
   let output = `**Query:** \`${sql}\`\n**Rows:** ${rowCount}\n\n`;
@@ -327,5 +455,18 @@ export async function handleGrafanaQueryDatabase(
   }
   if (rowCount > 50) output += `\n... and ${rowCount - 50} more rows`;
 
-  return output;
+  // SQL Explore deep-links are plugin-dependent; rawSql is used for SQL
+  // datasources. Where the plugin ignores it the link still opens Explore on
+  // the right datasource. The SQL is data only (F1).
+  const url = buildGrafanaExploreUrl(citationBaseUrl(baseUrl), {
+    datasourceUid,
+    datasourceType,
+    query: sql,
+    from: `now-${timeRange}`,
+    to: "now",
+  });
+  const citations: Citation[] = [];
+  const seen = new Set<string>();
+  pushExternalCitation(citations, seen, url, grafanaCitationLabel("sql", sql));
+  return okCited(output, citations);
 }

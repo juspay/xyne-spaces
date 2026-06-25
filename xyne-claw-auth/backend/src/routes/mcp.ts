@@ -7,6 +7,7 @@ import { listToolsForUser, callTool } from "../mcp/runner.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments } from "../mcp/adapters/bitbucket.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase } from "../mcp/adapters/grafana.js";
+import type { Citation } from "xyne-claw-shared";
 import { loadEffectiveCredentials } from "../lib/credentials-loader.js";
 import { requireSessionToken } from "../middleware/require-session-token.js";
 import { validateWriteAction } from "../mcp/validators.js";
@@ -220,16 +221,27 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // Handle Grafana custom tools locally
     if (serverType === "grafana" && tool.startsWith("grafana-")) {
       try {
-        let content: string;
+        let content: string = "";
+        let citations: Citation[] | undefined;
         const p = params ?? {};
+        // query-* handlers return { content, citations }; list-metrics still
+        // returns a bare string. Normalize both into { content, citations? }.
+        const unwrap = (r: string | { content: string; citations?: Citation[] }): void => {
+          if (typeof r === "string") {
+            content = r;
+          } else {
+            content = r.content;
+            citations = r.citations;
+          }
+        };
         switch (tool) {
-          case "grafana-query-logs": content = await handleGrafanaQueryLogs(credentials, p); break;
-          case "grafana-list-metrics": content = await handleGrafanaListMetrics(credentials, p); break;
-          case "grafana-query-metrics": content = await handleGrafanaQueryMetrics(credentials, p); break;
-          case "grafana-query-database": content = await handleGrafanaQueryDatabase(credentials, p); break;
+          case "grafana-query-logs": unwrap(await handleGrafanaQueryLogs(credentials, p)); break;
+          case "grafana-list-metrics": unwrap(await handleGrafanaListMetrics(credentials, p)); break;
+          case "grafana-query-metrics": unwrap(await handleGrafanaQueryMetrics(credentials, p)); break;
+          case "grafana-query-database": unwrap(await handleGrafanaQueryDatabase(credentials, p)); break;
           default: content = `Unknown grafana tool: ${tool}`;
         }
-        res.json({ success: true, data: { content } });
+        res.json({ success: true, data: { content, ...(citations?.length ? { citations } : {}) } });
       } catch (err) {
         res.json({ success: true, data: { content: `Error: ${err instanceof Error ? err.message : String(err)}` } });
       }

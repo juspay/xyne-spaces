@@ -16,7 +16,7 @@ import {
   searchContextItems,
   type ContextSearchType,
 } from "../services/agentChatContextService.js";
-import { appendCitations } from "../lib/citations.js";
+import { appendCitations, appendClawCitationTokens } from "../lib/citations.js";
 import { getSpacesAuthForUser } from "../lib/spaces-db.js";
 import { redisService } from "../redis.js";
 
@@ -937,9 +937,15 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
     // Non-fatal — keep default (no citations).
   }
 
-  const enrichedResult = status === "completed" && result
+  // Append LLM-provided citations, then `[clf-<toolCallId>#<chunkIndex>]`
+  // tokens from each ToolInvocation.citations so Desk's DraftSourcesPanel can
+  // resolve clickable sources. Gated by CLAW_INLINE_CITATIONS (default off).
+  const withCitations = status === "completed" && result
     ? appendCitations(result, toolInvocations, { baseUrl: CONFIG.spacesAppUrl, includeCitations }, llmCitations)
     : result;
+  const enrichedResult = withCitations && CONFIG.clawInlineCitations
+    ? appendClawCitationTokens(withCitations, toolInvocations)
+    : withCitations;
 
   // Await finalize BEFORE resolving the pending stream. The stream resolution
   // drives the SSE `done` event on the client, which triggers refreshRuns().

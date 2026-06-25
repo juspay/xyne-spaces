@@ -22,4 +22,8 @@ export interface Citation {
   ticketId?: string;
   /** For kind="external": absolute URL. */
   url?: string;
+  /** 1-based chunk index. Lets Desk's findCitationForChunk resolve a
+   *  `[clf-<toolCallId>#N]` token to this citation. Optional — single-resource
+   *  tools set 1; the resolver falls back to citations[0] when absent. */
+  chunkIndex?: number;
 }

@@ -36,7 +36,7 @@ import {
   handleRunCompletion,
   getRecoveryContextForSession,
 } from "../queue/run-recovery-worker.js";
-import { appendCitations } from "../lib/citations.js";
+import { appendCitations, appendClawCitationTokens } from "../lib/citations.js";
 import { getSpacesAuthForUser } from "../lib/spaces-db.js";
 import { ensureUserExists } from "../lib/users-jit.js";
 import { requireS2S } from "../middleware/require-auth.js";
@@ -1936,6 +1936,15 @@ router.post("/result", requireS2S, async (req: Request, res: Response) => {
       ...(ctx?.channelId ? { defaultChannelId: ctx.channelId } : {}),
     }, llmCitations)
     : payload.result ?? "";
+
+  // Append `[clf-<toolCallId>#<chunkIndex>]` tokens from each
+  // ToolInvocation.citations so Desk's DraftSourcesPanel can resolve clickable
+  // sources (e.g. Grafana). The autodraft path stores this as the assistant
+  // ChatMessage getConversationInsight reads back. Gated by
+  // CLAW_INLINE_CITATIONS (default off) — see config.ts.
+  if (CONFIG.clawInlineCitations) {
+    resultWithCitations = appendClawCitationTokens(resultWithCitations, payload.toolInvocations);
+  }
 
   // Memory footer: count successful memory-search tool invocations for the run
   // and append a single italic line. Tool-based recall replaced prefetch-and-inject

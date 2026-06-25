@@ -17,6 +17,7 @@ interface CitationBuildOptions {
 
 interface InvocationLike {
   toolName?: unknown;
+  toolCallId?: unknown;
   args?: unknown;
   result?: unknown;
   citations?: unknown;
@@ -543,4 +544,40 @@ export function appendCitations(
   }
   const appended = `${markdown.trimEnd()}\n\n${citationBlock}`;
   return appended;
+}
+
+/**
+ * Append inline `[clf-<toolCallId>#<chunkIndex>]` citation tokens to the
+ * assistant result, derived from the structured `Citation[]` carried on each
+ * `ToolInvocation.citations`. Desk's autodraft `DraftSourcesPanel` scans
+ * content for `[clf-…]` tokens and resolves them via `findCitationForChunk` —
+ * this is what makes Grafana (and other claw-tool) results render as clickable
+ * source rows. One token per (toolCallId, chunkIndex); invocations without
+ * citations are skipped. Inert when no citations exist.
+ */
+export function appendClawCitationTokens(
+  markdown: string,
+  toolInvocations: unknown,
+): string {
+  if (!Array.isArray(toolInvocations) || toolInvocations.length === 0) return markdown;
+  const tokens: string[] = [];
+  const seen = new Set<string>();
+  for (const inv of toolInvocations as InvocationLike[]) {
+    const toolCallId = asString(inv?.toolCallId);
+    const citations = inv?.citations;
+    if (!toolCallId || !Array.isArray(citations) || citations.length === 0) continue;
+    for (const c of citations) {
+      if (!isStructuredCitation(c)) continue;
+      const rawChunk = c.chunkIndex;
+      const chunkIndex = typeof rawChunk === "number" && Number.isFinite(rawChunk) && rawChunk > 0
+        ? rawChunk
+        : 1;
+      const token = `[clf-${toolCallId}#${chunkIndex}]`;
+      if (seen.has(token)) continue;
+      seen.add(token);
+      tokens.push(token);
+    }
+  }
+  if (tokens.length === 0) return markdown;
+  return `${markdown.trimEnd()}\n\n${tokens.join(" ")}`;
 }
