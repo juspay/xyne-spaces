@@ -1694,6 +1694,7 @@ export const activityTable = table('activities')
     ticketId: string().optional(),
     conversationId: string().optional(),
     channelId: string().optional(),
+    channelName: string().optional(),
     canvasId: string().optional(),
     blockId: string().optional(),
     conversationSeenCutoffAt: number().optional(),

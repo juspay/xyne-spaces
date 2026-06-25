@@ -75,6 +75,9 @@ export const ActivityItemCard = ({
 
   const channel = useChannel(channelId || '');
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, context.userID);
+  const resolvedChannelName = channel
+    ? channelDisplayName
+    : (activity.channelName ?? 'Unknown Channel');
 
   // Appends ?selectedActivity=id to path, preserving existing hash
   const appendSelectedActivity = (path: string): string => {
@@ -290,14 +293,12 @@ export const ActivityItemCard = ({
               actorAction !== 'resumed_from_assignment' &&
               actorAction !== 'workflow_question' &&
               (isMobile ? (
-                <span className='font-semibold text-foreground'>
-                  {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
-                </span>
+                <span className='font-semibold text-foreground'>{`#${resolvedChannelName}`}</span>
               ) : (
                 <GenericMentionHoverPopover
                   data={{
                     icon: '#',
-                    title: channelDisplayName,
+                    title: resolvedChannelName,
                     subtitle: channel?.description || 'Channel',
                   }}
                 >
@@ -309,10 +310,10 @@ export const ActivityItemCard = ({
                     data-track-metadata={JSON.stringify({
                       activityId: activity.id,
                       channelId: activity.channelId,
-                      channelName: channelDisplayName,
+                      channelName: resolvedChannelName,
                     })}
                   >
-                    {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
+                    {`#${resolvedChannelName}`}
                   </button>
                 </GenericMentionHoverPopover>
               ))}
