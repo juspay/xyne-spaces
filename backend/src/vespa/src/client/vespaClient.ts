@@ -217,6 +217,9 @@ class VespaClient {
       return document;
     } catch (error) {
       const errMessage = getErrorMessage(error);
+      if (errMessage.startsWith('Non-retryable error: 404')) {
+        return null;
+      }
       throw new Error(`Error fetching document docId: ${docId} - ${errMessage}`);
     }
   }

@@ -1,5 +1,6 @@
 export {
   searchChannels,
+  searchChannelsWithScores,
   useAllChannels,
   useAllVisibleChannels,
   useVisibleProjects,

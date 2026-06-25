@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 import { stateMachineActor } from '../machines/stateMachine.js';
 import type { Conversation, VisibleChannel } from '../machines/stateMachine.js';
 import { queryCacheActor } from '../machines/queryCacheMachine.js';
-import { searchChannels as _searchChannels } from '../utils/search.js';
+import { searchChannels as _searchChannels, searchChannelsWithScores as _searchChannelsWithScores } from '../utils/search.js';
 import type { Channel, ChannelUserStatus } from '../zero/schema.js';
 import { ChannelScopeType, ChannelVisibility } from '../zero/schema.js';
 import { isDeskChannelType } from '../utils/channel.js';
@@ -22,6 +22,10 @@ export type VisibleProject = QueryResultType<typeof queries.projectsByIds>[numbe
 
 export function searchChannels(channels: Channel[], query: string, limit = 10): Channel[] {
   return _searchChannels(channels, query, limit);
+}
+
+export function searchChannelsWithScores(channels: Channel[], query: string, limit = 10): { item: Channel; score: number }[] {
+  return _searchChannelsWithScores(channels, query, limit);
 }
 
 export const useAllChannels = (): Channel[] => {
