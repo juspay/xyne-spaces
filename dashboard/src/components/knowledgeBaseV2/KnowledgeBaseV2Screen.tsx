@@ -35,7 +35,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useZero } from '../../hooks/useZero';
 import { ChannelScopeType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
-import { useAllVisibleChannels } from '../../hooks/useChannels';
+import { useAllVisibleChannels, useVisibleProjects } from '../../hooks/useChannels';
 import { EntryGridV2 } from '../../components/knowledgeBaseV2/components/EntryGridV2';
 import { EntryListV2, ColumnDef } from '../../components/knowledgeBaseV2/components/EntryListV2';
 import { SearchFieldV2 } from '../../components/knowledgeBaseV2/components/SearchFieldV2';
@@ -53,6 +53,14 @@ import Tooltip from '../../components/ui/Tooltip';
 const KB_COLUMNS: ReadonlyArray<ColumnDef> = [
   { key: 'kind', header: 'Kind', width: '120px' },
   { key: 'size', header: 'Size', width: '120px' },
+  { key: 'updated', header: 'Updated', width: '140px' },
+];
+
+// Columns shown when listing collections at the root. Drops Size (collections
+// don't carry a meaningful aggregate size in this list) in favour of a
+// Location column that names the project + channel the collection lives in.
+const KB_ROOT_COLUMNS: ReadonlyArray<ColumnDef> = [
+  { key: 'location', header: 'Location', width: 'minmax(160px, 1fr)' },
   { key: 'updated', header: 'Updated', width: '140px' },
 ];
 
@@ -85,6 +93,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const { user } = useAuth();
   const zero = useZero();
   const allVisibleChannels = useAllVisibleChannels();
+  const visibleProjects = useVisibleProjects();
   const globalCollections = useGlobalCollections();
   // V1's mutation hooks — same path TreeSidebar uses. They drive the same
   // Zero mutators we used inline before, but: (a) they clear `activeCollection`
@@ -370,6 +379,35 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     [goToCollection],
   );
 
+  // ── Location resolver ────────────────────────────────────────────────
+  // Maps a collection (by id) to "ProjectName · #ChannelName". Used as the
+  // grid card caption and the list view's Location column so users can see
+  // where each collection lives without drilling into it.
+  const channelNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ch of allVisibleChannels) map.set(ch.id, ch.name);
+    return map;
+  }, [allVisibleChannels]);
+
+  const projectNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of visibleProjects) map.set(p.id, p.name);
+    return map;
+  }, [visibleProjects]);
+
+  const locationOf = useCallback(
+    (entry: CollectionChild): string => {
+      const owning = globalCollections.byId(entry.id);
+      if (!owning) return 'Collection';
+      const channelName = channelNameById.get(owning.scopeId);
+      const projectName = owning.projectId ? projectNameById.get(owning.projectId) : undefined;
+      if (channelName && projectName) return `#${channelName} · ${projectName}`;
+      if (channelName) return `#${channelName}`;
+      return 'Collection';
+    },
+    [globalCollections, channelNameById, projectNameById],
+  );
+
   // ── Open entry ───────────────────────────────────────────────────────
   const onOpenEntry = useCallback(
     (entry: CollectionChild): void => {
@@ -555,6 +593,16 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // Collections (at root) go through `updateCollection`; everything else
   // (folders + files inside a collection) goes through `renameItem`.
   const onRename = (entry: CollectionChild): void => {
+    // Renaming a collection is owner-only — matches delete and the new
+    // visibility toggle. We block before entering edit mode so non-owners
+    // never see an input that would only be rejected on submit.
+    if (isAtRoot) {
+      const owning = globalCollections.byId(entry.id);
+      if (owning && owning.role !== 'OWNER') {
+        toast.error('Only the collection owner can rename');
+        return;
+      }
+    }
     setRenameTarget(entry);
   };
 
@@ -577,6 +625,11 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       }
       try {
         if (isAtRoot) {
+          const owning = globalCollections.byId(entry.id);
+          if (owning && owning.role !== 'OWNER') {
+            toast.error('Only the collection owner can rename');
+            return;
+          }
           await renameCollection(entry.id, trimmed);
         } else {
           if (!collectionId) {
@@ -593,7 +646,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         setRenameTarget(null);
       }
     },
-    [user, isAtRoot, collectionId, renameCollection, renameNode],
+    [user, isAtRoot, collectionId, renameCollection, renameNode, globalCollections],
   );
 
   // ── Share (root-only) ────────────────────────────────────────────────
@@ -864,12 +917,12 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
                   scrollParentRef={mainRef}
-                  {...(isAtRoot ? { folderCaption: () => 'Collection', onShare } : {})}
+                  {...(isAtRoot ? { folderCaption: locationOf, onShare } : {})}
                 />
               ) : (
                 <EntryListV2
                   entries={entries}
-                  columns={[...KB_COLUMNS]}
+                  columns={isAtRoot ? [...KB_ROOT_COLUMNS] : [...KB_COLUMNS]}
                   onOpen={onOpenEntry}
                   onDelete={(e): void => {
                     void onDelete(e);
@@ -879,7 +932,13 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
                   scrollParentRef={mainRef}
-                  {...(isAtRoot ? { onShare } : {})}
+                  {...(isAtRoot
+                    ? {
+                        onShare,
+                        resolveColumnValue: (entry, key): string | undefined =>
+                          key === 'location' ? locationOf(entry) : undefined,
+                      }
+                    : {})}
                 />
               )}
             </>
@@ -916,15 +975,22 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         folderOnly={true}
       />
 
-      {shareTarget ? (
-        <ShareCollectionModal
-          isOpen
-          onClose={closeShare}
-          collectionId={shareTarget.id}
-          collectionName={shareTarget.name}
-          channelId={globalCollections.byId(shareTarget.id)?.scopeId ?? null}
-        />
-      ) : null}
+      {shareTarget
+        ? (() => {
+            const owning = globalCollections.byId(shareTarget.id);
+            return (
+              <ShareCollectionModal
+                isOpen
+                onClose={closeShare}
+                collectionId={shareTarget.id}
+                collectionName={shareTarget.name}
+                channelId={owning?.scopeId ?? null}
+                isPrivate={owning?.isPrivate ?? false}
+                canEditVisibility={owning?.role === 'OWNER'}
+              />
+            );
+          })()
+        : null}
     </div>
   );
 };

@@ -17,6 +17,7 @@ export interface GlobalCollection extends CollectionSummary {
   /** projectId of the owning channel, when known. Needed to build the
    *  existing /knowledge-base/<projectId>/<channelId>/<collectionId> URL. */
   projectId: string | null;
+  isPrivate: boolean;
 }
 
 interface GlobalCollectionsContextValue {
@@ -68,6 +69,7 @@ const ChannelCollectionsLoader: React.FC<ChannelCollectionsLoaderProps> = React.
           scopeType: 'CHANNEL',
           scopeId: channelId,
           projectId,
+          isPrivate: col.isPrivate ?? false,
         };
       });
     }, [zeroCollections, user, channelId, projectId]);

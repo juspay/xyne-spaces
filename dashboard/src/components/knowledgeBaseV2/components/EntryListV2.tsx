@@ -31,6 +31,10 @@ interface EntryListV2Props {
   onRenameCommit?: (entry: CollectionChild, next: string) => void | Promise<void>;
   onRenameCancel?: () => void;
   scrollParentRef: React.RefObject<HTMLElement | null>;
+  /** Resolve column values for keys not built into EntryListV2 (e.g. 'location'
+   *  at the collections root). Returning undefined falls back to the built-in
+   *  resolver. */
+  resolveColumnValue?: (entry: CollectionChild, key: string) => string | undefined;
 }
 
 // Inline editable name cell. Same UX as the cards: Enter commits, Escape
@@ -74,6 +78,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
   onRenameCommit,
   onRenameCancel,
   scrollParentRef,
+  resolveColumnValue,
 }) => {
   // Reserve a tail gutter for whichever action affordances are wired up so
   // grid columns don't shift between rows with/without actions. Each button
@@ -123,6 +128,8 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
   };
 
   const getColumnValue = (entry: CollectionChild, key: string): string => {
+    const overridden = resolveColumnValue?.(entry, key);
+    if (overridden !== undefined) return overridden;
     switch (key) {
       case 'kind':
         return formatCaption(entry);
@@ -241,7 +248,8 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                 ))}
 
                 {/* Row actions (share / rename / delete). Share is folder-only
-                    and only wired by the root view — matches V1's behaviour. */}
+                    and only wired by the root view — matches V1's behaviour.
+                    Visibility (public/private) lives inside the share dialog. */}
                 {actionsWidth ? (
                   <div className='flex items-center justify-end gap-1'>
                     {onShare && e.type === 'FOLDER' ? (
