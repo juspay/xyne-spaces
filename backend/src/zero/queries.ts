@@ -147,6 +147,11 @@ const applyKanbanTicketPageConditions = (
     query = query.where('projectId', projectId);
   }
 
+  // Scope by selected boards server-side so multi-board pagination stays correct.
+  if (!boardId && filters?.boards?.length) {
+    query = query.where('boardId', 'IN', filters.boards);
+  }
+
   switch (viewMode) {
     case 'my-tickets':
       query = query.where((helpers: any) =>
@@ -2434,6 +2439,10 @@ export const queries = defineQueries({
       .orderBy('createdAt', 'desc')
       .related('boards');
   }),
+  // Projects only (no boards) — boards are lazy-loaded per project in pickers.
+  getAllProjectsList: defineQuery(() => {
+    return zql.projects.where('type', '!=', ProjectType.DM).orderBy('createdAt', 'desc');
+  }),
 
 
   // Fetch a specific set of boards by their IDs — used in my-tickets view
@@ -3638,6 +3647,13 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     return zql.saved_user_configurations
       .where('contextType', SavedConfigContextType.BOARD)
       .where('contextId', boardId)
+      .related('values')
+      .orderBy('createdAt', 'desc');
+  }),
+
+  savedConfigsByUser: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
+    return zql.saved_user_configurations
+      .where('userId', userId)
       .related('values')
       .orderBy('createdAt', 'desc');
   }),

@@ -24,6 +24,8 @@ import {
   Clock,
   TextAlignJustify,
   BarChart3,
+  Bookmark,
+  Share2,
 } from 'lucide-react';
 import { CalendarView } from '../../components/Tickets/CalendarView';
 import {
@@ -44,6 +46,7 @@ import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
+import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
 import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -91,7 +94,9 @@ import {
   SavedConfigVisibility,
   SavedConfigEntityName,
   UserResponsibility,
+  SavedConfigContextType,
 } from '@xyne/shared';
+import { v4 as uuidv4 } from 'uuid';
 import AcOnSlow from '../../assets/icons/AcOnSlowIcon';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useUsers } from '../../hooks/useUsers';
@@ -99,91 +104,93 @@ import { useUserGroups } from '../../hooks/useUserGroup';
 import { stateMachineActor } from '../../machines/stateMachine';
 import { Dialog } from '../../components/ui/Dialog';
 import Button from '../../components/ui/Button';
+import { Popover } from '../../components/ui/Popover/Popover';
+import { cn } from '../../utils/classNames';
 import { useZero } from '../../hooks/useZero';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useKanbanCounts } from './useKanbanCounts';
+import { valuesToFilters } from '../../utils/savedViewSerialization';
 
-function valuesToFilters(
-  values: ReadonlyArray<{
-    entityName: SavedConfigEntityName;
-    fieldName: string;
-    fieldValue: string;
-  }>,
-): TicketFilters {
-  const result: TicketFilters = {};
-  for (const { entityName, fieldName, fieldValue } of values) {
-    if (entityName === SavedConfigEntityName.FORM_ENTITY_VALUE) {
-      if (!result.dynamicFields) result.dynamicFields = {};
-      if (fieldName.endsWith('.start')) {
-        const fieldId = fieldName.slice(0, -'.start'.length);
-        result.dynamicFields[fieldId] = {
-          ...(result.dynamicFields[fieldId] as object | undefined),
-          start: Number(fieldValue),
-        };
-      } else if (fieldName.endsWith('.end')) {
-        const fieldId = fieldName.slice(0, -'.end'.length);
-        result.dynamicFields[fieldId] = {
-          ...(result.dynamicFields[fieldId] as object | undefined),
-          end: Number(fieldValue),
-        };
-      } else {
-        result.dynamicFields[fieldName] = [
-          ...((result.dynamicFields[fieldName] as string[] | undefined) ?? []),
-          fieldValue,
-        ];
-      }
-      continue;
-    }
-    switch (fieldName) {
-      case 'priority':
-        result.priority = [...(result.priority ?? []), fieldValue as TicketPriority];
-        break;
-      case 'assignee':
-        result.assignee = [...(result.assignee ?? []), fieldValue];
-        break;
-      case 'createdBy':
-        result.createdBy = [...(result.createdBy ?? []), fieldValue];
-        break;
-      case 'userGroups':
-        result.userGroups = [...(result.userGroups ?? []), fieldValue];
-        break;
-      case 'prReviewers':
-        result.prReviewers = [...(result.prReviewers ?? []), fieldValue];
-        break;
-      case 'qaAssigned':
-        result.qaAssigned = [...(result.qaAssigned ?? []), fieldValue];
-        break;
-      case 'tags':
-        result.tags = [...(result.tags ?? []), fieldValue];
-        break;
-      case 'stages':
-        result.stages = [...(result.stages ?? []), fieldValue];
-        break;
-      case 'ticketTypes':
-        result.ticketTypes = [...(result.ticketTypes ?? []), fieldValue];
-        break;
-      case 'dueDateStart':
-        result.dueDateStart = Number(fieldValue);
-        break;
-      case 'dueDateEnd':
-        result.dueDateEnd = Number(fieldValue);
-        break;
-      case 'createdDateStart':
-        result.createdDateStart = Number(fieldValue);
-        break;
-      case 'createdDateEnd':
-        result.createdDateEnd = Number(fieldValue);
-        break;
-    }
+type SavedConfigValue = {
+  id: string;
+  entityName: SavedConfigEntityName;
+  fieldName: string;
+  fieldValue: string;
+};
+
+// Serialize filters (incl. boards) + groupBy into saved-config value rows.
+const WORKSPACE_VIEW_ARRAY_KEYS = [
+  'boards',
+  'priority',
+  'assignee',
+  'createdBy',
+  'userGroups',
+  'prReviewers',
+  'qaAssigned',
+  'tags',
+  'stages',
+  'ticketTypes',
+] as const satisfies (keyof TicketFilters)[];
+
+const WORKSPACE_VIEW_NUMERIC_KEYS = [
+  'dueDateStart',
+  'dueDateEnd',
+  'createdDateStart',
+  'createdDateEnd',
+] as const satisfies (keyof TicketFilters)[];
+
+function filtersToValues(filters: TicketFilters, groupBy?: string): SavedConfigValue[] {
+  const values: SavedConfigValue[] = [];
+  const addTicket = (fieldName: string, fieldValue: string): void => {
+    values.push({ id: uuidv4(), entityName: SavedConfigEntityName.TICKET, fieldName, fieldValue });
+  };
+  const addForm = (fieldName: string, fieldValue: string): void => {
+    values.push({
+      id: uuidv4(),
+      entityName: SavedConfigEntityName.FORM_ENTITY_VALUE,
+      fieldName,
+      fieldValue,
+    });
+  };
+
+  for (const key of WORKSPACE_VIEW_ARRAY_KEYS) {
+    (filters[key] as string[] | undefined)?.forEach(v => addTicket(key, v));
   }
-  return result;
+  for (const key of WORKSPACE_VIEW_NUMERIC_KEYS) {
+    const v = filters[key];
+    if (v !== undefined) addTicket(key, String(v));
+  }
+  if (filters.dynamicFields) {
+    Object.entries(filters.dynamicFields).forEach(([fieldId, val]) => {
+      if (Array.isArray(val)) {
+        val.forEach(v => addForm(fieldId, v));
+      } else {
+        if (val.start !== undefined) addForm(`${fieldId}.start`, String(val.start));
+        if (val.end !== undefined) addForm(`${fieldId}.end`, String(val.end));
+      }
+    });
+  }
+  if (groupBy && groupBy !== 'none') addTicket('__groupBy', groupBy);
+  return values;
 }
 
 interface BoardKanbanScreenProps {
-  viewMode?: 'my-tickets' | `user-tickets` | 'group-tickets';
+  viewMode?:
+    | 'my-tickets'
+    | 'user-tickets'
+    | 'group-tickets'
+    | 'board'
+    | 'project'
+    | 'workspace-view';
   channelId?: string;
   filterByUserId?: string;
   filterByGroupId?: string;
+  // Project Views builder (workspace-view mode):
+  workspaceId?: string;
+  viewId?: string;
+  initialName?: string;
+  initialFilters?: TicketFilters;
+  initialGroupBy?: string;
 }
 
 type GroupByType = 'none' | 'assignee' | 'status' | 'priority' | FormFieldGroup;
@@ -227,6 +234,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   channelId,
   filterByUserId,
   filterByGroupId,
+  workspaceId,
+  viewId,
+  initialName,
+  initialFilters,
+  initialGroupBy,
 }) => {
   const { projectId: projectIdParam, boardId } = useParams<{
     projectId?: string;
@@ -392,6 +404,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Determine view mode based on URL params or prop
   const viewMode = useMemo(() => {
+    if (viewModeProp === 'workspace-view') return 'workspace-view';
     if (viewModeProp === 'my-tickets') return 'my-tickets'; // Show user's tickets
     if (viewModeProp === 'user-tickets') return 'user-tickets'; // Show specific user's tickets
     if (viewModeProp === 'group-tickets') return 'group-tickets'; // Show specific group's tickets
@@ -401,6 +414,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (projectIdParam || channel) return 'project'; // Show all boards in project
     return 'project'; // Default to project view
   }, [viewModeProp, projectIdParam, boardId, channel]);
+
+  const isWorkspaceView = viewMode === 'workspace-view';
+  // A workspace view queries as a project view with no projectId; scope comes from filters.boards.
+  const queryViewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets' =
+    viewMode === 'workspace-view' ? 'project' : viewMode;
 
   // Get user's channel status for selectedBoardId persistence
   const channelUserStatus = useGetChannelUserStatus(channelId || '') as
@@ -536,6 +554,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const filters = state.context.filters;
   const channelViewType = state.context.viewType;
   const showOverdueOnly = state.context.showOverdueOnly;
+
+  // Don't query a workspace view until a board is picked (else it fans out across the workspace).
+  const workspaceViewReady = !isWorkspaceView || (filters.boards?.length ?? 0) > 0;
   const showSubStatus = state.context.showSubStatus;
 
   const setShowOverdueOnly = useCallback(
@@ -662,6 +683,107 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     },
     [selectedViewId, activeViewKey, setGroupBy],
   );
+
+  // Seed filters/groupBy once when a workspace view mounts.
+  const hasSeededViewRef = useRef(false);
+  useEffect(() => {
+    if (!isWorkspaceView || hasSeededViewRef.current) return;
+    if (state.value !== 'initialized') return;
+    hasSeededViewRef.current = true;
+    const urlHasFilters = Object.keys(state.context.urlFilters ?? {}).length > 0;
+    if (urlHasFilters) return;
+    setFilters(initialFilters ? { ...initialFilters } : {});
+    setGroupBy(initialGroupBy ? parseGroupBy(initialGroupBy) : 'none');
+  }, [
+    isWorkspaceView,
+    state.value,
+    state.context.urlFilters,
+    initialFilters,
+    initialGroupBy,
+    setFilters,
+    setGroupBy,
+  ]);
+
+  const [isSavingWorkspaceView, setIsSavingWorkspaceView] = useState(false);
+  const [isSavePopoverOpen, setIsSavePopoverOpen] = useState(false);
+  const [workspaceViewNameDraft, setWorkspaceViewNameDraft] = useState('');
+
+  const persistWorkspaceView = useCallback(
+    async (name: string): Promise<void> => {
+      const values = filtersToValues(filters, groupByKey);
+      setIsSavingWorkspaceView(true);
+      try {
+        if (viewId) {
+          const res = await zero.mutate(
+            mutators.savedUserConfiguration.update({
+              configId: viewId,
+              name,
+              timestamp: Date.now(),
+              values,
+            }),
+          ).server;
+          if (res.type === 'error') toast.error(res.error?.message ?? 'Failed to save view');
+          else toast.success('View updated');
+        } else {
+          const newId = uuidv4();
+          const res = await zero.mutate(
+            mutators.savedUserConfiguration.create({
+              id: newId,
+              name,
+              contextType: SavedConfigContextType.BOARD,
+              contextId: workspaceId ?? '',
+              channelId: '',
+              visibility: SavedConfigVisibility.PRIVATE,
+              timestamp: Date.now(),
+              values,
+            }),
+          ).server;
+          if (res.type === 'error') {
+            toast.error(res.error?.message ?? 'Failed to save view');
+          } else {
+            toast.success('View saved');
+            void navigate(`/projects/views/${newId}`);
+          }
+        }
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : 'Failed to save view');
+      } finally {
+        setIsSavingWorkspaceView(false);
+      }
+    },
+    [filters, groupByKey, viewId, workspaceId, zero, navigate],
+  );
+
+  const handleSavePopoverOpenChange = useCallback(
+    (open: boolean): void => {
+      if (open) setWorkspaceViewNameDraft(initialName ?? '');
+      setIsSavePopoverOpen(open);
+    },
+    [initialName],
+  );
+
+  const handleConfirmSaveWorkspaceView = useCallback((): void => {
+    const name = workspaceViewNameDraft.trim();
+    if (!name) return;
+    setIsSavePopoverOpen(false);
+    setWorkspaceViewNameDraft('');
+    void persistWorkspaceView(name);
+  }, [workspaceViewNameDraft, persistWorkspaceView]);
+
+  const handleShareWorkspaceView = useCallback((): void => {
+    if (!filters.boards?.length) {
+      toast.error('Pick at least one board to share');
+      return;
+    }
+    const cfg = { name: initialName ?? '', filters, groupBy: groupByKey };
+    const encoded = btoa(encodeURIComponent(JSON.stringify(cfg)));
+    const base = window.location.pathname.split('/projects')[0];
+    const link = `${window.location.origin}${base}/projects/views/new#cfg=${encoded}`;
+    void navigator.clipboard.writeText(link).then(
+      () => toast.success('Share link copied to clipboard'),
+      () => toast.error('Failed to copy link'),
+    );
+  }, [filters, groupByKey, initialName]);
 
   // Setup sensors for drag and drop
   const sensors = useSensors(
@@ -870,8 +992,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       return getStatusColumns();
     }
 
-    // If single board selected in filter, use its stages
+    // If single board selected in filter, use its stages.
+    // Workspace-views always group by status (shouldUseStatusColumns), so never
+    // return board stage UUIDs here or columns/counts/drag mode would mismatch.
     if (
+      !isWorkspaceView &&
       filteredSingleBoardId &&
       stagesDataForFilteredBoard &&
       stagesDataForFilteredBoard.length > 0
@@ -950,6 +1075,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // For project and my-tickets views, use status-based columns
     if (
       viewMode === 'project' ||
+      viewMode === 'workspace-view' ||
       viewMode === 'my-tickets' ||
       viewMode === 'user-tickets' ||
       viewMode === 'group-tickets'
@@ -997,6 +1123,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     ];
   }, [
     viewMode,
+    isWorkspaceView,
     shouldShowBoardWiseView,
     filteredSingleBoardId,
     stagesDataForFilteredBoard,
@@ -1035,7 +1162,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       groupId?: string;
       formEntityValueFieldIds?: string[];
     } = {
-      viewMode: viewMode,
+      viewMode: queryViewMode,
     };
 
     // Always pass boardId if it exists (from URL param)
@@ -1072,6 +1199,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return params;
   }, [
     viewMode,
+    queryViewMode,
     boardId,
     effectiveProjectId,
     filterByUserId,
@@ -1398,6 +1526,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }
 
   const shouldUseStatusColumns =
+    isWorkspaceView ||
     (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
     (channelId && viewMode === 'project' && channelViewType !== 'stage');
 
@@ -1724,7 +1853,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const currentBoardId = filteredSingleBoardId ?? null;
 
   const hasSearchTerm = searchTerm.trim().length > 0;
-  const canUseKanbanColumnPagination = isKanbanLayout;
+  const canUseKanbanColumnPagination = isKanbanLayout && workspaceViewReady;
   const shouldFetchKanbanCounts = canUseKanbanColumnPagination && !hasSearchTerm;
   const kanbanCounts = useKanbanCounts({
     ...ticketsQueryParams,
@@ -1931,7 +2060,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       {/* Header */}
       <div className='flex flex-col lg:flex-row flex-wrap lg:flex-nowrap lg:items-center justify-between px-4 py-3 bg-background flex-shrink-0 gap-3'>
         {/* Filters - Left Side */}
-        {(effectiveProjectId || viewMode === 'my-tickets') && (
+        {(effectiveProjectId || viewMode === 'my-tickets' || isWorkspaceView) && (
           <div className='flex-1 min-w-0'>
             <TicketFiltersDropdown
               filters={filters}
@@ -1966,12 +2095,90 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               {...(channelId ? { channelId } : {})}
               groupBy={typeof groupBy === 'object' ? JSON.stringify(groupBy) : groupBy}
               hasActiveView={!!selectedViewId}
+              workspaceView={isWorkspaceView}
+              {...(isWorkspaceView
+                ? {
+                    leadingControl: (
+                      <ViewBoardPicker
+                        selectedBoardIds={filters.boards ?? []}
+                        onChange={boardIds => setFilters({ ...filters, boards: boardIds })}
+                      />
+                    ),
+                  }
+                : {})}
             />
           </div>
         )}
 
-        {/* Create Ticket Button - Right Side */}
+        {/* Create Ticket / Save View Button - Right Side */}
         <div className='flex flex-wrap lg:flex-col md:items-end gap-3 ml-auto md:ml-0'>
+          {isWorkspaceView && (
+            <div className='flex items-center gap-2'>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={handleShareWorkspaceView}
+                disabled={!workspaceViewReady}
+                className='rounded-[10px] border-border hover:bg-muted'
+                aria-label='Share view'
+                data-track-category='Projects'
+                data-track-name='ShareView'
+              >
+                <Share2 className='w-3 h-3 text-muted-foreground' />
+                <span>Share</span>
+              </Button>
+              <Popover
+                open={isSavePopoverOpen}
+                onOpenChange={handleSavePopoverOpenChange}
+                align='end'
+                className='w-64 p-3'
+                trigger={
+                  <Button
+                    size='sm'
+                    disabled={!workspaceViewReady || isSavingWorkspaceView}
+                    className='rounded-[10px]'
+                    data-track-category='Projects'
+                    data-track-name='SaveView'
+                  >
+                    <Bookmark className='w-3 h-3' />
+                    <span>{viewId ? 'Save' : 'Save view'}</span>
+                  </Button>
+                }
+              >
+                <div className='flex flex-col gap-2'>
+                  <span className='text-[13px] font-medium text-foreground'>Name this view</span>
+                  <input
+                    autoFocus
+                    value={workspaceViewNameDraft}
+                    onChange={e => setWorkspaceViewNameDraft(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleConfirmSaveWorkspaceView();
+                    }}
+                    placeholder='e.g. My open PRs'
+                    data-track-category='Projects'
+                    data-track-name='SaveViewNameInput'
+                    className={cn(
+                      'h-8 px-2 rounded-md border border-input bg-background text-[13px]',
+                      'text-foreground outline-none placeholder:text-muted-foreground',
+                      'focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                    )}
+                  />
+                  <div className='flex justify-end gap-2 pt-1'>
+                    <Button variant='ghost' size='sm' onClick={() => setIsSavePopoverOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      size='sm'
+                      onClick={handleConfirmSaveWorkspaceView}
+                      disabled={!workspaceViewNameDraft.trim() || isSavingWorkspaceView}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+              </Popover>
+            </div>
+          )}
           {canCreateTicket && channel && !channel.isArchived && (
             <button
               data-testid='kanban-create-ticket-button'

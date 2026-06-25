@@ -7,6 +7,7 @@ import {
   FormContextType,
   FormEntityType,
   LookupType,
+  ProjectType,
   SavedConfigContextType,
 } from './schema.js';
 import { z } from 'zod';
@@ -149,6 +150,11 @@ const applyKanbanTicketPageConditions = (
 
   if (!boardId && viewMode !== 'my-tickets' && projectId) {
     query = query.where('projectId', projectId);
+  }
+
+  // Scope by selected boards server-side so multi-board pagination stays correct.
+  if (!boardId && filters?.boards?.length) {
+    query = query.where('boardId', 'IN', filters.boards);
   }
 
   switch (viewMode) {
@@ -1896,6 +1902,10 @@ export const queries = defineQueries({
   getAllProjects: defineQuery(() => {
     return zql.projects.orderBy('createdAt', 'desc').related('boards');
   }),
+  // Projects only (no boards) — boards are lazy-loaded per project in pickers.
+  getAllProjectsList: defineQuery(() => {
+    return zql.projects.where('type', '!=', ProjectType.DM).orderBy('createdAt', 'desc');
+  }),
   // Lightweight board list queries — just names/IDs for dropdown pickers.
   // No related data (stages, formContextMappings) to avoid heavy fetches.
 
@@ -3114,6 +3124,13 @@ export const queries = defineQueries({
     return zql.saved_user_configurations
       .where('contextType', SavedConfigContextType.BOARD)
       .where('contextId', boardId)
+      .related('values')
+      .orderBy('createdAt', 'desc');
+  }),
+
+  savedConfigsByUser: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
+    return zql.saved_user_configurations
+      .where('userId', userId)
       .related('values')
       .orderBy('createdAt', 'desc');
   }),

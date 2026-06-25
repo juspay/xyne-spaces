@@ -26,6 +26,7 @@ interface TicketFilterFieldDescriptor {
  * Column type (string vs number) is derived from col.type at runtime — not hardcoded.
  */
 const TICKET_FILTER_SCHEMA: Record<string, TicketFilterFieldDescriptor> = {
+  boards:           { col: ticketCols.boardId,         enumValues: null },
   assignee:         { col: ticketCols.assignedTo,      enumValues: null },
   createdBy:        { col: ticketCols.createdBy,       enumValues: null },
   userGroups:       { col: ticketCols.userGroupId,     enumValues: null },
@@ -33,6 +34,7 @@ const TICKET_FILTER_SCHEMA: Record<string, TicketFilterFieldDescriptor> = {
   qaAssigned:       { col: assignmentCols.userId,      enumValues: null },
   tags:             { col: tagCols.name,               enumValues: null },
   stages:           { col: ticketCols.stageName,       enumValues: null },
+  ticketTypes:      { col: ticketCols.ticketType,      enumValues: null },
   dueDateStart:     { col: ticketCols.eta,             enumValues: null },
   dueDateEnd:       { col: ticketCols.eta,             enumValues: null },
   createdDateStart: { col: ticketCols.createdAt,       enumValues: null },
@@ -47,7 +49,7 @@ function validateTicketValue(fieldName: string, fieldValue: string): void {
     throw new MutationACLError(`Field value cannot be empty for field: ${fieldName}`, table);
   }
 
-  // Virtual field — any non-empty string is valid (represents the groupBy column name)
+  // Virtual UI-state field (the groupBy column name), not a real column.
   if (fieldName === '__groupBy') return;
 
   const descriptor = TICKET_FILTER_SCHEMA[fieldName];

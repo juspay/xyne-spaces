@@ -26,6 +26,7 @@ import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
 
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
 import MyTicketsScreen from './FilteredTicketsScreen/FilteredTicketsScreen.tsx';
+import ProjectViewBuilder from './ProjectViewsScreen/ProjectViewBuilder';
 import SupportScreen from './SupportScreen/SupportScreen.tsx';
 import SaveRoute from '../components/SaveRoute/SaveRoute';
 import CanvasScreen from '../components/Canvas/CanvasScreen';
@@ -1065,6 +1066,18 @@ export const router = createBrowserRouter([
                   {
                     index: true,
                     element: <MyTicketsScreen />,
+                  },
+                  {
+                    path: 'views',
+                    element: <Navigate to='/projects' replace />,
+                  },
+                  {
+                    path: 'views/new',
+                    element: <ProjectViewBuilder />,
+                  },
+                  {
+                    path: 'views/:viewId',
+                    element: <ProjectViewBuilder />,
                   },
                   {
                     path: ':projectId',

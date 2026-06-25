@@ -4240,6 +4240,7 @@ model SavedUserConfiguration {
   contextType SavedConfigContextType
   contextId   String
   visibility  SavedConfigVisibility
+  isStarred   Boolean                 @default(false)
   createdAt   DateTime
   updatedAt   DateTime
 

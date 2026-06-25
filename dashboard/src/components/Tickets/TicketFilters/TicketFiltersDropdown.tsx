@@ -125,9 +125,12 @@ export const TicketFiltersDropdown = ({
   channelId,
   groupBy,
   hasActiveView,
+  workspaceView = false,
+  leadingControl,
 }: TicketFiltersProps & {
   searchValue?: string;
   onSearchChange?: (searchTerm: string) => void;
+  leadingControl?: ReactElement;
 }): ReactElement => {
   const [boardOpen, setBoardOpen] = useState(false);
   const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);
@@ -695,59 +698,62 @@ export const TicketFiltersDropdown = ({
 
   return (
     <div className={`relative flex  flex-col w-full ${className}`}>
-      <div className='w-max'>
-        <Popover.Root
-          open={boardOpen}
-          onOpenChange={open => {
-            setBoardOpen(open);
-            onBoardDropdownOpenChange?.(open);
-            if (open && !hasBoardDropdownOpened) {
-              setHasBoardDropdownOpened(true);
-            }
-          }}
-        >
-          <Popover.Trigger asChild>
-            <Button
-              variant='ghost'
-              onClick={() => setBoardOpen(!boardOpen)}
-              className={cn('rounded-[10px] mb-3')}
-              data-track-category='Tickets'
-              data-track-name='ToggleBoardDropdown'
-            >
-              <span className='font-semibold text-base'>
-                {isTicketsSyncing ? 'Loading tickets' : boardLabel}
-              </span>
-              {isNonLinearBoard && (
-                <span className='bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-medium ml-1.5'>
-                  Non-Linear
-                </span>
-              )}
-              {isTicketsSyncing && <Loader2 className='w-4 h-4 animate-spin' />}
-              <ChevronDown
-                className={cn(
-                  'w-5 h-5 transition-transform font-semibold',
-                  boardOpen && 'rotate-180',
-                )}
-              />
-            </Button>
-          </Popover.Trigger>
-
-          <Popover.Content
-            side='bottom'
-            align='start'
-            sideOffset={6}
-            className='z-[60] min-w-[220px] bg-background border border-border rounded-lg shadow-lg'
+      {!workspaceView && (
+        <div className='w-max'>
+          <Popover.Root
+            open={boardOpen}
+            onOpenChange={open => {
+              setBoardOpen(open);
+              onBoardDropdownOpenChange?.(open);
+              if (open && !hasBoardDropdownOpened) {
+                setHasBoardDropdownOpened(true);
+              }
+            }}
           >
-            <BoardSubmenu
-              selectedBoards={filters.boards || []}
-              onChange={(boards: string[]) => handleFilterChange('boards', boards)}
-              onClose={() => setBoardOpen(false)}
-              boards={allBoardsList ?? []}
-            />
-          </Popover.Content>
-        </Popover.Root>
-      </div>
+            <Popover.Trigger asChild>
+              <Button
+                variant='ghost'
+                onClick={() => setBoardOpen(!boardOpen)}
+                className={cn('rounded-[10px] mb-3')}
+                data-track-category='Tickets'
+                data-track-name='ToggleBoardDropdown'
+              >
+                <span className='font-semibold text-base'>
+                  {isTicketsSyncing ? 'Loading tickets' : boardLabel}
+                </span>
+                {isNonLinearBoard && (
+                  <span className='bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-medium ml-1.5'>
+                    Non-Linear
+                  </span>
+                )}
+                {isTicketsSyncing && <Loader2 className='w-4 h-4 animate-spin' />}
+                <ChevronDown
+                  className={cn(
+                    'w-5 h-5 transition-transform font-semibold',
+                    boardOpen && 'rotate-180',
+                  )}
+                />
+              </Button>
+            </Popover.Trigger>
+
+            <Popover.Content
+              side='bottom'
+              align='start'
+              sideOffset={6}
+              className='z-[60] min-w-[220px] bg-background border border-border rounded-lg shadow-lg'
+            >
+              <BoardSubmenu
+                selectedBoards={filters.boards || []}
+                onChange={(boards: string[]) => handleFilterChange('boards', boards)}
+                onClose={() => setBoardOpen(false)}
+                boards={allBoardsList ?? []}
+              />
+            </Popover.Content>
+          </Popover.Root>
+        </div>
+      )}
       <div className='flex flex-wrap items-center gap-2 sm:gap-3'>
+        {leadingControl}
         {!hideAssigneeFilter && (
           <Popover.Root open={assigneeOpen} onOpenChange={setAssigneeOpen}>
             <Popover.Trigger asChild>
@@ -903,75 +909,79 @@ export const TicketFiltersDropdown = ({
         )}
 
         {/* Save View Button — shown when a specific board is selected and filters are active */}
-        {selectedBoard && hasActiveFiltersOrGroupBy && !hasActiveView && !isMobile && (
-          <Popover.Root
-            open={showSavePopover}
-            onOpenChange={open => {
-              setShowSavePopover(open);
-              if (!open) {
-                setViewName('');
-                setIsPublic(false);
-              }
-            }}
-          >
-            <Popover.Trigger asChild>
-              <Button
-                variant='outline'
-                className='bg-background border border-border rounded-[10px] h-8'
-                data-track-category='Tickets'
-                data-track-name='OpenSaveViewPopover'
-              >
-                <span className='text-foreground'>Save view</span>
-              </Button>
-            </Popover.Trigger>
-            <Popover.Content
-              side='bottom'
-              align='end'
-              sideOffset={6}
-              className='z-[60] w-72 bg-popover border border-border rounded-xl shadow-lg p-4 flex flex-col gap-4'
+        {!workspaceView &&
+          selectedBoard &&
+          hasActiveFiltersOrGroupBy &&
+          !hasActiveView &&
+          !isMobile && (
+            <Popover.Root
+              open={showSavePopover}
+              onOpenChange={open => {
+                setShowSavePopover(open);
+                if (!open) {
+                  setViewName('');
+                  setIsPublic(false);
+                }
+              }}
             >
-              <input
-                type='text'
-                placeholder='Name this view'
-                value={viewName}
-                data-track-category='saved-views'
-                data-track-name='view-name-input'
-                onChange={e => setViewName(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && viewName.trim()) handleSaveView();
-                }}
-                className='w-full text-sm border-0 border-b border-border focus:outline-none focus:border-border pb-1 placeholder-muted-foreground'
-              />
-              <div className='flex items-center justify-between'>
-                <Switch
-                  checked={isPublic}
-                  onCheckedChange={setIsPublic}
-                  label='Public'
-                  id='save-view-public-toggle'
+              <Popover.Trigger asChild>
+                <Button
+                  variant='outline'
+                  className='bg-background border border-border rounded-[10px] h-8'
+                  data-track-category='Tickets'
+                  data-track-name='OpenSaveViewPopover'
+                >
+                  <span className='text-foreground'>Save view</span>
+                </Button>
+              </Popover.Trigger>
+              <Popover.Content
+                side='bottom'
+                align='end'
+                sideOffset={6}
+                className='z-[60] w-72 bg-popover border border-border rounded-xl shadow-lg p-4 flex flex-col gap-4'
+              >
+                <input
+                  type='text'
+                  placeholder='Name this view'
+                  value={viewName}
+                  data-track-category='saved-views'
+                  data-track-name='view-name-input'
+                  onChange={e => setViewName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && viewName.trim()) handleSaveView();
+                  }}
+                  className='w-full text-sm border-0 border-b border-border focus:outline-none focus:border-border pb-1 placeholder-muted-foreground'
                 />
-                <div className='flex items-center gap-1'>
-                  <button
-                    data-track-category='saved-views'
-                    data-track-name='cancel-save-view'
-                    onClick={() => setShowSavePopover(false)}
-                    className='text-sm font-medium text-foreground px-2 h-8'
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    data-track-category='saved-views'
-                    data-track-name='confirm-save-view'
-                    onClick={handleSaveView}
-                    disabled={!viewName.trim() || isSaving}
-                    className='text-sm font-semibold px-4 h-8 rounded-[8px] bg-sidebar-badge-accent text-white disabled:opacity-50 disabled:cursor-not-allowed'
-                  >
-                    Save
-                  </button>
+                <div className='flex items-center justify-between'>
+                  <Switch
+                    checked={isPublic}
+                    onCheckedChange={setIsPublic}
+                    label='Public'
+                    id='save-view-public-toggle'
+                  />
+                  <div className='flex items-center gap-1'>
+                    <button
+                      data-track-category='saved-views'
+                      data-track-name='cancel-save-view'
+                      onClick={() => setShowSavePopover(false)}
+                      className='text-sm font-medium text-foreground px-2 h-8'
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      data-track-category='saved-views'
+                      data-track-name='confirm-save-view'
+                      onClick={handleSaveView}
+                      disabled={!viewName.trim() || isSaving}
+                      className='text-sm font-semibold px-4 h-8 rounded-[8px] bg-sidebar-badge-accent text-white disabled:opacity-50 disabled:cursor-not-allowed'
+                    >
+                      Save
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </Popover.Content>
-          </Popover.Root>
-        )}
+              </Popover.Content>
+            </Popover.Root>
+          )}
 
         {/* ticket search */}
         <div className=' w-full max-w-56'>

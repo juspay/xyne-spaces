@@ -2471,6 +2471,7 @@ export const savedUserConfigurationTable = table('saved_user_configurations')
     contextType: enumeration<SavedConfigContextType>(),
     contextId: string(),
     visibility: enumeration<SavedConfigVisibility>(),
+    isStarred: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

@@ -5,6 +5,7 @@ import DirectorySectionHeader from '../../Chat/DirectorySectionHeader';
 import SidebarItem from './SidebarItem';
 import ProjectItem from './ProjectItem';
 import SearchInput from './SearchInput';
+import ViewsSidebarSection from './ViewsSidebarSection';
 import { useSearchFilter } from '../../../hooks/useSearchFilter';
 import { highlightText } from './highlightText';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -36,7 +37,6 @@ const ProjectSidebar = ({
   const effectiveBoardId = boardFromFilter ?? activeBoardId ?? undefined;
 
   // Section expansion states
-  const [isFavoritesExpanded, setIsFavoritesExpanded] = useState(true);
   const [isProjectsExpanded, setIsProjectsExpanded] = useState(true);
   const [isGroupsExpanded, setIsGroupsExpanded] = useState(true);
   const [isPersonsExpanded, setIsPersonsExpanded] = useState(true);
@@ -69,12 +69,6 @@ const ProjectSidebar = ({
     searchKeys: ['name'],
   });
 
-  // Mock favorites data (TODO: Replace with real data later)
-  const mockFavorites = [
-    { id: '1', type: 'ticket-view' as const, name: 'My Tickets' },
-    { id: '2', type: 'board' as const, name: 'Product Design' },
-    { id: '3', type: 'board' as const, name: 'Xynespace-FE' },
-  ];
   // Auto-expand the active project so its boards are always visible in the sidebar.
   // This handles both: navigating to /projects/:projectId/:boardId via the URL, and
   // selecting a board from the top filter dropdown (which sets ?board= query param).
@@ -136,45 +130,7 @@ const ProjectSidebar = ({
 
       {/* Scrollable Content */}
       <div className='flex-1 overflow-y-auto px-3 py-4'>
-        {/* FAVORITES Section */}
-        <div className='mb-4'>
-          <DirectorySectionHeader
-            title='Favorites'
-            isExpanded={isFavoritesExpanded}
-            onToggle={() => setIsFavoritesExpanded(!isFavoritesExpanded)}
-          />
-
-          {isFavoritesExpanded && (
-            <div className='mt-1'>
-              {mockFavorites.map(favorite => (
-                <SidebarItem
-                  key={favorite.id}
-                  label={favorite.name}
-                  isActive={
-                    favorite.type === 'ticket-view' &&
-                    favorite.name === 'My Tickets' &&
-                    !activeProjectId &&
-                    !activeBoardId
-                  }
-                  onClick={() => {
-                    if (favorite.type === 'ticket-view' && favorite.name === 'My Tickets') {
-                      void navigate('/projects');
-                    } else {
-                      // eslint-disable-next-line no-console
-                      console.log('Navigate to favorite:', favorite);
-                    }
-                  }}
-                  data-track-category='Projects'
-                  data-track-name='SelectFavorite'
-                  data-track-metadata={JSON.stringify({
-                    favoriteId: favorite.id,
-                    favoriteName: favorite.name,
-                  })}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        <ViewsSidebarSection />
 
         {/* PROJECTS Section */}
         <div className='mb-4'>
