@@ -14,6 +14,7 @@ import {
 } from '../../../hooks/useCalls';
 import { useAutoJoinOnAccept, useCallJoinState } from '../../../hooks/useCallJoinState';
 import { CallJoinButton } from '../../Call/CallJoinButton/CallJoinButton';
+import { cn } from '../../../utils/classNames';
 
 interface CallParticipant {
   response: string;
@@ -82,9 +83,13 @@ export function CallMessageOverlay({
 
   return (
     <>
-      <div className='flex items-center gap-2'>
+      {/* Reserve right-edge space (pr-28) so the participant text never runs under
+          the absolutely-positioned Join button below. pr-28 covers the widest
+          label ("Request to Join"); `truncate` ellipsises longer participant
+          strings instead of letting them slide under the button. */}
+      <div className={cn('flex items-center gap-2', !isUserInThisDevice && 'pr-28')}>
         <div className='flex-1 min-w-0'>
-          <div className='text-sm text-foreground'>
+          <div className='text-sm text-foreground truncate'>
             {participantCount > 0 ? (
               <>
                 {participantText} {participantCount === 1 ? 'is' : 'are'} in a call
@@ -94,38 +99,43 @@ export function CallMessageOverlay({
             )}
           </div>
         </div>
-
-        {!isUserInThisDevice && (
-          <div className='flex-shrink-0'>
-            <CallJoinButton
-              action={action}
-              onJoin={handleJoinClick}
-              onRequest={requestToJoin}
-              isRequesting={isRequesting}
-              variant='solid'
-              joinLabel={userIsActiveInCall ? 'Switch' : 'Join'}
-              testId={
-                action === 'canJoin'
-                  ? userIsActiveInCall
-                    ? 'switch-call-button'
-                    : 'join-button'
-                  : action === 'requested'
-                    ? 'waiting-to-join-button'
-                    : 'request-to-join-button'
-              }
-              trackCategory='CALLS'
-              trackJoinName={
-                userIsActiveInCall ? 'SWITCH_CALL_FROM_MESSAGE' : 'JOIN_CALL_FROM_MESSAGE'
-              }
-              trackRequestName='REQUEST_TO_JOIN_FROM_MESSAGE'
-              trackMetadata={{
-                callId: call.externalId,
-                isUserActiveInCall: userIsActiveInCall,
-              }}
-            />
-          </div>
-        )}
       </div>
+
+      {/* The call message has a two-row body (the "A call is going on" header sits
+          ABOVE this overlay), so an inline button only centers on the lower row.
+          Anchor the Join button to the relatively-positioned MessageBubble card and
+          vertically center it against the WHOLE message instead. */}
+      {!isUserInThisDevice && (
+        <div className='absolute right-4 top-1/2 -translate-y-1/2 flex-shrink-0'>
+          <CallJoinButton
+            action={action}
+            onJoin={handleJoinClick}
+            onRequest={requestToJoin}
+            isRequesting={isRequesting}
+            variant='solid'
+            className='call-join-pill'
+            joinLabel={userIsActiveInCall ? 'Switch' : 'Join'}
+            testId={
+              action === 'canJoin'
+                ? userIsActiveInCall
+                  ? 'switch-call-button'
+                  : 'join-button'
+                : action === 'requested'
+                  ? 'waiting-to-join-button'
+                  : 'request-to-join-button'
+            }
+            trackCategory='CALLS'
+            trackJoinName={
+              userIsActiveInCall ? 'SWITCH_CALL_FROM_MESSAGE' : 'JOIN_CALL_FROM_MESSAGE'
+            }
+            trackRequestName='REQUEST_TO_JOIN_FROM_MESSAGE'
+            trackMetadata={{
+              callId: call.externalId,
+              isUserActiveInCall: userIsActiveInCall,
+            }}
+          />
+        </div>
+      )}
 
       <CallConfirmationModal
         isOpen={showConfirmModal}

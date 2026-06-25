@@ -200,6 +200,11 @@
     --status-pending: #d97706;
     --status-scheduled: #2563eb;
     --status-success: #16a34a;
+    /* stage-completed tokens were missing in summer_breeze, so bg-stage-completed
+       (active-call message + headphone icon tile) rendered transparent. Mirror the
+       classic light-theme values to restore the light-green surface. */
+    --stage-completed-bg: 120 10% 96%;
+    --stage-completed-border: 120 30% 88%;
     --status-failure: #dc2626;
     --status-paused: #7c3aed;
     --ticket-accent: #445bb2;
@@ -2663,11 +2668,22 @@ img.inline-emoji,
 
 /* Active call message highlight - midnight theme */
 [data-theme="midnight"] .active-call-highlight {
-  background-color: rgba(59, 130, 246, 0.15) !important;
+  background-color: rgba(59, 130, 246, 0.22) !important;
+  border: 1px solid rgba(59, 130, 246, 0.45) !important;
 }
 
 [data-theme="midnight"] .active-call-highlight * {
   color: #e5e7eb !important;
+}
+
+/* The wildcard above recolors EVERY descendant to light gray, which is unreadable
+   on the green bg-status-success Join/Switch/Waiting pill. Restore the pill's own
+   foreground (it uses text-background) so the label stays legible on the light-green
+   surface. Scoped to .call-join-pill (the CallJoinButton marker class) so other
+   buttons inside the message card (hover toolbar, menus) are NOT recolored.
+   The !important is required only to defeat the wildcard rule above. (midnight only) */
+[data-theme="midnight"] .active-call-highlight .call-join-pill {
+  color: hsl(var(--background)) !important;
 }
 
 /* --- 2H: Dark Mode Shadow Enhancements --- */
