@@ -95,6 +95,7 @@ import { websocketService } from '@/services/websocketService';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { syncToYSweet } from '@/utils/ysweetUtils';
@@ -2264,6 +2265,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 logger.error('❌ [ANALYTICS] Failed to log message_sent:', error);
               }
             });
+            if (channel.scopeType === ChannelScopeType.DEFAULT) {
+              asyncTasks.push(async () => {
+                try {
+                  await processMeetLinksFromChatMessage(
+                    message.content,
+                    authData.workspaceId,
+                    conversationId,
+                    message.messageId,
+                  );
+                } catch (error) {
+                  logger.error(`[MUTATOR-CREATE-MESSAGE] Failed to process meet links for message ${message.messageId}:`, error);
+                }
+              });
+            }
           }
 
           await tx.mutate.channel_stats.update({
@@ -2950,6 +2965,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 logger.error('❌ [ANALYTICS] Failed to log message_sent (reply):', error);
               }
             });
+            if (channel.scopeType === ChannelScopeType.DEFAULT) {
+              asyncTasks.push(async () => {
+                try {
+                  await processMeetLinksFromChatMessage(
+                    message.content,
+                    authData.workspaceId,
+                    conversationId,
+                    message.messageId,
+                  );
+                } catch (error) {
+                  logger.error(`❌ [MUTATOR-CREATE-REPLY] Failed to process meet links for reply message ${message.messageId}:`, error);
+                }
+              });
+            }
           }
 
           const repliesData = parseRepliesMd(conversation.replies_md);

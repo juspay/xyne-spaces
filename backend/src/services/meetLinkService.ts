@@ -1,11 +1,13 @@
 /**
  * Google Meet Link Extraction Service
- * Extracts Google Meet links from email body and sends metadata to SAM service
+ * Extracts Google Meet links from email/chat content and sends metadata to SAM service
  */
 
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import axios from 'axios';
+
+const CHAT_CONVERSATION_PREFIX = 'conversation_';
 
 export interface MeetLinkMetadata {
   meetCode: string;
@@ -282,8 +284,62 @@ export async function processMeetLinksFromEmail(
   };
 }
 
+/**
+ * Extract Google Meet links from a newly created channel message and send the
+ * corresponding SAM metadata callbacks using the chat conversation as the anchor.
+ * @param content - Channel message content
+ * @param workspaceId - Workspace owning the channel
+ * @param conversationId - Conversation/thread ID where the message was posted
+ * @param messageId - Source message ID used as the SAM thread identifier
+ * @returns Count of successfully processed Meet links and their codes
+ */
+export async function processMeetLinksFromChatMessage(
+  content: string,
+  workspaceId: string,
+  conversationId: string,
+  messageId: string
+): Promise<{ processed: number; meetCodes: string[] }> {
+  logger.info('[MeetLinkService] Processing chat message for Google Meet links', {
+    conversationId,
+    messageId,
+  });
+  const meetLinks = extractMeetLinks(content);
+  if (meetLinks.length === 0) {
+    return { processed: 0, meetCodes: [] };
+  }
+  logger.info(`[MeetLinkService] Found ${meetLinks.length} Google Meet link(s) in chat message`, {
+    conversationId,
+    messageId,
+  });
+  const results = await Promise.allSettled(
+    meetLinks.map(link =>
+      sendMeetMetadataToSam({
+        meetCode: link.meetCode,
+        meetUrl: link.meetUrl,
+        workspaceId,
+        xyneTicketId: `${CHAT_CONVERSATION_PREFIX}${conversationId}`,
+        threadId: messageId,
+      })
+    )
+  );
+
+  const processedCodes: string[] = [];
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled' && result.value === true) {
+      processedCodes.push(meetLinks[index].meetCode);
+    }
+  });
+
+  return {
+    processed: processedCodes.length,
+    meetCodes: processedCodes,
+  };
+}
+
 export const meetLinkService = {
+  CHAT_CONVERSATION_PREFIX,
   extractMeetLinks,
   sendMeetMetadataToSam,
   processMeetLinksFromEmail,
+  processMeetLinksFromChatMessage,
 };

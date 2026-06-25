@@ -66,6 +66,17 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     });
   }
 
+  async findByIdAndWorkspace(conversationId: string, workspaceId: string): Promise<Conversation | null> {
+    return await this.db.conversation.findFirst({
+      where: {
+        conversationId,
+        channel: {
+          workspaceId,
+        },
+      },
+    });
+  }
+
   async findMany(options?: QueryOptions): Promise<Conversation[]>;
   async findMany(filters?: ConversationFilters): Promise<Conversation[]>;
   async findMany(optionsOrFilters?: QueryOptions | ConversationFilters): Promise<Conversation[]> {

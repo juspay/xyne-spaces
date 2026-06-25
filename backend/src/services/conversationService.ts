@@ -23,6 +23,7 @@ import {
   Message,
   MessageType,
   AttachmentEntityType,
+  ChannelScopeType,
 } from '@prisma/client';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
@@ -40,6 +41,7 @@ import { replaceCustomEmojiShortcodesWithImg } from '@/utils/customEmojiUtils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { emitTicketCommented } from '@/automations/triggers/ticket-commented.trigger';
 import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
+import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 
 interface UserInfo {
   id: string;
@@ -451,6 +453,26 @@ export class ConversationService {
     });
     await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
+    if (
+      !isBot &&
+      message.msgType === MessageType.USER &&
+      channel.workspaceId &&
+      channel.scopeType === ChannelScopeType.DEFAULT
+    ) {
+      void processMeetLinksFromChatMessage(
+        messageContent,
+        channel.workspaceId,
+        conversation.conversationId,
+        message.messageId,
+      ).catch(error => {
+        logger.error('[ConversationService] Failed to process meet links from new chat conversation', {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          conversationId: conversation.conversationId,
+          messageId: message.messageId,
+        });
+      });
+    }
+
     // Update channel last activity
     await this.channelRepository.updateLastActivity(channelId);
 
@@ -524,6 +546,7 @@ export class ConversationService {
     if (!conversation) {
       throw new Error('Conversation not found');
     }
+    const channel = await this.channelRepository.findById(conversation.channelId);
 
     // Check if user is channel participant (skip if isAddingParticipant is false)
     if (isAddingParticipant) {
@@ -613,8 +636,6 @@ export class ConversationService {
 
     // Create attachment records if files were uploaded
     if (processedFiles.length > 0) {
-      // Fetch channel to get workspaceId for attachments
-      const channel = await this.channelRepository.findById(conversation.channelId);
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
@@ -648,12 +669,32 @@ export class ConversationService {
     }
 
     // Push Vespa job for message indexing
-    this.pushVespaJobForMessage(message.messageId, userId).catch((error) => {
+    this.pushVespaJobForMessage(message.messageId, userId, channel?.workspaceId).catch((error) => {
       logger.error(
         `[ConversationService] Error pushing Vespa job for message ${message.messageId}:`,
         error
       );
     });
+
+    if (
+      !isBot &&
+      message.msgType === MessageType.USER &&
+      channel?.workspaceId &&
+      channel.scopeType === ChannelScopeType.DEFAULT
+    ) {
+      void processMeetLinksFromChatMessage(
+        messageContent,
+        channel.workspaceId,
+        conversationId,
+        message.messageId,
+      ).catch(error => {
+        logger.error('[ConversationService] Failed to process meet links from chat reply', {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          conversationId,
+          messageId: message.messageId,
+        });
+      });
+    }
 
     // Create child conversation if replyBroadcast is true (similar to mutator logic)
     if (replyBroadcast && childConversationId) {

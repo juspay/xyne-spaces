@@ -13,6 +13,8 @@ import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { MessageType } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
+import { meetLinkService } from '@/services/meetLinkService';
+import { db } from '@/database/client';
 
 /**
  * Zod schema for validating SAM Meet callback payloads
@@ -96,23 +98,46 @@ export class MeetCallbackController {
         return;
       }
 
-      // Find ticket by xyneId and workspaceId using centralized repository
-      const ticket = await repositories.tickets.findByXyneIdForMeet(xyneTicketId, workspaceId);
+      let targetConversationId: string | null = null;
+      let targetWorkspaceId = workspaceId;
 
-      if (!ticket) {
-        logger.warn('[MeetCallbackController] Ticket not found', { xyneTicketId });
-        res.status(404).json({
-          error: 'Ticket not found',
-          xyneTicketId,
-        });
-        return;
+      const conversationIdFromPrefix = xyneTicketId.startsWith(meetLinkService.CHAT_CONVERSATION_PREFIX)
+        && xyneTicketId.length > meetLinkService.CHAT_CONVERSATION_PREFIX.length
+        ? xyneTicketId.slice(meetLinkService.CHAT_CONVERSATION_PREFIX.length)
+        : null;
+
+      const chatConversation = conversationIdFromPrefix
+        ? await repositories.conversations.findByIdAndWorkspace(conversationIdFromPrefix, workspaceId)
+        : null;
+      if (chatConversation) {
+        targetConversationId = chatConversation.conversationId;
+      } else {
+        const ticket = await repositories.tickets.findByXyneIdForMeet(xyneTicketId, workspaceId);
+        if (!ticket) {
+          logger.warn('[MeetCallbackController] Ticket or conversation not found', { xyneTicketId });
+          res.status(404).json({
+            error: 'Ticket or conversation not found',
+            xyneTicketId,
+          });
+          return;
+        }
+
+        if (!ticket.conversationId) {
+          logger.warn('[MeetCallbackController] Ticket has no conversation', { xyneTicketId });
+          res.status(404).json({
+            error: 'Ticket has no associated conversation',
+            xyneTicketId,
+          });
+          return;
+        }
+
+        targetConversationId = ticket.conversationId;
+        targetWorkspaceId = ticket.workspaceId;
       }
 
-      if (!ticket.conversationId) {
-        logger.warn('[MeetCallbackController] Ticket has no conversation', { xyneTicketId });
-        res.status(404).json({
-          error: 'Ticket has no associated conversation',
-          xyneTicketId,
+      if (!targetConversationId) {
+        res.status(500).json({
+          error: 'Failed to resolve target conversation',
         });
         return;
       }
@@ -121,7 +146,7 @@ export class MeetCallbackController {
       const messageContent = this.formatMeetResponseMarkdown(payload, meetCode);
 
       // Get the Xyne Automatic bot user for posting the message (same as call summaries)
-      const botUser = await unifiedBotUserService.getBotByEmail('xyne-automatic@bot.xyne.ai', ticket.workspaceId);
+      const botUser = await unifiedBotUserService.getBotByEmail('xyne-automatic@bot.xyne.ai', targetWorkspaceId);
       if (!botUser) {
         logger.error('[MeetCallbackController] Xyne Automatic bot not found');
         res.status(500).json({
@@ -132,21 +157,42 @@ export class MeetCallbackController {
       }
       const senderId = botUser.id;
 
-      // Create message in the conversation thread with proper metadata
-      const message = await repositories.messages.create({
-        conversationId: ticket.conversationId,
-        senderId: senderId,
-        content: messageContent,
-        msgType: MessageType.BOT,
-        metadata: {
-          contentFormat: 'markdown',
-          messageSubtype: 'call_summary',
-        },
+      const now = new Date();
+      const message = await db.$transaction(async (tx) => {
+        const createdMessage = await tx.message.create({
+          data: {
+            conversationId: targetConversationId,
+            senderId,
+            content: messageContent,
+            msgType: MessageType.BOT,
+            metadata: {
+              contentFormat: 'markdown',
+              messageSubtype: 'call_summary',
+            },
+          },
+        });
+
+        await tx.conversation.update({
+          where: { conversationId: targetConversationId },
+          data: {
+            replyCount: {
+              increment: 1,
+            },
+            lastActivityAt: now,
+          },
+        });
+
+        await tx.conversationParticipant.updateMany({
+          where: { conversationId: targetConversationId },
+          data: { lastReplyAt: now },
+        });
+
+        return createdMessage;
       });
 
       logger.info('[MeetCallbackController] Successfully posted SAM response to thread', {
         xyneTicketId,
-        conversationId: ticket.conversationId,
+        conversationId: targetConversationId,
         messageId: message.messageId,
       });
 
@@ -154,7 +200,7 @@ export class MeetCallbackController {
         success: true,
         message: 'Callback processed successfully',
         messageId: message.messageId,
-        conversationId: ticket.conversationId,
+        conversationId: targetConversationId,
       });
     } catch (error) {
       logger.error('[MeetCallbackController] Error processing callback:', error);
