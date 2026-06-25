@@ -17,6 +17,16 @@ const migrationAdminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
  */
 router.delete('/orphan-conversations', authMiddleware.authenticate, migrationAdminAuth, controller.cleanupOrphanConversations);
 
+/**
+ * POST /api/migration/cleanup/deactivated-user-group-memberships
+ * Body: { dryRun?: boolean, workspaceId?: string }
+ * Backfill: removes INACTIVE users from all user groups by deleting their
+ * user_group_mappings, user_assignment_states and user_expertise_mappings rows.
+ * dryRun (default true) only reports per-workspace counts; omit workspaceId to
+ * run across ALL workspaces.
+ */
+router.post('/deactivated-user-group-memberships', authMiddleware.authenticate, migrationAdminAuth, controller.cleanupDeactivatedUserGroupMemberships);
+
 export default router;
 
 /**
