@@ -35,14 +35,6 @@ export class CallParticipantsACL extends BaseACL<'call_participants'> {
   }
 
   async canUpdate(_args: UpdateValue<TableSchema<'call_participants'>>, _tx: Transaction<Schema>): Promise<void> {
-    // const callParticipantInfo = await tx.query.call_participants.where('id', args.id).one().run();
-    // if (!callParticipantInfo) {
-    //   throw new MutationACLError('Call participant update failed: participant record does not exist', 'call_participants');
-    // }
-
-    // if (callParticipantInfo.userId !== this.ctx.userID) {
-    //   throw new MutationACLError('Call participant update failed: you can only update your own participant info', 'call_participants');
-    // }
 
   }
 

@@ -212,47 +212,6 @@ export class TicketRepository {
       ticket: createdSnapshot,
     });
 
-    // Queue ticket for Vespa ingestion with complete data
-    // try {
-    //   // Run all independent database queries concurrently
-    //   const [workflow, subTicketMapping, createdByUser, conversation] = await Promise.all([
-    //     // Get workflow for this ticket
-    //     prisma.workflow.findFirst({
-    //       where: { ticketId: ticket.id },
-    //       orderBy: { createdAt: 'desc' }
-    //     }),
-    //     // Check if this ticket is a sub-ticket to find its parent
-    //     prisma.ticketSubTicketMapping.findFirst({
-    //       where: { subTicketId: ticket.id }
-    //     }),
-    //     // Get createdBy user's email for ownerEmail and name for createdBy
-    //     prisma.user.findUnique({
-    //       where: { id: ticket.createdBy },
-    //       select: { email: true, name: true }
-    //     }),
-    //     // Get conversation to fetch channelId for Vespa reference
-    //     ticket.conversationId ? prisma.conversation.findUnique({
-    //       where: { conversationId: ticket.conversationId },
-    //       select: { channelId: true }
-    //     }) : Promise.resolve(null)
-    //   ]);
-
-    //   const channelId = conversation?.channelId || '';
-
-    //   const ticketWithAdditionalData = {
-    //     ...ticket,
-    //     createdBy: createdByUser?.email, // Send email instead of ID
-    //     workflowType: workflow?.workflowType || 'default',
-    //     parentTicketId: subTicketMapping?.ticketId || '',
-    //     ownerEmail: createdByUser?.email || '',
-    //     channelId, // Include channelId for Vespa channelRef
-    //   };
-
-    //   await queueTicketIngestion(ticketWithAdditionalData, 'feed');
-    // } catch (error) {
-    //   logger.error(`[VESPA-FLOW] Failed to queue ticket for Vespa: ${ticket.id}`, error);
-    //   // Don't throw - ticket is still created in DB
-    // }
 
     void (async (): Promise<void> => {
       try {
@@ -638,47 +597,6 @@ export class TicketRepository {
     websocketService.trackUserActivity(updatedBy)
       .catch(err => logger.error('Failed to track user activity after ticket stage update:', err));
 
-    // Queue ticket update for Vespa ingestion with complete data
-    // try {
-    //   // Run all independent database queries concurrently
-    //   const [workflow, subTicketMapping, createdByUser, conversation] = await Promise.all([
-    //     // Get workflow for this ticket
-    //     prisma.workflow.findFirst({
-    //       where: { ticketId: updatedTicket.id },
-    //       orderBy: { createdAt: 'desc' }
-    //     }),
-    //     // Check if this ticket is a sub-ticket to find its parent
-    //     prisma.ticketSubTicketMapping.findFirst({
-    //       where: { subTicketId: updatedTicket.id }
-    //     }),
-    //     // Get createdBy user's email for ownerEmail and name for createdBy
-    //     prisma.user.findUnique({
-    //       where: { id: updatedTicket.createdBy },
-    //       select: { email: true, name: true }
-    //     }),
-    //     // Get conversation to fetch channelId for Vespa reference
-    //     updatedTicket.conversationId ? prisma.conversation.findUnique({
-    //       where: { conversationId: updatedTicket.conversationId },
-    //       select: { channelId: true }
-    //     }) : Promise.resolve(null)
-    //   ]);
-
-    //   const channelId = conversation?.channelId || '';
-
-    //   const ticketWithAdditionalData = {
-    //     ...updatedTicket,
-    //     createdBy: createdByUser?.name,
-    //     workflowType: workflow?.workflowType || 'default',
-    //     parentTicketId: subTicketMapping?.ticketId || '',
-    //     ownerEmail: createdByUser?.email || '',
-    //     channelId, // Include channelId for Vespa channelRef
-    //   };
-
-    //   await queueTicketIngestion(ticketWithAdditionalData, 'update');
-    // } catch (error) {
-    //   logger.error(`[VESPA-FLOW] Failed to queue ticket update for Vespa: ${updatedTicket.id}`, error);
-    //   // Don't throw - ticket is still updated in DB
-    // }
 
     return updatedTicket;
   }

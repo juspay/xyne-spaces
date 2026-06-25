@@ -1088,8 +1088,6 @@ export class DefaultAgentOrchestrator implements AgentOrchestrator {
 
         this.debug('Conversation compacting completed with turn restart', {
           originalTokens: originalTokenCount,
-          // newTokens: newTokenCount,
-          // tokensReduced,
           messageCount: 1
         });
         

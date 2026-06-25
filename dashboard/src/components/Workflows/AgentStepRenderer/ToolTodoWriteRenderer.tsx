@@ -67,18 +67,6 @@ export const ToolTodoWriteRenderer: React.FC<
     const error = parsedData.output.error ?? '';
     const todosUpdated = parsedData.output.todosUpdated;
 
-    // const getStatusColor = (status: string): string => {
-    //   switch (status) {
-    //     case 'completed':
-    //       return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
-    //     case 'in_progress':
-    //       return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
-    //     case 'pending':
-    //     default:
-    //       return 'bg-muted text-foreground dark:bg-gray-800 dark:text-muted';
-    //   }
-    // };
-
     const getStatusIcon = (status: string): React.ReactNode => {
       switch (status) {
         case 'completed':

@@ -1051,18 +1051,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               isClosed: false,
             });
 
-            // // Update channel_user_status with timestamp
-            // const userStatus = await tx.run(zql.channel_user_status
-            //   .where('channelId', channelId)
-            //   .where('userId', user.id)
-            //   .one());
-
-            // if (userStatus) {
-            //   await tx.mutate.channel_user_status.update({
-            //     id: userStatus.id,
-            //     lastViewedAt: timestamp,
-            //   });
-            // }
 
             addedUsers.push(user);
           }

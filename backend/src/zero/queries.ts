@@ -2967,8 +2967,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .orderBy('channelId', isBackward ? 'asc' : 'desc');
 
       if (start) {
-        // Forward: inclusive to include cursor and items after (older)
-        // Backward: exclusive to get items before cursor (newer)
         query = query.start(
           { lastActivityAt: start.lastActivityAt, channelId: start.channelId },
           { inclusive: !isBackward },

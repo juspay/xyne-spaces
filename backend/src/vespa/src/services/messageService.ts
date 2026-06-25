@@ -1,1 +1,0 @@
-// Vespa message retrieval service

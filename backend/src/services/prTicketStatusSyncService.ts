@@ -491,9 +491,6 @@ export class PRTicketStatusSyncService {
    * Check if ticket status is terminal (should not be overridden)
    * Commented out since terminal status check is disabled
    */
-  // private isTerminalTicketStatus(status: TicketStatus): boolean {
-  //   return TERMINAL_TICKET_STATUSES.includes(status);
-  // }
 
   /**
    * Send a message to the conversation about PR event

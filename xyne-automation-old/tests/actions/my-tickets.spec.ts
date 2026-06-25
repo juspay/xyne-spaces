@@ -9,11 +9,6 @@ test('test', async ({ page }) => {
   await page.getByTestId('priority-filter-medium').click();
   await page.getByTestId('priority-filter-high').click();
   await page.getByTestId('priority-filter-critical').click();
-  // await page.getByTestId('filter-menu-userGroups').click();
-  // // Dynamic items - keeping original selectors
-  // await page.getByRole('button', { name: 'ADMIN' }).click();
-  // await page.getByRole('button', { name: 'DEVELOPER' }).click();
-  // await page.getByRole('button', { name: 'VIEWER', exact: true }).click();
   await page.getByTestId('clear-filters-btn').click();
   await page.getByTestId('table-view-btn').click();
   await page.getByTestId('calendar-view-btn').click();

@@ -75,9 +75,6 @@ class MixpanelService {
         secure_cookie: window.location.protocol === 'https:',
         // Session Replay Configuration - Controlled by ENABLE_SESSION_REPLAY constant
         record_sessions_percent: this.ENABLE_SESSION_REPLAY ? 100 : 0,
-        // record_block_selector: '.block-recording', // Completely block elements from being recorded
-        // record_mask_text_selector: ':not(.mp-unmask, .mp-unmask *)', // Mask all text except elements with .mp-unmask class and their children
-        // record_collect_fonts: true, // Collect fonts for better replay quality
       });
       /* eslint-enable @typescript-eslint/naming-convention */
 

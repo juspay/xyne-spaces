@@ -72,9 +72,6 @@ async function main() {
     // Use a transaction to ensure atomicity
     await prisma.$transaction(async (tx) => {
       
-      // ============================================
-      // PRELIMINARY: Create Sequences
-      // ============================================
       console.log('  Creating sequences...');
       await tx.$executeRaw`
         CREATE SEQUENCE IF NOT EXISTS ticket_xyne_id_seq START 1

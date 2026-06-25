@@ -887,9 +887,6 @@ export class WorkflowController {
     }
   };
 
-  // POST: Continue an agentic step with user input (preserves conversation history)
-  // NEW: Uses Redis pub/sub to signal the running agent to abort and continue
-  // UPDATED: Handles PAUSED state for external wait (MANUAL mode completion)
   continueAgenticStep = async (req: Request, res: Response): Promise<void> => {
     try {
       const { executionId } = req.params;

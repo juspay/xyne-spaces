@@ -324,18 +324,11 @@ import { PrismaClient } from '@prisma/client';
      let result: TransformedSearchResult;
      
      switch (docType) {
-       // case 'user':
-       //   result = transformUser(hit, doc as VespaUserDocument);
-       //   break;
    
        case 'message':
          result = transformMessage(hit, doc as VespaChatMessageDocument & importedChannelFields);
          break;
        
-       // case 'attachment':
-       // case 'chat_attachment':
-       //   result = transformAttachment(hit, doc as VespaChatAttachmentDocument, userMap, channelMap);
-       //   break;
    
       case 'file':
          // Check if this is a collection document by subApp field
@@ -354,10 +347,6 @@ import { PrismaClient } from '@prisma/client';
          result = transformMail(hit, doc as VespaMailDocument, mailMap);
          break;
 
-       // case 'channel':
-       // case 'chat_container':
-       //   result = transformChannel(hit, doc as VespaChatContainerDocument, userMap);
-       //   break;
 
        default:
          // Fallback for unknown types - log for debugging
@@ -411,52 +400,10 @@ import { PrismaClient } from '@prisma/client';
    /**
     * Format file size for display
     */
-   // function formatFileSize(bytes?: number): string | undefined {
-   //   if (bytes === undefined || bytes === null || isNaN(bytes)) {
-   //     return undefined;
-   //   }
-   
-   //   if (bytes === 0) {
-   //     return '0 KB';
-   //   }
-   
-   //   const k = 1024;
-   //   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-   //   const i = Math.floor(Math.log(bytes) / Math.log(k));
-   
-   //   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-   // }
    
    /**
     * Transform user document
     */
-   // function transformUser(hit: VespaSearchHit, doc: VespaUserDocument): TransformedSearchResult {
-   //   // Handle potentially invalid createdAt timestamp
-   //   let timestamp = '';
-   //   try {
-   //     if (doc.createdAt) {
-   //       const date = new Date(doc.createdAt);
-   //       if (!isNaN(date.getTime())) {
-   //         timestamp = formatTimestamp(date.toISOString());
-   //       }
-   //     }
-   //   } catch (error) {
-   //     logger.warn('Invalid createdAt for user:', doc.docId, doc.createdAt);
-   //   }
-   
-   //   return {
-   //     id: doc.docId,
-   //     type: 'user',
-   //     title: doc.name,
-   //     subtitle: doc.email,
-   //     context: doc.name,
-   //     relevanceScore: hit.relevance,
-   //     avatar: doc.docId,
-   //     metadata: {
-   //       timestamp: timestamp || 'N/A',
-   //     },
-   //   };
-   // }
    
    /**
     * Transform message document
@@ -771,51 +718,5 @@ function transformCollection(
    /**
     * Transform channel document
     */
-   // function transformChannel(
-   //   hit: VespaSearchHit,
-   //   doc: VespaChatContainerDocument,
-   //   userMap: UserMap,
-   // ): TransformedSearchResult {
-   //   const scopeType = doc.isIm ? 'DM' : doc.isMpim ? 'GROUP_DM' : 'DEFAULT';
-     
-   //   // Generate proper channel name for DMs
-   //   const channelName = generateChannelTitle(
-   //     doc.channelName,
-   //     doc.permissions,
-   //     userMap,
-   //     scopeType,
-   //   );
-   
-   //   // Handle potentially invalid createdAt timestamp
-   //   let timestamp = '';
-   //   try {
-   //     if (doc.createdAt) {
-   //       const date = new Date(doc.createdAt);
-   //       if (!isNaN(date.getTime())) {
-   //         timestamp = formatTimestamp(date.toISOString());
-   //       }
-   //     }
-   //   } catch (error) {
-   //     logger.warn('Invalid createdAt for channel:', doc.docId, doc.createdAt);
-   //   }
-   
-   //   return {
-   //     id: doc.docId,
-   //     type: 'channel',
-   //     title: scopeType === 'DEFAULT' ? `#${channelName}` : channelName,
-   //     subtitle: doc.description || doc.topic || `${doc.memberCount || 0} members`,
-   //     context: doc.description || doc.topic || '',
-   //     relevanceScore: hit.relevance,
-   //     metadata: {
-   //       timestamp: timestamp || 'N/A',
-   //       channelName: channelName,
-   //     },
-   //     searchContext: {
-   //       channelId: doc.docId,
-   //       channelTitle: channelName,
-   //       scopeType: scopeType,
-   //     },
-   //   };
-   // }
 
    

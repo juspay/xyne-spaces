@@ -79,51 +79,6 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
    * Queue channel for Vespa ingestion with complete data
    * Should be called AFTER participants are added to the channel
    */
-  // async queueChannelForVespa(channelId: string, jobType: 'feed' | 'update' | 'delete'): Promise<void> {
-  //   try {
-  //     if (jobType === 'delete') {
-  //       await queueChannelIngestion({ id: channelId }, jobType);
-  //       return;
-  //     }
-
-  //     const channel = await this.findById(channelId);
-  //     if (!channel) {
-  //       throw new Error(`Channel not found: ${channelId}`);
-  //     }
-
-  //     // Fetch createdBy user's email
-  //     const createdByUser = await this.db.user.findUnique({
-  //       where: { id: channel.createdBy },
-  //       select: { email: true }
-  //     });
-
-  //     // Fetch channel participants to include permissions and memberCount
-  //     const channelParticipants = await this.db.channelParticipant.findMany({
-  //       where: { channelId: channel.id }
-  //     });
-
-  //     // Extract user IDs for permissions
-  //     const permissions = channelParticipants.map(p => p.userId);
-
-  //     const channelWithAdditionalData = {
-  //       ...channel,
-  //       creator: createdByUser?.email, // Send user email in creator field
-  //       // createdBy and ownerId will remain as user IDs (from channel object)
-  //       permissions,
-  //       memberCount: channelParticipants.length,
-  //       lastActivityAt: channel.lastActivityAt || new Date(channel.createdAt),
-  //       updatedAt: new Date(),
-  //     };
-
-  //     console.log(`[VESPA-FLOW] Channel ${channelId}: Final creator value being sent:`, channelWithAdditionalData.creator);
-  //     console.log(`[VESPA-FLOW] Channel ${channelId}: Channel.createdBy:`, channel.createdBy);
-
-  //     await queueChannelIngestion(channelWithAdditionalData, jobType);
-  //   } catch (error) {
-  //     console.error(`[VESPA-FLOW] Failed to queue channel for Vespa: ${channelId}`, error);
-  //     // Don't throw - operation continues even if Vespa queuing fails
-  //   }
-  // }
 
   async findById(id: string): Promise<Channel | null> {
     return await this.db.channel.findUnique({

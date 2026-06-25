@@ -936,11 +936,6 @@ export class ConversationService {
       chatMessage
     );
 
-    // // Real-time broadcast via WebSocket (using session method for now)
-    // await websocketService.broadcastToSession(message.conversationId, 'message_updated', chatMessage);
-
-    // // Also broadcast via Redis for horizontal scaling (using session method for now)
-    // await redisService.broadcastMessageToSession(message.conversationId, chatMessage);
 
     return {
       conversation,

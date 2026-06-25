@@ -1142,8 +1142,6 @@ export class WorkflowRepository {
     return expandedWorkflows;
   }
 
-  // OPTIMIZED: Agent executions expansion using in-memory lookup
-  // NEW: Fetches agent step data from messageAttachment -> Redis/GCS instead of child executions
   private async expandAgentExecutionsOptimized(
     stepId: string,
     stepName: string,

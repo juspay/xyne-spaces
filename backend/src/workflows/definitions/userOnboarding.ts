@@ -92,9 +92,6 @@ const createJiraTicketCallback = async (email: string, slackMessageId: string) =
   }
 }
 
-// const _checkPremiumUserCallback = async (userType: string) => {
-//   return userType === 'premium' || userType === 'enterprise'
-// }
 
 const setupPremiumFeaturesCallback = async (email: string) => {
   logger.info(`Setting up premium features for ${email}`)

@@ -41,10 +41,6 @@ interface PermissionsApiResponse {
   permissions: UserPermission[];
 }
 
-// const isQueryError = (obj: QueryResultDetails[]): boolean => {
-//   return obj.some(v => v.type === "error");
-// }
-
 type QueryDetails =
   | {
       readonly type: 'complete';

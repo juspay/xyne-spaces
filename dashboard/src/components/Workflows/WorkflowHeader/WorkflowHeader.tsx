@@ -257,8 +257,6 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   const status = executionStatus?.toLowerCase() || '';
   const isRunning = ['running', 'in_progress'].includes(status);
   const statusConfig = getStatusConfig(executionStatus);
-  // const desc = ticket.description || '';
-  // const displayDesc = !showDesc && desc.length > 150 ? desc.slice(0, 150) + '...' : desc;
 
   return (
     <div className='flex-shrink-0 bg-background border-b border-border'>

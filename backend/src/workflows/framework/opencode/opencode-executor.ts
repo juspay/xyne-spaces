@@ -245,69 +245,6 @@ export class OpenCodeExecutor {
   /**
    * NEW: Continuation execution using parent execution and inputStepDbId
    */
-  // private async startContinuationExecution<T extends BaseWorkflowContext>(
-  //   parentExecutionId: string,
-  //   _workflowId: string,
-  //   agentChkConfig: FullAgenticCheckpointConfig,
-  //   originalConversationRequest: ConversationRequest,
-  //   parentState: WorkflowState<T>,
-  //   inputStepDbId: string,
-  //   checkpointId: string,
-  //   continuationOverride: AgenticContinuationOverride
-  // ): Promise<{ result: ConversationResult; updatedState: WorkflowState<T>; gitInfo: GitInfo }> {
-
-  //   const sourceGitInfo = await this.storage.getChildExecutionGitInfo(continuationOverride.sourceChildExecutionId)
-
-  //   if (sourceGitInfo) {
-  //     logger.info(`🔄 [OPENCODE-EXECUTOR] Source execution git info:`)
-  //     logger.info(`   Branch: ${sourceGitInfo.branch}`)
-  //     logger.info(`   Commit: ${sourceGitInfo.commitHash || 'N/A'}`)
-
-  //     if (agentChkConfig.repoInfo) {
-  //       agentChkConfig = {
-  //         ...agentChkConfig,
-  //         repoInfo: {
-  //           ...agentChkConfig.repoInfo,
-  //           repoBranch: sourceGitInfo.branch,
-  //           continuationCommitHash: sourceGitInfo.commitHash,
-  //           existingPrLink: sourceGitInfo.pr_link || sourceGitInfo.pullRequestUrl
-  //         }
-  //       }
-  //     }
-  //   }
-
-  //   const sourceSteps = await this.storage.getChildWorkflowSteps(continuationOverride.sourceChildExecutionId)
-
-  //   // Note: user_message step is already created by copyParentAgentStepsToExecution() in workflow-engine.ts
-  //   // No need to create it again here to avoid duplicate user messages in the UI
-
-  //   try {
-  //     const { result, gitInfo } = await this.executeOpenCodeWithPauseCheck(
-  //       parentExecutionId,
-  //       inputStepDbId,
-  //       checkpointId,
-  //       agentChkConfig,
-  //       originalConversationRequest,
-  //       parentState,
-  //       true,
-  //       sourceSteps,
-  //       continuationOverride.continuationUserMessage
-  //     )
-
-  //     await this.storage.saveAgenticCheckpointState(
-  //       parentExecutionId,
-  //       checkpointId,
-  //       { result, gitInfo }
-  //     )
-
-  //     const updatedState = this.buildStateFromCompletedExecution(parentState, result as FrameworkExecutionResult)
-  //     return { result, updatedState, gitInfo }
-
-  //   } catch (error) {
-  //     await this.storage.createErrorStep(parentExecutionId, inputStepDbId, error as Error)
-  //     throw error
-  //   }
-  // }
 
   /**
    * NEW: Uses inputStepDbId instead of childExecutionId for step storage
