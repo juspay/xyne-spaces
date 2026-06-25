@@ -592,20 +592,7 @@ export class CallController {
       }
 
       // Generate access token
-      // Participant record will be created/updated by webhook when user actually joins.
-      //
-      // Selective-participant gate: when callUpdatesChannel is set the call has an explicit
-      // invited-only participant list. Non-invited channel members can SEE the call card in
-      // the channel but must NOT receive a LiveKit token — enforce at the API boundary.
-      if (call?.callUpdatesChannel) {
-        const participant = await repositories.calls.findParticipant(call.id, user.id);
-        if (!participant) {
-          logger.warn(`[joinCall] user ${user.id} is not an invited participant of selective call ${callId} — rejecting`);
-          res.status(403).json({ success: false, error: 'You are not invited to this call' });
-          return;
-        }
-      }
-
+      // Participant record will be created/updated by webhook when user actually joins
       const joiner = await db.user.findUnique({ where: { id: user.id }, select: { picture: true } });
       const token = await livekitService.generateAccessToken({
         userIdentity: user.id,

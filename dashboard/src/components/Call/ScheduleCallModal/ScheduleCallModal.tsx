@@ -396,6 +396,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // Show "Post call updates" checkbox only when:
   //   - at least one participant is added
+  //   - no channel is selected in the participants field (channel already serves as the target)
+  const hasParticipantChannel = participants.some(v => v.startsWith('channel:'));
+  const showPostCallUpdates =
+    (participants.length > 0 || postCallUpdates) && !hasParticipantChannel;
+
   const participantLabel = useMemo(() => {
     if (participants.some(v => v.startsWith('channel:'))) return 'Selected Channel';
     return 'Internal Users';
@@ -405,36 +410,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   const [searchQuery, setSearchQuery] = React.useState('');
   const userGroups = useUserGroupSearch(searchQuery, 10);
   const [notFoundUsers, setNotFoundUsers] = React.useState<string[]>([]);
-  const [excludedChannelMembers, setExcludedChannelMembers] = React.useState<Set<string>>(
-    new Set(),
-  );
-
-  const hasParticipantChannel = participants.some(v => v.startsWith('channel:'));
-  const showPostCallUpdates =
-    (participants.length > 0 || postCallUpdates) &&
-    (!hasParticipantChannel || excludedChannelMembers.size > 0);
-
-  const selectedChannelValue = participants.find(v => v.startsWith('channel:'));
-  const selectedChannelId = selectedChannelValue
-    ? selectedChannelValue.replace('channel:', '')
-    : null;
-  const [selectedChannelMembers] = useCachedQuery(
-    queries.channelParticipants({ channelId: selectedChannelId ?? '' }),
-    { enabled: isOpen && !!selectedChannelId },
-  );
-
-  // When editing a selective-participants call, track the original participant IDs
-  // so we can diff against channel members once they load.
-  const selectiveEditParticipantIdsRef = React.useRef<Set<string> | null>(null);
-  const selectiveExclusionsInitializedRef = React.useRef(false);
-
-  // Auto-enable postCallUpdates when excludedChannelMembers changes
-  useEffect(() => {
-    if (excludedChannelMembers.size > 0 && selectedChannelId) {
-      setPostCallUpdates(true);
-      setUpdateChannelId(selectedChannelId);
-    }
-  }, [excludedChannelMembers.size, selectedChannelId]);
 
   // Recurring call state
   const [isRecurring, setIsRecurring] = React.useState(
@@ -553,7 +528,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       // Null means the call is either channel-scoped (channelId is a real DEFAULT channel)
       // or a direct group call (channelId is an auto-created GROUP_DM).
       // Non-null means call updates are posted to that channel while participants are in a GROUP_DM.
-      // (For selective participants, callUpdatesChannel IS the DEFAULT channel the user selected).
       const callChannel = initialCall.channelId
         ? allVisibleChannels.find(c => c.id === initialCall.channelId)
         : null;
@@ -563,27 +537,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         callChannel.scopeType !== ChannelScopeType.GROUP_DM;
       const callUpdatesChannel = initialCall.callUpdatesChannel ?? null;
 
-      // Selective participants: callUpdatesChannel holds the original DEFAULT channel the user
-      // picked. Restore the channel pill (not individual user pills) so the unfurl UI works.
-      const participantValues: string[] = callUpdatesChannel
-        ? [`channel:${callUpdatesChannel}`]
-        : isExplicitChannel
+      const participantValues: string[] =
+        isExplicitChannel && !callUpdatesChannel
           ? [`channel:${initialCall.channelId}`]
           : initialCall.participants
               .filter(p => p.userId !== user?.id)
               .map(p => `user:${p.userId}`);
-
-      // Record which participant IDs were in the call so the exclusion effect below
-      // can diff against the channel member list once it loads.
-      if (callUpdatesChannel) {
-        selectiveEditParticipantIdsRef.current = new Set(
-          initialCall.participants.map(p => p.userId),
-        );
-        selectiveExclusionsInitializedRef.current = false;
-      } else {
-        selectiveEditParticipantIdsRef.current = null;
-        selectiveExclusionsInitializedRef.current = true; // nothing to initialize
-      }
 
       reset({
         title: initialCall.title,
@@ -599,9 +558,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         setPostCallUpdates(false);
         setUpdateChannelId(null);
       }
-
-      // Reset exclusions for new edit session
-      setExcludedChannelMembers(new Set());
 
       setRecurringStartTime(toHHMM(callStart));
       setRecurringEndTime(toHHMM(callEnd));
@@ -630,27 +586,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       }
     }
   }, [isOpen, user, initialized]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── In selective-participants edit mode: pre-populate excludedChannelMembers ──
-  // Once selectedChannelMembers loads (which happens after the channel pill is restored
-  // in the effect above), diff the channel's full member list against the call's saved
-  // participants to determine who was excluded, then initialise the set.
-  useEffect(() => {
-    if (
-      selectiveExclusionsInitializedRef.current ||
-      !selectedChannelMembers ||
-      !selectiveEditParticipantIdsRef.current
-    )
-      return;
-
-    const savedIds = selectiveEditParticipantIdsRef.current;
-    const excluded = new Set<string>();
-    selectedChannelMembers.forEach((m: { userId: string }) => {
-      if (!savedIds.has(m.userId)) excluded.add(m.userId);
-    });
-    setExcludedChannelMembers(excluded);
-    selectiveExclusionsInitializedRef.current = true;
-  }, [selectedChannelMembers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── When series data arrives: pre-fill recurrence UI ────────────────────
   useEffect(() => {
@@ -864,41 +799,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     userGroups,
     fullUserList,
   ]);
-
-  const channelMembersOptions = useMemo(() => {
-    if (!selectedChannelMembers) return [];
-    type FullUser = (typeof fullUserList)[number];
-    return selectedChannelMembers
-      .map((m: { userId: string }) => {
-        const u = fullUserList.find((fu: FullUser) => fu.id === m.userId);
-        if (!u) return null;
-        return buildUserOption(u);
-      })
-      .filter((o): o is NonNullable<ReturnType<typeof buildUserOption>> => o !== null);
-  }, [selectedChannelMembers, fullUserList]);
-
-  const toggleExcludedChannelMember = useCallback(
-    (userId: string, isSelectAll?: boolean, allUserIds?: string[]) => {
-      setExcludedChannelMembers(prev => {
-        const next = new Set(prev);
-        if (isSelectAll !== undefined && allUserIds) {
-          if (isSelectAll) {
-            allUserIds.forEach(id => next.delete(id));
-          } else {
-            allUserIds.forEach(id => next.add(id));
-          }
-        } else {
-          if (next.has(userId)) {
-            next.delete(userId);
-          } else {
-            next.add(userId);
-          }
-        }
-        return next;
-      });
-    },
-    [],
-  );
 
   const parseTimeAndUpdateDate = useCallback(
     (timeString?: string, currentDate?: Date | null): Date | null => {
@@ -1217,31 +1117,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         return;
       }
 
-      let userIds: string[] = [];
+      const userIds: string[] = [];
       let channelId: string | undefined;
       data.participants.forEach(value => {
         if (value.startsWith('user:')) userIds.push(value.replace('user:', ''));
         else if (value.startsWith('channel:')) channelId = value.replace('channel:', '');
       });
-
-      let selectiveParticipants = false;
-      if (channelId && excludedChannelMembers.size > 0 && selectedChannelMembers) {
-        userIds = selectedChannelMembers
-          .filter((m: { userId: string }) => !excludedChannelMembers.has(m.userId))
-          .map((m: { userId: string }) => m.userId);
-        selectiveParticipants = true;
-      }
-
-      // Guard: a selective-participants call with nobody selected is invalid.
-      // The backend cannot distinguish "organizer only" from "whole channel" without targetUserIds.
-      if (selectiveParticipants && userIds.length === 0) {
-        toast.error('At least one participant must be included', {
-          description:
-            'You have excluded all channel members. Include at least one participant to schedule the call.',
-          duration: 4000,
-        });
-        return;
-      }
 
       // ── EDIT MODE ──────────────────────────────────────────────────────────
       if (isEditMode && initialCall) {
@@ -1258,14 +1139,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             postCallUpdates && updateChannelId ? updateChannelId : channelId;
           await callService.updateRecurringSeries(initialCall.recurringSeriesId, {
             title: data.title,
-            // For selective participants, channelId stays fixed — only targetUserIds changes.
-            // Sending channelId + targetUserIds would incorrectly trigger GROUP_DM creation.
-            ...(selectiveParticipants
-              ? { selectiveParticipants: true, targetUserIds: userIds }
-              : {
-                  ...(resolvedChannelId && { channelId: resolvedChannelId }),
-                  ...(userIds.length > 0 && { targetUserIds: userIds }),
-                }),
+            ...(resolvedChannelId && { channelId: resolvedChannelId }),
+            ...(userIds.length > 0 && { targetUserIds: userIds }),
             recurrenceRule: buildRrule(),
             timezone,
             startTime: recurringStartTime,
@@ -1286,14 +1161,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             title: data.title,
             startsAt: new Date(data.startsAt).getTime(),
             endsAt: new Date(data.endsAt).getTime(),
-            // For selective participants, always send targetUserIds (even if empty would be blocked above).
-            // For non-selective, only send if non-empty.
-            ...(selectiveParticipants
-              ? { selectiveParticipants: true, targetUserIds: userIds }
-              : {
-                  ...(userIds.length > 0 && { targetUserIds: userIds }),
-                  ...(resolvedChannelId && { channelId: resolvedChannelId }),
-                }),
+            ...(userIds.length > 0 && { targetUserIds: userIds }),
+            ...(resolvedChannelId && { channelId: resolvedChannelId }),
           });
           toast.success('Call Updated', {
             description: 'This occurrence has been updated.',
@@ -1323,10 +1192,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
               }
             : {
                 ...(channelId !== undefined && { channelId }),
-                // Always send targetUserIds in selective mode; only when non-empty otherwise.
-                ...(selectiveParticipants
-                  ? { targetUserIds: userIds, selectiveParticipants: true }
-                  : userIds.length > 0 && { targetUserIds: userIds }),
+                ...(userIds.length > 0 && { targetUserIds: userIds }),
               }),
           timezone,
           recurrenceRule: buildRrule(),
@@ -1347,7 +1213,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           title: data.title,
           startsAt: data.startsAt.getTime(),
           endsAt: data.endsAt.getTime(),
-          ...(selectiveParticipants && { selectiveParticipants }),
         };
         if (threadConversationId) {
           // Thread-linked: always use the thread's channel and pass conversationId
@@ -1359,9 +1224,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           if (userIds.length > 0) requestData.targetUserIds = userIds;
         } else {
           if (channelId) requestData.channelId = channelId;
-          // Always send targetUserIds in selective mode; only when non-empty otherwise.
-          if (selectiveParticipants) requestData.targetUserIds = userIds;
-          else if (userIds.length > 0) requestData.targetUserIds = userIds;
+          if (userIds.length > 0) requestData.targetUserIds = userIds;
         }
         const effExternals = data.externalEmails ?? [];
         if (enableExternalInvitees && effExternals.length > 0) {
@@ -1495,11 +1358,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     setUpdateChannelId(null);
     setChannelSearchQuery('');
     setChannelPickerOpen(false);
-
-    // Reset refs so selective exclusions recalculate on next open
-    selectiveExclusionsInitializedRef.current = false;
-    selectiveEditParticipantIdsRef.current = null;
-
     onClose();
   }, [reset, onClose, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2420,9 +2278,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                           ? `${notFoundUsers.length} user${notFoundUsers.length === 1 ? '' : 's'} not found`
                           : undefined
                       }
-                      channelMembersOptions={channelMembersOptions}
-                      excludedChannelMembers={excludedChannelMembers}
-                      toggleExcludedChannelMember={toggleExcludedChannelMember}
                     />
                   )}
                 />
@@ -2470,9 +2325,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                   <div className='flex items-center gap-1.5'>
                     <Checkbox
                       checked={postCallUpdates}
-                      disabled={
-                        hasParticipantChannel || (isEditMode && !!initialCall?.callUpdatesChannel)
-                      }
                       onChange={checked => {
                         setPostCallUpdates(checked);
                         if (!checked) {
@@ -2502,18 +2354,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                         className={cn(
                           'flex items-center gap-2 rounded-lg border h-8 px-3',
                           !updateChannelId ? 'border-red-500' : 'border-input',
-                          (hasParticipantChannel ||
-                            (isEditMode && !!initialCall?.callUpdatesChannel)) &&
-                            'opacity-50 pointer-events-none cursor-not-allowed',
                         )}
                       >
                         {updateChannelId && !channelPickerOpen && selectedChannelItem?.leftSlot}
                         <input
                           ref={channelInputRef}
-                          disabled={
-                            hasParticipantChannel ||
-                            (isEditMode && !!initialCall?.callUpdatesChannel)
-                          }
                           value={
                             channelPickerOpen
                               ? channelSearchQuery
@@ -2533,10 +2378,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                         {updateChannelId && (
                           <button
                             type='button'
-                            disabled={
-                              hasParticipantChannel ||
-                              (isEditMode && !!initialCall?.callUpdatesChannel)
-                            }
                             onMouseDown={e => {
                               e.preventDefault();
                               setUpdateChannelId(null);

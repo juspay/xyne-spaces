@@ -47,7 +47,6 @@ export interface ScheduleCallRequest {
   endsAt: number;
   channelId?: string;
   targetUserIds?: string[];
-  selectiveParticipants?: boolean;
   conversationId?: string; // Optional: for thread-initiated scheduled calls
   /** External emails to invite via a reply on the ticket thread. */
   externalInvitees?: string[];
@@ -76,7 +75,6 @@ export interface CreateRecurringSeriesRequest {
   description?: string;
   channelId?: string;
   targetUserIds?: string[];
-  selectiveParticipants?: boolean;
   timezone: string;
   recurrenceRule: string; // e.g. "FREQ=WEEKLY;BYDAY=MO,WE,FR"
   startTime: string; // HH:mm 24-hour format
@@ -97,7 +95,6 @@ export interface UpdateScheduleCallRequest {
   endsAt?: number; // epoch ms
   targetUserIds?: string[];
   channelId?: string;
-  selectiveParticipants?: boolean;
 }
 
 export interface UpdateRecurringSeriesRequest {
@@ -110,7 +107,6 @@ export interface UpdateRecurringSeriesRequest {
   timezone?: string;
   targetUserIds?: string[];
   channelId?: string;
-  selectiveParticipants?: boolean;
 }
 
 export interface ApiErrorResponse {
@@ -384,9 +380,6 @@ export class CallService {
         endsAt: data.endsAt,
         channelId: data.channelId,
         targetUserIds: data.targetUserIds,
-        ...(data.selectiveParticipants !== undefined && {
-          selectiveParticipants: data.selectiveParticipants,
-        }),
         ...(data.conversationId && { conversationId: data.conversationId }),
         ...(data.externalInvitees &&
           data.externalInvitees.length > 0 && {
@@ -428,7 +421,6 @@ export class CallService {
         description: data.description,
         channelId: data.channelId,
         targetUserIds: data.targetUserIds,
-        ...(data.selectiveParticipants && { selectiveParticipants: data.selectiveParticipants }),
         timezone: data.timezone,
         recurrenceRule: data.recurrenceRule,
         startTime: data.startTime,

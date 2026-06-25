@@ -388,10 +388,9 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Large group: create a private DEFAULT channel
     // Use provided name, or generate a friendly human-readable name from the current time
     const now = new Date();
-    const uniqueSuffix = Math.random().toString(36).substring(2, 6);
     const friendlyName = channelName
-      ? `Call-${channelName}-${formatDateTimeShort(now)}-${uniqueSuffix}`.slice(0, 254) // ensure it fits within 255 chars
-      : `Call-${formatDateTimeShort(now)}-${uniqueSuffix}`.slice(0, 254);
+      ? `Call-${channelName}-${formatDateTimeShort(now)}`.slice(0, 254) // ensure it fits within 255 chars
+      : `Call-${formatDateTimeShort(now)}`.slice(0, 254);
 
     // For large groups there won't be an existing channel to reuse (unique name),
     // so we always create a new one.
