@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
-import { ConfigScriptError } from './generators/automated';
 import { TagServiceError, tagService } from './service';
 import type {
   CreateTagBody,
@@ -33,10 +32,6 @@ function mapServiceError(error: unknown): { status: number; message: string } {
   if (error instanceof TagServiceError) {
     return { status: error.status, message: error.message };
   }
-  if (error instanceof ConfigScriptError) {
-    return { status: 400, message: error.message };
-  }
-
   return { status: 500, message: 'Internal server error' };
 }
 
@@ -194,12 +189,10 @@ export async function createConfig(req: Request, res: Response) {
   if (!userId) return;
   const workspaceId = requireWorkspaceId(req, res);
   if (!workspaceId) return;
-  const { configKey, sourceType, config, sampleContext } = req.body as CreateTagsConfigBody;
+  const { configKey, sourceType, config } = req.body as CreateTagsConfigBody;
 
   try {
-    const created = await tagService.createConfig(configKey, sourceType, workspaceId, config, userId, {
-      mockContext: sampleContext,
-    });
+    const created = await tagService.createConfig(configKey, sourceType, workspaceId, config, userId);
     return res.status(201).json({ config: created });
   } catch (error) {
     logger.error('[TAG][CTRL] Create config failed:', error);
@@ -212,12 +205,10 @@ export async function updateConfig(req: Request, res: Response) {
   const userId = requireUserId(req, res);
   if (!userId) return;
   const { configKey } = req.params;
-  const { config, sampleContext } = req.body as UpdateTagsConfigBody;
+  const { config } = req.body as UpdateTagsConfigBody;
 
   try {
-    const updated = await tagService.updateConfig(configKey, config, userId, {
-      mockContext: sampleContext,
-    });
+    const updated = await tagService.updateConfig(configKey, config, userId);
     return res.json({ config: updated });
   } catch (error) {
     logger.error('[TAG][CTRL] Update config failed:', error);
