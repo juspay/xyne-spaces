@@ -1,6 +1,14 @@
 import { config } from '@/config/env';
+import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
+import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
+import crypto from 'crypto';
 
+const installedAppsRepository = new InstalledAppsRepository();
+
+function signWebhookPayload(payload: string, signingSecret: string): string {
+  return crypto.createHmac('sha256', signingSecret).update(payload).digest('hex');
+}
 
 export interface ClawAgent {
   id: string;
@@ -20,6 +28,8 @@ export interface RunAgentRequest {
   userId: string;
   callbackUrl: string;
   context?: string;
+  conversationId?: string;
+  channelId?: string;
 }
 
 export interface RunAgentResponse {
@@ -95,20 +105,38 @@ class ClawClient {
   }
 
   async runAgent(req: RunAgentRequest): Promise<RunAgentResponse> {
-    const url = `${this.authUrl}/claw/api/v1/run`;
+    const agent = await this.getAgentBySlug(req.agentSlug);
+    if (!agent) {
+      throw new Error(`[claw-client] runAgent: agent "${req.agentSlug}" not found`);
+    }
+    if (!agent.enabled) {
+      throw new Error(`[claw-client] runAgent: agent "${req.agentSlug}" is disabled`);
+    }
+    const signingSecret = await resolveAgentSigningSecret(agent);
+
+    const url = `${config.xyneClaw.clawAuthCallbackUrlAutomation.replace(/\/$/, '')}/${encodeURIComponent(req.agentSlug)}`;
+    const payload = {
+      sessionId: req.sessionId,
+      task: req.task,
+      userId: req.userId,
+      callbackUrl: req.callbackUrl,
+      ...(req.context ? { context: req.context } : {}),
+      ...(req.conversationId ? { conversationId: req.conversationId } : {}),
+      ...(req.channelId ? { channelId: req.channelId } : {}),
+    };
+    const body = JSON.stringify(payload);
+    const signature = signWebhookPayload(body, signingSecret);
     let res: Response;
     try {
       res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this.s2sHeaders },
-        body: JSON.stringify({
-          sessionId: req.sessionId,
-          agentSlug: req.agentSlug,
-          task: req.task,
-          userId: req.userId,
-          callbackUrl: req.callbackUrl,
-          ...(req.context ? { context: req.context } : {}),
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Xyne-Signature': signature,
+          'X-Source': 'XyneSpaces',
+          ...this.s2sHeaders,
+        },
+        body,
         signal: AbortSignal.timeout(30_000),
       });
     } catch (err) {
@@ -128,6 +156,25 @@ class ClawClient {
     }
     return json;
   }
+}
+
+async function resolveAgentSigningSecret(agent: ClawAgent): Promise<string> {
+  if (!agent.spacesAppUserId) {
+    throw new Error(
+      `[claw-client] runAgent: agent "${agent.slug}" has no spacesAppUserId; cannot sign webhook`,
+    );
+  }
+
+  const installedApp = await installedAppsRepository.findFirst({
+    where: { userId: agent.spacesAppUserId },
+  });
+  if (!installedApp?.signingSecret) {
+    throw new Error(
+      `[claw-client] runAgent: no installed app signing secret for agent "${agent.slug}" app user ${agent.spacesAppUserId}`,
+    );
+  }
+
+  return decrypt(installedApp.signingSecret);
 }
 
 async function safeReadText(res: Response): Promise<string> {
