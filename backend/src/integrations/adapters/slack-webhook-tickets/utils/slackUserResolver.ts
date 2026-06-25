@@ -3,9 +3,33 @@ import { UserGroupRepository } from '../../../../database/repositories/userGroup
 import { ChannelRepository } from '../../../../database/repositories/channelRepository';
 import { DatabaseClient } from '../../../../database/client';
 import { config } from '../../../../config/env';
+import { AuthProvider } from '@prisma/client';
 
 import { logger } from '../../../../utils/logger';
+import { getAllBotTokens } from '../../../../migration/slack/slackMigrationBotConfig';
 import { WebClient } from '@slack/web-api';
+
+/**
+ * Builds the ordered list of bot tokens to try for a Slack API call: the caller's
+ * primary token first, then every other configured token (deduped).
+ *
+ * Slack only returns a user's email / a usergroup's members when the requesting
+ * bot is in the same workspace as that entity. In multi-workspace setups the
+ * mentioned entity may live in a different workspace than the primary token, so
+ * we fall back to the other tokens to fill in the missing info. With a single
+ * workspace configured this returns just the primary token (zero extra calls).
+ */
+function buildTokenFallbackList(primaryToken: string): string[] {
+  const tokens: string[] = [];
+  const seen = new Set<string>();
+  for (const token of [primaryToken, ...getAllBotTokens()]) {
+    if (token && !seen.has(token)) {
+      seen.add(token);
+      tokens.push(token);
+    }
+  }
+  return tokens;
+}
 
 function escapeHtml(text: string): string {
   const map: Record<string, string> = {
@@ -87,15 +111,18 @@ export function extractAllSlackChannelIds(text: string): { id: string; name?: st
   return results;
 }
 
-export async function fetchSlackUserInfo(
+/**
+ * Low-level: one `users.info` call with a single bot token.
+ * Most callers should use the fallback-aware `fetchSlackUserInfo` below instead;
+ * this only exists so that wrapper can try each configured token in turn.
+ */
+async function requestSlackUserInfo(
   slackUserId: string,
   botOauthToken: string
 ): Promise<SlackUserInfo | null> {
   try {
-    logger.info('[fetchSlackUserInfo] Creating WebClient', { slackUserId });
     const client = new WebClient(botOauthToken);
 
-    logger.info('[fetchSlackUserInfo] Calling client.users.info', { slackUserId });
     const result = await client.users.info({
       user: slackUserId,
     });
@@ -107,7 +134,6 @@ export async function fetchSlackUserInfo(
       return null;
     }
 
-    logger.info('[fetchSlackUserInfo] Success', { slackUserId, userId: result.user.id, isBot: result.user.is_bot });
     return result.user as SlackUserInfo;
   } catch (error) {
     const errorDetails = error instanceof Error ? {
@@ -124,7 +150,45 @@ export async function fetchSlackUserInfo(
   }
 }
 
-async function fetchSlackChannelInfo(
+/**
+ * Fetches Slack user info, falling back across every configured bot token when
+ * the primary token cannot resolve the user's email (the cross-workspace case).
+ *
+ * Returns the first result that carries an email; if no token yields an email,
+ * returns the best result we did get (so display name etc. is still available).
+ */
+export async function fetchSlackUserInfo(
+  slackUserId: string,
+  botOauthToken: string
+): Promise<SlackUserInfo | null> {
+  const tokens = buildTokenFallbackList(botOauthToken);
+  let bestResult: SlackUserInfo | null = null;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const result = await requestSlackUserInfo(slackUserId, tokens[i]);
+    if (result?.profile?.email) {
+      if (i > 0) {
+        logger.info('[fetchSlackUserInfo] Resolved email via fallback token', { slackUserId, tokenIndex: i });
+      }
+      return result;
+    }
+    if (result && !bestResult) {
+      bestResult = result;
+    }
+  }
+
+  if (!bestResult?.profile?.email) {
+    logger.warn('[fetchSlackUserInfo] No configured token returned an email', { slackUserId, tokensTried: tokens.length });
+  }
+  return bestResult;
+}
+
+/**
+ * Low-level: one `conversations.info` call with a single bot token.
+ * Most callers should use the fallback-aware `fetchSlackChannelInfo` below instead;
+ * this only exists so that wrapper can try each configured token in turn.
+ */
+async function requestSlackChannelInfo(
   channelId: string,
   botOauthToken: string
 ): Promise<{ id: string; name: string; isPrivate: boolean } | null> {
@@ -147,7 +211,39 @@ async function fetchSlackChannelInfo(
   }
 }
 
-async function fetchSlackGroupInfo(slackGroupId: string, botOauthToken: string): Promise<SlackGroupInfo | null> {
+/**
+ * Fetches Slack channel info, falling back across every configured bot token.
+ *
+ * `conversations.info` only succeeds for a bot that is in the channel's
+ * workspace, so in multi-workspace setups the primary token may not resolve a
+ * cross-workspace channel. Returns the first token that resolves it.
+ */
+async function fetchSlackChannelInfo(
+  channelId: string,
+  botOauthToken: string
+): Promise<{ id: string; name: string; isPrivate: boolean } | null> {
+  const tokens = buildTokenFallbackList(botOauthToken);
+
+  for (let i = 0; i < tokens.length; i++) {
+    const result = await requestSlackChannelInfo(channelId, tokens[i]);
+    if (result) {
+      if (i > 0) {
+        logger.info('[fetchSlackChannelInfo] Resolved channel via fallback token', { channelId, tokenIndex: i });
+      }
+      return result;
+    }
+  }
+
+  logger.warn('[fetchSlackChannelInfo] No configured token resolved the channel', { channelId, tokensTried: tokens.length });
+  return null;
+}
+
+/**
+ * Low-level: one `usergroups.list` call with a single bot token.
+ * Most callers should use the fallback-aware `fetchSlackGroupInfo` below instead;
+ * this only exists so that wrapper can try each configured token in turn.
+ */
+async function requestSlackGroupInfo(slackGroupId: string, botOauthToken: string): Promise<SlackGroupInfo | null> {
   try {
     const client = new WebClient(botOauthToken);
     const result = await client.usergroups.list({
@@ -167,6 +263,36 @@ async function fetchSlackGroupInfo(slackGroupId: string, botOauthToken: string):
     logger.error('Error fetching Slack group info', { slackGroupId, error });
     return null;
   }
+}
+
+/**
+ * Fetches Slack usergroup info, falling back across every configured bot token.
+ *
+ * A usergroup only appears in `usergroups.list` for a bot in the same workspace,
+ * so in multi-workspace setups the primary token may not see it. Returns the
+ * first token that resolves the group with members; otherwise the best result.
+ */
+async function fetchSlackGroupInfo(slackGroupId: string, botOauthToken: string): Promise<SlackGroupInfo | null> {
+  const tokens = buildTokenFallbackList(botOauthToken);
+  let bestResult: SlackGroupInfo | null = null;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const result = await requestSlackGroupInfo(slackGroupId, tokens[i]);
+    if (result && result.users && result.users.length > 0) {
+      if (i > 0) {
+        logger.info('[fetchSlackGroupInfo] Resolved group via fallback token', { slackGroupId, tokenIndex: i });
+      }
+      return result;
+    }
+    if (result && !bestResult) {
+      bestResult = result;
+    }
+  }
+
+  if (!bestResult) {
+    logger.warn('[fetchSlackGroupInfo] No configured token resolved the group', { slackGroupId, tokensTried: tokens.length });
+  }
+  return bestResult;
 }
 
 async function resolveApiUser(
@@ -190,15 +316,21 @@ async function resolveApiUser(
   return { dbUserId: user?.id, displayName };
 }
 
-async function resolveApiGroup(slackGroupId: string, botOauthToken: string, workspaceId?: string): Promise<string | undefined> {
+export async function resolveApiGroup(slackGroupId: string, botOauthToken: string, workspaceId?: string): Promise<string | undefined> {
   if (!slackGroupId || !botOauthToken) {
     return undefined;
   }
+  const resolvedWorkspaceId = workspaceId ?? config.defaultWorkspaceId;
   const groupRepo = new UserGroupRepository();
+  const userRepo = new UserRepository();
+  const dbClient = DatabaseClient.getInstance();
+
   const slackGroup = await fetchSlackGroupInfo(slackGroupId, botOauthToken);
   if (!slackGroup) {
     return undefined;
   }
+
+  // Upsert the group in the TARGET workspace (not just wherever it was first found)
   const group = await groupRepo.upsertGroupsWithMetadata({
     name: slackGroup.name,
     description: slackGroup.description,
@@ -206,28 +338,139 @@ async function resolveApiGroup(slackGroupId: string, botOauthToken: string, work
     metadata: {
       slackGroupId: slackGroup.id,
     },
-    workspace: { connect: { id: workspaceId ?? config.defaultWorkspaceId } },
+    workspace: { connect: { id: resolvedWorkspaceId } },
   });
-  const userRepo = new UserRepository();
-  const userResults = await Promise.allSettled(
-    slackGroup.users.map((slackUserId) => userRepo.findByMetadataField('slackId', slackUserId))
-  );
+
+  // Resolve each group member — create if not in DB (same pattern as channel resolution)
   const dbUserIds: string[] = [];
-  userResults.forEach((result) => {
-    if (result.status === 'fulfilled' && result.value) {
-      dbUserIds.push(result.value.id);
+  for (const slackUserId of slackGroup.users) {
+    // First try: find by slackId metadata in the target workspace
+    const existingBySlackId = await userRepo.findByMetadataField('slackId', slackUserId, resolvedWorkspaceId);
+    if (existingBySlackId) {
+      dbUserIds.push(existingBySlackId.id);
+      continue;
     }
-  });
+
+    // Second try: find by fetching Slack user info (they may not have slackId metadata yet)
+    const slackUserInfo = await fetchSlackUserInfo(slackUserId, botOauthToken);
+    if (!slackUserInfo || slackUserInfo.is_bot) {
+      logger.debug('[resolveApiGroup] Skipping bot or unfetchable user', { slackUserId });
+      continue;
+    }
+
+    // Try to find user by email
+    if (slackUserInfo.profile?.email) {
+      const existingByEmail = await userRepo.findByEmailCaseInsensitive(
+        slackUserInfo.profile.email.toLowerCase(),
+        resolvedWorkspaceId,
+      );
+      if (existingByEmail) {
+        await userRepo.upsertMetaDataField(existingByEmail.id, 'slackId', slackUserId);
+        dbUserIds.push(existingByEmail.id);
+        continue;
+      }
+
+      // User not in this workspace — create them with synthetic or real email
+      const userName = slackUserInfo.profile.real_name || slackUserInfo.profile.display_name || slackUserId;
+      const email = slackUserInfo.profile.email.toLowerCase();
+      let orgMember = await dbClient.orgMember.findUnique({
+        where: { email },
+        select: { memberId: true },
+      });
+      if (!orgMember) {
+        const workspace = await dbClient.workspace.findUnique({
+          where: { id: resolvedWorkspaceId },
+          select: { orgId: true },
+        });
+        if (!workspace) {
+          logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
+          continue;
+        }
+        orgMember = await dbClient.orgMember.create({
+          data: {
+            orgId: workspace.orgId,
+            email,
+            role: 'MEMBER',
+          },
+          select: { memberId: true },
+        });
+        logger.info('[resolveApiGroup] OrgMember created for group member', { email });
+      }
+      const user = await userRepo.create({
+        email,
+        name: userName,
+        providerUserId: `slack-migrated-${email}`,
+        authProvider: AuthProvider.GOOGLE,
+        status: slackUserInfo.deleted ? 'INACTIVE' : 'ACTIVE',
+        workspace: { connect: { id: resolvedWorkspaceId } },
+        orgMember: { connect: { memberId: orgMember.memberId } },
+      });
+      logger.info('[resolveApiGroup] User created for group member', { userId: user.id, email });
+      await userRepo.upsertMetaDataField(user.id, 'slackId', slackUserId);
+      dbUserIds.push(user.id);
+    } else {
+      // No email — use synthetic email
+      const syntheticEmail = `${slackUserId}@cross-platform.in`;
+      const userName = slackUserInfo.profile.real_name || slackUserInfo.profile.display_name || slackUserId;
+      let orgMember = await dbClient.orgMember.findUnique({
+        where: { email: syntheticEmail },
+        select: { memberId: true },
+      });
+      if (!orgMember) {
+        const workspace = await dbClient.workspace.findUnique({
+          where: { id: resolvedWorkspaceId },
+          select: { orgId: true },
+        });
+        if (!workspace) {
+          logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
+          continue;
+        }
+        orgMember = await dbClient.orgMember.create({
+          data: {
+            orgId: workspace.orgId,
+            email: syntheticEmail,
+            role: 'MEMBER',
+          },
+          select: { memberId: true },
+        });
+      }
+      const user = await userRepo.create({
+        email: syntheticEmail,
+        name: userName,
+        providerUserId: `slack-migrated-${syntheticEmail}`,
+        authProvider: AuthProvider.GOOGLE,
+        status: slackUserInfo.deleted ? 'INACTIVE' : 'ACTIVE',
+        workspace: { connect: { id: resolvedWorkspaceId } },
+        orgMember: { connect: { memberId: orgMember.memberId } },
+      });
+      logger.info('[resolveApiGroup] User created with synthetic email for group member', {
+        userId: user.id,
+        syntheticEmail,
+        userName,
+      });
+      await userRepo.upsertMetaDataField(user.id, 'slackId', slackUserId);
+      dbUserIds.push(user.id);
+    }
+  }
+
+  // Add all resolved users to the group
   if (dbUserIds.length > 0) {
-    const db = DatabaseClient.getInstance();
-    await db.userGroupMapping.createMany({
+    await dbClient.userGroupMapping.createMany({
       data: dbUserIds.map((userId) => ({
         userGroupId: group.id,
         userId,
       })),
-      skipDuplicates: true, 
+      skipDuplicates: true,
     });
   }
+
+  logger.info('[resolveApiGroup] Group resolved', {
+    slackGroupId,
+    xyneGroupId: group.id,
+    totalSlackMembers: slackGroup.users.length,
+    resolvedMembers: dbUserIds.length,
+    workspaceId: resolvedWorkspaceId,
+  });
 
   return group.id;
 }
@@ -244,44 +487,46 @@ export async function resolveSlackIds(
     return undefined;
   }
   const userRepo = new UserRepository();
-  const groupRepo = new UserGroupRepository();
   const userMapper = new Map<string, ResolvedEntry>();
 
-  const dbResults = await Promise.allSettled(
-    slackUserId.map((slackId) =>
-      type === 'user'
-        ? isSlackNativeId(slackId)
-          ? userRepo.findByMetadataField('slackId', slackId)
+  // For users: try DB lookup first (slackId or direct ID match)
+  // For groups: always call resolveApiGroup so it's created in the TARGET workspace
+  // (cross-workspace findByMetadataField would return a group from another workspace)
+  const userSlackIdsToFetch: string[] = [];
+  if (type === 'user') {
+    const dbResults = await Promise.allSettled(
+      slackUserId.map((slackId) =>
+        isSlackNativeId(slackId)
+          ? userRepo.findByMetadataField('slackId', slackId, workspaceId)
           : userRepo.findById(slackId)
-        : isSlackNativeId(slackId)
-          ? groupRepo.findByMetadataField('slackGroupId', slackId)
-          : groupRepo.findById(slackId)
-    )
-  );
+      )
+    );
 
-  const slackIdsToFetch: string[] = [];
+    slackUserId.forEach((slackId, i) => {
+      const result = dbResults[i];
+      if (result.status === 'fulfilled' && result.value) {
+        userMapper.set(slackId, { dbId: result.value.id });
+      } else if (isSlackNativeId(slackId)) {
+        userSlackIdsToFetch.push(slackId);
+      } else {
+        userMapper.set(slackId, {});
+      }
+    });
+  } else {
+    // Groups: fetch all from Slack API to ensure creation in target workspace
+    userSlackIdsToFetch.push(...slackUserId);
+  }
 
-  slackUserId.forEach((slackId, i) => {
-    const result = dbResults[i];
-    if (result.status === 'fulfilled' && result.value) {
-      userMapper.set(slackId, { dbId: result.value.id });
-    } else if ((type === 'user' && isSlackNativeId(slackId)) || (type === 'group' && isSlackNativeId(slackId))) {
-      slackIdsToFetch.push(slackId);
-    } else {
-      userMapper.set(slackId, {});
-    }
-  });
-
-  if (slackIdsToFetch.length > 0) {
+  if (userSlackIdsToFetch.length > 0) {
     const apiResults = await Promise.allSettled(
-      slackIdsToFetch.map((slackId) =>
+      userSlackIdsToFetch.map((slackId) =>
         type === 'user'
           ? resolveApiUser(slackId, botOauthToken, workspaceId ?? '')
           : resolveApiGroup(slackId, botOauthToken, workspaceId).then((id) => ({ dbUserId: id, displayName: undefined }))
       )
     );
 
-    slackIdsToFetch.forEach((slackId, i) => {
+    userSlackIdsToFetch.forEach((slackId, i) => {
       const result = apiResults[i];
       if (result.status === 'fulfilled') {
         userMapper.set(slackId, { dbId: result.value.dbUserId, displayName: result.value.displayName });

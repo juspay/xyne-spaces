@@ -5,6 +5,25 @@
 
 import { escapeForSlackWithMarkdown, escapeForSlack } from '@clearfeed-ai/slack-to-html';
 import { parseMrkdwnBlocks } from './slackUtils';
+import { logger } from '../../../../utils/logger';
+
+/**
+ * Safe wrapper around escapeForSlackWithMarkdown that catches stack-overflow
+ * errors from @clearfeed-ai/slack-to-html and falls back to plain-text escaping.
+ */
+function safeEscapeForSlackWithMarkdown(text: string): string {
+  try {
+    return escapeForSlackWithMarkdown(text);
+  } catch (error) {
+    if (error instanceof RangeError && error.message?.includes('Maximum call stack')) {
+      logger.warn('[SlackBlockKitParser] escapeForSlackWithMarkdown stack overflow, falling back to plain text', {
+        textPreview: text.slice(0, 200),
+      });
+      return escapeForSlack(text);
+    }
+    throw error;
+  }
+}
 import {
   SlackBlock,
   SlackBlockKitMessage,
@@ -366,7 +385,7 @@ export class SlackBlockKitParser {
       case 'link':
         return this.parseRichTextLink(element);
       case 'emoji':
-        return escapeForSlackWithMarkdown(`:${element.name}:`);
+        return safeEscapeForSlackWithMarkdown(`:${element.name}:`);
       case 'user':
         return `<@${element.user_id}>`;
       case 'usergroup':
@@ -427,13 +446,13 @@ export class SlackBlockKitParser {
 
   private formatMrkdwn(text: string): string {
     return parseMrkdwnBlocks<string>(text, {
-      onRegular: (lines) => escapeForSlackWithMarkdown(lines.join('\n')),
+      onRegular: (lines) => safeEscapeForSlackWithMarkdown(lines.join('\n')),
       onQuote: (lines) => {
-        const content = escapeForSlackWithMarkdown(lines.join('\n'));
+        const content = safeEscapeForSlackWithMarkdown(lines.join('\n'));
         return `<blockquote class="border-l-4 border-muted-foreground pl-4 text-foreground"><p>${content}</p></blockquote>`;
       },
       onList: (type, items) => {
-        const html = items.map((item) => `<li>${escapeForSlackWithMarkdown(item.text)}</li>`).join('');
+        const html = items.map((item) => `<li>${safeEscapeForSlackWithMarkdown(item.text)}</li>`).join('');
         return `<${type}>${html}</${type}>`;
       },
       onCode: (lines) => {

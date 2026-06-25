@@ -9,6 +9,7 @@ import {
   ConversationsHistoryResponse,
   ConversationsRepliesResponse,
 } from '@slack/web-api';
+import type { BotsInfoResponse } from '@slack/web-api/dist/types/response/BotsInfoResponse';
 import { logger } from '../../../utils/logger';
 import { config } from '../../../config/env';
 import { fetchSlackUserInfo, resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
@@ -79,6 +80,35 @@ export type UserInfoCache = Map<
     isBot?: boolean;
   }
 >;
+
+// ============================================================================
+// Bot name cache & helper
+// ============================================================================
+
+/** Module-level cache: Slack botId (B-prefixed) → resolved display name */
+const botNameCache = new Map<string, string>();
+
+/**
+ * Fetch the display name of a Slack bot via the `bots.info` API.
+ * Falls back silently and returns undefined on error.
+ */
+async function fetchSlackBotName(botId: string, botToken: string): Promise<string | undefined> {
+  const cached = botNameCache.get(botId);
+  if (cached !== undefined) return cached;
+
+  try {
+    const client = new WebClient(botToken);
+    const result: BotsInfoResponse = await client.bots.info({ bot: botId });
+    const name = result.bot?.name;
+    if (name) {
+      botNameCache.set(botId, name);
+      return name;
+    }
+  } catch (err) {
+    logger.warn('[fetchSlackBotName] Failed to fetch bot info from Slack', { botId, err });
+  }
+  return undefined;
+}
 
 // ============================================================================
 // Constants
@@ -165,7 +195,7 @@ export async function fetchPinnedMessageTimestamps(
 
     // Extract timestamps from pinned message items
     for (const item of result.items || []) {
-      const itemAny = item as any;
+      const itemAny = item as { type: string; message?: { ts: string } };
       if (item.type === 'message' && itemAny.message?.ts) {
         pinnedTs.add(itemAny.message.ts);
       }
@@ -331,9 +361,25 @@ function transformFiles(rawFiles: any[] | undefined, includeAttachments: boolean
 // User Info Management
 // ============================================================================
 
+// Deduplication map for in-flight getUserInfo requests by (workspaceId, slackUID, botToken)
+// Prevents thundering herd when the same user appears in many messages being processed concurrently
+const inflightUserInfoRequests = new Map<string, Promise<{
+  userEmail?: string;
+  userName?: string;
+  userId?: string;
+  isDeactivated?: boolean;
+  isBot?: boolean;
+}>>();
+
+function inflightUserInfoKey(slackUID: string, workspaceId: string, botToken?: string): string {
+  return `${workspaceId}:${slackUID}:${botToken || ''}`;
+}
+
 /**
  * Get user info from cache, database, or fetch from Slack API
  * Caches both database lookups (userId) and API-fetched results to avoid unnecessary calls
+ * Deduplicates concurrent in-flight requests for the same slackUID to prevent thundering herd
+ * against the Slack API rate limits.
  */
 export async function getUserInfo(slackUID: string, cache: UserInfoCache, workspaceId: string, botToken?: string): Promise<{
   userEmail?: string;
@@ -348,25 +394,51 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache, worksp
     return cached;
   }
 
+  // Deduplicate in-flight requests for the same user
+  const inflightKey = inflightUserInfoKey(slackUID, workspaceId, botToken);
+  const existing = inflightUserInfoRequests.get(inflightKey);
+  if (existing) {
+    logger.info('[getUserInfo] Reusing in-flight request', { slackUID, workspaceId });
+    return existing;
+  }
+
+  const promise = getUserInfoInner(slackUID, cache, workspaceId, botToken);
+  inflightUserInfoRequests.set(inflightKey, promise);
+
+  try {
+    return await promise;
+  } finally {
+    inflightUserInfoRequests.delete(inflightKey);
+  }
+}
+
+async function getUserInfoInner(slackUID: string, cache: UserInfoCache, workspaceId: string, botToken?: string): Promise<{
+  userEmail?: string;
+  userName?: string;
+  userId?: string;
+  isDeactivated?: boolean;
+  isBot?: boolean;
+}> {
+  // Double-check cache in case it was populated while we were waiting on the inflight lock
+  if (cache.has(slackUID)) {
+    const cached = cache.get(slackUID)!;
+    logger.info('[getUserInfo] Cache hit (after inflight dedup)', { slackUID, cached });
+    return cached;
+  }
+
   try {
     const userRepo = new UserRepository();
-    const user = await userRepo.findByMetadataField('slackId', slackUID);
-    
-    if (user) {
-      // findByMetadataField is cross-workspace — verify the user exists in the TARGET workspace.
-      // If not, fall through so findOrCreateUser creates them in the correct workspace.
-      const userInWorkspace = await userRepo.findByEmail(user.email, workspaceId);
-      if (userInWorkspace) {
-        const result = {
-          userId: userInWorkspace.id,
-          userEmail: userInWorkspace.email,
-          userName: userInWorkspace.name,
-        };
-        logger.info('[getUserInfo] Returning user in target workspace', { slackUID, workspaceId, userId: userInWorkspace.id });
-        cache.set(slackUID, result);
-        return result;
-      }
-      logger.info('[getUserInfo] User not in target workspace — falling through to create', { slackUID, userEmail: user.email, workspaceId });
+    const userInWorkspace = await userRepo.findByMetadataField('slackId', slackUID, workspaceId);
+
+    if (userInWorkspace) {
+      const result = {
+        userId: userInWorkspace.id,
+        userEmail: userInWorkspace.email,
+        userName: userInWorkspace.name,
+      };
+      logger.info('[getUserInfo] Returning user in target workspace', { slackUID, workspaceId, userId: userInWorkspace.id });
+      cache.set(slackUID, result);
+      return result;
     }
   } catch (error) {
     logger.debug('[Migration] User not found in database by slackId, fetching from Slack API', {
@@ -381,21 +453,46 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache, worksp
   }
 
   const userInfo = await retryWithBackoff(() => fetchSlackUserInfo(slackUID, token));
-  logger.info('[extractUserFromSlackUID] fetchSlackUserInfo returned', { slackUID, hasUserInfo: !!userInfo, userId: userInfo?.id, isBot: userInfo?.is_bot, deleted: userInfo?.deleted, hasProfile: !!userInfo?.profile, hasEmail: !!userInfo?.profile?.email });
+  logger.info('[extractUserFromSlackUID] fetchSlackUserInfo returned', {
+    slackUID,
+    hasUserInfo: !!userInfo,
+    userId: userInfo?.id,
+    isBot: userInfo?.is_bot,
+    deleted: userInfo?.deleted,
+    hasProfile: !!userInfo?.profile,
+    hasEmail: !!userInfo?.profile?.email,
+  });
 
-  if (!userInfo || !userInfo.profile?.email) {
-    const result = {
-      userEmail: userInfo?.profile?.email,
-      userName: userInfo?.profile?.real_name,
-      isDeactivated: userInfo?.deleted,
-      isBot: userInfo?.is_bot,
-    };
-    cache.set(slackUID, result);
-    return result;
+  if (!userInfo) {
+    logger.warn('[extractUserFromSlackUID] User not found in Slack', { slackUID });
+    cache.set(slackUID, { isDeactivated: undefined, isBot: undefined });
+    return cache.get(slackUID)!;
   }
 
   if (userInfo.is_bot) {
     const result = { isBot: true };
+    cache.set(slackUID, result);
+    return result;
+  }
+
+  // User found but missing email — generate synthetic email for migration
+  if (!userInfo.profile?.email) {
+    const syntheticEmail = `${slackUID}@cross-platform.in`;
+    const name = userInfo.profile?.real_name || userInfo.profile?.display_name || slackUID;
+
+    logger.info('[extractUserFromSlackUID] User found but missing email, using synthetic email', {
+      slackUID,
+      syntheticEmail,
+      realName: userInfo.profile?.real_name,
+      displayName: userInfo.profile?.display_name,
+    });
+
+    const result = {
+      userEmail: syntheticEmail,
+      userName: name,
+      isDeactivated: userInfo.deleted,
+      isBot: false,
+    };
     cache.set(slackUID, result);
     return result;
   }
@@ -692,10 +789,17 @@ export async function transformReply(
   workspaceId: string,
   botToken?: string,
 ): Promise<SlackReply> {
-  const isBot = !!reply.bot_id;
-  const userInfo = !isBot && reply.user ? await getUserInfo(reply.user, cache, workspaceId, botToken) : {};
+  // Fetch userInfo for any message that has a user field — needed to detect
+  // Slack bot-users (is_bot=true) that post without a bot_id on the message.
+  const userInfo = reply.user ? await getUserInfo(reply.user, cache, workspaceId, botToken) : {};
+  // isBot: explicit bot_id on the message, OR the user account itself is a bot
+  const isBot = !!reply.bot_id || userInfo?.isBot === true;
+  // effectiveBotId: prefer explicit bot_id; fall back to Slack UID for bot-users
+  const effectiveBotId = reply.bot_id || (userInfo?.isBot ? reply.user : undefined);
   const botName = isBot
-    ? (reply.username || reply.app_name || reply.bot_profile?.name)
+    ? (reply.username || reply.app_name || reply.bot_profile?.name
+       || userInfo?.userName
+       || (reply.bot_id && botToken ? await fetchSlackBotName(reply.bot_id, botToken) : undefined))
     : undefined;
 
   const isBotContext = !!reply.bot_id && (includeBotMessages || allowedBots.length > 0);
@@ -724,15 +828,17 @@ export async function transformReply(
   return {
     content: htmlContent,
     externalThreadId: reply.ts,
-    ...(userInfo?.userEmail && { userEmail: userInfo.userEmail }),
+    // Only include human-user fields when the sender is not a bot
+    ...(!isBot && userInfo?.userEmail && { userEmail: userInfo.userEmail }),
     ...(botEmail && { userEmail: botEmail }),
-    ...(userInfo?.userName && { userName: userInfo.userName }),
-    ...(userInfo?.userId && { userId: userInfo.userId }),
-    ...(userInfo?.isDeactivated === true && { isDeactivated: true }),
+    ...(!isBot && userInfo?.userName && { userName: userInfo.userName }),
+    ...(!isBot && userInfo?.userId && { userId: userInfo.userId }),
+    ...(!isBot && userInfo?.isDeactivated === true && { isDeactivated: true }),
     isPinned: pinnedMessageTs?.has(reply.ts),
     showInChannel: reply.subtype === 'thread_broadcast',
     files: transformFiles(reply.files, includeAttachments),
-    ...(reply.bot_id && { botId: reply.bot_id }),
+    ...(effectiveBotId && { botId: effectiveBotId }),
+    // botUserId only for explicit bot_id messages (links the bot app to its Slack UID)
     ...(reply.bot_id && reply.user && { botUserId: reply.user }),
     ...(botName && { botName }),
   };
@@ -752,10 +858,17 @@ async function transformMessage(
   workspaceId: string,
   botToken?: string,
 ): Promise<SlackMessage> {
-  const isBot = !!rawMessage.bot_id;
-  const userInfo = !isBot && rawMessage.user ? await getUserInfo(rawMessage.user, cache, workspaceId, botToken) : {};
+  // Fetch userInfo for any message that has a user field — needed to detect
+  // Slack bot-users (is_bot=true) that post without a bot_id on the message.
+  const userInfo = rawMessage.user ? await getUserInfo(rawMessage.user, cache, workspaceId, botToken) : {};
+  // isBot: explicit bot_id on the message, OR the user account itself is a bot
+  const isBot = !!rawMessage.bot_id || userInfo?.isBot === true;
+  // effectiveBotId: prefer explicit bot_id; fall back to Slack UID for bot-users
+  const effectiveBotId = rawMessage.bot_id || (userInfo?.isBot ? rawMessage.user : undefined);
   const botName = isBot
-    ? (rawMessage.username || rawMessage.app_name || rawMessage.bot_profile?.name)
+    ? (rawMessage.username || rawMessage.app_name || rawMessage.bot_profile?.name
+       || userInfo?.userName
+       || (rawMessage.bot_id && botToken ? await fetchSlackBotName(rawMessage.bot_id, botToken) : undefined))
     : undefined;
 
   // Transform thread replies
@@ -784,14 +897,16 @@ async function transformMessage(
   return {
     content: htmlContent,
     externalId: rawMessage.ts,
-    ...(userInfo?.userEmail && { userEmail: userInfo.userEmail }),
-    ...(userInfo?.userName && { userName: userInfo.userName }),
-    ...(userInfo?.userId && { userId: userInfo.userId }),
-    ...(userInfo?.isDeactivated === true && { isDeactivated: true }),
+    // Only include human-user fields when the sender is not a bot
+    ...(!isBot && userInfo?.userEmail && { userEmail: userInfo.userEmail }),
+    ...(!isBot && userInfo?.userName && { userName: userInfo.userName }),
+    ...(!isBot && userInfo?.userId && { userId: userInfo.userId }),
+    ...(!isBot && userInfo?.isDeactivated === true && { isDeactivated: true }),
     isPinned: pinnedMessageTs?.has(rawMessage.ts),
     replies,
     files: transformFiles(rawMessage.files, includeAttachments),
-    ...(rawMessage.bot_id && { botId: rawMessage.bot_id }),
+    ...(effectiveBotId && { botId: effectiveBotId }),
+    // botUserId only for explicit bot_id messages (links the bot app to its Slack UID)
     ...(rawMessage.bot_id && rawMessage.user && { botUserId: rawMessage.user }),
     ...(botName && { botName }),
   };
@@ -873,23 +988,23 @@ export async function extractChannelHistory(
     }
   }
 
-  // Step 4: Transform all messages
+  // Step 4: Transform all messages sequentially to prevent concurrent resolveApiGroup
+  // calls from racing to create the same user/group records (unique constraint violations).
   logger.info('[Migration] Transforming messages');
-  let messages = await Promise.all(
-    rawMessages.map((rawMessage) =>
-      transformMessage(
-        rawMessage,
-        threadRepliesMap.get(rawMessage.ts),
-        userCache,
-        includeAttachments,
-        includeDeactivatedUsers,
-        includeBotMessages,
-        pinnedMessageTs,
-        workspaceId,
-        overrideToken,
-      )
-    )
-  );
+  let messages: SlackMessage[] = [];
+  for (const rawMessage of rawMessages) {
+    messages.push(await transformMessage(
+      rawMessage,
+      threadRepliesMap.get(rawMessage.ts),
+      userCache,
+      includeAttachments,
+      includeDeactivatedUsers,
+      includeBotMessages,
+      pinnedMessageTs,
+      workspaceId,
+      overrideToken,
+    ));
+  }
 
   // Step 5: Apply filters
   if (!includeDeactivatedUsers) {
@@ -977,15 +1092,15 @@ export async function extractLegacyThreadReplies(
     if (!result.ok || !result.messages) break;
 
     for (const msg of result.messages) {
-      const msgTs = parseFloat((msg as any).ts ?? '0');
-      const latestReply = parseFloat((msg as any).latest_reply ?? '0');
+      const msgTs = parseFloat((msg as { ts?: string }).ts ?? '0');
+      const latestReply = parseFloat((msg as { latest_reply?: string }).latest_reply ?? '0');
 
       // Parent message is OLDER than the sync window AND got a reply WITHIN the sync window
       if (
         msgTs >= oldestFloat &&
         msgTs < sinceFloat &&
         latestReply >= sinceFloat &&
-        (msg as any).reply_count > 0
+        ((msg as { reply_count?: number }).reply_count ?? 0) > 0
       ) {
         oldThreadsWithNewReplies.push(msg);
       }

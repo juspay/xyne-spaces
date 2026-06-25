@@ -380,13 +380,14 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     return user;
   }
 
-  async findByMetadataField(key: string, value: string): Promise<User | null> {
+  async findByMetadataField(key: string, value: string, workspaceId?: string): Promise<User | null> {
     return await this.db.user.findFirst({
       where: {
         metadata: {
           path: [key],
           equals: value,
         },
+        ...(workspaceId ? { workspaceId } : {}),
       },
     });
   }

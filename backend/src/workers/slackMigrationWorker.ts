@@ -16,8 +16,10 @@ import {
   SlackMigrationJobData,
   closeSlackMigrationQueue,
 } from '@/queues/slackMigrationQueue';
-import { readSheetRows, updateSheetRowStatus } from '@/migration/slack/googleSheetsService';
-import { runMigration } from '@/migration/slack/slackConversationService';
+import { readSheetRows, updateSheetRowStatus, updateSheetLastSyncedDate } from '@/migration/slack/googleSheetsService';
+import { runMigration, resolveOrCreateChannel } from '@/migration/slack/slackConversationService';
+import { getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
+import { db } from '@/database/client';
 
 // ─── IST helpers ─────────────────────────────────────────────────────────────
 
@@ -35,9 +37,18 @@ function formatISTDate(d: Date): string {
   return `${dd}-${mm}-${yyyy}`;
 }
 
-/** Convert dd-mm-yyyy → YYYY-MM-DD for runMigration */
-function toISODate(ddmmyyyy: string): string {
-  const [dd, mm, yyyy] = ddmmyyyy.split('-');
+/** Convert dd-mm-yyyy or yyyy-mm-dd → YYYY-MM-DD for runMigration */
+function toISODate(dateInput: string): string {
+  const parts = dateInput.split('-');
+  if (parts.length !== 3) {
+    throw new Error(`Invalid date format: ${dateInput}. Expected dd-mm-yyyy or yyyy-mm-dd.`);
+  }
+  // If first part is 4 digits → yyyy-mm-dd (already ISO)
+  if (parts[0].length === 4) {
+    return dateInput;
+  }
+  // Otherwise assume dd-mm-yyyy → flip to yyyy-mm-dd
+  const [dd, mm, yyyy] = parts;
   return `${yyyy}-${mm}-${dd}`;
 }
 
@@ -46,6 +57,13 @@ function yesterdayISODate(): string {
   const ist = nowIST();
   ist.setUTCDate(ist.getUTCDate() - 1);
   return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}-${String(ist.getUTCDate()).padStart(2, '0')}`;
+}
+
+/** Add one calendar day to a YYYY-MM-DD date string */
+function addOneDayISO(isoDate: string): string {
+  const d = new Date(isoDate + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 /**
@@ -106,8 +124,37 @@ async function snapshotAndEnqueue(): Promise<void> {
   let skipped = 0;
 
   for (const row of rows) {
-    if (!row.xyneChannelId) {
-      logger.warn(`[SLACK-MIGRATION-WORKER] Row ${row.rowIndex} missing Xyne channel ID — skipping`);
+    let xyneChannelId = row.xyneChannelId;
+
+    // Auto-resolve or create channel when xyneChannelId is empty but projectId is provided
+    if (!xyneChannelId && row.projectId) {
+      const project = await db.project.findUnique({ where: { id: row.projectId }, select: { workspaceId: true } });
+      const workspaceId = project?.workspaceId;
+      if (workspaceId) {
+        const wsConfig = getBotConfigByWorkspaceId(workspaceId);
+        const resolvedId = await resolveOrCreateChannel(
+          row.slackChannelName,
+          row.slackChannelId,
+          row.projectId,
+          workspaceId,
+          wsConfig.slackBotToken,
+        );
+        if (resolvedId) {
+          xyneChannelId = resolvedId;
+        } else {
+          logger.error(`[SLACK-MIGRATION-WORKER] Row ${row.rowIndex} failed to resolve/create channel — skipping`);
+          skipped++;
+          continue;
+        }
+      } else {
+        logger.warn(`[SLACK-MIGRATION-WORKER] Row ${row.rowIndex} has invalid projectId (no workspace) — skipping`);
+        skipped++;
+        continue;
+      }
+    }
+
+    if (!xyneChannelId) {
+      logger.warn(`[SLACK-MIGRATION-WORKER] Row ${row.rowIndex} missing Xyne channel ID and projectId — skipping`);
       skipped++;
       continue;
     }
@@ -125,9 +172,28 @@ async function snapshotAndEnqueue(): Promise<void> {
       // Midnight IST — yesterday = full previous calendar day, no bleed into today
       syncDate = yesterdayISODate();
       syncEndDate = syncDate;
+      // Skip if this channel already completed today's daily sync
+      if (row.lastSyncedDate === syncDate) {
+        logger.info(`[SLACK-MIGRATION-WORKER] #${row.slackChannelName} already synced for ${syncDate} — skipping`);
+        skipped++;
+        continue;
+      }
     } else {
       try {
-        syncDate = toISODate(row.fromDate);
+        // Resume from the day after the last completed batch, or start fresh from fromDate
+        if (row.lastSyncedDate) {
+          syncDate = addOneDayISO(row.lastSyncedDate);
+          // If we've already caught up to today or beyond, the migration is done
+          const todayUTC = new Date().toISOString().slice(0, 10);
+          if (syncDate >= todayUTC) {
+            logger.info(`[SLACK-MIGRATION-WORKER] #${row.slackChannelName} already caught up (lastSyncedDate ${row.lastSyncedDate}) — skipping`);
+            skipped++;
+            continue;
+          }
+          logger.info(`[SLACK-MIGRATION-WORKER] #${row.slackChannelName} resuming from ${syncDate} (lastSyncedDate was ${row.lastSyncedDate})`);
+        } else {
+          syncDate = toISODate(row.fromDate);
+        }
       } catch {
         logger.warn(`[SLACK-MIGRATION-WORKER] Row ${row.rowIndex} invalid date "${row.fromDate}" — skipping`);
         skipped++;
@@ -139,7 +205,7 @@ async function snapshotAndEnqueue(): Promise<void> {
       rowIndex: row.rowIndex,
       slackChannelName: row.slackChannelName,
       slackChannelId: row.slackChannelId,
-      xyneChannelId: row.xyneChannelId,
+      xyneChannelId,
       syncDate,
       syncEndDate,
       postNotification: row.postNotification,
@@ -217,6 +283,11 @@ async function processJob(job: Bull.Job<SlackMigrationJobData>): Promise<void> {
       syncOptions: ['include_threads', 'include_attachments', 'include_deactivated_users', 'include_bot_messages'],
       postChannelAnnouncement: postNotification,
       isDaily,
+      onBatchComplete: async (batchEndDate: string) => {
+        await updateSheetLastSyncedDate(rowIndex, batchEndDate).catch((e) =>
+          logger.error(`[SLACK-MIGRATION-WORKER] Per-batch lastSyncedDate writeback failed for row ${rowIndex}:`, e),
+        );
+      },
     });
 
     if (!result.success) {
@@ -225,6 +296,8 @@ async function processJob(job: Bull.Job<SlackMigrationJobData>): Promise<void> {
 
     // Build the status label
     const successStatus = isDaily ? `Migrated (${runDate})` : 'Migrated';
+
+
     await updateSheetRowStatus(rowIndex, successStatus, '').catch((e) =>
       logger.error(`[SLACK-MIGRATION-WORKER] Sheet writeback failed for row ${rowIndex}:`, e),
     );
@@ -283,10 +356,22 @@ class SlackMigrationWorker {
     // Handles all rows: daily (yesterday window) + one-time (explicit date)
     this.snapshotQueue = new Bull('slack-migration-snapshot-cron', { redis: redisConfig });
     this.snapshotQueue.process(async () => { await snapshotAndEnqueue(); });
-    // Remove existing repeatable before re-registering so cron updates take effect on restart.
+    // Remove ALL existing repeatables before re-registering.
+    // removeRepeatableByKey(jobId) does NOT work when the cron expression changes between
+    // deployments — Bull embeds the cron in the internal Redis key, so a changed cron
+    // creates a new key and the old one lingers, causing both schedules to fire.
+    // Fetching + removing all repeatables is the only reliable way to ensure a clean slate.
     // IMPORTANT: do NOT set removeOnComplete inside add() for repeatable jobs — in Bull 4.x
     // that causes the repeatable pattern itself to be deleted after the first fire (job fires once, never again).
-    try { await this.snapshotQueue.removeRepeatableByKey('slack-migration-snapshot-repeatable'); } catch (_) { /* no-op */ }
+    try {
+      const existingSnapRepeatables = await this.snapshotQueue.getRepeatableJobs();
+      await Promise.all(existingSnapRepeatables.map((r) => this.snapshotQueue!.removeRepeatableByKey(r.key)));
+      if (existingSnapRepeatables.length > 0) {
+        logger.info(`[SLACK-MIGRATION-WORKER] Removed ${existingSnapRepeatables.length} stale snapshot repeatable(s) from Redis`);
+      }
+    } catch (err) {
+      logger.warn('[SLACK-MIGRATION-WORKER] Could not clear stale snapshot repeatables:', err);
+    }
     await this.snapshotQueue.add(
       {},
       {
@@ -294,11 +379,20 @@ class SlackMigrationWorker {
         jobId: 'slack-migration-snapshot-repeatable',
       },
     );
+    logger.info(`[SLACK-MIGRATION-WORKER] Registered snapshot cron: ${config.autoSyncSlackChannel.syncCron}`);
 
     // ── Cleanup cron: 7 AM IST = 01:30 UTC ───────────────────────────────────
     this.cleanupQueue = new Bull('slack-migration-cleanup-cron', { redis: redisConfig });
     this.cleanupQueue.process(async () => { await cleanupExpiredJobs(); });
-    try { await this.cleanupQueue.removeRepeatableByKey('slack-migration-cleanup-repeatable'); } catch (_) { /* no-op */ }
+    try {
+      const existingCleanupRepeatables = await this.cleanupQueue.getRepeatableJobs();
+      await Promise.all(existingCleanupRepeatables.map((r) => this.cleanupQueue!.removeRepeatableByKey(r.key)));
+      if (existingCleanupRepeatables.length > 0) {
+        logger.info(`[SLACK-MIGRATION-WORKER] Removed ${existingCleanupRepeatables.length} stale cleanup repeatable(s) from Redis`);
+      }
+    } catch (err) {
+      logger.warn('[SLACK-MIGRATION-WORKER] Could not clear stale cleanup repeatables:', err);
+    }
     await this.cleanupQueue.add(
       {},
       {
@@ -306,10 +400,11 @@ class SlackMigrationWorker {
         jobId: 'slack-migration-cleanup-repeatable',
       },
     );
+    logger.info(`[SLACK-MIGRATION-WORKER] Registered cleanup cron: ${config.autoSyncSlackChannel.cleanupCron}`);
 
     this.isInitialized = true;
     logger.info(
-      `[SLACK-MIGRATION-WORKER] Started — snapshot cron: ${config.autoSyncSlackChannel.syncCron}, cleanup cron: ${config.autoSyncSlackChannel.cleanupCron}, concurrency: ${concurrency}`,
+      `[SLACK-MIGRATION-WORKER] Started — snapshot cron: ${config.autoSyncSlackChannel.syncCron}, cleanup cron: ${config.autoSyncSlackChannel.cleanupCron}, concurrency: ${concurrency} (all previous repeatables cleared on startup)`,
     );
 
     // ── Recovery: re-enqueue if we restarted inside the migration window ─────

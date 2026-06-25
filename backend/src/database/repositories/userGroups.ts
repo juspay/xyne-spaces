@@ -343,27 +343,70 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     });
   }
 
+  private sanitizeAlias(raw: string): string | undefined {
+    const alias = raw.toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '-')
+      .replace(/[-_]{2,}/g, '-')
+      .replace(/^[^a-z0-9]+/, '')
+      .replace(/[^a-z0-9]+$/, '');
+    if (alias.length < 2 || alias.length > 50) return undefined;
+    return alias;
+  }
+
   async upsertGroupsWithMetadata(
     data: CreateUserGroupInput,
     actorUserId?: string
   ): Promise<UserGroup> {
-    // Get workspaceId from the workspace relation
     const workspaceId = (data.workspace as any)?.connect?.id;
 
-    // Check if a group with the same alias already exists
-    if (data.alias && workspaceId) {
-      const existingGroup = await this.findByAlias(data.alias, workspaceId);
-      if (existingGroup) {
-        // Merge new metadata into existing metadata
-        return await this.db.userGroup.update({
-          where: { id: existingGroup.id },
-          data: { metadata: data.metadata },
-        });
+    // Normalize alias upfront — Slack handles can have consecutive hyphens/underscores
+    // (e.g. ny--devs) that fail validateAlias. Returns undefined if unsalvageable.
+    const safeAlias = data.alias ? this.sanitizeAlias(data.alias) : undefined;
+    
+    // Use if-else to conditionally set safeData based on safeAlias
+    let safeData: CreateUserGroupInput;
+    if (safeAlias !== undefined) {
+      safeData = { ...data, alias: safeAlias };
+    } else {
+      safeData = { ...data, alias: undefined };
+    }
+
+    if (workspaceId) {
+      // 1. Find by alias within this workspace
+      if (safeAlias) {
+        const byAlias = await this.findByAlias(safeAlias, workspaceId);
+        if (byAlias) {
+          return await this.db.userGroup.update({
+            where: { id: byAlias.id },
+            data: { metadata: data.metadata },
+          });
+        }
+      // 2. Find by name within this workspace (@@unique([workspaceId, name]))
+      } else if (data.name) {
+        const byName = await this.findByName(data.name, workspaceId);
+        if (byName) {
+          return await this.db.userGroup.update({
+            where: { id: byName.id },
+            data: { metadata: data.metadata },
+          });
+        }
       }
     }
 
-    // No existing group found, create a new one
-    return await this.create(data, actorUserId);
+    // 3. Prod has a global unique constraint on alias — check globally before create.
+    //    If another workspace already owns this alias, create without alias so this
+    //    workspace still gets its own independent group.
+    if (safeAlias) {
+      const globalAliasTaken = await this.db.userGroup.findFirst({
+        where: { alias: safeAlias },
+        select: { id: true },
+      });
+      if (globalAliasTaken) {
+        return await this.create({ ...safeData, alias: undefined }, actorUserId);
+      }
+    }
+
+    return await this.create(safeData, actorUserId);
   }
 
 }

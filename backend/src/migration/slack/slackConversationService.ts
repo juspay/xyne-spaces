@@ -54,6 +54,103 @@ async function pushVespaJobForChannel(channelId: string, userId: string, workspa
   });
 }
 
+/**
+ * Find an existing channel by name in the workspace, or create a new one.
+ * Used when the Google Sheet row has no xyneChannelId but has a projectId.
+ */
+export async function resolveOrCreateChannel(
+  channelName: string,
+  slackChannelId: string,
+  projectId: string,
+  workspaceId: string,
+  botToken?: string,
+): Promise<string | null> {
+  const channelRepo = new ChannelRepository();
+
+  // 1. Look for existing channel with same name (case-insensitive) in this workspace
+  const existing = await db.channel.findFirst({
+    where: {
+      name: { equals: channelName, mode: 'insensitive' },
+      workspaceId,
+    },
+  });
+
+  if (existing) {
+    logger.info('[Migration] Found existing channel by name — reusing', {
+      name: channelName,
+      channelId: existing.id,
+      workspaceId,
+    });
+    return existing.id;
+  }
+
+  // 2. Find creator user: prefer john.doe@gmail.com, fallback to john.doe@gmail.com
+  let creatorUser = await db.user.findFirst({
+    where: { workspaceId, email: 'john.doe@gmail.com' },
+  });
+
+  if (!creatorUser) {
+    creatorUser = await db.user.findFirst({
+      where: { workspaceId, email: 'john.doe@gmail.com' },
+    });
+  }
+
+  if (!creatorUser) {
+    logger.error('[Migration] No suitable creator user found in workspace for channel creation', { workspaceId });
+    return null;
+  }
+
+  // 3. Determine visibility from Slack channel (default PUBLIC if API fails)
+  let visibility: 'PUBLIC' | 'PRIVATE' = 'PUBLIC';
+  if (botToken) {
+    try {
+      const client = new WebClient(botToken);
+      const info = await client.conversations.info({ channel: slackChannelId });
+      if (info.channel?.is_private) {
+        visibility = 'PRIVATE';
+      }
+      logger.info('[Migration] Resolved Slack channel visibility', {
+        slackChannelId,
+        isPrivate: info.channel?.is_private,
+        visibility,
+      });
+    } catch (error) {
+      logger.warn('[Migration] Failed to fetch Slack channel info, defaulting to PUBLIC', {
+        slackChannelId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  // 4. Create the channel
+  try {
+    const newChannel = await channelRepo.create({
+      scopeType: 'DEFAULT',
+      name: channelName,
+      projectId,
+      workspaceId,
+      createdBy: creatorUser.id,
+      visibility,
+    });
+
+    logger.info('[Migration] Created new channel for migration', {
+      name: channelName,
+      channelId: newChannel.id,
+      workspaceId,
+      visibility,
+    });
+    return newChannel.id;
+  } catch (error) {
+    logger.error('[Migration] Failed to create channel', {
+      name: channelName,
+      workspaceId,
+      visibility,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return null;
+  }
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -75,6 +172,18 @@ export interface MigrationInput {
    *  today's replies on older conversations (threads whose parent was posted
    *  before the current sync window). */
   isDaily?: boolean;
+  /**
+   * Called after each 7-day time batch completes successfully.
+   * Receives the batch's endDate (YYYY-MM-DD) so callers can checkpoint
+   * progress — enabling resume from the correct batch after a pod restart.
+   */
+  onBatchComplete?: (batchEndDate: string) => Promise<void>;
+  /**
+   * DM flow only: when true, the per-batch ingest will NOT mark the channel
+   * isMigrated. runMigrationDm sets isMigrated once, after all batches finish,
+   * so re-runs can skip fully-migrated DMs and resume interrupted ones.
+   */
+  skipChannelMigratedUpdate?: boolean;
 }
 
 export interface MigrationResult {
@@ -114,12 +223,12 @@ interface UserToAdd {
 // Constants
 // ============================================================================
 
-const BATCH_SIZE_DAYS = 30;
-const BATCH_DELAY_MS = 60000; // 1 minute
+const BATCH_SIZE_DAYS = 7;
+const BATCH_DELAY_MS = 5000; // 5 sec
 /** Max combined (top-level + thread replies) messages ingested per sub-batch */
 const INGEST_SUB_BATCH_SIZE = 50;
 /** Delay between sub-batches to avoid OOM / DB spikes */
-const INGEST_SUB_BATCH_DELAY_MS = 1000; // 1 second
+const INGEST_SUB_BATCH_DELAY_MS = 2000; // 2 second
 
 /** Resolve per-workspace notifications flag, falling back to global config */
 function getEnableNotifications(workspaceId?: string): boolean {
@@ -307,6 +416,7 @@ async function processBatch(
         workspaceId,
         ...(input.userToken && { userToken: input.userToken }),
         ...(botToken && { botToken }),
+        skipChannelMigratedUpdate: input.skipChannelMigratedUpdate,
       });
 
       if (si < subBatches.length - 1) {
@@ -775,6 +885,8 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     // Process batches
     let totalMessages = 0;
     let totalReplies = 0;
+    let batchFailed = false;
+    let failedBatchNumber: number | undefined;
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
@@ -783,6 +895,15 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         const result = await processBatch(batch, input, externalSourceName, messageTs, resolvedLogChannelId, wsConfig.slackBotToken);
         totalMessages += result.messages;
         totalReplies += result.replies;
+
+        // Checkpoint: notify caller that this batch window is fully ingested.
+        // Callers (e.g. slackMigrationWorker) use this to persist lastSyncedDate
+        // so a pod restart can resume from the next batch rather than the start.
+        if (input.onBatchComplete) {
+          await input.onBatchComplete(batch.endDate).catch((err) =>
+            logger.warn('[Migration] onBatchComplete callback failed (non-fatal)', { batchEndDate: batch.endDate, err }),
+          );
+        }
 
         // Delay between batches (except last)
         if (i < batches.length - 1) {
@@ -813,14 +934,19 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
             botToken: wsConfig.slackBotToken,
           });
         }
-        // Continue with next batch
+        // Stop processing further batches. lastSyncedDate (col H) reflects the
+        // last *successful* batch end date — a restart will resume from exactly
+        // this failed batch rather than skipping it.
+        batchFailed = true;
+        failedBatchNumber = batch.batchNumber;
+        break;
       }
     }
 
     // ── Step 2b: legacy thread replies (daily mode only) ─────────────────────
     // Scan the past 30 days of channel history and ingest any replies posted
     // TODAY on threads whose parent message predates the sync window.
-    if (input.isDaily && input.channelId && input.xyneSpaceChannelId) {
+    if (!batchFailed && input.isDaily && input.channelId && input.xyneSpaceChannelId) {
       try {
         const channelRepo = new ChannelRepository();
         const xyneChannelForLegacy = await channelRepo.findById(input.xyneSpaceChannelId);
@@ -918,7 +1044,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     // Now that all messages are in the DB:
     //  - Zero subscribers are added for the first time → one bulk sync per client
     //  - conversationSeenCutoffAt = now → no unread badge for migrated content
-    if (resolvedUsers && input.xyneSpaceChannelId) {
+    if (!batchFailed && resolvedUsers && input.xyneSpaceChannelId) {
       if (wsConfig.notificationsEnabled && messageTs) {
         await postMessage({
           channelId: resolvedLogChannelId,
@@ -936,7 +1062,14 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
 
     // Post final summary to log channel (threaded)
     if (wsConfig.notificationsEnabled && messageTs) {
-      if (input.xyneSpaceChannelId) {
+      if (batchFailed) {
+        await postMessage({
+          channelId: resolvedLogChannelId,
+          text: `⚠️ Migration incomplete — stopped at batch ${failedBatchNumber}/${batches.length}. Partial data ingested: ${totalMessages} messages, ${totalReplies} replies. Re-queue this channel to resume.`,
+          threadTs: messageTs,
+          botToken: wsConfig.slackBotToken,
+        });
+      } else if (input.xyneSpaceChannelId) {
         await postMessage({
           channelId: resolvedLogChannelId,
           text: `🎉 Migration complete!\n\nTop-level messages: ${totalMessages}\nThread replies: ${totalReplies}\nTotal: ${totalMessages + totalReplies}`,
@@ -954,7 +1087,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     }
 
     // Final @channel announcement always goes to the source channel
-    if (wsConfig.notificationsEnabled && input.postChannelAnnouncement !== false) {
+    if (!batchFailed && wsConfig.notificationsEnabled && input.postChannelAnnouncement !== false) {
       let xyneSpaceWorkspaceId: string | undefined;
       if (input.xyneSpaceChannelId) {
         const channelRepo2 = new ChannelRepository();
@@ -979,7 +1112,16 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     logger.info('[Migration] Migration completed', {
       totalBatches: batches.length,
       totalMessages,
+      batchFailed,
     });
+
+    if (batchFailed) {
+      return {
+        success: false,
+        error: `Stopped at batch ${failedBatchNumber}/${batches.length}`,
+        channelId: input.channelId,
+      };
+    }
 
     return {
       success: true,
@@ -1090,7 +1232,9 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
     const xyneSpaceWorkspaceId = xyneChannel.workspaceId;
     const dmWsConfig = getBotConfigByWorkspaceId(xyneSpaceWorkspaceId);
     dmBotToken = dmWsConfig.slackBotToken;
-    const dmLogChannelId = dmWsConfig.slackMigrationLogChannelId || responseChannelId || dmChannelId;
+    // DM flow (sync-dm): prefer the caller-supplied channel so all updates land
+    // in the dedicated sync-dm channel, not the generic workspace migration log.
+    const dmLogChannelId = responseChannelId || dmWsConfig.slackMigrationLogChannelId || dmChannelId;
     const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${xyneSpaceWorkspaceId}/chat/dir/${xyneSpaceChannelId}|${channelName}>`;
 
     // Post thread-starter to log channel
@@ -1139,9 +1283,12 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
         'include_bot_messages',
       ],
       userToken,
+      // Defer the isMigrated flag to the end of this whole DM (see below).
+      skipChannelMigratedUpdate: true,
     };
 
     let totalMessages = 0;
+    let anyBatchFailed = false;
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
@@ -1161,6 +1308,7 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
           await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
         }
       } catch (error) {
+        anyBatchFailed = true;
         logger.error('[MigrationDM] Batch processing failed', {
           batch: `${batch.batchNumber}/${batch.totalBatches}`,
           error: error instanceof Error ? error.message : 'Unknown error',
@@ -1180,6 +1328,25 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
       }
     }
 
+    // Mark the channel fully migrated only if every batch succeeded. If any
+    // batch failed, leave isMigrated=false so a re-run re-processes this DM.
+    if (!anyBatchFailed) {
+      try {
+        const xyneChannel = await channelRepo.findById(xyneSpaceChannelId);
+        if (xyneChannel && !(xyneChannel as any).isMigrated) {
+          await channelRepo.update(xyneSpaceChannelId, { isMigrated: true });
+        }
+        logger.info('[MigrationDM] Channel marked fully migrated', { xyneSpaceChannelId, dmChannelId });
+      } catch (err) {
+        logger.warn('[MigrationDM] Failed to mark channel migrated', {
+          xyneSpaceChannelId,
+          error: err instanceof Error ? err.message : err,
+        });
+      }
+    } else {
+      logger.warn('[MigrationDM] Some batches failed — channel left unmarked for re-run', { xyneSpaceChannelId, dmChannelId });
+    }
+
     if (getEnableNotifications(xyneSpaceWorkspaceId) && messageTs) {
       await postMessage({
         channelId: dmLogChannelId,
@@ -1189,15 +1356,16 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
       });
     }
 
-    logger.info('[MigrationDM] DM migration completed', { totalMessages, dmChannelId });
+    logger.info('[MigrationDM] DM migration completed', { totalMessages, dmChannelId, fullyMigrated: !anyBatchFailed });
 
-    return { success: true, channelId: dmChannelId };
+    return { success: !anyBatchFailed, channelId: dmChannelId };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error('[MigrationDM] DM migration failed', { error: errorMessage });
 
-    // dmLogChannelId may not be set if error thrown before channel lookup
-    const errLogChannel = dmChannelId;
+    // dmLogChannelId may not be set if error thrown before channel lookup.
+    // Prefer the caller-supplied (sync-dm) channel so failures surface there too.
+    const errLogChannel = responseChannelId || dmChannelId;
     if (messageTs && getEnableNotifications(config.defaultWorkspaceId)) {
       try {
         await postMessage({

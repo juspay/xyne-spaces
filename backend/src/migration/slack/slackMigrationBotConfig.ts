@@ -124,3 +124,29 @@ export function getWorkspaceIdByTeamId(teamId: string): string {
   }
   return config.defaultWorkspaceId || '';
 }
+
+/**
+ * Returns all configured bot tokens (deduplicated).
+ *
+ * Slack only returns a user's email / a usergroup's members when the requesting
+ * bot belongs to the same workspace as that entity. In multi-workspace setups a
+ * message may mention a user/group that lives in a different workspace than the
+ * bot whose token we started with, so callers can fall back to the other tokens
+ * to resolve the missing info.
+ */
+export function getAllBotTokens(): string[] {
+  const entries = Object.values(getParsedConfigs());
+
+  if (entries.length === 0) {
+    return config.slackBotToken ? [config.slackBotToken] : [];
+  }
+
+  const tokens = new Set<string>();
+  for (const entry of entries) {
+    if (entry.slackBotToken) tokens.add(entry.slackBotToken);
+  }
+  // Always include the global fallback too
+  if (config.slackBotToken) tokens.add(config.slackBotToken);
+
+  return [...tokens];
+}
