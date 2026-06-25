@@ -35,18 +35,17 @@ class AffinityController {
 
         try {
             const userDoc = await vespaService.crudService.getDocument(userId, userSchema);
-            const channelWeights = vespaTensorToRecord(userDoc?.fields?.channelWeights, 'channel:');
-            const userWeights = vespaTensorToRecord(userDoc?.fields?.userWeights, 'user:');
+            if (!userDoc) {
+                logger.info('[AFFINITY] No affinity doc found for user, returning empty weights', { userId });
+                res.json({ channelWeights: {}, userWeights: {} });
+                return;
+            }
+            const channelWeights = vespaTensorToRecord(userDoc.fields?.channelWeights, 'channel:');
+            const userWeights = vespaTensorToRecord(userDoc.fields?.userWeights, 'user:');
             res.json({ channelWeights, userWeights });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            const isNotFound = message.includes('404') || message.toLowerCase().includes('not found');
-            if (isNotFound) {
-                // Normal for new users who have no personalization doc yet
-                logger.info('[AFFINITY] No affinity doc found for user, returning empty weights', { userId });
-            } else {
-                logger.warn('[AFFINITY] Failed to fetch affinity weights', { userId, error: message });
-            }
+            logger.warn('[AFFINITY] Failed to fetch affinity weights', { userId, error: message });
             res.json({ channelWeights: {}, userWeights: {} });
         }
     };

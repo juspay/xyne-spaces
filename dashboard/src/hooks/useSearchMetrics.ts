@@ -20,7 +20,7 @@ import {
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
 import { useUserSearch } from './useUsers';
-import { searchChannels } from './useChannels';
+import { searchChannelsWithScores } from './useChannels';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
 import { isDMChannel } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 import {
@@ -61,10 +61,17 @@ function getFuseInstance(searchableNames: string[]): Fuse<string> {
   return instance;
 }
 
-// Max score reduction from affinity. 0.5 means at peak affinity a result's
-// score shifts by half the prefix-boost range — enough to reorder within a
-// tier but not enough to let a weak text match beat a strong one.
+// Affinity weight for DM ranking. Fuse scores are [0, 1]; 0.5 means peak
+// affinity shifts a result by half the score range.
 const AFFINITY_WEIGHT = 0.5;
+
+// Affinity weight for regular channel ranking. searchChannelsWithScores
+// applies −10/−5 prefix boosts, so the score range is ~[−10, 0.3].
+// At W=10, sat(affinity)×10 equals the 5-point tier gap when affinity
+// hits the sat() midpoint (50), so regularly-used channels (affinity≥50)
+// can surface above a lower-affinity prefix match. Fuzzy matches need
+// affinity≫1000 to cross the 10-point prefix gap — effectively never.
+const REGULAR_CHANNEL_AFFINITY_WEIGHT = 10;
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
@@ -196,12 +203,23 @@ export function filterChannelsBySearchableNames<
     .map(({ item }) => item);
 
   const regularChannels = regularItems.map(item => item.channel);
-  const orderedChannels = searchChannels(regularChannels, query, regularChannels.length);
   const regularItemsById = new Map(regularItems.map(item => [item.channel.id, item]));
-  const matchedRegular = orderedChannels.flatMap(c => {
-    const item = regularItemsById.get(c.id);
-    return item ? [item] : [];
-  });
+
+  // searchChannelsWithScores runs the same Fuse fuzzy match + prefix boosts
+  // as searchChannels but returns { item, score }[] instead of just items,
+  // so we can apply affinity on top before deciding the final order.
+  const matchedRegular = searchChannelsWithScores(regularChannels, query, regularChannels.length)
+    .flatMap(({ item: channel, score }) => {
+      const item = regularItemsById.get(channel.id);
+      if (!item) return [];
+
+      const affinity = affinityService.getChannelWeight(channel.id);
+      const finalScore = score - sat(affinity) * REGULAR_CHANNEL_AFFINITY_WEIGHT;
+
+      return [{ item, score: finalScore }];
+    })
+    .sort((a, b) => a.score - b.score)
+    .map(({ item }) => item);
 
   return [...matchedDms, ...matchedRegular];
 }
