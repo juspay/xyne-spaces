@@ -2046,7 +2046,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
         },
       ),
-      // One mutator for rename/emoji, collapse state, and reorder (all are field updates).
+      // One mutator for rename/emoji, collapse state, reorder, and sort order (all are field updates).
       update: defineMutator(
         z.object({
           id: z.string(),
@@ -2054,9 +2054,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           emoji: z.string().nullable().optional(),
           isCollapsed: z.boolean().optional(),
           position: z.string().optional(),
+          sortOrder: z.nativeEnum(ChannelSortOrder).nullable().optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, name, emoji, isCollapsed, position, timestamp } }) => {
+        async ({ tx, args: { id, name, emoji, isCollapsed, position, sortOrder, timestamp } }) => {
           const section = await tx.run(
             zql.channel_sections.where('id', id).where('userId', authData.sub).where('isDeleted', false).one(),
           );
@@ -2082,6 +2083,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(emoji !== undefined && { emoji: emoji ?? null }),
             ...(isCollapsed !== undefined && { isCollapsed }),
             ...(position !== undefined && { position }),
+            ...(sortOrder !== undefined && { sortOrder: sortOrder ?? null }),
             updatedAt: timestamp,
           });
         },

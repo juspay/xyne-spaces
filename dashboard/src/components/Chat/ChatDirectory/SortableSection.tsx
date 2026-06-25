@@ -1,24 +1,30 @@
 import { useState, type CSSProperties, type ReactElement } from 'react';
 import { Accordion } from 'radix-ui';
 import { useDroppable } from '@dnd-kit/core';
-import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
+  ArrowUpDown,
+  Check,
   ChevronRight,
   FolderPlus,
   GripVertical,
+  ListChecks,
   ListTree,
   MoreVertical,
   Pencil,
   Trash2,
 } from 'lucide-react';
-import type { ChannelSection } from '@xyne/shared';
+import { ChannelSortOrder, type ChannelSection } from '@xyne/shared';
 import type { VisibleChannel } from '../../../machines/stateMachine';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { cn } from '../../../utils/classNames';
@@ -26,6 +32,13 @@ import Badge from '../../ui/Badge';
 import SortableChannelItem from './SortableChannelItem';
 import { sumSectionUnread } from './ChatDirectory.utils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
+
+const SORT_OPTIONS: { label: string; value: ChannelSortOrder | null }[] = [
+  { label: 'Unread & Activity', value: ChannelSortOrder.UNREAD },
+  { label: 'By recency', value: ChannelSortOrder.RECENCY },
+  { label: 'Alphabetical A-Z', value: ChannelSortOrder.ALPHABETICAL },
+  { label: 'Manual order', value: null },
+];
 
 interface SortableSectionProps {
   section: ChannelSection;
@@ -36,7 +49,9 @@ interface SortableSectionProps {
   onRename: (section: ChannelSection) => void;
   onDelete: (section: ChannelSection) => void;
   onCreateSection: () => void;
+  onManageChannels: (section: ChannelSection) => void;
   onMoveChannelToSection: (channelId: string, sectionId: string | null) => void;
+  onSetSortOrder: (sectionId: string, order: ChannelSortOrder | null) => void;
 }
 
 const SortableSection = ({
@@ -48,7 +63,9 @@ const SortableSection = ({
   onRename,
   onDelete,
   onCreateSection,
+  onManageChannels,
   onMoveChannelToSection,
+  onSetSortOrder,
 }: SortableSectionProps): ReactElement => {
   const [menuOpen, setMenuOpen] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -68,9 +85,18 @@ const SortableSection = ({
   };
 
   const sectionUnreadCount = sumSectionUnread(channels, unreadCounts, activeChannelId);
+  const currentSortOrder = section.sortOrder ?? null;
 
   return (
-    <Accordion.Item ref={setNodeRef} style={style} value={section.id} className='group/item'>
+    <Accordion.Item
+      ref={el => {
+        setNodeRef(el);
+        setDropNodeRef(el);
+      }}
+      style={style}
+      value={section.id}
+      className='group/item'
+    >
       {/* Only the label is the Accordion.Trigger; grip + menu are siblings (no nested button). */}
       <div className='group relative flex items-center justify-between gap-2'>
         <button
@@ -142,6 +168,37 @@ const SortableSection = ({
               <span className='flex-1'>Rename section</span>
             </DropdownMenuItem>
             <DropdownMenuItem
+              className='gap-2'
+              onClick={e => {
+                e.stopPropagation();
+                onManageChannels(section);
+              }}
+            >
+              <ListChecks className='size-3.5 shrink-0' />
+              <span className='flex-1'>Manage channels</span>
+            </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className='gap-2'>
+                <ArrowUpDown className='size-3.5 shrink-0' />
+                <span className='flex-1'>Sort channels</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {SORT_OPTIONS.map(opt => (
+                  <DropdownMenuItem
+                    key={opt.label}
+                    className='gap-2'
+                    onClick={e => {
+                      e.stopPropagation();
+                      onSetSortOrder(section.id, opt.value);
+                    }}
+                  >
+                    <span className='flex-1'>{opt.label}</span>
+                    {currentSortOrder === opt.value && <Check className='size-3.5 shrink-0' />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuItem
               className='gap-2 text-destructive focus:text-destructive'
               onClick={e => {
                 e.stopPropagation();
@@ -166,24 +223,22 @@ const SortableSection = ({
         </DropdownMenu>
       </div>
       <Accordion.Content>
-        <div ref={setDropNodeRef} className='min-h-[4px]'>
+        <div className='min-h-[4px]'>
           {channels.length === 0 ? (
             <div className='px-2 py-1 text-xs text-sidebar-secondary-foreground/60'>
               No channels yet
             </div>
           ) : (
-            <SortableContext items={channels.map(c => c.id)} strategy={verticalListSortingStrategy}>
-              {channels.map(channel => (
-                <SortableChannelItem
-                  key={channel.id}
-                  channel={channel}
-                  unreadCount={unreadCounts[channel.id] ?? 0}
-                  isActive={activeChannelId === channel.id}
-                  sections={sections}
-                  onMoveToSection={onMoveChannelToSection}
-                />
-              ))}
-            </SortableContext>
+            channels.map(channel => (
+              <SortableChannelItem
+                key={channel.id}
+                channel={channel}
+                unreadCount={unreadCounts[channel.id] ?? 0}
+                isActive={activeChannelId === channel.id}
+                sections={sections}
+                onMoveToSection={onMoveChannelToSection}
+              />
+            ))
           )}
         </div>
       </Accordion.Content>

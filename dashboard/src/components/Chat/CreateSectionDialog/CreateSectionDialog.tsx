@@ -1,15 +1,26 @@
-import { useMemo, useState, type ChangeEvent, type FormEvent, type ReactElement } from 'react';
-import { Hash, Lock, Search, X } from 'lucide-react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type ReactElement,
+} from 'react';
+import { Hash, Lock, MessageCircle, Search, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { ChannelVisibility } from '@xyne/shared';
 import { Button } from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
-import { keyBetween } from '../ChatDirectory/ChatDirectory.utils';
+import { keyBetween, isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { SectionEmojiPicker } from '../SectionEmojiPicker';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import type { VisibleChannel } from '../../../machines/stateMachine';
+import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 
 interface CreateSectionDialogProps {
   channels: VisibleChannel[];
@@ -18,9 +29,41 @@ interface CreateSectionDialogProps {
   onClose: () => void;
 }
 
-// Primary CTA tokens (same as AddChannelForm) so it follows the active theme.
-const PRIMARY_BUTTON =
-  'bg-action-primary text-action-primary-foreground hover:bg-action-primary/90';
+const ChannelRow = ({
+  channel,
+  selected,
+  onToggle,
+}: {
+  channel: VisibleChannel;
+  selected: boolean;
+  onToggle: () => void;
+}): ReactElement => {
+  const { userID } = useAuthContextValues();
+  const { displayName } = useChannelDisplayName(channel, userID);
+  const isDM = isDMChannel(channel.scopeType);
+  return (
+    <label className='flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-sidebar-item-hover'>
+      <input
+        type='checkbox'
+        checked={selected}
+        onChange={onToggle}
+        data-track-category='CHAT_SIDEBAR'
+        data-track-name='CREATE_SECTION_TOGGLE_CHANNEL'
+        className='size-4 accent-action-primary'
+      />
+      <span className='shrink-0 text-muted-foreground'>
+        {isDM ? (
+          <MessageCircle size={14} />
+        ) : channel.visibility === ChannelVisibility.PRIVATE ? (
+          <Lock size={14} />
+        ) : (
+          <Hash size={14} />
+        )}
+      </span>
+      <span className='flex-1 truncate text-sm text-foreground'>{displayName}</span>
+    </label>
+  );
+};
 
 export const CreateSectionDialog = ({
   channels,
@@ -36,6 +79,20 @@ export const CreateSectionDialog = ({
   const [createdSectionId, setCreatedSectionId] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const showHintOnDismissRef = useRef(false);
+  useEffect(() => {
+    return () => {
+      if (showHintOnDismissRef.current) {
+        toast(
+          'Tip: drag dms/channels from the sidebar and drop them into your section to add them.',
+          {
+            duration: 5000,
+          },
+        );
+      }
+    };
+  }, []);
 
   const trimmedName = name.trim();
   const isDuplicateName = existingNames.some(
@@ -69,15 +126,20 @@ export const CreateSectionDialog = ({
         timestamp: Date.now(),
       }),
     );
+    showHintOnDismissRef.current = true;
     setCreatedSectionId(id);
     setStep(2);
   };
 
   const filteredChannels = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return channels;
-    return channels.filter(c => (c.name ?? '').toLowerCase().includes(q));
-  }, [channels, filter]);
+    const base = !q ? channels : channels.filter(c => (c.name ?? '').toLowerCase().includes(q));
+    return [...base].sort((a, b) => {
+      const aSelected = selected.has(a.id) ? 0 : 1;
+      const bSelected = selected.has(b.id) ? 0 : 1;
+      return aSelected - bSelected;
+    });
+  }, [channels, filter, selected]);
 
   const allFilteredSelected =
     filteredChannels.length > 0 && filteredChannels.every(c => selected.has(c.id));
@@ -106,7 +168,6 @@ export const CreateSectionDialog = ({
   const handleAddChannels = (): void => {
     if (createdSectionId && selected.size > 0) {
       const timestamp = Date.now();
-      // New section is empty → hand out ascending fractional keys to the selected channels.
       let prevKey: string | null = null;
       for (const channelId of selected) {
         const position = keyBetween(prevKey, null);
@@ -120,14 +181,23 @@ export const CreateSectionDialog = ({
         );
         prevKey = position;
       }
+      showHintOnDismissRef.current = false;
     }
+    onClose();
+  };
+
+  const handleSkip = (): void => {
+    showHintOnDismissRef.current = false;
+    toast('Tip: drag dms/channels from the sidebar and drop them into your section to add them.', {
+      duration: 5000,
+    });
     onClose();
   };
 
   const closeButton = (
     <button
       type='button'
-      onClick={onClose}
+      onClick={step === 2 ? handleSkip : onClose}
       aria-label='Close'
       data-track-category='CHAT_SIDEBAR'
       data-track-name='CLOSE_CREATE_SECTION'
@@ -168,7 +238,10 @@ export const CreateSectionDialog = ({
             <input
               id='section-name'
               value={name}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                setName(e.target.value);
+                setTouched(true);
+              }}
               onKeyDown={e => {
                 if (
                   e.key === 'Backspace' &&
@@ -180,7 +253,6 @@ export const CreateSectionDialog = ({
                   setEmoji('');
                 }
               }}
-              onBlur={() => setTouched(true)}
               placeholder='Ex: Project Beta'
               maxLength={50}
               autoFocus
@@ -202,7 +274,10 @@ export const CreateSectionDialog = ({
                 variant='default'
                 size='default'
                 disabled={!!nameError}
-                className={cn(PRIMARY_BUTTON, !!nameError && 'pointer-events-none')}
+                className={cn(
+                  'bg-action-primary text-action-primary-foreground hover:bg-action-primary/90',
+                  !!nameError && 'pointer-events-none',
+                )}
               >
                 Create and Add Channels
               </Button>
@@ -261,27 +336,12 @@ export const CreateSectionDialog = ({
             </div>
           ) : (
             filteredChannels.map(channel => (
-              <label
+              <ChannelRow
                 key={channel.id}
-                className='flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-sidebar-item-hover'
-              >
-                <input
-                  type='checkbox'
-                  checked={selected.has(channel.id)}
-                  onChange={() => toggleChannel(channel.id)}
-                  data-track-category='CHAT_SIDEBAR'
-                  data-track-name='CREATE_SECTION_TOGGLE_CHANNEL'
-                  className='size-4 accent-action-primary'
-                />
-                <span className='shrink-0 text-muted-foreground'>
-                  {channel.visibility === ChannelVisibility.PRIVATE ? (
-                    <Lock size={14} />
-                  ) : (
-                    <Hash size={14} />
-                  )}
-                </span>
-                <span className='flex-1 truncate text-sm text-foreground'>{channel.name}</span>
-              </label>
+                channel={channel}
+                selected={selected.has(channel.id)}
+                onToggle={() => toggleChannel(channel.id)}
+              />
             ))
           )}
         </div>
@@ -290,7 +350,7 @@ export const CreateSectionDialog = ({
       <div className='flex items-center justify-between pt-2'>
         <span className='text-sm text-muted-foreground'>Step 2 of 2</span>
         <div className='flex gap-3'>
-          <Button type='button' variant='outline' size='default' onClick={onClose}>
+          <Button type='button' variant='outline' size='default' onClick={handleSkip}>
             Skip
           </Button>
           <Button
@@ -299,7 +359,7 @@ export const CreateSectionDialog = ({
             size='default'
             onClick={handleAddChannels}
             disabled={selected.size === 0}
-            className={PRIMARY_BUTTON}
+            className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
           >
             Add Channels
           </Button>

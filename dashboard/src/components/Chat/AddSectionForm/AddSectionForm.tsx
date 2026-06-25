@@ -91,7 +91,10 @@ export const AddSectionForm = ({
           <input
             id='section-name'
             value={name}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => {
+              setName(e.target.value);
+              setTouched(true);
+            }}
             onKeyDown={e => {
               if (
                 e.key === 'Backspace' &&
@@ -103,7 +106,6 @@ export const AddSectionForm = ({
                 setEmoji('');
               }
             }}
-            onBlur={() => setTouched(true)}
             placeholder='Ex: Project Beta'
             maxLength={50}
             autoFocus
