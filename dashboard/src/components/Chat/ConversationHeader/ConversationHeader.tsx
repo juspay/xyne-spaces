@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef, JSX, cloneElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
-import { useVisibleChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
+import {
+  useVisibleChannel,
+  useGetChannelUserStatus,
+  useUserChannelStatuses,
+} from '../../../hooks/useChannels';
 import useMeasure from '../../../hooks/useMeasure';
-import { Star, Users2, Bell, ExternalLink, Search, X } from 'lucide-react';
+import { Star, Users2, Bell, Search, X, MoreVertical, Check } from 'lucide-react';
 import CompactActionsMenu, { ActionMenuItem } from '../../ui/CompactActionsMenu';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Dialog from '../../ui/Dialog';
@@ -19,7 +23,7 @@ import { Button } from '../../ui/Button';
 import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { getTargetUserIdForCall } from './ConversationHeader.utils';
 import { useUser } from '../../../hooks/useUsers';
-import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import { isOneToOneDMChannel, isDMChannel, keyBetween } from '../ChatDirectory/ChatDirectory.utils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useNavigate } from 'react-router-dom';
@@ -29,6 +33,19 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 
 interface ConversationHeaderProps {
   channelId: string;
@@ -56,6 +73,8 @@ const ConversationHeader = ({
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
   const navigate = useNavigate();
   const { baseRoute } = useRouteContext();
+  const [channelSections] = useCachedQuery(queries.userChannelSections({}));
+  const allChannelsUserStatus = useUserChannelStatuses();
 
   // Get user status for 1-on-1 DMs only (not group DMs)
   const isDM = channel && isOneToOneDMChannel(channel.scopeType);
@@ -116,7 +135,29 @@ const ConversationHeader = ({
     });
   };
 
+  const handleLeaveChannel = (): void => {
+    void zero.mutate(mutators.channel.leaveChannel({ channelId, updatedAt: Date.now() }));
+    void navigate('/chat');
+  };
+
+  const handleMoveToSection = (sectionId: string): void => {
+    const timestamp = Date.now();
+    const positions = allChannelsUserStatus
+      .filter(s => s.sectionId === sectionId)
+      .map(s => s.sectionPosition ?? '')
+      .filter(p => p !== '')
+      .sort();
+    const lastPos = positions[positions.length - 1] ?? null;
+    const position = keyBetween(lastPos, null);
+    if (channelUserStatus?.isStarred) {
+      void zero.mutate(mutators.channel.toggleStarred({ channelId, updatedAt: timestamp }));
+    }
+    void zero.mutate(mutators.channel.moveToSection({ channelId, sectionId, position, timestamp }));
+  };
+
   if (!channel) return null;
+
+  const isChannelDM = isDMChannel(channel.scopeType);
 
   const compactMenuItems: ActionMenuItem[] = [
     {
@@ -152,11 +193,6 @@ const ConversationHeader = ({
       visible: !!channelUserStatus,
     },
     {
-      icon: <ExternalLink className='w-4 h-4' />,
-      label: 'Open all links',
-      onSelect: () => handleOpenAllLinks({} as React.MouseEvent),
-    },
-    {
       icon: <Search className='w-4 h-4' />,
       label: 'Search in this channel',
       onSelect: () => invokeShortcut('mod+f'),
@@ -182,64 +218,73 @@ const ConversationHeader = ({
     <div className='h-[88px] bg-background border-b border-border'>
       <div ref={rowRef} className='h-14 p-4 flex items-center justify-between gap-6'>
         <div ref={titleRef} className='flex items-center gap-2 text-foreground min-w-0 flex-1'>
-          <div className='shrink-0'>
-            <ChannelIcon channel={channel} />
-          </div>
-          <button
-            onClick={() => {
-              setInfoDefaultTab('about');
-              setIsInfoOpen(true);
-            }}
-            className='text-base font-semibold hover:underline tracking-[-0.17px] flex items-center gap-2 min-w-0'
-            data-testid='channel-info-trigger'
-            data-track-category='CHANNELS'
-            data-track-name='OPEN_CHANNEL_INFO'
-            data-track-metadata={JSON.stringify({ channelId: channel.id, isDM })}
-          >
-            <span className='visual-regression-hide truncate'>{displayName}</span>
-            {isDM && (
-              <StatusIndicator
-                statusEmoji={dmUser?.statusEmoji}
-                statusContent={dmUser?.statusContent}
-                statusExpiryAt={dmUser?.statusExpiryAt}
-                size='md'
-                showOnHover={true}
+          <Tooltip content={channelUserStatus?.isStarred ? 'Unstar' : 'Star'}>
+            <Button
+              variant='outline'
+              onClick={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleStarToggle();
+              }}
+              className={cn(
+                'shrink-0 flex items-center justify-center border border-border rounded-lg !p-2 transition-all duration-100 text-primary',
+                channelUserStatus?.isStarred ? 'bg-muted' : 'bg-background',
+              )}
+              data-track-category='CHANNELS'
+              data-track-name='TOGGLE_STAR_CHANNEL'
+              data-track-metadata={JSON.stringify({
+                channelId,
+                isStarred: channelUserStatus?.isStarred,
+              })}
+            >
+              <Star
+                className={cn(
+                  'w-4 h-4',
+                  (channelUserStatus?.isStarred ?? false)
+                    ? 'text-status-pending'
+                    : 'text-muted-foreground',
+                )}
+                fill={(channelUserStatus?.isStarred ?? false) ? 'currentColor' : 'none'}
+                stroke='currentColor'
               />
-            )}
-          </button>
+            </Button>
+          </Tooltip>
+          <Tooltip
+            content='Get channel details'
+            side='bottom'
+            delayDuration={500}
+            {...(isChannelDM ? { open: false } : {})}
+          >
+            <button
+              onClick={() => {
+                setInfoDefaultTab('about');
+                setIsInfoOpen(true);
+              }}
+              className='text-base font-semibold tracking-[-0.17px] flex items-center gap-2 min-w-0 px-1.5 py-0.5 rounded-md hover:bg-muted transition-colors duration-100'
+              data-testid='channel-info-trigger'
+              data-track-category='CHANNELS'
+              data-track-name='OPEN_CHANNEL_INFO'
+              data-track-metadata={JSON.stringify({ channelId: channel.id, isDM })}
+            >
+              <span className='shrink-0'>
+                <ChannelIcon channel={channel} />
+              </span>
+              <span className={cn('visual-regression-hide truncate', isChannelDM && 'pt-1')}>
+                {displayName}
+              </span>
+              {isDM && (
+                <StatusIndicator
+                  statusEmoji={dmUser?.statusEmoji}
+                  statusContent={dmUser?.statusContent}
+                  statusExpiryAt={dmUser?.statusExpiryAt}
+                  size='md'
+                  showOnHover={true}
+                />
+              )}
+            </button>
+          </Tooltip>
         </div>
         <div ref={actionsRef} className='flex items-center gap-2 shrink-0'>
-          {!isCompact && (
-            <Tooltip content={channelUserStatus?.isStarred ? 'Unstar' : 'Star'}>
-              <Button
-                variant='outline'
-                onClick={handleStarToggle}
-                className={cn(
-                  'flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary',
-                  channelUserStatus?.isStarred
-                    ? 'bg-muted border-border'
-                    : 'bg-background border-border',
-                )}
-                data-track-category='CHANNELS'
-                data-track-name='TOGGLE_STAR_CHANNEL'
-                data-track-metadata={JSON.stringify({
-                  channelId,
-                  isStarred: channelUserStatus?.isStarred,
-                })}
-              >
-                <Star
-                  className={cn(
-                    'w-4 h-4',
-                    (channelUserStatus?.isStarred ?? false)
-                      ? 'text-status-pending'
-                      : 'text-muted-foreground',
-                  )}
-                  fill={(channelUserStatus?.isStarred ?? false) ? 'currentColor' : 'none'}
-                  stroke='currentColor'
-                />
-              </Button>
-            </Tooltip>
-          )}
           {!isCompact &&
             (channel.channelStats?.participantCount ?? 0) > 1 &&
             !isOneToOneDMChannel(channel.scopeType) && (
@@ -305,24 +350,6 @@ const ConversationHeader = ({
             </Button>
           </Tooltip>
           {!isCompact && (
-            <Tooltip content={`Open all Links`}>
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={handleOpenAllLinks}
-                className='p-2 border border-border rounded-lg h-8 w-8'
-              >
-                <ExternalLink className='w-4 h-4' />
-              </Button>
-            </Tooltip>
-          )}
-          {isCompact && (
-            <CompactActionsMenu
-              items={compactMenuItems}
-              triggerClassName='p-2 border border-border rounded-lg h-8 w-8'
-            />
-          )}
-          {!isCompact && (
             <Tooltip content='Search in this channel'>
               <Button
                 variant='ghost'
@@ -337,6 +364,12 @@ const ConversationHeader = ({
               </Button>
             </Tooltip>
           )}
+          {isCompact && (
+            <CompactActionsMenu
+              items={compactMenuItems}
+              triggerClassName='p-2 border border-border rounded-lg h-8 w-8'
+            />
+          )}
           <CallTriggerModal
             channelId={channelId}
             targetUserIds={targetUserId ? [targetUserId] : []}
@@ -347,6 +380,70 @@ const ConversationHeader = ({
             isMember={!!channelUserStatus}
             disabled={channel.isArchived}
           />
+          {!isCompact && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='p-2 border border-border rounded-lg h-8 w-8'
+                  data-track-category='CHANNELS'
+                  data-track-name='OPEN_CHANNEL_MENU'
+                >
+                  <MoreVertical className='w-4 h-4' />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='end' className='min-w-[180px]'>
+                <DropdownMenuItem
+                  onClick={() => {
+                    setInfoDefaultTab('about');
+                    setIsInfoOpen(true);
+                  }}
+                >
+                  Channel details
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleOpenAllLinks()}>
+                  Open all links
+                </DropdownMenuItem>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>Move to section</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {!channelSections || channelSections.length === 0 ? (
+                      <DropdownMenuItem disabled>No sections yet</DropdownMenuItem>
+                    ) : (
+                      channelSections.map(section => (
+                        <DropdownMenuItem
+                          key={section.id}
+                          className='gap-2'
+                          onClick={() => handleMoveToSection(section.id)}
+                        >
+                          {section.emoji && (
+                            <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
+                          )}
+                          <span className='flex-1 truncate'>{section.name}</span>
+                          {!channelUserStatus?.isStarred &&
+                            channelUserStatus?.sectionId === section.id && (
+                              <Check size={14} className='shrink-0' />
+                            )}
+                        </DropdownMenuItem>
+                      ))
+                    )}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                {!isChannelDM && !!channelUserStatus && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className='text-destructive focus:text-destructive'
+                      onClick={handleLeaveChannel}
+                    >
+                      Leave channel
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           {onClose && (
             <Button
               variant='ghost'
@@ -372,11 +469,13 @@ const ConversationHeader = ({
                   data-track-metadata={JSON.stringify({ tabValue: tab.value })}
                   onClick={e => setActiveTab?.(tab.value || '', e)}
                   className={cn(
-                    'h-8 flex items-center justify-start gap-1.5 px-2 transition-all duration-100 cursor-pointer',
+                    'h-8 flex items-center justify-start gap-1.5 px-2 transition-all duration-100 cursor-pointer rounded-t-md',
                     activeTab === tab.value
                       ? 'border-b-2 border-primary'
-                      : 'border-b-2 border-transparent',
-                    activeTab === tab.value ? 'text-primary' : 'text-muted-foreground',
+                      : 'border-b-2 border-transparent hover:bg-muted',
+                    activeTab === tab.value
+                      ? 'text-primary'
+                      : 'text-muted-foreground hover:text-primary',
                   )}
                 >
                   <span className='shrink-0'>
