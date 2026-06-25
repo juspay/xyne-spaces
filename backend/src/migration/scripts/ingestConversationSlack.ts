@@ -5,15 +5,13 @@
 
 import { logger } from '../../utils/logger';
 import { UserRepository } from '../../database/repositories/users';
-import { AppsRepository } from '../../database/repositories/appsRepository';
-import { InstalledAppsRepository } from '../../database/repositories/installedAppsRepository';
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
-import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole } from '@prisma/client';
+import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType } from '@prisma/client';
+import crypto from 'crypto';
 import { SlackMessage, SlackFile, UserInfoCache } from '../slack/utils/extractConversation';
-import { installApp } from '../../apps/core/appUtils';
 import {
   ExternalAttachmentService,
   ExternalAttachment,
@@ -37,6 +35,13 @@ export interface IngestConversationSlackInput {
   workspaceId: string;
   userToken?: string;
   botToken?: string;
+  /**
+   * When true, do NOT flip the channel's `isMigrated` flag here. Used by the
+   * DM flow (sync-dm), which ingests in many sub-batches but only wants the
+   * channel marked migrated after the WHOLE DM finishes — see runMigrationDm.
+   * Leave false/undefined for the regular channel flow (unchanged behaviour).
+   */
+  skipChannelMigratedUpdate?: boolean;
 }
 
 export interface IngestConversationSlackResult {
@@ -73,7 +78,6 @@ export function parseSlackTimestamp(slackTs: string): Date {
   return date;
 }
 
-// Helper: Find or create user (throws on failure)
 export const findOrCreateUser = async (
   userEmail: string,
   userName: string,
@@ -136,7 +140,73 @@ export const findOrCreateUser = async (
   return user.id;
 };
 
-// Helper: Find or create app user for a Slack bot (throws on failure)
+/**
+ * Create a new User (APP type) + InstalledApps row for the given app in the given workspace.
+ * Email is derived from the app name slug + botId to guarantee global uniqueness:
+ *   "Deploy Bot" + "BAAAA" → deploy-bot-baaaa@app.xyne.ai
+ * This means each (botId, workspaceId) pair always gets its own distinct user row.
+ */
+const installAppForWorkspace = async (
+  appId: string,
+  appName: string,
+  botId: string,
+  workspaceId: string,
+): Promise<string> => {
+  const nameSlug = appName
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  const botIdSlug = botId.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const email = `${nameSlug}-${botIdSlug}@app.xyne.ai`;
+
+  const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } });
+  if (!workspace) throw new Error(`[installAppForWorkspace] Workspace ${workspaceId} not found`);
+
+  let orgMember = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
+  if (!orgMember) {
+    orgMember = await db.orgMember.create({
+      data: { email, orgId: workspace.orgId, role: 'MEMBER' },
+      select: { memberId: true },
+    });
+  }
+
+  const appUser = await db.user.create({
+    data: {
+      name: appName,
+      email,
+      providerUserId: `xyne-app-${appId}-${workspaceId}`,
+      authProvider: AuthProvider.API_KEY,
+      userType: UserType.APP,
+      status: 'ACTIVE',
+      workspace: { connect: { id: workspaceId } },
+      orgMember: { connect: { memberId: orgMember.memberId } },
+    },
+  });
+
+  const signingSecret = crypto.randomBytes(32).toString('hex');
+  const encryptedSecret = encrypt(signingSecret);
+  const now = new Date();
+  await db.installedApps.create({
+    data: { appId, userId: appUser.id, signingSecret: encryptedSecret, createdAt: now, updatedAt: now },
+  });
+
+  logger.info('[installAppForWorkspace] Created app user', { appId, workspaceId, botId, userId: appUser.id, email });
+  return appUser.id;
+};
+
+/**
+ * Find or create a Xyne user representing a Slack bot in the target workspace.
+ *
+ * Design principles:
+ * - botId (BXXXXXXX) is the source of truth — one botId = one user per workspace.
+ * - Each (botId, workspaceId) pair always gets its own apps + users + installed_apps row.
+ *   No cross-workspace sharing of app rows.
+ * - App name is `${botName}-${botId}` to disambiguate bots with similar names.
+ * - Email uses botId suffix to guarantee global uniqueness:
+ *   "Deploy Bot" + "BAAAA" → deploy-bot-baaaa@app.xyne.ai
+ */
 export const findOrCreateApp = async (
   botName: string,
   botId: string,
@@ -144,58 +214,61 @@ export const findOrCreateApp = async (
   botUserId?: string,
   workspaceId?: string
 ): Promise<string> => {
+  // ── 0. In-memory cache hit (same migration run) ──────────────────────────
   if (botCache.has(botId)) {
     return botCache.get(botId)!.userId!;
   }
 
   const userRepo = new UserRepository();
 
-  // Look up by slackBotId (BXXXXXXX) — explicit bot identifier
-  const existingUser = await userRepo.findByMetadataField('slackBotId', botId);
+  // ── 1. DB lookup: user already exists for this botId in this workspace ───
+  // workspaceId is passed so the query is scoped to the target workspace.
+  const existingUser = await userRepo.findByMetadataField('slackBotId', botId, workspaceId);
   if (existingUser) {
     botCache.set(botId, { userId: existingUser.id });
+    logger.info('[findOrCreateApp] Reusing existing bot user', { botId, userId: existingUser.id, workspaceId });
     return existingUser.id;
   }
 
+  // ── 2. Not found in target workspace — create fresh app + user ───────────
+  // Each workspace gets its own apps row so workspace-scoped features
+  // (permissions, webhooks, commands) are cleanly isolated.
   const xyneUser = await db.user.findFirst({ where: { email: 'john.doe@gmail.com' } });
   let creatorUser = xyneUser;
   if (!creatorUser) {
     if (config.env === 'development' && workspaceId) {
       creatorUser = await db.user.findFirst({ where: { workspaceId } });
     } else {
-      throw new Error('Creator user john.doe@gmail.com not found');
+      throw new Error('[findOrCreateApp] Creator user john.doe@gmail.com not found');
     }
   }
   if (!creatorUser) {
-    throw new Error('No fallback workspace user found for local migration');
+    throw new Error('[findOrCreateApp] No fallback workspace user found for local migration');
   }
 
-  const appRepo = new AppsRepository();
-  let app: Awaited<ReturnType<typeof appRepo.createApp>>;
-  try {
-    app = await appRepo.createApp({ name: botName, createdBy: creatorUser.id });
-    await installApp(app.id, creatorUser.workspaceId);
-  } catch (err) {
-    // App already exists — find it by name and reuse it
-    const existingApps = await appRepo.findMany({
-      where: { name: { equals: botName.trim(), mode: 'insensitive' } },
-    });
-    if (!existingApps.length) throw err; // unexpected error, re-throw
-    app = existingApps[0];
-  }
+  // Build a unique app name so bots with identical display names (e.g. two
+  // different "Jira" integrations) are distinguishable in the workspace.
+  const uniqueBotName = `${botName.trim()}-${botId}`;
 
-  const installedAppsRepo = new InstalledAppsRepository();
-  const installed = await installedAppsRepo.findFirst({ where: { appId: app.id } });
-  if (!installed) {
-    throw new Error(`Failed to find installed app for ${app.id}`);
-  }
+  // Create the apps row — bypass createApp()'s name-uniqueness check because
+  // the same bot name is intentionally allowed across different workspaces.
+  const now = new Date();
+  const app = await db.apps.create({
+    data: { name: uniqueBotName, createdBy: creatorUser.id, createdAt: now, updatedAt: now },
+  });
 
-  if (botUserId) {
-    await userRepo.upsertMetaDataField(installed.userId, 'slackId', botUserId);
-  }
-  await userRepo.upsertMetaDataField(installed.userId, 'slackBotId', botId);
-  botCache.set(botId, { userId: installed.userId });
-  return installed.userId;
+  // Create the user + installed_apps in the target workspace.
+  // installAppForWorkspace uses email = slug-botId@app.xyne.ai, so this is
+  // always unique regardless of bot name or how many workspaces the bot is in.
+  const targetWorkspaceId = workspaceId ?? creatorUser.workspaceId;
+  const newUserId = await installAppForWorkspace(app.id, uniqueBotName, botId, targetWorkspaceId);
+
+  await userRepo.upsertMetaDataField(newUserId, 'slackBotId', botId);
+  if (botUserId) await userRepo.upsertMetaDataField(newUserId, 'slackId', botUserId);
+
+  botCache.set(botId, { userId: newUserId });
+  logger.info('[findOrCreateApp] Created new bot user', { botId, botName: uniqueBotName, workspaceId: targetWorkspaceId, userId: newUserId });
+  return newUserId;
 };
 
 // ============================================================================
@@ -208,7 +281,7 @@ export const findOrCreateApp = async (
 export async function ingestConversationSlack(
   input: IngestConversationSlackInput
 ): Promise<IngestConversationSlackResult> {
-  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId, userToken, botToken: inputBotToken } = input;
+  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId, userToken, botToken: inputBotToken, skipChannelMigratedUpdate = false } = input;
 
   logger.info('[IngestSlack] Starting ingestion', {
     externalSourceName,
@@ -513,20 +586,25 @@ export async function ingestConversationSlack(
       errors: errorDetails.length,
     });
 
-    const channel = await channelRepo.findById(channelId);
-    if (channel && !(channel as any).isMigrated) {
-      await channelRepo.update(channelId, { isMigrated: true });
-      const project = channel.projectId
-        ? await db.project.findUnique({ where: { id: channel.projectId }, select: { name: true } })
-        : null;
-      logger.info('analytics_event', {
-        event: 'channel_migrated',
-        timestamp: new Date().toISOString(),
-        channelId,
-        channelName: channel.name,
-        channelProjectName: project?.name ?? null,
-        sourceType: 'slack',
-      });
+    // The DM flow defers this — it marks the channel migrated only after the
+    // whole DM (all batches) completes, so a half-migrated DM stays isMigrated=false
+    // and gets resumed on re-run. The channel flow marks it here, per batch, as before.
+    if (!skipChannelMigratedUpdate) {
+      const channel = await channelRepo.findById(channelId);
+      if (channel && !(channel as any).isMigrated) {
+        await channelRepo.update(channelId, { isMigrated: true });
+        const project = channel.projectId
+          ? await db.project.findUnique({ where: { id: channel.projectId }, select: { name: true } })
+          : null;
+        logger.info('analytics_event', {
+          event: 'channel_migrated',
+          timestamp: new Date().toISOString(),
+          channelId,
+          channelName: channel.name,
+          channelProjectName: project?.name ?? null,
+          sourceType: 'slack',
+        });
+      }
     }
 
     return {

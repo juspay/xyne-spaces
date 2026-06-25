@@ -26,7 +26,6 @@ import { postMessage } from './utils/postMessage';
 import { UserRepository } from '../../database/repositories/users';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '../../database/repositories/channelParticipantRepository';
-import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { findOrCreateUser } from '../scripts/ingestConversationSlack';
 import { getUserInfo, UserInfoCache } from './utils/extractConversation';
 import { config } from '../../config/env';
@@ -82,20 +81,32 @@ export async function handleSyncDmCommand(req: Request, res: Response): Promise<
 // Bulk DM migration
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Dedicated Slack channel for ALL /sync-dm updates (plan, progress, summary).
+// The migration bot must be a member of this channel to post. Override via env.
+const SYNC_DM_LOG_CHANNEL = process.env.SYNC_DM_LOG_CHANNEL || 'C0BCN9BDQMN';
+
+// How many DMs/group-DMs to migrate concurrently. Override via env; defaults to 3.
+// Falls back to 3 for missing/invalid/non-positive values.
+const SYNC_DM_CONCURRENCY = (() => {
+  const parsed = parseInt(process.env.SYNC_DM_CONCURRENCY ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 3;
+})();
+
 export async function runMigrationAllDms({
   userToken,
   userId: slackUserId,
-  responseChannelId,
   teamId,
 }: {
   userToken: string;
   userId?: string;
+  // Accepted for API compatibility but ignored — all updates go to SYNC_DM_LOG_CHANNEL.
   responseChannelId?: string;
   teamId?: string;
 }): Promise<void> {
   const workspaceId = (teamId ? getWorkspaceIdByTeamId(teamId) : '') || config.defaultWorkspaceId;
   const wsConfig = getBotConfigByWorkspaceId(workspaceId || '');
-  const logChannelId = wsConfig.slackMigrationLogChannelId || responseChannelId;
+  // All /sync-dm updates go to the dedicated sync-dm channel.
+  const logChannelId = SYNC_DM_LOG_CHANNEL;
   const userClient = new WebClient(userToken);
   const dmBotToken = wsConfig.slackBotToken;
 
@@ -215,16 +226,24 @@ export async function runMigrationAllDms({
 
   const channelRepo = new ChannelRepository();
   const channelParticipantRepo = new ChannelParticipantRepository();
-  const externalSourceRepo = new ExternalSourceRepository();
 
   let migrated = 0;
   let skippedUnresolvable = 0;
   let failed = 0;
+  let alreadyMigrated = 0;
 
-  // ── Step 4: Process each DM ──────────────────────────────────────────────
+  // ── Step 4: Classify each DM — already fully migrated vs. pending ─────────
+  // A DM's Xyne channel is marked isMigrated=true only after ALL of its batches
+  // finish (see runMigrationDm). So on a re-run we skip fully migrated DMs and
+  // resume the rest — including any interrupted half-way (still isMigrated=false).
+  interface PendingDm {
+    slackDmId: string;
+    xyneDmChannelId: string;
+  }
+  const pending: PendingDm[] = [];
+
   for (const dm of allDms) {
     const slackDmId: string = dm.id;
-    const externalSourceName = `slackMigration-${slackDmId}`;
 
     try {
       // ── 4a: Resolve other participant(s) ─────────────────────────────
@@ -272,13 +291,50 @@ export async function runMigrationAllDms({
         workspaceId
       );
 
-      // ── 4c: Log if already migrated (but continue to pick up new messages) ──
-      const existingSource = await externalSourceRepo.findByName(externalSourceName);
-      if (existingSource) {
-        logger.info('[SyncDM] Already migrated, re-running to pick up new messages', { slackDmId, xyneDmChannelId });
+      // ── 4c: Skip if this DM's channel is already fully migrated ──────
+      const xyneChannel = await channelRepo.findById(xyneDmChannelId);
+      if (xyneChannel && (xyneChannel as any).isMigrated) {
+        logger.info('[SyncDM] Already fully migrated, skipping', { slackDmId, xyneDmChannelId });
+        alreadyMigrated++;
+        continue;
       }
 
-      // ── 4d: Get DM creation timestamp ────────────────────────────────
+      pending.push({ slackDmId, xyneDmChannelId });
+    } catch (err) {
+      logger.error('[SyncDM] Failed to classify DM', {
+        slackDmId,
+        error: err instanceof Error ? err.message : err,
+      });
+      failed++;
+    }
+  }
+
+  // ── Step 4.5: Report the plan (migrated vs. yet-to-migrate) ───────────────
+  logger.info('[SyncDM] Migration plan', {
+    total: allDms.length,
+    alreadyMigrated,
+    toMigrate: pending.length,
+    skippedUnresolvable,
+  });
+  if (logChannelId) {
+    await postMessage({
+      channelId: logChannelId,
+      text:
+        `📊 DM migration plan for <@${slackUserId}>:\n` +
+        `• Total conversations: *${allDms.length}*\n` +
+        `• ✅ Already migrated (skipping): *${alreadyMigrated}*\n` +
+        `• 🔄 To migrate now: *${pending.length}*\n` +
+        `• ⏭️ Skipped (bot/unresolvable): *${skippedUnresolvable}*`,
+      botToken: dmBotToken,
+    });
+  }
+
+  // ── Step 5: Migrate the pending DMs (up to SYNC_DM_CONCURRENCY at a time) ──
+  // Each DM threads its own updates under its own message in the log channel,
+  // so concurrent runs stay readable even though they interleave in time.
+  const migrateOne = async ({ slackDmId, xyneDmChannelId }: PendingDm): Promise<void> => {
+    try {
+      // Get DM creation timestamp so we capture full history from day 1.
       let dmCreatedTimestamp: number | undefined;
       try {
         const info = await userClient.conversations.info({ channel: slackDmId });
@@ -288,10 +344,9 @@ export async function runMigrationAllDms({
         logger.warn('[SyncDM] Could not get channel created timestamp', { slackDmId, error: err });
       }
 
-      // ── 4e: Migrate ───────────────────────────────────────────────────
       logger.info('[SyncDM] Migrating DM', { slackDmId, xyneDmChannelId, dmCreatedTimestamp });
 
-      await runMigrationDm({
+      const result = await runMigrationDm({
         dmChannelId: slackDmId,
         xyneSpaceChannelId: xyneDmChannelId,
         userToken,
@@ -300,7 +355,11 @@ export async function runMigrationAllDms({
         responseChannelId: logChannelId,
       });
 
-      migrated++;
+      if (result.success) {
+        migrated++;
+      } else {
+        failed++;
+      }
     } catch (err) {
       logger.error('[SyncDM] Failed to migrate DM', {
         slackDmId,
@@ -308,13 +367,25 @@ export async function runMigrationAllDms({
       });
       failed++;
     }
-  }
+  };
+
+  // Fixed-size worker pool: keeps up to SYNC_DM_CONCURRENCY migrations in flight.
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < pending.length) {
+      const dm = pending[nextIndex++];
+      await migrateOne(dm);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(SYNC_DM_CONCURRENCY, pending.length) }, () => worker()),
+  );
 
   // ── Summary ───────────────────────────────────────────────────────────────
   if (logChannelId) {
     await postMessage({
       channelId: logChannelId,
-      text: `✅ DM migration complete for <@${slackUserId}>:\n• Migrated/Updated: ${migrated}\n• Skipped (bot/unresolvable user): ${skippedUnresolvable}\n• Failed: ${failed}`,
+      text: `✅ DM migration complete for <@${slackUserId}>:\n• Migrated: ${migrated}\n• Already migrated (skipped): ${alreadyMigrated}\n• Skipped (bot/unresolvable user): ${skippedUnresolvable}\n• Failed: ${failed}`,
       botToken: dmBotToken,
     });
   }
