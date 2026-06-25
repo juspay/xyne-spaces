@@ -15,7 +15,7 @@ import { UserRepository } from '../database/repositories/users';
 import { websocketService } from '../services/websocketService';
 import { redisService } from '../services/redisService';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
-import { Message, MessageType, AttachmentEntityType } from '@prisma/client';
+import { Message, MessageType, AttachmentEntityType, ChannelScopeType } from '@prisma/client';
 import { BotCommandParser, botProcessor, BotMessageMetadata } from '../services/bots';
 import { getBotInfo, isRegisteredBot } from '../bots/core/bot-utils';
 import { v4 as uuidv4 } from 'uuid';
@@ -44,6 +44,7 @@ import {
   type SerializedConversationMessageRow,
 } from '../serializers/conversationMessageSerializer';
 import { getCallTicketsCreatedFromSuggestionsTotal } from '@/services/otel/suggestionMetrics';
+import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 
 // Local type definitions
 interface UserInfo {
@@ -468,6 +469,25 @@ export class ConversationController {
         initialMessageId: message.messageId,
       });
       await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
+
+      if (
+        message.msgType === MessageType.USER &&
+        req.user?.workspaceId &&
+        channel.scopeType === ChannelScopeType.DEFAULT
+      ) {
+        void processMeetLinksFromChatMessage(
+          message.content,
+          req.user.workspaceId,
+          conversation.conversationId,
+          message.messageId,
+        ).catch((error) => {
+          logger.error('[ConversationController] Failed to process meet links from new conversation', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            conversationId: conversation.conversationId,
+            messageId: message.messageId,
+          });
+        });
+      }
 
       // Update channel last activity
       await this.channelRepository.updateLastActivity(channelId);
@@ -975,6 +995,25 @@ export class ConversationController {
 
       // Update conversation reply count and last activity
       await this.conversationRepository.incrementReplyCount(conversationId);
+
+      if (
+        message.msgType === MessageType.USER &&
+        req.user?.workspaceId &&
+        channel?.scopeType === ChannelScopeType.DEFAULT
+      ) {
+        void processMeetLinksFromChatMessage(
+          message.content,
+          req.user.workspaceId,
+          conversationId,
+          message.messageId,
+        ).catch((error) => {
+          logger.error('[ConversationController] Failed to process meet links from reply', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            conversationId,
+            messageId: message.messageId,
+          });
+        });
+      }
 
       // Update reply count for previous message's child conversation if it exists
       // This matches the mutator logic - get the most recent previous message (limit 1) and check if it has showInChannel
