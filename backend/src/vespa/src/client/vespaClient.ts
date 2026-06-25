@@ -165,28 +165,6 @@ class VespaClient {
       const errMessage = getErrorMessage(error);
       this.logger.error(`Error inserting document ${document.docId}: ${errMessage}`, error);
 
-     // const errorText = error instanceof Error ? error.message : 'Unknown error';
-
-      // Log failed insertion to Postgres for later retry
-      // try {
-      //   await db.failedVespaInsertion.create({
-      //     data: {
-      //       docId: document.docId,
-      //       docType: document.docType,
-      //       namespace: options.namespace,
-      //       schema: options.schema as string,
-      //       cluster: options.cluster,
-      //       errorMessage: `Failed to insert document: ${errorText}`,
-      //       errorDetails: JSON.stringify(error),
-      //       status: 'failed',
-      //       userId: options.userId,
-      //       createdAt: new Date(),
-      //     },
-      //   });
-
-      // } catch (dbError) {
-      //   this.logger.error(`Failed to log insertion error to database: ${getErrorMessage(dbError)}`, dbError);
-      // }
 
       throw new Error(`Error inserting document ${document.docId}: ${errMessage}`);
     }

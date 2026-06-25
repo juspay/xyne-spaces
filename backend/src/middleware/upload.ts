@@ -100,28 +100,6 @@ export const uploadConfig = multer({
     fileSize: MAX_FILE_SIZE_BYTES,
     files: 10 // Max 10 files per request
   },
-  // fileFilter: (_req, file, cb) => {
-  //   // Allowed file types
-  //   const allowedMimeTypes = [
-  //     // Images
-  //     'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-  //     // Videos
-  //     'video/mp4', 'video/avi', 'video/mov', 'video/wmv', 'video/webm',
-  //     // Documents
-  //     'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  //     'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  //     'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  //     'text/plain', 'text/csv',
-  //     // Archives
-  //     'application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed'
-  //   ];
-
-  //   if (allowedMimeTypes.includes(file.mimetype)) {
-  //     cb(null, true);
-  //   } else {
-  //     cb(new Error(`File type ${file.mimetype} is not allowed`));
-  //   }
-  // }
 });
 
 // Factory: creates a streaming Multer storage engine that pipes files directly to GCS.

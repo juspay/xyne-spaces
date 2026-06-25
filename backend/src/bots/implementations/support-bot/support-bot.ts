@@ -180,9 +180,6 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
       })
 
       const supportGroup = await this.getSupportGroup()
-      // const user = await this.getUser(params.userId)
-
-      // const userMention = `<span data-mention="" data-mention-type="user" class="chat-input-mention" data-user-id="${params.userId}" data-username="${user?.name}" data-user-email="${user?.email}" data-user-picture="${user?.picture}">@${user?.name}</span>`
 
       let messageContent = ''
 

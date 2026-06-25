@@ -29,9 +29,6 @@ export class ConversationCompactor {
   /**
    * Get exact token count for message array
    */
-  // public async getTokenCount(messages: readonly Message[], tools: ToolDefinition[], maxTokens: number): Promise<number> {
-  //   return 
-  // }
 
   /**
    * Calculate what percentage of context window is used

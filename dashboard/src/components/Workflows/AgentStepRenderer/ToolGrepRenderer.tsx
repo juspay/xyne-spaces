@@ -53,11 +53,6 @@ export const ToolGrepRenderer: React.FC<
     const { input } = parsedData;
     const pattern = input.pattern;
     const searchPath = input.path;
-    // const outputMode = input.output_mode;
-    // const matches = output.matches || [];
-    // const files = output.files || [];
-    // const count = output.count;
-    // const error = output.error;
 
     return (
       <div>

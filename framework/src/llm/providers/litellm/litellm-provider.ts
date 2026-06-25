@@ -152,19 +152,6 @@ export class LiteLLMProvider extends BaseProvider {
    */
   public async authenticate(): Promise<void> {
     try {
-      // // Test the API key with a simple model list request
-      // const response = await fetch(`${this.baseUrl}/models`, {
-      //   method: 'GET',
-      //   headers: this.headers,
-      //   signal: AbortSignal.timeout(this.providerConfig.timeout || 30000)
-      // });
-
-      // if (!response.ok) {
-      //   const errorText = await response.text();
-      //   throw new Error(`Authentication failed: ${response.status} ${errorText}`);
-      // }
-
-      // this.isAuthenticatedFlag = true;
       await Promise.resolve();
       logger.info('LiteLLM provider authenticated successfully');
       

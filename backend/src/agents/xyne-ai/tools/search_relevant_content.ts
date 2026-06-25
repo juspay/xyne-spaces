@@ -109,9 +109,6 @@ function buildSearchContentMappings(result: ToolResult): EnhancedCitationMapping
   };
 }
 
-// ============================================================================
-// Helper: Fetch subtickets for ticket results
-// ============================================================================
 
 async function fetchSubticketsForTickets(
   ticketIds: string[]

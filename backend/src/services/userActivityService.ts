@@ -125,11 +125,6 @@ export class UserActivityService {
   async resolveActivity(activity: UserActivityEvent): Promise<ActivityWithRelatedData> {
     return await this._getMoreDetails(activity);
 
-    // switch(detailedActivity.eventName.toLocaleLowerCase()) {
-    //   case 'REPLY_IN_THREAD':
-    //   case 'OpenTicketCard':
-    //   case 'OPEN_CHANNEL':
-    //   case 'OPEN_CANVAS':
 
   }
 }

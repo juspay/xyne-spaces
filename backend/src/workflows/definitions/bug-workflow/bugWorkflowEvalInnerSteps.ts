@@ -520,8 +520,6 @@ export const bugWorkflowEvalInnerSteps: WorkflowDefinition<BugWorkflowEvalContex
         throw error;
       }
 
-      // TESTING: Force RCA to be empty to test validation
-      //rcaResult.rca = [];
       
       if (!rcaResult.rca || rcaResult.rca.length === 0) {
         const error = new Error('RCA analysis completed but returned empty results');
@@ -807,11 +805,6 @@ export const bugWorkflowEvalInnerSteps: WorkflowDefinition<BugWorkflowEvalContex
         failureInfo: {
           step: step,
           reason: reason
-          //details: { 
-            //errorType: error instanceof Error ? error.constructor.name : typeof error,
-            //stack: error instanceof Error ? error.stack : undefined,
-            //originalMessage: error instanceof Error ? error.message : 'Unknown error'
-         // }
         }
       };
     } finally {

@@ -511,9 +511,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     candidateLinks,
     // duplicateCheckError,
     isCheckingDuplicate,
-    // isDuplicateReasonExpanded,
-    // setIsDuplicateReasonExpanded,
-    // triggerDuplicateCheck,
     resetDuplicateState,
   } = useDuplicateTicketCheck({
     title: titleValue,

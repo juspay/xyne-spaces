@@ -104,47 +104,6 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
       return project;
     });
 
-    // Queue project for Vespa ingestion with complete data
-    // try {
-    //   // Fetch user names for createdBy
-    //   const createdByUser = await this.db.user.findUnique({
-    //     where: { id: result.createdBy },
-    //     select: { name: true }
-    //   });
-
-    //   // Get all stages for this project (through boards)
-    //   const boards = await this.db.board.findMany({
-    //     where: {
-    //       projectId: result.id
-    //     }
-    //   });
-
-    //   const boardIds = boards.map(b => b.id);
-
-    //   const stages = await this.db.stage.findMany({
-    //     where: {
-    //       boardId: {
-    //         in: boardIds
-    //       }
-    //     },
-    //     orderBy: {
-    //       sequenceNumber: 'asc'
-    //     }
-    //   });
-
-    //   const projectWithStages = {
-    //     ...result,
-    //     createdBy: createdByUser?.name, // Send name instead of ID
-    //     stages: stages.map(s => s.name), // Send only stage names as array
-    //     updatedAt: new Date(result.createdAt || Date.now()),
-    //     createdAt: new Date(result.createdAt || Date.now()),
-    //   };
-
-    //   await queueProjectIngestion(projectWithStages, 'feed');
-    // } catch (error) {
-    //   console.error(`[VESPA-FLOW] Failed to queue project for Vespa: ${result.id}`, error);
-    //   // Don't throw - project is still created in DB
-    // }
 
     return result;
   }
@@ -207,48 +166,6 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
       }
     });
 
-    // Queue project update for Vespa with complete data
-    // try {
-    //   // Fetch user names for createdBy and updatedBy
-    //   const [createdByUser, updatedByUser] = await Promise.all([
-    //     this.db.user.findUnique({ where: { id: result.createdBy }, select: { name: true } }),
-    //     result.updatedBy ? this.db.user.findUnique({ where: { id: result.updatedBy }, select: { name: true } }) : Promise.resolve(null)
-    //   ]);
-
-    //   // Get all stages for this project
-    //   const boards = await this.db.board.findMany({
-    //     where: {
-    //       projectId: result.id
-    //     }
-    //   });
-
-    //   const boardIds = boards.map(b => b.id);
-
-    //   const stages = await this.db.stage.findMany({
-    //     where: {
-    //       boardId: {
-    //         in: boardIds
-    //       }
-    //     },
-    //     orderBy: {
-    //       sequenceNumber: 'asc'
-    //     }
-    //   });
-
-    //   const projectWithStages = {
-    //     ...result,
-    //     createdBy: createdByUser?.name, // Send name instead of ID
-    //     updatedBy: updatedByUser?.name, // Send name instead of ID
-    //     stages: stages.map(s => s.name), // Send only stage names as array
-    //     updatedAt: new Date(result.updatedAt || Date.now()),
-    //     createdAt: new Date(result.createdAt || Date.now()),
-    //   };
-
-    //   await queueProjectIngestion(projectWithStages, 'update');
-    // } catch (error) {
-    //   console.error(`[VESPA-FLOW] Failed to queue project update for Vespa: ${result.id}`, error);
-    //   // Don't throw - project is still updated in DB
-    // }
 
     return result;
   }

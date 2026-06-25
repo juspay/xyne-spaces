@@ -2,10 +2,6 @@ import vespaConfig from '@/vespa/vespaConfig';
 import { ticketSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 
-// let PCA: any;
-// let HDBSCAN: any;
-// try { PCA = require('ml-pca').PCA; } catch {}
-// try { HDBSCAN = require('hdbscan-ts').HDBSCAN; } catch {}
 import { PCA } from 'ml-pca';
 import { HDBSCAN } from 'hdbscan-ts';
 

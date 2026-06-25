@@ -1190,9 +1190,6 @@ class RedisService {
     logger.info(`📦 [ASSIGNMENT-STATE] Retrieved assignment state backup for user ${userId}:`, data);
     // logging for each group
     const parsedData = JSON.parse(data) as Record<string, { onCall: boolean; isActiveForAssignment: boolean }>;
-    // for (const [groupId, state] of Object.entries(parsedData)) {
-    //   logger.info(`   - Group ${groupId}: onCall=${state.onCall}, isActiveForAssignment=${state.isActiveForAssignment}`);
-    // }
     return parsedData;
   }
 

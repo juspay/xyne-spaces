@@ -1,1 +1,0 @@
-// Vespa ticket retrieval service

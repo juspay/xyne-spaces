@@ -67,35 +67,6 @@ export const ToolLsRenderer: React.FC<
 
     const { input } = parsedData;
     const path = input.path || '.';
-    // const flags = input.flags || [];
-    // const entries = output.entries || [];
-    // const error = output.error;
-
-    // const formatFileSize = (bytes?: number): string => {
-    //   if (!bytes) return '-';
-    //   const units = ['B', 'KB', 'MB', 'GB'];
-    //   let size = bytes;
-    //   let unitIndex = 0;
-    //   while (size >= 1024 && unitIndex < units.length - 1) {
-    //     size /= 1024;
-    //     unitIndex++;
-    //   }
-    //   return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-    // };
-
-    // const getTypeIcon = (type: string): string => {
-    //   switch (type) {
-    //     case 'directory':
-    //       return '📁';
-    //     case 'symlink':
-    //       return '🔗';
-    //     case 'file':
-    //     default:
-    //       return '📄';
-    //   }
-    // };
-
-    // console.log('data', data);
 
     return (
       <button className='flex items-start justify-end gap-1.5 w-full text-xs overflow-hidden'>

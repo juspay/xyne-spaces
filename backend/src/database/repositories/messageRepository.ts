@@ -5,9 +5,6 @@ import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/databa
 import { websocketService } from '@/services/websocketService';
 import {logger} from '@/utils/logger';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
-//import { queueMessageIngestion } from '@/queues/vespaQueue';
-
-//import { extractAllMentions } from '@/utils/mentionParser';
 export interface CreateMessageInput {
   conversationId: string;
   childConversationId?: string;
@@ -141,57 +138,6 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
       .catch(err => logger.error('Failed to track user activity:', err));
   }
 
-      // Log message creation
-      // console.log(`[VESPA-FLOW] 1. Message created in DB: ${result.messageId}`);
-
-      // // Queue message for Vespa ingestion with complete data (async, non-blocking)
-      // // If this fails, message is still saved in DB
-      // try {
-      //   // Fetch sender, attachments, reactions, and conversation to include complete data
-      //   const [sender, attachments, reactions, conversation] = await Promise.all([
-      //     this.db.user.findUnique({ where: { id: result.senderId } }),
-      //     this.db.messageAttachment.findMany({
-      //       where: {
-      //         entityId: result.messageId,
-      //         entityType: 'CHAT'
-      //       }
-      //     }),
-      //     this.db.reaction.findMany({
-      //       where: {
-      //         messageId: result.messageId
-      //       }
-      //     }),
-      //     this.db.conversation.findUnique({ where: { conversationId: result.conversationId } })
-      //   ]);
-
-      //   // Extract mentions from content for Vespa
-      //   const extractedMentions = extractAllMentions(result.content);
-
-
-      //   // Combine data for Vespa with all required fields
-      //   const messageWithRelations = {
-      //     ...result,
-      //     sender,
-      //     attachments,
-      //     // Add Vespa-specific fields
-      //     channelId: conversation?.channelId || '',
-      //     threadId: result.conversationId,
-      //     mentions: extractedMentions.userIds || [],
-      //     replyCount: 0, // Initial reply count - will be updated as replies are added
-      //     reactions: reactions.length, // Send reaction count instead of array
-      //     replyUsersCount: 0, // Initial reply users count
-      //     updatedAt: new Date(result.createdAt), // Same as createdAt for new messages
-      //     deletedAt: undefined,
-      //     createdBy: sender?.email // Send user email instead of ID
-      //   };
-
-      //   await queueMessageIngestion(messageWithRelations, 'feed');
-      // } catch (error) {
-      //   logger.error(`[VESPA-FLOW] Failed to queue message for Vespa: ${result.messageId}`, error);
-      //   // Don't throw - message is still saved in DB
-      // }
-
-      // console.log(`[VESPA-FLOW] 2. Message queued for Vespa ingestion: ${result.messageId}`);
 
       return result;
   }
@@ -266,74 +212,6 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
       data
     });
 
-    // Queue message update for Vespa with complete data
-    // try {
-    //   // Fetch all related data for complete Vespa document
-    //   const [sender, attachments, reactions, conversation] = await Promise.all([
-    //     this.db.user.findUnique({ where: { id: result.senderId } }),
-    //     this.db.messageAttachment.findMany({
-    //       where: {
-    //         entityId: result.messageId,
-    //         entityType: 'CHAT'
-    //       }
-    //     }),
-    //     this.db.reaction.findMany({
-    //       where: {
-    //         messageId: result.messageId
-    //       }
-    //     }),
-    //     this.db.conversation.findUnique({ where: { conversationId: result.conversationId } })
-    //   ]);
-
-    //   // Get replies only if this is the initial message of the conversation
-    //   let replyCount = 0;
-    //   let replyUsersCount = 0;
-    //   if (conversation?.initialMessageId === result.messageId) {
-    //     // Get count efficiently
-    //     replyCount = await this.db.message.count({
-    //       where: {
-    //         conversationId: result.conversationId,
-    //         createdAt: { gt: result.createdAt }
-    //       }
-    //     });
-
-    //     // Only fetch senderId field for better performance
-    //     const replies = await this.db.message.findMany({
-    //       where: {
-    //         conversationId: result.conversationId,
-    //         createdAt: { gt: result.createdAt }
-    //       },
-    //       select: { senderId: true }
-    //     });
-
-    //     replyUsersCount = new Set(replies.map(r => r.senderId).filter(id => id !== result.senderId)).size;
-    //   }
-
-    //   // Extract mentions from updated content for Vespa
-    //   const extractedMentions = extractAllMentions(result.content);
-
-    //   // Combine data for Vespa with all required fields
-    //   const messageWithRelations = {
-    //     ...result,
-    //     sender,
-    //     attachments,
-    //     // Add Vespa-specific fields with real data
-    //     channelId: conversation?.channelId || '',
-    //     threadId: result.conversationId,
-    //     mentions: extractedMentions.userIds || [],
-    //     replyCount,
-    //     reactions: reactions.length, // Send reaction count instead of array
-    //     replyUsersCount,
-    //     updatedAt: new Date(), // Use current time for updates
-    //     deletedAt: undefined,
-    //     createdBy: sender?.email // Send user email instead of ID
-    //   };
-
-    //   await queueMessageIngestion(messageWithRelations, 'update');
-    // } catch (error) {
-    //   logger.error(`[VESPA-FLOW] Failed to queue message update for Vespa: ${result.messageId}`, error);
-    //   // Don't throw - message is still updated in DB
-    // }
 
     return result;
   }

@@ -972,9 +972,6 @@ export class XyneAIController {
   }
 }
 
-// ============================================================================
-// Helper: Read raw session metadata from DB
-// ============================================================================
 
 async function getRawSessionMetadata(sessionId: string): Promise<Record<string, any>> {
   try {
