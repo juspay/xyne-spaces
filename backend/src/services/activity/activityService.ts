@@ -18,6 +18,7 @@ export interface CreateActivityParams {
   ticketId?: string;
   conversationId?: string;
   channelId?: string;
+  channelName?: string;
   pullRequestId?: string;
   canvasId?: string;
   blockId?: string;
@@ -218,6 +219,12 @@ export class ActivityService {
    */
   async createActivity(params: CreateActivityParams): Promise<void> {
     const activity = await this.enrichActivityWithConversationCutoff(params);
+    const channelName =
+      activity.channelName ??
+      (activity.channelId
+        ? (await this.prisma.channel.findUnique({ where: { id: activity.channelId }, select: { name: true } }))?.name ??
+          undefined
+        : undefined);
     logger.info('[ActivityService] Creating activity', {
       activityId: activity.id,
       userId: activity.userId,
@@ -254,6 +261,7 @@ export class ActivityService {
           ? { conversationSeenCutoffAt: activity.conversationSeenCutoffAt }
           : {}),
         channelId: activity.channelId,
+        ...(channelName ? { channelName } : {}),
         actorId: activity.actorId,
         ...(activity.classification ? { classification: activity.classification } : {}),
         ...(activity.classificationJobType !== undefined
@@ -322,6 +330,7 @@ export class ActivityService {
           ? { conversationSeenCutoffAt: a.conversationSeenCutoffAt }
           : {}),
         channelId: a.channelId,
+        ...(a.channelName ? { channelName: a.channelName } : {}),
         actorId: a.actorId,
         ...(a.classification ? { classification: a.classification } : {}),
         ...(a.classificationJobType !== undefined
