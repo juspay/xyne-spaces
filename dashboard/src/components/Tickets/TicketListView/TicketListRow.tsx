@@ -154,7 +154,7 @@ export const TicketListRow = ({
             data-track-category='Tickets'
             data-track-name='ToggleTicketSelection'
           >
-            <Checkbox checked={isSelected} onChange={() => onToggleSelect()} label='' />
+            <Checkbox checked={isSelected} onChange={() => onToggleSelect()} label='' accent />
           </span>
         )}
         {isHumanInterventionTicket ? (

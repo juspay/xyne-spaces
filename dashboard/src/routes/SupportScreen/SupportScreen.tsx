@@ -1037,7 +1037,7 @@ const SupportScreen = (): ReactElement => {
   const dlMemberSyncTooltip = isDlMemberSyncing
     ? `Syncing older emails from ${dlMemberSyncStatus.memberEmail}`
     : 'Fetch latest emails or sync older DL emails';
-  const { markAsRead: markBulkAsRead } = useMarkTicketsAsRead();
+  const { markAsRead: markBulkAsRead, markAsUnread: markBulkAsUnread } = useMarkTicketsAsRead();
 
   type SelectedTicket = {
     id: string;
@@ -1082,6 +1082,41 @@ const SupportScreen = (): ReactElement => {
     markBulkAsRead(tickets);
     setSelectedTickets(new Map());
   }, [selectedTickets, markBulkAsRead]);
+
+  const handleMarkSelectedAsUnread = useCallback((): void => {
+    if (selectedTickets.size === 0) return;
+    const tickets = Array.from(selectedTickets.values());
+    markBulkAsUnread(tickets);
+    setSelectedTickets(new Map());
+  }, [selectedTickets, markBulkAsUnread]);
+
+  const handleToggleSelectAll = useCallback(
+    (
+      rows: ReadonlyArray<{
+        id: string;
+        lastEmailAt: number;
+        emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
+      }>,
+      select: boolean,
+    ): void => {
+      setSelectedTickets(prev => {
+        const next = new Map(prev);
+        for (const row of rows) {
+          if (select) {
+            next.set(row.id, {
+              id: row.id,
+              lastEmailAt: row.lastEmailAt,
+              emailReads: row.emailReads ?? [],
+            });
+          } else {
+            next.delete(row.id);
+          }
+        }
+        return next;
+      });
+    },
+    [],
+  );
 
   const handleMergeSelectedTickets = useCallback(
     async (parentTicketId: string): Promise<void> => {
@@ -1962,7 +1997,7 @@ const SupportScreen = (): ReactElement => {
                           <Button
                             variant='default'
                             size='sm'
-                            className='rounded-[10px] bg-[#6276BE]/80 hover:bg-[#6276BE]'
+                            className='rounded-[10px] bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/90 text-white'
                             onClick={() => openNewCompose(selectedChannelId)}
                             data-track-category='Support'
                             data-track-name='OpenComposeEmail'
@@ -2007,6 +2042,7 @@ const SupportScreen = (): ReactElement => {
                       type='button'
                       size='sm'
                       variant='default'
+                      className='bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/90 text-white'
                       onClick={handleMarkSelectedAsRead}
                       data-track-category='Support'
                       data-track-name='MarkSelectedTicketsAsRead'
@@ -2017,6 +2053,21 @@ const SupportScreen = (): ReactElement => {
                     >
                       <CheckCheck size={14} />
                       Mark as read
+                    </Button>
+                    <Button
+                      type='button'
+                      size='sm'
+                      variant='outline'
+                      onClick={handleMarkSelectedAsUnread}
+                      data-track-category='Support'
+                      data-track-name='MarkSelectedTicketsAsUnread'
+                      data-track-metadata={JSON.stringify({
+                        channelId: refetchChannelId,
+                        count: selectedTicketIds.size,
+                      })}
+                    >
+                      <Mail size={14} />
+                      Mark as unread
                     </Button>
                     {selectedTicketIds.size >= 2 && (
                       <Button
@@ -2160,6 +2211,8 @@ const SupportScreen = (): ReactElement => {
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
                         onBoardIdReady={setChannelBoardId}
+                        onPageChange={clearTicketSelection}
+                        onToggleSelectAll={handleToggleSelectAll}
                         onTicketClick={ticket => {
                           void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {

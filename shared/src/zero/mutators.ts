@@ -7885,6 +7885,21 @@ export const mutators = defineMutators({
         );
       },
     ),
+
+    bulkMarkAsUnread: defineMutator(
+      z.object({
+        ticketIds: z.array(z.string()).max(50, 'Cannot mark more than 50 tickets at once'),
+      }),
+      async ({ tx, ctx, args: { ticketIds } }) => {
+        if (ticketIds.length === 0) return;
+        const existing = await tx.run(
+          zql.email_reads
+            .where('userId', ctx.userID)
+            .where(h => h.cmp('ticketId', 'IN', ticketIds)),
+        );
+        await Promise.all(existing.map(e => tx.mutate.email_reads.delete({ id: e.id })));
+      },
+    ),
   },
 
   cleanupStageApprovals: defineMutator(

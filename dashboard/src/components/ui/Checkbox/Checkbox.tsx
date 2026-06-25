@@ -7,6 +7,8 @@ interface CheckboxProps {
   label?: string;
   indeterminate?: boolean;
   disabled?: boolean;
+  /** Fill the checked box with the theme accent color (--sidebar-badge-accent) instead of neutral --primary. */
+  accent?: boolean;
 }
 
 export function Checkbox({
@@ -15,8 +17,12 @@ export function Checkbox({
   label = 'Edit entire series',
   indeterminate = false,
   disabled = false,
+  accent = false,
 }: CheckboxProps): ReactElement {
   const inputRef = useRef<HTMLInputElement>(null);
+  const glyphStroke = accent
+    ? 'var(--sidebar-badge-accent-foreground)'
+    : 'hsl(var(--primary-foreground))';
   useEffect(() => {
     if (inputRef.current) inputRef.current.indeterminate = indeterminate;
   }, [indeterminate]);
@@ -40,7 +46,7 @@ export function Checkbox({
           relative flex items-center justify-center
           w-[18px] h-[18px] rounded-[4px] shrink-0
           border transition-all duration-150 ease-in-out
-          ${checked || indeterminate ? 'bg-primary border-primary ' : 'bg-card border-border '}
+          ${checked || indeterminate ? (accent ? 'bg-sidebar-badge-accent border-sidebar-badge-accent ' : 'bg-primary border-primary ') : 'bg-card border-border '}
         `}
       >
         <input
@@ -61,12 +67,7 @@ export function Checkbox({
             xmlns='http://www.w3.org/2000/svg'
             className='w-[10px] h-[2px]'
           >
-            <path
-              d='M1 1H9'
-              stroke='hsl(var(--primary-foreground))'
-              strokeWidth='1.6'
-              strokeLinecap='round'
-            />
+            <path d='M1 1H9' stroke={glyphStroke} strokeWidth='1.6' strokeLinecap='round' />
           </svg>
         ) : (
           <svg
@@ -79,7 +80,7 @@ export function Checkbox({
           >
             <path
               d='M1 4L3.5 6.5L9 1'
-              stroke='hsl(var(--primary-foreground))'
+              stroke={glyphStroke}
               strokeWidth='1.6'
               strokeLinecap='round'
               strokeLinejoin='round'

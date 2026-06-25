@@ -54,10 +54,9 @@ export function StagePicker({
     hasApprovers: boolean;
   } | null>(null);
 
-  // Pre-fetch the full ticket so it's ready when the form modal opens.
-  // Gating on boardId (not formModal) avoids a null ticketData gap when the modal opens.
+  // Lazy-fetch the full ticket (only non-linear form modals need it) so a list doesn't fetch every row.
   const [ticketData] = useCachedQuery(queries.ticketByIdV2({ ticketId }), {
-    enabled: !!boardId,
+    enabled: !!boardId && (open || formModal !== null),
   });
 
   const openFormModal = (targetStage: Stage, formId: string, hasApprovers: boolean): void => {
