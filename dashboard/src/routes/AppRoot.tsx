@@ -147,6 +147,7 @@ import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { xyneAIStreamManager } from '../services/XyneAI';
 import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
+import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
@@ -1392,6 +1393,23 @@ export const router = createBrowserRouter([
             element: <ThreadMessages />,
           },
         ],
+      },
+      {
+        path: '/newWindow/create-ticket',
+        element: (
+          <ZeroProvider>
+            <ZeroFallbackProvider>
+              <InitialStateLoader>
+                <EditProvider>
+                  <div className='h-full bg-background'>
+                    <CreateTicketWindow />
+                  </div>
+                  <AttachmentGalleryModal />
+                </EditProvider>
+              </InitialStateLoader>
+            </ZeroFallbackProvider>
+          </ZeroProvider>
+        ),
       },
       {
         path: '/invite',

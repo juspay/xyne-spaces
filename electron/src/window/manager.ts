@@ -148,6 +148,17 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       }
       
       // Internal URLs - allow new window
+      if (urlObj.pathname.startsWith('/newWindow/create-ticket')) {
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            width: 900,
+            height: 820,
+            minWidth: 640,
+            minHeight: 600,
+          },
+        };
+      }
       return { action: 'allow' };
       
     } catch (error) {

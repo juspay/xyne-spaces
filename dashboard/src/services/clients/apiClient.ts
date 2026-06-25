@@ -96,11 +96,20 @@ apiConfig.interceptors.request.use(
       config.headers['Access-Control-Allow-Credentials'] = 'true';
       config.headers['x-request-id'] = requestId;
 
-      // NEW: Add X-Workspace-Id header for multi-workspace support
-      // Extract workspaceId from current URL path (e.g., /:workspaceId/chat)
-      const pathMatch = window.location.pathname.match(/^\/([^/]+)/);
-      if (pathMatch && pathMatch[1] && pathMatch[1] !== 'auth') {
-        config.headers['x-workspace-id'] = pathMatch[1];
+      // X-Workspace-Id for multi-workspace. Main routes are /:workspaceId/...; standalone
+      // /newWindow/* windows carry it as a query param (then fall back to lastActiveWorkspaceId).
+      const firstPathSegment = window.location.pathname.match(/^\/([^/]+)/)?.[1];
+      let workspaceId: string | undefined = firstPathSegment;
+      if (firstPathSegment === 'newWindow') {
+        const search = new URLSearchParams(window.location.search);
+        workspaceId =
+          search.get('workspaceId') ||
+          (logger.emailId
+            ? localStorage.getItem(`lastActiveWorkspaceId_${logger.emailId}`) || undefined
+            : undefined);
+      }
+      if (workspaceId && workspaceId !== 'auth') {
+        config.headers['x-workspace-id'] = workspaceId;
       }
 
       const zeroClientId = logger.zeroClientId;

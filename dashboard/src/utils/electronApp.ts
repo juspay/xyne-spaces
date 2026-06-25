@@ -119,3 +119,155 @@ export const standaloneNavigate = (
 
   void navigate(normalizedPath, navigateOptions);
 };
+
+export interface CreateTicketPopoutDraft {
+  popoutId: string;
+  workspaceId?: string | null | undefined;
+  channelId: string;
+  projectId: string;
+  tab?: string | null | undefined;
+  sourceConversationId?: string | null | undefined;
+  initialMessageId?: string | null | undefined;
+  parentTicketId?: string | null | undefined;
+  isFromSubTicket?: boolean | undefined;
+  isFromAI?: boolean | undefined;
+  subTickets?: Array<{ title: string; description?: string }> | undefined;
+  excludedChatAttachmentIds?: string[] | undefined;
+  // Full in-progress form snapshot so nothing the user entered is dropped.
+  form: {
+    title?: string | undefined;
+    description?: string | undefined;
+    priority?: string | null | undefined;
+    status?: string | undefined;
+    assignee?: { type: string; value: string } | null | undefined;
+    eta?: string | null | undefined; // ISO
+    tags?: string[] | undefined;
+    boardId?: string | undefined;
+    workflowType?: string | undefined;
+    merchantId?: string | undefined;
+    ticketType?: string | undefined;
+    dynamicFields?: Record<string, string | string[]> | undefined;
+  };
+}
+
+const POPOUT_DRAFT_PREFIX = 'xyne:createTicketPopout:';
+
+export const openCreateTicketWindow = (draft: CreateTicketPopoutDraft): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const draftKey = POPOUT_DRAFT_PREFIX + draft.popoutId;
+  try {
+    localStorage.setItem(draftKey, JSON.stringify(draft));
+  } catch {
+    // ignore
+  }
+
+  const search = new URLSearchParams();
+  search.set('popoutId', draft.popoutId);
+  if (draft.workspaceId) search.set('workspaceId', draft.workspaceId);
+  if (draft.tab) search.set('tab', draft.tab);
+
+  const path = toStandalonePath(`/create-ticket?${search.toString()}`);
+  const newWindow = window.open(
+    path,
+    '_blank',
+    isElectronApp() ? '' : 'popup=yes,width=960,height=900',
+  );
+  if (newWindow) {
+    newWindow.focus();
+    return true;
+  }
+
+  try {
+    localStorage.removeItem(draftKey);
+  } catch {
+    // ignore
+  }
+  console.warn('Failed to open create-ticket window; popup may be blocked');
+  return false;
+};
+
+export const consumeCreateTicketDraft = (popoutId: string): CreateTicketPopoutDraft | null => {
+  if (typeof window === 'undefined' || !popoutId) {
+    return null;
+  }
+  const draftKey = POPOUT_DRAFT_PREFIX + popoutId;
+  try {
+    const raw = localStorage.getItem(draftKey);
+    if (!raw) {
+      return null;
+    }
+    localStorage.removeItem(draftKey);
+    return JSON.parse(raw) as CreateTicketPopoutDraft;
+  } catch {
+    return null;
+  }
+};
+
+const POPOUT_TICKET_CHANNEL = 'xyne-create-ticket-popout';
+
+export interface PopOutTicketResult {
+  id: string;
+  conversationId?: string;
+  xyneId?: string;
+  workflowType?: string;
+}
+
+interface PopOutTicketMessage {
+  popoutId: string;
+  ticket: PopOutTicketResult;
+}
+
+export const postCreateTicketResult = (popoutId: string, ticket: PopOutTicketResult): void => {
+  if (typeof BroadcastChannel === 'undefined' || !popoutId) {
+    return;
+  }
+  try {
+    const channel = new BroadcastChannel(POPOUT_TICKET_CHANNEL);
+    channel.postMessage({ popoutId, ticket } as PopOutTicketMessage);
+    channel.close();
+  } catch {
+    // ignore
+  }
+};
+
+export const subscribeCreateTicketResult = (
+  popoutId: string,
+  onResult: (ticket: PopOutTicketResult) => void,
+  timeoutMs = 15 * 60 * 1000,
+): (() => void) => {
+  if (typeof BroadcastChannel === 'undefined' || !popoutId) {
+    return () => {};
+  }
+
+  let channel: BroadcastChannel | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const dispose = (): void => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (channel) {
+      channel.close();
+      channel = null;
+    }
+  };
+
+  try {
+    channel = new BroadcastChannel(POPOUT_TICKET_CHANNEL);
+    channel.onmessage = (event: MessageEvent<PopOutTicketMessage>): void => {
+      if (event.data && event.data.popoutId === popoutId) {
+        onResult(event.data.ticket);
+        dispose();
+      }
+    };
+    timer = setTimeout(dispose, timeoutMs);
+  } catch {
+    dispose();
+  }
+
+  return dispose;
+};
