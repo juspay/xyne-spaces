@@ -11,6 +11,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
 const DEFAULT_MAX_RETRIES = 3;
+const AGENT_RESULT_LOG_LIMIT = 2_000;
 
 const RunAgentConfigSchema = z.object({
   agentSlug: variableRef(z.string().min(1).describe('Claw agent slug')),
@@ -62,6 +63,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
     const runUserId = await resolveRunUserId(agentSlug, context.automation.createdById);
+    const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
       `[RUN_AGENT] firing — executionId=${store.runId} stepIndex=${currentIndex} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
@@ -74,6 +76,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
         task: prompt,
         userId: runUserId,
         callbackUrl,
+        ...(visibleContext ? visibleContext : {}),
       });
     } catch (err) {
       logger.error(
@@ -104,6 +107,9 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
 
     const declaredSchema = (cfg.outputSchema ?? {}) as Record<string, unknown>;
     const rawResult = (agentRawResult as { result?: unknown }).result;
+    logger.info(
+      `[RUN_AGENT] callback result — status=${String(envelopeStatus ?? '∅')} rawType=${typeof rawResult} raw=${formatForLog(rawResult)}`,
+    );
 
     try {
       const parsed = parseAgentJson(rawResult);
@@ -153,6 +159,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     );
     const runUserId = await resolveRunUserId(agentSlug, context.automation.createdById);
     const callbackUrl = buildCallbackUrl(store.runId, stepName);
+    const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
       `[RUN_AGENT] retry ${nextRetry}/${maxRetries} firing — executionId=${store.runId} step=${stepName} sessionId=${retrySessionId}`,
@@ -165,6 +172,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
         task: retryPrompt,
         userId: runUserId,
         callbackUrl,
+        ...(visibleContext ? visibleContext : {}),
       });
     } catch (err) {
       throw new Error(
@@ -183,6 +191,23 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
 }
 
 export const runAgentStep = new RunAgentStep();
+
+function resolveVisibleConversationContext(
+  context: AutomationContext,
+): { conversationId: string; channelId: string } | null {
+  const trigger = context.trigger as Record<string, unknown> | undefined;
+  const conversationId =
+    asNonEmptyString(trigger?.conversationId) ??
+    asNonEmptyString((trigger?.message as Record<string, unknown> | undefined)?.conversationId);
+  const channelId =
+    asNonEmptyString(trigger?.channelId) ??
+    asNonEmptyString((trigger?.message as Record<string, unknown> | undefined)?.channelId);
+  return conversationId && channelId ? { conversationId, channelId } : null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
 
 function buildCallbackUrl(executionId: string, stepName: string): string {
   return `${config.xyneClaw.callbackUrl.replace(/\/$/, '')}/api/internal/automations/claw-callback/${encodeURIComponent(executionId)}/${encodeURIComponent(stepName)}`;
@@ -244,3 +269,10 @@ function stripJsonFence(text: string): string {
   return fence?.[1]?.trim() ?? text;
 }
 
+function formatForLog(value: unknown): string {
+  const text = typeof value === 'string' ? JSON.stringify(value) : JSON.stringify(value);
+  if (text === undefined) return 'undefined';
+  return text.length > AGENT_RESULT_LOG_LIMIT
+    ? `${text.slice(0, AGENT_RESULT_LOG_LIMIT)}...[truncated ${text.length - AGENT_RESULT_LOG_LIMIT} chars]`
+    : text;
+}
