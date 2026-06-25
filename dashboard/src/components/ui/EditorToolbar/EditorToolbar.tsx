@@ -282,6 +282,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <button
               type='button'
               onClick={handleBold}
+              onMouseDown={e => e.preventDefault()}
               className={buttonClass(isActive.bold)}
               aria-label='Bold'
               aria-pressed={isActive.bold}
@@ -332,6 +333,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 <button
                   type='button'
                   onClick={handleCode}
+                  onMouseDown={e => e.preventDefault()}
                   className={buttonClass(isActive.code)}
                   aria-label='Inline code'
                   aria-pressed={isActive.code}

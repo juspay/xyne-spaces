@@ -607,6 +607,11 @@
     @apply bg-muted border border-border rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-muted-foreground;
   }
 
+  .chat-input-field strong code:not(pre code),
+  .chat-input-field code:not(pre code) strong {
+    @apply font-bold;
+  }
+
   /* Code Block Inner Code*/
   .chat-input-field pre code {
     @apply bg-transparent border-0 p-0 text-sm leading-6 block overflow-x-auto font-mono text-foreground;
@@ -1458,6 +1463,11 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    ---------------------------- */
 .jp-message-html code:not(pre code) {
   @apply bg-muted border border-border rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-muted-foreground;
+}
+
+.jp-message-html strong code:not(pre code),
+.jp-message-html code:not(pre code) strong {
+  @apply font-bold;
 }
 
 /* ----------------------------
