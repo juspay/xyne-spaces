@@ -4,8 +4,6 @@ import {logger} from '@/utils/logger';
 // Re-export time keyword parser utilities
 export {
   parseTimeKeywords,
-  getDefaultFreshnessWeight,
-  getDefaultRankingProfile,
   formatTimeRange,
   type ParsedTimeQuery,
   type TimeKeywordConfig,

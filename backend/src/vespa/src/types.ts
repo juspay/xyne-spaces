@@ -42,12 +42,6 @@ export const MemoryScope = {
 
 export type MemoryScope = (typeof MemoryScope)[keyof typeof MemoryScope];
 
-export interface TranscriptEntry {
-  timestamp: string;
-  speaker: string;
-  content: string;
-}
-
 export interface Chapter {
   timestamp: string;
   topic: string;
@@ -95,7 +89,6 @@ export interface SamTranscriptInput {
 }
 
 // Deprecated: Use VESPA_SCHEMAS instead
-export const AllSources: VespaSchema[] = VESPA_SCHEMAS;
 
 export enum VespaDocType {
   TICKET = 'ticket',

@@ -23,10 +23,6 @@ export interface VespaJobConfig<S extends keyof SchemaDataMap> {
 }
 
 export type VespaQueueHandler = VespaJobConfig<keyof SchemaDataMap>
-
-export type VespaJobWithPartialData<T> =
-  Omit<VespaJobConfig<keyof SchemaDataMap>, "data"> & { data: Partial<T> };
-
 export type VespaJob = VespaJobConfig<keyof SchemaDataMap>
 /**
  * Table names from the schema
