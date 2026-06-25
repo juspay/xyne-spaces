@@ -71,7 +71,7 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
     mimeTypes: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
     extensions: ['.docx'],
     component: DocxViewer,
-    wrapperClass: 'h-full overflow-auto',
+    wrapperClass: 'h-full w-full overflow-auto',
     displayName: 'Word Document',
   },
   code: {
