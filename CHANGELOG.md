@@ -1,3 +1,24 @@
+## [1.170.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.169.2...v1.170.0) (2026-06-25)
+
+
+### Features
+
+* add Cmd+K Open/Search ghost hint with inline name completion ([c99cf38](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c99cf38ed529b9263e4ce9f0376371be6ccba997)), closes [#8015](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8015)
+* add kb_get_chunks + kb_search_within backend+dashboard ([007c240](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/007c24057a91dd862f627e982c17d585b55baa19)), closes [#8016](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8016)
+* added kb scoping in ask ai + vespa query in debug ([0d2320c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0d2320c897d311f110544d346233a354cc95099f)), closes [#7983](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7983)
+* centralize new user creation accesses ([ac594fb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ac594fb2d0739444ba50e1bd87bc9571a7f7b78c)), closes [#7812](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7812)
+* domain check removed on DL type desks ([e2ed39a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e2ed39a4d4317725024a41a5113b57d3ea5fad4a)), closes [#7370](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7370)
+* implements search in channel icon in channel header(ticketId: 12533) ([46e1514](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/46e15144dad0c7b6237dcae8557d1554f51e02de)), closes [#8019](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8019)
+* Revert "Pull request [#7479](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7479): keyword notifications" ([aa66e65](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/aa66e6540954c23da6c5a9f2a0cbc25883aaf4c8)), closes [#8005](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8005)
+
+
+### Bug Fixes
+
+* Fix stage approval uploaded document issue ([874637a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/874637a3d0dd7a4dfd7b4745a33e5aaeff897594))
+* hooks related code-cleanup ([76b89dc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/76b89dcaddfa0327d7647cb09cd608a8094da3fc)), closes [#7970](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7970)
+* ingestion related code cleanup ([fea971e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fea971e9987325e60afa5ccc54680d22aa659e52)), closes [#7960](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7960)
+* stop pasted link fragment from hijacking Cmd K search. ([5714979](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5714979692eae762feb161010fb1ef0910814f4e)), closes [#7997](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7997)
+
 ## [1.169.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.169.1...v1.169.2) (2026-06-24)
 
 
