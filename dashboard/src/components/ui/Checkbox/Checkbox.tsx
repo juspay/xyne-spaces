@@ -1,12 +1,10 @@
 import { ReactElement, useEffect, useRef } from 'react';
-import { cn } from '../../../utils/classNames';
 
 interface CheckboxProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label?: string;
   indeterminate?: boolean;
-  disabled?: boolean;
   /** Fill the checked box with the theme accent color (--sidebar-badge-accent) instead of neutral --primary. */
   accent?: boolean;
 }
@@ -16,7 +14,6 @@ export function Checkbox({
   onChange,
   label = 'Edit entire series',
   indeterminate = false,
-  disabled = false,
   accent = false,
 }: CheckboxProps): ReactElement {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -28,12 +25,7 @@ export function Checkbox({
   }, [indeterminate]);
 
   return (
-    <label
-      className={cn(
-        'group inline-flex items-center gap-2 select-none w-fit',
-        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-      )}
-    >
+    <label className='group inline-flex items-center gap-2 cursor-pointer select-none w-fit'>
       {/* Custom checkbox box — both "checked" and "indeterminate" share the
           filled-primary look (Gmail/Outlook convention); the glyph inside
           (check vs dash) is what distinguishes "all" from "some". The
@@ -53,12 +45,8 @@ export function Checkbox({
           ref={inputRef}
           type='checkbox'
           checked={checked}
-          disabled={disabled}
           onChange={e => onChange(e.target.checked)}
-          className={cn(
-            'absolute inset-0 w-full h-full opacity-0 m-0 p-0',
-            disabled ? 'cursor-not-allowed' : 'cursor-pointer',
-          )}
+          className='absolute inset-0 w-full h-full opacity-0 cursor-pointer m-0 p-0'
         />
         {indeterminate ? (
           <svg

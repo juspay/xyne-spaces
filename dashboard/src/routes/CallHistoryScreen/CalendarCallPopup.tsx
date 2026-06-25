@@ -607,8 +607,7 @@ const CalendarCallPopup = ({
                 Download transcript
               </button>
             )
-          : onJoinCall &&
-            currentParticipant && (
+          : onJoinCall && (
               <Button
                 onClick={onJoinCall}
                 className='!bg-action-primary !text-action-primary-foreground hover:opacity-90 duration-200 rounded-lg gap-1.5 px-4 py-2 h-8'
