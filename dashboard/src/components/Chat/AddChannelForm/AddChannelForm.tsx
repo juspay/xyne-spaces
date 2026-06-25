@@ -7,6 +7,7 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import { Hash, Lock, AlertCircle, FolderKanban } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
+import { Tooltip } from '../../ui/Tooltip';
 import {
   channelService,
   CreateChannelFormData,
@@ -239,6 +240,24 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
     (requireConnector && deskType === 'SLACK' && !selectedSlackChannelId) ||
     duplicateCheck?.isDuplicate === true;
+
+  const submitDisabledReason = ((): string | null => {
+    if (!nameValue || nameValue.length < 2) return 'Channel name must be at least 2 characters';
+    if (nameValue.length > 80) return 'Channel name must be 80 characters or less';
+    if (duplicateCheck?.isDuplicate) return 'Channel name already exists';
+    if (!projectIdValue) return 'Please select a project';
+    if (requireConnector) {
+      if (deskType === 'EMAIL' && !selectedConnector)
+        return 'Please select an email provider (Google or Microsoft)';
+      if (deskType === 'DL') {
+        if (!workspaceMailbox?.configured) return 'Workspace shared mailbox is not configured';
+        if (!dlEmailInput) return 'Please enter a distribution list email';
+        if (!isValidDlEmail(dlEmailInput)) return dlEmailError ?? 'Invalid distribution list email';
+      }
+      if (deskType === 'SLACK' && !selectedSlackChannelId) return 'Please select a Slack channel';
+    }
+    return null;
+  })();
 
   // Auto-select first project if none selected
   useEffect(() => {
@@ -832,20 +851,31 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             Cancel
           </Button>
         )}
-        <Button
-          variant='default'
-          size='default'
-          loading={loading || false}
-          type='submit'
-          disabled={isSubmitDisabled}
-          className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed'
-          data-testid='create-channel-button'
-          data-track-category='ADD_CHANNEL_FORM'
-          data-track-name='CREATE_CHANNEL_SUBMIT'
-          data-track-metadata={JSON.stringify({ mode, channelName })}
+        <Tooltip
+          content={submitDisabledReason ?? ''}
+          {...(isSubmitDisabled && Boolean(submitDisabledReason) ? {} : { open: false })}
+          side='top'
         >
-          {mode === 'promote' ? 'Promote to Channel' : 'Create Channel'}
-        </Button>
+          <span className={cn('inline-flex', isSubmitDisabled && 'cursor-not-allowed')}>
+            <Button
+              variant='default'
+              size='default'
+              loading={loading || false}
+              type='submit'
+              disabled={isSubmitDisabled}
+              className={cn(
+                'bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 disabled:opacity-50',
+                isSubmitDisabled && 'pointer-events-none',
+              )}
+              data-testid='create-channel-button'
+              data-track-category='ADD_CHANNEL_FORM'
+              data-track-name='CREATE_CHANNEL_SUBMIT'
+              data-track-metadata={JSON.stringify({ mode, channelName })}
+            >
+              {mode === 'promote' ? 'Promote to Channel' : 'Create Channel'}
+            </Button>
+          </span>
+        </Tooltip>
       </div>
     </div>
   );

@@ -14,6 +14,7 @@ export interface BulkMarkTicket {
 
 export function useMarkTicketsAsRead(): {
   markAsRead: (tickets: ReadonlyArray<BulkMarkTicket>) => number;
+  markAsUnread: (tickets: ReadonlyArray<BulkMarkTicket>) => number;
 } {
   const { userID } = useAuthContextValues();
   const zero = useZero();
@@ -59,5 +60,43 @@ export function useMarkTicketsAsRead(): {
     [zero, userID],
   );
 
-  return { markAsRead };
+  const markAsUnread = useCallback(
+    (tickets: ReadonlyArray<BulkMarkTicket>): number => {
+      const ticketIds: string[] = [];
+
+      for (const ticket of tickets) {
+        const userRow = (ticket.emailReads ?? []).find(r => r.userId === userID);
+
+        if (!userRow || userRow.lastReadEmailAt < ticket.lastEmailAt) {
+          continue;
+        }
+
+        ticketIds.push(ticket.id);
+      }
+
+      if (ticketIds.length === 0) {
+        toast.success('Already up to date');
+        return 0;
+      }
+
+      void zero
+        .mutate(mutators.emailRead.bulkMarkAsUnread({ ticketIds }))
+        .client.catch((err: unknown) => {
+          logger.error(LoggerEvent.ZERO_MUTATION_ERROR, {
+            hook: 'useMarkTicketsAsRead',
+            mutator: 'emailRead.bulkMarkAsUnread',
+            error: err instanceof Error ? err.message : String(err),
+          });
+          toast.error('Failed to mark some tickets as unread');
+        });
+
+      toast.success(
+        `Marked ${ticketIds.length} ticket${ticketIds.length === 1 ? '' : 's'} as unread`,
+      );
+      return ticketIds.length;
+    },
+    [zero, userID],
+  );
+
+  return { markAsRead, markAsUnread };
 }

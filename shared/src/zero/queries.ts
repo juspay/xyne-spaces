@@ -1048,6 +1048,8 @@ export const queries = defineQueries({
 
       const orderDirection = dir === 'forward' ? 'desc' : 'asc';
       query = query.orderBy('lastEmailAt', orderDirection);
+      // id tiebreak keeps the (lastEmailAt, id) keyset cursor deterministic on ties.
+      query = query.orderBy('id', orderDirection);
 
       if (start) {
         query = query.start(

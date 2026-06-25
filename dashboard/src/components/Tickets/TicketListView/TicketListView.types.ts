@@ -10,6 +10,7 @@ export interface TicketListItem {
   lastEmailAt?: number | null;
   priority?: TicketPriority | string | null;
   assignedTo?: string | null;
+  boardId?: string | null;
   aiCategory?: string | null;
   metadata?: unknown;
   emailCount?: number | null;
