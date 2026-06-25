@@ -442,33 +442,10 @@ export function parseTimeKeywords(
 // ============== Utility Functions ==============
 
 /**
- * Get default freshness weight (when no time keyword detected)
- */
-export function getDefaultFreshnessWeight(): number {
-  return FRESHNESS_WEIGHTS.DEFAULT;
-}
-export function getDefaultFilteringWeight(): number {
-  return FILTERING_WEIGHTS.DEFAULT;
-}
-/**
- * Get default ranking profile
- */
-export function getDefaultRankingProfile(): string {
-  return RANKING_PROFILES.DEFAULT;
-}
-
-/**
  * Format time range for logging/debugging
  */
 export function formatTimeRange(timeRange: TimeRange): string {
   const from = new Date(timeRange.from);
   const to = new Date(timeRange.to);
   return `${from.toISOString()} to ${to.toISOString()}`;
-}
-
-/**
- * Get all supported time keywords
- */
-export function getSupportedTimeKeywords(): string[] {
-  return Object.keys(TIME_KEYWORD_DEFINITIONS);
 }

@@ -79,17 +79,3 @@ export function collectVespaJobs(
   // Accumulate jobs in place
   accumulator.push(...jobs);
 }
-
-/**
- * Gets the count of accumulated jobs (useful for logging/debugging)
- */
-export function getAccumulatedJobCount(accumulator: VespaJobsAccumulator): number {
-  return accumulator.length;
-}
-
-/**
- * Clears the accumulator (useful if transaction rolls back)
- */
-export function clearAccumulator(accumulator: VespaJobsAccumulator): void {
-  accumulator.length = 0;
-}

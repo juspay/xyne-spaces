@@ -4,9 +4,9 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import { CanvasVisibility, ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
 import { FormFieldType } from '@xyne/shared';
-import { VespaJob, VespaJobType, VespaPayload } from './types';
+import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Conversation, Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem } from '@prisma/client';
+import { Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem } from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import vespaClient from '@/vespa/client';
@@ -306,81 +306,6 @@ export const mapChannel = async (
     orgId: effectiveOrgId,
   };
 }
-
-export const updateChannelNameInPreviousMessages = async (
-  id: string,
-  channelName?: string,
-): Promise<void> => {
-  const conversationBatchSize = 50;
-
-  let lastConversationId: string | undefined;
-
-  while (true) {
-    const conversationQuery: Parameters<
-      typeof db.conversation.findMany
-    >[0] = {
-      where: { channelId: id },
-      take: conversationBatchSize,
-      orderBy: { conversationId: 'asc' },
-    };
-
-    if (lastConversationId) {
-      conversationQuery.cursor = { conversationId: lastConversationId };
-      conversationQuery.skip = 1;
-    }
-
-    const conversations: Conversation[] =
-      await db.conversation.findMany(conversationQuery);
-
-    if (conversations.length === 0) break;
-
-    for (const conversation of conversations) {
-      const messageBatchSize = 50;
-      let lastMessageId: string | undefined;
-
-      while (true) {
-        const messageQuery: Parameters<
-          typeof db.message.findMany
-        >[0] = {
-          where: { conversationId: conversation.conversationId },
-          take: messageBatchSize,
-          orderBy: { messageId: 'asc' },
-        };
-
-        if (lastMessageId) {
-          messageQuery.cursor = { messageId: lastMessageId };
-          messageQuery.skip = 1;
-        }
-
-        const messages: Message[] =
-          await db.message.findMany(messageQuery);
-
-        if (messages.length === 0) break;
-
-        const updates = messages.map((message) => ({
-          docId: message.messageId,
-          fields: {
-            docType: VespaDocType.MESSAGE,
-            docId: message.messageId,
-            messageChannelName: channelName || '',
-          },
-        }));
-
-        const results = await vespaClient.crudService.update(updates, messageSchema);
-        const failed = results.filter(r => !r.success);
-        if (failed.length > 0) {
-          logger.error(`[CHANNEL NAME UPDATE] ${failed.length}/${results.length} updates failed for channelId: ${id}`);
-        }
-
-        lastMessageId = messages[messages.length - 1].messageId;
-      }
-    }
-
-    lastConversationId =
-      conversations[conversations.length - 1].conversationId;
-  }
-};
-
 export const mapAndUpdatePreviousMessagesMentions = async (
   messageId: string,
   conversationId: string,
@@ -1383,14 +1308,6 @@ export const mapBySchema = async (
   }
   throw new Error(`Unknown job type: ${jobType}`);
 }
-
-export const queueVespaJob = (schema: VespaSchema, jobType: VespaJobType, data: InsertDocument | Partial<InsertDocument>): VespaJob => ({
-  schema,
-  jobType,
-  docId: data.docId || "",
-  data
-})
-
 export const fetchDataBySchema = async (
   schema: VespaSchema,
   docId: string,

@@ -4,8 +4,6 @@ export { VespaHandlerFactory } from './core/handler-factory';
 export {
   createVespaJobsAccumulator,
   collectVespaJobs,
-  getAccumulatedJobCount,
-  clearAccumulator,
   type VespaOperation,
 } from './core/collector';
 export type {
