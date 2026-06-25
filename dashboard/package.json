@@ -76,6 +76,7 @@
     "@tiptap/extension-blockquote": "^3.8.0",
     "@tiptap/extension-bold": "^3.8.0",
     "@tiptap/extension-bullet-list": "^3.8.0",
+    "@tiptap/extension-code": "3.15.3",
     "@tiptap/extension-code-block-lowlight": "^3.10.2",
     "@tiptap/extension-color": "^3.23.1",
     "@tiptap/extension-document": "^3.8.0",

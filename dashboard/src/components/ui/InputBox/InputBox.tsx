@@ -9,6 +9,7 @@ import React, {
 import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
+import Code from '@tiptap/extension-code';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
 
@@ -469,11 +470,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               class: 'line-through',
             },
           },
-          code: {
-            HTMLAttributes: {
-              class: 'bg-muted rounded px-1 py-0.5 text-foreground font-mono text-[0.85em]',
-            },
-          },
+          code: false,
           blockquote: {
             HTMLAttributes: {
               class: 'border-l-4 border-muted-foreground pl-4 text-foreground',
@@ -498,6 +495,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             HTMLAttributes: {
               class: 'm-0 leading-6',
             },
+          },
+        }),
+        Code.extend({
+          excludes: '',
+        }).configure({
+          HTMLAttributes: {
+            class: 'bg-muted rounded px-1 py-0.5 text-foreground font-mono text-[0.85em]',
           },
         }),
         MaxListDepthPlugin,
