@@ -1,6 +1,5 @@
 import { Prisma, Tag, TagMethod, TagsConfig } from '@prisma/client';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { assertConfigScriptsValid } from './generators/automated';
 import { TAG_FORMAT_REGEX, TagsConfigShapeSchema } from './schema';
 import type { CategoryConfig, GeneratedTag, PersistedTag, TagsConfigShape } from './types';
 
@@ -14,17 +13,8 @@ export class TagServiceError extends Error {
   }
 }
 
-/** Options shared by config writes. `validateScripts` runs each automated
- * category's `script` once at save time (default on); the pipeline's internal
- * auto-merge of new tags passes `false` since it never changes scripts. */
-export interface ConfigWriteOptions {
-  validateScripts?: boolean;
-  mockContext?: string;
-}
-
 const TAG_METHOD_MAP: Record<string, TagMethod> = {
   llm: TagMethod.LLM,
-  automated: TagMethod.AUTOMATED,
   manual: TagMethod.MANUAL,
 };
 
@@ -37,12 +27,7 @@ export class TagService {
     workspaceId: string,
     config: TagsConfigShape,
     createdBy?: string | null,
-    options: ConfigWriteOptions = {},
   ): Promise<TagsConfig> {
-    if (options.validateScripts !== false) {
-      assertConfigScriptsValid(config, options.mockContext);
-    }
-
     const existing = await tagRepository.getActiveConfigByKey(configKey);
     if (existing) {
       throw new TagServiceError(`Active config already exists for configKey "${configKey}"`, 409);
@@ -62,12 +47,7 @@ export class TagService {
     configKey: string,
     newConfig: TagsConfigShape,
     updatedBy?: string | null,
-    options: ConfigWriteOptions = {},
   ): Promise<TagsConfig> {
-    if (options.validateScripts !== false) {
-      assertConfigScriptsValid(newConfig, options.mockContext);
-    }
-
     return tagRepository.getDb().$transaction(async (tx) => {
       const existing = await tagRepository.getActiveConfigByKey(configKey, tx);
       if (!existing) {

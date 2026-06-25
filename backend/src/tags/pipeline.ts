@@ -4,7 +4,6 @@ import { config as appConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { generateAutomatedTags } from './generators/automated';
 import { generateLlmTags } from './generators/llm';
 import { TagsConfigShapeSchema } from './schema';
 import { tagService } from './service';
@@ -18,7 +17,7 @@ import type {
   TagGenerationResult,
 } from './types';
 
-export type GeneratorMethod = 'llm' | 'automated';
+export type GeneratorMethod = 'llm';
 
 export class TagGenerationPipeline extends EventEmitter {
   private queue: Bull.Queue<TagGenerationJobData> | null = null;
@@ -188,7 +187,6 @@ export class TagGenerationPipeline extends EventEmitter {
 
   private registerDefaultGenerators(): void {
     this.registerGenerator('llm', generateLlmTags);
-    this.registerGenerator('automated', generateAutomatedTags);
   }
 
   private registerGenerator(method: GeneratorMethod, fn: GeneratorFn): void {
@@ -247,7 +245,6 @@ export class TagGenerationPipeline extends EventEmitter {
           categories: mergedCategories,
         },
         undefined,
-        { validateScripts: false },
       );
     }
 

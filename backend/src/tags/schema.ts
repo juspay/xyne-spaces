@@ -4,34 +4,18 @@ import { TagMethod } from '@prisma/client';
 export const TagMethodSchema = z.nativeEnum(TagMethod);
 
 export const TAG_FORMAT_REGEX = /^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*$/;
-export const TAG_SCRIPT_TIMEOUT_MAX_MS = 5 * 60 * 1000;
 
 const TAG_FORMAT_MESSAGE = 'must be lowercase, hyphen-separated, alphanumeric segments';
 const TagNameSchema = z.string().regex(TAG_FORMAT_REGEX, TAG_FORMAT_MESSAGE);
 
 export const CategoryConfigSchema = z
   .object({
-    method: z.enum(['manual', 'llm', 'automated']),
+    method: z.enum(['manual', 'llm']),
     count: z.number().int().positive().optional(),
     tags: z.array(TagNameSchema).optional(),
     is_new_tag_allowed: z.boolean().optional(),
     blacklist: z.array(TagNameSchema).optional(),
     prompt: z.string().optional(),
-    script: z.string().optional(),
-    script_timeout_ms: z.number().int().positive().max(TAG_SCRIPT_TIMEOUT_MAX_MS).optional(),
-  })
-  .superRefine((category, ctx) => {
-    if (category.method !== 'automated') {
-      return;
-    }
-
-    if (typeof category.script !== 'string' || category.script.trim().length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['script'],
-        message: 'automated categories must define a non-empty script',
-      });
-    }
   });
 
 export const TagsConfigShapeSchema = z.object({
@@ -128,12 +112,10 @@ export const CreateTagsConfigBodySchema = z.object({
   configKey: z.string().min(1),
   sourceType: z.string().min(1),
   config: TagsConfigShapeSchema,
-  sampleContext: z.string().optional(),
 });
 
 export const UpdateTagsConfigBodySchema = z.object({
   config: TagsConfigShapeSchema,
-  sampleContext: z.string().optional(),
 });
 
 export type CreateTagsConfigBody = z.infer<typeof CreateTagsConfigBodySchema>;
