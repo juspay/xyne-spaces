@@ -36,5 +36,3 @@ export const useRouteContext = (): {
     buildChannelRoute,
   };
 };
-
-export const useDirectoryRouteContext = useRouteContext;

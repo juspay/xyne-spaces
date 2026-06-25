@@ -54,14 +54,3 @@ export function useUpsertBoardSlaPolicy() {
     [zero],
   );
 }
-
-export function useDeleteBoardSlaPolicy() {
-  const zero = useZero();
-
-  return useCallback(
-    (id: string) => {
-      zero.mutate(mutators.boardSlaPolicy.delete({ id }));
-    },
-    [zero],
-  );
-}

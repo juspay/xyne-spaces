@@ -35,12 +35,6 @@ const readCache = (channelId: string): DeskPeople | undefined => {
   }
   return entry.people;
 };
-
-export const clearDeskPeopleCache = (channelId?: string): void => {
-  if (channelId) cache.delete(channelId);
-  else cache.clear();
-};
-
 /**
  * Fetches the distinct senders/recipients actually present in a desk channel's
  * indexed mail (derived live from Vespa, not the user's address book). Powers

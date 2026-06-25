@@ -17,9 +17,7 @@ import {
   deleteSessionApi,
   updateSessionMetadataApi,
   sessionDetailToConversationHistory,
-  type SessionMetadataPayload,
-  fetchSessionsByConversationId,
-  type SessionListItem,
+  SessionMetadataPayload,
 } from '../services/XyneAI/XyneAISessionsService';
 
 // ============================================================================
@@ -27,8 +25,6 @@ import {
 // ============================================================================
 
 const SESSIONS_KEY = ['xyne-ai-sessions'] as const;
-const sessionDetailKey = (sessionId: string) => ['xyne-ai-session', sessionId] as const;
-
 // ============================================================================
 // Hooks
 // ============================================================================
@@ -41,19 +37,6 @@ export function useSessionsList() {
     queryKey: SESSIONS_KEY,
     queryFn: fetchSessions,
     staleTime: 30_000,
-  });
-}
-
-/**
- * Fetch full session detail (with messages) for a specific session.
- */
-export function useSessionDetail(sessionId: string | null) {
-  return useQuery({
-    queryKey: sessionDetailKey(sessionId || ''),
-    queryFn: () => fetchSessionDetail(sessionId!),
-    enabled: !!sessionId,
-    select: sessionDetailToConversationHistory,
-    staleTime: 60_000,
   });
 }
 
@@ -131,17 +114,4 @@ export async function saveSessionMetadata(
   } catch (error) {
     console.error('[useAskAISessions] Failed to save session metadata:', error);
   }
-}
-
-export function useSessionForConversation(conversationId: string | undefined | null) {
-  return useQuery<SessionListItem | null>({
-    queryKey: ['xyne-ai-session', conversationId],
-    queryFn: async (): Promise<SessionListItem | null> => {
-      if (!conversationId) return null;
-      const sessions = await fetchSessionsByConversationId(conversationId);
-      return sessions.length > 0 ? sessions[0]! : null;
-    },
-    enabled: !!conversationId,
-    staleTime: 30_000,
-  });
 }

@@ -18,8 +18,6 @@ let workflowTypesCache: {
 } | null = null;
 
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
-const STALE_TIME = 5 * 60 * 1000; // 5 minutes - consider stale after this but still use cache
-
 /**
  * Hook to fetch and cache workflow types globally
  * Uses manual caching with TTL to avoid repeated API calls
@@ -143,32 +141,4 @@ export const useWorkflowTypes = (): UseWorkflowTypesResult => {
   }, [fetchWorkflowTypes]);
 
   return state;
-};
-
-/**
- * Function to preload workflow types - useful for app initialization
- */
-export const preloadWorkflowTypes = async (): Promise<void> => {
-  const now = Date.now();
-
-  // Only preload if cache is stale or doesn't exist
-  if (
-    !workflowTypesCache ||
-    !workflowTypesCache.data ||
-    now - workflowTypesCache.timestamp > STALE_TIME
-  ) {
-    const response = await apiInstance.get<WorkflowTypesAPIResponse>('/workflows/types');
-    workflowTypesCache = {
-      data: response.data.workflowTypes || [],
-      timestamp: now,
-      promise: null,
-    };
-  }
-};
-
-/**
- * Function to clear workflow types cache - useful when workflow types are updated
- */
-export const clearWorkflowTypesCache = (): void => {
-  workflowTypesCache = null;
 };

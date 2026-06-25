@@ -49,10 +49,6 @@ async function getImageDimensions(file: File): Promise<{ width: number; height: 
   });
 }
 
-export function useDraftFromLocal(lookupId: string) {
-  return useSelector(stateMachineActor, state => state.context.drafts[lookupId]);
-}
-
 export function saveDraft(lookupId: string, html: string, text: string): void {
   stateMachineActor.send({ type: 'SAVE_DRAFT', lookupId, html, text });
 }

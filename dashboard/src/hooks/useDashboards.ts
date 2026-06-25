@@ -15,9 +15,6 @@ import {
   updateComponent,
   updateComponentPositions,
   deleteComponent,
-  upsertQuery,
-  deleteQuery,
-  reorderQueries,
   type DashboardScope,
   type ComponentInput,
 } from '../services/DynamicDashboard/dashboardCrudService';
@@ -181,28 +178,4 @@ export function useComponentMutations(dashboardId: string) {
   });
 
   return { create, update, updatePositions, remove };
-}
-
-export function useQueryMutations(dashboardId: string) {
-  const queryClient = useQueryClient();
-  const invalidate = (): void => {
-    void queryClient.invalidateQueries({ queryKey: dashboardKeys.dashboard(dashboardId) });
-  };
-
-  const upsert = useMutation({
-    mutationFn: (input: Parameters<typeof upsertQuery>[0]) => upsertQuery(input),
-    onSuccess: invalidate,
-  });
-
-  const remove = useMutation({
-    mutationFn: (id: string) => deleteQuery(id),
-    onSuccess: invalidate,
-  });
-
-  const reorder = useMutation({
-    mutationFn: (orderedMappingIds: string[]) => reorderQueries(dashboardId, orderedMappingIds),
-    onSuccess: invalidate,
-  });
-
-  return { upsert, remove, reorder };
 }
