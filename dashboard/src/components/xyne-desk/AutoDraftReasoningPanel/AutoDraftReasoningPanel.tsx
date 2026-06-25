@@ -1,57 +1,19 @@
-import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
-import { Wrench, Sparkles, ChevronRight, Brain } from 'lucide-react';
+import { ReactElement, useCallback, useEffect, useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { cn } from '../../../utils/classNames';
-
-/**
- * A single tool call as persisted by claw. Fields are best-effort — claw's
- * ToolInvocation shape varies by provider, so everything is optional and
- * rendered defensively.
- */
-interface ToolInvocation {
-  toolName?: string;
-  toolCallId?: string;
-  status?: string;
-  result?: unknown;
-  args?: unknown;
-  durationMs?: number;
-  isError?: boolean;
-}
+import { ActivityBlock } from '../../Chat/XyneAISidebar/components/ActivityBlock';
+import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 
 interface InsightResponse {
   available: boolean;
   reasoning: string | null;
+  /** Raw claw tool invocations (toolName, args, result, citations, …). */
   toolInvocations: ToolInvocation[];
 }
 
 interface AutoDraftReasoningPanelProps {
   conversationId: string;
   channelId: string;
-}
-
-/**
- * Render a value as readable text. Objects (and JSON-encoded strings) are
- * pretty-printed so a result like `{"content":[{"type":"text",…}]}` reads as an
- * indented block instead of a one-line blob.
- */
-function formatValue(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        return JSON.stringify(JSON.parse(trimmed), null, 2);
-      } catch {
-        /* not JSON — fall through to the raw string */
-      }
-    }
-    return value;
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return '[unserializable]';
-  }
 }
 
 function ReasoningSkeleton(): ReactElement {
@@ -67,100 +29,13 @@ function ReasoningSkeleton(): ReactElement {
   );
 }
 
-/** A collapsible tool-call card, mirroring the Claw UI's invocation blocks. */
-function ToolCallCard({ tool }: { tool: ToolInvocation }): ReactElement {
-  const [expanded, setExpanded] = useState(false);
-  const argsStr = useMemo(() => formatValue(tool.args), [tool.args]);
-  const resultStr = useMemo(() => formatValue(tool.result), [tool.result]);
-  const preview = useMemo(
-    () => (resultStr || argsStr).replace(/\s+/g, ' ').trim().slice(0, 120),
-    [resultStr, argsStr],
-  );
-
-  return (
-    <li
-      className={cn(
-        'rounded-lg border bg-background',
-        tool.isError ? 'border-destructive/40' : 'border-border/60',
-      )}
-    >
-      <button
-        type='button'
-        onClick={() => setExpanded(v => !v)}
-        aria-expanded={expanded}
-        data-track-category='Support'
-        data-track-name='ToggleAutoDraftToolCall'
-        className='flex w-full items-start gap-2 px-2.5 py-1.5 text-left'
-      >
-        <ChevronRight
-          size={12}
-          className={cn(
-            'mt-0.5 flex-shrink-0 text-muted-foreground transition-transform',
-            expanded && 'rotate-90',
-          )}
-        />
-        <div className='min-w-0 flex-1'>
-          <div className='flex items-center gap-2'>
-            <Wrench
-              size={12}
-              className={cn(
-                'flex-shrink-0',
-                tool.isError ? 'text-destructive' : 'text-muted-foreground',
-              )}
-            />
-            <span className='font-mono text-[12px] font-medium text-foreground'>
-              {tool.toolName ?? 'tool'}
-            </span>
-            {tool.isError && (
-              <span className='rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive'>
-                error
-              </span>
-            )}
-            {typeof tool.durationMs === 'number' && (
-              <span className='ml-auto flex-shrink-0 text-[10px] tabular-nums text-muted-foreground'>
-                {tool.durationMs}ms
-              </span>
-            )}
-          </div>
-          {!expanded && preview && (
-            <p className='mt-0.5 truncate font-mono text-[11px] text-muted-foreground'>{preview}</p>
-          )}
-        </div>
-      </button>
-
-      {expanded && (
-        <div className='space-y-2 border-t border-border/60 px-2.5 py-2'>
-          {argsStr && (
-            <div>
-              <div className='mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground'>
-                Input
-              </div>
-              <pre className='max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 font-mono text-[11px] leading-relaxed text-foreground/90'>
-                {argsStr}
-              </pre>
-            </div>
-          )}
-          <div>
-            <div className='mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground'>
-              Output
-            </div>
-            <pre className='max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 font-mono text-[11px] leading-relaxed text-foreground/90'>
-              {resultStr || '(empty)'}
-            </pre>
-          </div>
-        </div>
-      )}
-    </li>
-  );
-}
-
 /**
- * Embedded "how this draft was generated" content for the Support right-panel
- * "Reasoning" tab — mirrors how DraftSourcesPanel renders inside the Sources
- * tab, and the Claw UI's reasoning + tool-call blocks.
- *
- * Nothing is stored on the Spaces side — this fetches on mount straight from
- * claw via the `/email/:conversationId/autodraft-insight` read-through endpoint.
+ * "How this draft was generated" for the Support right-panel "Reasoning" tab.
+ * Renders with the EXACT same component the XyneAI sidebar uses for a completed
+ * assistant turn (`ActivityBlock` → reasoning + collapsible tool-call list with
+ * citations), so the UI/dropdowns match 1:1. Nothing is stored Spaces-side —
+ * this reads straight from claw via the `/email/:conversationId/autodraft-insight`
+ * read-through endpoint.
  */
 export const AutoDraftReasoningPanel = ({
   conversationId,
@@ -169,8 +44,6 @@ export const AutoDraftReasoningPanel = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [data, setData] = useState<InsightResponse | null>(null);
-  // Thinking is collapsed by default — expand on demand, like the Claw UI.
-  const [thinkingOpen, setThinkingOpen] = useState(false);
 
   const fetchInsight = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -225,52 +98,11 @@ export const AutoDraftReasoningPanel = ({
   }
 
   return (
-    <div className='flex flex-col gap-4'>
-      {reasoning && (
-        <div className='rounded-lg border border-border/60 bg-muted/20'>
-          <button
-            type='button'
-            onClick={() => setThinkingOpen(v => !v)}
-            aria-expanded={thinkingOpen}
-            data-track-category='Support'
-            data-track-name='ToggleAutoDraftThinking'
-            className='flex w-full items-center gap-2 px-3 py-2 text-left'
-          >
-            <ChevronRight
-              size={12}
-              className={cn(
-                'flex-shrink-0 text-muted-foreground transition-transform',
-                thinkingOpen && 'rotate-90',
-              )}
-            />
-            <Brain size={12} className='flex-shrink-0 text-muted-foreground' />
-            <span className='text-[10px] font-semibold uppercase tracking-wide text-muted-foreground'>
-              Thinking
-            </span>
-            <span className='ml-auto flex-shrink-0 text-[10px] tabular-nums text-muted-foreground'>
-              {reasoning.length} chars
-            </span>
-          </button>
-          {thinkingOpen && (
-            <div className='whitespace-pre-wrap border-t border-border/60 px-3 py-2 text-[13px] leading-relaxed text-foreground'>
-              {reasoning}
-            </div>
-          )}
-        </div>
-      )}
-
-      {tools.length > 0 && (
-        <div>
-          <div className='mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground'>
-            Tool calls ({tools.length})
-          </div>
-          <ul className='flex flex-col gap-1.5'>
-            {tools.map((t, i) => (
-              <ToolCallCard key={t.toolCallId ?? `${t.toolName ?? 'tool'}-${i}`} tool={t} />
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+    <ActivityBlock
+      reasoning={reasoning || undefined}
+      toolInvocations={tools}
+      streaming={false}
+      fillHeight
+    />
   );
 };

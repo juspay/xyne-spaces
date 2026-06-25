@@ -2223,7 +2223,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         agents={agents}
                         onSelect={onSelectAgent}
                         compact={true}
-                        disabled={isStreaming}
                       />
                     </div>
                   )}

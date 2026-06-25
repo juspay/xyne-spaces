@@ -342,8 +342,9 @@ const XyneAISidebar = ({
   const prevThreadConversationIdRef = useRef(threadInfo?.conversationId);
   useEffect(() => {
     setActiveThreadInfo(threadInfo ?? null);
-    if (prevThreadConversationIdRef.current !== threadInfo?.conversationId) {
-      prevThreadConversationIdRef.current = threadInfo?.conversationId;
+    const newConvId = threadInfo?.conversationId;
+    if (newConvId && prevThreadConversationIdRef.current !== newConvId) {
+      prevThreadConversationIdRef.current = newConvId;
       hasLoadedInitialConversationRef.current = false;
       setMessages([]);
       setConversationId('');
@@ -718,6 +719,12 @@ const XyneAISidebar = ({
       return;
     }
 
+    if (xyneAIActor.getSnapshot().context.focusSessionId) {
+      hasLoadedInitialConversationRef.current = true;
+      setIsLoadingConversation(false);
+      return;
+    }
+
     const loadMostRecentConversation = async (): Promise<void> => {
       try {
         setIsLoadingConversation(true);
@@ -996,6 +1003,7 @@ const XyneAISidebar = ({
   const handleLoadConversation = async (conversation: ConversationHistoryType): Promise<void> => {
     setLoadingHistorySessionId(conversation.sessionId);
     setStreamThreadKey(conversation.sessionId);
+    setConversationId(conversation.sessionId);
     usesDraftStreamKeyRef.current = false;
 
     try {
@@ -1264,10 +1272,8 @@ const XyneAISidebar = ({
     void handleLoadConversationRef.current(stub);
   }, [initialConversationId, isFullscreen, handleNewChat]);
 
-  // Open the session requested by a background completion toast (View)
   useEffect(() => {
-    const sub = xyneAIActor.subscribe(snapshot => {
-      const focus = snapshot.context.focusSessionId;
+    const processFocus = (focus: string | null | undefined): void => {
       if (!focus) return;
       if (focus === conversationId) {
         xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
@@ -1284,7 +1290,9 @@ const XyneAISidebar = ({
       };
       void handleLoadConversationRef.current(stub);
       xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
-    });
+    };
+    processFocus(xyneAIActor.getSnapshot().context.focusSessionId);
+    const sub = xyneAIActor.subscribe(snapshot => processFocus(snapshot.context.focusSessionId));
     return () => sub.unsubscribe();
   }, [conversationId]);
 
@@ -1953,9 +1961,45 @@ const XyneAISidebar = ({
             )}
 
             {hasBackgroundStreamingElsewhere ? (
-              <div className='flex-shrink-0 border-b border-border bg-muted/35 px-4 py-2 text-xs text-muted-foreground'>
-                Another chat is still generating. Open history to see which one is marked{' '}
-                <span className='font-medium text-foreground'>Responding</span>.
+              <div className='flex-shrink-0 border-b border-border bg-muted/35 px-4 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1'>
+                <span>Another chat is still generating.</span>
+                <button
+                  type='button'
+                  onClick={() => {
+                    const s = xyneAIStreamManager.findLatestSidebarStream();
+                    const sid = s?.sessionId || s?.streamSlotKey;
+                    if (!sid) return;
+                    // Switch to the responding stream's agent first so the
+                    // selector reflects it and the loaded session is scoped to
+                    // the right agent (not the one currently selected).
+                    const respondingAgent = s?.agentSlug ?? null;
+                    if (respondingAgent !== selectedAgentSlug) {
+                      setSelectedAgentSlug(respondingAgent);
+                    }
+                    xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: sid });
+                  }}
+                  className='font-medium text-primary hover:underline'
+                  data-track-category='AskAI'
+                  data-track-name='GoToRespondingChat'
+                >
+                  Go to responding chat
+                </button>
+                <span className='text-muted-foreground/50'>·</span>
+                <button
+                  type='button'
+                  onClick={() => {
+                    const keep = [conversationId, streamThreadKey].filter(
+                      k => k && k.trim().length > 0,
+                    );
+                    xyneAIStreamManager.abortAllExcept(keep);
+                    setStreamingSessionIds(xyneAIStreamManager.getStreamingSessionIds());
+                  }}
+                  className='font-medium text-destructive hover:underline'
+                  data-track-category='AskAI'
+                  data-track-name='AbortOtherChats'
+                >
+                  Abort others
+                </button>
               </div>
             ) : null}
 
