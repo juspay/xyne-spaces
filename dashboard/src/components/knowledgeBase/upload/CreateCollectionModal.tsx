@@ -1,6 +1,6 @@
-import { ReactElement, useState, useCallback, useEffect } from 'react';
+import { ReactElement, useState, useCallback, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Upload, ChevronDown } from 'lucide-react';
+import { Upload, Hash } from 'lucide-react';
 import Dialog from '../../ui/Dialog';
 import { Button } from '../../ui/Button/Button';
 import { CollectionForm } from './CollectionForm';
@@ -13,12 +13,7 @@ import { CollectionRole } from '@xyne/shared';
 import { useUploadHandler } from './useUploadHandler';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '../../ui/dropdown-menu';
+import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 
 interface ChannelOption {
   id: string;
@@ -212,8 +207,16 @@ const CreateCollectionModal = ({
   ]);
 
   const canSubmit = files.length > 0 && !!effectiveScopeId && !isCreating;
-  const selectedChannelName =
-    channels.find(c => c.id === selectedChannelId)?.name ?? 'Select channel';
+
+  const channelOptions = useMemo(
+    () =>
+      channels.map(ch => ({
+        value: ch.id,
+        label: ch.name,
+        icon: <Hash size={14} className='text-gray-500' />,
+      })),
+    [channels],
+  );
 
   return (
     <Dialog
@@ -233,38 +236,16 @@ const CreateCollectionModal = ({
         {/* Channel selector (only if no initialScopeId provided) */}
         {!initialScopeId && (
           <div className='mb-3'>
-            <label
-              htmlFor='create-collection-channel-trigger'
-              className='block text-sm font-medium text-foreground mb-1'
-            >
-              Channel
-            </label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  id='create-collection-channel-trigger'
-                  type='button'
-                  className='inline-flex h-9 w-full items-center justify-between rounded-md border border-border bg-background px-3 text-sm text-foreground transition hover:bg-muted'
-                >
-                  <span className='truncate'>{selectedChannelName}</span>
-                  <ChevronDown className='h-4 w-4 ml-2 shrink-0' />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align='start'
-                className='w-[--radix-dropdown-menu-trigger-width]'
-              >
-                {channels.length === 0 ? (
-                  <DropdownMenuItem disabled>No channels available</DropdownMenuItem>
-                ) : (
-                  channels.map(ch => (
-                    <DropdownMenuItem key={ch.id} onClick={() => setSelectedChannelId(ch.id)}>
-                      <span className='truncate'>{ch.name}</span>
-                    </DropdownMenuItem>
-                  ))
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className='block text-sm font-medium text-foreground mb-1'>Channel</div>
+            <EntitySelector
+              options={channelOptions}
+              selectedValue={selectedChannelId}
+              onSelect={setSelectedChannelId}
+              placeholder='Select a channel...'
+              searchPlaceholder='Search channels...'
+              width='100%'
+              showClearButton={false}
+            />
           </div>
         )}
 

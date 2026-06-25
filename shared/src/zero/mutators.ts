@@ -9673,16 +9673,32 @@ export const mutators = defineMutators({
         id: z.string(),
         name: z.string().optional(),
         description: z.string().nullable().optional(),
+        isPrivate: z.boolean().optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, name, description, timestamp } }) => {
+      async ({ tx, ctx, args: { id, name, description, isPrivate, timestamp } }) => {
         const collection = await tx.run(zql.collections.where('id', id).one());
         if (!collection) {
           throw new Error('Collection not found');
         }
 
-        // Verify OWNER or EDITOR permission
         const isOwner = collection.ownerId === ctx.userID;
+
+        // Visibility is owner-only: changing isPrivate flips who can see the
+        // collection at all, so EDITOR permissions are not enough.
+        if (isPrivate !== undefined && !isOwner) {
+          throw new Error('Collection update failed: only the owner can change visibility');
+        }
+
+        // Rename is owner-only too: collection names are surfaced wherever the
+        // collection is referenced (sidebar, breadcrumbs, share UI), so we
+        // treat the title the same as visibility — a property only the owner
+        // is allowed to change.
+        if (name !== undefined && !isOwner) {
+          throw new Error('Collection update failed: only the owner can rename the collection');
+        }
+
+        // Verify OWNER or EDITOR permission for name/description edits
         if (!isOwner && collection.isPrivate) {
           const permission = await tx.run(
             zql.collection_permissions
@@ -9699,6 +9715,7 @@ export const mutators = defineMutators({
           id,
           ...(name !== undefined && { name }),
           ...(description !== undefined && { description: description ?? undefined }),
+          ...(isPrivate !== undefined && { isPrivate }),
           updatedAt: timestamp,
         });
       },

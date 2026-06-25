@@ -12785,16 +12785,32 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           id: z.string(),
           name: z.string().optional(),
           description: z.string().nullable().optional(),
+          isPrivate: z.boolean().optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, name, description, timestamp } }) => {
+        async ({ tx, args: { id, name, description, isPrivate, timestamp } }) => {
           const collection = await tx.run(zql.collections.where('id', id).one());
           if (!collection) {
             throw new Error('Collection not found');
           }
 
-          // Verify OWNER or EDITOR permission
           const isOwner = collection.ownerId === authData.sub;
+
+          // Visibility is owner-only: flipping isPrivate changes who can see
+          // the collection at all, so EDITOR permissions are not enough.
+          if (isPrivate !== undefined && !isOwner) {
+            throw new Error('Collection update failed: only the owner can change visibility');
+          }
+
+          // Rename is owner-only too: collection names are surfaced wherever
+          // the collection is referenced (sidebar, breadcrumbs, share UI),
+          // so we treat the title the same as visibility — a property only
+          // the owner is allowed to change.
+          if (name !== undefined && !isOwner) {
+            throw new Error('Collection update failed: only the owner can rename the collection');
+          }
+
+          // Verify OWNER or EDITOR permission for name/description edits
           if (!isOwner && collection.isPrivate) {
             const permission = await tx.run(
               zql.collection_permissions
@@ -12811,6 +12827,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id,
             ...(name !== undefined && { name }),
             ...(description !== undefined && { description: description ?? undefined }),
+            ...(isPrivate !== undefined && { isPrivate }),
             updatedAt: timestamp,
           });
         },

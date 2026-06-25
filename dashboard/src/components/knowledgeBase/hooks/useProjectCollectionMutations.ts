@@ -40,5 +40,23 @@ export function useProjectCollectionMutations() {
     [zero, activeCollection, setActiveCollection],
   );
 
-  return { renameCollection, deleteCollection };
+  // Owner-only visibility flip. The server rejects non-owners; we surface that
+  // error to the caller via `.server` so the UI can toast a useful message.
+  const setCollectionVisibility = useCallback(
+    async (collectionId: string, isPrivate: boolean) => {
+      const serverRes = await zero.mutate(
+        mutators.collection.updateCollection({
+          id: collectionId,
+          isPrivate,
+          timestamp: Date.now(),
+        }),
+      ).server;
+      if (serverRes.type === 'error') {
+        throw new Error(serverRes.error.message || 'Failed to update visibility');
+      }
+    },
+    [zero],
+  );
+
+  return { renameCollection, deleteCollection, setCollectionVisibility };
 }

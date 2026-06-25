@@ -189,7 +189,8 @@ interface FolderCardV2Props {
   onDelete?: (() => void) | undefined;
   onRename?: (() => void) | undefined;
   /** Optional share affordance. Only wired by the root-level collections
-   *  view — folders inside a collection don't surface this in V1 either. */
+   *  view — folders inside a collection don't surface this in V1 either.
+   *  Visibility (public/private) lives inside the share dialog. */
   onShare?: (() => void) | undefined;
   /** Inline-rename mode (see FileCardV2Props for details). */
   isRenaming?: boolean;
@@ -238,7 +239,10 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
               {folder.name}
             </span>
           )}
-          <span className='truncate text-[11.5px] text-muted-foreground'>
+          <span
+            className='truncate text-[11.5px] text-muted-foreground'
+            title={caption ?? 'Folder'}
+          >
             {caption ?? 'Folder'}
           </span>
         </span>
