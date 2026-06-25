@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useRef, useMemo } from 'react';
+import { ReactElement, ReactNode, useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -31,7 +31,7 @@ import {
 } from '../../ui/dropdown-menu';
 import { useAuthContextValues, useAuth } from '../../../hooks/useAuth';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
-import { sumSectionUnread } from './ChatDirectory.utils';
+import { keyBetween, sumSectionUnread } from './ChatDirectory.utils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { useMutation } from '@tanstack/react-query';
@@ -45,22 +45,23 @@ import { AddDmForm, CreateDmFormData } from '../AddDmForm/AddDmForm';
 import AddChannelForm from '../AddChannelForm/AddChannelForm';
 import AddSectionForm from '../AddSectionForm/AddSectionForm';
 import CreateSectionDialog from '../CreateSectionDialog/CreateSectionDialog';
+import ManageSectionChannelsDialog from './ManageSectionChannelsDialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
 import Dialog, { cn } from '../../ui/Dialog';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { useChannelSort } from '../../../hooks/useChannelSort';
-import { useChannelSectionDnd } from './useChannelSectionDnd';
+import {
+  useChannelSectionDnd,
+  STARRED_CONTAINER,
+  DEFAULT_CONTAINER,
+  DM_CONTAINER,
+} from './useChannelSectionDnd';
 import { ChannelSortOrder, ChannelSection, ChannelType, ChannelScopeType } from '@xyne/shared';
-import { DndContext, DragOverlay } from '@dnd-kit/core';
+import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Accordion } from 'radix-ui';
 import { createPortal } from 'react-dom';
@@ -73,6 +74,23 @@ import { useUnreadThreadsCount } from '../../../hooks/useUnreadThreadsCount';
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
 import { stateMachineActor } from '../../../machines/stateMachine';
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
+
+const ContainerDropZone = ({
+  id,
+  children,
+  className,
+}: {
+  id: string;
+  children: ReactNode;
+  className?: string;
+}) => {
+  const { setNodeRef } = useDroppable({ id, data: { type: 'container' } });
+  return (
+    <div ref={setNodeRef} className={className}>
+      {children}
+    </div>
+  );
+};
 
 const ChatDirectory = ({
   channelData,
@@ -99,14 +117,21 @@ const ChatDirectory = ({
   const [showAddSectionForm, setShowAddSectionForm] = useState(false);
   const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);
   const [sectionToDelete, setSectionToDelete] = useState<ChannelSection | null>(null);
+  const [sectionToManage, setSectionToManage] = useState<ChannelSection | null>(null);
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);
   const [newlyCreatedChannelId, setNewlyCreatedChannelId] = useState<string | null>(null);
   const pendingScheduledCount = usePendingDelayedMessagesCount();
   const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
-  const { starred, channels, directMessages, channelSortOrder, setChannelSortOrder } =
-    useChannelSort(channelData, allChannelsUserStatus, context.userID, activeChannelId);
+  const {
+    starred,
+    channels,
+    directMessages,
+    allDirectMessages,
+    channelSortOrder,
+    setChannelSortOrder,
+  } = useChannelSort(channelData, allChannelsUserStatus, context.userID, activeChannelId);
   const {
     channelSections,
     sectioned,
@@ -114,13 +139,17 @@ const ChatDirectory = ({
     lastSectionPosition,
     displaySectioned,
     defaultDisplayChannels,
-    setDefaultDropRef,
+    dmDisplayChannels,
+    starredDisplayChannels,
     activeOverlayChannel,
     activeOverlaySection,
     moveChannelToSection,
     dndContextProps,
   } = useChannelSectionDnd({
     channels,
+    directMessages,
+    allDirectMessages,
+    starred,
     channelData,
     allChannelsUserStatus,
   });
@@ -186,13 +215,11 @@ const ChatDirectory = ({
     unreadCounts,
     activeChannelId,
   );
+  const dmUnreadCount = sumSectionUnread(dmDisplayChannels, unreadCounts, activeChannelId);
 
   const createChannelMutation = useMutation({
     mutationFn: (data: CreateChannelFormData) => channelService.createChannel(data),
     onSuccess: response => {
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.NEW_CHANNEL,
-      });
       setShowAddChannelForm(false);
       // Navigate to the newly created channel
       void navigate(`/chat/dir/${response.id}`);
@@ -204,17 +231,7 @@ const ChatDirectory = ({
 
   const createDmMutation = useMutation({
     mutationFn: (data: CreateDmRequest) => channelService.createDm(data),
-    onSuccess: (response, variables) => {
-      // Track group creation if more than 1 participant (excluding current user)
-      const isGroupDm = variables.participantIds.length > 1;
-
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: isGroupDm
-          ? EVENT_PROPERTIES.ACTION_TYPES.NEW_GROUP_DM
-          : EVENT_PROPERTIES.ACTION_TYPES.NEW_DM,
-        hasInitialMessage: !!variables.message,
-      });
-
+    onSuccess: response => {
       setShowAddDmForm(false);
       // If existing DM was returned (might have been closed), reopen it
       if (response.isExisting) {
@@ -562,41 +579,52 @@ const ChatDirectory = ({
           value={openSidebarSections}
           onValueChange={handleSectionsOpenChange}
         >
-          {/* Starred  */}
-          {starred.length > 0 && (
-            <Accordion.Item value={ChannelCategory.STARRED}>
-              <Accordion.Trigger asChild>
-                <button className='group flex items-center justify-start gap-2 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium px-1'>
-                  <span className='size-4 flex items-center justify-center shrink-0'>
-                    <Star className='size-3.5 group-hover:hidden' />
-                    <ChevronRight
-                      strokeWidth={2.33}
-                      className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
-                    />
-                  </span>
-                  <span className='text-left truncate block'>Starred</span>
-                  {starredUnreadCount > 0 && (
-                    <Badge className='ml-auto mr-0.5 hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
-                      {starredUnreadCount > 9 ? '9+' : starredUnreadCount}
-                    </Badge>
-                  )}
-                </button>
-              </Accordion.Trigger>
-              <Accordion.Content>
-                {starred.map(channel => (
-                  <ChannelItemV2
-                    key={channel.id}
-                    channel={channel}
-                    unreadCount={unreadCounts[channel.id] ?? 0}
-                    isActive={activeChannelId === channel.id}
-                  />
-                ))}
-              </Accordion.Content>
-            </Accordion.Item>
-          )}
-
-          {/* Custom sections (per-user, drag to reorder) */}
           <DndContext {...dndContextProps}>
+            <ContainerDropZone id={`section-drop-${STARRED_CONTAINER}`}>
+              {(starred.length > 0 || activeOverlayChannel !== null) && (
+                <Accordion.Item value={ChannelCategory.STARRED}>
+                  <Accordion.Trigger asChild>
+                    <button className='group flex items-center justify-start gap-2 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium px-1'>
+                      <span className='size-4 flex items-center justify-center shrink-0'>
+                        <Star className='size-3.5 group-hover:hidden' />
+                        <ChevronRight
+                          strokeWidth={2.33}
+                          className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
+                        />
+                      </span>
+                      <span className='text-left truncate block'>Starred</span>
+                      {starredUnreadCount > 0 && (
+                        <Badge className='ml-auto mr-0.5 hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
+                          {starredUnreadCount > 9 ? '9+' : starredUnreadCount}
+                        </Badge>
+                      )}
+                    </button>
+                  </Accordion.Trigger>
+                  <Accordion.Content>
+                    <div className='min-h-[4px]'>
+                      {starredDisplayChannels.length === 0 ? (
+                        <div className='px-2 py-1 text-xs text-sidebar-secondary-foreground/60 italic'>
+                          Drop here to star
+                        </div>
+                      ) : (
+                        starredDisplayChannels.map(channel => (
+                          <SortableChannelItem
+                            key={channel.id}
+                            channel={channel}
+                            unreadCount={unreadCounts[channel.id] ?? 0}
+                            isActive={activeChannelId === channel.id}
+                            sections={channelSections ?? []}
+                            onMoveToSection={moveChannelToSection}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </Accordion.Content>
+                </Accordion.Item>
+              )}
+            </ContainerDropZone>
+
+            {/* Custom sections (per-user, drag to reorder) */}
             <SortableContext
               items={sectioned.map(b => b.section.id)}
               strategy={verticalListSortingStrategy}
@@ -611,8 +639,18 @@ const ChatDirectory = ({
                   activeChannelId={activeChannelId}
                   onRename={setSectionToRename}
                   onDelete={setSectionToDelete}
+                  onManageChannels={setSectionToManage}
                   onCreateSection={() => setShowAddSectionForm(true)}
                   onMoveChannelToSection={moveChannelToSection}
+                  onSetSortOrder={(sectionId, order) => {
+                    void zero.mutate(
+                      mutators.channelSection.update({
+                        id: sectionId,
+                        sortOrder: order,
+                        timestamp: Date.now(),
+                      }),
+                    );
+                  }}
                 />
               ))}
             </SortableContext>
@@ -794,77 +832,85 @@ const ChatDirectory = ({
                 </div>
               </Accordion.Header>
               <Accordion.Content data-testid='channel-list'>
-                <div ref={setDefaultDropRef} className='min-h-[4px]'>
-                  <SortableContext
-                    items={defaultDisplayChannels.map(c => c.id)}
-                    strategy={verticalListSortingStrategy}
+                <ContainerDropZone id={`section-drop-${DEFAULT_CONTAINER}`} className='min-h-[4px]'>
+                  {defaultDisplayChannels.map(channel => (
+                    <SortableChannelItem
+                      key={channel.id}
+                      channel={channel}
+                      unreadCount={unreadCounts[channel.id] ?? 0}
+                      isActive={activeChannelId === channel.id}
+                      sections={channelSections ?? []}
+                      onMoveToSection={moveChannelToSection}
+                    />
+                  ))}
+                </ContainerDropZone>
+              </Accordion.Content>
+            </Accordion.Item>
+            {/* DMS  */}
+            <Accordion.Item value={ChannelCategory.DIRECT_MESSAGES}>
+              <Accordion.Header asChild>
+                <div className='group px-1 flex items-center justify-between gap-2 '>
+                  <Accordion.Trigger asChild>
+                    <button className='flex items-center justify-start gap-2 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium px-1'>
+                      <span className='size-4 flex items-center justify-center shrink-0'>
+                        <MessageCircle className='size-3.5 group-hover:hidden' />
+                        <ChevronRight
+                          strokeWidth={2.33}
+                          className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
+                        />
+                      </span>
+                      <span className='text-left truncate block'>Direct Messages</span>
+                    </button>
+                  </Accordion.Trigger>
+                  {dmUnreadCount > 0 && (
+                    <Badge className='order-last hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
+                      {dmUnreadCount > 9 ? '9+' : dmUnreadCount}
+                    </Badge>
+                  )}
+                  <Tooltip
+                    content='Add direct message'
+                    side='top'
+                    sideOffset={0}
+                    delayDuration={500}
                   >
-                    {defaultDisplayChannels.map(channel => (
-                      <SortableChannelItem
-                        key={channel.id}
-                        channel={channel}
-                        unreadCount={unreadCounts[channel.id] ?? 0}
-                        isActive={activeChannelId === channel.id}
-                        sections={channelSections ?? []}
-                        onMoveToSection={moveChannelToSection}
+                    <button
+                      id='sidebar-add-dm-btn'
+                      className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity ease-in-out duration-300 hover:bg-sidebar-item-hover rounded-md p-1 mr-0.5'
+                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleAddDirectMessage();
+                      }}
+                      data-testid='create-new-dm'
+                      data-track-event='BUTTON_CLICK'
+                      data-track-category='CHAT_SIDEBAR'
+                      data-track-name='CREATE_DIRECT_MESSAGE'
+                      data-track-metadata={JSON.stringify({ source: 'directory' })}
+                    >
+                      <Plus
+                        strokeWidth={2.33}
+                        className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
                       />
-                    ))}
-                  </SortableContext>
+                    </button>
+                  </Tooltip>
                 </div>
+              </Accordion.Header>
+              <Accordion.Content data-testid='dm-list'>
+                <ContainerDropZone id={`section-drop-${DM_CONTAINER}`} className='min-h-[4px]'>
+                  {dmDisplayChannels.map(channel => (
+                    <SortableChannelItem
+                      key={channel.id}
+                      channel={channel}
+                      unreadCount={unreadCounts[channel.id] ?? 0}
+                      isActive={activeChannelId === channel.id}
+                      sections={channelSections ?? []}
+                      onMoveToSection={moveChannelToSection}
+                    />
+                  ))}
+                </ContainerDropZone>
               </Accordion.Content>
             </Accordion.Item>
           </DndContext>
-
-          {/* DMS  */}
-          <Accordion.Item value={ChannelCategory.DIRECT_MESSAGES}>
-            <Accordion.Header asChild>
-              <div className='group px-1 flex items-center justify-between gap-2 '>
-                <Accordion.Trigger asChild>
-                  <button className='flex items-center justify-start gap-2 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium px-1'>
-                    <span className='size-4 flex items-center justify-center shrink-0'>
-                      <MessageCircle className='size-3.5 group-hover:hidden' />
-                      <ChevronRight
-                        strokeWidth={2.33}
-                        className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
-                      />
-                    </span>
-                    <span className='text-left truncate block'>Direct Messages</span>
-                  </button>
-                </Accordion.Trigger>
-                <Tooltip content='Add direct message' side='top' sideOffset={0} delayDuration={500}>
-                  <button
-                    id='sidebar-add-dm-btn'
-                    className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity ease-in-out duration-300 hover:bg-sidebar-item-hover rounded-md p-1 mr-0.5'
-                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleAddDirectMessage();
-                    }}
-                    data-testid='create-new-dm'
-                    data-track-event='BUTTON_CLICK'
-                    data-track-category='CHAT_SIDEBAR'
-                    data-track-name='CREATE_DIRECT_MESSAGE'
-                    data-track-metadata={JSON.stringify({ source: 'directory' })}
-                  >
-                    <Plus
-                      strokeWidth={2.33}
-                      className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
-                    />
-                  </button>
-                </Tooltip>
-              </div>
-            </Accordion.Header>
-            <Accordion.Content data-testid='dm-list'>
-              {directMessages.map(channel => (
-                <ChannelItemV2
-                  key={channel.id}
-                  channel={channel}
-                  unreadCount={unreadCounts[channel.id] ?? 0}
-                  isActive={activeChannelId === channel.id}
-                />
-              ))}
-            </Accordion.Content>
-          </Accordion.Item>
         </Accordion.Root>
       </div>
 
@@ -998,6 +1044,57 @@ const ChatDirectory = ({
             </button>
           </div>
         </div>
+      </Dialog>
+
+      <Dialog
+        open={!!sectionToManage}
+        onOpenChange={open => {
+          if (!open) setSectionToManage(null);
+        }}
+        testId='manage-section-channels-dialog'
+      >
+        {sectionToManage && (
+          <ManageSectionChannelsDialog
+            section={sectionToManage}
+            channels={sectionableChannels}
+            currentChannelIds={allChannelsUserStatus
+              .filter(s => s.sectionId === sectionToManage.id)
+              .map(s => s.channelId)}
+            onSave={(toAdd, toRemove) => {
+              const timestamp = Date.now();
+              const existingPositions = allChannelsUserStatus
+                .filter(s => s.sectionId === sectionToManage.id)
+                .map(s => s.sectionPosition ?? '')
+                .filter(p => p !== '')
+                .sort();
+              let prevKey: string | null = existingPositions[existingPositions.length - 1] ?? null;
+              for (const channelId of toAdd) {
+                const position = keyBetween(prevKey, null);
+                void zero.mutate(
+                  mutators.channel.moveToSection({
+                    channelId,
+                    sectionId: sectionToManage.id,
+                    position,
+                    timestamp,
+                  }),
+                );
+                prevKey = position;
+              }
+              for (const channelId of toRemove) {
+                void zero.mutate(
+                  mutators.channel.moveToSection({
+                    channelId,
+                    sectionId: null,
+                    position: keyBetween(null, null),
+                    timestamp,
+                  }),
+                );
+              }
+              setSectionToManage(null);
+            }}
+            onClose={() => setSectionToManage(null)}
+          />
+        )}
       </Dialog>
     </div>
   );

@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   PointerSensor,
   closestCenter,
-  pointerWithin,
-  useDroppable,
   useSensor,
   useSensors,
   type CollisionDetection,
@@ -11,8 +9,13 @@ import {
   type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { arrayMove } from '@dnd-kit/sortable';
-import { ChannelType, type ChannelSection, type ChannelUserStatus } from '@xyne/shared';
+import {
+  ChannelScopeType,
+  ChannelSortOrder,
+  ChannelType,
+  type ChannelSection,
+  type ChannelUserStatus,
+} from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -26,10 +29,15 @@ import {
 import type { SectionBucket } from './ChatDirectory.types';
 import type { VisibleChannel } from '../../../machines/stateMachine';
 
-const DEFAULT_CONTAINER = '__channels__';
+export const DEFAULT_CONTAINER = '__channels__';
+export const STARRED_CONTAINER = '__starred__';
+export const DM_CONTAINER = '__dms__';
 
 interface UseChannelSectionDndParams {
   channels: VisibleChannel[];
+  directMessages: VisibleChannel[];
+  allDirectMessages: VisibleChannel[];
+  starred: VisibleChannel[];
   channelData: VisibleChannel[] | undefined;
   allChannelsUserStatus: ChannelUserStatus[];
 }
@@ -41,7 +49,8 @@ interface ChannelSectionDnd {
   lastSectionPosition: string | null;
   displaySectioned: SectionBucket[];
   defaultDisplayChannels: VisibleChannel[];
-  setDefaultDropRef: (element: HTMLElement | null) => void;
+  dmDisplayChannels: VisibleChannel[];
+  starredDisplayChannels: VisibleChannel[];
   activeOverlayChannel: VisibleChannel | null;
   activeOverlaySection: ChannelSection | null;
   moveChannelToSection: (channelId: string, sectionId: string | null) => void;
@@ -57,19 +66,25 @@ interface ChannelSectionDnd {
 
 export const useChannelSectionDnd = ({
   channels,
+  directMessages,
+  allDirectMessages,
+  starred,
   channelData,
   allChannelsUserStatus,
 }: UseChannelSectionDndParams): ChannelSectionDnd => {
   const zero = useZero();
   const [channelSections] = useCachedQuery(queries.userChannelSections({}));
-  const { sectioned, unsectioned } = useMemo(
-    () => bucketChannelsBySection(channels, allChannelsUserStatus, channelSections ?? []),
-    [channels, allChannelsUserStatus, channelSections],
+  const allSectionable = useMemo(
+    () => [...channels, ...allDirectMessages],
+    [channels, allDirectMessages],
   );
-  // Default-scope channels that can be placed into a section (DMs/email excluded).
+  const recentDmIds = useMemo(() => new Set(directMessages.map(c => c.id)), [directMessages]);
+  const { sectioned, unsectioned } = useMemo(
+    () => bucketChannelsBySection(allSectionable, allChannelsUserStatus, channelSections ?? []),
+    [allSectionable, allChannelsUserStatus, channelSections],
+  );
   const sectionableChannels = useMemo(
-    () =>
-      (channelData ?? []).filter(c => !isDMChannel(c.scopeType) && c.type !== ChannelType.EMAIL),
+    () => (channelData ?? []).filter(c => c.type !== ChannelType.EMAIL),
     [channelData],
   );
   // Append new sections after the last one (channelSections is ordered by position asc).
@@ -80,14 +95,10 @@ export const useChannelSectionDnd = ({
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
-  // Drop zone for the default "Channels" group, so channels can be dragged into/out of sections.
-  const { setNodeRef: setDefaultDropRef } = useDroppable({
-    id: `section-drop-${DEFAULT_CONTAINER}`,
-    data: { type: 'container' },
-  });
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [dragItems, setDragItems] = useState<Record<string, string[]> | null>(null);
-  // One cross-section re-parent per frame, to avoid an onDragOver feedback loop.
+  const activeDragStartContainerRef = useRef<string | null>(null);
+  const activeDragIsDmRef = useRef(false);
   const recentlyMovedToNewContainer = useRef(false);
   useEffect(() => {
     const raf = requestAnimationFrame((): void => {
@@ -99,14 +110,40 @@ export const useChannelSectionDnd = ({
     const map = new Map<string, VisibleChannel>();
     for (const bucket of sectioned) for (const c of bucket.channels) map.set(c.id, c);
     for (const c of unsectioned) map.set(c.id, c);
+    for (const c of starred) map.set(c.id, c);
     return map;
-  }, [sectioned, unsectioned]);
-  // channelId -> persisted user status, so drag-end lookups are O(1) instead of repeated .find().
+  }, [sectioned, unsectioned, starred]);
   const statusByChannelId = useMemo(() => {
     const map = new Map<string, ChannelUserStatus>();
     for (const s of allChannelsUserStatus) map.set(s.channelId, s);
     return map;
   }, [allChannelsUserStatus]);
+  const applySectionSort = (
+    chs: VisibleChannel[],
+    sortOrder: ChannelSortOrder | null | undefined,
+    statuses: Map<string, ChannelUserStatus>,
+  ): VisibleChannel[] => {
+    if (!sortOrder) return chs;
+    const sorted = [...chs];
+    if (sortOrder === ChannelSortOrder.ALPHABETICAL) {
+      return sorted.sort((a, b) =>
+        (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase()),
+      );
+    }
+    const lastActivity = (c: VisibleChannel) => c.channelStats?.lastActivityAt ?? 0;
+    const lastViewed = (c: VisibleChannel) => statuses.get(c.id)?.lastViewedAt ?? 0;
+    const unread = (c: VisibleChannel) => statuses.get(c.id)?.unreadCount ?? 0;
+    if (sortOrder === ChannelSortOrder.RECENCY) {
+      return sorted.sort((a, b) => lastActivity(b) - lastActivity(a));
+    }
+    return sorted.sort((a, b) => {
+      const aUnread = unread(a) > 0 ? 2 : lastActivity(a) > lastViewed(a) ? 1 : 0;
+      const bUnread = unread(b) > 0 ? 2 : lastActivity(b) > lastViewed(b) ? 1 : 0;
+      if (bUnread !== aUnread) return bUnread - aUnread;
+      return lastActivity(b) - lastActivity(a);
+    });
+  };
+
   const displaySectioned = dragItems
     ? sectioned.map(bucket => ({
         section: bucket.section,
@@ -114,12 +151,25 @@ export const useChannelSectionDnd = ({
           .map(id => channelById.get(id))
           .filter((c): c is VisibleChannel => Boolean(c)),
       }))
-    : sectioned;
+    : sectioned.map(bucket => ({
+        section: bucket.section,
+        channels: applySectionSort(bucket.channels, bucket.section.sortOrder, statusByChannelId),
+      }));
   const defaultDisplayChannels = dragItems
     ? (dragItems[DEFAULT_CONTAINER] ?? [])
         .map(id => channelById.get(id))
         .filter((c): c is VisibleChannel => Boolean(c))
-    : unsectioned;
+    : unsectioned.filter(c => c.scopeType === ChannelScopeType.DEFAULT);
+  const dmDisplayChannels = dragItems
+    ? (dragItems[DM_CONTAINER] ?? [])
+        .map(id => channelById.get(id))
+        .filter((c): c is VisibleChannel => Boolean(c))
+    : unsectioned.filter(c => isDMChannel(c.scopeType) && recentDmIds.has(c.id));
+  const starredDisplayChannels = dragItems
+    ? (dragItems[STARRED_CONTAINER] ?? [])
+        .map(id => channelById.get(id))
+        .filter((c): c is VisibleChannel => Boolean(c))
+    : starred;
   const activeOverlayChannel = activeDragId ? (channelById.get(activeDragId) ?? null) : null;
   const activeOverlaySection =
     activeDragId && !activeOverlayChannel
@@ -127,6 +177,7 @@ export const useChannelSectionDnd = ({
       : null;
 
   const moveChannelToSection = (channelId: string, sectionId: string | null): void => {
+    const timestamp = Date.now();
     let position = keyBetween(null, null);
     if (sectionId) {
       const positions = allChannelsUserStatus
@@ -137,9 +188,10 @@ export const useChannelSectionDnd = ({
       const lastPos = positions[positions.length - 1] ?? null;
       position = keyBetween(lastPos, null);
     }
-    void zero.mutate(
-      mutators.channel.moveToSection({ channelId, sectionId, position, timestamp: Date.now() }),
-    );
+    if (statusByChannelId.get(channelId)?.isStarred) {
+      void zero.mutate(mutators.channel.toggleStarred({ channelId, updatedAt: timestamp }));
+    }
+    void zero.mutate(mutators.channel.moveToSection({ channelId, sectionId, position, timestamp }));
   };
 
   const findContainer = (id: string, items: Record<string, string[]>): string | null => {
@@ -158,34 +210,33 @@ export const useChannelSectionDnd = ({
     setActiveDragId(id);
     if ((event.active.data.current as { type?: string } | undefined)?.type === 'channel') {
       const items: Record<string, string[]> = {};
-      for (const bucket of sectioned) items[bucket.section.id] = bucket.channels.map(c => c.id);
-      items[DEFAULT_CONTAINER] = unsectioned.map(c => c.id);
+      for (const bucket of sectioned) {
+        const sorted = applySectionSort(
+          bucket.channels,
+          bucket.section.sortOrder,
+          statusByChannelId,
+        );
+        items[bucket.section.id] = sorted.map(c => c.id);
+      }
+      items[DEFAULT_CONTAINER] = unsectioned
+        .filter(c => c.scopeType === ChannelScopeType.DEFAULT)
+        .map(c => c.id);
+      items[STARRED_CONTAINER] = starred.map(c => c.id);
+      items[DM_CONTAINER] = unsectioned
+        .filter(c => isDMChannel(c.scopeType) && recentDmIds.has(c.id))
+        .map(c => c.id);
+      const startContainer = Object.keys(items).find(k => (items[k] ?? []).includes(id)) ?? null;
+      activeDragStartContainerRef.current = startContainer;
+      const draggedChannel = channelById.get(id);
+      activeDragIsDmRef.current = draggedChannel?.scopeType
+        ? isDMChannel(draggedChannel.scopeType)
+        : false;
       setDragItems(items);
     }
   };
 
   const handleDragOver = (event: DragOverEvent): void => {
-    const { active, over } = event;
-    if (!over) return;
-    if ((active.data.current as { type?: string } | undefined)?.type !== 'channel') return;
-    if (recentlyMovedToNewContainer.current || !dragItems) return;
-    const activeId = String(active.id);
-    const overId = String(over.id);
-    const activeContainer = findContainer(activeId, dragItems);
-    const overContainer = findContainer(overId, dragItems);
-    if (!activeContainer || !overContainer || activeContainer === overContainer) return;
-    recentlyMovedToNewContainer.current = true;
-    setDragItems(prev => {
-      if (!prev) return prev;
-      const overItems = prev[overContainer] ?? [];
-      const overIndex = overItems.indexOf(overId);
-      const newIndex = overIndex >= 0 ? overIndex : overItems.length;
-      return {
-        ...prev,
-        [activeContainer]: (prev[activeContainer] ?? []).filter(id => id !== activeId),
-        [overContainer]: [...overItems.slice(0, newIndex), activeId, ...overItems.slice(newIndex)],
-      };
-    });
+    if ((event.active.data.current as { type?: string } | undefined)?.type === 'channel') return;
   };
 
   const sidebarCollisionDetection: CollisionDetection = args => {
@@ -193,22 +244,9 @@ export const useChannelSectionDnd = ({
     const droppableContainers = args.droppableContainers.filter(c => {
       if (c.id === args.active.id) return false;
       const t = (c.data.current as { type?: string } | undefined)?.type;
-      return activeType === 'section' ? t === 'section' : t === 'channel' || t === 'container';
+      return activeType === 'section' ? t === 'section' : t === 'container';
     });
-    const scoped = { ...args, droppableContainers };
-    if (activeType === 'section') return closestCenter(scoped);
-    const under = pointerWithin(scoped);
-    const onChannel = under.find(
-      c =>
-        (
-          droppableContainers.find(d => d.id === c.id)?.data.current as
-            | { type?: string }
-            | undefined
-        )?.type === 'channel',
-    );
-    if (onChannel) return [onChannel];
-    if (under.length > 0) return under;
-    return closestCenter(scoped);
+    return closestCenter({ ...args, droppableContainers });
   };
 
   const handleDragEnd = (event: DragEndEvent): void => {
@@ -246,46 +284,137 @@ export const useChannelSectionDnd = ({
       return;
     }
 
-    // --- Channel reorder / move ---
     if (activeData?.type === 'channel') {
       const channelId = String(active.id);
       const items = dragItems;
       if (!items) return;
-      const finalContainer = findContainer(channelId, items);
-      if (!finalContainer) return;
-      const targetSectionId = finalContainer === DEFAULT_CONTAINER ? null : finalContainer;
-      const currentSectionId = statusByChannelId.get(channelId)?.sectionId ?? null;
-      // Reordering within the default "Channels" group isn't persisted (it follows the sort menu).
-      if (targetSectionId === null && currentSectionId === null) return;
-      const originalOrder = items[finalContainer] ?? [];
-      let list = [...originalOrder];
-      const activeIndex = list.indexOf(channelId);
-      if (activeIndex < 0) return;
-      if (overData?.type === 'channel') {
-        const overIndex = list.indexOf(String(over.id));
-        if (overIndex >= 0 && overIndex !== activeIndex) {
-          list = arrayMove(list, activeIndex, overIndex);
+      const wasStarred = statusByChannelId.get(channelId)?.isStarred === true;
+      const timestamp = Date.now();
+
+      if (wasStarred) {
+        const overId = String(over.id);
+        const targetContainer = overId.startsWith('section-drop-')
+          ? overId.slice('section-drop-'.length)
+          : (findContainer(overId, items) ?? STARRED_CONTAINER);
+
+        if (targetContainer === STARRED_CONTAINER) return;
+
+        void zero.mutate(mutators.channel.toggleStarred({ channelId, updatedAt: timestamp }));
+        if (targetContainer !== DEFAULT_CONTAINER && targetContainer !== DM_CONTAINER) {
+          const positions = allChannelsUserStatus
+            .filter(s => s.sectionId === targetContainer)
+            .map(s => s.sectionPosition ?? '')
+            .filter(p => p !== '')
+            .sort();
+          const position = keyBetween(positions[positions.length - 1] ?? null, null);
+          void zero.mutate(
+            mutators.channel.moveToSection({
+              channelId,
+              sectionId: targetContainer,
+              position,
+              timestamp,
+            }),
+          );
         }
-      } else {
-        list = arrayMove(list, activeIndex, list.length - 1);
+        return;
       }
-      // No-op: same section and unchanged order → don't fire a mutation.
-      const orderUnchanged =
-        list.length === originalOrder.length && list.every((v, i) => v === originalOrder[i]);
-      if (targetSectionId === currentSectionId && orderUnchanged) return;
-      const idx = list.indexOf(channelId);
-      const posOf = (id: string | undefined): string | null =>
-        (id && statusByChannelId.get(id)?.sectionPosition) || null;
-      const position =
-        targetSectionId === null
-          ? keyBetween(null, null)
-          : keyBetween(posOf(list[idx - 1]), posOf(list[idx + 1]));
+
+      const isDm = activeDragIsDmRef.current;
+
+      if (isDm) {
+        const overId = String(over.id);
+        const targetContainer = overId.startsWith('section-drop-')
+          ? overId.slice('section-drop-'.length)
+          : (findContainer(overId, items) ?? activeDragStartContainerRef.current ?? DM_CONTAINER);
+        const currentSectionId = statusByChannelId.get(channelId)?.sectionId ?? null;
+        if (targetContainer === STARRED_CONTAINER) {
+          void zero.mutate(mutators.channel.toggleStarred({ channelId, updatedAt: timestamp }));
+          void zero.mutate(
+            mutators.channel.moveToSection({
+              channelId,
+              sectionId: null,
+              position: keyBetween(null, null),
+              timestamp,
+            }),
+          );
+          return;
+        }
+        if (targetContainer === DM_CONTAINER) {
+          if (currentSectionId) {
+            void zero.mutate(
+              mutators.channel.moveToSection({
+                channelId,
+                sectionId: null,
+                position: keyBetween(null, null),
+                timestamp,
+              }),
+            );
+          }
+          return;
+        }
+        if (targetContainer === DEFAULT_CONTAINER || targetContainer === currentSectionId) return;
+        const dmPositions = allChannelsUserStatus
+          .filter(s => s.sectionId === targetContainer)
+          .map(s => s.sectionPosition ?? '')
+          .filter(p => p !== '')
+          .sort();
+        const dmPosition = keyBetween(dmPositions[dmPositions.length - 1] ?? null, null);
+        void zero.mutate(
+          mutators.channel.moveToSection({
+            channelId,
+            sectionId: targetContainer,
+            position: dmPosition,
+            timestamp,
+          }),
+        );
+        return;
+      }
+
+      const overId = String(over.id);
+      const targetContainer = overId.startsWith('section-drop-')
+        ? overId.slice('section-drop-'.length)
+        : (findContainer(overId, items) ??
+          activeDragStartContainerRef.current ??
+          DEFAULT_CONTAINER);
+
+      if (targetContainer === STARRED_CONTAINER) {
+        void zero.mutate(mutators.channel.toggleStarred({ channelId, updatedAt: timestamp }));
+        void zero.mutate(
+          mutators.channel.moveToSection({
+            channelId,
+            sectionId: null,
+            position: keyBetween(null, null),
+            timestamp,
+          }),
+        );
+        return;
+      }
+
+      const targetSectionId =
+        targetContainer === DEFAULT_CONTAINER || targetContainer === DM_CONTAINER
+          ? null
+          : targetContainer;
+      const currentSectionId = statusByChannelId.get(channelId)?.sectionId ?? null;
+      if (targetSectionId === null && currentSectionId === null) return;
+      if (targetSectionId === currentSectionId) return;
+
+      let position: string;
+      if (targetSectionId === null) {
+        position = keyBetween(null, null);
+      } else {
+        const sectionPositions = allChannelsUserStatus
+          .filter(s => s.sectionId === targetSectionId)
+          .map(s => s.sectionPosition ?? '')
+          .filter(p => p !== '')
+          .sort();
+        position = keyBetween(sectionPositions[sectionPositions.length - 1] ?? null, null);
+      }
       void zero.mutate(
         mutators.channel.moveToSection({
           channelId,
           sectionId: targetSectionId,
           position,
-          timestamp: Date.now(),
+          timestamp,
         }),
       );
     }
@@ -298,7 +427,8 @@ export const useChannelSectionDnd = ({
     lastSectionPosition,
     displaySectioned,
     defaultDisplayChannels,
-    setDefaultDropRef,
+    dmDisplayChannels,
+    starredDisplayChannels,
     activeOverlayChannel,
     activeOverlaySection,
     moveChannelToSection,
@@ -316,6 +446,7 @@ export const useChannelSectionDnd = ({
       onDragCancel: (): void => {
         setActiveDragId(null);
         setDragItems(null);
+        activeDragIsDmRef.current = false;
       },
     },
   };

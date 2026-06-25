@@ -11,6 +11,7 @@ interface UseChannelSortResult {
   starred: VisibleChannel[];
   channels: VisibleChannel[];
   directMessages: VisibleChannel[];
+  allDirectMessages: VisibleChannel[];
   channelSortOrder: ChannelSortOrder;
   setChannelSortOrder: (order: ChannelSortOrder) => void;
 }
@@ -37,8 +38,9 @@ export const useChannelSort = (
     );
   };
 
-  const { starred, channels, directMessages } = useMemo(() => {
-    if (!channelData) return { starred: [], channels: [], directMessages: [] };
+  const { starred, channels, directMessages, allDirectMessages } = useMemo(() => {
+    if (!channelData)
+      return { starred: [], channels: [], directMessages: [], allDirectMessages: [] };
 
     const grouped = groupChannelsByScope(channelData, allChannelsUserStatus);
 
@@ -103,8 +105,16 @@ export const useChannelSort = (
       starred: sortByUnreadAndActivity(grouped.starred),
       channels: sortChannels(grouped.channels),
       directMessages: sortByUnreadAndActivity(recentDms),
+      allDirectMessages: sortByUnreadAndActivity(grouped.directMessages),
     };
   }, [channelData, allChannelsUserStatus, currentUserId, channelSortOrder, activeChannelId]);
 
-  return { starred, channels, directMessages, channelSortOrder, setChannelSortOrder };
+  return {
+    starred,
+    channels,
+    directMessages,
+    allDirectMessages,
+    channelSortOrder,
+    setChannelSortOrder,
+  };
 };

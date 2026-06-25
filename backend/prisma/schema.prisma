@@ -2132,9 +2132,10 @@ model ChannelSection {
   name        String    // Section label (the "tag" name)
   emoji       String?   // Optional emoji icon
   position    String    // Fractional index (generateKeyBetween) among the user's sections
-  isCollapsed Boolean   @default(false) // Per-user collapse state, synced across devices
-  isDeleted   Boolean   @default(false) // Soft delete flag
-  createdAt   DateTime  @default(now())
+  isCollapsed Boolean           @default(false) // Per-user collapse state, synced across devices
+  isDeleted   Boolean           @default(false) // Soft delete flag
+  sortOrder   ChannelSortOrder? // Optional per-section channel sort order
+  createdAt   DateTime          @default(now())
   updatedAt   DateTime? // Nullable, set manually in code (matches ChannelUserStatus convention)
 
   @@index([userId, workspaceId, isDeleted]) // Fast lookup of a user's sections in a workspace

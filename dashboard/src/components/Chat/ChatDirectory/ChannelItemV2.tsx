@@ -24,7 +24,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
@@ -108,7 +107,9 @@ const ChannelItemV2 = memo(
     };
 
     const currentSectionId = status?.sectionId ?? null;
-    const showSectionMenu = !isDM && (sections.length > 0 || !!currentSectionId);
+    const isStarred = status?.isStarred ?? false;
+    const showSectionMenu =
+      !!onMoveToSection && (sections.length > 0 || !!currentSectionId || isStarred);
 
     /**
      * Returns the icon for the channel type:
@@ -158,147 +159,149 @@ const ChannelItemV2 = memo(
     );
 
     return (
-      <Link
-        className=''
-        draggable={false}
-        to={`/chat/dir/${channel.id}`}
-        onClick={handleChannelClick}
-        data-track-category='CHAT_SIDEBAR'
-        data-track-name='OPEN_CHANNEL'
-        data-track-metadata={JSON.stringify({
-          channelId: channel.id,
-          channelName: displayName,
-          isDM,
-        })}
-      >
-        <div
-          className={cn(
-            'flex items-center gap-2 h-8 group rounded-md pl-5 pr-1.5 transition-colors',
-            isActive
-              ? 'text-sidebar-primary-foreground bg-sidebar-item-active'
-              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
-            shouldShowBold && !isActive && '!font-semibold text-sidebar-unread-foreground',
-          )}
-          style={shouldShowBold && !isActive ? { fontWeight: '700' } : undefined}
+      <Tooltip content={displayName} delayDuration={1000} side='top'>
+        <Link
+          className=''
+          draggable={false}
+          to={`/chat/dir/${channel.id}`}
+          onClick={handleChannelClick}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='OPEN_CHANNEL'
+          data-track-metadata={JSON.stringify({
+            channelId: channel.id,
+            channelName: displayName,
+            isDM,
+          })}
         >
-          <span className='flex items-center'>{getIcon()}</span>
-          <span className='text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
-            <span className='visual-regression-hide truncate'>{displayName}</span>
-            {isSupportChannel && <SupportChannelBadge />}
-            {is1on1DM && (
-              <StatusIndicator
-                statusEmoji={dmUser?.statusEmoji}
-                statusContent={dmUser?.statusContent}
-                statusExpiryAt={dmUser?.statusExpiryAt}
-                size='sm'
-                showOnHover={true}
-              />
+          <div
+            className={cn(
+              'flex items-center gap-2 h-8 group rounded-md pl-5 pr-1.5 transition-colors',
+              isActive
+                ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
+                : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
+              shouldShowBold && '!font-semibold text-sidebar-unread-foreground',
             )}
-          </span>
-          {hasActiveCall && (
-            <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
-              <Headphones size={14} />
+            style={shouldShowBold ? { fontWeight: '700' } : undefined}
+          >
+            <span className='flex items-center'>{getIcon()}</span>
+            <span className='text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
+              <span className='visual-regression-hide truncate'>{displayName}</span>
+              {isSupportChannel && <SupportChannelBadge />}
+              {is1on1DM && (
+                <StatusIndicator
+                  statusEmoji={dmUser?.statusEmoji}
+                  statusContent={dmUser?.statusContent}
+                  statusExpiryAt={dmUser?.statusExpiryAt}
+                  size='sm'
+                  showOnHover={true}
+                />
+              )}
             </span>
-          )}
-          {shouldShowDraft && (
-            <Tooltip content={draftTooltipContent} side='top' sideOffset={6}>
-              <Pencil size={14} className='shrink-0' />
-            </Tooltip>
-          )}
-          {unreadCount > 0 && !isActive && (
-            <Badge className='order-last font-mono h-[18px] bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
-              {unreadCount > 9 ? '9+' : unreadCount}
-            </Badge>
-          )}
-          {showSectionMenu && (
-            <DropdownMenu open={sectionMenuOpen} onOpenChange={setSectionMenuOpen}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type='button'
-                  className={cn(
-                    'flex items-center justify-center p-1 rounded-md hover:bg-sidebar-item-hover shrink-0 transition-opacity',
-                    sectionMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-                  )}
-                  onClick={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  onPointerDown={e => e.stopPropagation()}
-                  aria-label='Channel section options'
-                  data-track-category='CHAT_SIDEBAR'
-                  data-track-name='CHANNEL_SECTION_MENU'
-                >
-                  <MoreVertical size={14} className='shrink-0' />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align='end'
-                onCloseAutoFocus={e => e.preventDefault()}
-                className='min-w-[180px]'
-              >
-                <div className='px-2 py-1.5 text-xs font-semibold text-sidebar-secondary-foreground truncate'>
-                  {displayName}
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Move to section</DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {sections.length === 0 ? (
-                      <DropdownMenuItem disabled>No sections yet</DropdownMenuItem>
-                    ) : (
-                      sections.map(section => (
-                        <DropdownMenuItem
-                          key={section.id}
-                          className='gap-2'
-                          onClick={e => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            onMoveToSection?.(channel.id, section.id);
-                          }}
-                        >
-                          {section.emoji && (
-                            <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
-                          )}
-                          <span className='flex-1 truncate'>{section.name}</span>
-                          {currentSectionId === section.id && (
-                            <Check size={14} className='shrink-0' />
-                          )}
-                        </DropdownMenuItem>
-                      ))
+            {hasActiveCall && (
+              <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
+                <Headphones size={14} />
+              </span>
+            )}
+            {shouldShowDraft && (
+              <Tooltip content={draftTooltipContent} side='top' sideOffset={6}>
+                <Pencil size={14} className='shrink-0' />
+              </Tooltip>
+            )}
+            {unreadCount > 0 && !isActive && (
+              <Badge className='order-last font-mono h-[18px] bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </Badge>
+            )}
+            {showSectionMenu && (
+              <DropdownMenu open={sectionMenuOpen} onOpenChange={setSectionMenuOpen}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type='button'
+                    className={cn(
+                      'flex items-center justify-center p-1 rounded-md hover:bg-sidebar-item-hover shrink-0 transition-opacity',
+                      sectionMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                     )}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-                {currentSectionId && (
-                  <DropdownMenuItem
                     onClick={e => {
                       e.preventDefault();
                       e.stopPropagation();
-                      onMoveToSection?.(channel.id, null);
                     }}
+                    onPointerDown={e => e.stopPropagation()}
+                    aria-label='Channel section options'
+                    data-track-category='CHAT_SIDEBAR'
+                    data-track-name='CHANNEL_SECTION_MENU'
                   >
-                    Remove from section
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          {shouldShowCloseButton && (
-            <button
-              type='button'
-              className='group-hover:block hidden p-1 rounded-md -blue'
-              onClick={handleCloseDm}
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='CLOSE_DM_CHANNEL'
-              data-track-metadata={JSON.stringify({
-                channelId: channel.id,
-                channelName: displayName,
-              })}
-            >
-              <X size={14} className='shrink-0' />
-            </button>
-          )}
-        </div>
-      </Link>
+                    <MoreVertical size={14} className='shrink-0' />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align='end'
+                  onCloseAutoFocus={e => e.preventDefault()}
+                  className='min-w-[180px]'
+                >
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>Move to section</DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {sections.length === 0 ? (
+                        <DropdownMenuItem disabled>No sections yet</DropdownMenuItem>
+                      ) : (
+                        sections.map(section => (
+                          <DropdownMenuItem
+                            key={section.id}
+                            className='gap-2'
+                            onClick={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onMoveToSection?.(channel.id, section.id);
+                            }}
+                          >
+                            {section.emoji && (
+                              <span className='shrink-0'>
+                                {renderEmoji(section.emoji, 'size-4')}
+                              </span>
+                            )}
+                            <span className='flex-1 truncate'>{section.name}</span>
+                            {currentSectionId === section.id && (
+                              <Check size={14} className='shrink-0' />
+                            )}
+                          </DropdownMenuItem>
+                        ))
+                      )}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  {(currentSectionId || isStarred) && (
+                    <DropdownMenuItem
+                      onClick={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onMoveToSection?.(channel.id, null);
+                      }}
+                    >
+                      Remove from section
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {shouldShowCloseButton && (
+              <Tooltip content='Close conversation' side='top' sideOffset={6} delayDuration={500}>
+                <button
+                  type='button'
+                  className='group-hover:block hidden p-1 rounded-md -blue'
+                  onClick={handleCloseDm}
+                  data-track-category='CHAT_SIDEBAR'
+                  data-track-name='CLOSE_DM_CHANNEL'
+                  data-track-metadata={JSON.stringify({
+                    channelId: channel.id,
+                    channelName: displayName,
+                  })}
+                >
+                  <X size={14} className='shrink-0' />
+                </button>
+              </Tooltip>
+            )}
+          </div>
+        </Link>
+      </Tooltip>
     );
   },
 );

@@ -6014,9 +6014,10 @@ export const mutators = defineMutators({
         emoji: z.string().nullable().optional(),
         isCollapsed: z.boolean().optional(),
         position: z.string().optional(),
+        sortOrder: z.nativeEnum(ChannelSortOrder).nullable().optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, name, emoji, isCollapsed, position, timestamp } }) => {
+      async ({ tx, ctx, args: { id, name, emoji, isCollapsed, position, sortOrder, timestamp } }) => {
         const section = await tx.run(
           zql.channel_sections.where('id', id).where('userId', ctx.userID).where('isDeleted', false).one(),
         );
@@ -6042,6 +6043,7 @@ export const mutators = defineMutators({
           ...(emoji !== undefined && { emoji: emoji ?? null }),
           ...(isCollapsed !== undefined && { isCollapsed }),
           ...(position !== undefined && { position }),
+          ...(sortOrder !== undefined && { sortOrder: sortOrder ?? null }),
           updatedAt: timestamp,
         });
       },

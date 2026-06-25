@@ -1531,6 +1531,7 @@ export const channelSectionTable = table('channel_sections') // Prisma model: Ch
     isDeleted: boolean(),
     createdAt: number(),
     updatedAt: number().optional(),
+    sortOrder: enumeration<ChannelSortOrder>().optional(),
   })
   .primaryKey('id');
 
