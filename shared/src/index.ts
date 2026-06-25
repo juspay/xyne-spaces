@@ -20,6 +20,7 @@ export * from './utils/canvasDestinationAccess';
 export * from './utils/canvasFolderNameConflict';
 export * from './utils/origins';
 export * from './utils/linkPreviewParser';
+export * from './utils/messageContent';
 export * from './utils/ticketMetadata';
 export * from './utils/fileTypes';
 export * from './utils/channel';

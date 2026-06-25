@@ -1171,12 +1171,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                               maxHeight={500}
                             />
                           ) : (
-                            <div className='jp-message-html inline-block'>
-                              <RenderMessageWithHTML
-                                message={resolvedForwardedContent}
-                                showEdited={false}
-                              />
-                            </div>
+                            <ExpandableMessage
+                              message={resolvedForwardedContent}
+                              showEdited={false}
+                              maxHeight={120}
+                            />
                           )}
                         </div>
                         {/* Attachments inside the forwarded message border */}
@@ -1213,7 +1212,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(message.content)}`}
                       style={isSystemMessage ? systemMessageStyles : undefined}
                     >
-                      {isMobile ? (
+                      {message.msgType === MessageType.USER ? (
+                        // User messages collapse by rendered height (~5 lines) behind a
+                        // View More toggle on both desktop and mobile.
+                        <ExpandableMessage
+                          message={isWorkflowMessage ? 'Workflow created' : message.content}
+                          showEdited={message.edited}
+                          maxHeight={120}
+                          isSystemMessage={isSystemMessage}
+                          messageId={message.messageId}
+                          conversationId={message.conversationId}
+                        />
+                      ) : isMobile ? (
                         <ExpandableMessage
                           message={isWorkflowMessage ? 'Workflow created' : message.content}
                           showEdited={message.edited}
