@@ -102,11 +102,3 @@ export const startRuntimeConfigPolling = (): void => {
   }
   schedule()
 }
-
-export const stopRuntimeConfigPolling = (): void => {
-  pollingStarted = false
-  if (pollTimer) {
-    clearTimeout(pollTimer)
-    pollTimer = null
-  }
-}

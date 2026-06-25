@@ -133,17 +133,6 @@ export const releaseDoclingSchedulerPermit = async (
     permit.permitId,
   )
 }
-
-export const releaseDoclingOcrSubmitPermit = async (
-  permit: DoclingSchedulerPermit | { permitId?: string | null },
-): Promise<void> => {
-  if (!permit.permitId || permit.permitId.startsWith('disabled:')) return
-  await Promise.all([
-    releaseDoclingSchedulerPermit({ kind: 'ocr-submit', permitId: permit.permitId }),
-    releaseDoclingSchedulerPermit({ kind: 'ocr-submit-pages', permitId: permit.permitId }),
-  ])
-}
-
 export const listActiveDoclingSchedulerPermitIds = async (kind: string, limit = 200): Promise<string[]> => {
   const now = Date.now()
   const client = getClient()
