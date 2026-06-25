@@ -81,65 +81,31 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
 
   return (
     <div className='mt-2 mr-3 max-w-lg min-[500px]:ml-14 max-[500px]:ml-12'>
-      <div
-        className={cn(
-          'rounded-lg flex items-stretch gap-0.5 ',
-          isUserInCall ? 'text-foreground' : 'text-white',
-        )}
-      >
-        <div
-          className={cn(
-            'flex items-center gap-2 rounded-lg px-2 py-1.5',
-            isUserInCall ? 'bg-green-100 dark:bg-green-900/30' : 'bg-green-700',
-          )}
-        >
-          <Headphones
-            className={cn(
-              'w-5 h-5',
-              isUserInCall ? 'text-green-700 dark:text-green-300' : 'text-white',
-            )}
-          />
+      {/* No `dark:` Tailwind variants here on purpose: the dashboard themes via
+          data-theme="midnight" on <html>, not the `.dark` class, so Tailwind's
+          darkMode:['class'] variants never activate. Use a single solid green for
+          every theme; the Join / Request button alone signals join state. */}
+      <div className='rounded-lg flex items-stretch gap-0.5 text-white'>
+        <div className={cn('flex items-center gap-2 rounded-lg px-2 py-1.5', 'bg-green-700')}>
+          <Headphones className={cn('w-5 h-5', 'text-white')} />
         </div>
 
         <div
           className={cn(
             'flex items-center justify-between w-full px-2 py-1.5 rounded-lg',
-            isUserInCall ? 'bg-green-100 dark:bg-green-900/30' : 'bg-green-700',
+            'bg-green-700',
           )}
         >
           <div className='flex items-center gap-4'>
             <div className='flex items-center gap-2'>
               <AvatarGroup userIds={participantUserIds} size='sm' count={2} />
-              {!isMobile && (
-                <span
-                  className={cn(
-                    'text-sm font-medium',
-                    isUserInCall ? 'text-green-800 dark:text-green-200' : '',
-                  )}
-                >
-                  {callStatusText}
-                </span>
-              )}
+              {!isMobile && <span className='text-sm font-medium'>{callStatusText}</span>}
             </div>
 
             {callDuration && (
               <>
-                {!isMobile && (
-                  <span
-                    className={cn(
-                      'w-1 h-1 rounded-full',
-                      isUserInCall ? 'bg-foreground/50' : 'bg-background/50',
-                    )}
-                  />
-                )}
-                <span
-                  className={cn(
-                    'text-sm',
-                    isUserInCall ? 'text-green-800 dark:text-green-200' : 'text-white/90',
-                  )}
-                >
-                  {callDuration}
-                </span>
+                {!isMobile && <span className={cn('w-1 h-1 rounded-full', 'bg-background/50')} />}
+                <span className={cn('text-sm', 'text-white/90')}>{callDuration}</span>
               </>
             )}
           </div>

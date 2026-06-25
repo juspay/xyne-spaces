@@ -29,7 +29,7 @@ export function AvatarStackItem({
     <div
       data-slot='avatar-stack-item'
       className={cn(
-        'size-full shrink-0 overflow-hidden rounded-full',
+        'size-full shrink-0 overflow-hidden rounded-full flex items-center justify-center',
         '[&_[data-slot="avatar"]]:size-full',
         className,
       )}
