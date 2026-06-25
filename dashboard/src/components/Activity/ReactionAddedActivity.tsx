@@ -6,6 +6,7 @@ import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessa
 import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { renderEmoji } from '../../utils/customEmojiUtils';
+import { getReactionMessagePreview } from './reactionMessagePreview';
 
 export const ReactionAddedActivity = ({
   activity,
@@ -48,7 +49,10 @@ export const ReactionAddedActivity = ({
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} contentOnly={true} variant='default' />
       ) : (
-        <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
+        <RenderMessageWithHTML
+          message={getReactionMessagePreview(message.content)}
+          showEdited={message.edited}
+        />
       )}
     </ActivityItemCard>
   );

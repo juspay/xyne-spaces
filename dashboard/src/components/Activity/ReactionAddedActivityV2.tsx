@@ -7,6 +7,7 @@ import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { parseReactionsMd, ReactionsData, getMostRecentEmoji } from '@xyne/shared';
 import { renderEmoji } from '../../utils/customEmojiUtils';
+import { getReactionMessagePreview } from './reactionMessagePreview';
 
 export const ReactionAddedActivityV2 = ({
   activity,
@@ -79,7 +80,10 @@ export const ReactionAddedActivityV2 = ({
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} contentOnly={true} variant='default' />
       ) : (
-        <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
+        <RenderMessageWithHTML
+          message={getReactionMessagePreview(message.content)}
+          showEdited={message.edited}
+        />
       )}
     </ActivityItemCard>
   );
