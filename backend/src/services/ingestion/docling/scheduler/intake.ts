@@ -100,7 +100,3 @@ export const routePdfToScheduler = async (docId: string, app: SubApp): Promise<b
   }
   return false;
 };
-
-/** @deprecated use routePdfToScheduler(docId, SubApp.COLLECTIONS) */
-export const routeCollectionPdfToScheduler = (fileId: string): Promise<boolean> =>
-  config.doclingScheduler.routePdfs ? routeCollection(fileId) : Promise.resolve(false);

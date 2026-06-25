@@ -24,9 +24,6 @@ export const DOCLING_PART_STATUS = {
   Failed: 'failed',
 } as const
 
-export type DoclingFileStatus = (typeof DOCLING_FILE_STATUS)[keyof typeof DOCLING_FILE_STATUS]
-export type DoclingPartStatus = (typeof DOCLING_PART_STATUS)[keyof typeof DOCLING_PART_STATUS]
-
 export interface DoclingFile {
   fileId: string
   collectionId: string
