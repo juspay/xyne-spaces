@@ -62,6 +62,8 @@ export interface TicketFiltersProps {
   channelId?: string;
   groupBy?: string; // serialized groupBy — included in save view and hasActiveFilters check
   hasActiveView?: boolean; // hides Save view button when a saved view is already active
+  // Hide the board selector + the dropdown's own Save view (the Views builder has its own).
+  workspaceView?: boolean;
 }
 
 export interface PriorityFilterProps {

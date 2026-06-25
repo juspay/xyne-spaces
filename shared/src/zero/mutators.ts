@@ -8548,6 +8548,7 @@ export const mutators = defineMutators({
         configId: z.string(),
         name: z.string().min(1).optional(),
         visibility: z.nativeEnum(SavedConfigVisibility).optional(),
+        isStarred: z.boolean().optional(),
         timestamp: z.number(),
         values: z
           .array(
@@ -8560,7 +8561,7 @@ export const mutators = defineMutators({
           )
           .optional(),
       }),
-      async ({ tx, ctx, args: { configId, name, visibility, timestamp, values } }) => {
+      async ({ tx, ctx, args: { configId, name, visibility, isStarred, timestamp, values } }) => {
         const config = await tx.run(zql.saved_user_configurations.where('id', configId).one());
         if (!config) {
           throw new Error('Saved view not found');
@@ -8588,6 +8589,7 @@ export const mutators = defineMutators({
           id: configId,
           ...(name !== undefined && { name }),
           ...(visibility !== undefined && { visibility }),
+          ...(isStarred !== undefined && { isStarred }),
           updatedAt: timestamp,
         });
 
