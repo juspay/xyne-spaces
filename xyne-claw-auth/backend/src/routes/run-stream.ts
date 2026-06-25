@@ -5,7 +5,7 @@ import { requireAuth } from "../middleware/require-auth.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { gcsService } from "../services/gcsService.js";
-import { appendCitations } from "../lib/citations.js";
+import { appendCitations, appendClawCitationTokens } from "../lib/citations.js";
 
 const publicRouter = Router();
 const internalRouter = Router();
@@ -396,10 +396,16 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     const toolInvocations = body.toolInvocations;
     const llmCitations = body.llmCitations;
 
-    // Append LLM-provided citations (same logic as agent-chat.ts)
-    const content = status === "completed" && rawResult
+    // Append LLM-provided citations, then `[clf-<toolCallId>#<chunkIndex>]`
+    // tokens from each ToolInvocation.citations so Desk's DraftSourcesPanel
+    // can resolve clickable sources (e.g. Grafana). Gated by
+    // CLAW_INLINE_CITATIONS (default off) — see config.ts.
+    const withCitations = status === "completed" && rawResult
       ? appendCitations(rawResult, toolInvocations, { baseUrl: CONFIG.spacesAppUrl, includeCitations: true }, llmCitations)
       : rawResult;
+    const content = CONFIG.clawInlineCitations
+      ? appendClawCitationTokens(withCitations, toolInvocations)
+      : withCitations;
 
     const progressAttachments = stream.getAttachments();
     const allAttachments: StreamAttachment[] = [

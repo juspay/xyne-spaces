@@ -64,6 +64,21 @@ export const CONFIG = {
   redisPort: Number(process.env["REDIS_PORT"] ?? 6379),
   redisPassword: process.env["REDIS_PASSWORD"] || undefined,
   redisTls: process.env["REDIS_TLS"] === "true",
+  /**
+   * Feature flag for the Desk autodraft clickable-citations pipeline.
+   * When true, claw-auth appends `[clf-<toolCallId>#<chunkIndex>]` tokens
+   * (built from each ToolInvocation's structured citations) so the Desk
+   * DraftSourcesPanel can render clickable source rows (e.g. Grafana Explore
+   * deep links). Inert when a run has no structured citations. Default off. */
+  clawInlineCitations: process.env["CLAW_INLINE_CITATIONS"] === "true",
+  /**
+   * Grafana base URL for Explore citation links. When set, citation deep-links
+   * use this base instead of the Grafana connection's credential `url` — so a
+   * single deployed Grafana can be the link target regardless of which
+   * connection ran the query. The actual log/metric/SQL query still uses the
+   * connection's credential `url`+`token`; this only affects the citation link.
+   * Empty → fall back to the credential `url`. */
+  grafanaBaseUrl: process.env["GRAFANA_BASE_URL"] ?? "",
   runRecoveryMaxRetries: Number(process.env["RUN_RECOVERY_MAX_RETRIES"] ?? 3),
   runRecoveryTimeoutMs: Number(process.env["RUN_RECOVERY_TIMEOUT_MS"] ?? 900000),
   runRecoveryBackoffMs: Number(process.env["RUN_RECOVERY_BACKOFF_MS"] ?? 30000),
