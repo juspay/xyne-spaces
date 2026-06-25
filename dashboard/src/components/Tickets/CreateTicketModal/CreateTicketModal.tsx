@@ -85,10 +85,16 @@ import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { openCreateTicketWindow, subscribeCreateTicketResult } from '../../../utils/electronApp';
 
 interface CreateTicketModalProps {
   isOpen: boolean;
   onClose: () => void;
+  standalone?: boolean;
+  standaloneSeed?: {
+    workflowType?: string;
+    excludedChatAttachmentIds?: string[];
+  };
   channelId: string;
   projectId: string;
   defaultStageId?: string | undefined;
@@ -193,6 +199,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   sourceConversation,
   onBeforeCreate,
   onTicketCreated,
+  standalone = false,
+  standaloneSeed,
 }) => {
   const zero = useZero();
   const shareableOrigin = useShareableOrigin();
@@ -229,7 +237,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Track which chat attachments to exclude from the ticket
   const [excludedChatAttachmentIds, setExcludedChatAttachmentIds] = useState<Set<string>>(
-    new Set(),
+    () => new Set(standaloneSeed?.excludedChatAttachmentIds ?? []),
   );
 
   // Track assignee search
@@ -380,7 +388,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       userGroupId: null,
       boardId: selectedBoardId || '',
       channelId: channelId,
-      workflowType: '',
+      workflowType: standaloneSeed?.workflowType ?? '',
       files: [],
       dynamicFields: {},
       merchantId: '',
@@ -1171,6 +1179,53 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     onClose();
   };
 
+  const canPopOut = !standalone && !ticketSequence;
+
+  const handlePopOut = (): void => {
+    const popoutId = uuidv4();
+
+    const disposeResultListener = onTicketCreated
+      ? subscribeCreateTicketResult(popoutId, onTicketCreated)
+      : undefined;
+
+    const values = form.state.values;
+    const opened = openCreateTicketWindow({
+      popoutId,
+      workspaceId: user?.workspaceId,
+      channelId,
+      projectId,
+      tab: tab || undefined,
+      sourceConversationId: sourceConversation?.conversationId,
+      initialMessageId: sourceConversation?.initialMessageId,
+      parentTicketId,
+      isFromSubTicket,
+      isFromAI,
+      subTickets: subTickets.length > 0 ? subTickets : undefined,
+      excludedChatAttachmentIds:
+        excludedChatAttachmentIds.size > 0 ? Array.from(excludedChatAttachmentIds) : undefined,
+      form: {
+        title: values.title || undefined,
+        description: values.description || undefined,
+        priority: values.priority ?? undefined,
+        status: values.status,
+        assignee: values.assignee ?? undefined,
+        eta: values.eta ? values.eta.toISOString() : undefined,
+        tags: values.tags,
+        boardId: values.boardId || selectedBoardId || undefined,
+        workflowType: values.workflowType || undefined,
+        merchantId: values.merchantId || undefined,
+        ticketType: values.ticketType,
+        dynamicFields: values.dynamicFields,
+      },
+    });
+
+    if (opened) {
+      onClose();
+    } else {
+      disposeResultListener?.();
+    }
+  };
+
   // Handle duplicate ticket copy link
   const handleDuplicateTicketCopyLink = (link: string): void => {
     const ticketUrl = `${shareableOrigin}${link}`;
@@ -1367,6 +1422,1117 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     return null;
   }
 
+  const modalContent = (
+    <div
+      onDragOver={handleModalDragOver}
+      onDragEnter={handleModalDragEnter}
+      onDragLeave={handleModalDragLeave}
+      onDrop={handleModalDrop}
+      className={cn('relative', standalone ? '' : 'overflow-y-auto max-h-[80vh]')}
+    >
+      {/* Drag overlay */}
+      {isDraggingOverModal && (
+        <div className='absolute inset-0 bg-blue-50 bg-opacity-90 rounded-lg flex items-center justify-center z-50 pointer-events-none'>
+          <div className='text-center'>
+            <Paperclip className='w-12 h-12 text-blue-500 mx-auto mb-2' />
+            <p className='text-blue-700 font-medium'>Drop files to attach</p>
+          </div>
+        </div>
+      )}
+
+      <div className='w-full px-4 pt-4 pb-3 flex items-center justify-between'>
+        <h2 className='text-xs leading-5 font-medium text-foreground/80 select-none'>
+          {ticketSequence
+            ? `New Ticket (${ticketSequence.current}/${ticketSequence.total})`
+            : 'New Ticket'}
+        </h2>
+        <div className='flex items-center gap-1'>
+          {canPopOut && (
+            <Button
+              variant='ghost'
+              size='icon'
+              onClick={handlePopOut}
+              disabled={form.state.isSubmitting}
+              className='size-6'
+              aria-label='Open in new window'
+              title='Open in new window'
+              data-track-category='Tickets'
+              data-track-name='PopOutCreateTicketModal'
+            >
+              <SquareArrowOutUpRight strokeWidth={2.33} className='size-3.5' />
+            </Button>
+          )}
+          <Button
+            variant='ghost'
+            size='icon'
+            onClick={onClose}
+            disabled={form.state.isSubmitting}
+            className='size-6 '
+            data-track-category='Tickets'
+            data-track-name='CloseCreateTicketModal'
+          >
+            <X strokeWidth={2.33} className='size-3.5' />
+          </Button>
+        </div>
+      </div>
+
+      <form
+        onSubmit={e => {
+          e.preventDefault();
+          e.stopPropagation();
+          void form.handleSubmit();
+        }}
+        className='px-4 pt-1.5 space-y-0'
+      >
+        {/* Title Field */}
+        <form.Field
+          name='title'
+          validators={{
+            onChange: ({ value }) => {
+              if (!value?.trim()) return 'Title is required';
+              if (value.length < 3) return 'Title must be at least 3 characters';
+              if (value.length > 100) return 'Title must be 100 characters or less';
+              return undefined;
+            },
+          }}
+        >
+          {field => (
+            <div className='space-y-1'>
+              {isTitleGenerating ? (
+                <div className='flex h-8 items-center'>
+                  <TextShimmer
+                    glassEffect={false}
+                    className='text-left leading-tight font-bold text-[20px]'
+                  >
+                    Adding AI generated title
+                  </TextShimmer>
+                </div>
+              ) : (
+                <Input
+                  ref={titleInputRef}
+                  value={field.state.value}
+                  required={true}
+                  onChange={e => {
+                    // If user starts typing, cancel the ongoing generation
+                    if (isTitleGenerating) {
+                      cancelGeneration();
+                    }
+                    field.handleChange(e.target.value);
+                  }}
+                  aria-label='Ticket Title'
+                  placeholder='Enter Ticket Title...'
+                  data-testid='ticket-title-input'
+                  data-track-category='TICKETS'
+                  data-track-name='EDIT_TICKET_TITLE'
+                  data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
+                  className={cn(
+                    '!text-xl !leading-tight truncate',
+                    'px-0 border-none focus-visible:ring-0',
+                    'font-bold text-foreground placeholder:text-xl placeholder:text-muted-foreground/50',
+                    field.state.meta.errors.length > 0 && 'text-red-600',
+                  )}
+                />
+              )}
+              <FieldError error={field.state.meta.errors[0]} />
+            </div>
+          )}
+        </form.Field>
+
+        {/* Description Field */}
+        <form.Field
+          name='description'
+          validators={{
+            onChange: ({ value }) => {
+              if (!value?.trim()) return 'Description is required';
+              if (value.length < 5) return 'Description must be at least 5 characters';
+              return undefined;
+            },
+          }}
+        >
+          {field => (
+            <div className='space-y-1'>
+              <Textarea
+                ref={descriptionTextareaRef}
+                rows={2}
+                required={true}
+                aria-required='true'
+                id='ticket-description'
+                value={field.state.value || ''}
+                aria-invalid={field.state.meta.errors.length > 0}
+                placeholder='Enter Ticket Description...'
+                aria-label='Ticket Description'
+                data-testid='ticket-description-input'
+                data-track-category='TICKETS'
+                data-track-name='EDIT_TICKET_DESCRIPTION'
+                data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
+                onChange={e => {
+                  const newValue = e.target.value;
+                  field.handleChange(newValue);
+                  // Dynamically adjust the height
+                  const target = e.target;
+                  target.style.height = 'auto'; // Reset height to recalculate
+                  target.style.height = `${target.scrollHeight}px`; // Set to scroll height
+                }}
+                className={cn(
+                  'border-none focus-visible:ring-0 focus-visible:border-none rounded-none p-0 min-h-16',
+                  'max-h-[25vh]', // can occupy max 25% of vertical height
+                  'resize-none overflow-y-auto',
+                  'placeholder:text-muted-foreground/50 text-foreground/80 leading-5 font-semibold',
+                  field.state.meta.errors.length > 0 && 'text-red-600',
+                )}
+              />
+              <FieldError error={field.state.meta.errors[0]} />
+            </div>
+          )}
+        </form.Field>
+
+        {subTickets.length > 0 && (
+          <div className='mt-2 rounded-md border border-border bg-muted p-3'>
+            <div className='mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground'>
+              <SubTicketCountIcon className='shrink-0 text-foreground' />
+              <span>{subTickets.length} Sub-tickets</span>
+            </div>
+            <div className='space-y-2'>
+              {subTickets.map((subTicket, index) => {
+                const isEditing = editingSubTicketIndex === index;
+                return (
+                  <div
+                    key={`subticket-${index}`}
+                    className='rounded-lg border border-border bg-background p-[11px]'
+                  >
+                    {isEditing ? (
+                      <div className='flex flex-col gap-2'>
+                        <div className='flex items-center justify-between gap-2'>
+                          <div className='flex min-w-0 items-center gap-2'>
+                            <span className='font-mono text-[12px] font-medium leading-[1.1] text-muted-foreground'>
+                              {index + 1}
+                            </span>
+                            <Input
+                              value={editingSubTicketTitle}
+                              onChange={e => setEditingSubTicketTitle(e.target.value)}
+                              placeholder='Sub-ticket title'
+                              className='h-auto border-none p-0 text-[14px] font-medium leading-[18px] text-foreground focus-visible:ring-0'
+                            />
+                          </div>
+                          <button
+                            type='button'
+                            onClick={saveEditedSubTicket}
+                            className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
+                            data-track-category='TICKETS'
+                            data-track-name='SaveEditedSubTicket'
+                            data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
+                          >
+                            Done
+                          </button>
+                        </div>
+                        <Textarea
+                          value={editingSubTicketDescription}
+                          onChange={e => setEditingSubTicketDescription(e.target.value)}
+                          placeholder='Sub-ticket description (optional)'
+                          rows={2}
+                          className='min-h-0 resize-none border-none p-0 text-[14px] leading-[18px] text-muted-foreground focus-visible:ring-0'
+                        />
+                      </div>
+                    ) : (
+                      <div className='flex items-start justify-between gap-3'>
+                        <div className='min-w-0 flex-1'>
+                          <div className='flex min-w-0 items-center gap-2'>
+                            <span className='font-mono text-[12px] font-medium leading-[1.1] text-muted-foreground'>
+                              {index + 1}
+                            </span>
+                            <div className='truncate text-[14px] font-medium leading-[18px] text-foreground'>
+                              {subTicket.title}
+                            </div>
+                          </div>
+                          {subTicket.description && (
+                            <div className='mt-1 text-[14px] leading-[18px] text-muted-foreground'>
+                              {subTicket.description}
+                            </div>
+                          )}
+                        </div>
+                        <div className='flex shrink-0 items-center gap-4'>
+                          <button
+                            type='button'
+                            onClick={() => beginEditSubTicket(index)}
+                            className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
+                            data-track-category='TICKETS'
+                            data-track-name='EditSubTicket'
+                            data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type='button'
+                            onClick={() => deleteSubTicket(index)}
+                            aria-label={`Delete subticket ${index + 1}`}
+                            className='text-muted-foreground hover:text-muted-foreground'
+                            data-track-category='TICKETS'
+                            data-track-name='DeleteSubTicket'
+                            data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
+                          >
+                            <Trash2 className='size-[14px]' />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Channel and Board Selection */}
+        <div className={cn('flex items-center gap-2.5 pb-2', subTickets.length > 0 && 'pt-4')}>
+          {/* Channel Selection - Only for SubTicket creation */}
+          {(isFromSubTicket || isFromAI) && (
+            <form.Field
+              name='channelId'
+              validators={{
+                onChange: ({ value }) => {
+                  if (!value?.trim()) return 'Channel is required';
+                  return undefined;
+                },
+              }}
+            >
+              {field => (
+                <EntitySelector
+                  variant='inline'
+                  options={channelOptions}
+                  selectedValue={field.state.value || ''}
+                  onSelect={(value: string | null) =>
+                    field.handleChange(value as CreateTicketFormData['channelId'])
+                  }
+                  searchPlaceholder='channel'
+                  placeholder='channel'
+                  inputIcon={<Hash className='size-3.5' strokeWidth={2.33} />}
+                />
+              )}
+            </form.Field>
+          )}
+
+          {/* Board Selection */}
+          <form.Field
+            name='boardId'
+            validators={{
+              onChange: ({ value }) => {
+                if (!value?.trim()) return 'Board is required';
+                return undefined;
+              },
+            }}
+          >
+            {field => {
+              // AI is checking — compact shimmer chip with an inline X to stop and pick manually
+              if (isCheckingBoard && !boardAISuggestionSuppressed) {
+                return (
+                  <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background pl-2 pr-1 py-0.5 h-8 w-fit overflow-hidden text-sm'>
+                    <SquareKanban
+                      className='size-3.5 text-muted-foreground shrink-0'
+                      strokeWidth={2.33}
+                    />
+                    <span className='text-sm whitespace-nowrap text-muted-foreground animate-pulse'>
+                      Suggesting board...
+                    </span>
+                    <button
+                      type='button'
+                      className='flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline-none focus-visible:text-foreground focus-visible:bg-accent transition-colors shrink-0'
+                      title='Stop and select manually'
+                      aria-label='Stop and select manually'
+                      onClick={() => {
+                        setBoardAISuggestionSuppressed(true);
+                        resetBoardSuggestionState();
+                        setTimeout(() => setBoardSelectorOpen(true), 0);
+                      }}
+                      data-track-category='TICKETS'
+                      data-track-name='CancelAISuggestedBoard'
+                    >
+                      <X className='size-3.5 shrink-0' strokeWidth={2.33} />
+                    </button>
+                  </div>
+                );
+              }
+
+              // AI suggestion ready — grey outer wrapper, chip left, Accept/Reject right
+              if (
+                boardSuggestion?.analysis.suggestedBoardId &&
+                !boardAISuggestionSuppressed &&
+                !field.state.value
+              ) {
+                return (
+                  <div className='flex items-center justify-between w-full rounded-lg bg-muted px-3 py-1.5'>
+                    {/* Board name pill — clean bg inside the grey wrapper */}
+                    <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-0.5 h-8 text-sm'>
+                      <SquareKanban
+                        className='size-3.5 text-muted-foreground shrink-0'
+                        strokeWidth={2.33}
+                      />
+                      <span className='text-foreground whitespace-nowrap'>
+                        {boardSuggestion.analysis.suggestedBoardName || 'Unknown Board'}
+                      </span>
+                    </div>
+                    {/* Accept / Reject — separate bordered buttons on the right */}
+                    <div className='flex items-center gap-1.5'>
+                      <button
+                        type='button'
+                        className='h-8 px-3 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-accent transition-colors'
+                        onClick={() => {
+                          if (boardSuggestion.analysis.suggestedBoardId) {
+                            field.handleChange(boardSuggestion.analysis.suggestedBoardId);
+                            setBoardAISuggestionSuppressed(true);
+                            resetBoardSuggestionState();
+                          }
+                        }}
+                        data-track-category='TICKETS'
+                        data-track-name='AcceptAISuggestedBoard'
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type='button'
+                        className='h-8 px-3 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-accent transition-colors'
+                        onClick={() => {
+                          setBoardAISuggestionSuppressed(true);
+                          resetBoardSuggestionState();
+                          // Defer open until EntitySelector has mounted in DOM
+                          setTimeout(() => setBoardSelectorOpen(true), 0);
+                        }}
+                        data-track-category='TICKETS'
+                        data-track-name='RejectAISuggestedBoard'
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              // Normal selector (default / after reject / after accept — shows chevron to change)
+              return (
+                <EntitySelector
+                  showSearch={false}
+                  options={boardOptions}
+                  selectedValue={field.state.value || ''}
+                  onSelect={(value: string | null) => {
+                    field.handleChange(value as CreateTicketFormData['boardId']);
+                    setBoardAISuggestionSuppressed(true);
+                    setBoardSelectorOpen(false);
+                  }}
+                  searchPlaceholder='board'
+                  placeholder='Select board'
+                  inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
+                  inputClassName='!h-8 rounded-lg'
+                  showIndicator={true}
+                  testId='ticket-board-selector'
+                  isOpen={boardSelectorOpen}
+                  onOpenChange={setBoardSelectorOpen}
+                />
+              );
+            }}
+          </form.Field>
+        </div>
+
+        {/* Dynamic Form Fields */}
+        {requiredDynamicFields.length > 0 && (
+          <div className='space-y-2'>
+            <div className='text-sm font-bold text-foreground pb-2'>Additional Information</div>
+            <div className='space-y-2 h-full max-h-56 overflow-scroll -mx-4 px-4'>
+              {requiredDynamicFields.map(field => {
+                const fieldName = field.fieldName;
+                const fieldType = field.fieldType;
+                const rawValue = formValues?.dynamicFields?.[fieldName] || '';
+                const error = dynamicFieldErrors[fieldName];
+                const isOptional = field.isOptional === true;
+
+                // Normalize value based on field type
+                const stringValue = getSingleStringValue(rawValue);
+                const arrayValue = getStringArrayValue(rawValue);
+
+                return (
+                  <div key={field.id} className='mb-1'>
+                    {(fieldType === FormFieldType.STRING || fieldType === FormFieldType.NUMBER) && (
+                      <>
+                        <label className='text-sm font-medium text-foreground'>{`${fieldName}${!isOptional ? '*' : ''}`}</label>
+                        <Input
+                          value={stringValue}
+                          onChange={e => {
+                            const value = e.target.value;
+                            form.setFieldValue('dynamicFields', {
+                              ...formValues?.dynamicFields,
+                              [fieldName]: value,
+                            });
+                            if (value.trim() && error) {
+                              setDynamicFieldErrors(prev => {
+                                const newErrors = { ...prev };
+                                delete newErrors[fieldName];
+                                return newErrors;
+                              });
+                            }
+                          }}
+                          type={fieldType === FormFieldType.NUMBER ? 'number' : 'text'}
+                          placeholder={`Enter ${fieldName.toLowerCase()}`}
+                          className={cn(
+                            'px-0 border-none focus-visible:ring-0',
+                            'font-semibold text-muted-foreground placeholder:text-muted-foreground/80',
+                            error && 'text-red-600',
+                          )}
+                        />
+                        <FieldError error={error} />
+                      </>
+                    )}
+                    {fieldType === FormFieldType.DATE && (
+                      <>
+                        <label className='text-sm font-medium text-foreground'>{fieldName} *</label>
+                        <Input
+                          value={stringValue}
+                          onChange={e => {
+                            const value = e.target.value ?? '';
+                            form.setFieldValue('dynamicFields', {
+                              ...formValues?.dynamicFields,
+                              [fieldName]: value,
+                            });
+                            if (value && error) {
+                              setDynamicFieldErrors(prev => {
+                                const newErrors = { ...prev };
+                                delete newErrors[fieldName];
+                                return newErrors;
+                              });
+                            }
+                          }}
+                          type='date'
+                          className={cn(
+                            'px-0 border-none focus-visible:ring-0',
+                            'font-semibold text-muted-foreground',
+                            error && 'text-red-600',
+                          )}
+                        />
+                        <FieldError error={error} />
+                      </>
+                    )}
+                    {fieldType === FormFieldType.BOOLEAN && (
+                      <RadioGroup
+                        label={`${fieldName}${!isOptional ? '*' : ''}`}
+                        value={stringValue}
+                        className='text-xs'
+                        onChange={value => {
+                          form.setFieldValue('dynamicFields', {
+                            ...formValues?.dynamicFields,
+                            [fieldName]: value,
+                          });
+                          if (value && error) {
+                            setDynamicFieldErrors(prev => {
+                              const newErrors = { ...prev };
+                              delete newErrors[fieldName];
+                              return newErrors;
+                            });
+                          }
+                        }}
+                      >
+                        <div className='flex gap-3'>
+                          <Radio value='true'>Yes</Radio>
+                          <Radio value='false'>No</Radio>
+                        </div>
+                      </RadioGroup>
+                    )}
+                    {fieldType === FormFieldType.SINGLE_SELECT && (
+                      <SingleSelect
+                        label={`${fieldName}${!isOptional ? ' *' : ''}`}
+                        placeholder={`Select ${fieldName.toLowerCase()}`}
+                        items={[
+                          {
+                            items:
+                              (field.fieldEnum as string[] | undefined)?.map(opt => ({
+                                label: opt,
+                                value: opt,
+                              })) || [],
+                          },
+                        ]}
+                        selected={stringValue}
+                        onSelect={selected => {
+                          form.setFieldValue('dynamicFields', {
+                            ...formValues?.dynamicFields,
+                            [fieldName]: selected ?? '',
+                          });
+                          if (selected && error) {
+                            setDynamicFieldErrors(prev => {
+                              const newErrors = { ...prev };
+                              delete newErrors[fieldName];
+                              return newErrors;
+                            });
+                          }
+                        }}
+                        alignment={SelectMenuAlignment.START}
+                        error={!!error}
+                        {...(error && { errorMessage: error })}
+                      />
+                    )}
+                    {fieldType === FormFieldType.MULTI_SELECT && (
+                      <MultiSelect
+                        label={`${fieldName}${!isOptional ? ' *' : ''}`}
+                        placeholder={`Select ${fieldName.toLowerCase()}`}
+                        options={
+                          (field.fieldEnum as string[] | undefined)?.map(opt => ({
+                            label: opt,
+                            value: opt,
+                          })) || []
+                        }
+                        selectedValues={arrayValue}
+                        onChange={newValues => {
+                          const cleanedValues = (newValues ?? []).filter(
+                            v => !!v && v.trim().length > 0,
+                          );
+
+                          form.setFieldValue('dynamicFields', {
+                            ...formValues?.dynamicFields,
+                            [fieldName]: cleanedValues,
+                          });
+                          if (!isOptional && cleanedValues.length === 0) {
+                            setDynamicFieldErrors(prev => ({
+                              ...prev,
+                              [fieldName]: `${fieldName} is required`,
+                            }));
+                          } else {
+                            setDynamicFieldErrors(prev => {
+                              const next = { ...prev };
+                              delete next[fieldName];
+                              return next;
+                            });
+                          }
+                        }}
+                        error={error || ''}
+                      />
+                    )}
+                    {fieldType === FormFieldType.USER && (
+                      <>
+                        <label className='text-sm font-medium text-foreground'>{`${fieldName}${!isOptional ? ' *' : ''}`}</label>
+                        <div className='border border-input rounded'>
+                          <SearchUserV2
+                            options={allUsers || []}
+                            selectedUsers={arrayValue
+                              .map(userId => userMap.get(userId))
+                              .filter((user): user is UserType => user !== undefined)}
+                            searchQuery={dynamicFieldSearchQueries[fieldName] || ''}
+                            onSearchChange={query => {
+                              setDynamicFieldSearchQueries(prev => ({
+                                ...prev,
+                                [fieldName]: query,
+                              }));
+                            }}
+                            onSelect={selectedUsers => {
+                              const cleanedValues = selectedUsers
+                                .map(u => u.id)
+                                .filter(v => !!v && v.trim().length > 0);
+
+                              form.setFieldValue('dynamicFields', {
+                                ...formValues?.dynamicFields,
+                                [fieldName]: cleanedValues,
+                              });
+                              if (!isOptional && cleanedValues.length === 0) {
+                                setDynamicFieldErrors(prev => ({
+                                  ...prev,
+                                  [fieldName]: `${fieldName} is required`,
+                                }));
+                              } else {
+                                setDynamicFieldErrors(prev => {
+                                  const next = { ...prev };
+                                  delete next[fieldName];
+                                  return next;
+                                });
+                              }
+                            }}
+                            isOpen={dynamicFieldOpenStates[fieldName] || false}
+                            setIsOpen={isOpen => {
+                              setDynamicFieldOpenStates(prev => ({
+                                ...prev,
+                                [fieldName]: isOpen,
+                              }));
+                            }}
+                          />
+                        </div>
+                        {error && <p className='text-xs text-red-600 mt-1'>{error}</p>}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className='py-2'>
+          {isCheckingDuplicate && (
+            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+              <Loader2 className='h-4 w-4 animate-spin' />
+              <span>Checking for duplicates...</span>
+            </div>
+          )}
+          {(duplicateCheck?.candidates?.length ?? 0) > 0 && (
+            <div className='rounded-lg border border-border bg-muted p-4 mb-2 transition-all duration-200 ease-out'>
+              <div className='space-y-2'>
+                <div className='flex items-center justify-between pb-0.5'>
+                  <span className='flex items-center gap-2'>
+                    <Copy className='size-3' strokeWidth={2.5} />
+                    <p className='text-sm font-medium text-foreground leading-5'>
+                      {duplicateCheck?.analysis?.isDuplicate
+                        ? 'Duplicate ticket found'
+                        : 'Similar tickets found'}
+                    </p>
+                  </span>
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    onClick={resetDuplicateState}
+                    className='size-6 '
+                  >
+                    <X strokeWidth={2.33} className='size-3.5' />
+                  </Button>
+                </div>
+                {(duplicateCheck?.analysis?.isDuplicate
+                  ? duplicateCheck?.candidates?.slice(0, 1)
+                  : duplicateCheck?.candidates?.slice(0, 5)
+                )?.map(candidate => {
+                  const candidateLink = candidateLinks.get(candidate.id);
+
+                  return (
+                    <div
+                      key={candidate.id}
+                      className='border border-border rounded-lg p-2.5 flex items-center justify-between gap-2 group bg-background'
+                    >
+                      <span className='flex items-center gap-2 overflow-hidden cursor-default'>
+                        <p className='text-foreground text-sm font-medium truncate'>
+                          <RenderMessageWithHTML message={candidate.title} />
+                        </p>
+                      </span>
+                      <span className='opacity-0 flex items-center gap-1 group-hover:opacity-100 transition-opacity duration-300 '>
+                        {candidateLink && (
+                          <Tooltip
+                            content='Copy Ticket'
+                            side='top'
+                            className='text-[10px] font-semibold leading-3  p-1.5'
+                          >
+                            <Button
+                              type='button'
+                              variant='ghost'
+                              size='icon'
+                              className='size-6'
+                              onClick={() => {
+                                handleDuplicateTicketCopyLink(candidateLink);
+                              }}
+                              data-track-category='Tickets'
+                              data-track-name='CopyDuplicateTicketLink'
+                            >
+                              <LinkIcon className='size-3.5' />
+                            </Button>
+                          </Tooltip>
+                        )}
+                        {candidateLink && (
+                          <Tooltip
+                            content='Open in new page'
+                            side='top'
+                            className='text-[10px] font-semibold leading-3 p-1.5 '
+                          >
+                            <Link to={candidateLink}>
+                              <Button type='button' variant='ghost' size='icon' className='size-6'>
+                                <SquareArrowOutUpRight className='size-3.5' />
+                              </Button>
+                            </Link>
+                          </Tooltip>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {allAttachments.length > 0 && (
+          <div
+            className={cn(
+              allAttachments.length === 1
+                ? 'flex flex-col'
+                : allAttachments.length === 2
+                  ? 'flex flex-row'
+                  : 'grid grid-cols-2',
+              'gap-2 py-3',
+            )}
+          >
+            {allAttachments.map(attachment => {
+              if (attachment.isFromChat) {
+                if (!attachment.id) return null;
+                const attachmentId = attachment.id;
+                return (
+                  <AttachmentPreview
+                    key={`chat-${attachmentId}`}
+                    file={{
+                      id: attachmentId,
+                      originalName: attachment.originalFilename || 'Unknown',
+                      fileName: attachment.originalFilename || 'Unknown',
+                      fileSize: attachment.size || 0,
+                      mimeType: attachment.mimetype || 'application/octet-stream',
+                      fileUrl: attachment.url || '',
+                      thumbnailUrl: attachment.thumbnailUrl ?? '',
+                    }}
+                    onRemove={() => {
+                      // Exclude this chat attachment from the ticket
+                      setExcludedChatAttachmentIds(prev => new Set([...prev, attachmentId]));
+                    }}
+                    onPreview={() => {}}
+                    isUploading={form.state.isSubmitting}
+                    variant='detailed'
+                  />
+                );
+              }
+
+              // Handle new uploaded files (removable)
+              if (attachment.file) {
+                const isFileObject = attachment.file instanceof File;
+                let fileKey: string;
+                if (isFileObject) {
+                  const fileObj = attachment.file as File;
+                  fileKey =
+                    attachment.id || `file-${fileObj.name}-${fileObj.size}-${fileObj.lastModified}`;
+                } else {
+                  const uploadedFile = attachment.file as UploadedFile;
+                  fileKey =
+                    attachment.id ||
+                    `file-${uploadedFile.originalName}-${uploadedFile.fileSize}-${Date.now()}`;
+                }
+                const fileId = attachment.id || '';
+                return (
+                  <AttachmentPreview
+                    key={fileKey}
+                    file={attachment.file}
+                    onRemove={() => {
+                      if (fileId) {
+                        void removeFile(fileId, {} as File);
+                      }
+                    }}
+                    onPreview={() => {
+                      if (isFileObject) {
+                        handlePreviewFile(attachment.file as File);
+                      }
+                    }}
+                    isUploading={form.state.isSubmitting}
+                    variant='detailed'
+                  />
+                );
+              }
+
+              return null;
+            })}
+          </div>
+        )}
+
+        <div className='flex flex-wrap items-center gap-2.5 mt-2'>
+          {/* Assignee Selection */}
+          <form.Field name='assignee'>
+            {field => (
+              <EntitySelector
+                options={assigneeOptions}
+                selectedValue={
+                  field.state.value
+                    ? field.state.value.type === 'assigneeTo'
+                      ? `user:${field.state.value.value}`
+                      : `${field.state.value.type}:${field.state.value.value}`
+                    : null
+                }
+                onSelect={(value: string | null) => {
+                  field.handleChange(parseAssignee(value));
+                  if (value) {
+                    const picked = assigneeOptions.find(o => o.value === value);
+                    setSelectedAssigneeOption(
+                      picked
+                        ? { value: picked.value, label: picked.label, icon: picked.icon }
+                        : null,
+                    );
+                  } else {
+                    setSelectedAssigneeOption(null);
+                  }
+                }}
+                onSearchChange={setAssigneeSearchValue}
+                searchPlaceholder={
+                  showUserGroupsOnly
+                    ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
+                    : `Select assignee${mandatoryAssignee ? ' *' : ''}`
+                }
+                placeholder={
+                  showUserGroupsOnly
+                    ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
+                    : `Assignee${mandatoryAssignee ? ' *' : ''}`
+                }
+                inputIcon={
+                  showUserGroupsOnly ? (
+                    <Users className='size-3.5' strokeWidth={2.33} />
+                  ) : (
+                    <User className='size-3.5' strokeWidth={2.33} />
+                  )
+                }
+                inputClassName='rounded-md h-7'
+                disableClientFiltering={true}
+                showIndicator={false}
+                testId='ticket-assignee-selector'
+              />
+            )}
+          </form.Field>
+
+          {/* Status Selection (Todo) - conditionally rendered */}
+          {showTodo && (
+            <form.Field name='status'>
+              {field => (
+                <EntitySelector
+                  showSearch={false}
+                  options={statusOptions}
+                  selectedValue={field.state.value}
+                  onSelect={(value: string | null) =>
+                    field.handleChange(value as CreateTicketFormData['status'])
+                  }
+                  searchPlaceholder={`status${mandatoryTodo ? ' *' : ''}`}
+                  placeholder={`status${mandatoryTodo ? ' *' : ''}`}
+                  inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
+                  inputClassName='rounded-md h-7'
+                  showClearButton={true}
+                  showIndicator={false}
+                  testId='ticket-status-selector'
+                />
+              )}
+            </form.Field>
+          )}
+
+          {/* Due Date - conditionally rendered */}
+          {showDueDate && (
+            <form.Field name='eta'>
+              {field => {
+                const yesterday = new Date(new Date().setDate(new Date().getDate() - 1));
+                return (
+                  <DatePicker
+                    selectedDate={field.state.value}
+                    onSelect={date => field.handleChange(date)}
+                    placeholder={`Due Date${mandatoryDueDate ? ' *' : ''}`}
+                    minDate={yesterday}
+                    showClearButton
+                  />
+                );
+              }}
+            </form.Field>
+          )}
+
+          {/* Priority Selection */}
+          <form.Field name='priority'>
+            {field => {
+              return (
+                <EntitySelector
+                  showSearch={false}
+                  options={getPriorityOptions()}
+                  selectedValue={field.state.value}
+                  onSelect={(value: string | null) =>
+                    field.handleChange(value as CreateTicketFormData['priority'])
+                  }
+                  searchPlaceholder='priority'
+                  placeholder='priority'
+                  inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
+                  inputClassName='rounded-md h-7'
+                  showClearButton={true}
+                  showIndicator={false}
+                  testId='ticket-priority-selector'
+                />
+              );
+            }}
+          </form.Field>
+
+          {/* Workflow Type Selection - conditionally rendered */}
+          {showWorkflows && (
+            <form.Field name='workflowType'>
+              {field => {
+                return (
+                  <EntitySelector
+                    variant='inline'
+                    options={workflowTypes.map(workflowType => ({
+                      ...workflowType,
+                      value: workflowType.id,
+                      icon: null,
+                    }))}
+                    selectedValue={field.state.value}
+                    onSelect={value => {
+                      field.handleChange(value as CreateTicketFormData['workflowType']);
+                    }}
+                    searchPlaceholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
+                    placeholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
+                    inputIcon={<WorkflowIcon strokeWidth={2.33} className='size-[14px]' />}
+                    inputClassName='bg-background'
+                    showIndicator={false}
+                    testId='ticket-workflow-selector'
+                  />
+                );
+              }}
+            </form.Field>
+          )}
+
+          {/* Tags Selection - conditionally rendered */}
+          {showLabels && (
+            <form.Field name='tags'>
+              {field => (
+                <EntityMultiSelector
+                  options={tagOptions}
+                  selectedValues={field.state.value}
+                  onMultiSelect={(tags: string[]) => field.handleChange(tags)}
+                  allowCreate={true}
+                  onCreateOption={(value: string) => {
+                    setNewTags(prev => [...prev, value]);
+                    field.handleChange([...field.state.value, value]);
+                  }}
+                  onOpenChange={open => {
+                    if (open && !tagsQueried) setTagsQueried(true);
+                  }}
+                  placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
+                  searchPlaceholder='Search labels'
+                  showSearch={true}
+                  collapseSelectedAfter={3}
+                  collapsedLabel='labels'
+                  inputIcon={<Tag strokeWidth={2.33} className='size-3.5' />}
+                />
+              )}
+            </form.Field>
+          )}
+
+          {/* Ticket Type Selection - conditionally rendered */}
+          {showTicketType && (
+            <form.Field name='ticketType'>
+              {field => {
+                const typeOptions =
+                  ticketTypeOptions?.map(type => ({
+                    label: type.value,
+                    value: type.value,
+                    icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                  })) ?? [];
+
+                return (
+                  <EntitySelector
+                    showSearch={false}
+                    options={typeOptions}
+                    selectedValue={field.state.value || ''}
+                    onSelect={(value: string | null) =>
+                      field.handleChange(value as CreateTicketFormData['ticketType'])
+                    }
+                    searchPlaceholder='ticket type'
+                    placeholder={`ticket type${mandatoryTicketType ? ' *' : ''}`}
+                    inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
+                    inputClassName='rounded-md h-7'
+                    showClearButton={true}
+                    showIndicator={false}
+                  />
+                );
+              }}
+            </form.Field>
+          )}
+
+          {/* Merchant ID - conditionally rendered */}
+          {showMerchantId && (
+            <form.Field name='merchantId'>
+              {field => (
+                <Input
+                  type='text'
+                  value={field.state.value || ''}
+                  onChange={e => field.handleChange(e.target.value)}
+                  placeholder={`Merchant ID${mandatoryMerchantId ? ' *' : ''}`}
+                  className='text-sm'
+                />
+              )}
+            </form.Field>
+          )}
+        </div>
+        <div className='flex justify-between items-center pt-6 pb-4'>
+          <Button
+            type='button'
+            onClick={handlePaperclipClick}
+            variant='ghost'
+            size='icon'
+            title='Attach files'
+            disabled={form.state.isSubmitting}
+            className='size-6'
+            data-testid='ticket-attachment-button'
+            data-track-category='TICKETS'
+            data-track-name='ATTACH_FILE'
+            data-track-metadata={JSON.stringify({
+              boardId: selectedBoardId,
+              channelId,
+              fileCount: allAttachments.length,
+            })}
+          >
+            <Paperclip strokeWidth={2.33} className='size-3.5 text-muted-foreground' />
+          </Button>
+          <div className='flex items-center gap-3'>
+            {missingMandatoryFieldMessage ? (
+              <Tooltip content={missingMandatoryFieldMessage} side='top'>
+                <span className='cursor-not-allowed'>
+                  <Button
+                    type='submit'
+                    loading={form.state.isSubmitting}
+                    disabled={form.state.isSubmitting || !isFormReadyForSubmit}
+                    className={cn(
+                      'px-3 rounded-lg h-8',
+                      'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
+                      'pointer-events-none',
+                    )}
+                    data-testid='ticket-submit-button'
+                    data-track-category='TICKETS'
+                    data-track-name='SUBMIT_CREATE_TICKET_MODAL'
+                    data-track-metadata={JSON.stringify({
+                      boardId: selectedBoardId,
+                      channelId,
+                      hasAttachments: allAttachments.length > 0,
+                      isFromAI,
+                    })}
+                  >
+                    {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : (
+              <Button
+                type='submit'
+                loading={form.state.isSubmitting}
+                disabled={form.state.isSubmitting || !isFormReadyForSubmit}
+                className={cn(
+                  'px-3 rounded-lg h-8',
+                  'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
+                )}
+                data-testid='ticket-submit-button'
+                data-track-category='TICKETS'
+                data-track-name='SUBMIT_CREATE_TICKET_MODAL'
+                data-track-metadata={JSON.stringify({
+                  boardId: selectedBoardId,
+                  channelId,
+                  hasAttachments: allAttachments.length > 0,
+                  isFromAI,
+                })}
+              >
+                {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
+              </Button>
+            )}
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type='file'
+              multiple
+              onChange={handleFileInputChange}
+              className='hidden'
+              data-testid='ticket-attachment-input'
+            />
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+
+  if (standalone) {
+    return (
+      <div className='h-screen w-full overflow-y-auto bg-background'>
+        <div className='mx-auto w-full max-w-screen-md'>{modalContent}</div>
+      </div>
+    );
+  }
+
   return (
     <Dialog
       open={isOpen}
@@ -1380,1098 +2546,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         'top-1/3 !-translate-y-1/3',
       )}
     >
-      <div
-        onDragOver={handleModalDragOver}
-        onDragEnter={handleModalDragEnter}
-        onDragLeave={handleModalDragLeave}
-        onDrop={handleModalDrop}
-        className='relative overflow-y-auto max-h-[80vh]'
-      >
-        {/* Drag overlay */}
-        {isDraggingOverModal && (
-          <div className='absolute inset-0 bg-blue-50 bg-opacity-90 rounded-lg flex items-center justify-center z-50 pointer-events-none'>
-            <div className='text-center'>
-              <Paperclip className='w-12 h-12 text-blue-500 mx-auto mb-2' />
-              <p className='text-blue-700 font-medium'>Drop files to attach</p>
-            </div>
-          </div>
-        )}
-
-        <div className='w-full px-4 pt-4 pb-3 flex items-center justify-between'>
-          <h2 className='text-xs leading-5 font-medium text-foreground/80 select-none'>
-            {ticketSequence
-              ? `New Ticket (${ticketSequence.current}/${ticketSequence.total})`
-              : 'New Ticket'}
-          </h2>
-          <Button
-            variant='ghost'
-            size='icon'
-            onClick={onClose}
-            disabled={form.state.isSubmitting}
-            className='size-6 '
-            data-track-category='Tickets'
-            data-track-name='CloseCreateTicketModal'
-          >
-            <X strokeWidth={2.33} className='size-3.5' />
-          </Button>
-        </div>
-
-        <form
-          onSubmit={e => {
-            e.preventDefault();
-            e.stopPropagation();
-            void form.handleSubmit();
-          }}
-          className='px-4 pt-1.5 space-y-0'
-        >
-          {/* Title Field */}
-          <form.Field
-            name='title'
-            validators={{
-              onChange: ({ value }) => {
-                if (!value?.trim()) return 'Title is required';
-                if (value.length < 3) return 'Title must be at least 3 characters';
-                if (value.length > 100) return 'Title must be 100 characters or less';
-                return undefined;
-              },
-            }}
-          >
-            {field => (
-              <div className='space-y-1'>
-                {isTitleGenerating ? (
-                  <div className='flex h-8 items-center'>
-                    <TextShimmer
-                      glassEffect={false}
-                      className='text-left leading-tight font-bold text-[20px]'
-                    >
-                      Adding AI generated title
-                    </TextShimmer>
-                  </div>
-                ) : (
-                  <Input
-                    ref={titleInputRef}
-                    value={field.state.value}
-                    required={true}
-                    onChange={e => {
-                      // If user starts typing, cancel the ongoing generation
-                      if (isTitleGenerating) {
-                        cancelGeneration();
-                      }
-                      field.handleChange(e.target.value);
-                    }}
-                    aria-label='Ticket Title'
-                    placeholder='Enter Ticket Title...'
-                    data-testid='ticket-title-input'
-                    data-track-category='TICKETS'
-                    data-track-name='EDIT_TICKET_TITLE'
-                    data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
-                    className={cn(
-                      '!text-xl !leading-tight truncate',
-                      'px-0 border-none focus-visible:ring-0',
-                      'font-bold text-foreground placeholder:text-xl placeholder:text-muted-foreground/50',
-                      field.state.meta.errors.length > 0 && 'text-red-600',
-                    )}
-                  />
-                )}
-                <FieldError error={field.state.meta.errors[0]} />
-              </div>
-            )}
-          </form.Field>
-
-          {/* Description Field */}
-          <form.Field
-            name='description'
-            validators={{
-              onChange: ({ value }) => {
-                if (!value?.trim()) return 'Description is required';
-                if (value.length < 5) return 'Description must be at least 5 characters';
-                return undefined;
-              },
-            }}
-          >
-            {field => (
-              <div className='space-y-1'>
-                <Textarea
-                  ref={descriptionTextareaRef}
-                  rows={2}
-                  required={true}
-                  aria-required='true'
-                  id='ticket-description'
-                  value={field.state.value || ''}
-                  aria-invalid={field.state.meta.errors.length > 0}
-                  placeholder='Enter Ticket Description...'
-                  aria-label='Ticket Description'
-                  data-testid='ticket-description-input'
-                  data-track-category='TICKETS'
-                  data-track-name='EDIT_TICKET_DESCRIPTION'
-                  data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
-                  onChange={e => {
-                    const newValue = e.target.value;
-                    field.handleChange(newValue);
-                    // Dynamically adjust the height
-                    const target = e.target;
-                    target.style.height = 'auto'; // Reset height to recalculate
-                    target.style.height = `${target.scrollHeight}px`; // Set to scroll height
-                  }}
-                  className={cn(
-                    'border-none focus-visible:ring-0 focus-visible:border-none rounded-none p-0 min-h-16',
-                    'max-h-[25vh]', // can occupy max 25% of vertical height
-                    'resize-none overflow-y-auto',
-                    'placeholder:text-muted-foreground/50 text-foreground/80 leading-5 font-semibold',
-                    field.state.meta.errors.length > 0 && 'text-red-600',
-                  )}
-                />
-                <FieldError error={field.state.meta.errors[0]} />
-              </div>
-            )}
-          </form.Field>
-
-          {subTickets.length > 0 && (
-            <div className='mt-2 rounded-md border border-border bg-muted p-3'>
-              <div className='mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground'>
-                <SubTicketCountIcon className='shrink-0 text-foreground' />
-                <span>{subTickets.length} Sub-tickets</span>
-              </div>
-              <div className='space-y-2'>
-                {subTickets.map((subTicket, index) => {
-                  const isEditing = editingSubTicketIndex === index;
-                  return (
-                    <div
-                      key={`subticket-${index}`}
-                      className='rounded-lg border border-border bg-background p-[11px]'
-                    >
-                      {isEditing ? (
-                        <div className='flex flex-col gap-2'>
-                          <div className='flex items-center justify-between gap-2'>
-                            <div className='flex min-w-0 items-center gap-2'>
-                              <span className='font-mono text-[12px] font-medium leading-[1.1] text-muted-foreground'>
-                                {index + 1}
-                              </span>
-                              <Input
-                                value={editingSubTicketTitle}
-                                onChange={e => setEditingSubTicketTitle(e.target.value)}
-                                placeholder='Sub-ticket title'
-                                className='h-auto border-none p-0 text-[14px] font-medium leading-[18px] text-foreground focus-visible:ring-0'
-                              />
-                            </div>
-                            <button
-                              type='button'
-                              onClick={saveEditedSubTicket}
-                              className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
-                              data-track-category='TICKETS'
-                              data-track-name='SaveEditedSubTicket'
-                              data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
-                            >
-                              Done
-                            </button>
-                          </div>
-                          <Textarea
-                            value={editingSubTicketDescription}
-                            onChange={e => setEditingSubTicketDescription(e.target.value)}
-                            placeholder='Sub-ticket description (optional)'
-                            rows={2}
-                            className='min-h-0 resize-none border-none p-0 text-[14px] leading-[18px] text-muted-foreground focus-visible:ring-0'
-                          />
-                        </div>
-                      ) : (
-                        <div className='flex items-start justify-between gap-3'>
-                          <div className='min-w-0 flex-1'>
-                            <div className='flex min-w-0 items-center gap-2'>
-                              <span className='font-mono text-[12px] font-medium leading-[1.1] text-muted-foreground'>
-                                {index + 1}
-                              </span>
-                              <div className='truncate text-[14px] font-medium leading-[18px] text-foreground'>
-                                {subTicket.title}
-                              </div>
-                            </div>
-                            {subTicket.description && (
-                              <div className='mt-1 text-[14px] leading-[18px] text-muted-foreground'>
-                                {subTicket.description}
-                              </div>
-                            )}
-                          </div>
-                          <div className='flex shrink-0 items-center gap-4'>
-                            <button
-                              type='button'
-                              onClick={() => beginEditSubTicket(index)}
-                              className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
-                              data-track-category='TICKETS'
-                              data-track-name='EditSubTicket'
-                              data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => deleteSubTicket(index)}
-                              aria-label={`Delete subticket ${index + 1}`}
-                              className='text-muted-foreground hover:text-muted-foreground'
-                              data-track-category='TICKETS'
-                              data-track-name='DeleteSubTicket'
-                              data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
-                            >
-                              <Trash2 className='size-[14px]' />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Channel and Board Selection */}
-          <div className={cn('flex items-center gap-2.5 pb-2', subTickets.length > 0 && 'pt-4')}>
-            {/* Channel Selection - Only for SubTicket creation */}
-            {(isFromSubTicket || isFromAI) && (
-              <form.Field
-                name='channelId'
-                validators={{
-                  onChange: ({ value }) => {
-                    if (!value?.trim()) return 'Channel is required';
-                    return undefined;
-                  },
-                }}
-              >
-                {field => (
-                  <EntitySelector
-                    variant='inline'
-                    options={channelOptions}
-                    selectedValue={field.state.value || ''}
-                    onSelect={(value: string | null) =>
-                      field.handleChange(value as CreateTicketFormData['channelId'])
-                    }
-                    searchPlaceholder='channel'
-                    placeholder='channel'
-                    inputIcon={<Hash className='size-3.5' strokeWidth={2.33} />}
-                  />
-                )}
-              </form.Field>
-            )}
-
-            {/* Board Selection */}
-            <form.Field
-              name='boardId'
-              validators={{
-                onChange: ({ value }) => {
-                  if (!value?.trim()) return 'Board is required';
-                  return undefined;
-                },
-              }}
-            >
-              {field => {
-                // AI is checking — compact shimmer chip with an inline X to stop and pick manually
-                if (isCheckingBoard && !boardAISuggestionSuppressed) {
-                  return (
-                    <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background pl-2 pr-1 py-0.5 h-8 w-fit overflow-hidden text-sm'>
-                      <SquareKanban
-                        className='size-3.5 text-muted-foreground shrink-0'
-                        strokeWidth={2.33}
-                      />
-                      <span className='text-sm whitespace-nowrap text-muted-foreground animate-pulse'>
-                        Suggesting board...
-                      </span>
-                      <button
-                        type='button'
-                        className='flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline-none focus-visible:text-foreground focus-visible:bg-accent transition-colors shrink-0'
-                        title='Stop and select manually'
-                        aria-label='Stop and select manually'
-                        onClick={() => {
-                          setBoardAISuggestionSuppressed(true);
-                          resetBoardSuggestionState();
-                          setTimeout(() => setBoardSelectorOpen(true), 0);
-                        }}
-                        data-track-category='TICKETS'
-                        data-track-name='CancelAISuggestedBoard'
-                      >
-                        <X className='size-3.5 shrink-0' strokeWidth={2.33} />
-                      </button>
-                    </div>
-                  );
-                }
-
-                // AI suggestion ready — grey outer wrapper, chip left, Accept/Reject right
-                if (
-                  boardSuggestion?.analysis.suggestedBoardId &&
-                  !boardAISuggestionSuppressed &&
-                  !field.state.value
-                ) {
-                  return (
-                    <div className='flex items-center justify-between w-full rounded-lg bg-muted px-3 py-1.5'>
-                      {/* Board name pill — clean bg inside the grey wrapper */}
-                      <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-0.5 h-8 text-sm'>
-                        <SquareKanban
-                          className='size-3.5 text-muted-foreground shrink-0'
-                          strokeWidth={2.33}
-                        />
-                        <span className='text-foreground whitespace-nowrap'>
-                          {boardSuggestion.analysis.suggestedBoardName || 'Unknown Board'}
-                        </span>
-                      </div>
-                      {/* Accept / Reject — separate bordered buttons on the right */}
-                      <div className='flex items-center gap-1.5'>
-                        <button
-                          type='button'
-                          className='h-8 px-3 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-accent transition-colors'
-                          onClick={() => {
-                            if (boardSuggestion.analysis.suggestedBoardId) {
-                              field.handleChange(boardSuggestion.analysis.suggestedBoardId);
-                              setBoardAISuggestionSuppressed(true);
-                              resetBoardSuggestionState();
-                            }
-                          }}
-                          data-track-category='TICKETS'
-                          data-track-name='AcceptAISuggestedBoard'
-                        >
-                          Accept
-                        </button>
-                        <button
-                          type='button'
-                          className='h-8 px-3 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-accent transition-colors'
-                          onClick={() => {
-                            setBoardAISuggestionSuppressed(true);
-                            resetBoardSuggestionState();
-                            // Defer open until EntitySelector has mounted in DOM
-                            setTimeout(() => setBoardSelectorOpen(true), 0);
-                          }}
-                          data-track-category='TICKETS'
-                          data-track-name='RejectAISuggestedBoard'
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </div>
-                  );
-                }
-
-                // Normal selector (default / after reject / after accept — shows chevron to change)
-                return (
-                  <EntitySelector
-                    showSearch={false}
-                    options={boardOptions}
-                    selectedValue={field.state.value || ''}
-                    onSelect={(value: string | null) => {
-                      field.handleChange(value as CreateTicketFormData['boardId']);
-                      setBoardAISuggestionSuppressed(true);
-                      setBoardSelectorOpen(false);
-                    }}
-                    searchPlaceholder='board'
-                    placeholder='Select board'
-                    inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
-                    inputClassName='!h-8 rounded-lg'
-                    showIndicator={true}
-                    testId='ticket-board-selector'
-                    isOpen={boardSelectorOpen}
-                    onOpenChange={setBoardSelectorOpen}
-                  />
-                );
-              }}
-            </form.Field>
-          </div>
-
-          {/* Dynamic Form Fields */}
-          {requiredDynamicFields.length > 0 && (
-            <div className='space-y-2'>
-              <div className='text-sm font-bold text-foreground pb-2'>Additional Information</div>
-              <div className='space-y-2 h-full max-h-56 overflow-scroll -mx-4 px-4'>
-                {requiredDynamicFields.map(field => {
-                  const fieldName = field.fieldName;
-                  const fieldType = field.fieldType;
-                  const rawValue = formValues?.dynamicFields?.[fieldName] || '';
-                  const error = dynamicFieldErrors[fieldName];
-                  const isOptional = field.isOptional === true;
-
-                  // Normalize value based on field type
-                  const stringValue = getSingleStringValue(rawValue);
-                  const arrayValue = getStringArrayValue(rawValue);
-
-                  return (
-                    <div key={field.id} className='mb-1'>
-                      {(fieldType === FormFieldType.STRING ||
-                        fieldType === FormFieldType.NUMBER) && (
-                        <>
-                          <label className='text-sm font-medium text-foreground'>{`${fieldName}${!isOptional ? '*' : ''}`}</label>
-                          <Input
-                            value={stringValue}
-                            onChange={e => {
-                              const value = e.target.value;
-                              form.setFieldValue('dynamicFields', {
-                                ...formValues?.dynamicFields,
-                                [fieldName]: value,
-                              });
-                              if (value.trim() && error) {
-                                setDynamicFieldErrors(prev => {
-                                  const newErrors = { ...prev };
-                                  delete newErrors[fieldName];
-                                  return newErrors;
-                                });
-                              }
-                            }}
-                            type={fieldType === FormFieldType.NUMBER ? 'number' : 'text'}
-                            placeholder={`Enter ${fieldName.toLowerCase()}`}
-                            className={cn(
-                              'px-0 border-none focus-visible:ring-0',
-                              'font-semibold text-muted-foreground placeholder:text-muted-foreground/80',
-                              error && 'text-red-600',
-                            )}
-                          />
-                          <FieldError error={error} />
-                        </>
-                      )}
-                      {fieldType === FormFieldType.DATE && (
-                        <>
-                          <label className='text-sm font-medium text-foreground'>
-                            {fieldName} *
-                          </label>
-                          <Input
-                            value={stringValue}
-                            onChange={e => {
-                              const value = e.target.value ?? '';
-                              form.setFieldValue('dynamicFields', {
-                                ...formValues?.dynamicFields,
-                                [fieldName]: value,
-                              });
-                              if (value && error) {
-                                setDynamicFieldErrors(prev => {
-                                  const newErrors = { ...prev };
-                                  delete newErrors[fieldName];
-                                  return newErrors;
-                                });
-                              }
-                            }}
-                            type='date'
-                            className={cn(
-                              'px-0 border-none focus-visible:ring-0',
-                              'font-semibold text-muted-foreground',
-                              error && 'text-red-600',
-                            )}
-                          />
-                          <FieldError error={error} />
-                        </>
-                      )}
-                      {fieldType === FormFieldType.BOOLEAN && (
-                        <RadioGroup
-                          label={`${fieldName}${!isOptional ? '*' : ''}`}
-                          value={stringValue}
-                          className='text-xs'
-                          onChange={value => {
-                            form.setFieldValue('dynamicFields', {
-                              ...formValues?.dynamicFields,
-                              [fieldName]: value,
-                            });
-                            if (value && error) {
-                              setDynamicFieldErrors(prev => {
-                                const newErrors = { ...prev };
-                                delete newErrors[fieldName];
-                                return newErrors;
-                              });
-                            }
-                          }}
-                        >
-                          <div className='flex gap-3'>
-                            <Radio value='true'>Yes</Radio>
-                            <Radio value='false'>No</Radio>
-                          </div>
-                        </RadioGroup>
-                      )}
-                      {fieldType === FormFieldType.SINGLE_SELECT && (
-                        <SingleSelect
-                          label={`${fieldName}${!isOptional ? ' *' : ''}`}
-                          placeholder={`Select ${fieldName.toLowerCase()}`}
-                          items={[
-                            {
-                              items:
-                                (field.fieldEnum as string[] | undefined)?.map(opt => ({
-                                  label: opt,
-                                  value: opt,
-                                })) || [],
-                            },
-                          ]}
-                          selected={stringValue}
-                          onSelect={selected => {
-                            form.setFieldValue('dynamicFields', {
-                              ...formValues?.dynamicFields,
-                              [fieldName]: selected ?? '',
-                            });
-                            if (selected && error) {
-                              setDynamicFieldErrors(prev => {
-                                const newErrors = { ...prev };
-                                delete newErrors[fieldName];
-                                return newErrors;
-                              });
-                            }
-                          }}
-                          alignment={SelectMenuAlignment.START}
-                          error={!!error}
-                          {...(error && { errorMessage: error })}
-                        />
-                      )}
-                      {fieldType === FormFieldType.MULTI_SELECT && (
-                        <MultiSelect
-                          label={`${fieldName}${!isOptional ? ' *' : ''}`}
-                          placeholder={`Select ${fieldName.toLowerCase()}`}
-                          options={
-                            (field.fieldEnum as string[] | undefined)?.map(opt => ({
-                              label: opt,
-                              value: opt,
-                            })) || []
-                          }
-                          selectedValues={arrayValue}
-                          onChange={newValues => {
-                            const cleanedValues = (newValues ?? []).filter(
-                              v => !!v && v.trim().length > 0,
-                            );
-
-                            form.setFieldValue('dynamicFields', {
-                              ...formValues?.dynamicFields,
-                              [fieldName]: cleanedValues,
-                            });
-                            if (!isOptional && cleanedValues.length === 0) {
-                              setDynamicFieldErrors(prev => ({
-                                ...prev,
-                                [fieldName]: `${fieldName} is required`,
-                              }));
-                            } else {
-                              setDynamicFieldErrors(prev => {
-                                const next = { ...prev };
-                                delete next[fieldName];
-                                return next;
-                              });
-                            }
-                          }}
-                          error={error || ''}
-                        />
-                      )}
-                      {fieldType === FormFieldType.USER && (
-                        <>
-                          <label className='text-sm font-medium text-foreground'>{`${fieldName}${!isOptional ? ' *' : ''}`}</label>
-                          <div className='border border-input rounded'>
-                            <SearchUserV2
-                              options={allUsers || []}
-                              selectedUsers={arrayValue
-                                .map(userId => userMap.get(userId))
-                                .filter((user): user is UserType => user !== undefined)}
-                              searchQuery={dynamicFieldSearchQueries[fieldName] || ''}
-                              onSearchChange={query => {
-                                setDynamicFieldSearchQueries(prev => ({
-                                  ...prev,
-                                  [fieldName]: query,
-                                }));
-                              }}
-                              onSelect={selectedUsers => {
-                                const cleanedValues = selectedUsers
-                                  .map(u => u.id)
-                                  .filter(v => !!v && v.trim().length > 0);
-
-                                form.setFieldValue('dynamicFields', {
-                                  ...formValues?.dynamicFields,
-                                  [fieldName]: cleanedValues,
-                                });
-                                if (!isOptional && cleanedValues.length === 0) {
-                                  setDynamicFieldErrors(prev => ({
-                                    ...prev,
-                                    [fieldName]: `${fieldName} is required`,
-                                  }));
-                                } else {
-                                  setDynamicFieldErrors(prev => {
-                                    const next = { ...prev };
-                                    delete next[fieldName];
-                                    return next;
-                                  });
-                                }
-                              }}
-                              isOpen={dynamicFieldOpenStates[fieldName] || false}
-                              setIsOpen={isOpen => {
-                                setDynamicFieldOpenStates(prev => ({
-                                  ...prev,
-                                  [fieldName]: isOpen,
-                                }));
-                              }}
-                            />
-                          </div>
-                          {error && <p className='text-xs text-red-600 mt-1'>{error}</p>}
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <div className='py-2'>
-            {isCheckingDuplicate && (
-              <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-                <Loader2 className='h-4 w-4 animate-spin' />
-                <span>Checking for duplicates...</span>
-              </div>
-            )}
-            {(duplicateCheck?.candidates?.length ?? 0) > 0 && (
-              <div className='rounded-lg border border-border bg-muted p-4 mb-2 transition-all duration-200 ease-out'>
-                <div className='space-y-2'>
-                  <div className='flex items-center justify-between pb-0.5'>
-                    <span className='flex items-center gap-2'>
-                      <Copy className='size-3' strokeWidth={2.5} />
-                      <p className='text-sm font-medium text-foreground leading-5'>
-                        {duplicateCheck?.analysis?.isDuplicate
-                          ? 'Duplicate ticket found'
-                          : 'Similar tickets found'}
-                      </p>
-                    </span>
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      onClick={resetDuplicateState}
-                      className='size-6 '
-                    >
-                      <X strokeWidth={2.33} className='size-3.5' />
-                    </Button>
-                  </div>
-                  {(duplicateCheck?.analysis?.isDuplicate
-                    ? duplicateCheck?.candidates?.slice(0, 1)
-                    : duplicateCheck?.candidates?.slice(0, 5)
-                  )?.map(candidate => {
-                    const candidateLink = candidateLinks.get(candidate.id);
-
-                    return (
-                      <div
-                        key={candidate.id}
-                        className='border border-border rounded-lg p-2.5 flex items-center justify-between gap-2 group bg-background'
-                      >
-                        <span className='flex items-center gap-2 overflow-hidden cursor-default'>
-                          <p className='text-foreground text-sm font-medium truncate'>
-                            <RenderMessageWithHTML message={candidate.title} />
-                          </p>
-                        </span>
-                        <span className='opacity-0 flex items-center gap-1 group-hover:opacity-100 transition-opacity duration-300 '>
-                          {candidateLink && (
-                            <Tooltip
-                              content='Copy Ticket'
-                              side='top'
-                              className='text-[10px] font-semibold leading-3  p-1.5'
-                            >
-                              <Button
-                                type='button'
-                                variant='ghost'
-                                size='icon'
-                                className='size-6'
-                                onClick={() => {
-                                  handleDuplicateTicketCopyLink(candidateLink);
-                                }}
-                                data-track-category='Tickets'
-                                data-track-name='CopyDuplicateTicketLink'
-                              >
-                                <LinkIcon className='size-3.5' />
-                              </Button>
-                            </Tooltip>
-                          )}
-                          {candidateLink && (
-                            <Tooltip
-                              content='Open in new page'
-                              side='top'
-                              className='text-[10px] font-semibold leading-3 p-1.5 '
-                            >
-                              <Link to={candidateLink}>
-                                <Button
-                                  type='button'
-                                  variant='ghost'
-                                  size='icon'
-                                  className='size-6'
-                                >
-                                  <SquareArrowOutUpRight className='size-3.5' />
-                                </Button>
-                              </Link>
-                            </Tooltip>
-                          )}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {allAttachments.length > 0 && (
-            <div
-              className={cn(
-                allAttachments.length === 1
-                  ? 'flex flex-col'
-                  : allAttachments.length === 2
-                    ? 'flex flex-row'
-                    : 'grid grid-cols-2',
-                'gap-2 py-3',
-              )}
-            >
-              {allAttachments.map(attachment => {
-                if (attachment.isFromChat) {
-                  if (!attachment.id) return null;
-                  const attachmentId = attachment.id;
-                  return (
-                    <AttachmentPreview
-                      key={`chat-${attachmentId}`}
-                      file={{
-                        id: attachmentId,
-                        originalName: attachment.originalFilename || 'Unknown',
-                        fileName: attachment.originalFilename || 'Unknown',
-                        fileSize: attachment.size || 0,
-                        mimeType: attachment.mimetype || 'application/octet-stream',
-                        fileUrl: attachment.url || '',
-                        thumbnailUrl: attachment.thumbnailUrl ?? '',
-                      }}
-                      onRemove={() => {
-                        // Exclude this chat attachment from the ticket
-                        setExcludedChatAttachmentIds(prev => new Set([...prev, attachmentId]));
-                      }}
-                      onPreview={() => {}}
-                      isUploading={form.state.isSubmitting}
-                      variant='detailed'
-                    />
-                  );
-                }
-
-                // Handle new uploaded files (removable)
-                if (attachment.file) {
-                  const isFileObject = attachment.file instanceof File;
-                  let fileKey: string;
-                  if (isFileObject) {
-                    const fileObj = attachment.file as File;
-                    fileKey =
-                      attachment.id ||
-                      `file-${fileObj.name}-${fileObj.size}-${fileObj.lastModified}`;
-                  } else {
-                    const uploadedFile = attachment.file as UploadedFile;
-                    fileKey =
-                      attachment.id ||
-                      `file-${uploadedFile.originalName}-${uploadedFile.fileSize}-${Date.now()}`;
-                  }
-                  const fileId = attachment.id || '';
-                  return (
-                    <AttachmentPreview
-                      key={fileKey}
-                      file={attachment.file}
-                      onRemove={() => {
-                        if (fileId) {
-                          void removeFile(fileId, {} as File);
-                        }
-                      }}
-                      onPreview={() => {
-                        if (isFileObject) {
-                          handlePreviewFile(attachment.file as File);
-                        }
-                      }}
-                      isUploading={form.state.isSubmitting}
-                      variant='detailed'
-                    />
-                  );
-                }
-
-                return null;
-              })}
-            </div>
-          )}
-
-          <div className='flex flex-wrap items-center gap-2.5 mt-2'>
-            {/* Assignee Selection */}
-            <form.Field name='assignee'>
-              {field => (
-                <EntitySelector
-                  options={assigneeOptions}
-                  selectedValue={
-                    field.state.value
-                      ? field.state.value.type === 'assigneeTo'
-                        ? `user:${field.state.value.value}`
-                        : `${field.state.value.type}:${field.state.value.value}`
-                      : null
-                  }
-                  onSelect={(value: string | null) => {
-                    field.handleChange(parseAssignee(value));
-                    if (value) {
-                      const picked = assigneeOptions.find(o => o.value === value);
-                      setSelectedAssigneeOption(
-                        picked
-                          ? { value: picked.value, label: picked.label, icon: picked.icon }
-                          : null,
-                      );
-                    } else {
-                      setSelectedAssigneeOption(null);
-                    }
-                  }}
-                  onSearchChange={setAssigneeSearchValue}
-                  searchPlaceholder={
-                    showUserGroupsOnly
-                      ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
-                      : `Select assignee${mandatoryAssignee ? ' *' : ''}`
-                  }
-                  placeholder={
-                    showUserGroupsOnly
-                      ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
-                      : `Assignee${mandatoryAssignee ? ' *' : ''}`
-                  }
-                  inputIcon={
-                    showUserGroupsOnly ? (
-                      <Users className='size-3.5' strokeWidth={2.33} />
-                    ) : (
-                      <User className='size-3.5' strokeWidth={2.33} />
-                    )
-                  }
-                  inputClassName='rounded-md h-7'
-                  disableClientFiltering={true}
-                  showIndicator={false}
-                  testId='ticket-assignee-selector'
-                />
-              )}
-            </form.Field>
-
-            {/* Status Selection (Todo) - conditionally rendered */}
-            {showTodo && (
-              <form.Field name='status'>
-                {field => (
-                  <EntitySelector
-                    showSearch={false}
-                    options={statusOptions}
-                    selectedValue={field.state.value}
-                    onSelect={(value: string | null) =>
-                      field.handleChange(value as CreateTicketFormData['status'])
-                    }
-                    searchPlaceholder={`status${mandatoryTodo ? ' *' : ''}`}
-                    placeholder={`status${mandatoryTodo ? ' *' : ''}`}
-                    inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
-                    inputClassName='rounded-md h-7'
-                    showClearButton={true}
-                    showIndicator={false}
-                    testId='ticket-status-selector'
-                  />
-                )}
-              </form.Field>
-            )}
-
-            {/* Due Date - conditionally rendered */}
-            {showDueDate && (
-              <form.Field name='eta'>
-                {field => {
-                  const yesterday = new Date(new Date().setDate(new Date().getDate() - 1));
-                  return (
-                    <DatePicker
-                      selectedDate={field.state.value}
-                      onSelect={date => field.handleChange(date)}
-                      placeholder={`Due Date${mandatoryDueDate ? ' *' : ''}`}
-                      minDate={yesterday}
-                      showClearButton
-                    />
-                  );
-                }}
-              </form.Field>
-            )}
-
-            {/* Priority Selection */}
-            <form.Field name='priority'>
-              {field => {
-                return (
-                  <EntitySelector
-                    showSearch={false}
-                    options={getPriorityOptions()}
-                    selectedValue={field.state.value}
-                    onSelect={(value: string | null) =>
-                      field.handleChange(value as CreateTicketFormData['priority'])
-                    }
-                    searchPlaceholder='priority'
-                    placeholder='priority'
-                    inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
-                    inputClassName='rounded-md h-7'
-                    showClearButton={true}
-                    showIndicator={false}
-                    testId='ticket-priority-selector'
-                  />
-                );
-              }}
-            </form.Field>
-
-            {/* Workflow Type Selection - conditionally rendered */}
-            {showWorkflows && (
-              <form.Field name='workflowType'>
-                {field => {
-                  return (
-                    <EntitySelector
-                      variant='inline'
-                      options={workflowTypes.map(workflowType => ({
-                        ...workflowType,
-                        value: workflowType.id,
-                        icon: null,
-                      }))}
-                      selectedValue={field.state.value}
-                      onSelect={value => {
-                        field.handleChange(value as CreateTicketFormData['workflowType']);
-                      }}
-                      searchPlaceholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
-                      placeholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
-                      inputIcon={<WorkflowIcon strokeWidth={2.33} className='size-[14px]' />}
-                      inputClassName='bg-background'
-                      showIndicator={false}
-                      testId='ticket-workflow-selector'
-                    />
-                  );
-                }}
-              </form.Field>
-            )}
-
-            {/* Tags Selection - conditionally rendered */}
-            {showLabels && (
-              <form.Field name='tags'>
-                {field => (
-                  <EntityMultiSelector
-                    options={tagOptions}
-                    selectedValues={field.state.value}
-                    onMultiSelect={(tags: string[]) => field.handleChange(tags)}
-                    allowCreate={true}
-                    onCreateOption={(value: string) => {
-                      setNewTags(prev => [...prev, value]);
-                      field.handleChange([...field.state.value, value]);
-                    }}
-                    onOpenChange={open => {
-                      if (open && !tagsQueried) setTagsQueried(true);
-                    }}
-                    placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
-                    searchPlaceholder='Search labels'
-                    showSearch={true}
-                    collapseSelectedAfter={3}
-                    collapsedLabel='labels'
-                    inputIcon={<Tag strokeWidth={2.33} className='size-3.5' />}
-                  />
-                )}
-              </form.Field>
-            )}
-
-            {/* Ticket Type Selection - conditionally rendered */}
-            {showTicketType && (
-              <form.Field name='ticketType'>
-                {field => {
-                  const typeOptions =
-                    ticketTypeOptions?.map(type => ({
-                      label: type.value,
-                      value: type.value,
-                      icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
-                    })) ?? [];
-
-                  return (
-                    <EntitySelector
-                      showSearch={false}
-                      options={typeOptions}
-                      selectedValue={field.state.value || ''}
-                      onSelect={(value: string | null) =>
-                        field.handleChange(value as CreateTicketFormData['ticketType'])
-                      }
-                      searchPlaceholder='ticket type'
-                      placeholder={`ticket type${mandatoryTicketType ? ' *' : ''}`}
-                      inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
-                      inputClassName='rounded-md h-7'
-                      showClearButton={true}
-                      showIndicator={false}
-                    />
-                  );
-                }}
-              </form.Field>
-            )}
-
-            {/* Merchant ID - conditionally rendered */}
-            {showMerchantId && (
-              <form.Field name='merchantId'>
-                {field => (
-                  <Input
-                    type='text'
-                    value={field.state.value || ''}
-                    onChange={e => field.handleChange(e.target.value)}
-                    placeholder={`Merchant ID${mandatoryMerchantId ? ' *' : ''}`}
-                    className='text-sm'
-                  />
-                )}
-              </form.Field>
-            )}
-          </div>
-          <div className='flex justify-between items-center pt-6 pb-4'>
-            <Button
-              type='button'
-              onClick={handlePaperclipClick}
-              variant='ghost'
-              size='icon'
-              title='Attach files'
-              disabled={form.state.isSubmitting}
-              className='size-6'
-              data-testid='ticket-attachment-button'
-              data-track-category='TICKETS'
-              data-track-name='ATTACH_FILE'
-              data-track-metadata={JSON.stringify({
-                boardId: selectedBoardId,
-                channelId,
-                fileCount: allAttachments.length,
-              })}
-            >
-              <Paperclip strokeWidth={2.33} className='size-3.5 text-muted-foreground' />
-            </Button>
-            <div className='flex items-center gap-3'>
-              {missingMandatoryFieldMessage ? (
-                <Tooltip content={missingMandatoryFieldMessage} side='top'>
-                  <span className='cursor-not-allowed'>
-                    <Button
-                      type='submit'
-                      loading={form.state.isSubmitting}
-                      disabled={form.state.isSubmitting || !isFormReadyForSubmit}
-                      className={cn(
-                        'px-3 rounded-lg h-8',
-                        'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
-                        'pointer-events-none',
-                      )}
-                      data-testid='ticket-submit-button'
-                      data-track-category='TICKETS'
-                      data-track-name='SUBMIT_CREATE_TICKET_MODAL'
-                      data-track-metadata={JSON.stringify({
-                        boardId: selectedBoardId,
-                        channelId,
-                        hasAttachments: allAttachments.length > 0,
-                        isFromAI,
-                      })}
-                    >
-                      {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
-                    </Button>
-                  </span>
-                </Tooltip>
-              ) : (
-                <Button
-                  type='submit'
-                  loading={form.state.isSubmitting}
-                  disabled={form.state.isSubmitting || !isFormReadyForSubmit}
-                  className={cn(
-                    'px-3 rounded-lg h-8',
-                    'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
-                  )}
-                  data-testid='ticket-submit-button'
-                  data-track-category='TICKETS'
-                  data-track-name='SUBMIT_CREATE_TICKET_MODAL'
-                  data-track-metadata={JSON.stringify({
-                    boardId: selectedBoardId,
-                    channelId,
-                    hasAttachments: allAttachments.length > 0,
-                    isFromAI,
-                  })}
-                >
-                  {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
-                </Button>
-              )}
-              {/* Hidden file input */}
-              <input
-                ref={fileInputRef}
-                type='file'
-                multiple
-                onChange={handleFileInputChange}
-                className='hidden'
-                data-testid='ticket-attachment-input'
-              />
-            </div>
-          </div>
-        </form>
-      </div>
+      {modalContent}
     </Dialog>
   );
 };
