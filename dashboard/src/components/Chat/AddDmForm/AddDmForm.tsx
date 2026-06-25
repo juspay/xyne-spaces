@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/react-form';
 import { Button } from '../../ui/Button';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
 import Textarea from '../../ui/Textarea';
-import { User } from '@xyne/shared';
+import { User, validateMessageContentLength } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -107,10 +107,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
         <form.Field
           name='message'
           validators={{
-            onChange: ({ value }) => {
-              if (value.length > 1000) return 'Message must be 1000 characters or less';
-              return undefined;
-            },
+            onChange: ({ value }) => validateMessageContentLength(value),
           }}
         >
           {field => (
@@ -128,9 +125,6 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
                 data-testid='dm-message-textarea'
                 aria-invalid={field.state.meta.errors.length > 0}
               />
-              <div className='flex justify-end mt-1'>
-                <span className='text-sm text-muted-foreground'>{`${field.state.value.length}/1000 characters`}</span>
-              </div>
               {field.state.meta.errors.length > 0 && field.state.meta.errors[0] && (
                 <p className='text-sm text-destructive'>{field.state.meta.errors[0]}</p>
               )}
@@ -165,20 +159,24 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
               Cancel
             </Button>
           )}
-          <Button
-            type='submit'
-            variant='default'
-            size='default'
-            className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
-            loading={loading || false}
-            disabled={selectedUsers.length === 0}
-            data-testid='start-dm-btn'
-            data-track-category='ADD_DM_FORM'
-            data-track-name='Start_DM'
-            data-track-metadata={JSON.stringify({ selectedUserCount: selectedUsers })}
-          >
-            Start DM
-          </Button>
+          <form.Subscribe selector={state => state.canSubmit}>
+            {canSubmit => (
+              <Button
+                type='submit'
+                variant='default'
+                size='default'
+                className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
+                loading={loading || false}
+                disabled={selectedUsers.length === 0 || !canSubmit}
+                data-testid='start-dm-btn'
+                data-track-category='ADD_DM_FORM'
+                data-track-name='Start_DM'
+                data-track-metadata={JSON.stringify({ selectedUserCount: selectedUsers })}
+              >
+                Start DM
+              </Button>
+            )}
+          </form.Subscribe>
         </div>
       </div>
     </form>

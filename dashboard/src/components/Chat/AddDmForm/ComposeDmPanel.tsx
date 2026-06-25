@@ -1,7 +1,12 @@
 import { useZero } from '../../../hooks/useZero';
 import { useForm } from '@tanstack/react-form';
 import { useMutation } from '@tanstack/react-query';
-import { User, ChannelVisibility, ChannelScopeType } from '@xyne/shared';
+import {
+  User,
+  ChannelVisibility,
+  ChannelScopeType,
+  validateMessageContentLength,
+} from '@xyne/shared';
 import { CircleAlert } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -12,13 +17,13 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useActiveUserSearch, useActiveUsers, useUser } from '../../../hooks/useUsers';
+import { cn } from '../../../utils/classNames';
 import {
   EVENT_PROPERTIES,
   EVENTS,
   mixpanelService,
 } from '../../../services/Analytics/mixpanelService';
 import { channelService, CreateDmRequest } from '../../../services/Chat/channelService';
-import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { InputBox } from '../../ui/InputBox';
@@ -373,12 +378,6 @@ export const ComposeDmPanel: React.FC = () => {
     return `${firstTwo} + ${remaining} others`;
   };
 
-  // calculate message length ( 0/1000 chars)
-  const getTextLength = (html: string): number => {
-    const text = new DOMParser().parseFromString(html, 'text/html').body.textContent;
-    return text?.length || 0;
-  };
-
   return (
     <div className='pt-4 pb-2 relative h-full'>
       <form
@@ -471,10 +470,7 @@ export const ComposeDmPanel: React.FC = () => {
             <form.Field
               name='message'
               validators={{
-                onChange: ({ value }) => {
-                  if (getTextLength(value) > 1000) return 'Message must be 1000 characters or less';
-                  return undefined;
-                },
+                onChange: ({ value }) => validateMessageContentLength(value),
               }}
             >
               {field => (
@@ -503,20 +499,18 @@ export const ComposeDmPanel: React.FC = () => {
                       fileAttachments: true,
                       emojiPicker: true,
                     }}
+                    sendDisabled={field.state.meta.errors.length > 0}
                     className={cn(
                       field.state.meta.errors.length > 0 &&
                         'border-destructive aria-invalid:ring-destructive/20 aria-invalid:border-destructive',
                     )}
                   />
-                  <div className='flex items-center justify-between'>
+                  <div className='h-2 px-1'>
                     {field.state.meta.errors.length > 0 && field.state.meta.errors[0] && (
-                      <p className='text-xs text-destructive text-nowrap'>
+                      <p className='text-[12px] text-destructive text-nowrap'>
                         {field.state.meta.errors[0]}
                       </p>
                     )}
-                    <span className='text-xs text-muted-foreground w-full text-end'>
-                      {`${getTextLength(field.state.value)}/1000 characters`}
-                    </span>
                   </div>
                 </div>
               )}

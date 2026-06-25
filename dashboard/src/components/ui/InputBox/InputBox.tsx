@@ -893,7 +893,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
           }
 
-          if (pastedText && pastedText.length > 11500) {
+          // Convert oversized pasted text to a file attachment, but only when there's
+          // a channel to attach it to. Without a channelId (e.g. the DM-compose panel,
+          // before the conversation exists) fall through to normal inline paste.
+          if (pastedText && pastedText.length > 11500 && channelId) {
             event.preventDefault();
 
             // Check if attachment limit has been reached before adding text file

@@ -5,6 +5,10 @@ import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/databa
 import { websocketService } from '@/services/websocketService';
 import {logger} from '@/utils/logger';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
+import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH } from '@xyne/shared';
+//import { queueMessageIngestion } from '@/queues/vespaQueue';
+
+//import { extractAllMentions } from '@/utils/mentionParser';
 export interface CreateMessageInput {
   conversationId: string;
   childConversationId?: string;
@@ -92,6 +96,18 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     }
   }
 
+  /**
+   * Validates message content length using the shared getMessageContentLength,
+   * the same measurement the client composer uses. Content is stored as HTML,
+   * but the limit applies to the visible (HTML-stripped) character count — so a
+   * message accepted client-side is never rejected here purely due to markup.
+   */
+  private validateContentLength(content: string, maxLength: number = MAX_MESSAGE_CONTENT_LENGTH): void {
+    if (getMessageContentLength(content) > maxLength) {
+      throw new Error(`content must be less than ${maxLength} characters`);
+    }
+  }
+
   async create(data: CreateMessageInput, disableMessageCountIncrement: boolean = false): Promise<Message> {
 
       await this.validateString(data.conversationId, 'conversationId');
@@ -105,7 +121,8 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     
     // Validate content if provided
     if (data.content && data.content.trim() !== '') {
-      await this.validateString(data.content, 'content', 10000); // Max 10k characters
+      await this.validateString(data.content, 'content');
+      this.validateContentLength(data.content); // Max 10k visible characters
     }
 
     if (data.msgType) {
@@ -198,7 +215,8 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
 
   async update(id: string, data: UpdateMessageInput): Promise<Message> {
     if (data.content) {
-      await this.validateString(data.content, 'content', 10000);
+      await this.validateString(data.content, 'content');
+      this.validateContentLength(data.content); // Max 10k visible characters
     }
 
     if (data.msgType) {
@@ -415,7 +433,8 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     }
     
     if (data.content && data.content.trim() !== '') {
-      await this.validateString(data.content, 'content', 10000);
+      await this.validateString(data.content, 'content');
+      this.validateContentLength(data.content); // Max 10k visible characters
     }
 
     if (data.msgType) {
