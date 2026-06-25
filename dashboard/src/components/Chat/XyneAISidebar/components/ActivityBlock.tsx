@@ -56,6 +56,12 @@ interface ActivityBlockProps {
   streaming?: boolean | undefined;
   /** True if the parent message was aborted mid-stream — forwarded to ToolInvocationList. */
   messageAborted?: boolean | undefined;
+  /**
+   * Render to fill its container (e.g. the Support reasoning panel) instead of
+   * a compact chat-bubble block: starts expanded and drops the fixed
+   * `max-h-[28rem]` cap so the parent scrolls the whole reasoning + tool tree.
+   */
+  fillHeight?: boolean | undefined;
 }
 
 /**
@@ -190,13 +196,14 @@ export function ActivityBlock({
   toolInvocations,
   streaming,
   messageAborted,
+  fillHeight = false,
 }: ActivityBlockProps): ReactElement | null {
   const hasReasoning = !!reasoning && reasoning.length > 0;
   const hasTools = !!toolInvocations && toolInvocations.length > 0;
 
-  // Collapsed by default — the user opens it explicitly when they want to
-  // inspect the reasoning or tool tree. No auto-expand.
-  const [expanded, setExpanded] = useState(false);
+  // Collapsed by default in a chat bubble — the user opens it explicitly. In
+  // fillHeight mode (a dedicated panel) it starts open so the panel isn't empty.
+  const [expanded, setExpanded] = useState(fillHeight);
 
   const runningTool = useMemo(
     () => toolInvocations?.find(t => t.status === 'running'),
@@ -305,8 +312,12 @@ export function ActivityBlock({
 
       {expanded && canExpand && (
         <div
-          className='mt-1.5 max-h-[28rem] overflow-y-auto pl-5 pr-0.5 py-2 space-y-3'
-          style={FADE_MASK_STYLE}
+          className={
+            fillHeight
+              ? 'mt-1.5 pl-5 pr-0.5 py-2 space-y-3'
+              : 'mt-1.5 max-h-[28rem] overflow-y-auto pl-5 pr-0.5 py-2 space-y-3'
+          }
+          style={fillHeight ? undefined : FADE_MASK_STYLE}
         >
           {hasReasoning && (
             <div>

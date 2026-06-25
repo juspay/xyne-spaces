@@ -166,6 +166,9 @@ function parseAttachmentDimensions(data: string): { width?: number; height?: num
 class XyneAIStreamManager {
   private static instance: XyneAIStreamManager;
 
+  /** Max number of sidebar chats allowed to stream concurrently. */
+  private static readonly MAX_CONCURRENT_SIDEBAR_STREAMS = 3;
+
   // Active stream tracking
   private activeStreams: Map<string, StreamState> = new Map();
   private abortControllers: Map<string, AbortController> = new Map();
@@ -821,6 +824,16 @@ class XyneAIStreamManager {
         this.abortControllers.delete(existingStream.streamId);
       } else {
         this.abortStream(existingStream.streamId);
+      }
+    }
+
+    if (request.showInSidebar ?? true) {
+      const streamingSidebar = Array.from(this.activeStreams.values())
+        .filter(s => s.status === 'streaming' && s.showInSidebar && s.threadId !== threadId)
+        .sort((a, b) => a.startedAt - b.startedAt);
+      while (streamingSidebar.length >= XyneAIStreamManager.MAX_CONCURRENT_SIDEBAR_STREAMS) {
+        const oldest = streamingSidebar.shift();
+        if (oldest) this.abortStream(oldest.streamId);
       }
     }
 
@@ -1920,6 +1933,27 @@ class XyneAIStreamManager {
     if (state) {
       this.abortStream(state.streamId);
     }
+  }
+
+  /**
+   * Abort every streaming session EXCEPT the ones whose session id / slot key /
+   * thread-slot matches one of `keepKeys`. Used by the sidebar's "Abort others"
+   * action so a user can stop all background chats but the one they're viewing.
+   */
+  public abortAllExcept(keepKeys: string[]): void {
+    const keep = new Set(keepKeys.filter(k => k && k.trim().length > 0));
+    const toAbort: string[] = [];
+    for (const state of this.activeStreams.values()) {
+      if (state.status !== 'streaming') continue;
+      const keys = [
+        state.sessionId,
+        state.streamSlotKey,
+        getStreamSlotKeyFromThreadId(state.threadId),
+      ].filter((k): k is string => !!k && k.trim().length > 0);
+      if (keys.some(k => keep.has(k))) continue;
+      toAbort.push(state.streamId);
+    }
+    for (const id of toAbort) this.abortStream(id);
   }
 
   /**

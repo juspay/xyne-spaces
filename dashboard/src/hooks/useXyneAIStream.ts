@@ -395,6 +395,13 @@ export const useXyneAIStream = ({
   const abortCurrentRequest = useCallback(() => {
     // Use stream manager to abort - it will update messages
     xyneAIStreamManager.abortStreamByThread(threadId);
+    const convId = conversationIdRef.current;
+    if (convId) {
+      const match = xyneAIStreamManager.findActiveStreamBySessionId(convId);
+      if (match && match.threadId !== threadId) {
+        xyneAIStreamManager.abortStream(match.streamId);
+      }
+    }
     currentStreamIdRef.current = null;
   }, [threadId]);
 

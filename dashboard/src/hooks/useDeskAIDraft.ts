@@ -279,6 +279,19 @@ export function useDeskAIDraft({
     return xyneAIStreamManager.subscribe((state: StreamState): void => {
       if (state.threadId !== threadId) return;
       if (state.streamId !== ourStreamIdRef.current) return;
+
+      if (state.status === 'aborted') {
+        ourStreamIdRef.current = null;
+        setIsStreaming(false);
+        setIsDraftActive(false);
+        setDraftContent('');
+        setDraftSources([]);
+        setDraftToolInvocations([]);
+        setDraftInlineCitations([]);
+        clearStorage();
+        return;
+      }
+
       if (
         state.sessionId &&
         state.sessionId !== sessionIdRef.current &&
@@ -294,7 +307,7 @@ export function useDeskAIDraft({
       setDraftInlineCitations(extractInlineCitations(raw));
       setIsStreaming(state.status === 'streaming');
     });
-  }, [threadId]);
+  }, [threadId, clearStorage]);
 
   const submit = useCallback(
     async (query: string, displayContent: string, options?: { disableTools?: boolean }) => {
