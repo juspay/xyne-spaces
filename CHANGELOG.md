@@ -1,3 +1,28 @@
+## [1.171.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.170.0...v1.171.0) (2026-06-25)
+
+
+### Features
+
+* add project views ([246773f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/246773f5c8045b3d782812bbfd18bd50250dd69d)), closes [#7992](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7992)
+* bot name resolution, stale cron cleanup, and resume-from-lastSyncedDate ([08828c4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/08828c47d2b09573414254c2e2d1bd335f163a34)), closes [#7225](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7225)
+* remove deactivated users from all groups and assignment state ([2d36227](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2d362272bab2d098886a2df30b37963cf3278422)), closes [#7786](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7786)
+* sam default channel integration ([f482d57](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f482d57d331d38752d715ad416686d272a4086f0)), closes [#8011](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8011)
+* selective participants in scheduled call in a channel" - Revert "Pull request [#7737](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7737): ([cdccb9e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cdccb9e060acb9d3ffab71bcf1bda468b125d2f5)), closes [#8038](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8038)
+
+
+### Bug Fixes
+
+* attachment preview error for file type docx was broken ([40e2f68](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/40e2f6872624ebada9523268fcf4cee72d5fc8b6)), closes [#7647](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7647)
+* claw automation fix (backport) ([846e9ce](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/846e9ce9627b616f4f92b91093f64ff1040169dd))
+* cmdK regular channel affinity ([f3bb26d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f3bb26d64188af02eee7f71327941f1dfefeab5d)), closes [#7995](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7995)
+* Desk and Sidebar AI UX fixes ([9ada975](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9ada975d90796896ae42ff16e36ccc6bf79150a2)), closes [#8026](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8026)
+* Fix Dark Mode message for Call ([93793e8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/93793e80098d44d1735c2ebc4adbae6d7e0bb723))
+* fix reactions on fwded messages ([5219afc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5219afc7c85497c75eb92c4f834e3da8bfaa8c5f))
+* fixes 1k character limit for group-dm creation ([1da46e7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1da46e7cc89ca174f9996eae78b8709ff2383079))
+* Remove boldness from active chat items ([7605948](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/760594828366f9dd5b922a7b105ce5da2fd377c0)), closes [#7998](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7998)
+* removing all teh commented code ([51cb79a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/51cb79a94da8c1d945bc38c5b98af495c2bf8798)), closes [#8035](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8035)
+* vespa code cleanup ([4f3c466](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4f3c466e61807cb144792dafef78deef593e24df)), closes [#7962](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7962)
+
 ## [1.170.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.169.2...v1.170.0) (2026-06-25)
 
 
