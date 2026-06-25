@@ -13,14 +13,6 @@ import { useHasResourceAccess, usePermissions } from '@xyne/shared/hooks';
 export const useIsMemoryAdmin = (): boolean => {
   return useHasResourceAccess('MEMORY');
 };
-
-export const useCanManageWorkspace = (): boolean => {
-  const permissions = usePermissions();
-  return permissions.some(
-    permission => permission.resourceName === 'WORKSPACE' && permission.accessType === 'ADMIN',
-  );
-};
-
 export const useCanCreateWorkspace = (): boolean => {
   const permissions = usePermissions();
   return permissions.some(

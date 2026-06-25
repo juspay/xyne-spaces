@@ -5,7 +5,7 @@
  * Automatically refetches when input filters change.
  */
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { memoryService } from '../services/Memory/memoryService';
 import { useDebouncedValue } from './useDebouncedValue';
@@ -121,33 +121,6 @@ export function useMemory(input: UseMemoryInput): UseMemoryOutput {
     isSearching: isLoading && !isInitialLoad,
     error: error,
     refetch: () => void refetch(),
-  };
-}
-
-/**
- * Hook for managing memory pagination state
- */
-export function useMemoryPagination(initialLimit = DEFAULT_LIMIT) {
-  const [offset, setOffset] = useState(0);
-
-  const nextPage = useCallback(() => {
-    setOffset(prev => prev + initialLimit);
-  }, [initialLimit]);
-
-  const prevPage = useCallback(() => {
-    setOffset(prev => Math.max(0, prev - initialLimit));
-  }, [initialLimit]);
-
-  const resetPage = useCallback(() => {
-    setOffset(0);
-  }, []);
-
-  return {
-    offset,
-    limit: initialLimit,
-    nextPage,
-    prevPage,
-    resetPage,
   };
 }
 

@@ -56,28 +56,6 @@ const QUERY_KEYS = {
 // ============================================================================
 
 /**
- * Get thread summary from cache (no fetching, just cache lookup)
- */
-export function useThreadSummary(conversationId: string): CachedSummary | undefined {
-  const queryClient = useQueryClient();
-  return queryClient.getQueryData<CachedSummary>(QUERY_KEYS.threadSummary(conversationId));
-}
-
-/**
- * Get channel summary from cache (no fetching, just cache lookup)
- */
-export function useChannelSummary(
-  channelId: string,
-  dateFrom?: string,
-  dateTo?: string,
-): CachedSummary | undefined {
-  const queryClient = useQueryClient();
-  return queryClient.getQueryData<CachedSummary>(
-    QUERY_KEYS.channelSummary(channelId, dateFrom, dateTo),
-  );
-}
-
-/**
  * Set thread summary in cache
  */
 export function useSetThreadSummary() {
@@ -102,28 +80,6 @@ export function useSetChannelSummary() {
   ) => {
     queryClient.setQueryData(QUERY_KEYS.channelSummary(channelId, dateFrom, dateTo), data);
   };
-}
-
-/**
- * Check if thread summary exists in cache
- */
-export function useHasThreadSummary(conversationId: string): boolean {
-  const queryClient = useQueryClient();
-  const data = queryClient.getQueryData(QUERY_KEYS.threadSummary(conversationId));
-  return data !== undefined;
-}
-
-/**
- * Check if channel summary exists in cache
- */
-export function useHasChannelSummary(
-  channelId: string,
-  dateFrom?: string,
-  dateTo?: string,
-): boolean {
-  const queryClient = useQueryClient();
-  const data = queryClient.getQueryData(QUERY_KEYS.channelSummary(channelId, dateFrom, dateTo));
-  return data !== undefined;
 }
 
 /**

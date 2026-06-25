@@ -10,23 +10,6 @@ export interface UsePlatformReturn {
 }
 
 /**
- * Check if the user is on mobile Firefox.
- *
- * Returns `undefined` in non-browser environments (e.g. SSR).
- */
-export function isMobileFirefox(): boolean | undefined {
-  if (typeof window === 'undefined' || typeof window.navigator === 'undefined') {
-    return undefined;
-  }
-
-  const userAgent = window.navigator.userAgent || '';
-  return (
-    (/Firefox/.test(userAgent) && /Mobile/.test(userAgent)) || // Android Firefox
-    /FxiOS/.test(userAgent) // iOS Firefox
-  );
-}
-
-/**
  * Test the current `navigator.platform` with a regex.
  *
  * Returns `undefined` in non-browser environments (e.g. SSR).
@@ -53,19 +36,6 @@ export function isMac(): boolean | undefined {
  */
 export function isIPhone(): boolean | undefined {
   return testPlatform(/^iPhone/);
-}
-
-/**
- * Detect if the current browser is Safari (best-effort via user agent).
- *
- * Returns `undefined` in non-browser environments (e.g. SSR).
- */
-export function isSafari(): boolean | undefined {
-  if (typeof window === 'undefined' || typeof window.navigator === 'undefined') {
-    return undefined;
-  }
-
-  return /^((?!chrome|android).)*safari/i.test(window.navigator.userAgent || '');
 }
 
 /**

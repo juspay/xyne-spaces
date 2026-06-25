@@ -7,10 +7,7 @@
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  fetchV2Conversations,
-  fetchV2ConversationMessages,
-} from '../services/XyneAI/XyneAISessionsV2Service';
+import { fetchV2Conversations } from '../services/XyneAI/XyneAISessionsV2Service';
 
 // ============================================================================
 // Query Keys
@@ -36,20 +33,6 @@ export function useV2SessionsList(agentSlug?: string | null) {
     queryKey: V2_SESSIONS_KEY(agentSlug),
     queryFn: () => fetchV2Conversations(agentSlug),
     staleTime: 30_000,
-  });
-}
-
-/**
- * Fetch messages for a specific claw conversation.
- * @param convId - The conversation ID to fetch messages for.
- * @param agentSlug - Optional agent slug for per-agent message fetching.
- */
-export function useV2ConversationMessages(convId: string | null, agentSlug?: string | null) {
-  return useQuery({
-    queryKey: v2SessionMessagesKey(convId || '', agentSlug),
-    queryFn: () => fetchV2ConversationMessages(convId!, agentSlug),
-    enabled: !!convId,
-    staleTime: 60_000,
   });
 }
 

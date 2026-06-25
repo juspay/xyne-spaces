@@ -3,7 +3,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { QueryResultType } from '@rocicorp/zero';
 import { roomActor } from '../machines/roomMachine';
 import { queries } from '../zero/queries';
-import { InvitationResponse, MeetingStatus } from '@xyne/shared';
+import { InvitationResponse } from '@xyne/shared';
 import { useCachedQuery } from './useCachedQuery';
 import { htmlToPlainText } from '../utils/sanitizer';
 
@@ -25,18 +25,6 @@ export const getActiveParticipants = <
 ): T[] => {
   return participants.filter(p => p.response === InvitationResponse.ACCEPTED);
 };
-
-/**
- * Find a specific user's participant record in a participants array
- * @param participants - Array of call participants
- * @param userId - The user ID to find
- * @returns The participant record, or undefined if not found
- */
-export const findUserParticipant = <T extends { userId: string }>(
-  participants: readonly T[],
-  userId: string,
-): T | undefined => participants.find(p => p.userId === userId);
-
 /**
  * Check if a specific user is actively in a call (ACCEPTED response)
  * @param participants - Array of call participants
@@ -66,24 +54,6 @@ export const getUserCallAccessLevel = (
   if (!p) return 'requestToJoin';
   return p.response === InvitationResponse.REQUESTED ? 'requested' : 'canJoin';
 };
-
-/**
- * Gets the meeting status of the current user for a given call
- * @param call - The call object with participants
- * @param currentUserId - Current user ID (optional)
- * @returns MeetingStatus of the user or PENDING if not found
- */
-export const getCurrentUserMeetingStatus = (
-  call: { participants?: Array<{ userId: string; meetingStatus?: MeetingStatus }> },
-  currentUserId?: string,
-): MeetingStatus => {
-  if (!currentUserId) return MeetingStatus.PENDING;
-  return (
-    call.participants?.find(participant => participant.userId === currentUserId)?.meetingStatus ??
-    MeetingStatus.PENDING
-  );
-};
-
 /**
  * Formats participant text for display based on participant count
  * @param participants - Array of call participants (only needs userId field)
