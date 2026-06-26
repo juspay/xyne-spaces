@@ -542,7 +542,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       const typeMapping: Record<string, { app: 'chat' | 'ticket' | 'file' | 'mail' | null, optionsKey: 'slack' | 'ticket' | 'file' | 'mail', docType: string, subApp?: string }> = {
         'messages': { app: 'chat', optionsKey: 'slack', docType: VespaDocType.MESSAGE },
         'attachments': { app: 'chat', optionsKey: 'slack', docType: VespaDocType.ATTACHMENT },
-        'channels': { app: null, optionsKey: 'slack', docType: VespaDocType.CHANNEL },
+        'channels': { app: 'chat', optionsKey: 'slack', docType: VespaDocType.CHANNEL },
         'tickets': { app: 'ticket', optionsKey: 'ticket', docType: VespaDocType.TICKET },
         'files': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE },
         'users': { app: null, optionsKey: 'slack', docType: VespaDocType.USER },
