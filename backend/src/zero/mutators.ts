@@ -79,6 +79,7 @@ import {
   parseRepliesMd,
   addReplyToData,
   serializeRepliesMd,
+  SUMMARY_PROMPT_MAX_LENGTH,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { generatePlainTextContent } from "@/utils/contentUtils";
@@ -1207,6 +1208,34 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.channels.update({
             id: channelId,
             showTicketsTabTicketsInChat: show,
+          });
+        },
+      ),
+      updateCallSummaryPrompt: defineMutator(
+        z.object({
+          channelId: z.string(),
+          prompt: z
+            .string()
+            .max(SUMMARY_PROMPT_MAX_LENGTH, 'Call summary template must be 20000 characters or less')
+            .nullable(),
+        }),
+        async ({ tx, args: { channelId, prompt } }) => {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error("Channel doesn't exist");
+          }
+
+          const participant = await tx.run(zql.channel_participants
+            .where('channelId', channelId)
+            .where('userId', authData.sub)
+            .one());
+          if (channel.createdBy !== authData.sub && (!participant || participant.role !== ChannelRole.ADMIN)) {
+            throw new Error('Only channel admins or the owner can change call summary settings');
+          }
+
+          await tx.mutate.channels.update({
+            id: channelId,
+            callSummaryPrompt: prompt?.trim() ? prompt : null,
           });
         },
       ),

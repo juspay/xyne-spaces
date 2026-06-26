@@ -227,7 +227,7 @@ const AboutChannel = ({
   }, [isEditingName]);
 
   return (
-    <div className='flex flex-col h-[392px] bg-muted'>
+    <div className='flex flex-col h-full bg-muted'>
       <div className='p-4 overflow-y-auto'>
         {/* Channel Name */}
         {canRename && (
@@ -386,7 +386,7 @@ const AboutChannel = ({
           </div>
         )}
 
-        <div className='text-[14px] text-muted-foreground py-4'>
+        <div className='text-[14px] text-muted-foreground py-4 text-center'>
           Created By <span className='text-primary'>{createdByUser?.name || 'Unknown'}</span> on{' '}
           <span className='visual-regression-hide'>{formatDate(channel.createdAt)}</span>
         </div>

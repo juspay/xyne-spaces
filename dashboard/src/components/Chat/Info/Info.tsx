@@ -24,6 +24,7 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import AboutChannel from '../AboutChannel/AboutChannel';
 import ChannelSettings from '../ChannelInformation/ChannelSettings';
+import { CallSummaryConfig } from '../CallSettings/CallSummaryConfig';
 import NotificationsTab from '../AboutChannel/NotificationsTab';
 import { AddChannelForm } from '../AddChannelForm/AddChannelForm';
 import { PromoteGroupDmRequest } from '../../../services/Chat/channelService';
@@ -62,7 +63,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 
-export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings';
+export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings' | 'ai-features';
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
@@ -247,7 +248,7 @@ const Info = ({
   return (
     <div
       ref={popoverContainerRef}
-      className='overflow-clip h-[600px] bg-background flex flex-col'
+      className='overflow-clip h-[720px] bg-background flex flex-col'
       style={{ position: 'relative' }}
     >
       <div className='w-full flex items-start justify-between gap-2 p-4 pb-6'>
@@ -388,7 +389,7 @@ const Info = ({
         onValueChange={value => setActiveTab(value as ChannelTab)}
         className='flex-1 min-h-0 flex flex-col'
       >
-        <Tabs.List className='flex items-center justify-start border-b border-border px-4 shrink-0'>
+        <Tabs.List className='flex items-center justify-center border-b border-border px-4 shrink-0'>
           <Tabs.Trigger
             value='about'
             className={cn(
@@ -439,6 +440,19 @@ const Info = ({
               Settings
             </Tabs.Trigger>
           )}
+          {isDefaultChannel && (
+            <Tabs.Trigger
+              value='ai-features'
+              className={cn(
+                'px-4 py-2 text-sm transition-all duration-100 border-b-2',
+                activeTab === 'ai-features'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              AI Preference
+            </Tabs.Trigger>
+          )}
         </Tabs.List>
         <Tabs.Content
           value='about'
@@ -475,6 +489,31 @@ const Info = ({
               previousChannelId={previousChannelId}
               {...(onClose && { onClose })}
             />
+          </Tabs.Content>
+        )}
+        {isDefaultChannel && (
+          <Tabs.Content
+            value='ai-features'
+            className='outline-none flex-1 min-h-0 overflow-y-auto bg-muted'
+          >
+            <div className='flex flex-col gap-3 p-4'>
+              <div className='flex flex-col gap-0.5'>
+                <div className='text-[15px] font-semibold text-foreground'>Call settings</div>
+                <p className='text-[13px] leading-[140%] text-muted-foreground'>
+                  Configure how AI handles calls in this channel.
+                </p>
+              </div>
+              <div className='rounded-[12px] border border-border bg-card'>
+                <CallSummaryConfig
+                  channelId={channel.id}
+                  currentPrompt={channel.callSummaryPrompt}
+                  canManage={
+                    currentUserParticipant?.role === ChannelRole.ADMIN ||
+                    channel.createdBy === context.userID
+                  }
+                />
+              </div>
+            </div>
           </Tabs.Content>
         )}
         {isParticipant && !isSelfDM && (isDM || isGroupDM || !!channelUserStatus) && (

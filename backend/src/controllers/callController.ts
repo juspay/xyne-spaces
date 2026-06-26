@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { ChannelRole } from '@prisma/client';
 import { livekitService } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient, db } from '@/database/client';
@@ -25,6 +26,8 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { normalizeStoragePath } from '@/services/storage/pathUtils';
 import { callRecordingService } from '@/services/callRecordingService';
 import { config } from '@/config/env';
+import { callDocumentService } from '@/services/callDocumentService';
+import { SUMMARY_PROMPT_MAX_LENGTH } from '@xyne/shared';
 
 export class CallController {
   updateMeetingStatus = async (req: Request, res: Response): Promise<void> => {
@@ -1185,7 +1188,6 @@ export class CallController {
       const summary = call.aiSummary || null;
 
       // 5. Generate PRD and post to conversation
-      const { callDocumentService } = await import('@/services/callDocumentService');
       const { customPrompt } = z.object({
         customPrompt: z.string().optional().refine(
           val => !val || val.length < 5000,
@@ -1275,7 +1277,6 @@ export class CallController {
       }
 
       // 4. Generate detailed summary and post to conversation
-      const { callDocumentService } = await import('@/services/callDocumentService');
       const result = await callDocumentService.generateAndPostDetailedSummary(
         callId,
         transcriptContent,
@@ -1297,6 +1298,57 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to generate detailed summary:', error);
       res.status(500).json({ success: false, error: 'Failed to generate detailed summary' });
+    }
+  };
+
+  editSummaryPrompt = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const parsed = z
+      .object({
+        channelId: z.string().min(1),
+        currentPrompt: z.string().max(SUMMARY_PROMPT_MAX_LENGTH),
+        instruction: z.string().min(1).max(5000),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: 'channelId, currentPrompt and instruction are required' });
+      return;
+    }
+
+    const channel = await repositories.channels.findById(parsed.data.channelId);
+    if (!channel) {
+      res.status(404).json({ success: false, error: 'Channel not found' });
+      return;
+    }
+    const [participant] = await repositories.channelParticipants.findMany({
+      channelId: parsed.data.channelId,
+      userId,
+    });
+    const isCreator = channel.createdBy === userId;
+    const isAdmin = participant?.role === ChannelRole.ADMIN;
+    if (!isCreator && !isAdmin) {
+      res.status(403).json({ success: false, error: 'Only channel admins or the owner can edit call summary settings' });
+      return;
+    }
+
+    try {
+      const prompt = await callDocumentService.editSummaryStructureWithAI(
+        parsed.data.currentPrompt,
+        parsed.data.instruction,
+      );
+      if (!prompt) {
+        res.status(500).json({ success: false, error: 'Failed to edit summary template' });
+        return;
+      }
+      res.json({ success: true, prompt });
+    } catch (error) {
+      logger.error('Failed to edit summary prompt with AI:', error);
+      res.status(500).json({ success: false, error: 'Failed to edit summary template' });
     }
   };
 
@@ -2092,4 +2144,3 @@ export class CallController {
 }
 
 export const callController = new CallController();
-

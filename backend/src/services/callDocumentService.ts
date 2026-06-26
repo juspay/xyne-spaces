@@ -10,7 +10,7 @@ import { LogLevel } from '@framework';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType } from '@xyne/shared';
+import { DEFAULT_SUMMARY_FIELDS, MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
@@ -72,6 +72,13 @@ function sanitizeInput(input: string | null): string {
   // Limit length to prevent excessive token usage (adjust as needed)
   const maxLength = 100000; // ~100K chars
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
+}
+
+function renderPromptTemplate(template: string, values: Record<string, string>): string {
+  const replacements = new Map(Object.entries(values));
+  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) =>
+    replacements.has(key) ? (replacements.get(key) ?? '') : match,
+  );
 }
 
 /**
@@ -213,7 +220,6 @@ CALL SUMMARY:
 {summary}
 `;
 
-// Detailed AI Summary prompt - phase-based comprehensive analysis
 const DETAILED_SUMMARY_PROMPT = `You are creating a comprehensive, phase-based meeting summary that captures the natural flow of conversation.
 **LANGUAGE: Generate this entire summary in English, regardless of the transcript language.**
 
@@ -233,76 +239,7 @@ Analyze the transcript and divide it into distinct phases/segments based on topi
 MARKDOWN TEMPLATE:
 
 
-### 💡 Key Takeaways
-1. [Most important outcome]
-2. [Second most important]
-3. [Third if applicable]
-
----
-
-### 📋 Action Items
-| # | Task | Assignee | Due | Priority |
-|---|------|----------|-----|----------|
-| 1 | [Task] | [Person] | [Date] | [H/M/L] |
-
----
-
-### Call Overview
-**Estimated Duration**: [Short/Medium/Long based on transcript length]
-**Participants**: [List all participants mentioned]
-**Primary Focus**: [1-2 sentence summary of main purpose]
-
----
-
-### 📍 Call Phases
-
-#### Phase 1: [Phase Title - e.g., "Opening & Context Setting"]
-**Summary**: [2-3 sentence summary of this phase]
-
-**Key Points**:
-- [Point 1]
-- [Point 2]
-
-**Notable Mentions**:
-- [Specific names, numbers, dates, or quotes mentioned]
-
----
-
-#### Phase 2: [Phase Title - e.g., "Main Discussion"]
-**Summary**: [2-3 sentence summary]
-
-**Key Points**:
-- [Point 1]
-- [Point 2]
-
-**Decisions/Outcomes** (if any):
-- [Decision made in this phase]
-
----
-
-#### Phase 3: [Phase Title - e.g., "Wrap-up & Next Steps"]
-**Summary**: [2-3 sentence summary]
-
-**Commitments**:
-- [Who agreed to do what]
-
----
-
-### 📋 Consolidated Outcomes
-
-#### Decisions Made
-| # | Decision | Owner | Context |
-|---|----------|-------|---------|
-| 1 | [Decision] | [Person] | [Why/Context] |
-
-#### Open Items
-- [ ] [Unresolved question or parked topic]
-
----
-
-### 🔗 Follow-up
-- **Next Meeting**: [If mentioned]
-- **Blockers**: [Any blockers identified]
+{fields}
 
 **CALL PARTICIPANTS (Correct Names):**
 {participants}
@@ -329,6 +266,41 @@ No extra text.
 
 TRANSCRIPT:
 {transcript}
+`;
+
+const EDIT_SUMMARY_PROMPT = `You are an assistant that edits a MARKDOWN SECTION TEMPLATE used to generate call summaries. You will be given the CURRENT TEMPLATE and a USER INSTRUCTION, and you must return the UPDATED TEMPLATE.
+
+WHAT THIS TEMPLATE IS:
+- After every call ends, the system automatically generates a "Detailed Call Summary" from the call transcript.
+- This template defines the SECTIONS and STRUCTURE of that summary (e.g. Key Takeaways, Action Items, Call Overview, Call Phases, Consolidated Outcomes, Follow-up).
+- It is configured per channel. Whatever sections exist in this template are what every detailed summary for that channel will contain.
+
+HOW IT IS USED (so your edits stay valid):
+- The template you produce is inserted into a larger fixed prompt and sent to another LLM along with the call transcript. That LLM fills in the sections with real content from the transcript.
+- The generated markdown is then converted into a collaborative canvas document (BlockNote). Standard Markdown renders correctly: headings (###), bold, bullet/numbered lists, checkboxes (- [ ]), and GitHub-flavored tables (| col | col |). Prefer these constructs.
+- The surrounding fixed prompt ALREADY handles the following — do NOT add instructions or placeholders for them:
+  - The participant list is injected separately; do not add a {participants} or {transcript} placeholder.
+  - Output language is forced to English.
+  - Brand-name correction: speech-to-text mis-hearings of "Xyne" (Zain/Zine/Xine/Zyne) are auto-corrected.
+  - Phase count scales with call length (short calls get fewer phases).
+  - Name accuracy & mentions: in Action Items, people who attended the call are written as @ + their FULL NAME (e.g. @Mayank Bansal) so they become real user mentions in the channel; people NOT in the call are written plainly with "(not in channel)". Preserve this convention if the template references assignees/owners.
+
+RULES FOR YOUR EDIT:
+- Apply the USER INSTRUCTION to the CURRENT TEMPLATE: add, remove, reorder, rename, or restructure sections as asked.
+- Keep it as a clean Markdown template with clear subheadings separated by blank lines.
+- Keep bracketed placeholders (e.g. [Most important outcome], [Task], [Person]) so the generating LLM knows what to fill in.
+- Keep tables in valid GitHub-flavored Markdown if the section is tabular.
+- Do not invent transcript content; this is a TEMPLATE, not a filled summary.
+- If the instruction is unclear or out of scope, make the smallest reasonable change and keep the rest intact.
+
+OUTPUT:
+- Return ONLY the updated Markdown template. No commentary, no explanation, no code fences.
+
+CURRENT TEMPLATE:
+{current}
+
+USER INSTRUCTION:
+{instruction}
 `;
 
 /**
@@ -714,7 +686,7 @@ export class CallDocumentService {
   /**
    * Generate detailed summary from transcript with explicit retry loop.
    */
-  async generateDetailedSummary(transcript: string, callId: string, customPrompt?: string): Promise<string | null> {
+  async generateDetailedSummary(transcript: string, callId: string, customPrompt?: string, summaryFields?: string): Promise<string | null> {
     // Resolve channelId and build participant map once (expensive DB lookups)
     const call = await repositories.calls.findByExternalId(callId);
     const channelId = call?.channelId;
@@ -729,11 +701,14 @@ export class CallDocumentService {
 
     const sanitizedTranscript = sanitizeInput(transcript);
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
+    const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
 
     const buildPrompt = () => {
-      let prompt = DETAILED_SUMMARY_PROMPT
-        .replace('{participants}', participantList || '- No participants found')
-        .replace('{transcript}', sanitizedTranscript);
+      let prompt = renderPromptTemplate(DETAILED_SUMMARY_PROMPT, {
+        fields: sanitizedFields || DEFAULT_SUMMARY_FIELDS,
+        participants: participantList || '- No participants found',
+        transcript: sanitizedTranscript,
+      });
 
       if (sanitizedCustomPrompt) {
         prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this summary. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
@@ -755,6 +730,31 @@ export class CallDocumentService {
 
     logger.info(`[${callId}] Successfully generated detailed summary`);
     return extracted.content;
+  }
+
+  async editSummaryStructureWithAI(currentFields: string, instruction: string): Promise<string | null> {
+    const sanitizedCurrent = sanitizeInput(currentFields);
+    const sanitizedInstruction = sanitizeInput(instruction);
+
+    const buildPrompt = (): string =>
+      renderPromptTemplate(EDIT_SUMMARY_PROMPT, {
+        current: sanitizedCurrent || DEFAULT_SUMMARY_FIELDS,
+        instruction: sanitizedInstruction,
+      });
+
+    const extracted = await executeCallLlmWithRetry(
+      () => this.createAgent(),
+      buildPrompt,
+      'summary_prompt_edit',
+      'prompt-edit',
+    );
+
+    if (!extracted.ok) {
+      logger.error('[CallDocumentService] summary_prompt_edit_failed', { reason: extracted.reason, status: extracted.status });
+      return null;
+    }
+
+    return extracted.content.trim();
   }
 
   /**
@@ -1387,14 +1387,13 @@ A comprehensive detailed summary has been generated from this call.
 
       const channel = await db.channel.findUnique({
         where: { id: call.channelId || conversation.channelId },
-        select: { workspaceId: true }
+        select: { workspaceId: true, callSummaryPrompt: true }
       });
       if (!channel?.workspaceId) {
         return { success: false, error: 'Channel workspace not found' };
       }
 
-      // 1. Generate detailed summary markdown
-      const detailedSummaryMarkdown = await this.generateDetailedSummary(transcript, callId, customPrompt);
+      const detailedSummaryMarkdown = await this.generateDetailedSummary(transcript, callId, customPrompt, channel.callSummaryPrompt ?? undefined);
       if (!detailedSummaryMarkdown) {
         return { success: false, error: 'Failed to generate detailed summary' };
       }
