@@ -1,3 +1,10 @@
+## [1.173.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.172.0...v1.173.0) (2026-06-26)
+
+
+### Features
+
+* added channel wise call summary customization ([9ff87b0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9ff87b0250b00203c060d1529ce45304f43a5e6d)), closes [#8056](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8056)
+
 ## [1.172.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.171.0...v1.172.0) (2026-06-26)
 
 
