@@ -1,3 +1,10 @@
+## [1.174.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.173.0...v1.174.0) (2026-06-26)
+
+
+### Features
+
+* fix fix: channels type filter ([bc78d14](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bc78d1493de7cd63f4ac8254db4f48461658209c))
+
 ## [1.173.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.172.0...v1.173.0) (2026-06-26)
 
 
