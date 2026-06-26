@@ -16,6 +16,9 @@ import {
   type SelectDropdownProps,
 } from './CreateFormSlideOut.types';
 
+const isSelectField = (fieldType: FormFieldType): boolean =>
+  fieldType === FormFieldType.SINGLE_SELECT || fieldType === FormFieldType.MULTI_SELECT;
+
 const SelectDropdown = ({
   value,
   onChange,
@@ -54,6 +57,255 @@ const SelectDropdown = ({
   );
 };
 
+interface FieldEditorProps {
+  field: FormField;
+  isExpanded: boolean;
+  registerInputRef: (fieldId: string, el: HTMLInputElement | null) => void;
+  onExpand: (fieldId: string) => void;
+  onCollapse: () => void;
+  onToggleExpand: (fieldId: string) => void;
+  onUpdate: (fieldId: string, updates: Partial<FormField>) => void;
+  onChangeType: (fieldId: string, nextType: FormFieldType) => void;
+  onDelete: (fieldId: string) => void;
+}
+
+const FieldEditor = ({
+  field,
+  isExpanded,
+  registerInputRef,
+  onExpand,
+  onCollapse,
+  onToggleExpand,
+  onUpdate,
+  onChangeType,
+  onDelete,
+}: FieldEditorProps): ReactElement => {
+  const showOptions = isSelectField(field.fieldType);
+  const options = field.fieldEnum ?? [];
+
+  const optionKeysRef = useRef<string[]>([]);
+  if (optionKeysRef.current.length !== options.length) {
+    const next = optionKeysRef.current.slice(0, options.length);
+    while (next.length < options.length) next.push(uuidv4());
+    optionKeysRef.current = next;
+  }
+
+  const editOption = (index: number, value: string): void => {
+    const next = [...options];
+    next[index] = value;
+    onUpdate(field.id, { fieldEnum: next });
+  };
+
+  const removeOption = (index: number): void => {
+    optionKeysRef.current = optionKeysRef.current.filter((_, i) => i !== index);
+    onUpdate(field.id, { fieldEnum: options.filter((_, i) => i !== index) });
+  };
+
+  const addOption = (value: string): void => {
+    optionKeysRef.current = [...optionKeysRef.current, uuidv4()];
+    onUpdate(field.id, { fieldEnum: [...options, value] });
+  };
+
+  return (
+    <div
+      className={`${isExpanded ? 'border border-border shadow-md' : ''} rounded-[12px] bg-background overflow-hidden transition-shadow`}
+    >
+      {/* Field Header - Always visible */}
+      <div className='flex items-start justify-between px-[12px] py-[10px] gap-3'>
+        {/* GripVertical - Only in expanded state for drag */}
+        {isExpanded && <GripVertical size={16} className='text-muted-foreground mt-1' />}
+        <button
+          type='button'
+          className='flex flex-col gap-2 flex-1 text-left bg-transparent border-0 p-0 cursor-pointer'
+          onClick={() => {
+            if (!isExpanded) onExpand(field.id);
+          }}
+          data-track-category='board_config'
+          data-track-name='expand_field_header'
+        >
+          {!isExpanded && (
+            <>
+              <span
+                className={`text-[14px] font-medium mb-1 ${
+                  field.fieldName ? 'text-foreground' : 'italic text-muted-foreground/60'
+                }`}
+              >
+                {field.fieldName || 'Untitled question'}
+                {field.fieldName && !field.isOptional && (
+                  <span className='text-[#ff4f4f] ml-1'>*</span>
+                )}
+              </span>
+              <div className='w-full h-[36px] px-[12px] bg-background border border-border rounded-[12px] text-[13px] flex items-center justify-between mb-1'>
+                <span className='text-foreground'>
+                  {FIELD_TYPE_OPTIONS.find(opt => opt.value === field.fieldType)?.label || 'Text'}
+                </span>
+                <ChevronDown size={14} className='text-muted-foreground' />
+              </div>
+              {(isSelectField(field.fieldType) || field.fieldType === FormFieldType.BOOLEAN) &&
+                field.fieldEnum &&
+                field.fieldEnum.length > 0 && (
+                  <span className='text-[12px] text-muted-foreground'>
+                    {field.fieldEnum.length} option
+                    {field.fieldEnum.length > 1 ? 's' : ''}
+                  </span>
+                )}
+            </>
+          )}
+        </button>
+        <div className='flex items-center gap-[12px]'>
+          {/* Required Toggle - Only in expanded state */}
+          {isExpanded && (
+            <div className='flex items-center gap-[10px]'>
+              <span className='text-[14px] text-foreground'>Required</span>
+              <button
+                type='button'
+                onClick={() => onUpdate(field.id, { isOptional: !field.isOptional })}
+                className={`w-[36px] h-[20px] rounded-full relative transition-colors ${
+                  !field.isOptional ? 'bg-[#6276be]' : 'bg-muted'
+                }`}
+                data-track-category='board_config'
+                data-track-name='toggle_required'
+              >
+                <span
+                  className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
+                    !field.isOptional ? 'left-[18px]' : 'left-[2px]'
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+          {/* Delete Button - Only in expanded state */}
+          {isExpanded && (
+            <Button
+              onClick={() => onDelete(field.id)}
+              variant='ghost'
+              size='iconSm'
+              className='text-muted-foreground hover:text-red-500'
+              data-track-category='board_config'
+              data-track-name='delete_field'
+            >
+              <Trash2 size={18} />
+            </Button>
+          )}
+          {/* Chevron - Only in expanded state */}
+          {isExpanded && (
+            <Button
+              onClick={() => onToggleExpand(field.id)}
+              variant='ghost'
+              size='iconSm'
+              className='flex items-center justify-center'
+              data-track-category='board_config'
+              data-track-name='toggle_field_expand'
+            >
+              <ChevronDown
+                size={16}
+                className='text-muted-foreground transition-transform rotate-180'
+              />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Expanded Content */}
+      {isExpanded && (
+        <div className='px-[12px] pb-[12px] pt-[4px] flex flex-col gap-[2px]'>
+          {/* Field Name Input */}
+          <div className='pb-3'>
+            <input
+              ref={el => registerInputRef(field.id, el)}
+              type='text'
+              value={field.fieldName}
+              onChange={e => onUpdate(field.id, { fieldName: e.target.value })}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  onCollapse();
+                }
+              }}
+              placeholder='Enter question'
+              className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
+              data-track-category='board_config'
+              data-track-name='field_name_input'
+            />
+          </div>
+
+          {/* Field Type Dropdown */}
+          <div>
+            <SelectDropdown
+              value={field.fieldType}
+              onChange={value => onChangeType(field.id, value as FormFieldType)}
+              options={FIELD_TYPE_OPTIONS.map(opt => ({
+                value: opt.value,
+                label: opt.label,
+              }))}
+            />
+          </div>
+
+          {/* Options for Select Fields */}
+          {showOptions && (
+            <div className='flex flex-col gap-[8px] mt-2 px-[12px]'>
+              <label className='text-[12px] font-semibold' htmlFor={`options-${field.id}`}>
+                Enter Options
+              </label>
+              <div className='flex flex-col gap-[8px]'>
+                {options.map((option, optionIndex) => (
+                  <div
+                    key={optionKeysRef.current[optionIndex]}
+                    className='flex items-center gap-[8px] border border-border rounded-[8px] px-[8px] h-[34px]'
+                  >
+                    <GripVertical size={14} className='text-muted-foreground' />
+                    <input
+                      type='text'
+                      value={option}
+                      onChange={e => editOption(optionIndex, e.target.value)}
+                      placeholder={`Option ${optionIndex + 1}`}
+                      className='flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
+                      data-track-category='board_config'
+                      data-track-name='edit_option'
+                    />
+                    <Button
+                      onClick={() => removeOption(optionIndex)}
+                      variant='ghost'
+                      size='iconSm'
+                      className='text-muted-foreground hover:text-red-500'
+                      data-track-category='board_config'
+                      data-track-name='delete_form_field_option'
+                    >
+                      <X size={14} />
+                    </Button>
+                  </div>
+                ))}
+                {/* Add Option Input */}
+                <div className='flex items-center gap-[8px] px-[6px] py-[4px]'>
+                  <input
+                    type='text'
+                    placeholder={options.length ? 'Add another option' : 'Add option'}
+                    className='flex-1 text-[13px] bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const target = e.target as HTMLInputElement;
+                        const value = target.value;
+                        if (value.trim()) {
+                          addOption(value.trim());
+                          target.value = '';
+                        }
+                      }
+                    }}
+                    data-track-category='board_config'
+                    data-track-name='add_option'
+                  />
+                  <span className='text-[14px] text-muted-foreground font-medium'>⏎</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── Component ─────────────────────────────────────────────────────────────
 export const CreateFormSlideOut = ({
   isOpen,
@@ -88,7 +340,7 @@ export const CreateFormSlideOut = ({
       setFormDescription(initialData.formDescription);
       setFields(initialData.fields);
       setExpandedFieldId(null);
-    } else if (fields.length === 0) {
+    } else {
       const firstField: FormField = {
         id: uuidv4(),
         fieldName: '',
@@ -101,8 +353,7 @@ export const CreateFormSlideOut = ({
         fieldInputRefs.current[firstField.id]?.focus();
       }, 100);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [isOpen, initialData]);
 
   // Handle click outside to close expanded field
   useEffect(() => {
@@ -134,6 +385,17 @@ export const CreateFormSlideOut = ({
     };
   }, [expandedFieldId, fields]);
 
+  const expandField = (fieldId: string): void => {
+    setExpandedFieldId(fieldId);
+    setTimeout(() => {
+      fieldInputRefs.current[fieldId]?.focus();
+    }, 100);
+  };
+
+  const registerInputRef = (fieldId: string, el: HTMLInputElement | null): void => {
+    fieldInputRefs.current[fieldId] = el;
+  };
+
   // Add a new field
   const handleAddField = (): void => {
     const newField: FormField = {
@@ -143,16 +405,25 @@ export const CreateFormSlideOut = ({
       isOptional: false,
     };
     setFields(prev => [...prev, newField]);
-    setExpandedFieldId(newField.id);
-    // Focus the new field after a short delay
-    setTimeout(() => {
-      fieldInputRefs.current[newField.id]?.focus();
-    }, 100);
+    expandField(newField.id);
   };
 
   // Update field
   const handleUpdateField = (fieldId: string, updates: Partial<FormField>): void => {
     setFields(prev => prev.map(field => (field.id === fieldId ? { ...field, ...updates } : field)));
+  };
+
+  const handleChangeFieldType = (fieldId: string, nextType: FormFieldType): void => {
+    setFields(prev =>
+      prev.map(f => {
+        if (f.id !== fieldId) return f;
+        if (isSelectField(nextType)) {
+          return { ...f, fieldType: nextType, fieldEnum: [] };
+        }
+        const { fieldEnum: _dropped, ...rest } = f;
+        return { ...rest, fieldType: nextType };
+      }),
+    );
   };
 
   // Delete field
@@ -166,11 +437,6 @@ export const CreateFormSlideOut = ({
   // Toggle field expansion
   const handleToggleExpand = (fieldId: string): void => {
     setExpandedFieldId(prev => (prev === fieldId ? null : fieldId));
-  };
-
-  // Check if field is a select type
-  const isSelectField = (fieldType: FormFieldType): boolean => {
-    return fieldType === FormFieldType.SINGLE_SELECT || fieldType === FormFieldType.MULTI_SELECT;
   };
 
   // Handle save
@@ -201,13 +467,16 @@ export const CreateFormSlideOut = ({
     hasSeededRef.current = false;
   };
 
-  // Check if form is valid
-  const isValid =
-    formName.trim() &&
-    fields.length > 0 &&
-    fields.every(
-      f => f.fieldName.trim() && (!isSelectField(f.fieldType) || (f.fieldEnum?.length ?? 0) > 0),
-    );
+  const invalidReason: string | null = !formName.trim()
+    ? 'Add a form title'
+    : fields.length === 0
+      ? 'Add at least one question'
+      : fields.some(f => !f.fieldName.trim())
+        ? 'Enter a question in every field'
+        : fields.some(f => isSelectField(f.fieldType) && (f.fieldEnum?.length ?? 0) === 0)
+          ? 'Add at least one option to every select question'
+          : null;
+  const isValid = invalidReason === null;
 
   if (!isOpen) return null;
 
@@ -256,241 +525,20 @@ export const CreateFormSlideOut = ({
 
           {/* Fields List */}
           <div className='flex flex-col gap-[8px]' ref={fieldsContainerRef}>
-            {fields.map(field => {
-              const isExpanded = expandedFieldId === field.id;
-              const showOptions = isSelectField(field.fieldType);
-
-              return (
-                <div
-                  key={field.id}
-                  className={`${isExpanded ? 'border border-border shadow-md' : ''} rounded-[12px] bg-background overflow-hidden transition-shadow`}
-                >
-                  {/* Field Header - Always visible */}
-                  <div className='flex items-start justify-between px-[12px] py-[10px] gap-3'>
-                    {/* GripVertical - Only in expanded state for drag */}
-                    {isExpanded && (
-                      <GripVertical size={16} className='text-muted-foreground mt-1' />
-                    )}
-                    <button
-                      type='button'
-                      className='flex flex-col gap-2 flex-1 text-left bg-transparent border-0 p-0 cursor-pointer'
-                      onClick={() => {
-                        if (!isExpanded) {
-                          setExpandedFieldId(field.id);
-                          setTimeout(() => {
-                            fieldInputRefs.current[field.id]?.focus();
-                          }, 100);
-                        }
-                      }}
-                      data-track-category='board_config'
-                      data-track-name='expand_field_header'
-                    >
-                      {!isExpanded && field.fieldName && (
-                        <>
-                          <span className='text-[14px] text-foreground font-medium mb-1'>
-                            {field.fieldName}
-                            {!field.isOptional && <span className='text-[#ff4f4f] ml-1'>*</span>}
-                          </span>
-                          <div className='w-full h-[36px] px-[12px] bg-background border border-border rounded-[12px] text-[13px] flex items-center justify-between mb-1'>
-                            <span className='text-foreground'>
-                              {FIELD_TYPE_OPTIONS.find(opt => opt.value === field.fieldType)
-                                ?.label || 'Text'}
-                            </span>
-                            <ChevronDown size={14} className='text-muted-foreground' />
-                          </div>
-                          {(isSelectField(field.fieldType) ||
-                            field.fieldType === FormFieldType.BOOLEAN) &&
-                            field.fieldEnum &&
-                            field.fieldEnum.length > 0 && (
-                              <span className='text-[12px] text-muted-foreground'>
-                                {field.fieldEnum.length} option
-                                {field.fieldEnum.length > 1 ? 's' : ''}
-                              </span>
-                            )}
-                        </>
-                      )}
-                    </button>
-                    <div className='flex items-center gap-[12px]'>
-                      {/* Required Toggle - Only in expanded state */}
-                      {isExpanded && (
-                        <div className='flex items-center gap-[10px]'>
-                          <span className='text-[14px] text-foreground'>Required</span>
-                          <button
-                            onClick={() =>
-                              handleUpdateField(field.id, { isOptional: !field.isOptional })
-                            }
-                            className={`w-[36px] h-[20px] rounded-full relative transition-colors ${
-                              !field.isOptional ? 'bg-[#6276be]' : 'bg-muted'
-                            }`}
-                            data-track-category='board_config'
-                            data-track-name='toggle_required'
-                          >
-                            <span
-                              className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
-                                !field.isOptional ? 'left-[18px]' : 'left-[2px]'
-                              }`}
-                            />
-                          </button>
-                        </div>
-                      )}
-                      {/* Delete Button - Only in expanded state */}
-                      {isExpanded && (
-                        <Button
-                          onClick={() => handleDeleteField(field.id)}
-                          variant='ghost'
-                          size='iconSm'
-                          className='text-muted-foreground hover:text-red-500'
-                          data-track-category='board_config'
-                          data-track-name='delete_field'
-                        >
-                          <Trash2 size={18} />
-                        </Button>
-                      )}
-                      {/* Chevron - Only in expanded state */}
-                      {isExpanded && (
-                        <Button
-                          onClick={() => handleToggleExpand(field.id)}
-                          variant='ghost'
-                          size='iconSm'
-                          className='flex items-center justify-center'
-                          data-track-category='board_config'
-                          data-track-name='toggle_field_expand'
-                        >
-                          <ChevronDown
-                            size={16}
-                            className='text-muted-foreground transition-transform rotate-180'
-                          />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Expanded Content */}
-                  {isExpanded && (
-                    <div className='px-[12px] pb-[12px] pt-[4px] flex flex-col gap-[2px]'>
-                      {/* Field Name Input */}
-                      <div className='pb-3'>
-                        <input
-                          ref={el => {
-                            fieldInputRefs.current[field.id] = el;
-                          }}
-                          type='text'
-                          value={field.fieldName}
-                          onChange={e => handleUpdateField(field.id, { fieldName: e.target.value })}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              setExpandedFieldId(null);
-                            }
-                          }}
-                          placeholder='Enter question'
-                          className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
-                          data-track-category='board_config'
-                          data-track-name='field_name_input'
-                        />
-                      </div>
-
-                      {/* Field Type Dropdown */}
-                      <div>
-                        <SelectDropdown
-                          value={field.fieldType}
-                          onChange={value =>
-                            handleUpdateField(field.id, {
-                              fieldType: value as FormFieldType,
-                              ...(isSelectField(value as FormFieldType) && { fieldEnum: [] }),
-                            })
-                          }
-                          options={FIELD_TYPE_OPTIONS.map(opt => ({
-                            value: opt.value,
-                            label: opt.label,
-                          }))}
-                        />
-                      </div>
-
-                      {/* Options for Select Fields */}
-                      {showOptions && (
-                        <div className='flex flex-col gap-[8px] mt-2 px-[12px]'>
-                          <label
-                            className='text-[12px] font-semibold'
-                            htmlFor={`options-${field.id}`}
-                          >
-                            Enter Options
-                          </label>
-                          <div className='flex flex-col gap-[8px]'>
-                            {field.fieldEnum?.map((option, optionIndex) => (
-                              <div
-                                key={optionIndex}
-                                className='flex items-center gap-[8px] border border-border rounded-[8px] px-[8px] h-[34px]'
-                              >
-                                <GripVertical size={14} className='text-muted-foreground' />
-                                <input
-                                  type='text'
-                                  value={option}
-                                  onChange={e => {
-                                    const newOptions = [...(field.fieldEnum || [])];
-                                    newOptions[optionIndex] = e.target.value;
-                                    handleUpdateField(field.id, { fieldEnum: newOptions });
-                                  }}
-                                  placeholder={`Option ${optionIndex + 1}`}
-                                  className='flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
-                                  data-track-category='board_config'
-                                  data-track-name='edit_option'
-                                />
-                                <Button
-                                  onClick={() => {
-                                    const newOptions =
-                                      field.fieldEnum?.filter((_, i) => i !== optionIndex) || [];
-                                    handleUpdateField(
-                                      field.id,
-                                      newOptions.length > 0 ? { fieldEnum: newOptions } : {},
-                                    );
-                                  }}
-                                  variant='ghost'
-                                  size='iconSm'
-                                  className='text-muted-foreground hover:text-red-500'
-                                  data-track-category='board_config'
-                                  data-track-name='delete_form_field_option'
-                                >
-                                  <X size={14} />
-                                </Button>
-                              </div>
-                            ))}
-                            {/* Add Option Input */}
-                            <div className='flex items-center gap-[8px] px-[6px] py-[4px]'>
-                              <input
-                                type='text'
-                                placeholder={
-                                  field.fieldEnum?.length ? 'Add another option' : 'Add option'
-                                }
-                                className='flex-1 text-[13px] bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    const target = e.target as HTMLInputElement;
-                                    const value = target.value;
-                                    if (value.trim()) {
-                                      handleUpdateField(field.id, {
-                                        fieldEnum: [...(field.fieldEnum || []), value.trim()],
-                                      });
-                                      target.value = '';
-                                    }
-                                  }
-                                }}
-                                data-track-category='board_config'
-                                data-track-name='add_option'
-                              />
-                              <span className='text-[14px] text-muted-foreground font-medium'>
-                                ⏎
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {fields.map(field => (
+              <FieldEditor
+                key={field.id}
+                field={field}
+                isExpanded={expandedFieldId === field.id}
+                registerInputRef={registerInputRef}
+                onExpand={expandField}
+                onCollapse={() => setExpandedFieldId(null)}
+                onToggleExpand={handleToggleExpand}
+                onUpdate={handleUpdateField}
+                onChangeType={handleChangeFieldType}
+                onDelete={handleDeleteField}
+              />
+            ))}
           </div>
 
           {/* Add Question Button */}
@@ -509,6 +557,9 @@ export const CreateFormSlideOut = ({
 
         {/* Footer */}
         <div className='px-[16px] py-[14px]'>
+          {invalidReason && (
+            <p className='text-[12px] text-muted-foreground mb-2 text-center'>{invalidReason}</p>
+          )}
           <Button
             onClick={handleSave}
             disabled={!isValid}
