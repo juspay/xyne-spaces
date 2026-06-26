@@ -270,7 +270,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   }
 
   return (
-    <div className='flex flex-col h-[392px] bg-muted'>
+    <div className='flex flex-col h-full bg-muted'>
       <div className='p-4 overflow-y-auto space-y-3'>
         {/* Permission card */}
         <div className='bg-card p-[12px] rounded-[12px] border border-border'>

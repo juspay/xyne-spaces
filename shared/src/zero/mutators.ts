@@ -78,6 +78,7 @@ import {
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
 import type { MessageType as MessageTypeEnum } from './schema.js';
 import { extractAllMentions } from '../utils/mentionParser.js';
+import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
 
 /** Build initial_message_md from message data. Single helper for all conversation creation sites. */
@@ -674,6 +675,33 @@ export const mutators = defineMutators({
         await tx.mutate.channels.update({
           id: channelId,
           showTicketsTabTicketsInChat: show,
+        });
+      },
+    ),
+    updateCallSummaryPrompt: defineMutator(
+      z.object({
+        channelId: z.string(),
+        prompt: z
+          .string()
+          .max(SUMMARY_PROMPT_MAX_LENGTH, 'Call summary template must be 20000 characters or less')
+          .nullable(),
+      }),
+      async ({ tx, ctx, args: { channelId, prompt } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+        if (channel.createdBy !== ctx.userID && (!participant || participant.role !== ChannelRole.ADMIN)) {
+          throw new Error('Only channel admins or the owner can change call summary settings');
+        }
+
+        await tx.mutate.channels.update({
+          id: channelId,
+          callSummaryPrompt: prompt?.trim() ? prompt : null,
         });
       },
     ),

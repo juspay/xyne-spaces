@@ -1037,6 +1037,28 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
     /* Firefox */
   }
 
+  .thin-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .thin-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .thin-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .thin-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+
+  .thin-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground;
+  }
+
   /* Common overflow and sizing utilities for workflow components */
   .overflow-safe {
     @apply overflow-hidden max-w-full min-w-0;

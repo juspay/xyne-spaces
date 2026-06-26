@@ -1463,6 +1463,7 @@ export const channelTable = table('channels')
     addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
+    callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
   })
   .primaryKey('id');
 

@@ -490,7 +490,7 @@ const ConversationHeader = ({
       </div>
 
       <Dialog
-        className='max-w-[496px] rounded-2xl overflow-hidden'
+        className='max-w-[620px] rounded-2xl overflow-hidden'
         open={isInfoOpen}
         onOpenChange={setIsInfoOpen}
       >

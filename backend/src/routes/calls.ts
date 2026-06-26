@@ -21,6 +21,7 @@ router.delete('/recordings/:callId', callController.deleteRecording);
 // Pulse org list proxy (must be before /:callId wildcard)
 router.get('/pulse-orgs', callController.getPulseOrgs);
 
+router.post('/summary-prompt/edit', callController.editSummaryPrompt);
 
 router.post('/chat/:externalId/messages', requireInternalCallParticipant, callChatController.sendMessage);
 router.get('/chat/:externalId/messages', requireInternalCallParticipant, callChatController.getMessages);
@@ -84,5 +85,4 @@ router.post('/:callId/mute-all', callController.muteAllParticipants);
 router.post('/:callId/mute-participant', callController.muteParticipant);
 
 export default router;
-
 

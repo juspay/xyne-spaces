@@ -2010,6 +2010,7 @@ model Channel {
   addUserPolicy   ChannelAddUserPolicy?  @default(EVERYONE)
   isArchived      Boolean                @default(false)
   showTicketsTabTicketsInChat Boolean?   @default(true)
+  callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
 
   // Relations
   conversations      Conversation[]

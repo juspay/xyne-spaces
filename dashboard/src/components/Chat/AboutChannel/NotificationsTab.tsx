@@ -115,7 +115,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
   }
 
   return (
-    <div className='flex flex-col h-[392px] bg-muted'>
+    <div className='flex flex-col h-full bg-muted'>
       <div className='p-4 overflow-y-auto'>
         <div className='bg-card p-[12px] rounded-[12px] border border-border space-y-4'>
           {/* ── Desktop ── */}
