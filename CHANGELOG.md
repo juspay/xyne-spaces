@@ -1,3 +1,19 @@
+## [1.172.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.171.0...v1.172.0) (2026-06-26)
+
+
+### Features
+
+* Add full screen option to create ticket ([75b3233](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75b3233ff8933ce784df33a2f5179970633122ed)), closes [#7815](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7815)
+* change-visibility-of-kb+project-channel-view ([5e5d1b9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5e5d1b95194fbffed01fd4a60a29570f5e9ad643)), closes [#8052](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8052)
+* resolve unknown-channel activity notifications for non-members ([5ea8dce](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5ea8dce2162db50a69e2308e4278630a3fbd1cc7))
+
+
+### Bug Fixes
+
+* add stage boundary plus actions, fix added-field type state, and show disabled save reason ([3c958a6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3c958a6f69e8ab598e86f4285c20817d272d6af1))
+* channel header improvements ([f7655a8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f7655a86a4bf32d469fbe8aefe1aacbcdd2de551)), closes [#8050](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8050)
+* Improve channel section UX: feedbacks ([1b8a98f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1b8a98f8b16fe751d0b76d66b41a48965e06e469)), closes [#7923](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7923)
+
 ## [1.171.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.170.0...v1.171.0) (2026-06-25)
 
 
