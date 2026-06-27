@@ -20,15 +20,20 @@ import { createMarkdownComponents } from '../../../../utils/markdownComponents';
 import {
   stripCitationMarks,
   extractInlineCitations,
-  linkifyClawCitations,
+  linkifyAndGroupClawCitations,
+  parseCiteGroupHref,
   buildClawCitationToolNumbers,
   type InlineCitation,
 } from '../../../ui/TipTapExtensions/CitationMark';
+import { ClawCitationGroup } from './ClawCitationGroup';
 import {
   findCitationForChunk,
   buildClawCitationUrl,
   getClawCitationLabel,
+  citationOpensInNewTab,
+  resolveCitationIconUrl,
 } from '../utils/clawCitationUrl';
+import { CitationLink } from './CitationLink';
 import { genericInstance } from '../../../../services/clients/genericClient';
 import type { Components } from 'react-markdown';
 import {
@@ -45,8 +50,8 @@ import { PdfPageViewer } from '../../../PdfPageViewer';
 import { PptxViewer } from '../../../PptxViewer';
 import { Tooltip } from '../../../ui/Tooltip';
 import { UserHoverWrapper } from '../../../ui/UserMentionPopover/UserMentionPopover';
-import { useAuth } from '../../../../hooks/useAuth';
-import { useUser } from '../../../../hooks/useUsers';
+import Avatar from '../../../ui/Avatar/Avatar';
+import { useUser, useUsers } from '../../../../hooks/useUsers';
 import { useProfilePictureUrl } from '../../../../hooks/useProfilePicture';
 import FileDocumentIcon from '../../../icons/FileDocumentIcon';
 import type {
@@ -137,7 +142,9 @@ const ClawCitationChip = ({
     conversationTools && conversationTools.length > 0 ? conversationTools : toolInvocations;
   const citation = findCitationForChunk(lookupTools, toolCallId, chunkIndex);
   const url = citation ? buildClawCitationUrl(citation) : null;
-  const label = `${toolNumber}.${chunkIndex}`;
+  // Show the citation's header (title) instead of the bare number — easier to
+  // read. Falls back to the number if the citation didn't resolve.
+  const label = citation ? getClawCitationLabel(citation) : `${toolNumber}.${chunkIndex}`;
   const tooltip = buildClawCitationTooltip(citation);
   // `claw-citation-chip` is the hook for the `!important` override in
   // global.css that keeps the chip's text the paragraph's foreground colour
@@ -145,23 +152,42 @@ const ClawCitationChip = ({
   // Hover swaps the neutral muted background for a soft rose tint so the
   // chip stands out without shouting. Dark-mode hover uses a low-opacity
   // rose so it stays readable on a near-black surface.
+  // Fixed-height pill, capped width; the label truncates with an ellipsis and
+  // the full text shows on hover (tooltip).
   const chipClass =
     'claw-citation-chip ' +
-    'inline-flex items-center justify-center align-baseline ' +
-    'px-1 min-w-[1.125rem] h-[1.125rem] mx-[2px] rounded ' +
-    'text-[9.5px] font-medium tabular-nums leading-none ' +
-    'bg-orange-100/40 border border-orange-300/50 ' +
-    'hover:bg-orange-100/50 dark:hover:bg-orange-950 ' +
-    'hover:border-orange-200 dark:hover:border-orange-900/80 ' +
+    'inline-flex items-center gap-1 align-middle ' +
+    'px-1.5 h-[1.25rem] max-w-[180px] mx-[2px] rounded-xl ' +
+    'text-[10px] font-medium leading-none ' +
+    'bg-muted border border-border/50 ' +
+    'hover:bg-accent hover:border-border ' +
     'transition-colors';
 
+  // Brand icon (Gmail/Calendar/Drive/Xyne/…) supplied by claw. Resolved from
+  // the citation's `iconKey` against the shared icon registry (or an inline
+  // `iconUrl` on legacy/streaming rows). Rendered generically as an <img>, so
+  // adding a new source's icon is a claw-only change — no per-app logic here.
+  const iconUrl = resolveCitationIconUrl(citation);
+  const chipInner = (
+    <>
+      {iconUrl ? (
+        <img src={iconUrl} alt='' aria-hidden className='w-3.5 h-3.5 shrink-0 object-contain' />
+      ) : null}
+      <span className='min-w-0 truncate'>{label}</span>
+    </>
+  );
   const trigger = url ? (
-    <Link to={url} className={chipClass} aria-label={tooltip}>
-      {label}
-    </Link>
+    <CitationLink
+      url={url}
+      newTab={!!citation && citationOpensInNewTab(citation)}
+      className={chipClass}
+      ariaLabel={tooltip}
+    >
+      {chipInner}
+    </CitationLink>
   ) : (
     <span className={chipClass} aria-label={tooltip}>
-      {label}
+      {chipInner}
     </span>
   );
 
@@ -311,110 +337,195 @@ const ImageWithDownload = ({
 // User Tag Component and Utilities
 // ============================================================================
 
-// Memoized UserTag Component to prevent unnecessary re-renders
+// Memoized UserTag Component to prevent unnecessary re-renders.
+// Rendered as a citation-style chip: a circular profile picture followed by the
+// display name in a compact pill, mirroring the claw citation chip so inline
+// @-mentions and source chips read as one visual family. The rich hover card
+// (avatar + email + actions) is preserved via UserHoverWrapper. The shared
+// Avatar handles the picture fetch + colored-initials fallback by userId.
 const UserTagComponent = React.memo(({ userTag }: { userTag: UserTag }) => {
-  const { user: currentUser } = useAuth();
-  const isCurrentUser = currentUser?.id === userTag.userId;
-  const displayName = userTag.name;
-  const mentionDisplay = `${displayName}`;
+  const chipClass =
+    'claw-citation-chip inline-flex items-center gap-1 align-middle ' +
+    'pl-0.5 pr-1.5 h-[1.25rem] max-w-[180px] mx-[1px] rounded-full ' +
+    'text-[10px] font-medium leading-none cursor-pointer border transition-colors ' +
+    'bg-muted border-border/50 text-foreground hover:bg-accent hover:border-border';
 
-  const className = isCurrentUser
-    ? 'mention-text !bg-muted !text-primary cursor-pointer hover:underline'
-    : 'mention-text cursor-pointer hover:underline';
-
-  console.log('[UserTagComponent] Rendering:', {
-    userTag,
-    userId: userTag.userId,
-    hasUserId: !!userTag.userId,
-  });
+  const chip = (
+    <span className={chipClass}>
+      {userTag.userId ? (
+        <Avatar
+          userId={userTag.userId}
+          size='xs'
+          rounded
+          showActiveStatus={false}
+          className='shrink-0'
+        />
+      ) : null}
+      <span className='min-w-0 truncate'>{userTag.name}</span>
+    </span>
+  );
 
   return userTag.userId ? (
-    <UserHoverWrapper userId={userTag.userId}>
-      <span className={className}>{mentionDisplay}</span>
-    </UserHoverWrapper>
+    <UserHoverWrapper userId={userTag.userId}>{chip}</UserHoverWrapper>
   ) : (
-    <span className={className}>{mentionDisplay}</span>
+    chip
   );
 });
 
 UserTagComponent.displayName = 'UserTagComponent';
 
+/** Resolves a candidate "@name" to a real workspace user, or null otherwise. */
+type MentionResolver = (rawName: string) => UserTag | null;
+
+const MENTION_AMBIGUOUS: unique symbol = Symbol('mention-ambiguous');
+
 /**
- * Process a string to replace user tags with UserTag components
- * Handles both formats:
- * - `@Username` format (from TipTap editor plain text output for user messages)
- * - `<Username>` format (from bot responses)
+ * Build a mention resolver from the run's `userTags` (server/input-resolved,
+ * authoritative) PLUS the live workspace directory. A name resolves to a
+ * mention only when it maps to exactly ONE real user — by display name, name,
+ * or email local-part (so "@pradeesh.s" tags pradeesh.s@…). Ambiguous names
+ * (e.g. two "John"s) resolve to nothing, so we never mis-tag.
  */
-const processStringForUserTags = (
-  str: string,
-  userTags?: Record<string, UserTag>,
-): React.ReactNode[] => {
+const makeMentionResolver = (
+  userTags: Record<string, UserTag> | undefined,
+  users: ReadonlyArray<{
+    id: string;
+    name?: string | null;
+    displayName?: string | null;
+    email?: string | null;
+  }>,
+): MentionResolver => {
+  const map = new Map<string, UserTag | typeof MENTION_AMBIGUOUS>();
+  const add = (key: string | null | undefined, tag: UserTag): void => {
+    const k = key?.trim().toLowerCase();
+    if (!k) return;
+    const existing = map.get(k);
+    if (existing === undefined) {
+      map.set(k, tag);
+    } else if (existing !== MENTION_AMBIGUOUS && existing.userId !== tag.userId) {
+      map.set(k, MENTION_AMBIGUOUS);
+    }
+  };
+  for (const u of users) {
+    if (!u.id) continue;
+    const display = u.displayName || u.name || (u.email ? u.email.split('@')[0]! : '') || 'Unknown';
+    const tag: UserTag = { name: display, userId: u.id };
+    add(u.name, tag);
+    add(u.displayName, tag);
+    if (u.email) add(u.email.split('@')[0], tag);
+  }
+  // userTags are explicit + authoritative — overwrite any directory entry.
+  if (userTags) {
+    for (const [key, tag] of Object.entries(userTags)) {
+      const name = key.startsWith('<') && key.endsWith('>') ? key.slice(1, -1) : key;
+      if (name) map.set(name.trim().toLowerCase(), tag);
+    }
+  }
+  return (rawName: string): UserTag | null => {
+    const hit = map.get(rawName.trim().toLowerCase());
+    return hit && hit !== MENTION_AMBIGUOUS ? hit : null;
+  };
+};
+
+/** Hook: a mention resolver for this message's userTags + the live directory.
+ *  Exported so the AIScreen (AIChatThread) renders @-mentions as the same
+ *  avatar+name chip as the sidebar. */
+export const useMentionResolver = (userTags?: Record<string, UserTag>): MentionResolver => {
+  const users = useUsers();
+  return React.useMemo(() => makeMentionResolver(userTags, users), [userTags, users]);
+};
+
+/**
+ * Replace `@Name` / `<Name>` references with a mention chip — but ONLY when the
+ * name resolves to a real workspace user (via `resolve`). Any other "@text" is
+ * left as plain text. Mirrors channels/threads, where only a real user becomes
+ * a mention; arbitrary "@words" never do. For "@First Last …" it tags the
+ * LONGEST leading run of words that resolves and leaves the rest as text.
+ */
+const processStringForUserTags = (str: string, resolve: MentionResolver): React.ReactNode[] => {
+  if (!str || (str.indexOf('@') === -1 && str.indexOf('<') === -1)) return [str];
+
+  // `@handle` / `@First Last` (words may contain . _ -) OR a `<Name>` placeholder.
+  const re = /@([A-Za-z0-9][A-Za-z0-9._-]*(?:[ \t]+[A-Za-z0-9][A-Za-z0-9._-]*)*)|<([^>\n]+)>/g;
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
-  // Create a combined regex that matches both @Username and <Username> formats
-  // @Username format - @ followed by word characters and spaces until a non-word character
-  // <Username> format - content inside angle brackets
-  const tagRegex = /@([\w\s]+(?=\s|$|[^\w]))|<([^>]+)>/g;
+  while ((match = re.exec(str)) !== null) {
+    const start = match.index;
+    if (start > lastIndex) parts.push(str.slice(lastIndex, start));
 
-  while ((match = tagRegex.exec(str)) !== null) {
-    const startIndex = match.index;
-
-    if (startIndex > lastIndex) {
-      parts.push(str.slice(lastIndex, startIndex));
+    // `<Name>` form — resolve exactly; otherwise keep the literal untouched.
+    if (match[2] !== undefined) {
+      const tag = resolve(match[2].trim());
+      parts.push(tag ? <UserTagComponent key={`m-${start}`} userTag={tag} /> : match[0]);
+      lastIndex = re.lastIndex;
+      continue;
     }
 
-    // Determine which format was matched
-    const isAtFormat = match[1] !== undefined; // @Username format
-    const username = isAtFormat ? match[1]!.trim() : match[2]!.trim();
-    const fullMatch = match[0];
+    // `@…` form — tag the longest leading run of words that resolves.
+    const candidate = match[1]!;
+    const tokens: Array<{ start: number; end: number; text: string }> = [];
+    const wordRe = /[^ \t]+/g;
+    let wm: RegExpExecArray | null;
+    while ((wm = wordRe.exec(candidate)) !== null) {
+      tokens.push({ start: wm.index, end: wm.index + wm[0].length, text: wm[0] });
+    }
 
-    // Try to find userTag - check both possible key formats
-    const keyForAtFormat = `<${username}>`;
-    const userTag = userTags?.[keyForAtFormat];
+    let tag: UserTag | null = null;
+    let consumedEnd = 0;
+    for (let take = tokens.length; take >= 1; take--) {
+      const found = resolve(candidate.slice(0, tokens[take - 1]!.end));
+      if (found) {
+        tag = found;
+        consumedEnd = tokens[take - 1]!.end;
+        break;
+      }
+    }
+    // Single token with trailing punctuation, e.g. "John." → try "John".
+    if (!tag && tokens.length > 0) {
+      const first = tokens[0]!;
+      const stripped = first.text.replace(/[.,;:!?]+$/g, '');
+      if (stripped && stripped !== first.text) {
+        const found = resolve(stripped);
+        if (found) {
+          tag = found;
+          consumedEnd = first.start + stripped.length;
+        }
+      }
+    }
 
-    if (userTag) {
-      // Full userTag available - render with hover
-      parts.push(<UserTagComponent key={`${fullMatch}-${startIndex}`} userTag={userTag} />);
+    if (tag) {
+      parts.push(<UserTagComponent key={`m-${start}`} userTag={tag} />);
+      const remainder = candidate.slice(consumedEnd);
+      if (remainder) parts.push(remainder);
     } else {
-      // No userTag - render as plain text without hover
-      parts.push(
-        <span
-          key={`${fullMatch}-${startIndex}`}
-          className='mention-text cursor-pointer hover:underline text-primary'
-        >
-          {username}
-        </span>,
-      );
+      parts.push(match[0]); // plain "@candidate"
     }
-
-    lastIndex = tagRegex.lastIndex;
+    lastIndex = re.lastIndex;
   }
 
-  if (lastIndex < str.length) {
-    parts.push(str.slice(lastIndex));
-  }
-
+  if (lastIndex < str.length) parts.push(str.slice(lastIndex));
   return parts.length > 0 ? parts : [str];
 };
 
 /**
- * Process React node recursively to replace user tags
+ * Process React node recursively to replace user tags. Exported for reuse on
+ * the AIScreen so both ask-ai surfaces render mentions identically.
  */
-const processNodeForUserTags = (
+export const processNodeForUserTags = (
   node: React.ReactNode,
-  userTags?: Record<string, UserTag>,
+  resolve: MentionResolver,
 ): React.ReactNode => {
   if (typeof node === 'string') {
-    const parts = processStringForUserTags(node, userTags);
+    const parts = processStringForUserTags(node, resolve);
     return parts.length === 1 ? parts[0] : parts;
   }
 
   if (Array.isArray(node)) {
     return node.map((child: React.ReactNode, idx) => (
       <React.Fragment key={`user-tag-${idx}`}>
-        {processNodeForUserTags(child, userTags)}
+        {processNodeForUserTags(child, resolve)}
       </React.Fragment>
     ));
   }
@@ -428,7 +539,7 @@ const processNodeForUserTags = (
 
     const processedChildren =
       children !== undefined
-        ? processNodeForUserTags(children as React.ReactNode, userTags)
+        ? processNodeForUserTags(children as React.ReactNode, resolve)
         : undefined;
 
     return React.cloneElement(element, { children: processedChildren });
@@ -485,6 +596,7 @@ interface SummarizerContentProps {
 interface GeniusKeyPointsProps {
   parsedContent: StreamingParsedContent;
   message: Message;
+  resolveMention: MentionResolver;
   onCitationClick: (
     messageNumber: number,
     conversationIdMapping: Record<string, string>,
@@ -915,6 +1027,11 @@ export const MessageItem = React.memo(
     const editTextareaRef = React.useRef<HTMLTextAreaElement>(null);
     const navigate = useNavigate();
 
+    // Resolve `@name` against this message's userTags + the live workspace
+    // directory. Only REAL, unambiguous users become mentions — every other
+    // "@text" stays plain text (matches channels/threads).
+    const resolveMention = useMentionResolver(message.userTags);
+
     // The rotating `displayStatus` + bouncing-dots indicator that used to live
     // here has been removed in favor of the single ActivityBlock shimmer
     // header. The backend `statusMessage` field is now ignored on this
@@ -947,7 +1064,7 @@ export const MessageItem = React.memo(
         message.type === 'bot' && message.isStreaming && message.streamingContent
           ? message.streamingContent
           : message.content || message.streamingContent || '';
-      const linkified = linkifyClawCitations(raw, clawCitationToolNumbers);
+      const linkified = linkifyAndGroupClawCitations(raw, clawCitationToolNumbers);
       const stripped = stripCitationMarks(linkified);
       return message.isStreaming ? stripped + '\n' : stripped;
     }, [
@@ -1130,7 +1247,7 @@ export const MessageItem = React.memo(
                     remarkPlugins={[remarkGfm]}
                     components={{
                       p: ({ children }) => {
-                        const processed = processNodeForUserTags(children, message.userTags);
+                        const processed = processNodeForUserTags(children, resolveMention);
                         return <span>{processed}</span>;
                       },
                       a: ({ href, children, ...props }) => {
@@ -1385,6 +1502,7 @@ const MessageContent = ({
   onCitationClick,
   onSummarizerCitationClick,
 }: MessageContentProps): ReactElement => {
+  const resolveMention = useMentionResolver(message.userTags);
   // Memoize markdown components to prevent re-renders on parent updates
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
 
@@ -1521,22 +1639,34 @@ const MessageContent = ({
             components={{
               ...sidebarMarkdownComponents,
               p: ({ children }) => {
-                const processed = processNodeForUserTags(children, message.userTags);
+                const processed = processNodeForUserTags(children, resolveMention);
                 return <p className='mb-2 last:mb-0'>{processed}</p>;
               },
               li: ({ children, ...props }) => {
-                const processed = processNodeForUserTags(children, message.userTags);
+                const processed = processNodeForUserTags(children, resolveMention);
                 return <li {...props}>{processed}</li>;
               },
               td: ({ children, ...props }) => {
-                const processed = processNodeForUserTags(children, message.userTags);
+                const processed = processNodeForUserTags(children, resolveMention);
                 return <td {...props}>{processed}</td>;
               },
               th: ({ children, ...props }) => {
-                const processed = processNodeForUserTags(children, message.userTags);
+                const processed = processNodeForUserTags(children, resolveMention);
                 return <th {...props}>{processed}</th>;
               },
               a: ({ href, children, ...props }) => {
+                // Grouped run of adjacent citations → one stacked cluster chip.
+                if (href && href.startsWith('cite-group:')) {
+                  const groupRefs = parseCiteGroupHref(href);
+                  if (groupRefs.length >= 2) {
+                    return (
+                      <ClawCitationGroup
+                        refs={groupRefs}
+                        toolInvocations={message.toolInvocations}
+                      />
+                    );
+                  }
+                }
                 // v3-style inline citation: `linkifyClawCitations` rewrites
                 // `[clf-<toolCallId>#<N>]` → `[<num>.<N>](cite:clf-<toolCallId>#<N>)`.
                 // Intercept the synthetic `cite:` href and substitute a chip
@@ -1627,6 +1757,7 @@ const MessageContent = ({
         <GeniusKeyPoints
           parsedContent={parsedContent}
           message={message}
+          resolveMention={resolveMention}
           onCitationClick={onCitationClick}
         />
       )}
@@ -1789,6 +1920,7 @@ const SummarizerContent = ({
   message,
   onSummarizerCitationClick,
 }: SummarizerContentProps): ReactElement => {
+  const resolveMention = useMentionResolver(message.userTags);
   // Memoize markdown components to prevent re-renders on parent updates
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
 
@@ -1818,19 +1950,19 @@ const SummarizerContent = ({
               components={{
                 ...sidebarMarkdownComponents,
                 p: ({ children }) => {
-                  const processed = processNodeForUserTags(children, message.userTags);
+                  const processed = processNodeForUserTags(children, resolveMention);
                   return <p className='mb-2 last:mb-0'>{processed}</p>;
                 },
                 li: ({ children, ...props }) => {
-                  const processed = processNodeForUserTags(children, message.userTags);
+                  const processed = processNodeForUserTags(children, resolveMention);
                   return <li {...props}>{processed}</li>;
                 },
                 td: ({ children, ...props }) => {
-                  const processed = processNodeForUserTags(children, message.userTags);
+                  const processed = processNodeForUserTags(children, resolveMention);
                   return <td {...props}>{processed}</td>;
                 },
                 th: ({ children, ...props }) => {
-                  const processed = processNodeForUserTags(children, message.userTags);
+                  const processed = processNodeForUserTags(children, resolveMention);
                   return <th {...props}>{processed}</th>;
                 },
                 a: ({ href, children, ...props }) => {
@@ -1940,7 +2072,7 @@ const SummarizerContent = ({
                         remarkPlugins={[remarkGfm]}
                         components={{
                           p: ({ children }) => {
-                            const processed = processNodeForUserTags(children, message.userTags);
+                            const processed = processNodeForUserTags(children, resolveMention);
                             return <span>{processed}</span>;
                           },
                           a: ({ href, children, ...props }) => {
@@ -2037,6 +2169,7 @@ const SummarizerContent = ({
 const GeniusKeyPoints = ({
   parsedContent,
   message,
+  resolveMention,
   onCitationClick,
 }: GeniusKeyPointsProps): ReactElement => (
   <div className='space-y-2'>
@@ -2058,7 +2191,7 @@ const GeniusKeyPoints = ({
                 remarkPlugins={[remarkGfm]}
                 components={{
                   p: ({ children }) => {
-                    const processed = processNodeForUserTags(children, message.userTags);
+                    const processed = processNodeForUserTags(children, resolveMention);
                     return <span>{processed}</span>;
                   },
                   a: ({ href, children, ...props }) => {

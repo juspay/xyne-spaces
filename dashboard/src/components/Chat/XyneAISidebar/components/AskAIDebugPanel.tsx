@@ -18,6 +18,7 @@ import {
   Maximize2,
   MessagesSquare,
   MessageSquareText,
+  Quote,
   RefreshCw,
   RotateCcw,
   User,
@@ -543,6 +544,7 @@ function eventTitle(kind: string, data: Record<string, unknown>): string {
   if (kind === 'auto_retry_start') return 'Retry attempt';
   if (kind === 'compaction_start') return 'Context compaction started';
   if (kind === 'compaction_end') return 'Context compaction completed';
+  if (kind === 'citation_reflection') return 'Citation check';
   return kind.replaceAll('_', ' ');
 }
 
@@ -564,6 +566,8 @@ function eventIcon(kind: string): { Icon: typeof Bug; color: string } {
     return { Icon: RotateCcw, color: 'text-orange-500 dark:text-orange-400' };
   if (kind === 'compaction_start' || kind === 'compaction_end')
     return { Icon: Zap, color: 'text-violet-500 dark:text-violet-400' };
+  if (kind === 'citation_reflection')
+    return { Icon: Quote, color: 'text-teal-500 dark:text-teal-400' };
   return { Icon: CirclePlay, color: 'text-xyne-fg-tertiary' };
 }
 
@@ -602,6 +606,22 @@ function eventSummary(kind: string, data: Record<string, unknown>): string {
     }
     case 'session_end':
       return '';
+    case 'citation_reflection': {
+      if (getString(data, 'phase') === 'nudge') {
+        const round = getNumber(data, 'round') ?? 0;
+        const maxRounds = getNumber(data, 'maxRounds') ?? 0;
+        return `Answer used sources but isn't cited — nudging the model to add citations (round ${round}/${maxRounds})`;
+      }
+      const outcome = getString(data, 'outcome');
+      const labels: Record<string, string> = {
+        already_cited: 'Answer already cited — no action needed',
+        no_citeable_sources: 'No citeable sources retrieved — nothing to enforce',
+        fixed_after_nudge: 'Citations added after reflection',
+        still_uncited: 'Still uncited after reflection',
+        aborted: 'Reflection aborted (run cancelled)',
+      };
+      return labels[outcome] ?? outcome.replaceAll('_', ' ');
+    }
     default:
       return '';
   }
@@ -1347,6 +1367,11 @@ function conversationPairs(
     if (!isRecord(message)) continue;
     const role = getString(message, 'role');
     if (role === 'user') {
+      // Internal harness nudges (structured-output / verify-responses / citation
+      // reflection) are delivered via session.prompt("<system>…") and land in the
+      // transcript as user-role messages. They are NOT real conversation turns —
+      // skip them so a post-response nudge doesn't spawn a phantom empty turn.
+      if (messageText(message).trimStart().startsWith('<system>')) continue;
       pairs.push({ user: message });
     } else if (role === 'assistant' && pairs.length > 0 && !pairs[pairs.length - 1]?.assistant) {
       pairs[pairs.length - 1]!.assistant = message;

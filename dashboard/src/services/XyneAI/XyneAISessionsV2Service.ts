@@ -10,6 +10,7 @@ import type {
   ToolInvocation,
   DebugArtifactBundle,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { registerClawIcons } from '../../components/Chat/XyneAISidebar/utils/clawCitationUrl';
 
 // ============================================================================
 // Claw API response types
@@ -55,6 +56,10 @@ interface ClawMessagesResponse {
   data: ClawChatMessage[];
   toolInvocations?: unknown[];
   invocationsByMsgId?: Record<string, unknown[]>;
+  /** De-duplicated brand-icon registry: `iconKey` → inline `data:` SVG URI.
+   *  Each unique icon ships once here instead of being repeated on every
+   *  citation; chips resolve it via `resolveCitationIconUrl`. */
+  icons?: Record<string, string>;
   /** assistantMsgId → AgentRun.sessionId, for branching-safe debugger pairing. */
   runByMsgId?: Record<string, string>;
 }
@@ -138,6 +143,10 @@ export async function fetchV2ConversationMessages(
   // Otherwise we fall back to time-window heuristics.
   const invocationsByMsgId =
     (response.data.invocationsByMsgId as Record<string, ToolInvocation[]> | undefined) || undefined;
+
+  // Stash the payload's de-duplicated icon bytes before mapping messages, so
+  // citation chips (which carry only `iconKey`) can resolve their brand icon.
+  registerClawIcons(response.data.icons);
 
   const runByMsgId = response.data.runByMsgId || undefined;
 

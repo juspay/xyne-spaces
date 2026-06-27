@@ -94,6 +94,50 @@ export function buildClawCitationUrl(citation: ClawCitation): string | null {
   return null;
 }
 
+/**
+ * Spaces-native citations (thread/canvas/ticket) navigate within the app, so
+ * they open in the SAME tab. Everything else — external Google/web links —
+ * points off-app and should open in a NEW tab.
+ */
+export function citationOpensInNewTab(citation: ClawCitation): boolean {
+  return citation.kind === 'external';
+}
+
+/**
+ * Brand-icon registry: `iconKey` → inline `data:` SVG URI. The `/messages`
+ * payload ships each unique icon ONCE in a top-level `icons` map (instead of
+ * repeating the identical SVG bytes on every citation); we stash that map here
+ * and re-attach the bytes per chip at render time. Icon keys are stable global
+ * constants ("spaces", "gmail", …) whose bytes never change, so a module-level
+ * cache that accumulates across loads is safe and lets every render site share
+ * one registry without threading it through props.
+ */
+const clawIconRegistry = new Map<string, string>();
+
+/** Merge a backend-supplied `iconKey → data:URI` map (from the `/messages`
+ *  `icons` field) into the registry. No-op for an absent/empty map. */
+export function registerClawIcons(icons: Record<string, string> | undefined): void {
+  if (!icons) return;
+  for (const [key, url] of Object.entries(icons)) {
+    if (key && typeof url === 'string' && url) clawIconRegistry.set(key, url);
+  }
+}
+
+/**
+ * Resolve the brand-icon URI for a citation chip. Prefers an inline `iconUrl`
+ * when present (legacy rows + the live streaming path still carry it), then
+ * falls back to the de-duplicated registry keyed by `iconKey`. Returns
+ * undefined when neither resolves — the chip then renders without an icon.
+ */
+export function resolveCitationIconUrl(
+  citation: ClawCitation | null | undefined,
+): string | undefined {
+  if (!citation) return undefined;
+  if (citation.iconUrl) return citation.iconUrl;
+  if (citation.iconKey) return clawIconRegistry.get(citation.iconKey);
+  return undefined;
+}
+
 export function getClawCitationLabel(citation: ClawCitation): string {
   if (citation.label) return citation.label;
   if (citation.kind === 'thread') {

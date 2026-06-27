@@ -45,19 +45,26 @@ import { createMarkdownComponents } from '../../utils/markdownComponents';
 import {
   stripCitationMarks,
   extractInlineCitations,
-  linkifyClawCitations,
+  linkifyAndGroupClawCitations,
+  parseCiteGroupHref,
   buildClawCitationToolNumbers,
   type InlineCitation,
 } from '../ui/TipTapExtensions/CitationMark';
+import { ClawCitationGroup } from '../Chat/XyneAISidebar/components/ClawCitationGroup';
 import {
   findCitationForChunk,
   buildClawCitationUrl,
   getClawCitationLabel,
+  citationOpensInNewTab,
+  resolveCitationIconUrl,
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
+import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
   AttachmentPreview,
+  useMentionResolver,
+  processNodeForUserTags,
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
@@ -337,21 +344,43 @@ function ClawCitationChip({
     conversationTools && conversationTools.length > 0 ? conversationTools : toolInvocations;
   const citation = findCitationForChunk(lookupTools, toolCallId, chunkIndex);
   const url = citation ? buildClawCitationUrl(citation) : null;
-  const label = `${toolNumber}.${chunkIndex}`;
+  // Show the citation's header (title) instead of the bare number — easier to
+  // read at a glance. Falls back to the number if the citation didn't resolve.
+  const label = citation ? getClawCitationLabel(citation) : `${toolNumber}.${chunkIndex}`;
   const tooltip = buildClawCitationTooltip(citation);
+  // Fixed-height pill, capped width; the label truncates with an ellipsis and
+  // the full text shows on hover (tooltip).
   const chipClass =
-    'claw-citation-chip inline-flex items-center justify-center align-baseline ' +
-    'px-1 min-w-[1.125rem] h-[1.125rem] mx-[2px] rounded ' +
-    'text-[9.5px] font-medium tabular-nums leading-none ' +
+    'claw-citation-chip inline-flex items-center gap-1 align-middle ' +
+    'px-1.5 h-[1.25rem] max-w-[180px] mx-[2px] rounded ' +
+    'text-[10px] font-medium leading-none ' +
     'bg-muted/60 border border-border/50 hover:bg-accent hover:border-border transition-colors';
 
+  // Brand icon (Gmail/Calendar/Drive/Xyne/…) supplied by claw. Resolved from
+  // the citation's `iconKey` against the shared icon registry (or an inline
+  // `iconUrl` on legacy/streaming rows). Rendered generically as an <img>, so
+  // adding a new source's icon is a claw-only change — no per-app logic here.
+  const iconUrl = resolveCitationIconUrl(citation);
+  const chipInner = (
+    <>
+      {iconUrl ? (
+        <img src={iconUrl} alt='' aria-hidden className='w-3 h-3 shrink-0 object-contain' />
+      ) : null}
+      <span className='min-w-0 truncate'>{label}</span>
+    </>
+  );
   const trigger = url ? (
-    <Link to={url} className={chipClass} aria-label={tooltip}>
-      {label}
-    </Link>
+    <CitationLink
+      url={url}
+      newTab={!!citation && citationOpensInNewTab(citation)}
+      className={chipClass}
+      ariaLabel={tooltip}
+    >
+      {chipInner}
+    </CitationLink>
   ) : (
     <span className={chipClass} aria-label={tooltip}>
-      {label}
+      {chipInner}
     </span>
   );
 
@@ -532,7 +561,7 @@ function ChatMessageBubble({
       message.type === 'bot' && message.isStreaming && message.streamingContent
         ? message.streamingContent
         : message.content || message.streamingContent || '';
-    const linkified = linkifyClawCitations(raw, clawCitationToolNumbers);
+    const linkified = linkifyAndGroupClawCitations(raw, clawCitationToolNumbers);
     const stripped = stripCitationMarks(linkified);
     const nonClfStripped = stripNonClfCitationTokens(stripped);
     const cleaned = stripUnknownCiteLinks(nonClfStripped, validCitationKeys);
@@ -552,6 +581,11 @@ function ChatMessageBubble({
   );
 
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
+
+  // Resolve @-mentions to the same avatar+name chip the sidebar uses, so user
+  // tagging looks identical on the AIScreen. Only names that map to exactly one
+  // real workspace user become chips; everything else stays plain text.
+  const resolveMention = useMentionResolver(message.userTags);
 
   const hasUserContent = isUser && message.content.trim().length > 0;
   const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
@@ -577,9 +611,12 @@ function ChatMessageBubble({
           )}
           {hasUserContent && (
             <div className='whitespace-pre-wrap'>
-              {stripUnknownCiteLinks(
-                stripNonClfCitationTokens(stripCitationMarks(message.content)),
-                validCitationKeys,
+              {processNodeForUserTags(
+                stripUnknownCiteLinks(
+                  stripNonClfCitationTokens(stripCitationMarks(message.content)),
+                  validCitationKeys,
+                ),
+                resolveMention,
               )}
             </div>
           )}
@@ -611,7 +648,29 @@ function ChatMessageBubble({
                 urlTransform={url => url}
                 components={{
                   ...markdownComponents,
+                  p: ({ children }) => <p>{processNodeForUserTags(children, resolveMention)}</p>,
+                  li: ({ children, ...props }) => (
+                    <li {...props}>{processNodeForUserTags(children, resolveMention)}</li>
+                  ),
+                  td: ({ children, ...props }) => (
+                    <td {...props}>{processNodeForUserTags(children, resolveMention)}</td>
+                  ),
+                  th: ({ children, ...props }) => (
+                    <th {...props}>{processNodeForUserTags(children, resolveMention)}</th>
+                  ),
                   a: ({ href, children, ...props }) => {
+                    // Grouped run of adjacent citations → one stacked cluster chip.
+                    if (href && href.startsWith('cite-group:')) {
+                      const groupRefs = parseCiteGroupHref(href);
+                      if (groupRefs.length >= 2) {
+                        return (
+                          <ClawCitationGroup
+                            refs={groupRefs}
+                            toolInvocations={message.toolInvocations}
+                          />
+                        );
+                      }
+                    }
                     if (href && href.startsWith('cite:clf-')) {
                       const body = href.slice('cite:clf-'.length);
                       const hashIdx = body.lastIndexOf('#');
