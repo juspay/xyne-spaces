@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
-import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, FormContextType, FormEntityType, Prisma, DeskType } from '@prisma/client';
+import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, FormContextType, FormEntityType, Prisma, DeskType, EmailType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
@@ -14,6 +15,7 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '../types';
 import { emailService } from '@/services/emailService';
+import { uploadFiles } from '@/services/fileUploadService';
 import { buildEmailTicketAcknowledgmentBody } from '../core/emailUtils';
 import { extractEmailAddress } from '@/utils/email';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
@@ -114,6 +116,16 @@ const CreateEmailTicketBodySchema = z.object({
   assignedUserGroupAlias: z.string().trim().optional(),
   stageName: z.string().trim().optional(),
   ticketType: z.string().trim().optional(),
+});
+
+const AppDeskInboundBodySchema = z.object({
+  channelId: z.string().min(1, 'channelId is required').trim(),
+  threadId: z.string().min(1, 'threadId is required').trim(),
+  externalId: z.string().min(1).trim().optional(),
+  subject: z.string().min(1, 'subject is required').trim(),
+  body: z.string().trim().optional(),
+  senderName: z.string().trim().optional(),
+  senderEmail: z.string().email('senderEmail must be a valid email when provided').trim().optional(),
 });
 
 const ListBySenderQuerySchema = z.object({
@@ -1797,4 +1809,208 @@ export class TicketController {
       res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     }
   };
+
+  appDeskInbound = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const bodyResult = AppDeskInboundBodySchema.safeParse(req.body);
+      if (!bodyResult.success) {
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+        return;
+      }
+
+      const {
+        channelId, threadId, externalId: bodyExternalId, subject, body,
+        senderEmail, senderName,
+      } = bodyResult.data;
+
+      const userId = req.user!.id;
+
+      const reqFiles = (req.files && !Array.isArray(req.files))
+        ? (req.files as Record<string, Express.Multer.File[]>)
+        : {};
+      const files = reqFiles['files'] ?? [];
+      const emailBody = body ?? '';
+      if (!emailBody && files.length === 0) {
+        res.status(400).json({ error: 'body or at least one file is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      const channel = await repositories.channels.findById(channelId);
+      if (!channel) {
+        res.status(404).json({ error: `Channel with ID ${channelId} not found`, code: 'CHANNEL_NOT_FOUND' });
+        return;
+      }
+
+      const channelPref = await prismaClient.emailChannelPreference.findUnique({
+        where: { channelId },
+        select: { sendAsEmail: true, ownerUserId: true, boardId: true, deskType: true },
+      });
+      if (!channelPref || channelPref.deskType !== DeskType.APP) {
+        res.status(400).json({ error: 'Channel is not an APP desk', code: 'NOT_APP_DESK' });
+        return;
+      }
+
+      const externalSource = await externalSourceRepo.findByChannelId(channelId);
+      if (!externalSource) {
+        res.status(503).json({ error: 'App desk source is not configured', code: 'MISCONFIGURED' });
+        return;
+      }
+      if (!externalSource.isActive) {
+        res.status(409).json({ error: 'App desk is disconnected', code: 'DESK_DISCONNECTED' });
+        return;
+      }
+
+      const externalThreadId = threadId;
+      const externalMessageId = bodyExternalId || randomUUID();
+      let emailFrom =
+        (senderName && senderEmail && `${senderName} <${senderEmail}>`) ||
+        senderName ||
+        senderEmail ||
+        '';
+      if (!emailFrom) {
+        const botUser = await repositories.users.findById(userId);
+        emailFrom = botUser?.email
+          ? `${botUser.name} <${botUser.email}>`
+          : botUser?.name ?? 'External user';
+      }
+      const uploadedFiles = files.length > 0 ? await uploadFiles(files) : [];
+
+      const ownerUser = channelPref.ownerUserId ? await repositories.users.findById(channelPref.ownerUserId) : null;
+      const recipientEmail =
+        channelPref.sendAsEmail ||
+        extractEmailAddress(externalSource.displayName ?? '') ||
+        ownerUser?.email ||
+        `desk-${channelId}@apps.xyne.ai`;
+
+      logger.info('[AppDeskInbound] received', {
+        channelId,
+        threadId: externalThreadId,
+        externalMessageId,
+        externalIdProvided: !!bodyExternalId,
+        from: emailFrom,
+        recipientEmail,
+        hasBody: emailBody.length > 0,
+        fileCount: uploadedFiles.length,
+        appUserId: userId,
+      });
+
+      const threadEmail = await repositories.emails.findFirstByThreadAndChannel(externalThreadId, channelId);
+      if (threadEmail) {
+        const { email } = await emailService.addEmailToConversation({
+          conversationId: threadEmail.conversationId,
+          emailSubject: subject,
+          emailBody,
+          emailTo: [recipientEmail],
+          emailFrom,
+          externalThreadId,
+          externalMessageId,
+          emailType: EmailType.DEFAULT,
+          ...(uploadedFiles.length > 0 && { uploadedFiles }),
+          receivedAt: new Date(),
+        });
+        await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, email.id);
+        const existingTicket = await prismaClient.ticket.findFirst({
+          where: { conversationId: threadEmail.conversationId },
+          select: { id: true, xyneId: true },
+        });
+        logger.info('[AppDeskInbound] appended message to existing thread', {
+          threadId: externalThreadId,
+          conversationId: threadEmail.conversationId,
+          emailId: email.id,
+          ticketId: existingTicket?.id,
+          xyneId: existingTicket?.xyneId,
+          fileCount: uploadedFiles.length,
+        });
+        res.status(200).json({
+          ticketId: existingTicket?.id,
+          xyneId: existingTicket?.xyneId,
+          conversationId: threadEmail.conversationId,
+          isNew: false,
+        });
+        return;
+      }
+
+      const effectiveBoardId = channelPref.boardId || undefined;
+      if (!effectiveBoardId) {
+        res.status(503).json({ error: 'App desk board is not configured', code: 'MISCONFIGURED' });
+        return;
+      }
+
+      const result = await emailService.createConversationWithEmail({
+        channelId,
+        userId,
+        emailSubject: subject,
+        emailBody,
+        emailFrom,
+        emailTo: [recipientEmail],
+        externalThreadId,
+        externalMessageId,
+        ...(uploadedFiles.length > 0 && { uploadedFiles }),
+        ...(senderEmail && {
+          ticketMetadata: {
+            reporterEmail: extractEmailAddress(senderEmail) ?? senderEmail.trim().toLowerCase(),
+            fromEmailAddress: senderEmail,
+          },
+        }),
+        receivedAt: new Date(),
+        boardId: effectiveBoardId,
+      });
+
+      if (result && 'blocked' in result && result.blocked) {
+        res.status(403).json({ error: 'Ticket creation blocked by configuration', code: 'BLOCKED' });
+        return;
+      }
+      if (result && 'isDuplicate' in result && result.isDuplicate) {
+        res.status(409).json({ error: 'Duplicate ticket', code: 'DUPLICATE' });
+        return;
+      }
+
+      const { ticket, conversation, email: initialEmail } = result as { ticket: any; conversation: any; email: any };
+      await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, initialEmail.id);
+
+      logger.info('[AppDeskInbound] created new ticket', {
+        threadId: externalThreadId,
+        ticketId: ticket?.id,
+        xyneId: ticket?.xyneId,
+        conversationId: conversation?.conversationId,
+        emailId: initialEmail?.id,
+        boardId: effectiveBoardId,
+        fileCount: uploadedFiles.length,
+      });
+
+      res.status(201).json({
+        ticketId: ticket?.id,
+        xyneId: ticket?.xyneId,
+        conversationId: conversation?.conversationId,
+        isNew: true,
+      });
+    } catch (error) {
+      logger.error('[TicketController] appDeskInbound error:', error);
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    }
+  };
+
+  private async recordIncomingAppMessage(
+    externalSourceId: string,
+    externalMessageId: string,
+    externalThreadId: string,
+    emailId: string,
+  ): Promise<void> {
+    try {
+      await prismaClient.externalMessage.create({
+        data: {
+          externalSourceId,
+          externalId: externalMessageId,
+          externalThreadId,
+          messageId: emailId,
+          entityId: emailId,
+          direction: MessageDirection.INCOMING,
+          entityType: ExternalEntityType.EMAIL,
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return;
+      throw error;
+    }
+  }
 }

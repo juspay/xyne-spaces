@@ -6,11 +6,12 @@ import { resolveSlackMentions, fetchSlackUserInfo } from '../slack-webhook-ticke
 import { ChannelRepository } from '../../../database/repositories/channelRepository';
 import { UserRepository } from '../../../database/repositories/users';
 import { logger } from '../../../utils/logger';
+import { buildSlackDeskSourceName } from '../../core/deskSources';
 
 export class SlackDeskFlow extends BaseFlow {
   getSourceNameFromDB(payload: any): string | undefined {
     const channelId = payload?.event?.channel;
-    return channelId ? `slack-desk-${channelId}` : undefined;
+    return channelId ? buildSlackDeskSourceName(channelId) : undefined;
   }
 
   async preprocess(payload: any, source?: ExternalSource): Promise<any> {

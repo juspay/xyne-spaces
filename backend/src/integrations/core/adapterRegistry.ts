@@ -85,6 +85,7 @@ class AdapterRegistry {
     'slack-desk': ExternalSourcePlatform.SLACK_DESK,
     microsoft: ExternalSourcePlatform.MICROSOFT,
     google: ExternalSourcePlatform.GOOGLE,
+    'app-desk': ExternalSourcePlatform.APP_DESK,
   };
 
   private tryMapStringToPlatform(platformStr: string): ExternalSourcePlatform | undefined {

@@ -8,6 +8,10 @@ import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { Button } from '../../ui/Button';
+import {
+  MessageCardAttachmentThumbnails,
+  type PanelAttachmentRow,
+} from '../../Chat/MessageCard/MessageCardAttachmentThumbnails';
 
 export type SlackEmailMessage = {
   id: string;
@@ -17,9 +21,9 @@ export type SlackEmailMessage = {
   type: string | null;
   attachments?: ReadonlyArray<{
     readonly id: string;
-    readonly fileName?: string | null;
-    readonly fileUrl?: string | null;
-    readonly mimeType?: string | null;
+    readonly originalFilename?: string | null;
+    readonly mimetype?: string | null;
+    readonly thumbnailUrl?: string | null;
     readonly size?: number | null;
     [key: string]: unknown;
   }> | null;
@@ -54,6 +58,18 @@ const SlackMessage = ({ email }: { email: SlackEmailMessage }): ReactElement => 
       })
     : '';
   const isOutgoing = email.type === 'REPLY';
+
+  const panelAttachments: PanelAttachmentRow[] = useMemo(
+    () =>
+      (email.attachments ?? []).map(a => ({
+        id: a.id,
+        mimetype: a.mimetype ?? 'application/octet-stream',
+        originalFilename: a.originalFilename ?? 'file',
+        thumbnailUrl: a.thumbnailUrl ?? null,
+        size: a.size ?? 0,
+      })),
+    [email.attachments],
+  );
 
   return (
     <div className={cn('flex gap-3 px-4 py-3', isOutgoing && 'bg-blue-50/40')}>
@@ -100,9 +116,19 @@ const SlackMessage = ({ email }: { email: SlackEmailMessage }): ReactElement => 
               <RenderMessageWithHTML message={email.body} />
             </div>
           ) : (
-            <span className='text-muted-foreground italic'>No content</span>
+            !panelAttachments.length && (
+              <span className='text-muted-foreground italic'>No content</span>
+            )
           )}
         </div>
+        {/* Attachments — same rendering as chat (image/video previews + gallery) */}
+        {panelAttachments.length > 0 && (
+          <MessageCardAttachmentThumbnails
+            attachments={panelAttachments}
+            className='mt-2'
+            trackCategory='slack-desk'
+          />
+        )}
       </div>
     </div>
   );

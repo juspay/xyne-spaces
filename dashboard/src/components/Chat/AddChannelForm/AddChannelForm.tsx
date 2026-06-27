@@ -4,7 +4,16 @@ import { useStore } from '@tanstack/react-store';
 import { useQuery } from '@tanstack/react-query';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
-import { Hash, Lock, AlertCircle, FolderKanban } from 'lucide-react';
+import {
+  Hash,
+  Lock,
+  AlertCircle,
+  FolderKanban,
+  Mail,
+  Users,
+  MessageSquare,
+  Boxes,
+} from 'lucide-react';
 
 import { Button } from '../../ui/Button';
 import { Tooltip } from '../../ui/Tooltip';
@@ -28,7 +37,7 @@ import { getWorkspaceSharedMailboxStatus } from '../../../services/clients/works
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
 type ConnectorType = 'google' | 'microsoft' | null;
-type DeskType = 'EMAIL' | 'DL' | 'SLACK';
+type DeskType = 'EMAIL' | 'DL' | 'SLACK' | 'APP';
 type Visibility = 'public' | 'private';
 
 interface SlackChannel {
@@ -39,15 +48,55 @@ interface SlackChannel {
   alreadyConnected: boolean;
 }
 
+const DESK_SOURCES: ReadonlyArray<{
+  value: DeskType;
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  {
+    value: 'EMAIL',
+    label: 'Personal mailbox',
+    description: 'Connect a dedicated inbox via OAuth',
+    icon: Mail,
+  },
+  {
+    value: 'DL',
+    label: 'Distribution list',
+    description: 'Route a DL through the shared mailbox',
+    icon: Users,
+  },
+  {
+    value: 'SLACK',
+    label: 'Slack channel',
+    description: 'Connect a Slack channel to create tickets from messages',
+    icon: MessageSquare,
+  },
+  {
+    value: 'APP',
+    label: 'Xyne App',
+    description: 'Connect an external system through a Xyne App over APIs',
+    icon: Boxes,
+  },
+];
+
+interface EligibleApp {
+  installedAppId: string;
+  appId: string;
+  name: string;
+  description: string | null;
+}
+
 interface AddChannelFormProps {
   mode?: ChannelFormMode;
   onSubmit: (
     data: ChannelFormData & {
       connector?: ConnectorType;
-      channelType?: 'EMAIL' | 'SLACK' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | undefined;
       deskType?: DeskType;
       dlEmail?: string;
       slackChannelId?: string;
+      installedAppId?: string;
     },
   ) => void;
   onCancel: () => void;
@@ -73,6 +122,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [deskType, setDeskType] = useState<DeskType>('EMAIL');
   const [dlEmailInput, setDlEmailInput] = useState<string>('');
   const [selectedSlackChannelId, setSelectedSlackChannelId] = useState<string>('');
+  const [selectedInstalledAppId, setSelectedInstalledAppId] = useState<string>('');
   const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
 
@@ -86,6 +136,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       return res.data.channels;
     },
     enabled: requireConnector && deskType === 'SLACK',
+  });
+
+  const { data: eligibleAppsData, isLoading: isLoadingEligibleApps } = useQuery({
+    queryKey: ['app-desk-eligible-apps'],
+    queryFn: async () => {
+      const { apiInstance } = await import('../../../services/clients/apiClient');
+      const res = await apiInstance.get<{ apps: EligibleApp[] }>('/integrations/app-desk/apps');
+      return res.data.apps;
+    },
+    enabled: requireConnector && deskType === 'APP',
   });
 
   const { data: workspaceMailbox } = useQuery({
@@ -164,6 +224,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         )
           return;
         if (deskType === 'SLACK' && !selectedSlackChannelId) return;
+        if (deskType === 'APP' && !selectedInstalledAppId) return;
       }
       if (mode === 'promote') {
         const promoteData: PromoteGroupDmRequest = {
@@ -184,6 +245,15 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             channelType: 'SLACK',
             deskType: 'SLACK',
             slackChannelId: selectedSlackChannelId,
+            assigneeUserGroupId: value.assigneeUserGroupId,
+          });
+        } else if (deskType === 'APP') {
+          onSubmit?.({
+            ...value,
+            connector: null,
+            channelType: 'APP',
+            deskType: 'APP',
+            installedAppId: selectedInstalledAppId,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === 'DL') {
@@ -239,6 +309,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       deskType === 'DL' &&
       (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
     (requireConnector && deskType === 'SLACK' && !selectedSlackChannelId) ||
+    (requireConnector && deskType === 'APP' && !selectedInstalledAppId) ||
     duplicateCheck?.isDuplicate === true;
 
   const submitDisabledReason = ((): string | null => {
@@ -338,6 +409,15 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     }
   };
 
+  const handleSourceChange = (value: DeskType): void => {
+    setDeskType(value);
+    setDlEmailInput('');
+    setSelectedSlackChannelId('');
+    setSelectedInstalledAppId('');
+    if (value !== 'EMAIL') setSelectedConnector(null);
+  };
+  const selectedSource = DESK_SOURCES.find(s => s.value === deskType);
+
   const renderFormComponent = (): ReactElement => (
     <div data-testid='add-channel-form' className='space-y-6 w-full'>
       {title ? (
@@ -348,69 +428,33 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
-      {/* Desk Type Toggle (for email channels) */}
+      {/* Desk source selector */}
       {requireConnector && (
-        <div className='space-y-2'>
-          <div className='flex gap-3'>
-            <button
-              type='button'
-              onClick={() => {
-                setDeskType('EMAIL');
-                setDlEmailInput('');
-              }}
-              className={cn(
-                'flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all text-left',
-                deskType === 'EMAIL'
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border text-foreground hover:border-muted-foreground/50',
-              )}
-              data-track-category='ADD_CHANNEL_FORM'
-              data-track-name='SELECT_DESK_TYPE_EMAIL'
-            >
-              <div>Personal mailbox</div>
-              <div className='text-xs font-normal text-muted-foreground mt-0.5'>
-                Connect a dedicated inbox via OAuth
-              </div>
-            </button>
-            <button
-              type='button'
-              onClick={() => setDeskType('DL')}
-              className={cn(
-                'flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all text-left',
-                deskType === 'DL'
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border text-foreground hover:border-muted-foreground/50',
-              )}
-              data-track-category='ADD_CHANNEL_FORM'
-              data-track-name='SELECT_DESK_TYPE_DL'
-            >
-              <div>Distribution list</div>
-              <div className='text-xs font-normal text-muted-foreground mt-0.5'>
-                Route a DL through the shared mailbox
-              </div>
-            </button>
-            <button
-              type='button'
-              onClick={() => {
-                setDeskType('SLACK');
-                setSelectedConnector(null);
-                setDlEmailInput('');
-              }}
-              className={cn(
-                'flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all text-left',
-                deskType === 'SLACK'
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border text-foreground hover:border-muted-foreground/50',
-              )}
-              data-track-category='ADD_CHANNEL_FORM'
-              data-track-name='SELECT_DESK_TYPE_SLACK'
-            >
-              <div>Slack channel</div>
-              <div className='text-xs font-normal text-muted-foreground mt-0.5'>
-                Connect a Slack channel to create tickets from messages
-              </div>
-            </button>
-          </div>
+        <div className='space-y-1.5'>
+          <label htmlFor='desk-source' className='text-sm font-medium text-foreground'>
+            Desk source
+          </label>
+          <Select value={deskType} onValueChange={value => handleSourceChange(value as DeskType)}>
+            <SelectTrigger id='desk-source' className='w-full'>
+              <SelectValue placeholder='Select a source' />
+            </SelectTrigger>
+            <SelectContent>
+              {DESK_SOURCES.map(source => {
+                const Icon = source.icon;
+                return (
+                  <SelectItem key={source.value} value={source.value}>
+                    <span className='flex items-center gap-2'>
+                      <Icon className='w-4 h-4 text-muted-foreground' />
+                      {source.label}
+                    </span>
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          {selectedSource && (
+            <p className='text-xs text-muted-foreground'>{selectedSource.description}</p>
+          )}
         </div>
       )}
 
@@ -518,6 +562,59 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               )}
               <p className='text-xs text-muted-foreground'>
                 Don&apos;t see your channel? Invite the Xyne bot to it first in Slack.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Xyne App Selection */}
+      {requireConnector && deskType === 'APP' && (
+        <div className='space-y-2'>
+          <label htmlFor='app-desk-select' className='text-sm font-medium text-foreground'>
+            Xyne App <span className='text-muted-foreground'>*</span>
+          </label>
+          {isLoadingEligibleApps ? (
+            <div className='flex items-center gap-2 py-3 text-sm text-muted-foreground'>
+              <div className='h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent' />
+              Loading apps...
+            </div>
+          ) : !eligibleAppsData?.length ? (
+            <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
+              <AlertCircle
+                size={16}
+                className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
+              />
+              <div className='text-sm text-foreground'>
+                <div className='font-medium'>No eligible apps found</div>
+                <div className='text-xs text-muted-foreground mt-1'>
+                  An app must be installed with the <span className='font-mono'>desk:write</span>{' '}
+                  permission and not already back another desk. Set this up in{' '}
+                  <span className='font-medium'>Xyne Apps</span> first.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Select value={selectedInstalledAppId} onValueChange={setSelectedInstalledAppId}>
+                <SelectTrigger id='app-desk-select' className='w-full'>
+                  <SelectValue placeholder='Select a Xyne App' />
+                </SelectTrigger>
+                <SelectContent>
+                  {eligibleAppsData.map(app => (
+                    <SelectItem key={app.installedAppId} value={app.installedAppId}>
+                      {app.name}
+                      {app.description && (
+                        <span className='ml-2 text-xs text-muted-foreground'>
+                          {app.description}
+                        </span>
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className='text-xs text-muted-foreground'>
+                Apps already backing a desk are hidden. One app backs one desk.
               </p>
             </>
           )}

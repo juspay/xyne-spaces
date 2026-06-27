@@ -34,7 +34,7 @@ router.post('/openDm', requirePermission('im:write'), async (req: Request, res: 
 
 router.post('/info', requirePermission('channels:read'), validateChannelAccessForPost, channelController.getChannelByName);
 
-router.post('/deskChannelConfig', requirePermission('channels:read'), validateChannelAccessForPost, channelController.getDeskConfig);
+router.post('/deskChannelConfig', requirePermission('desk:read'), validateChannelAccessForPost, channelController.getDeskConfig);
 
 router.get('/list', requirePermission('channels:read'), channelController.listChannels);
 

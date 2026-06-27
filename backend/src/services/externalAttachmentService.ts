@@ -122,6 +122,7 @@ export class ExternalAttachmentService {
   private static readonly authHandlers: Record<string, AuthHandler> = {
     'zoho': new ZohoAuthHandler(),
     'slack': new SlackAuthHandler(),
+    'slack-desk': new SlackAuthHandler(),
     'default': new DefaultAuthHandler()
   };
 

@@ -204,7 +204,7 @@ export async function validateChannelAccessForPost(
     const channelId = req.body.channelId;
     const channelName = req.body.channelName;
     const conversationId = req.body.conversationId;
-    const userId = req.body.userId;
+    const userId = req.body.userId ?? req.user?.id;
 
     const validationResult = ChannelValidationSchema.safeParse({
       channelId,

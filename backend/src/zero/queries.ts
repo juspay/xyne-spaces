@@ -1579,7 +1579,9 @@ export const queries = defineQueries({
       .where('isClosed', false)
       .where('isDeleted', false)
       .related('channel', ch =>
-        ch.where('type', 'NOT IN', [ChannelType.EMAIL, ChannelType.SLACK]).related('channelStats'),
+        ch
+          .where('type', 'NOT IN', [ChannelType.EMAIL, ChannelType.SLACK, ChannelType.APP])
+          .related('channelStats'),
       );
   }),
   userVisibleEmailChannels: defineQuery(({ ctx }) => {
@@ -1588,7 +1590,9 @@ export const queries = defineQueries({
       .where('isClosed', false)
       .where('isDeleted', false)
       .related('channel', ch =>
-        ch.where('type', 'IN', [ChannelType.EMAIL, ChannelType.SLACK]).related('channelStats'),
+        ch
+          .where('type', 'IN', [ChannelType.EMAIL, ChannelType.SLACK, ChannelType.APP])
+          .related('channelStats'),
       );
   }),
 

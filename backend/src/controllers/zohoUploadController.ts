@@ -56,6 +56,8 @@ export class ZohoUploadController {
     [ExternalSourcePlatform.ZOHO]: this.uploadToZoho.bind(this),
     [ExternalSourcePlatform.MICROSOFT]: this.uploadToGcsAndStage.bind(this),
     [ExternalSourcePlatform.GOOGLE]: this.uploadToGcsAndStage.bind(this),
+    [ExternalSourcePlatform.SLACK_DESK]: this.uploadToGcsAndStage.bind(this),
+    [ExternalSourcePlatform.APP_DESK]: this.uploadToGcsAndStage.bind(this),
   };
 
   uploadAttachments = async (req: Request, res: Response) => {
