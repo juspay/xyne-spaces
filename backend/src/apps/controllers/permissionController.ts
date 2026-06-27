@@ -18,39 +18,111 @@ export class PermissionController {
 
   /**
    * GET /apps/permissions/:appId
-   * Return permissions for the app.
-   * - If installed: returns the scoped installed_app_permissions with statuses
-   * - If not installed: returns the pre-install app_permission grants
+   * Return the app TEMPLATE permissions (app_permission). Used by the Org/Marketplace edit
+   * screen (creator). Install-scoped permissions are served by getInstalledGranted below.
    */
   getGranted = async (req: Request, res: Response): Promise<void> => {
     try {
       const { appId } = req.params;
-      const installation = await repositories.installedApps.findFirst({ where: { appId } });
-      let permissions: string[];
-      let permissionsPending = false;
-      let statuses: { scope: string; status: string }[] = [];
-      if (installation) {
-        permissions = await repositories.appPermissions.getInstalledPermissions(installation.id);
-        permissionsPending = await repositories.appPermissions.hasPermissionsPendingReinstall(installation.id);
-        statuses = await repositories.appPermissions.getInstalledPermissionsWithStatus(installation.id);
-
-        // 403 if all permissions are still UNAPPROVED (app was never reinstalled after grant)
-        const hasApproved = statuses.some((p) => p.status === AppPermissionStatus.APPROVED);
-        if (statuses.length > 0 && !hasApproved) {
-          res.status(403).json({
-            error: 'no_approved_permissions',
-            message: 'All permissions are pending activation. Please reinstall the app.',
-            permissions,
-            permissionsPending,
-            statuses,
-          });
-          return;
-        }
-      } else {
-        permissions = await repositories.appPermissions.getAppPermissions(appId);
-      }
+      const permissions = await repositories.appPermissions.getAppPermissions(appId);
 
       // 403 if no permissions are granted at all
+      if (permissions.length === 0) {
+        res.status(403).json({
+          error: 'no_permissions',
+          message: 'No permissions have been granted to this app.',
+          permissions,
+          permissionsPending: false,
+          statuses: [],
+        });
+        return;
+      }
+
+      res.status(200).json({ permissions, permissionsPending: false, statuses: [] });
+    } catch {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * POST /apps/permissions/:appId
+   * Replace the app TEMPLATE permissions (app_permission). Used by the creator on the
+   * Org/Marketplace edit screen. Bumps the app version so installs see an Update.
+   * Body: { permissions: string[] }
+   */
+  setPermissions = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { appId } = req.params;
+      const { permissions } = req.body as { permissions: string[] };
+      if (!Array.isArray(permissions)) {
+        res.status(400).json({ error: 'permissions must be an array of strings' });
+        return;
+      }
+      // Only the creator may edit the template (matches the apps.update mutator ACL).
+      const app = await repositories.apps.findById(appId);
+      if (!app) {
+        res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
+        return;
+      }
+      if (app.createdBy !== req.user?.id) {
+        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
+        return;
+      }
+      await repositories.appPermissions.setAppPermissions(appId, permissions);
+      // Template permissions changed -> bump version so installs surface the Update prompt.
+      await repositories.apps.bumpVersion(appId);
+      res.status(200).json({ ok: true });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Internal server error';
+      const status = msg.startsWith('Unknown permissions') ? 400 : 500;
+      res.status(status).json({ error: msg });
+    }
+  };
+
+  /**
+   * Resolve an install owned by the caller's workspace, or null. Scopes per-install permission
+   * edits to the caller's workspace (via the install's bot-user relation).
+   */
+  private async findOwnInstall(installedAppId: string, workspaceId: string) {
+    return repositories.installedApps.findFirst({
+      where: { id: installedAppId, user: { workspaceId } },
+    });
+  }
+
+  /**
+   * GET /apps/installed/:installedAppId/permissions
+   * Return the INSTALL's scoped permissions (installed_app_permissions) with approval statuses.
+   * Used by the Installed edit screen (workspace admin).
+   */
+  getInstalledGranted = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { installedAppId } = req.params;
+      const workspaceId = req.user?.workspaceId;
+      if (!installedAppId || !workspaceId) {
+        res.status(400).json({ error: 'installedAppId and workspace are required' });
+        return;
+      }
+      const install = await this.findOwnInstall(installedAppId, workspaceId);
+      if (!install) {
+        res.status(404).json({ error: 'Installed app not found in this workspace' });
+        return;
+      }
+
+      const permissions = await repositories.appPermissions.getInstalledPermissions(install.id);
+      const permissionsPending = await repositories.appPermissions.hasPermissionsPendingReinstall(install.id);
+      const statuses = await repositories.appPermissions.getInstalledPermissionsWithStatus(install.id);
+
+      const hasApproved = statuses.some((p) => p.status === AppPermissionStatus.APPROVED);
+      if (statuses.length > 0 && !hasApproved) {
+        res.status(403).json({
+          error: 'no_approved_permissions',
+          message: 'All permissions are pending activation. Please update the app.',
+          permissions,
+          permissionsPending,
+          statuses,
+        });
+        return;
+      }
       if (permissions.length === 0) {
         res.status(403).json({
           error: 'no_permissions',
@@ -69,28 +141,30 @@ export class PermissionController {
   };
 
   /**
-   * POST /apps/permissions/:appId
-   * Replace the full set of permissions for an app.
-   * - If NOT installed: saves to app_permission (pre-install global grants)
-   * - If installed: saves to installed_app_permissions (scoped to installation)
+   * POST /apps/installed/:installedAppId/permissions
+   * Replace the INSTALL's scoped permissions (installed_app_permissions). Used by the Installed
+   * edit screen (workspace admin). Does NOT bump the app version — this is an install-level change.
    * Body: { permissions: string[] }
    */
-  setPermissions = async (req: Request, res: Response): Promise<void> => {
+  setInstalledPermissions = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { appId } = req.params;
+      const { installedAppId } = req.params;
+      const workspaceId = req.user?.workspaceId;
       const { permissions } = req.body as { permissions: string[] };
+      if (!installedAppId || !workspaceId) {
+        res.status(400).json({ error: 'installedAppId and workspace are required' });
+        return;
+      }
       if (!Array.isArray(permissions)) {
         res.status(400).json({ error: 'permissions must be an array of strings' });
         return;
       }
-      const installation = await repositories.installedApps.findFirst({ where: { appId } });
-      if (installation) {
-        // App is installed — save scoped permissions to installed_app_permissions
-        await repositories.appPermissions.setInstalledPermissions(installation.id, permissions);
-      } else {
-        // App not yet installed — save global pre-install grants to app_permission
-        await repositories.appPermissions.setAppPermissions(appId, permissions);
+      const install = await this.findOwnInstall(installedAppId, workspaceId);
+      if (!install) {
+        res.status(404).json({ error: 'Installed app not found in this workspace' });
+        return;
       }
+      await repositories.appPermissions.setInstalledPermissions(install.id, permissions);
       res.status(200).json({ ok: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Internal server error';

@@ -78,7 +78,12 @@ export async function handleEventSubscriptionsForUsers(
 
     appsToNotify.map(async (app) => {
         try {
-            const decryptedSigningSecret = decrypt(app.signingSecret);
+            const secretEnc = app.app?.signingSecret;
+            if (!secretEnc) {
+                logger.warn(`App has no signing secret; skipping webhook`, { userId: app.userId });
+                return { success: false, userId: app.userId, webhookUrl: app.webhookUrl };
+            }
+            const decryptedSigningSecret = decrypt(secretEnc);
             await sendWebhookNotification(app.webhookUrl!, event, decryptedSigningSecret);
             return { success: true, userId: app.userId, webhookUrl: app.webhookUrl };
         } catch (error) {

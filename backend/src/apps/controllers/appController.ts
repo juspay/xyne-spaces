@@ -2,9 +2,11 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { AccessType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
+import { db } from '@/database/client';
 import { CreateAppInput } from '@/database/repositories/appsRepository';
 import { logger } from '@/utils/logger';
 import { installApp, configureWebhook, regenerateJwt, getSigningSecret } from '../core/appUtils';
+import { isValidUrl } from '@/utils/urlUtils';
 import { UserManagementService } from '@/services/userManagementService';
 
 const CreateAppBodySchema = z.object({
@@ -79,11 +81,22 @@ export class AppController {
         return;
       }
 
+      // Resolve the creator's owning org (apps are owned at the org level, created at ORG scope).
+      const workspace = await repositories.workspaces.findById(req.user!.workspaceId);
+      if (!workspace?.orgId) {
+        res.status(400).json({
+          error: 'Could not resolve organization for the current workspace',
+          code: 'ORG_REQUIRED',
+        });
+        return;
+      }
+
       // Create app data
       const appData: CreateAppInput = {
         name,
         description,
         createdBy: userId,
+        orgId: workspace.orgId,
       };
 
       // Create the app
@@ -135,6 +148,24 @@ export class AppController {
         return;
       }
 
+      // Eligibility: ORG-scoped apps install only within the owning org; GLOBAL apps install anywhere.
+      // (Install is gated to XYNE-APPS admins at the route level.)
+      const app = await repositories.apps.findById(appId);
+      if (!app) {
+        res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
+        return;
+      }
+      if (app.scope === 'ORG') {
+        const workspace = await repositories.workspaces.findById(workspaceId);
+        if (!workspace || workspace.orgId !== app.orgId) {
+          res.status(403).json({
+            error: 'This app is not available to your workspace',
+            code: 'APP_NOT_IN_SCOPE',
+          });
+          return;
+        }
+      }
+
       // Install the app
       const installedApp = await installApp(appId, workspaceId);
 
@@ -151,6 +182,55 @@ export class AppController {
         return;
       }
 
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Promote an app from ORG scope to GLOBAL (marketplace). XYNE-APPS resource admin only.
+   * POST /api/apps/promote/:appId
+   */
+  promoteApp = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const paramsResult = AppIdParamsSchema.safeParse(req.params);
+      if (!paramsResult.success) {
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: paramsResult.error.errors });
+        return;
+      }
+      const { appId } = paramsResult.data;
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Authentication required', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      const isAdmin = await this.isAclAdmin(userId);
+      if (!isAdmin) {
+        res.status(403).json({ error: 'Only a XYNE-APPS admin can promote apps to global', code: 'FORBIDDEN' });
+        return;
+      }
+
+      const app = await repositories.apps.findById(appId);
+      if (!app) {
+        res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
+        return;
+      }
+      if (app.scope === 'GLOBAL') {
+        res.status(409).json({ error: 'App is already global', code: 'ALREADY_GLOBAL' });
+        return;
+      }
+
+      // Ownership: only an admin of the app's OWN org may promote it (not just any XYNE-APPS admin).
+      const workspace = await repositories.workspaces.findById(req.user!.workspaceId);
+      if (!workspace?.orgId || workspace.orgId !== app.orgId) {
+        res.status(403).json({ error: 'You can only promote apps owned by your organization', code: 'FORBIDDEN' });
+        return;
+      }
+
+      const updated = await repositories.apps.update(appId, { scope: 'GLOBAL' });
+      res.status(200).json(updated);
+    } catch (error) {
+      logger.error('Error promoting app:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };
@@ -182,7 +262,12 @@ export class AppController {
       }
       const { appId } = paramsResult.data;
       const { webhookUrl } = bodyResult.data;
-      const result = await configureWebhook(appId, webhookUrl);
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const result = await configureWebhook(appId, webhookUrl, workspaceId);
 
       res.status(200).json(result);
     } catch (error) {
@@ -204,6 +289,46 @@ export class AppController {
         return;
       }
 
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * PATCH /apps/installed/:installedAppId
+   * Update the caller's INSTALL (not the template). Edits made from the Installed screen by a
+   * workspace admin. Scoped to the caller's workspace via the install's bot-user relation, so
+   * one workspace can never edit another's install. Currently supports the outbound webhook URL.
+   */
+  updateInstalledApp = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { installedAppId } = req.params;
+      const workspaceId = req.user?.workspaceId;
+      if (!installedAppId || !workspaceId) {
+        res.status(400).json({ error: 'installedAppId and workspace are required' });
+        return;
+      }
+
+      const { webhookUrl } = req.body as { webhookUrl?: string };
+      if (webhookUrl !== undefined && webhookUrl !== '' && !isValidUrl(webhookUrl)) {
+        res.status(400).json({ error: 'Invalid webhook URL format', code: 'INVALID_WEBHOOK_URL' });
+        return;
+      }
+
+      // Ownership check: the install must belong to the caller's workspace (via bot user).
+      const install = await repositories.installedApps.findFirst({
+        where: { id: installedAppId, user: { workspaceId } },
+      });
+      if (!install) {
+        res.status(404).json({ error: 'Installed app not found in this workspace', code: 'INSTALLED_APP_NOT_FOUND' });
+        return;
+      }
+
+      const updated = await repositories.installedApps.update(install.id, {
+        webhookUrl: webhookUrl === undefined ? install.webhookUrl : webhookUrl.trim() || null,
+      });
+      res.status(200).json({ webhookUrl: updated.webhookUrl });
+    } catch (error) {
+      logger.error('Error updating installed app:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };
@@ -257,7 +382,12 @@ export class AppController {
         return;
       }
 
-      const result = await regenerateJwt(appId);
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const result = await regenerateJwt(appId, workspaceId);
 
       res.status(200).json(result);
     } catch (error) {
@@ -370,14 +500,21 @@ export class AppController {
         return;
       }
 
-      // Get the installed app to find the bot user
+      // Get THIS workspace's install (the bot user is per-install). Scope by the caller's
+      // workspace so we never edit another workspace's bot. Guard workspaceId — an undefined
+      // filter would un-scope the query.
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
       const installedApp = await repositories.installedApps.findFirst({
-        where: { appId }
+        where: { appId, user: { workspaceId } }
       });
 
       if (!installedApp) {
         res.status(404).json({
-          error: 'App is not installed',
+          error: 'App is not installed in this workspace',
           code: 'APP_NOT_INSTALLED'
         });
         return;
@@ -464,6 +601,38 @@ export class AppController {
       });
     } catch (error) {
       logger.error('Error getting project boards:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * POST /apps/org-names
+   * Resolve org ids -> org names for app attribution. Done server-side because the client only
+   * syncs its own org (org-scoped ACL), so it can't resolve a cross-org app's origin (marketplace).
+   * Org names aren't sensitive and only the ids the caller asks about are returned.
+   * Body: { orgIds: string[] } -> { orgNames: Record<orgId, name> }
+   */
+  getOrgNames = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { orgIds } = req.body as { orgIds?: unknown };
+      if (!Array.isArray(orgIds) || orgIds.some(id => typeof id !== 'string')) {
+        res.status(400).json({ error: 'orgIds must be an array of strings' });
+        return;
+      }
+      const ids = Array.from(new Set(orgIds as string[])).filter(Boolean);
+      if (ids.length === 0) {
+        res.status(200).json({ orgNames: {} });
+        return;
+      }
+      const orgs = await db.organization.findMany({
+        where: { orgId: { in: ids } },
+        select: { orgId: true, name: true },
+      });
+      const orgNames: Record<string, string> = {};
+      for (const o of orgs) orgNames[o.orgId] = o.name;
+      res.status(200).json({ orgNames });
+    } catch (error) {
+      logger.error('Error resolving org names:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };

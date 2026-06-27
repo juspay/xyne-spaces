@@ -9,7 +9,7 @@ import { MessageRepository } from '../../database/repositories/messageRepository
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
-import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType } from '@prisma/client';
+import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType} from '@prisma/client';
 import crypto from 'crypto';
 import { SlackMessage, SlackFile, UserInfoCache } from '../slack/utils/extractConversation';
 import {
@@ -189,7 +189,7 @@ const installAppForWorkspace = async (
   const encryptedSecret = encrypt(signingSecret);
   const now = new Date();
   await db.installedApps.create({
-    data: { appId, userId: appUser.id, signingSecret: encryptedSecret, createdAt: now, updatedAt: now },
+    data: { appId, userId: appUser.id, signingSecret: encryptedSecret, version: 1, createdAt: now, updatedAt: now },
   });
 
   logger.info('[installAppForWorkspace] Created app user', { appId, workspaceId, botId, userId: appUser.id, email });
@@ -250,17 +250,38 @@ export const findOrCreateApp = async (
   // different "Jira" integrations) are distinguishable in the workspace.
   const uniqueBotName = `${botName.trim()}-${botId}`;
 
+  // The app is owned by the target workspace's org — apps are ORG-scoped now.
+  const targetWorkspaceId = workspaceId ?? creatorUser.workspaceId;
+  const targetWorkspace = await db.workspace.findUnique({
+    where: { id: targetWorkspaceId },
+    select: { orgId: true },
+  });
+  if (!targetWorkspace?.orgId) {
+    throw new Error(`[findOrCreateApp] Could not resolve org for workspace ${targetWorkspaceId}`);
+  }
+
   // Create the apps row — bypass createApp()'s name-uniqueness check because
   // the same bot name is intentionally allowed across different workspaces.
+  // Populate the org-scoped columns (orgId/scope/version) and an app-level
+  // signing secret so the row is valid in the new multi-org model; without
+  // these it's invisible in the Org/Marketplace views and hidden by the ACL.
   const now = new Date();
   const app = await db.apps.create({
-    data: { name: uniqueBotName, createdBy: creatorUser.id, createdAt: now, updatedAt: now },
+    data: {
+      name: uniqueBotName,
+      createdBy: creatorUser.id,
+      orgId: targetWorkspace.orgId,
+      scope: 'ORG',
+      version: 1,
+      signingSecret: encrypt(crypto.randomBytes(32).toString('hex')),
+      createdAt: now,
+      updatedAt: now,
+    },
   });
 
   // Create the user + installed_apps in the target workspace.
   // installAppForWorkspace uses email = slug-botId@app.xyne.ai, so this is
   // always unique regardless of bot name or how many workspaces the bot is in.
-  const targetWorkspaceId = workspaceId ?? creatorUser.workspaceId;
   const newUserId = await installAppForWorkspace(app.id, uniqueBotName, botId, targetWorkspaceId);
 
   await userRepo.upsertMetaDataField(newUserId, 'slackBotId', botId);

@@ -108,6 +108,29 @@ export interface AppPermission {
   description: string | null;
 }
 
+interface GrantedPermissionsResponse {
+  permissions: string[];
+  permissionsPending: boolean;
+  statuses: { scope: string; status: string }[];
+}
+function extractGrantedFrom403(err: unknown): GrantedPermissionsResponse | null {
+  const e = err as {
+    status?: number;
+    responseData?: Partial<GrantedPermissionsResponse>;
+    response?: { status?: number; data?: Partial<GrantedPermissionsResponse> };
+  };
+  const status = e?.status ?? e?.response?.status;
+  const data = e?.responseData ?? e?.response?.data;
+  if (status === 403 && data) {
+    return {
+      permissions: data.permissions ?? [],
+      permissionsPending: data.permissionsPending ?? false,
+      statuses: data.statuses ?? [],
+    };
+  }
+  return null;
+}
+
 export class AppsService {
   async createApp(data: CreateAppRequest): Promise<App> {
     const response = await apiInstance.post<App>('/apps/create', data);
@@ -116,6 +139,18 @@ export class AppsService {
 
   async installApp(appId: string): Promise<InstallAppResponse> {
     const response = await apiInstance.post<InstallAppResponse>(`/apps/install/${appId}`);
+    return response.data;
+  }
+
+  // Update = re-install into the current workspace (pulls the latest app snapshot + version).
+  async updateApp(appId: string): Promise<InstallAppResponse> {
+    const response = await apiInstance.post<InstallAppResponse>(`/apps/install/${appId}`);
+    return response.data;
+  }
+
+  // Promote an ORG app to GLOBAL (marketplace). XYNE-APPS admin only (enforced server-side).
+  async promoteApp(appId: string): Promise<App> {
+    const response = await apiInstance.post<App>(`/apps/promote/${appId}`);
     return response.data;
   }
 
@@ -136,6 +171,19 @@ export class AppsService {
       `/apps/project-boards/${projectId}`,
     );
     return response.data.boards;
+  }
+
+  /**
+   * Resolve org ids -> org names (for "Created by" attribution on cross-workspace/cross-org apps,
+   * which can't be resolved client-side because org data is org-scoped). Returns {} on empty input.
+   */
+  async getOrgNames(orgIds: string[]): Promise<Record<string, string>> {
+    if (orgIds.length === 0) return {};
+    const response = await apiInstance.post<{ orgNames: Record<string, string> }>(
+      '/apps/org-names',
+      { orgIds },
+    );
+    return response.data.orgNames;
   }
 
   async createIncomingWebhook(data: CreateIncomingWebhookRequest): Promise<IncomingWebhook> {
@@ -325,45 +373,67 @@ export class AppsService {
   }
 
   /** Get the permission names currently granted to an app, along with per-permission statuses. */
-  async getGrantedPermissions(appId: string): Promise<{
-    permissions: string[];
-    permissionsPending: boolean;
-    statuses: { scope: string; status: string }[];
-  }> {
+  async getGrantedPermissions(appId: string): Promise<GrantedPermissionsResponse> {
     try {
-      const response = await apiInstance.get<{
-        permissions: string[];
-        permissionsPending: boolean;
-        statuses: { scope: string; status: string }[];
-      }>(`/apps/permissions/${appId}`);
+      const response = await apiInstance.get<GrantedPermissionsResponse>(
+        `/apps/permissions/${appId}`,
+      );
       return response.data;
     } catch (err: unknown) {
-      // Backend returns 403 with full body (permissions + statuses) when no
-      // permissions are active yet. Extract it so the UI still shows badges.
-      const axiosErr = err as {
-        response?: {
-          status?: number;
-          data?: {
-            permissions?: string[];
-            permissionsPending?: boolean;
-            statuses?: { scope: string; status: string }[];
-          };
-        };
-      };
-      if (axiosErr?.response?.status === 403 && axiosErr.response.data) {
-        return {
-          permissions: axiosErr.response.data.permissions ?? [],
-          permissionsPending: axiosErr.response.data.permissionsPending ?? false,
-          statuses: axiosErr.response.data.statuses ?? [],
-        };
-      }
+      const body = extractGrantedFrom403(err);
+      if (body) return body;
       throw err;
     }
   }
 
-  /** Replace the full set of permissions for an app. */
+  /** Replace the TEMPLATE permissions for an app (Org/Marketplace edit, creator). */
   async setPermissions(appId: string, permissions: string[]): Promise<void> {
     await apiInstance.post(`/apps/permissions/${appId}`, { permissions });
+  }
+
+  // ─── Per-install edits (Installed screen, workspace admin) ───────────────────
+
+  /** Update the caller's install (webhook URL only). Scoped server-side to the workspace. */
+  async updateInstalledApp(
+    installedAppId: string,
+    data: { webhookUrl?: string },
+  ): Promise<{ webhookUrl: string | null }> {
+    const response = await apiInstance.patch<{ webhookUrl: string | null }>(
+      `/apps/installed/${installedAppId}`,
+      data,
+    );
+    return response.data;
+  }
+
+  /** Read the INSTALL's scoped permissions (installed_app_permissions) with statuses. */
+  async getInstalledPermissions(installedAppId: string): Promise<GrantedPermissionsResponse> {
+    try {
+      const response = await apiInstance.get<GrantedPermissionsResponse>(
+        `/apps/installed/${installedAppId}/permissions`,
+      );
+      return response.data;
+    } catch (err: unknown) {
+      const body = extractGrantedFrom403(err);
+      if (body) return body;
+      throw err;
+    }
+  }
+
+  /** Replace the INSTALL's scoped permissions (installed_app_permissions). */
+  async setInstalledPermissions(installedAppId: string, permissions: string[]): Promise<void> {
+    await apiInstance.post(`/apps/installed/${installedAppId}/permissions`, { permissions });
+  }
+
+  /** Read-only snapshot of the install's commands/shortcuts. */
+  async getInstalledCommands(
+    installedAppId: string,
+    commandType: CommandType = 'COMMAND',
+  ): Promise<AppCommand[]> {
+    const response = await apiInstance.get<AppCommand[]>(
+      `/apps/installed/${installedAppId}/commands`,
+      { params: { commandType } },
+    );
+    return response.data;
   }
 }
 

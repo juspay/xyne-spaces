@@ -4105,11 +4105,17 @@ model SurfaceLink {
   @@schema("public")
 }
 
+
 model Apps {
   id String @id @default(cuid())
   name String
   description String?
   createdBy String
+  orgId String
+  scope String
+  version Int
+  webhookUrl String?
+  signingSecret String
   createdAt DateTime
   updatedAt DateTime
 
@@ -4121,6 +4127,8 @@ model Apps {
 
   @@index([name])
   @@index([createdBy])
+  @@index([orgId])
+  @@index([scope])
   @@map("apps")
   @@schema("public")
 }
@@ -4130,7 +4138,9 @@ model InstalledApps {
   appId String
   userId String
   webhookUrl String?
-  signingSecret String
+
+  signingSecret String?   // @deprecated
+  version Int
   createdAt DateTime
   updatedAt DateTime
 
@@ -4139,10 +4149,29 @@ model InstalledApps {
   user                    User                   @relation("InstalledAppsUser", fields: [userId], references: [id])
   incomingWebhooks        AppIncomingWebhook[]
   installedAppPermissions InstalledAppPermission[]
+  installedAppCommands    InstalledAppCommand[]
 
   @@index([appId])
   @@index([userId])
   @@map("installed_apps")
+  @@schema("public")
+}
+
+model InstalledAppCommand {
+  id              String   @id @default(cuid())
+  installedAppId  String
+  sourceCommandId String
+  commandName          String
+  description          String
+  commandType          CommandType
+  commandAccessibility CommandAccessibility
+  createdAt       DateTime
+  updatedAt       DateTime
+
+  installedApp InstalledApps @relation(fields: [installedAppId], references: [id])
+
+  @@index([installedAppId])
+  @@map("installed_app_commands")
   @@schema("public")
 }
 

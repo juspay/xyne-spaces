@@ -236,6 +236,46 @@ export class CommandController {
   };
 
   /**
+   * GET /api/apps/installed/:installedAppId/commands?commandType=COMMAND|SHORTCUT
+   * Read-only snapshot of the INSTALL's commands/shortcuts (installed_app_commands), scoped to
+   * the caller's workspace. The Installed edit screen shows these; they only change via Update.
+   */
+  getInstalledCommands = async (req: Request, res: Response): Promise<void> => {
+    const { installedAppId } = req.params;
+    const workspaceId = req.user?.workspaceId;
+    const { commandType } = req.query;
+    if (!installedAppId || !workspaceId) {
+      res.status(400).json({ error: 'installedAppId and workspace are required' });
+      return;
+    }
+    if (!commandType || !Object.values(CommandType).includes(commandType as CommandType)) {
+      res.status(400).json({
+        error: 'Validation error',
+        details: [{ message: `commandType query param is required and must be one of: ${Object.values(CommandType).join(', ')}` }],
+      });
+      return;
+    }
+    try {
+      // Ownership check: install must belong to the caller's workspace (via bot user).
+      const install = await repositories.installedApps.findFirst({
+        where: { id: installedAppId, user: { workspaceId } },
+      });
+      if (!install) {
+        res.status(404).json({ error: 'Installed app not found in this workspace' });
+        return;
+      }
+      const commands = await appCommandRepository.findInstalledByInstalledAppId(
+        installedAppId,
+        commandType as CommandType,
+      );
+      res.status(200).json(commands);
+    } catch (error) {
+      logger.error('[COMMANDS] getInstalledCommands error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
    * POST /api/apps/:appId/commands
    * Create a NEW command or shortcut for an app. Fails with 409 if the name is already
    * taken — adding never overwrites an existing command/shortcut.
@@ -250,7 +290,14 @@ export class CommandController {
         res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
         return;
       }
+      // Only the creator may edit the template (matches the apps.update mutator ACL).
+      if (app.createdBy !== req.user?.id) {
+        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
+        return;
+      }
       const command = await appCommandRepository.create(parsed.appId, parsed.body);
+      // Template changed -> bump version so installs see an available Update.
+      await repositories.apps.bumpVersion(parsed.appId);
       res.status(201).json(command);
     } catch (error) {
       if (error instanceof CommandNameConflictError) {
@@ -277,7 +324,14 @@ export class CommandController {
         res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
         return;
       }
+      // Only the creator may edit the template (matches the apps.update mutator ACL).
+      if (app.createdBy !== req.user?.id) {
+        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
+        return;
+      }
       const command = await appCommandRepository.update(parsed.appId, parsed.body);
+      // Template changed -> bump version so installs see an available Update.
+      await repositories.apps.bumpVersion(parsed.appId);
       res.status(200).json(command);
     } catch (error) {
       if (error instanceof CommandNameConflictError) {
@@ -336,11 +390,23 @@ export class CommandController {
     }
 
     try {
+      const app = await repositories.apps.findById(params.data.appId);
+      if (!app) {
+        res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
+        return;
+      }
+      // Only the creator may edit the template (matches the apps.update mutator ACL).
+      if (app.createdBy !== req.user?.id) {
+        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
+        return;
+      }
       await appCommandRepository.deleteByAppIdNameAndType(
         params.data.appId,
         params.data.commandName,
         commandType as CommandType,
       );
+      // Template changed -> bump version so installs see an available Update.
+      await repositories.apps.bumpVersion(params.data.appId);
       res.status(200).json({ message: 'Deleted' });
     } catch (error) {
       logger.error('[COMMANDS] deleteCommand error:', error);

@@ -6,7 +6,6 @@ import {
 import { Schema } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
-import { hasXyneAppsAdminAccess } from '../core/admin-access';
 
 export class AppsACL extends BaseACL<'apps'> {
 
@@ -20,18 +19,12 @@ export class AppsACL extends BaseACL<'apps'> {
       throw new MutationACLError('App update failed: app does not exist', 'apps');
     }
 
-    // Allow if user is the creator
+    // Only the creator may edit the app template (commands/permissions/webhook/description).
     if (app.createdBy === this.ctx.userID) {
       return;
     }
 
-    // Allow if user has XYNE-APPS ADMIN access
-    const hasAdminAccess = await hasXyneAppsAdminAccess(this.ctx, tx);
-    if (hasAdminAccess) {
-      return;
-    }
-
-    throw new MutationACLError('App update failed: only the app creator or XYNE-APPS ADMIN can modify this app', 'apps');
+    throw new MutationACLError('App update failed: only the app creator can modify this app', 'apps');
   }
 
   async canDelete(_args: DeleteID<TableSchema<'apps'>>, _tx: Transaction<Schema>): Promise<void> {
@@ -44,17 +37,11 @@ export class AppsACL extends BaseACL<'apps'> {
       throw new MutationACLError('App upsert failed: app does not exist for update', 'apps');
     }
 
-    // Allow if user is the creator
+    // Only the creator may edit the app template.
     if (app.createdBy === this.ctx.userID) {
       return;
     }
 
-    // Allow if user has XYNE-APPS ADMIN access
-    const hasAdminAccess = await hasXyneAppsAdminAccess(this.ctx, tx);
-    if (hasAdminAccess) {
-      return;
-    }
-
-    throw new MutationACLError('App upsert failed: only the app creator or XYNE-APPS ADMIN can modify this app', 'apps');
+    throw new MutationACLError('App upsert failed: only the app creator can modify this app', 'apps');
   }
 }

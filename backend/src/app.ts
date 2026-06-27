@@ -107,6 +107,8 @@ import formFieldSequenceBackfillRoutes from '@/routes/formFieldSequenceBackfill'
 import dmChannelProjectBackfillRoutes from '@/routes/dmChannelProjectBackfill';
 import workspaceIdBackfillRoutes from '@/routes/workspaceIdBackfill';
 import notificationSettingsBackfillRoutes from '@/routes/notificationSettingsBackfill';
+import appSigningSecretBackfillRoutes from '@/routes/appSigningSecretBackfill';
+import installedAppCommandsBackfillRoutes from '@/routes/installedAppCommandsBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
@@ -351,6 +353,12 @@ export class App {
     // App permissions backfill — grant all permissions to all installed apps
     this.app.use('/api/admin/app-permissions-backfill', appPermissionsBackfillRoutes);
     this.app.use('/migrate/api/admin/app-permissions-backfill', appPermissionsBackfillRoutes);
+    // App-level signing secret backfill — copy per-install secret up to the app / generate if missing
+    this.app.use('/api/admin/app-signing-secret-backfill', appSigningSecretBackfillRoutes);
+    this.app.use('/migrate/api/admin/app-signing-secret-backfill', appSigningSecretBackfillRoutes);
+    // Installed app commands backfill — snapshot each app's commands into existing installs
+    this.app.use('/api/admin/installed-app-commands-backfill', installedAppCommandsBackfillRoutes);
+    this.app.use('/migrate/api/admin/installed-app-commands-backfill', installedAppCommandsBackfillRoutes);
     // Project tags + ticket_tag_mappings backfill from ticket_tags
     this.app.use('/api/admin/project-tags-backfill', projectTagsBackfillRoutes);
     this.app.use('/migrate/api/admin/project-tags-backfill', projectTagsBackfillRoutes);
