@@ -37,12 +37,20 @@ const commandController = new CommandController();
 
 router.post('/create', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.createApp);
 router.post('/install/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appController.installApp);
+router.post('/promote/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appController.promoteApp);
 router.post('/configureWebhook/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.configureWebhook);
 router.post('/regenerate-jwt/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.regenerateJwt);
 router.post('/signing-secret/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.getSigningSecret);
 router.post('/upload-picture/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), uploadConfig.single('picture'), appController.uploadBotPicture);
 router.get('/bot-channels/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), appController.getBotChannels);
 router.get('/project-boards/:projectId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), appController.getProjectBoards);
+router.post('/org-names', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), appController.getOrgNames);
+
+// Per-install edits (Installed screen, workspace admin). Scoped to the caller's workspace.
+router.patch('/installed/:installedAppId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.updateInstalledApp);
+router.get('/installed/:installedAppId/permissions', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), permissionController.getInstalledGranted);
+router.post('/installed/:installedAppId/permissions', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.setInstalledPermissions);
+router.get('/installed/:installedAppId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), commandController.getInstalledCommands);
 
 router.post('/incoming-webhooks', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.createWebhook);
 router.get('/incoming-webhooks/:installedAppId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), incomingWebhookController.listWebhooks);

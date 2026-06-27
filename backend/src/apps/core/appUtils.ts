@@ -14,103 +14,158 @@ import { db } from '@/database/client';
  * @param workspaceId - The workspace ID to install the app in
  * @returns The created installed app entry
  */
-export async function installApp(appId: string, workspaceId: string) {
-  try {
-    // 1. Check if app is already installed — if so, regenerate JWT (reinstall)
-    const existingInstallation = await repositories.installedApps.findFirst({
-      where: { appId: appId }
-    });
+/**
+ * Sync a workspace's installed command snapshot with the app's current commands.
+ * Upserts each template command (matched by sourceCommandId) and removes installed commands
+ * whose template source no longer exists. Used on both install and Update.
+ */
+async function syncInstalledCommands(installedAppId: string, appId: string): Promise<void> {
+  // One transaction so the install never ends up with a half-synced command snapshot if the
+  // process dies mid-loop (partial create/update/delete).
+  await db.$transaction(async (tx) => {
+    const now = new Date();
+    const [templateCommands, existing] = await Promise.all([
+      tx.appCommand.findMany({ where: { appId } }),
+      tx.installedAppCommand.findMany({ where: { installedAppId } }),
+    ]);
+    const existingBySource = new Map(existing.map(e => [e.sourceCommandId, e]));
+    const templateIds = new Set(templateCommands.map(c => c.id));
 
-    if (existingInstallation) {
-      const signingSecret = decrypt(existingInstallation.signingSecret);
-      const jwtToken = jwt.sign(
-        { appId, userId: existingInstallation.userId },
-        signingSecret,
-        { noTimestamp: true },
-      );
-      // Apply pending permission changes: new→approved, delete→removed
-      await repositories.appPermissions.applyReinstall(existingInstallation.id);
-      await repositories.installedApps.update(existingInstallation.id, { updatedAt: new Date() });
-      logger.info(`[INSTALL-APP] App ${appId} reinstalled — permissions applied`);
-      return { jwtToken };
+    for (const c of templateCommands) {
+      const prev = existingBySource.get(c.id);
+      if (prev) {
+        await tx.installedAppCommand.update({
+          where: { id: prev.id },
+          data: {
+            commandName: c.commandName,
+            description: c.description,
+            commandType: c.commandType,
+            commandAccessibility: c.commandAccessibility,
+            updatedAt: now,
+          },
+        });
+      } else {
+        await tx.installedAppCommand.create({
+          data: {
+            installedAppId,
+            sourceCommandId: c.id,
+            commandName: c.commandName,
+            description: c.description,
+            commandType: c.commandType,
+            commandAccessibility: c.commandAccessibility,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      }
     }
 
-    // 2. Get the app to retrieve its name
+    for (const e of existing) {
+      if (!templateIds.has(e.sourceCommandId)) {
+        await tx.installedAppCommand.delete({ where: { id: e.id } });
+      }
+    }
+  });
+}
+
+/**
+ * Install (or Update) an app into a workspace. Each install is a version-frozen snapshot of the
+ * app's commands + permissions; calling again for the same workspace performs an Update.
+ */
+export async function installApp(appId: string, workspaceId: string) {
+  try {
     const app = await repositories.apps.findById(appId);
     if (!app) {
       throw new Error(`[INSTALL-APP] App with ID ${appId} not found`);
     }
 
-    // 3. Sanitize bot name for email and create email address
+    // App-level signing secret (lazy-generate for legacy/migrated apps that lack one). One secret
+    // per app — the per-install JWT and outbound webhook HMAC are all signed with it. The write is
+    // atomic (COALESCE) so concurrent first-installs can't generate competing secrets: only the
+    // first writer sets it and every caller reads back the persisted (winning) value.
+    let signingSecretEnc = app.signingSecret;
+    if (!signingSecretEnc) {
+      const fresh = await encrypt(crypto.randomBytes(32).toString('hex'));
+      const rows = await db.$queryRaw<{ signingSecret: string | null }[]>`
+        UPDATE apps SET "signingSecret" = COALESCE("signingSecret", ${fresh})
+        WHERE id = ${appId} RETURNING "signingSecret"`;
+      signingSecretEnc = rows[0]?.signingSecret ?? fresh;
+    }
+    const signingSecret = decrypt(signingSecretEnc);
+
+    // 1. Update path — already installed IN THIS WORKSPACE (scoped via the app user's workspace,
+    // since installs have no workspaceId column). Re-mint token, re-sync commands + permissions, bump version.
+    const existingInstallation = await repositories.installedApps.findFirst({
+      where: { appId, user: { workspaceId } },
+    });
+    if (existingInstallation) {
+      const jwtToken = jwt.sign({ appId, userId: existingInstallation.userId }, signingSecret, { noTimestamp: true });
+      await repositories.appPermissions.syncFromAppApproved(appId, existingInstallation.id);
+      await syncInstalledCommands(existingInstallation.id, appId);
+      await repositories.installedApps.update(existingInstallation.id, {
+        version: app.version,
+        webhookUrl: existingInstallation.webhookUrl ?? app.webhookUrl ?? null,
+        updatedAt: new Date(),
+      });
+      logger.info(`[INSTALL-APP] App ${appId} updated in workspace ${workspaceId}`);
+      return { jwtToken };
+    }
+
+    // 2. New install — dedicated per-workspace app user. Email is suffixed with the workspace id
+    // because OrgMember.email is globally unique, so the same app installs across workspaces/orgs.
     const botName = app.name
       .toLowerCase()
       .trim()
       .replace(/[^a-z0-9-]/g, '-')
-      .replace(/-+/g, '-') 
+      .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
-    const email = `${botName}@app.xyne.ai`;
+    const email = `${botName}-${workspaceId}@app.xyne.ai`;
 
-    // 4. Get orgId from workspace and create orgMember for the app user
-    const workspace = await db.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { orgId: true }
-    });
+    const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } });
     if (!workspace) {
       throw new Error(`[INSTALL-APP] Workspace ${workspaceId} not found`);
     }
 
-    // Create orgMember entry for the app (apps are dynamic, not pre-invited)
-    const orgMember = await db.orgMember.create({
-      data: {
-        email: email,
-        orgId: workspace.orgId,
-        role: 'MEMBER',
-      }
-    });
-    logger.info(`[INSTALL-APP] Created orgMember for app: ${orgMember.memberId}`);
+    // Reuse an existing orgMember/app-user if present (idempotent — survives prior manual cleanup).
+    let orgMember = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
+    if (!orgMember) {
+      orgMember = await db.orgMember.create({
+        data: { email, orgId: workspace.orgId, role: 'MEMBER' },
+        select: { memberId: true },
+      });
+    }
+    let appUser = await repositories.users.findByEmail(email, workspaceId);
+    if (!appUser) {
+      appUser = await repositories.users.create({
+        name: app.name,
+        email,
+        providerUserId: `xyne-app-${appId}`,
+        authProvider: AuthProvider.API_KEY,
+        userType: UserType.APP,
+        status: 'ACTIVE',
+        workspace: { connect: { id: workspaceId } },
+        orgMember: { connect: { memberId: orgMember.memberId } },
+      });
+    }
 
-    // 5. Create a new user for the app
-    const appUser = await repositories.users.create({
-      name: app.name,
-      email: email,
-      providerUserId: `xyne-app-${appId}`,
-      authProvider: AuthProvider.API_KEY,
-      userType: UserType.APP,
-      status: 'ACTIVE',
-      workspace: { connect: { id: workspaceId } },
-      orgMember: { connect: { memberId: orgMember.memberId } },
-    });
-    logger.info(`[INSTALL-APP] Created new app user: ${appUser.id} for app ${appId}`);
+    // Per-install JWT, signed with the app-level secret.
+    const jwtToken = jwt.sign({ appId, userId: appUser.id }, signingSecret, { noTimestamp: true });
 
-    // 6. Generate signing secret
-    const signingSecret = crypto.randomBytes(32).toString('hex');
-
-    // 7. Create JWT token with appId and userId, signed by signingSecret 
-    const jwtToken = jwt.sign(
-      { appId, userId: appUser.id },
-      signingSecret,
-      { noTimestamp: true }
-    );
-
-    // 8. Create entry in installedApps
     const now = new Date();
     const installedApp = await repositories.installedApps.create({
-      appId: appId,
+      appId,
       userId: appUser.id,
-      signingSecret: await encrypt(signingSecret),
+      webhookUrl: app.webhookUrl ?? null,
+      version: app.version,
       createdAt: now,
       updatedAt: now,
-    } );
+    });
 
-    logger.info(`[INSTALL-APP] Created installed app entry: ${installedApp.id} for app ${appId}`);
-
-    // 9. Copy pre-install permission grants (app_permission) → installed_app_permissions
     await repositories.appPermissions.copyFromApp(appId, installedApp.id);
-    logger.info(`[INSTALL-APP] Copied permissions from app ${appId} to installedApp ${installedApp.id}`);
+    await syncInstalledCommands(installedApp.id, appId);
+    logger.info(`[INSTALL-APP] Installed app ${appId} (entry ${installedApp.id}) in workspace ${workspaceId}`);
 
-    return {
-      jwtToken: jwtToken,
-    };
+    return { jwtToken };
   } catch (error) {
     logger.error(`[INSTALL-APP] Error installing app ${appId}:`, error);
     throw error;
@@ -124,18 +179,18 @@ export async function installApp(appId: string, workspaceId: string) {
  * @param webhookUrl - The webhook URL to configure
  * @returns The updated installed app entry
  */
-export async function configureWebhook(appId: string, webhookUrl: string) {
+export async function configureWebhook(appId: string, webhookUrl: string, workspaceId: string) {
   try {
     if (!isValidUrl(webhookUrl)) {
       throw new Error('Invalid webhook URL format');
     }
 
     const installedApp = await repositories.installedApps.findFirst({
-      where: { appId: appId }
+      where: { appId, user: { workspaceId } }
     });
 
     if (!installedApp) {
-      throw new Error(`[CONFIGURE-WEBHOOK] Installed app with appId ${appId} not found`);
+      throw new Error(`[CONFIGURE-WEBHOOK] Installed app with appId ${appId} not found in workspace ${workspaceId}`);
     }
 
     const updatedInstalledApp = await repositories.installedApps.update(
@@ -159,18 +214,23 @@ export async function configureWebhook(appId: string, webhookUrl: string) {
  * @param appId - The ID of the app
  * @returns The new JWT token
  */
-export async function regenerateJwt(appId: string) {
+export async function regenerateJwt(appId: string, workspaceId: string) {
   try {
+    const app = await repositories.apps.findById(appId);
+    if (!app?.signingSecret) {
+      throw new Error(`[REGENERATE-JWT] App ${appId} not found or has no signing secret`);
+    }
+
     const installedApp = await repositories.installedApps.findFirst({
-      where: { appId: appId }
+      where: { appId, user: { workspaceId } }
     });
 
     if (!installedApp) {
-      throw new Error(`[REGENERATE-JWT] Installed app with appId ${appId} not found`);
+      throw new Error(`[REGENERATE-JWT] Installed app with appId ${appId} not found in workspace ${workspaceId}`);
     }
 
-    // Decrypt the signing secret
-    const signingSecret = decrypt(installedApp.signingSecret);
+    // Decrypt the app-level signing secret
+    const signingSecret = decrypt(app.signingSecret);
 
     // Generate new JWT token
     const jwtToken = jwt.sign(
@@ -212,16 +272,12 @@ export async function getSigningSecret(appId: string, userId: string, isAdmin: b
       throw new Error(`[GET-SIGNING-SECRET] Unauthorized: Only admin or app creator can access signing secret`);
     }
 
-    const installedApp = await repositories.installedApps.findFirst({
-      where: { appId: appId }
-    });
-
-    if (!installedApp) {
-      throw new Error(`[GET-SIGNING-SECRET] Installed app with appId ${appId} not found`);
+    if (!app.signingSecret) {
+      throw new Error(`[GET-SIGNING-SECRET] App ${appId} has no signing secret`);
     }
 
-    // Decrypt the signing secret
-    const signingSecret = decrypt(installedApp.signingSecret);
+    // Decrypt the app-level signing secret
+    const signingSecret = decrypt(app.signingSecret);
 
     logger.info(`[GET-SIGNING-SECRET] Retrieved signing secret for app ${appId} by user ${userId}`);
 

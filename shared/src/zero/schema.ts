@@ -2448,6 +2448,11 @@ export const appsTable = table('apps')
     name: string(),
     description: string().optional(),
     createdBy: string(),
+    orgId: string(),
+    scope: string(),
+    version: number(),
+    webhookUrl: string().optional(),
+    signingSecret: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2459,7 +2464,9 @@ export const installedAppsTable = table('installed_apps')
     appId: string(),
     userId: string(),
     webhookUrl: string().optional(),
-    signingSecret: string(),
+    // @deprecated — signing secret is app-level now; kept (nullable) for gradual migration.
+    signingSecret: string().optional(),
+    version: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -3787,6 +3794,11 @@ export const appsTableRelationships = relationships(appsTable, ({ one, many }) =
     sourceField: ['id'],
     destField: ['appId'],
     destSchema: installedAppsTable,
+  }),
+  orgWorkspaces: many({
+    sourceField: ['orgId'],
+    destField: ['orgId'],
+    destSchema: workspaceTable,
   }),
 }));
 

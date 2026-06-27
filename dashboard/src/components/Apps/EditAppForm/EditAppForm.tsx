@@ -41,9 +41,15 @@ interface CommandRowProps {
   command: AppCommand;
   onEdit: (command: AppCommand) => void;
   onDelete: (commandName: string) => void;
+  readOnly?: boolean;
 }
 
-const CommandRow = ({ command, onEdit, onDelete }: CommandRowProps): ReactElement => (
+const CommandRow = ({
+  command,
+  onEdit,
+  onDelete,
+  readOnly = false,
+}: CommandRowProps): ReactElement => (
   <div className='flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30 group'>
     <div className='flex-1 min-w-0'>
       <div className='flex items-center gap-2'>
@@ -65,28 +71,30 @@ const CommandRow = ({ command, onEdit, onDelete }: CommandRowProps): ReactElemen
       </div>
       <p className='text-xs text-muted-foreground truncate mt-0.5'>{command.description}</p>
     </div>
-    <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
-      <Button
-        type='button'
-        variant='ghost'
-        size='sm'
-        className='h-7 w-7 p-0'
-        onClick={() => onEdit(command)}
-        title='Edit command'
-      >
-        <Pencil size={13} />
-      </Button>
-      <Button
-        type='button'
-        variant='ghost'
-        size='sm'
-        className='h-7 w-7 p-0 text-destructive hover:text-destructive'
-        onClick={() => onDelete(command.commandName)}
-        title='Delete command'
-      >
-        <Trash2 size={13} />
-      </Button>
-    </div>
+    {!readOnly && (
+      <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='h-7 w-7 p-0'
+          onClick={() => onEdit(command)}
+          title='Edit command'
+        >
+          <Pencil size={13} />
+        </Button>
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='h-7 w-7 p-0 text-destructive hover:text-destructive'
+          onClick={() => onDelete(command.commandName)}
+          title='Delete command'
+        >
+          <Trash2 size={13} />
+        </Button>
+      </div>
+    )}
   </div>
 );
 
@@ -257,9 +265,15 @@ interface ShortcutRowProps {
   shortcut: AppShortcut;
   onEdit: (shortcut: AppShortcut) => void;
   onDelete: (commandName: string) => void;
+  readOnly?: boolean;
 }
 
-const ShortcutRow = ({ shortcut, onEdit, onDelete }: ShortcutRowProps): ReactElement => (
+const ShortcutRow = ({
+  shortcut,
+  onEdit,
+  onDelete,
+  readOnly = false,
+}: ShortcutRowProps): ReactElement => (
   <div className='flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30 group'>
     <div className='flex-shrink-0 w-6 h-6 rounded bg-primary/10 flex items-center justify-center'>
       <Zap className='w-3.5 h-3.5 text-primary' />
@@ -281,28 +295,30 @@ const ShortcutRow = ({ shortcut, onEdit, onDelete }: ShortcutRowProps): ReactEle
       </div>
       <p className='text-xs text-muted-foreground truncate mt-0.5'>{shortcut.description}</p>
     </div>
-    <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
-      <Button
-        type='button'
-        variant='ghost'
-        size='sm'
-        className='h-7 w-7 p-0'
-        onClick={() => onEdit(shortcut)}
-        title='Edit shortcut'
-      >
-        <Pencil size={13} />
-      </Button>
-      <Button
-        type='button'
-        variant='ghost'
-        size='sm'
-        className='h-7 w-7 p-0 text-destructive hover:text-destructive'
-        onClick={() => onDelete(shortcut.commandName)}
-        title='Delete shortcut'
-      >
-        <Trash2 size={13} />
-      </Button>
-    </div>
+    {!readOnly && (
+      <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='h-7 w-7 p-0'
+          onClick={() => onEdit(shortcut)}
+          title='Edit shortcut'
+        >
+          <Pencil size={13} />
+        </Button>
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='h-7 w-7 p-0 text-destructive hover:text-destructive'
+          onClick={() => onDelete(shortcut.commandName)}
+          title='Delete shortcut'
+        >
+          <Trash2 size={13} />
+        </Button>
+      </div>
+    )}
   </div>
 );
 
@@ -452,9 +468,19 @@ const ShortcutFormInline = ({
 interface PermissionsSectionProps {
   appId: string;
   isInstalled: boolean;
+  // 'template' -> edits app_permission (creator, Org/Marketplace). 'install' -> edits this
+  // workspace's installed_app_permissions (admin, Installed screen).
+  editMode: 'template' | 'install';
+  installedAppId: string | null;
 }
 
-const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): ReactElement => {
+const PermissionsSection = ({
+  appId,
+  isInstalled,
+  editMode,
+  installedAppId,
+}: PermissionsSectionProps): ReactElement => {
+  const isInstallMode = editMode === 'install' && !!installedAppId;
   const [available, setAvailable] = useState<AppPermission[]>([]);
   // Local selection — always editable regardless of install state
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -472,8 +498,11 @@ const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): Re
   }, []);
 
   const loadGranted = useCallback(() => {
-    void appsService
-      .getGrantedPermissions(appId)
+    const fetcher =
+      isInstallMode && installedAppId
+        ? appsService.getInstalledPermissions(installedAppId)
+        : appsService.getGrantedPermissions(appId);
+    void fetcher
       .then(({ permissions, statuses }) => {
         // Checked = APPROVED or UNAPPROVED (not PENDINGDELETE)
         const checkedScopes = new Set(
@@ -494,7 +523,7 @@ const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): Re
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
-  }, [appId]);
+  }, [appId, isInstallMode, installedAppId]);
 
   // Pre-fill selection from already-granted permissions
   useEffect(() => {
@@ -507,14 +536,14 @@ const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): Re
     if (status === 'UNAPPROVED') {
       return (
         <span className='text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 whitespace-nowrap'>
-          Reinstall to activate
+          Update to activate
         </span>
       );
     }
     if (status === 'PENDINGDELETE') {
       return (
         <span className='text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 whitespace-nowrap'>
-          Removes on reinstall
+          Removes on update
         </span>
       );
     }
@@ -540,7 +569,11 @@ const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): Re
   const handleSave = async () => {
     setSaving(true);
     try {
-      await appsService.setPermissions(appId, Array.from(selected));
+      if (isInstallMode && installedAppId) {
+        await appsService.setInstalledPermissions(installedAppId, Array.from(selected));
+      } else {
+        await appsService.setPermissions(appId, Array.from(selected));
+      }
       toast.success(`Permissions saved (${selected.size} granted)`);
       // Refresh statuses after save so badges update
       loadGranted();
@@ -550,6 +583,28 @@ const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): Re
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Install-mode permission edits land as UNAPPROVED (or PENDINGDELETE) and only take effect after
+  // a re-install. Update is version-gated, so without this an admin's install-permission change
+  // could never activate. This re-installs (applyReinstall) to apply the pending changes.
+  const [activating, setActivating] = useState(false);
+  const hasPendingChanges = Object.values(statusMap).some(
+    s => s === 'UNAPPROVED' || s === 'PENDINGDELETE',
+  );
+  const handleActivate = async () => {
+    setActivating(true);
+    try {
+      await appsService.updateApp(appId);
+      toast.success('Permission changes applied');
+      loadGranted();
+    } catch (e) {
+      toast.error('Failed to apply permission changes', {
+        description: e instanceof Error ? e.message : 'Unknown error',
+      });
+    } finally {
+      setActivating(false);
     }
   };
 
@@ -578,6 +633,19 @@ const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): Re
           >
             {saving ? 'Saving…' : 'Save Permissions'}
           </Button>
+          {isInstallMode && hasPendingChanges && (
+            <Button
+              type='button'
+              size='sm'
+              variant='default'
+              className='h-7 text-xs'
+              onClick={() => void handleActivate()}
+              disabled={activating || saving}
+              title='Re-sync this install to activate pending permission changes'
+            >
+              {activating ? 'Applying…' : 'Apply & activate'}
+            </Button>
+          )}
         </div>
       </div>
       {!loaded || available.length === 0 ? (
@@ -633,7 +701,13 @@ export interface EditAppFormProps {
   appId: string;
   appName: string;
   appDescription: string | null;
+  // App-level (template) webhook URL — editable by the creator regardless of install state.
+  appWebhookUrl?: string | null;
   appInstallations?: readonly InstalledApps[] | undefined;
+  // 'template' = Org/Marketplace edit (creator; edits the app). 'install' = Installed edit
+  // (admin; edits this workspace's install — webhook + permissions, commands read-only).
+  editMode?: 'template' | 'install';
+  installedAppId?: string | null;
   onSave: (data: { description: string; webhookUrl: string }) => Promise<void>;
   onUploadPicture?: ((appId: string, file: File) => Promise<void>) | undefined;
   isLoading?: boolean | undefined;
@@ -697,12 +771,18 @@ export const EditAppForm = ({
   appId,
   appName,
   appDescription,
+  appWebhookUrl,
   appInstallations,
+  editMode = 'template',
+  installedAppId = null,
   onSave,
   onUploadPicture,
   isLoading = false,
   onCancel,
 }: EditAppFormProps): ReactElement => {
+  // Install mode = editing this workspace's install (admin). Template mode = editing the app
+  // (creator). In install mode commands and name/description are read-only (template-owned).
+  const isInstallMode = editMode === 'install';
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [botChannels, setBotChannels] = useState<BotChannel[]>([]);
   const [webhooks, setWebhooks] = useState<IncomingWebhook[]>([]);
@@ -722,7 +802,9 @@ export const EditAppForm = ({
   const [revokeTargetId, setRevokeTargetId] = useState<string | null>(null);
   const WEBHOOK_PAGE_SIZE = 3;
 
-  const installedAppId = appInstallations?.[0]?.id ?? null;
+  // Incoming webhooks are install-scoped; in install mode this is the caller's install (prop).
+  // In template mode it falls back to the first install only as a best-effort (section hidden).
+  const incomingInstalledAppId = installedAppId ?? appInstallations?.[0]?.id ?? null;
 
   useEffect(() => {
     if (!appId) return;
@@ -734,9 +816,9 @@ export const EditAppForm = ({
 
   const fetchWebhooks = useCallback(
     (offset: number): void => {
-      if (!installedAppId) return;
+      if (!incomingInstalledAppId) return;
       void appsService
-        .getIncomingWebhooks(installedAppId, { limit: WEBHOOK_PAGE_SIZE, offset })
+        .getIncomingWebhooks(incomingInstalledAppId, { limit: WEBHOOK_PAGE_SIZE, offset })
         .then(data => {
           setWebhooks(data.webhooks);
           setWebhookTotal(data.total);
@@ -747,7 +829,7 @@ export const EditAppForm = ({
           setWebhookTotal(0);
         });
     },
-    [installedAppId],
+    [incomingInstalledAppId],
   );
 
   useEffect(() => {
@@ -796,12 +878,12 @@ export const EditAppForm = ({
   };
 
   const handleCreateWebhook = async (): Promise<void> => {
-    if (!installedAppId || !selectedChannelId || !webhookName.trim()) return;
+    if (!incomingInstalledAppId || !selectedChannelId || !webhookName.trim()) return;
 
     setIsCreating(true);
     try {
       await appsService.createIncomingWebhook({
-        installedAppId,
+        installedAppId: incomingInstalledAppId,
         channelId: selectedChannelId,
         ...(selectedWebhookAction === 'TICKET' && selectedBoardId
           ? { boardId: selectedBoardId }
@@ -880,21 +962,28 @@ export const EditAppForm = ({
 
   useEffect(() => {
     setCommandsLoading(true);
-    appsService
-      .getCommands(appId)
+    // Install mode: read-only snapshot from installed_app_commands. Template mode: app_commands.
+    const fetcher =
+      isInstallMode && installedAppId
+        ? appsService.getInstalledCommands(installedAppId, 'COMMAND')
+        : appsService.getCommands(appId);
+    fetcher
       .then(setCommands)
       .catch(() => toast.error('Failed to load commands'))
       .finally(() => setCommandsLoading(false));
-  }, [appId]);
+  }, [appId, isInstallMode, installedAppId]);
 
   useEffect(() => {
     setShortcutsLoading(true);
-    appsService
-      .getShortcuts(appId)
+    const fetcher =
+      isInstallMode && installedAppId
+        ? appsService.getInstalledCommands(installedAppId, 'SHORTCUT')
+        : appsService.getShortcuts(appId);
+    fetcher
       .then(setShortcuts)
       .catch(() => toast.error('Failed to load shortcuts'))
       .finally(() => setShortcutsLoading(false));
-  }, [appId]);
+  }, [appId, isInstallMode, installedAppId]);
 
   const handleCommandSaved = (saved: AppCommand) => {
     setCommands(prev => {
@@ -1008,11 +1097,12 @@ export const EditAppForm = ({
     fileInputRef.current?.click();
   };
 
-  const webhookUrlValue = useMemo(() => {
-    const installations = appInstallations || [];
-    const firstInstallation = installations[0];
-    return firstInstallation?.webhookUrl || '';
-  }, [appInstallations]);
+  // Install mode edits THIS install's webhook (installed_apps.webhookUrl); template mode edits the
+  // app-level (template) URL set by the creator and copied to installs.
+  const webhookUrlValue = useMemo(
+    () => (isInstallMode ? (appInstallations?.[0]?.webhookUrl ?? '') : (appWebhookUrl ?? '')),
+    [isInstallMode, appInstallations, appWebhookUrl],
+  );
 
   const isAppInstalled = useMemo(() => {
     const installations = appInstallations || [];
@@ -1070,12 +1160,17 @@ export const EditAppForm = ({
                 id='description'
                 placeholder='Enter app description (optional)'
                 rows={3}
-                disabled={isLoading}
+                disabled={isLoading || isInstallMode}
                 className='text-foreground'
                 {...field}
               />
             )}
           />
+          {isInstallMode && (
+            <p className='text-xs text-muted-foreground'>
+              Description is set on the app template. Edit it from the Org Apps screen.
+            </p>
+          )}
           {errors.description && (
             <p className='text-xs text-destructive'>{errors.description.message}</p>
           )}
@@ -1085,73 +1180,74 @@ export const EditAppForm = ({
           <label htmlFor='webhookUrl' className='block text-sm font-medium text-foreground'>
             Webhook URL
           </label>
-          {!isAppInstalled ? (
-            <div className='bg-amber-500/10 border border-amber-500/30 text-amber-600 px-3 py-2 rounded-md text-sm'>
-              Install app to add webhook URL
-            </div>
-          ) : (
-            <Controller
-              name='webhookUrl'
-              control={control}
-              rules={{
-                validate: value => {
-                  if (!value || value.trim() === '') return true;
-                  try {
-                    new URL(value);
-                    return true;
-                  } catch {
-                    return 'Please enter a valid URL';
-                  }
-                },
-              }}
-              render={({ field }) => (
-                <Input
-                  id='webhookUrl'
-                  type='url'
-                  placeholder='https://your-app.com/webhook'
-                  disabled={isLoading}
-                  className='text-foreground'
-                  {...field}
-                />
-              )}
-            />
-          )}
+          <Controller
+            name='webhookUrl'
+            control={control}
+            rules={{
+              validate: value => {
+                if (!value || value.trim() === '') return true;
+                try {
+                  new URL(value);
+                  return true;
+                } catch {
+                  return 'Please enter a valid URL';
+                }
+              },
+            }}
+            render={({ field }) => (
+              <Input
+                id='webhookUrl'
+                type='url'
+                placeholder='https://your-app.com/webhook'
+                disabled={isLoading}
+                className='text-foreground'
+                {...field}
+              />
+            )}
+          />
+          <p className='text-xs text-muted-foreground'>
+            {isInstallMode
+              ? "This install's backend endpoint for your workspace. Overrides the template URL."
+              : "The app's backend endpoint. Editable any time (even before install); installs pick it up on Update."}
+          </p>
           {errors.webhookUrl && (
             <p className='text-xs text-destructive'>{errors.webhookUrl.message}</p>
           )}
         </div>
 
-        <div className='space-y-2'>
-          <label htmlFor='profilePicture' className='block text-sm font-medium text-foreground'>
-            Profile Picture
-          </label>
-          <div className='flex gap-2'>
-            <input
-              type='file'
-              ref={fileInputRef}
-              onChange={e => void handleFileSelect(e)}
-              accept='image/jpeg,image/png,image/webp'
-              className='hidden'
-            />
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              onClick={handleUploadClick}
-              disabled={isLoading}
-              className='gap-1'
-              title='Upload bot profile picture'
-            >
-              <Upload size={14} />
-              Upload Picture
-            </Button>
+        {isInstallMode && (
+          <div className='space-y-2'>
+            <label htmlFor='profilePicture' className='block text-sm font-medium text-foreground'>
+              Profile Picture
+            </label>
+            <div className='flex gap-2'>
+              <input
+                type='file'
+                ref={fileInputRef}
+                onChange={e => void handleFileSelect(e)}
+                accept='image/jpeg,image/png,image/webp'
+                className='hidden'
+              />
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={handleUploadClick}
+                disabled={isLoading}
+                className='gap-1'
+                title='Upload bot profile picture'
+              >
+                <Upload size={14} />
+                Upload Picture
+              </Button>
+            </div>
+            <p className='text-xs text-muted-foreground'>
+              Supported formats: JPG, PNG, WebP. Max size: 5MB.
+            </p>
           </div>
-          <p className='text-xs text-muted-foreground'>
-            Supported formats: JPG, PNG, WebP. Max size: 5MB.
-          </p>
-        </div>
+        )}
 
-        {isAppInstalled && (
+        {isInstallMode && incomingInstalledAppId && (
           <div className='space-y-2'>
             <div className='border-t border-border pt-4'>
               <span className='block text-sm font-medium text-foreground'>Incoming Webhooks</span>
@@ -1519,7 +1615,7 @@ export const EditAppForm = ({
             <label htmlFor='app-commands' className='block text-sm font-medium text-foreground'>
               Commands
             </label>
-            {!showCommandForm && (
+            {!showCommandForm && !isInstallMode && (
               <Button
                 type='button'
                 variant='outline'
@@ -1547,6 +1643,11 @@ export const EditAppForm = ({
             />
           )}
 
+          {isInstallMode && (
+            <p className='text-xs text-muted-foreground'>
+              Commands come from the app template. Click Update to sync the latest.
+            </p>
+          )}
           {commandsLoading ? (
             <p className='text-xs text-muted-foreground py-2'>Loading commands…</p>
           ) : commands.length === 0 && !showCommandForm ? (
@@ -1562,6 +1663,7 @@ export const EditAppForm = ({
                   command={cmd}
                   onEdit={handleEditCommand}
                   onDelete={commandName => void handleDeleteCommand(commandName)}
+                  readOnly={isInstallMode}
                 />
               ))}
             </div>
@@ -1572,7 +1674,7 @@ export const EditAppForm = ({
         <div className='space-y-2'>
           <div className='flex items-center justify-between'>
             <span className='block text-sm font-medium text-foreground'>Shortcuts</span>
-            {!showShortcutForm && (
+            {!showShortcutForm && !isInstallMode && (
               <Button
                 type='button'
                 variant='outline'
@@ -1617,6 +1719,7 @@ export const EditAppForm = ({
                   shortcut={s}
                   onEdit={handleEditShortcut}
                   onDelete={callbackId => void handleDeleteShortcut(callbackId)}
+                  readOnly={isInstallMode}
                 />
               ))}
             </div>
@@ -1625,7 +1728,12 @@ export const EditAppForm = ({
 
         {/* Permissions */}
         <div className='border-t border-border pt-4'>
-          <PermissionsSection appId={appId} isInstalled={isAppInstalled} />
+          <PermissionsSection
+            appId={appId}
+            isInstalled={isInstallMode || isAppInstalled}
+            editMode={editMode}
+            installedAppId={installedAppId}
+          />
         </div>
       </div>
 

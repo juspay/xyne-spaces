@@ -3044,17 +3044,64 @@ export const queries = defineQueries({
   ),
 
   // Apps Queries
-  getAllAppsPaginated: defineQuery(
+  // (getAllAppsPaginated removed — it returned every app across all orgs unscoped.)
+
+  // Installed view — apps installed in the caller's workspace (workspace via the app user).
+  getWorkspaceInstalledApps: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ createdAt: z.number(), id: z.string() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.installed_apps
+        .whereExists('user', (u) => u.where('workspaceId', ctx.workspaceId))
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc');
+      if (start) {
+        query = query.start({ createdAt: start.createdAt, id: start.id }, { inclusive: false });
+      }
+      return query.limit(limit).related('app');
+    },
+  ),
+
+  // Org view — ORG-scoped apps for the caller's org. orgId is supplied by the client; the
+  // caller gates this query with `enabled: !!orgId` so it never runs with an empty orgId.
+  getOrgApps: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ createdAt: z.number(), id: z.string() }).nullable(),
+      orgId: z.string(),
+    }),
+    ({ args: { limit, start, orgId } }) => {
+      let query = zql.apps
+        .where(({ and, cmp }) => and(cmp('scope', "ORG"), cmp('orgId', orgId)))
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc');
+      if (start) {
+        query = query.start({ createdAt: start.createdAt, id: start.id }, { inclusive: false });
+      }
+      // No `installations` relation: it would expose other workspaces' install rows. The caller's
+      // own install state comes from getWorkspaceInstalledApps (workspace-scoped) on the client.
+      return query.limit(limit);
+    },
+  ),
+
+  // Marketplace view — GLOBAL apps across all orgs.
+  getMarketplaceApps: defineQuery(
     z.object({
       limit: z.number(),
       start: z.object({ createdAt: z.number(), id: z.string() }).nullable(),
     }),
     ({ args: { limit, start } }) => {
-      let query = zql.apps.orderBy('createdAt', 'desc').orderBy('id', 'desc');
+      let query = zql.apps
+        .where('scope', "GLOBAL")
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc');
       if (start) {
         query = query.start({ createdAt: start.createdAt, id: start.id }, { inclusive: false });
       }
-      return query.limit(limit).related('installations');
+      // No `installations` relation — see getOrgApps. Cross-org install rows must not leak.
+      return query.limit(limit);
     },
   ),
 

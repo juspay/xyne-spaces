@@ -11970,9 +11970,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('App not found');
           }
 
-          const updateData: { id: string; updatedAt: number; name?: string; description?: string | null } = {
+          // Creator editing the template: webhook is written to the APP (template) and version
+          // is bumped so installs see an Update prompt. (Per-install webhook edits go via REST.)
+          const updateData: { id: string; updatedAt: number; version: number; name?: string; description?: string | null; webhookUrl?: string | null } = {
             id: appId,
             updatedAt: timestamp,
+            version: (app.version ?? 0) + 1,
           };
 
           if (name !== undefined) {
@@ -11981,23 +11984,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (description !== undefined) {
             updateData.description = description.trim() || null;
           }
+          if (webhookUrl !== undefined) {
+            updateData.webhookUrl = webhookUrl.trim() || null;
+          }
 
           await tx.mutate.apps.update(updateData);
-
-          // Update webhook URL in installed_apps table
-          if (webhookUrl !== undefined) {
-            const installations = await tx.run(zql.installed_apps.where('appId', appId));
-            if (installations.length > 0) {
-              const installedAppUpdateData: { id: string; updatedAt: number; webhookUrl?: string | null } = {
-                id: installations[0].id,
-                updatedAt: timestamp,
-              };
-              if (webhookUrl !== undefined) {
-                installedAppUpdateData.webhookUrl = webhookUrl.trim() || null;
-              }
-              await tx.mutate.installed_apps.update(installedAppUpdateData);
-            }
-          }
         },
       ),
     },

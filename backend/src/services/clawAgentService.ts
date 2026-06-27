@@ -1080,10 +1080,18 @@ export async function runClawAgent(
 ): Promise<{ dispatched: boolean }> {
   const installedApp = await db.installedApps.findFirst({
     where: { webhookUrl: { endsWith: `/webhook/${req.agentSlug}` } },
-    select: { webhookUrl: true, signingSecret: true },
+    // Signing secret is app-level now (apps.signingSecret); the per-install column is deprecated.
+    select: { webhookUrl: true, app: { select: { signingSecret: true } } },
   });
   if (!installedApp?.webhookUrl) {
     logger.warn('[ClawAgentService] runClawAgent: no installed-app webhook for agent', {
+      agentSlug: req.agentSlug,
+    });
+    return { dispatched: false };
+  }
+  const signingSecretEnc = installedApp.app?.signingSecret;
+  if (!signingSecretEnc) {
+    logger.warn('[ClawAgentService] runClawAgent: app has no signing secret', {
       agentSlug: req.agentSlug,
     });
     return { dispatched: false };
@@ -1104,7 +1112,7 @@ export async function runClawAgent(
     },
     timestamp: new Date().toISOString(),
   };
-  await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(installedApp.signingSecret));
+  await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(signingSecretEnc));
   return { dispatched: true };
 }
 

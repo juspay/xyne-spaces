@@ -397,9 +397,18 @@ class IncomingWebhookController {
         return;
       }
 
-      const installedApp = await repositories.installedApps.findById(installedAppId);
+      // Scope to the caller's workspace (via the bot user) so you can't create a webhook against
+      // another workspace's install. Guard workspaceId — an undefined filter would un-scope the query.
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const installedApp = await repositories.installedApps.findFirst({
+        where: { id: installedAppId, user: { workspaceId } },
+      });
       if (!installedApp) {
-        res.status(404).json({ error: 'Installed app not found' });
+        res.status(404).json({ error: 'Installed app not found in this workspace' });
         return;
       }
 
@@ -523,9 +532,17 @@ class IncomingWebhookController {
       const { limit, offset, includeInactive } = queryResult.data;
       const activeOnly = !includeInactive;
 
-      const installedApp = await repositories.installedApps.findById(installedAppId);
+      // Scope to the caller's workspace — don't list another workspace's install's webhooks.
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const installedApp = await repositories.installedApps.findFirst({
+        where: { id: installedAppId, user: { workspaceId } },
+      });
       if (!installedApp) {
-        res.status(404).json({ error: 'Installed app not found' });
+        res.status(404).json({ error: 'Installed app not found in this workspace' });
         return;
       }
 
@@ -620,6 +637,20 @@ class IncomingWebhookController {
         return;
       }
 
+      // Scope to the caller's workspace — only act on webhooks of your own install.
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const ownInstall = await repositories.installedApps.findFirst({
+        where: { id: webhook.installedAppId, user: { workspaceId } },
+      });
+      if (!ownInstall) {
+        res.status(404).json({ error: 'Webhook not found' });
+        return;
+      }
+
       if (!webhook.isActive) {
         res.status(400).json({ error: 'Cannot update a revoked webhook' });
         return;
@@ -654,7 +685,8 @@ class IncomingWebhookController {
       const { webhookId } = paramsResult.data;
 
       const userId = req.user?.id;
-      if (!userId) {
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
         logger.warn('[Incoming-Webhook] Missing authenticated user for revoke webhook', {
           webhookId,
         });
@@ -664,6 +696,15 @@ class IncomingWebhookController {
 
       const webhook = await repositories.incomingWebhooks.findById(webhookId);
       if (!webhook) {
+        res.status(404).json({ error: 'Webhook not found' });
+        return;
+      }
+
+      // Scope to the caller's workspace — only revoke webhooks of your own install.
+      const ownInstall = await repositories.installedApps.findFirst({
+        where: { id: webhook.installedAppId, user: { workspaceId } },
+      });
+      if (!ownInstall) {
         res.status(404).json({ error: 'Webhook not found' });
         return;
       }

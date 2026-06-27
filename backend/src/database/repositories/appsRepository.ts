@@ -1,10 +1,14 @@
 import { BaseRepository } from './base';
 import { Prisma } from '@prisma/client';
+import crypto from 'crypto';
+import { encrypt } from '@/services/encryptionService';
 
 export interface CreateAppInput {
   name: string;
   description?: string;
   createdBy: string;
+  // Owning org (snapshot of the creator's workspace's org). Apps are always created at ORG scope
+  orgId: string;
 }
 
 export class AppsRepository extends BaseRepository<
@@ -24,7 +28,8 @@ export class AppsRepository extends BaseRepository<
    * Create a new app with duplicate name validation
    */
   async createApp(data: CreateAppInput) {
-    // Check if app with same name already exists (case-insensitive)
+    // Names only need to be unique WITHIN THE OWNING ORG (apps are org-scoped); a different
+    // org may reuse a name.
     const trimmedName = data.name.trim();
     const existingApps = await this.findMany({
       where: {
@@ -32,6 +37,7 @@ export class AppsRepository extends BaseRepository<
           equals: trimmedName,
           mode: 'insensitive',
         },
+        orgId: data.orgId,
       },
     });
 
@@ -39,12 +45,17 @@ export class AppsRepository extends BaseRepository<
       throw new Error(`App with name '${data.name}' already exists.`);
     }
 
-    // Create the app
+    // Create the app. scope defaults to ORG and version to 1 via the schema. An app-level signing
+    // secret is generated up front (encrypted at rest) — it signs the per-install JWT + webhook HMAC.
     const now = new Date();
     const appData: Prisma.AppsUncheckedCreateInput = {
       name: data.name.trim(),
       description: data.description?.trim() || null,
       createdBy: data.createdBy,
+      orgId: data.orgId,
+      scope: "ORG",
+      version: 1,
+      signingSecret: await encrypt(crypto.randomBytes(32).toString('hex')),
       createdAt: now,
       updatedAt: now,
     };
@@ -54,6 +65,18 @@ export class AppsRepository extends BaseRepository<
 
   async findById(id: string) {
     return this.db.apps.findUnique({ where: { id } });
+  }
+
+  /**
+   * Bump the app template version. Called on any creator edit to the template
+   * (commands/shortcuts/permissions/webhook/description) so installed copies can detect
+   * `app.version > installedApp.version` and surface the Update prompt.
+   */
+  async bumpVersion(appId: string) {
+    return this.db.apps.update({
+      where: { id: appId },
+      data: { version: { increment: 1 }, updatedAt: new Date() },
+    });
   }
 
   async findMany(options?: { where?: Prisma.AppsWhereInput; skip?: number; take?: number; orderBy?: Prisma.AppsOrderByWithRelationInput }) {

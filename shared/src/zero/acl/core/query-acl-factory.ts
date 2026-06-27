@@ -4,6 +4,8 @@ import { BaseQueryACL } from './base-acl';
 
 import {
   ActivitiesACL,
+  AppsACL,
+  InstalledAppsACL,
   CollectionsACL,
   CollectionItemsACL,
   CollectionPermissionsACL,
@@ -80,6 +82,10 @@ export class QueryACLFactory {
     switch (table) {
       case 'activities':
         return new ActivitiesACL(ctx) as BaseQueryACL<TTable>;
+      case 'apps':
+        return new AppsACL(ctx) as BaseQueryACL<TTable>;
+      case 'installed_apps':
+        return new InstalledAppsACL(ctx) as BaseQueryACL<TTable>;
       case 'agent_tools_mappings':
         return new BaseQueryACL(ctx, table);
       case 'agents':

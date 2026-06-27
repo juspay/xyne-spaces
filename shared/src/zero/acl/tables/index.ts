@@ -1,4 +1,6 @@
 export { ActivitiesACL } from './activities-acl';
+export { AppsACL } from './apps-acl';
+export { InstalledAppsACL } from './installed-apps-acl';
 export { CollectionsACL } from './collections-acl';
 export { CollectionItemsACL } from './collection-items-acl';
 export { CollectionPermissionsACL } from './collection-permissions-acl';

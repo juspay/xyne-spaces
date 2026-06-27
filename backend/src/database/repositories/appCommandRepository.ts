@@ -59,6 +59,19 @@ export class AppCommandRepository {
   }
 
   /**
+   * Get the INSTALL's frozen command/shortcut snapshot (installed_app_commands) for one install.
+   * Read-only — the Installed edit screen shows these; they refresh only via Update (re-install).
+   */
+  // Returns the install-snapshot rows as-is (installed_app_commands has installedAppId +
+  // sourceCommandId instead of appId, and no isForChat/isForThread). Read-only display only.
+  async findInstalledByInstalledAppId(installedAppId: string, commandType: CommandType) {
+    return db.installedAppCommand.findMany({
+      where: { installedAppId, commandType },
+      orderBy: { commandName: 'asc' },
+    });
+  }
+
+  /**
    * Get all commands available in a channel.
    * Resolves apps via ChannelParticipant (APP bot users) → InstalledApps → AppCommand.
    * commandType is required — prevents accidentally mixing commands and shortcuts.
@@ -76,16 +89,17 @@ export class AppCommandRepository {
     if (participants.length === 0) return [];
 
     const userIds = participants.map((p: { userId: string }) => p.userId);
+
     const installations = await db.installedApps.findMany({
       where: { userId: { in: userIds } },
-      select: { appId: true },
+      select: { id: true, appId: true },
     });
 
     if (installations.length === 0) return [];
 
-    const appIds = installations.map((i: { appId: string }) => i.appId);
+    const appIdByInstall = new Map(installations.map(i => [i.id, i.appId]));
     const where: Record<string, unknown> = {
-      appId: { in: appIds },
+      installedAppId: { in: installations.map(i => i.id) },
       commandType: filter.commandType,
     };
     if (filter.commandAccessibility !== undefined) {
@@ -98,10 +112,20 @@ export class AppCommandRepository {
       where.commandAccessibility = { in: matchValues };
     }
 
-    return db.appCommand.findMany({
+    const rows = await db.installedAppCommand.findMany({
       where,
       orderBy: { commandName: 'asc' },
-    }) as Promise<Array<AppCommand & { appId: string }>>;
+    });
+    return rows.map(r => ({
+      id: r.sourceCommandId,
+      appId: appIdByInstall.get(r.installedAppId) as string,
+      commandName: r.commandName,
+      description: r.description,
+      commandType: r.commandType,
+      commandAccessibility: r.commandAccessibility,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
   }
 
   /**
@@ -120,16 +144,19 @@ export class AppCommandRepository {
     if (participants.length === 0) return [];
 
     const userIds = participants.map((p: { userId: string }) => p.userId);
+    // Frozen snapshot (installed_app_commands), not the live template — see findByChannelId.
     const installations = await db.installedApps.findMany({
       where: { userId: { in: userIds } },
-      select: { appId: true },
+      select: { id: true, appId: true, app: { select: { name: true } } },
     });
 
     if (installations.length === 0) return [];
 
-    const appIds = installations.map((i: { appId: string }) => i.appId);
+    const metaByInstall = new Map(
+      installations.map(i => [i.id, { appId: i.appId, appName: i.app.name }]),
+    );
     const where: Record<string, unknown> = {
-      appId: { in: appIds },
+      installedAppId: { in: installations.map(i => i.id) },
       commandType: filter.commandType,
     };
     if (filter.commandAccessibility !== undefined) {
@@ -142,25 +169,25 @@ export class AppCommandRepository {
       where.commandAccessibility = { in: matchValues };
     }
 
-    const rows = await db.appCommand.findMany({
+    const rows = await db.installedAppCommand.findMany({
       where,
       orderBy: { commandName: 'asc' },
-      include: { app: { select: { name: true } } },
     });
 
-    return rows.map(r => ({
-      id: r.id,
-      appId: r.appId,
-      commandName: r.commandName,
-      description: r.description,
-      commandType: r.commandType,
-      commandAccessibility: r.commandAccessibility,
-      isForThread: r.isForThread,
-      isForChat: r.isForChat,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-      appName: r.app.name,
-    }));
+    return rows.map(r => {
+      const meta = metaByInstall.get(r.installedAppId);
+      return {
+        id: r.sourceCommandId,
+        appId: meta?.appId ?? '',
+        commandName: r.commandName,
+        description: r.description,
+        commandType: r.commandType,
+        commandAccessibility: r.commandAccessibility,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        appName: meta?.appName ?? '',
+      };
+    });
   }
 
   /**
@@ -272,23 +299,21 @@ export class AppCommandRepository {
 
     const userIds = participants.map((p: { userId: string }) => p.userId);
 
+    // Match against the install's FROZEN snapshot (installed_app_commands), not the live template,
+    // so dispatch honors the version each workspace actually installed.
     const installation = await db.installedApps.findFirst({
       where: {
         userId: { in: userIds },
-        app: { commands: { some: { commandName, commandType } } },
+        installedAppCommands: { some: { commandName, commandType } },
       },
       include: {
-        app: {
-          include: {
-            commands: { where: { commandName, commandType }, take: 1 },
-          },
-        },
+        installedAppCommands: { where: { commandName, commandType }, take: 1 },
       },
     });
 
     if (!installation) return null;
 
-    const command = installation.app.commands[0];
+    const command = installation.installedAppCommands[0];
     if (!command) return null;
 
     return {

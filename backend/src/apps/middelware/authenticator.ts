@@ -66,8 +66,14 @@ export async function authenticateApp(
       return;
     }
 
-    // 4. Decrypt signing secret and VERIFY the JWT — this is the actual auth check
-    const signingSecret = decrypt(installedApp.signingSecret);
+    // 4. Decrypt the APP-LEVEL signing secret and VERIFY the JWT — this is the actual auth check
+    const app = await repositories.apps.findById(appId);
+    if (!app?.signingSecret) {
+      logger.warn('[APP-AUTH] App signing secret missing');
+      sendError(res, 401);
+      return;
+    }
+    const signingSecret = decrypt(app.signingSecret);
 
     let verified: unknown;
     try {

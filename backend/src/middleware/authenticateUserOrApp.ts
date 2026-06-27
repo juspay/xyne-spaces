@@ -77,7 +77,13 @@ async function handleAppAuth(
       return;
     }
 
-    const signingSecret = decrypt(installedApp.signingSecret);
+    const app = await repositories.apps.findById(appId);
+    if (!app?.signingSecret) {
+      logger.warn('[AUTH] App signing secret missing');
+      res.status(401).json({ error: 'Unauthorized', message: 'Authentication failed' });
+      return;
+    }
+    const signingSecret = decrypt(app.signingSecret);
 
     let verified: unknown;
     try {

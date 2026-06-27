@@ -268,15 +268,52 @@ export class AppPermissionRepository extends BaseRepository<
   }
 
 
-  async applyReinstall(installedAppId: string): Promise<void> {
+  /**
+   * Make an install's permissions exactly match the app's current template, all APPROVED.
+   * Used on Update: the latest template permissions are granted directly (no pending step) —
+   * adds new ones, removes ones the creator dropped, approves the rest.
+   */
+  async syncFromAppApproved(appId: string, installedAppId: string): Promise<void> {
     await this.db.$transaction(async (tx: Tx) => {
-      await tx.installedAppPermission.updateMany({
-        where: { installedAppId, status: AppPermissionStatus.UNAPPROVED },
-        data: { status: AppPermissionStatus.APPROVED },
+      const grants = await tx.appPermission.findMany({
+        where: { appId },
+        select: { permissionId: true },
       });
-      await tx.installedAppPermission.deleteMany({
-        where: { installedAppId, status: AppPermissionStatus.PENDINGDELETE },
+      const wantedIds = grants.map((g) => g.permissionId);
+      const wantedSet = new Set(wantedIds);
+
+      const existing = await tx.installedAppPermission.findMany({
+        where: { installedAppId },
+        select: { id: true, permissionId: true },
       });
+      const existingSet = new Set(existing.map((e) => e.permissionId));
+
+      // Remove install permissions the template no longer has.
+      const removeIds = existing.filter((e) => !wantedSet.has(e.permissionId)).map((e) => e.id);
+      if (removeIds.length > 0) {
+        await tx.installedAppPermission.deleteMany({ where: { id: { in: removeIds } } });
+      }
+
+      // Add template permissions missing from the install, as APPROVED.
+      const toAdd = wantedIds.filter((id) => !existingSet.has(id));
+      if (toAdd.length > 0) {
+        await tx.installedAppPermission.createMany({
+          data: toAdd.map((permissionId) => ({
+            installedAppId,
+            permissionId,
+            status: AppPermissionStatus.APPROVED,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      // Approve everything that remains from the template (clears any UNAPPROVED/PENDINGDELETE).
+      if (wantedIds.length > 0) {
+        await tx.installedAppPermission.updateMany({
+          where: { installedAppId, permissionId: { in: wantedIds } },
+          data: { status: AppPermissionStatus.APPROVED },
+        });
+      }
     });
   }
 }

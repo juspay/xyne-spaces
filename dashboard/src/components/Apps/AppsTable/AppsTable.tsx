@@ -4,7 +4,7 @@ import { Button } from '../../ui/Button/Button';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import type { ColumnDef } from '../../ui/Table/Table.types';
 import type { InstalledApps } from '@xyne/shared';
-import { Download, Pencil, Copy, RefreshCw } from 'lucide-react';
+import { Download, Pencil, Copy, RefreshCw, Globe } from 'lucide-react';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -16,8 +16,11 @@ interface AppRow extends Record<string, unknown> {
   name: string;
   description: string | null;
   createdBy: string;
+  orgId?: string;
   createdAt: number;
   updatedAt: number;
+  version?: number;
+  scope?: string;
   installations?: readonly InstalledApps[] | undefined;
   webhookUrl?: string;
   status?: string;
@@ -25,9 +28,17 @@ interface AppRow extends Record<string, unknown> {
   jwtToken?: string;
 }
 
-const CreatedByCell = ({ userId }: { userId: string }): ReactElement => {
+// Apps are org-shared, so a creator in another workspace/org isn't synced locally. Show the
+// resolved user name when available, else fall back to the app's origin org name, else Unknown.
+const CreatedByCell = ({
+  userId,
+  orgName,
+}: {
+  userId: string;
+  orgName?: string | undefined;
+}): ReactElement => {
   const user = useUser(userId);
-  return <span className='text-foreground'>{user?.name || 'Unknown'}</span>;
+  return <span className='text-foreground'>{user?.name || orgName || 'Unknown'}</span>;
 };
 
 interface AppsTableProps {
@@ -35,16 +46,30 @@ interface AppsTableProps {
   currentUserId: string;
   onInstall: (appId: string) => void;
   onReinstall: (appId: string) => void;
+  // Edit the app TEMPLATE (Org/Marketplace view, creator only).
   onUpdateApp?: (
     appId: string,
     data: { name?: string; description?: string; webhookUrl?: string },
   ) => Promise<void>;
+  // Edit the caller's INSTALL (Installed view, workspace admin). Webhook only for now.
+  onUpdateInstall?: (installedAppId: string, data: { webhookUrl?: string }) => Promise<void>;
   onGetJwtToken?: (appId: string) => Promise<string>;
   onGetSigningSecret?: (appId: string) => Promise<string>;
   onUploadPicture?: (appId: string, file: File) => Promise<void>;
   userPermissions: Array<{ resourceName: string; accessType: string }>;
   isInstalling?: boolean;
   isUpdatingApp?: boolean;
+  // Promote ORG -> GLOBAL (marketplace). Shown on org-view apps when the user is a XYNE-APPS admin.
+  onPromote?: (appId: string) => void;
+  canPromote?: boolean;
+  isPromoting?: boolean;
+  // Where row fields come from: 'install' = installed_apps (Installed view), 'app' = apps template (Org/Marketplace).
+  dataSource?: 'app' | 'install';
+  // For Org/Marketplace views: appId -> installed version in the caller's workspace. Used to
+  // show Installed status and gate the Update button (app.version > installed version).
+  installedVersionByAppId?: Record<string, number>;
+  // appId's origin orgId -> org name, for "Created by" attribution on cross-workspace/org apps.
+  orgNamesById?: Record<string, string>;
 }
 
 export const AppsTable = ({
@@ -53,13 +78,21 @@ export const AppsTable = ({
   onInstall,
   onReinstall,
   onUpdateApp,
+  onUpdateInstall,
   onGetJwtToken,
   onGetSigningSecret,
   onUploadPicture,
   userPermissions,
   isInstalling = false,
   isUpdatingApp = false,
+  onPromote,
+  canPromote = false,
+  isPromoting = false,
+  dataSource = 'app',
+  installedVersionByAppId = {},
+  orgNamesById = {},
 }: AppsTableProps): ReactElement => {
+  const isInstalledView = dataSource === 'install';
   const appAccessLevel = useMemo(() => {
     const appPerms = userPermissions.filter(p => p.resourceName === 'XYNE-APPS');
     if (appPerms.some(p => p.accessType === 'ADMIN')) return 'ADMIN';
@@ -71,12 +104,13 @@ export const AppsTable = ({
   // Check if user has admin access
   const hasAdminAccess = appAccessLevel === 'ADMIN';
 
-  // Check if user can edit a specific app (ADMIN or WRITE creator only, not READ)
+  // Who may edit, by screen:
+  // - Installed view: editing the install copy -> any XYNE-APPS admin.
+  // - Org/Marketplace view: editing the app template -> creator only (matches AppsACL.canUpdate).
   const canEditApp = (app: AppRow): boolean => {
-    if (appAccessLevel === 'READ') return false;
-    if (hasAdminAccess) return true;
-    if (appAccessLevel === 'WRITE') return app.createdBy === currentUserId;
-    return false;
+    if (appAccessLevel === 'READ' || appAccessLevel === null) return false;
+    if (isInstalledView) return hasAdminAccess;
+    return app.createdBy === currentUserId;
   };
 
   const [editingAppId, setEditingAppId] = useState<string | null>(null);
@@ -86,15 +120,34 @@ export const AppsTable = ({
     | ((appId: string, file: File) => Promise<void>)
     | undefined;
 
+  // Installed version of this app in the caller's workspace, or undefined if not installed.
+  // Installed view: the row IS the install. Org/Marketplace: look it up by appId.
+  const getInstalledVersion = (app: AppRow): number | undefined => {
+    // version is nullable (until backfilled) — normalize null to undefined.
+    if (isInstalledView) return app.installations?.[0]?.version ?? undefined;
+    return installedVersionByAppId[app.id];
+  };
+
   const getStatus = (app: AppRow): string => {
-    const installations = app.installations || [];
-    return installations.length > 0 ? 'Installed' : 'Pending';
+    // Installed in my workspace -> 'Installed'; otherwise show the app's scope.
+    if (getInstalledVersion(app) !== undefined) return 'Installed';
+    return (app['scope'] as string) || 'Available';
+  };
+
+  // True when the creator has bumped the app template past the version I installed.
+  const hasUpdate = (app: AppRow): boolean => {
+    const installedVersion = getInstalledVersion(app);
+    if (installedVersion === undefined) return false;
+    const appVersion = (app.version as number) ?? 1;
+    return appVersion > installedVersion;
   };
 
   const getWebhookUrl = (app: AppRow): string => {
-    const installations = app.installations || [];
-    const firstInstallation = installations[0];
-    return firstInstallation?.webhookUrl || '';
+    // Installed view -> the install's webhook copy; Org/Marketplace -> the app template webhook.
+    if (isInstalledView) {
+      return app.installations?.[0]?.webhookUrl || '';
+    }
+    return (app.webhookUrl as string) || '';
   };
 
   const getBotUserId = (app: AppRow): string | undefined => {
@@ -110,14 +163,19 @@ export const AppsTable = ({
 
   const handleSaveEdit = async (data: { description: string; webhookUrl: string }) => {
     if (!editingApp) return;
-    const updateData: { description?: string; webhookUrl?: string } = {};
-    if (data.description) {
-      updateData.description = data.description;
+    if (isInstalledView) {
+      // Installed screen: edit the install copy (webhook only; description is template-owned).
+      const installedAppId = editingApp.installations?.[0]?.id;
+      if (installedAppId) {
+        await onUpdateInstall?.(installedAppId, { webhookUrl: data.webhookUrl });
+      }
+    } else {
+      // Org/Marketplace screen: edit the app template.
+      const updateData: { description?: string; webhookUrl?: string } = {};
+      if (data.description) updateData.description = data.description;
+      if (data.webhookUrl) updateData.webhookUrl = data.webhookUrl;
+      await onUpdateApp?.(editingApp.id, updateData);
     }
-    if (data.webhookUrl) {
-      updateData.webhookUrl = data.webhookUrl;
-    }
-    await onUpdateApp?.(editingApp.id, updateData);
     setEditingAppId(null);
     setEditingApp(null);
   };
@@ -222,7 +280,12 @@ export const AppsTable = ({
     {
       field: 'createdBy',
       header: 'Created By',
-      renderCell: (_value, app) => <CreatedByCell userId={app.createdBy} />,
+      renderCell: (_value, app) => (
+        <CreatedByCell
+          userId={app.createdBy}
+          orgName={app.orgId ? orgNamesById[app.orgId] : undefined}
+        />
+      ),
     },
     {
       field: 'status',
@@ -230,7 +293,7 @@ export const AppsTable = ({
       renderCell: (_value, app) => {
         const status = getStatus(app);
         const statusClass =
-          status === 'Installed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800';
+          status === 'Installed' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800';
         return (
           <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusClass}`}>
             {status}
@@ -275,13 +338,8 @@ export const AppsTable = ({
       field: 'signingSecret',
       header: 'Signing Secret',
       renderCell: (_value, app) => {
-        const status = getStatus(app);
-        const isInstalled = status === 'Installed';
+        // Signing secret is app-level — visible/copyable regardless of install state (creator/admin only).
         const canCopy = hasAdminAccess || app.createdBy === currentUserId;
-
-        if (!isInstalled) {
-          return <span className='text-muted-foreground text-xs'>Install app first</span>;
-        }
 
         return (
           <div className='flex items-center gap-2'>
@@ -313,8 +371,8 @@ export const AppsTable = ({
     field: 'actions',
     header: 'Actions',
     renderCell: (_value, app) => {
-      const status = getStatus(app);
-      const isInstalled = status === 'Installed';
+      const isInstalled = getStatus(app) === 'Installed';
+      const showUpdate = hasUpdate(app);
       const canEdit = canEditApp(app);
 
       const isDisabledEdit = !canEdit;
@@ -347,19 +405,34 @@ export const AppsTable = ({
               {isInstalling ? 'Installing...' : 'Install'}
             </Button>
           )}
-          {hasAdminAccess && isInstalled && (
+          {hasAdminAccess && showUpdate && (
             <Button
               variant='outline'
               size='sm'
               disabled={isInstalling}
               onClick={() => onReinstall(app.id)}
               className='gap-1 h-8'
-              title='Regenerate JWT token (use after updating permissions)'
+              title='Update to the latest app version (the creator changed commands or permissions)'
               data-track-category='Apps'
-              data-track-name='ReinstallApp'
+              data-track-name='UpdateApp'
             >
               <RefreshCw size={14} />
-              {isInstalling ? 'Reinstalling...' : 'Reinstall'}
+              {isInstalling ? 'Updating...' : 'Update'}
+            </Button>
+          )}
+          {onPromote && canPromote && (
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={isPromoting}
+              onClick={() => onPromote(app.id)}
+              className='gap-1 h-8'
+              title='Promote to the cross-org marketplace (make this app global)'
+              data-track-category='Apps'
+              data-track-name='PromoteApp'
+            >
+              <Globe size={14} />
+              {isPromoting ? 'Promoting...' : 'Promote'}
             </Button>
           )}
         </div>
@@ -397,7 +470,10 @@ export const AppsTable = ({
             appId={editingApp.id}
             appName={editingApp.name}
             appDescription={editingApp.description}
+            appWebhookUrl={editingApp.webhookUrl ?? null}
             appInstallations={editingApp.installations}
+            editMode={isInstalledView ? 'install' : 'template'}
+            installedAppId={isInstalledView ? (editingApp.installations?.[0]?.id ?? null) : null}
             onSave={handleSaveEdit}
             onUploadPicture={uploadPictureHandler}
             isLoading={isUpdatingApp}
