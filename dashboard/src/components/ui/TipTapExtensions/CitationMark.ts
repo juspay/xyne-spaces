@@ -285,6 +285,74 @@ export function linkifyClawCitations(
   });
 }
 
+/** A single source inside a grouped (`cite-group:`) citation link. */
+export interface ClawCiteGroupRef {
+  toolCallId: string;
+  chunkIndex: number;
+}
+
+/**
+ * Like {@link linkifyClawCitations}, but additionally GROUPS runs of 2+ inline
+ * citation tokens that sit next to each other (separated only by spaces/tabs —
+ * no other text) into a single `[+N](cite-group:<body1>,<body2>,…)` link. The
+ * `a` renderer turns that into a stacked "cluster" chip whose popover lists each
+ * source. A lone token renders exactly as {@link linkifyClawCitations} would.
+ */
+export function linkifyAndGroupClawCitations(
+  content: string,
+  toolNumbers: ReadonlyMap<string, number>,
+): string {
+  if (!content || content.indexOf('clf-') === -1) return content;
+  // Whole-token pattern (brackets included); mirrors CLAW_CITATION_TOKEN_RE.
+  const TOKEN_SRC = '[【\\[⟦]clf-[A-Za-z0-9_.:-]+#\\d+[】\\]⟧]';
+  // A maximal run of adjacent tokens — spaces/tabs (NOT newlines) between them,
+  // so we never group across line breaks / list items.
+  const runRe = new RegExp(`${TOKEN_SRC}(?:[ \\t]*${TOKEN_SRC})*`, 'g');
+  const tokenRe = new RegExp(CLAW_CITATION_TOKEN_RE.source, 'g');
+  return content.replace(runRe, run => {
+    tokenRe.lastIndex = 0;
+    const resolved: Array<{ body: string; toolNumber: number; chunkIndex: string }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = tokenRe.exec(run)) !== null) {
+      const body = m[2];
+      if (!body) continue;
+      const hashIdx = body.lastIndexOf('#');
+      if (hashIdx <= 0) continue;
+      const toolCallId = body.slice('clf-'.length, hashIdx);
+      const chunkIndex = body.slice(hashIdx + 1);
+      const toolNumber = toolNumbers.get(toolCallId);
+      if (!toolNumber) continue; // unknown tool — drop, matches strip behavior
+      resolved.push({ body, toolNumber, chunkIndex });
+    }
+    if (resolved.length === 0) return run; // leave raw for stripCitationMarks
+    if (resolved.length === 1) {
+      const r = resolved[0]!;
+      return `[${r.toolNumber}.${r.chunkIndex}](cite:${r.body})`;
+    }
+    const bodies = resolved.map(r => r.body).join(',');
+    return `[+${resolved.length}](cite-group:${bodies})`;
+  });
+}
+
+/** Parse a `cite-group:<clf-a#1>,<clf-b#2>,…` href into its individual refs. */
+export function parseCiteGroupHref(href: string): ClawCiteGroupRef[] {
+  const PREFIX = 'cite-group:';
+  if (!href || !href.startsWith(PREFIX)) return [];
+  const refs: ClawCiteGroupRef[] = [];
+  for (const raw of href.slice(PREFIX.length).split(',')) {
+    const body = raw.trim();
+    if (!body.startsWith('clf-')) continue;
+    const rest = body.slice('clf-'.length);
+    const hashIdx = rest.lastIndexOf('#');
+    if (hashIdx <= 0) continue;
+    const toolCallId = rest.slice(0, hashIdx);
+    const chunkIndex = Number(rest.slice(hashIdx + 1));
+    if (!toolCallId || !Number.isFinite(chunkIndex)) continue;
+    refs.push({ toolCallId, chunkIndex });
+  }
+  return refs;
+}
+
 /**
  * Build a stable display-number map (`toolCallId` → 1, 2, 3 …) following the
  * order tokens appear in the rendered markdown — so the first tool the model

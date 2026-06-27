@@ -121,6 +121,18 @@ export interface ClawCitation {
   xyneId?: string;
   mailId?: string;
   url?: string;
+  /** For kind="external": source app (Gmail / Google Calendar / Google Drive). */
+  app?: 'gmail' | 'gcal' | 'gdrive';
+  /** Stable brand-icon key (e.g. "spaces", "gmail"), stamped by claw. The
+   *  `/messages` payload ships the SVG bytes ONCE per unique key in a top-level
+   *  `icons` map; the chip resolves `iconKey` → bytes via `resolveCitationIconUrl`
+   *  (see clawCitationUrl). Adding a new source stays a claw-only change. */
+  iconKey?: string;
+  /** Inline `data:image/svg+xml,…` brand-icon URI. Still present on legacy rows
+   *  and the live streaming path; `/messages` now sends `iconKey` + the shared
+   *  `icons` map instead. `resolveCitationIconUrl` prefers this when set, then
+   *  falls back to the keyed registry. */
+  iconUrl?: string;
   // For kind="collection-item" (KB tools: kb-search / kb-read-file /
   // kb-get-chunks / kb-search-within-doc). The backend (kb-handlers.ts)
   // populates `url` with a deep-link to the v2 file viewer; the other
