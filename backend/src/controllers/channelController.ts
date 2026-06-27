@@ -1,4 +1,10 @@
 import { Request, Response } from 'express';
+import {
+  buildAppDeskSourceName,
+  buildSlackDeskSourceName,
+  extractInstalledAppId,
+  extractSlackChannelId,
+} from '../integrations/core/deskSources';
 import { ChannelRepository, CreateChannelInput } from '../database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { ConversationRepository, CreateConversationInput } from '../database/repositories/conversationRepository';
@@ -7,7 +13,7 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma, DeskType, EmailMergeMode } from '@prisma/client';
+import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma, DeskType, EmailMergeMode, AppPermissionStatus, AppPermissionType } from '@prisma/client';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
@@ -675,6 +681,7 @@ export class ChannelController {
         deskType,
         dlEmail,
         slackChannelId,
+        installedAppId,
         boardId,
       }: {
         scopeType: ChannelScopeType;
@@ -684,11 +691,12 @@ export class ChannelController {
         visibility?: ChannelVisibility;
         projectId: string;
         participants?: string[];
-        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK';
+        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP';
         assigneeUserGroupId?: string;
         deskType?: DeskType;
         dlEmail?: string;
         slackChannelId?: string;
+        installedAppId?: string;
         boardId?: string;
       } = req.body;
 
@@ -784,13 +792,49 @@ export class ChannelController {
           res.status(503).json({ error: 'Slack is not connected for this workspace. Please connect Slack first.' });
           return;
         }
-        const sourceName = `slack-desk-${slackChannelId}`;
+        const sourceName = buildSlackDeskSourceName(slackChannelId);
         const existingSource = await db.externalSource.findUnique({
           where: { name: sourceName },
           select: { id: true, isActive: true },
         });
         if (existingSource?.isActive) {
           res.status(409).json({ error: 'A desk already exists for this Slack channel' });
+          return;
+        }
+      }
+
+      if (channelType === 'APP') {
+        if (!installedAppId) {
+          res.status(400).json({ error: 'installedAppId is required for APP channels' });
+          return;
+        }
+        const installedApp = await db.installedApps.findUnique({
+          where: { id: installedAppId },
+          select: { id: true, userId: true, user: { select: { workspaceId: true } } },
+        });
+        if (!installedApp || installedApp.user.workspaceId !== req.user!.workspaceId!) {
+          res.status(404).json({ error: 'App is not installed in this workspace' });
+          return;
+        }
+        const hasDeskWrite = await db.installedAppPermission.findFirst({
+          where: {
+            installedAppId,
+            status: { in: [AppPermissionStatus.APPROVED, AppPermissionStatus.PENDINGDELETE] },
+            permission: { name: 'desk', type: AppPermissionType.WRITE },
+          },
+          select: { id: true },
+        });
+        if (!hasDeskWrite) {
+          res.status(403).json({ error: 'App must have the desk:write permission to back a desk' });
+          return;
+        }
+        const sourceName = buildAppDeskSourceName(installedAppId);
+        const existingSource = await db.externalSource.findUnique({
+          where: { name: sourceName },
+          select: { id: true, isActive: true },
+        });
+        if (existingSource?.isActive) {
+          res.status(409).json({ error: 'A desk already exists for this app' });
           return;
         }
       }
@@ -980,7 +1024,7 @@ export class ChannelController {
             ...(assigneeUserGroupId && { assigneeUserGroupId }),
           });
 
-          const sourceName = `slack-desk-${slackChannelId}`;
+          const sourceName = buildSlackDeskSourceName(slackChannelId);
           // Read bot token from workspace-level Slack source
           const slackWorkspaceSource = await db.externalSource.findFirst({
             where: { workspaceId: req.user!.workspaceId!, sourceType: 'slack', isActive: true },
@@ -1029,6 +1073,86 @@ export class ChannelController {
             res.status(409).json({ error: 'A desk with this Slack channel already exists' });
           } else {
             res.status(500).json({ error: 'Failed to create Slack desk' });
+          }
+          return;
+        }
+      }
+
+      if (channelType === 'APP' && installedAppId) {
+        try {
+          let appBoardId = boardId;
+          if (!appBoardId) {
+            const firstBoard = await db.board.findFirst({
+              where: { projectId: channel.projectId },
+              orderBy: { createdAt: 'asc' },
+              select: { id: true },
+            });
+            if (!firstBoard) {
+              await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
+              res.status(409).json({ error: 'Project has no boards configured — cannot create app desk' });
+              return;
+            }
+            appBoardId = firstBoard.id;
+          }
+
+          const installedApp = await db.installedApps.findUnique({
+            where: { id: installedAppId },
+            select: { id: true, userId: true, user: { select: { workspaceId: true } } },
+          });
+          if (!installedApp || installedApp.user.workspaceId !== req.user!.workspaceId!) {
+            await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
+            res.status(404).json({ error: 'App is not installed in this workspace' });
+            return;
+          }
+
+          await this.emailChannelPreferenceRepository.create({
+            channelId: channel.id,
+            ownerUserId: userId,
+            deskType: DeskType.APP,
+            boardId: appBoardId,
+            emailMergeMode: EmailMergeMode.DISABLED,
+            ...(assigneeUserGroupId && { assigneeUserGroupId }),
+          });
+
+          const sourceName = buildAppDeskSourceName(installedAppId);
+          const appCredentials = encrypt(JSON.stringify({ installedAppId }));
+          const existingAppSource = await db.externalSource.findUnique({
+            where: { name: sourceName },
+            select: { id: true },
+          });
+          if (existingAppSource) {
+            await db.externalSource.update({
+              where: { id: existingAppSource.id },
+              data: { isActive: true, credentials: appCredentials, channelId: channel.id, displayName: name! },
+            });
+          } else {
+            await db.externalSource.create({
+              data: {
+                name: sourceName,
+                sourceType: 'app-desk',
+                displayName: name!,
+                channelId: channel.id,
+                credentials: appCredentials,
+                isActive: true,
+              },
+            });
+          }
+
+          await this.channelParticipantRepository.addParticipant(
+            channel.id,
+            installedApp.userId,
+            'MEMBER'
+          );
+        } catch (error) {
+          logger.error('Failed to create app desk resources, rolling back channel', error);
+          await db.channel.delete({ where: { id: channel.id } }).catch(err => {
+            logger.error(`Channel rollback failed for ${channel.id}`, err);
+          });
+          const code = (error as { code?: string })?.code;
+          if (code === 'P2002') {
+            res.status(409).json({ error: 'A desk already exists for this app' });
+          } else {
+            res.status(500).json({ error: 'Failed to create app desk' });
           }
           return;
         }
@@ -1189,17 +1313,31 @@ export class ChannelController {
 
       const source = await db.externalSource.findFirst({
         where: { channelId },
-        select: { displayName: true, sourceType: true, isActive: true },
+        select: { name: true, displayName: true, sourceType: true, isActive: true },
         orderBy: { createdAt: 'desc' },
       });
       const hasSource = !!source;
       const isConnected = source?.isActive === true;
       const sourceType = source?.sourceType ?? null;
+
+      let connectedLabel: string | null = null;
+      if (source?.sourceType === 'app-desk') {
+        const installedAppId = extractInstalledAppId(source.name) ?? '';
+        const installedApp = await db.installedApps.findUnique({
+          where: { id: installedAppId },
+          select: { app: { select: { name: true } } },
+        });
+        connectedLabel = installedApp?.app?.name ?? null;
+      } else if (source?.sourceType === 'slack-desk') {
+        connectedLabel = extractSlackChannelId(source.name);
+      }
+
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
       if (fromDisplay) {
+        const email = fromDisplay.toLowerCase();
         res
           .status(200)
-          .json({ email: fromDisplay.toLowerCase(), isConnected, hasSource, sourceType });
+          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email });
         return;
       }
 
@@ -1213,14 +1351,15 @@ export class ChannelController {
           select: { email: true },
         });
         if (owner?.email) {
+          const email = owner.email.toLowerCase();
           res
             .status(200)
-            .json({ email: owner.email.toLowerCase(), isConnected, hasSource, sourceType });
+            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });

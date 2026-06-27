@@ -1168,7 +1168,7 @@ const SupportScreen = (): ReactElement => {
   const createChannelMutation = useMutation({
     mutationFn: async (
       data: CreateChannelFormData & {
-        channelType?: 'EMAIL' | 'SLACK' | undefined;
+        channelType?: 'EMAIL' | 'SLACK' | 'APP' | undefined;
         emailDeskOpts?: EmailDeskOpts;
       },
     ) => {
@@ -1194,14 +1194,15 @@ const SupportScreen = (): ReactElement => {
   const handleCreateEmailChannel = (
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
-      channelType?: 'EMAIL' | 'SLACK' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP';
       dlEmail?: string;
       slackChannelId?: string;
+      installedAppId?: string;
     },
   ) => {
-    const { connector, deskType, dlEmail, slackChannelId, ...rest } = data;
+    const { connector, deskType, dlEmail, slackChannelId, installedAppId, ...rest } = data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
     if (deskType === 'SLACK') {
@@ -1213,6 +1214,19 @@ const SupportScreen = (): ReactElement => {
         ...rest,
         channelType: 'SLACK',
         emailDeskOpts: { deskType: 'SLACK', slackChannelId },
+      });
+      return;
+    }
+
+    if (deskType === 'APP') {
+      if (!installedAppId) {
+        toast.error('Please select a Xyne App');
+        return;
+      }
+      createChannelMutation.mutate({
+        ...rest,
+        channelType: 'APP',
+        emailDeskOpts: { deskType: 'APP', installedAppId },
       });
       return;
     }
@@ -3440,7 +3454,7 @@ export const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK ? (
+                  {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
                     <SlackThread
                       emails={emails}
                       ticketId={ticket?.id}
@@ -3475,9 +3489,13 @@ export const SupportTicketDetail = ({
               )}
             </div>
             <div className='absolute inset-x-0 bottom-0 z-20' ref={composerOverlayRef}>
-              {channel?.type === ChannelType.SLACK ? (
+              {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
                 conversationId ? (
-                  <SlackComposer conversationId={conversationId} channelId={channel?.id ?? null} />
+                  <SlackComposer
+                    conversationId={conversationId}
+                    channelId={channel?.id ?? null}
+                    variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
+                  />
                 ) : null
               ) : (
                 <AnimatePresence mode='popLayout' initial={false}>

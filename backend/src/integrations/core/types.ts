@@ -18,6 +18,7 @@ export enum ExternalSourcePlatform {
   SLACK_DESK = 'slack-desk',
   MICROSOFT = 'microsoft',
   GOOGLE = 'google',
+  APP_DESK = 'app-desk',
 }
 
 /**

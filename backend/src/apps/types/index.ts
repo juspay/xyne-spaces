@@ -29,6 +29,7 @@ export enum AppEventType {
     USER_MENTIONED = 'USER_MENTIONED',
     EMAIL = 'EMAIL',
     ADDITIONAL_FORM_FIELD_UPDATED = 'ADDITIONAL_FORM_FIELD_UPDATED',
+    DESK_REPLY = 'DESK_REPLY',
 }
 
 export enum ContentFormat {
@@ -132,12 +133,32 @@ export interface AdditionalFormFieldUpdatedPayload {
     workspaceId: string;
 }
 
+export interface DeskReplyAttachment {
+    name: string;
+    url: string;
+    mimeType: string;
+    size?: number;
+}
+
+export interface DeskReplyEventPayload {
+    channelId: string;
+    conversationId: string;
+    ticketId?: string;
+    threadId: string;
+    externalId: string;
+    body: string;
+    attachments?: DeskReplyAttachment[];
+    replierUserId: string;
+    replierName?: string;
+    workspaceId?: string;
+}
+
 /**
  * Base app event type with dynamic, event-specific payload
  */
 export interface BaseAppEvent {
     eventType: AppEventType;
-    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload | EmailEventPayload | AdditionalFormFieldUpdatedPayload;
+    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload | EmailEventPayload | AdditionalFormFieldUpdatedPayload | DeskReplyEventPayload;
     timestamp: string; // ISO timestamp
 }
 

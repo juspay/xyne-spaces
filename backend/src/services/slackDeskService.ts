@@ -1,11 +1,15 @@
 import { EmailType, Prisma, MessageDirection, ExternalEntityType } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { decrypt } from '@/services/encryptionService';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
+import { extractSlackChannelId } from '@/integrations/core/deskSources';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
+import { ExternalAttachmentService } from '@/services/externalAttachmentService';
+import { AttachmentEntityType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { htmlToSlackMrkdwn } from '@/integrations/adapters/slack-desk/slackMrkdwn';
 
@@ -21,8 +25,9 @@ class SlackDeskService {
     conversationId: string;
     body: string;
     userId: string;
+    attachmentIds?: string[];
   }): Promise<{ emailId: string; slackTs: string }> {
-    const { conversationId, body, userId } = params;
+    const { conversationId, body, userId, attachmentIds = [] } = params;
 
     // 1. Fetch conversation and thread info
     const conversation = await this.conversationRepo.findById(conversationId);
@@ -47,7 +52,7 @@ class SlackDeskService {
     }
 
     // Determine Slack channel ID from source name (slack-desk-C09RF2JQTE1 → C09RF2JQTE1)
-    const slackChannelId = externalSource.name.replace('slack-desk-', '');
+    const slackChannelId = extractSlackChannelId(externalSource.name);
     if (!slackChannelId) {
       throw new Error(`Cannot extract Slack channel ID from source name: ${externalSource.name}`);
     }
@@ -69,61 +74,84 @@ class SlackDeskService {
     }
 
     const mrkdwnBody = htmlToSlackMrkdwn(body);
+    const hasText = mrkdwnBody.trim().length > 0;
+    if (!hasText && attachmentIds.length === 0) {
+      throw new Error('Reply must have text or at least one attachment');
+    }
+    let messageTs: string;
 
-    const postMessage = async (token: string) => {
-      const slackResponse = await fetch('https://slack.com/api/chat.postMessage', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          channel: slackChannelId,
-          thread_ts: threadTs,
-          text: mrkdwnBody,
-        }),
-      });
+    if (hasText) {
+      const postMessage = async (token: string) => {
+        const slackResponse = await fetch('https://slack.com/api/chat.postMessage', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            channel: slackChannelId,
+            thread_ts: threadTs,
+            text: mrkdwnBody,
+          }),
+        });
 
-      return (await slackResponse.json()) as {
-        ok: boolean;
-        error?: string;
-        ts?: string;
-        message?: { ts: string };
+        return (await slackResponse.json()) as {
+          ok: boolean;
+          error?: string;
+          ts?: string;
+          message?: { ts: string };
+        };
       };
-    };
 
-    let slackData = await postMessage(authToken);
+      let slackData = await postMessage(authToken);
 
-    // Self-heal: if user token is revoked, delete it and retry with bot token
-    if (
-      !slackData.ok &&
-      userExternalToken &&
-      /token_revoked|invalid_auth|not_authed|account_inactive/.test(slackData.error || '')
-    ) {
-      logger.warn(`${TAG} User token revoked, falling back to bot token`, {
-        userId,
-        slackError: slackData.error,
-      });
-      await this.prisma.userExternalToken.delete({
-        where: { id: userExternalToken.id },
-      });
-      authToken = creds.botOauthToken;
-      senderName = 'Xyne Bot';
-      slackData = await postMessage(authToken);
+      // Self-heal: if user token is revoked, delete it and retry with bot token
+      if (
+        !slackData.ok &&
+        userExternalToken &&
+        /token_revoked|invalid_auth|not_authed|account_inactive/.test(slackData.error || '')
+      ) {
+        logger.warn(`${TAG} User token revoked, falling back to bot token`, {
+          userId,
+          slackError: slackData.error,
+        });
+        await this.prisma.userExternalToken.delete({
+          where: { id: userExternalToken.id },
+        });
+        authToken = creds.botOauthToken;
+        senderName = 'Xyne Bot';
+        slackData = await postMessage(authToken);
+      }
+
+      if (!slackData.ok) {
+        logger.error(`${TAG} Slack chat.postMessage failed`, {
+          error: slackData.error,
+          channel: slackChannelId,
+          threadTs,
+        });
+        throw new Error(`Slack API error: ${slackData.error}`);
+      }
+
+      const ts = slackData.ts || slackData.message?.ts;
+      if (!ts) {
+        throw new Error('Slack API returned ok but no message timestamp');
+      }
+      messageTs = ts;
+    } else {
+      messageTs = `att-${randomUUID()}`;
     }
 
-    if (!slackData.ok) {
-      logger.error(`${TAG} Slack chat.postMessage failed`, {
-        error: slackData.error,
-        channel: slackChannelId,
-        threadTs,
-      });
-      throw new Error(`Slack API error: ${slackData.error}`);
-    }
-
-    const messageTs = slackData.ts || slackData.message?.ts;
-    if (!messageTs) {
-      throw new Error('Slack API returned ok but no message timestamp');
+    // 3b. Upload reply attachments into the same Slack thread (best-effort). Collect
+    //     the staged rows so we can rebind them to the reply email below.
+    let stagedAttachmentRowIds: string[] = [];
+    if (attachmentIds.length > 0) {
+      try {
+        const { attachments, stagedRowIds } = await new ExternalAttachmentService().prepareOutboundAttachments({ attachmentIds });
+        stagedAttachmentRowIds = stagedRowIds;
+        await this.uploadAttachmentsToSlack(creds.botOauthToken, slackChannelId, threadTs, attachments);
+      } catch (err) {
+        logger.error(`${TAG} Failed to upload attachments to Slack`, { err });
+      }
     }
 
     // 4. Create Email + ExternalMessage dedup atomically.
@@ -137,7 +165,7 @@ class SlackDeskService {
           data: {
             type: EmailType.REPLY,
             subject: initialEmail.subject,
-            body,
+            body: hasText ? body : '',
             to: [],
             from: senderName,
             cc: [],
@@ -183,6 +211,13 @@ class SlackDeskService {
       throw err;
     }
 
+    if (stagedAttachmentRowIds.length > 0) {
+      await this.prisma.messageAttachment.updateMany({
+        where: { id: { in: stagedAttachmentRowIds } },
+        data: { entityType: AttachmentEntityType.EMAIL, entityId: email.id, conversationId },
+      }).catch(err => logger.error(`${TAG} Failed to rebind attachments to reply email`, { err }));
+    }
+
     await syncTicketEmailCount(this.prisma, conversationId);
     void dispatchEmailEventForEmailId(email.id);
 
@@ -204,6 +239,49 @@ class SlackDeskService {
     });
 
     return { emailId: email.id, slackTs: messageTs };
+  }
+
+  private async uploadAttachmentsToSlack(
+    botToken: string,
+    slackChannelId: string,
+    threadTs: string,
+    attachments: Array<{ name: string; contentType: string; content: Buffer | string }>,
+  ): Promise<void> {
+    for (const att of attachments) {
+      const buffer = typeof att.content === 'string' ? Buffer.from(att.content) : att.content;
+
+      const getResp = await fetch('https://slack.com/api/files.getUploadURLExternal', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ filename: att.name, length: String(buffer.length) }),
+      });
+      const getData = (await getResp.json()) as { ok: boolean; error?: string; upload_url?: string; file_id?: string };
+      if (!getData.ok || !getData.upload_url || !getData.file_id) {
+        throw new Error(`files.getUploadURLExternal failed: ${getData.error ?? 'unknown'}`);
+      }
+
+      const form = new FormData();
+      form.append('file', new Blob([buffer], { type: att.contentType || 'application/octet-stream' }), att.name);
+      const uploadResp = await fetch(getData.upload_url, { method: 'POST', body: form });
+      if (!uploadResp.ok) {
+        throw new Error(`Slack upload_url POST failed: ${uploadResp.status}`);
+      }
+
+      const completeResp = await fetch('https://slack.com/api/files.completeUploadExternal', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: [{ id: getData.file_id, title: att.name }],
+          channel_id: slackChannelId,
+          thread_ts: threadTs,
+        }),
+      });
+      const completeData = (await completeResp.json()) as { ok: boolean; error?: string };
+      if (!completeData.ok) {
+        throw new Error(`files.completeUploadExternal failed: ${completeData.error ?? 'unknown'}`);
+      }
+      logger.info(`${TAG} Uploaded attachment to Slack thread`, { name: att.name, threadTs });
+    }
   }
 }
 

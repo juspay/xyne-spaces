@@ -107,6 +107,7 @@ enum DeskType {
   EMAIL
   DL
   SLACK
+  APP
   @@schema("public")
 }
 
@@ -236,6 +237,7 @@ enum ChannelType {
   EMAIL
   SUPPORT
   SLACK
+  APP
   @@schema("public")
 }
 

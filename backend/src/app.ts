@@ -52,6 +52,7 @@ import googleAuthRoutes from '@/integrations/routes/google-auth';
 import deskIntegrationRoutes from '@/integrations/routes/desk-integration';
 import workspaceDeskRoutes from '@/integrations/routes/workspace-desk';
 import slackDeskRoutes from '@/integrations/routes/slack-desk';
+import appDeskRoutes from '@/integrations/routes/app-desk';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
@@ -266,6 +267,7 @@ export class App {
     this.app.use('/api/integrations/desk', deskIntegrationRoutes);
     this.app.use('/api/integrations/workspace-desk', workspaceDeskRoutes);
     this.app.use('/api/integrations/slack-desk', slackDeskRoutes);
+    this.app.use('/api/integrations/app-desk', appDeskRoutes);
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
 
     // Migration routes (body parsing handled in route file)

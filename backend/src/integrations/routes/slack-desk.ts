@@ -14,6 +14,7 @@ import { ChannelType } from '@prisma/client';
 import { WebClient } from '@slack/web-api';
 import { logger } from '@/utils/logger';
 import { slackDeskService } from '@/services/slackDeskService';
+import { DESK_SOURCE_PREFIXES, extractSlackChannelId } from '@/integrations/core/deskSources';
 import { decrypt } from '@/services/encryptionService';
 import { redisService } from '@/services/redisService';
 
@@ -83,14 +84,16 @@ router.get(
       // Mark channels that already have an active slack-desk ExternalSource
       const existingSources = await db.externalSource.findMany({
         where: {
-          name: { startsWith: 'slack-desk-' },
+          name: { startsWith: DESK_SOURCE_PREFIXES.SLACK },
           isActive: true,
         },
         select: { name: true },
       });
 
       const claimedChannelIds = new Set(
-        existingSources.map(s => s.name.replace('slack-desk-', ''))
+        existingSources
+          .map(s => extractSlackChannelId(s.name))
+          .filter((id): id is string => id !== null)
       );
 
       const available = channels.map(ch => ({
@@ -118,18 +121,20 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { conversationId } = req.params;
-      const { body } = req.body as { body: string };
+      const { body, attachmentIds } = req.body as { body?: string; attachmentIds?: string[] };
       const userId = req.user!.id;
 
-      if (!body || typeof body !== 'string' || body.trim().length === 0) {
-        res.status(400).json({ error: 'body is required' });
+      const ids = Array.isArray(attachmentIds) ? attachmentIds : [];
+      if ((!body || typeof body !== 'string' || body.trim().length === 0) && ids.length === 0) {
+        res.status(400).json({ error: 'body or at least one attachment is required' });
         return;
       }
 
       const result = await slackDeskService.sendSlackReply({
         conversationId,
-        body: body.trim(),
+        body: (body ?? '').trim(),
         userId,
+        attachmentIds: ids,
       });
 
       res.json(result);

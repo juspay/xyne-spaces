@@ -19,7 +19,7 @@ export async function sendWebhookNotification(
     webhookUrl: string,
     event: BaseAppEvent,
     signingSecret: string
-): Promise<void> {
+): Promise<{ status: number; body: unknown }> {
     const payload = JSON.stringify(event);
     const signature = signWebhookPayload(payload, signingSecret);
 
@@ -34,9 +34,10 @@ export async function sendWebhookNotification(
             body: payload,
         });
 
+        const text = await response.text().catch(() => '');
+
         if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Unable to read error response');
-            throw new Error(`Webhook request failed with status ${response.status}: ${errorText}`);
+            throw new Error(`Webhook request failed with status ${response.status}: ${text || 'Unable to read error response'}`);
         }
 
         logger.info('[handleAppMentionEvents] Successfully sent webhook notification', {
@@ -44,6 +45,10 @@ export async function sendWebhookNotification(
             eventType: event.eventType,
             status: response.status,
         });
+
+        let body: unknown = text;
+        try { body = text ? JSON.parse(text) : undefined; } catch { /* keep raw text */ }
+        return { status: response.status, body };
     } catch (error) {
         throw error;
     }

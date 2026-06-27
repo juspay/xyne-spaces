@@ -5,7 +5,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { all, createLowlight } from 'lowlight';
-import { ArrowUp, Loader2 } from 'lucide-react';
+import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AutoDraftStatus } from '@xyne/shared';
@@ -17,18 +17,28 @@ import Tooltip from '../../ui/Tooltip';
 import { EditorToolbar, EmojiPickerButton } from '../../ui/EditorToolbar';
 import { MentionExtension, mentionPluginKey } from '../../ui/TipTapExtensions';
 import { MentionSelector } from '../../ui/Selectors';
+import { useComposerDragDrop } from '../EmailComposer/useComposerDragDrop';
+import { uploadComposerAttachments } from '../EmailComposer/composerAttachmentUpload';
 
 const lowlight = createLowlight(all);
 
 interface SlackComposerProps {
   conversationId: string;
   channelId?: string | null;
+  variant?: 'slack' | 'app';
 }
 
-const SlackComposer = ({ conversationId, channelId }: SlackComposerProps): ReactElement => {
+const SlackComposer = ({
+  conversationId,
+  channelId,
+  variant = 'slack',
+}: SlackComposerProps): ReactElement => {
   const [sending, setSending] = useState(false);
   const [content, setContent] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [attachments, setAttachments] = useState<{ id: string; name: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: slackAuth, isLoading: authLoading } = useSlackUserAuth();
   const disconnectMutation = useDisconnectSlackUser();
   const { filteredUsers, searchUsers } = useSlackUsers();
@@ -128,22 +138,34 @@ const SlackComposer = ({ conversationId, channelId }: SlackComposerProps): React
 
         return false;
       },
+      handlePaste: (_view, event) => {
+        const files = Array.from(event.clipboardData?.files ?? []);
+        if (files.length > 0) {
+          event.preventDefault();
+          void uploadFilesList(files);
+          return true;
+        }
+        return false;
+      },
     },
   });
 
   const handleSend = useCallback(async () => {
-    if (!editor || sending) return;
+    if (!editor || sending || uploading) return;
     const text = editor.getText().trim();
-    if (!text) return;
+    if (!text && attachments.length === 0) return;
 
     setSending(true);
     try {
       const html = editor.getHTML();
-      await apiInstance.post(`/integrations/slack-desk/${conversationId}/reply`, {
+      const replyBase = variant === 'app' ? '/integrations/app-desk' : '/integrations/slack-desk';
+      await apiInstance.post(`${replyBase}/${conversationId}/reply`, {
         body: html,
+        ...(attachments.length > 0 && { attachmentIds: attachments.map(a => a.id) }),
       });
       editor.commands.setContent('');
       setContent('');
+      setAttachments([]);
       lastLoadedDraftRef.current = '';
       deleteDraft();
     } catch {
@@ -151,7 +173,46 @@ const SlackComposer = ({ conversationId, channelId }: SlackComposerProps): React
     } finally {
       setSending(false);
     }
-  }, [editor, sending, conversationId, deleteDraft]);
+  }, [editor, sending, uploading, attachments, conversationId, deleteDraft, variant]);
+
+  const uploadFilesList = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return;
+      setUploading(true);
+      try {
+        const { attachmentIds, failures } = await uploadComposerAttachments({
+          files,
+          conversationId,
+        });
+        if (failures?.length) {
+          toast.error(failures.map(f => `${f.filename}: ${f.error}`).join('; '));
+        }
+        setAttachments(prev => [
+          ...prev,
+          ...attachmentIds.map((id, i) => ({ id, name: files[i]?.name ?? 'file' })),
+        ]);
+      } catch {
+        toast.error('Failed to upload attachment');
+      } finally {
+        setUploading(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleFilesSelected = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      e.target.value = '';
+      void uploadFilesList(files);
+    },
+    [uploadFilesList],
+  );
+
+  const { isDraggingFiles, dragHandlers } = useComposerDragDrop(uploadFilesList);
+
+  const removeAttachment = (id: string): void =>
+    setAttachments(prev => prev.filter(a => a.id !== id));
 
   useEffect(() => {
     if (!editor) return;
@@ -188,8 +249,8 @@ const SlackComposer = ({ conversationId, channelId }: SlackComposerProps): React
 
   return (
     <div className='px-4 py-3 border-t border-border'>
-      {/* Auth status */}
-      {!authLoading && (
+      {/* Auth status (Slack send-as-user — not applicable to app desks) */}
+      {variant === 'slack' && !authLoading && (
         <div className='flex items-center gap-2 mb-2 text-xs text-muted-foreground'>
           {slackAuth?.connected ? (
             <>
@@ -226,12 +287,25 @@ const SlackComposer = ({ conversationId, channelId }: SlackComposerProps): React
 
       {/* Rich text editor */}
       <div
-        className={`overflow-hidden rounded-lg border transition-all bg-card ${
-          isFocused ? 'border-ring' : 'border-input'
+        className={`relative overflow-hidden rounded-lg border transition-all bg-card ${
+          isDraggingFiles
+            ? 'border-primary ring-1 ring-primary'
+            : isFocused
+              ? 'border-ring'
+              : 'border-input'
         }`}
         data-track-category='slack-composer'
         data-track-name='compose-reply'
+        {...dragHandlers}
       >
+        {isDraggingFiles && (
+          <div className='absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-primary/10 border-2 border-dashed border-primary pointer-events-none'>
+            <span className='flex items-center gap-2 text-sm font-medium text-primary'>
+              <Paperclip size={16} />
+              Drop files to attach
+            </span>
+          </div>
+        )}
         {/* Mention dropdown */}
         <MentionSelector
           editor={editor}
@@ -267,26 +341,74 @@ const SlackComposer = ({ conversationId, channelId }: SlackComposerProps): React
           />
         </div>
 
-        {/* Footer: emoji + send */}
+        {/* Attachment chips */}
+        {attachments.length > 0 && (
+          <div className='flex flex-wrap gap-2 px-3 pb-2'>
+            {attachments.map(a => (
+              <span
+                key={a.id}
+                className='inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-foreground max-w-[200px]'
+              >
+                <Paperclip size={12} className='shrink-0 text-muted-foreground' />
+                <span className='truncate'>{a.name}</span>
+                <button
+                  type='button'
+                  onClick={() => removeAttachment(a.id)}
+                  className='shrink-0 text-muted-foreground hover:text-foreground'
+                  aria-label={`Remove ${a.name}`}
+                  data-track-category='slack-composer'
+                  data-track-name='remove-attachment'
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Footer: attach + emoji + send */}
         <div className='flex items-center justify-between p-2 border-t border-border/50'>
           <div className='flex items-center gap-1'>
+            <input
+              ref={fileInputRef}
+              type='file'
+              multiple
+              className='hidden'
+              onChange={e => void handleFilesSelected(e)}
+            />
+            <button
+              type='button'
+              onClick={() => fileInputRef.current?.click()}
+              disabled={sending || uploading}
+              className='p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              data-track-category='slack-composer'
+              data-track-name='attach-file'
+              aria-label='Attach files'
+            >
+              {uploading ? <Loader2 size={16} className='animate-spin' /> : <Paperclip size={16} />}
+            </button>
             <EmojiPickerButton onEmojiSelect={handleEmojiSelect} disabled={sending} />
           </div>
-          <button
-            type='button'
-            onClick={() => void handleSend()}
-            disabled={!content || sending}
-            className={`p-2 rounded-md transition-all ${
-              content && !sending
-                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
-            }`}
-            data-track-category='slack-composer'
-            data-track-name='send-reply'
-            aria-label='Send reply'
-          >
-            {sending ? <Loader2 size={16} className='animate-spin' /> : <ArrowUp size={16} />}
-          </button>
+          {(() => {
+            const canSend = (!!content || attachments.length > 0) && !sending && !uploading;
+            return (
+              <button
+                type='button'
+                onClick={() => void handleSend()}
+                disabled={!canSend}
+                className={`p-2 rounded-md transition-all ${
+                  canSend
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                    : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
+                }`}
+                data-track-category='slack-composer'
+                data-track-name='send-reply'
+                aria-label='Send reply'
+              >
+                {sending ? <Loader2 size={16} className='animate-spin' /> : <ArrowUp size={16} />}
+              </button>
+            );
+          })()}
         </div>
       </div>
     </div>
