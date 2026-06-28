@@ -306,9 +306,15 @@ const SearchResultItem = ({
               {' '}
               <RenderMessageWithHTML message={result.title} />
             </div>
-            <div className='text-xs text-muted-foreground'>
-              {' '}
-              <RenderMessageWithHTML message={result.subtitle} />
+            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
+              <span className='truncate'>
+                <RenderMessageWithHTML message={result.subtitle} />
+              </span>
+              {result.metadata.timestamp && (
+                <span className='shrink-0 whitespace-nowrap'>
+                  {utcToIst(result.metadata.timestamp)}
+                </span>
+              )}
             </div>
           </div>
           {isSelected && <SelectedBadge />}

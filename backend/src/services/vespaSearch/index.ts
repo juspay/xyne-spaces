@@ -5,7 +5,7 @@ import config from 'vespa/src/config';
 import { transformVespaResults } from './resultTransform';
 import { db } from '@/database/client';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
-import { MatchFeatures, RankProfile, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
+import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
 
 
 // Create dependencies
@@ -547,9 +547,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
         'files': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE },
         'users': { app: null, optionsKey: 'slack', docType: VespaDocType.USER },
         'people': { app: null, optionsKey: 'slack', docType: VespaDocType.USER },
-        'canvas': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: 'canvas' },
-        'transcript': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: 'transcript' },
-        'rca': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: 'RCA' },
+        'canvas': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: SubApp.CANVAS },
+        'transcript': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: SubApp.TRANSCRIPT },
+        'rca': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: SubApp.RCA },
         'emails': { app: 'mail', optionsKey: 'mail', docType: VespaDocType.MAIL },
       };
 

@@ -2,6 +2,20 @@ import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { GitCompare, Hash, Loader2, Mail, MessageCircle, Paperclip, X } from 'lucide-react';
+
+const utcToIst = (utcString?: string): string => {
+  if (!utcString) return '';
+  const dateUtc = new Date(`${utcString} UTC`);
+  return dateUtc.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+};
 import ThreadMessages from '../ThreadPannel';
 import { UserProfile } from '../../ui/UserProfile/UserProfile';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -675,11 +689,16 @@ function ResultsBody({
                 <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
                   {icon}
                 </div>
-                <div className='min-w-0'>
+                <div className='min-w-0 flex-1'>
                   <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
-                  {result.subtitle && (
-                    <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
-                  )}
+                  <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
+                    {result.subtitle && <span className='truncate'>{result.subtitle}</span>}
+                    {result.metadata.timestamp && (
+                      <span className='shrink-0 whitespace-nowrap'>
+                        {utcToIst(result.metadata.timestamp)}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </button>
             );
