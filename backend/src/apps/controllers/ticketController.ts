@@ -178,8 +178,57 @@ type CustomFieldWritePayload = {
   }>;
 };
 
+const validateUserCustomFieldReferences = async (
+  fieldValues: Array<{
+    fieldName: string;
+    fieldType: string;
+    actualFieldValue: Prisma.InputJsonValue;
+  }>,
+  workspaceId: string,
+): Promise<void> => {
+  const userFieldEntries = fieldValues.filter(fieldValue => fieldValue.fieldType === 'USER');
+  if (userFieldEntries.length === 0) return;
+
+  const userIds = Array.from(
+    new Set(
+      userFieldEntries.flatMap(fieldValue =>
+        Array.isArray(fieldValue.actualFieldValue)
+          ? fieldValue.actualFieldValue
+          : [fieldValue.actualFieldValue],
+      ).filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+    ),
+  );
+
+  if (userIds.length === 0) return;
+
+  const users = await prismaClient.user.findMany({
+    where: {
+      id: { in: userIds },
+      workspaceId,
+    },
+    select: { id: true },
+  });
+  const validUserIds = new Set(users.map(user => user.id));
+
+  for (const fieldValue of userFieldEntries) {
+    const referencedUserIds = (
+      Array.isArray(fieldValue.actualFieldValue)
+        ? fieldValue.actualFieldValue
+        : [fieldValue.actualFieldValue]
+    ).filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    const invalidUserIds = referencedUserIds.filter(userId => !validUserIds.has(userId));
+    if (invalidUserIds.length > 0) {
+      throw new Error(
+        `Field "${fieldValue.fieldName}" contains invalid user ID${invalidUserIds.length > 1 ? 's' : ''}: ${invalidUserIds.join(', ')}`,
+      );
+    }
+  }
+};
+
 const buildCustomFieldWritePayload = async (
   boardId: string,
+  workspaceId: string,
   dynamicFields: Record<string, unknown> | undefined,
   options?: { requireAllRequiredFields?: boolean },
 ): Promise<CustomFieldWritePayload | undefined> => {
@@ -243,6 +292,18 @@ const buildCustomFieldWritePayload = async (
       actualFieldValue: normalized.actualFieldValue,
     };
   });
+
+  await validateUserCustomFieldReferences(
+    fieldValues.map(fieldValue => {
+      const field = fieldByName.get(fieldValue.fieldName);
+      return {
+        fieldName: fieldValue.fieldName,
+        fieldType: field?.fieldType ?? '',
+        actualFieldValue: fieldValue.actualFieldValue,
+      };
+    }),
+    workspaceId,
+  );
 
   return {
     formId: formMapping.formId,
@@ -563,7 +624,11 @@ export class TicketController {
 
       let customFieldValues: CustomFieldWritePayload | undefined;
       try {
-        customFieldValues = await buildCustomFieldWritePayload(boardId, dynamicFields);
+        customFieldValues = await buildCustomFieldWritePayload(
+          boardId,
+          req.user!.workspaceId!,
+          dynamicFields,
+        );
       } catch (error) {
         res.status(400).json({
           error: error instanceof Error ? error.message : 'Invalid custom field values',
@@ -882,9 +947,14 @@ export class TicketController {
 
       let customFieldValues: CustomFieldWritePayload | undefined;
       try {
-        customFieldValues = await buildCustomFieldWritePayload(targetBoardId, dynamicFields, {
-          requireAllRequiredFields: false,
-        });
+        customFieldValues = await buildCustomFieldWritePayload(
+          targetBoardId,
+          req.user!.workspaceId!,
+          dynamicFields,
+          {
+            requireAllRequiredFields: false,
+          },
+        );
       } catch (error) {
         res.status(400).json({
           error: error instanceof Error ? error.message : 'Invalid custom field values',
@@ -1135,6 +1205,7 @@ export class TicketController {
     try {
       const { xyneId } = req.params;
       const workspaceId = req.user?.workspaceId;
+      const userId = req.user?.id;
 
       if (!xyneId) {
         res.status(400).json({
@@ -1147,6 +1218,14 @@ export class TicketController {
       if (!workspaceId) {
         res.status(400).json({
           error: 'Authenticated workspace is required',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
+
+      if (!userId) {
+        res.status(400).json({
+          error: 'Authenticated user is required',
           code: 'VALIDATION_ERROR',
         });
         return;
@@ -1169,6 +1248,27 @@ export class TicketController {
         res.status(404).json({
           error: `Ticket with xyneId ${xyneId} not found`,
           code: 'TICKET_NOT_FOUND',
+        });
+        return;
+      }
+
+      const channel = await repositories.channels.findById(ticketInfo.ticket.channelId);
+      if (!channel) {
+        res.status(404).json({
+          error: 'Channel not found',
+          code: 'CHANNEL_NOT_FOUND',
+        });
+        return;
+      }
+
+      const isParticipant = await repositories.channelParticipants.isParticipant(
+        ticketInfo.ticket.channelId,
+        userId,
+      );
+      if (!isParticipant) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Bot does not have channel access',
         });
         return;
       }
@@ -1243,7 +1343,7 @@ export class TicketController {
       // Get the field by name
       const field = await prismaClient.formFields.findFirst({
         where: { formId: formMapping.formId, fieldName: fieldName },
-        select: { id: true },
+        select: { id: true, fieldName: true, fieldType: true, fieldEnum: true },
       });
 
       if (!field) {
@@ -1251,8 +1351,27 @@ export class TicketController {
         return;
       }
 
+      let normalizedFieldValue: ReturnType<typeof normalizeCustomFieldValue>;
+      try {
+        normalizedFieldValue = normalizeCustomFieldValue(field, fieldValue);
+        await validateUserCustomFieldReferences(
+          [{
+            fieldName: field.fieldName,
+            fieldType: field.fieldType,
+            actualFieldValue: normalizedFieldValue.actualFieldValue,
+          }],
+          ticket.workspaceId,
+        );
+      } catch (error) {
+        res.status(400).json({
+          error: error instanceof Error ? error.message : 'Invalid form field value',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
+
       const timestamp = new Date();
-      const stringValue = String(fieldValue);
+      const stringValue = normalizedFieldValue.fieldValue;
 
       // Upsert the form entity value
       const existing = await prismaClient.formEntityValues.findFirst({
@@ -1262,7 +1381,11 @@ export class TicketController {
       if (existing) {
         await prismaClient.formEntityValues.update({
           where: { id: existing.id },
-          data: { fieldValue: stringValue, actualFieldValue: stringValue, updatedAt: timestamp },
+          data: {
+            fieldValue: stringValue,
+            actualFieldValue: normalizedFieldValue.actualFieldValue,
+            updatedAt: timestamp,
+          },
         });
       } else {
         await prismaClient.formEntityValues.create({
@@ -1273,7 +1396,7 @@ export class TicketController {
             formId: formMapping.formId,
             fieldId: field.id,
             fieldValue: stringValue,
-            actualFieldValue: stringValue,
+            actualFieldValue: normalizedFieldValue.actualFieldValue,
             createdAt: timestamp,
             updatedAt: timestamp,
           },

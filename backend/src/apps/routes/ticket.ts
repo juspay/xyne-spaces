@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { TicketController } from '../controllers/ticketController';
-import { validateChannelAccessForPost, validateChannelAccessForGet} from '../middelware/channelValidation';
+import { validateChannelAccessForPost } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
 import { uploadMultiple } from '@/middleware/upload';
 
@@ -15,7 +15,7 @@ router.post('/updateFormField', requirePermission('tickets:write'), validateChan
 router.post('/disableEmailSend', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.disableEmailSend);
 router.post('/enableEmailSend', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.enableEmailSend);
 router.get('/listBySender', requirePermission('tickets:read'), ticketController.listBySender);
-router.get('/:xyneId', requirePermission('tickets:read'), validateChannelAccessForGet, ticketController.getInfo);
+router.get('/:xyneId', requirePermission('tickets:read'), ticketController.getInfo);
 
 
 export default router;
