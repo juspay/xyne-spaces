@@ -1,3 +1,10 @@
+## [1.177.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.176.0...v1.177.0) (2026-06-28)
+
+
+### Features
+
+* add orderBy param to vespaSearch using Vespa native ORDER BY ([125c62f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/125c62fa11b7ef6aafded00bd8da0b4a16380432)), closes [#8108](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8108)
+
 ## [1.176.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.175.1...v1.176.0) (2026-06-28)
 
 
