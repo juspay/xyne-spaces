@@ -1,3 +1,15 @@
+## [1.178.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.177.0...v1.178.0) (2026-06-28)
+
+
+### Features
+
+* route Bitbucket ticket-key links to Xyne Spaces ([6e8aac1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6e8aac11268ba86fcb39986ec73a872f55c93b2d)), closes [#8121](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8121)
+
+
+### Bug Fixes
+
+* add to main ([98420c1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/98420c1c39d1660e07cea9cca63b3937ab2d4eb1)), closes [#8036](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8036)
+
 ## [1.177.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.176.0...v1.177.0) (2026-06-28)
 
 
