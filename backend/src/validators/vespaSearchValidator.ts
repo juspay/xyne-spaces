@@ -275,6 +275,12 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'groupBy must be a string'
   }),
 
+  // Sort order for results. newest/oldest sort by document timestamp; relevance uses Vespa ranking.
+  // When newest/oldest is set, grouping is disabled automatically (flat ranked list).
+  orderBy: Joi.string().valid('newest', 'oldest', 'relevance').optional().messages({
+    'any.only': 'orderBy must be one of: newest, oldest, relevance'
+  }),
+
   // Chunk-level KB drill-in (opt-in). Used by claw-auth's kb-get-chunks /
   // kb-search-within-doc tools. When 'true' AND fileId is set, the handler
   // short-circuits the normal pipeline and emits raw chunk-level data.

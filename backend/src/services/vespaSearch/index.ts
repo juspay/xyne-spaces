@@ -167,6 +167,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       includeChunkLevel,   // 'true' => emit chunk-level data for KB drill-in
       startChunkIndex,     // 0-based offset into the doc's chunks (no-query mode)
       chunkLimit,          // max chunks to return in no-query mode (1-30, default 15)
+      orderBy,             // 'newest' | 'oldest' | 'relevance' — Vespa ORDER BY timestamp
       // Note: subApp was moved up to be with other frontend filters
     } = req.query;
 
@@ -716,6 +717,12 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // My-channels toggle: when true, scope chat results to channels the user is a
     // member of (drop the public-non-member access branch in YqlBuilder).
     options.slack.onlyMyChannels = onlyMyChannels === 'true';
+
+    // Sort by timestamp: force flat (ungrouped) results so ORDER BY applies cleanly.
+    if (orderBy === 'newest' || orderBy === 'oldest') {
+      options.sort = orderBy as string;
+      options.groupBy = '';
+    }
 
     // Call vespa search
     const results = await vespaService.searchService.searchVespa(
