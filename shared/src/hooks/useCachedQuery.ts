@@ -28,7 +28,19 @@ export interface UseCachedQueryOptions {
   updatedAtEnabled?: boolean;
   /** Enable cursor pagination mode. Cursor fields are automatically derived from the query's orderBy. */
   cursorEnabled?: boolean;
+  /** Return source metadata as a third tuple item for cursor pagination. */
+  includeMeta?: boolean;
 }
+
+export interface UseCachedQueryMeta {
+  source: 'cache' | 'fresh';
+}
+
+export type CachedQueryResult<TReturn> = readonly [
+  QueryResult<TReturn>[0],
+  QueryResult<TReturn>[1],
+  UseCachedQueryMeta,
+];
 
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
 const shouldUpdateLastUpdatedAt = (currentLastUpdatedAt: number | undefined): boolean => {
@@ -116,7 +128,7 @@ export function useCachedQuery<
 >(
   query: QueryRequest<TTable, TInput, TOutput, TSchema, TReturn, TContext>,
   options?: UseCachedQueryOptions | UseQueryOptions | boolean,
-): QueryResult<TReturn> {
+): QueryResult<TReturn> | CachedQueryResult<TReturn> {
   const updatedAtEnabled =
     typeof options === 'object' && options !== null && 'updatedAtEnabled' in options
       ? options.updatedAtEnabled
@@ -128,11 +140,26 @@ export function useCachedQuery<
       ? !!options.cursorEnabled
       : false;
 
+  const includeMeta =
+    typeof options === 'object' && options !== null && 'includeMeta' in options
+      ? !!options.includeMeta
+      : false;
+
   // Extract cursor (start), limit, and direction from query args for filtering
   const queryArgs = query.args as Record<string, unknown> | undefined;
   const cursor = queryArgs?.['start'];
   const limit = (queryArgs?.['limit'] as number) || 0;
   const direction = queryArgs?.['direction'] as 'forward' | 'backward' | undefined;
+  const isInitialCursorPage = cursor === null || cursor === undefined;
+
+  const withMeta = (
+    result: QueryResult<TReturn>,
+    source: UseCachedQueryMeta['source'],
+  ): QueryResult<TReturn> | CachedQueryResult<TReturn> => {
+    return includeMeta && cursorEnabled && isInitialCursorPage
+      ? ([result[0], result[1], { source }] as CachedQueryResult<TReturn>)
+      : result;
+  };
 
   const zero = useZero();
   const { logger } = useInstrumentation();
@@ -356,11 +383,15 @@ export function useCachedQuery<
 
   // Return based on mode
   if (updatedAtEnabled && hasCachedData) {
-    return cacheEntry.data;
+    return withMeta(cacheEntry.data, 'cache');
+  }
+
+  if (cursorEnabled && isInitialCursorPage && freshDetails.type === 'complete') {
+    return withMeta([freshData, freshDetails] as QueryResult<TReturn>, 'fresh');
   }
 
   if (cursorEnabled && cursorWindow.hasCachedWindow) {
-    return [cursorWindow.data, cursorWindow.details] as QueryResult<TReturn>;
+    return withMeta([cursorWindow.data, cursorWindow.details] as QueryResult<TReturn>, 'cache');
   }
 
   // For cursor-paginated queries, when the cache doesn't have the requested window
@@ -369,8 +400,10 @@ export function useCachedQuery<
   // Returning cacheEntry.data here would expose the raw accumulated cache array
   // (which may contain PAGE_BREAK_MARKERs) as activitiesPage, breaking accumulation.
   if (cursorEnabled) {
-    return [freshData, freshDetails];
+    return withMeta([freshData, freshDetails] as QueryResult<TReturn>, 'fresh');
   }
 
-  return cacheEntry?.data ?? [freshData, freshDetails];
+  return cacheEntry?.data
+    ? withMeta(cacheEntry.data, 'cache')
+    : withMeta([freshData, freshDetails] as QueryResult<TReturn>, 'fresh');
 }

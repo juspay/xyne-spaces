@@ -366,8 +366,9 @@ const ActivityListView = (): ReactElement => {
     [PAGE_SIZE, fetchCursor, currentTypes, classificationFilter, showUnreadOnly],
   );
 
-  const [activitiesPage, activitiesDetails] = useCachedQuery(activitiesQuery, {
+  const [activitiesPage, activitiesDetails, activitiesMeta] = useCachedQuery(activitiesQuery, {
     cursorEnabled: true,
+    includeMeta: fetchCursor === null,
   });
 
   // Accumulate results when query completes
@@ -377,6 +378,8 @@ const ActivityListView = (): ReactElement => {
     }
 
     setIsLoading(false);
+
+    const canAdvancePagination = fetchCursor !== null || activitiesMeta?.source !== 'cache';
 
     if (activityLoadStartTimeRef.current !== null) {
       const duration = Date.now() - activityLoadStartTimeRef.current;
@@ -401,6 +404,7 @@ const ActivityListView = (): ReactElement => {
     }
 
     if (activitiesPage.length === 0) {
+      if (!canAdvancePagination) return;
       if (fetchCursor === null) {
         if (showUnreadOnly) {
           // Keep only the currently-selected item (white/read styling).
@@ -451,6 +455,8 @@ const ActivityListView = (): ReactElement => {
       return unique;
     });
 
+    if (!canAdvancePagination) return;
+
     setHasMore(activitiesPage.length >= PAGE_SIZE);
 
     // Store the next cursor but don't fetch yet - wait for handleEndReached
@@ -461,12 +467,18 @@ const ActivityListView = (): ReactElement => {
         updatedAt: lastItemOfPage.updatedAt ?? lastItemOfPage.createdAt,
       });
     }
-  }, [activitiesPage, activitiesDetails.type, fetchCursor, activeTab, showUnreadOnly]);
+  }, [
+    activitiesPage,
+    activitiesDetails.type,
+    activitiesMeta?.source,
+    fetchCursor,
+    activeTab,
+    showUnreadOnly,
+  ]);
 
   // Scroll down - load older items (triggered ~20-25 items before end via overscan)
   const handleEndReached = useCallback(() => {
     if (!hasMore || isLoading || !nextCursor) return;
-
     // Trigger the next page fetch
     setIsLoading(true);
     setFetchCursor(nextCursor);
