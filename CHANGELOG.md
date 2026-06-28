@@ -1,3 +1,10 @@
+## [1.175.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.175.0...v1.175.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* fix subApp case mismatch for canvas/transcript type filter ([4a408f2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4a408f2c148903468812e0ee1fa0c87998ef72f1))
+
 ## [1.175.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.174.0...v1.175.0) (2026-06-28)
 
 
