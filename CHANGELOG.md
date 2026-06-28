@@ -1,3 +1,17 @@
+## [1.175.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.174.0...v1.175.0) (2026-06-28)
+
+
+### Features
+
+* ask ai with google ([6b5cc5d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6b5cc5d4def83f2a69b237ff7880c6ad60a62564)), closes [#8103](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8103)
+* multiWorkspace and org support for apps ([66086ee](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/66086ee4bf2224cf9193884dd2ba3137e75dbaf0)), closes [#7782](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7782)
+* Xyne Apps based Desk ([eecdc31](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/eecdc31bd5c5de99edf8ac70e835464c9e7c1268)), closes [#8072](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8072)
+
+
+### Bug Fixes
+
+* guard against null signingSecret before decrypt [XYNE-16719] ([9c5c757](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9c5c757d271f5a89b2d2674ca101653f33d0f31d)), closes [#8118](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8118)
+
 ## [1.174.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.173.0...v1.174.0) (2026-06-26)
 
 
