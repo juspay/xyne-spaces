@@ -1,3 +1,10 @@
+## [1.176.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.175.1...v1.176.0) (2026-06-28)
+
+
+### Features
+
+* fix for activity pagaination ([1f81397](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1f813970d78c23ff6665fd712d5574f2ba21da6f))
+
 ## [1.175.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.175.0...v1.175.1) (2026-06-28)
 
 
