@@ -158,7 +158,8 @@ export class YqlBuilder {
     mailFilters: MailFilters = {},
     useFuzzy: boolean = false,
     useSemanticAnyway: boolean = true,
-    workspaceId?: string
+    workspaceId?: string,
+    sort?: string,
   ): { yql: string; params: Record<string, string> } {
     const schemaNames = schemas.join(', ');
     // `limit` is interpolated raw into non-bindable YQL grammar ({targetHits:N}, max(N)); coerce to
@@ -340,6 +341,26 @@ export class YqlBuilder {
     }
 
     let yql = `select * from sources ${schemaNames} where ${whereConditions.join(' and ')}`;
+
+    // Append ORDER BY when caller requests timestamp-based sorting.
+    // Only applies to flat (non-grouped) results — caller must set groupBy='' to get flat output.
+    // Field name varies by schema; for multi-app queries we use 'timestamp' (Slack field) since
+    // schemas without that field default to 0, naturally sinking non-message results to the bottom.
+    if ((sort === 'newest' || sort === 'oldest') && !groupBy) {
+      const dir = sort === 'newest' ? 'desc' : 'asc';
+      const appsLower = apps.map((a) => a.toLowerCase());
+      let sortField: string | null = null;
+      if (appsLower.length === 1) {
+        if (appsLower[0] === 'chat') sortField = 'timestamp';
+        else if (appsLower[0] === 'ticket') sortField = 'createdAtTimestamp';
+        else if (appsLower[0] === 'file') sortField = 'createdAt';
+      } else if (appsLower.includes('chat')) {
+        sortField = 'timestamp';
+      }
+      if (sortField) {
+        yql += ` order by ${sortField} ${dir}`;
+      }
+    }
 
     const isMailOnly = apps.length === 1 && apps[0].toLowerCase() === 'mail';
 

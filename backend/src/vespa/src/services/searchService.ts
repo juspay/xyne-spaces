@@ -79,6 +79,7 @@ interface SearchOptions {
   limit?: number;
   chunkLimit?: number;
   groupBy?: string;
+  sort?: string;
   nativeRankThreshold?: number;
   workspaceId?: string;
   slack?: SlackFilters;
@@ -136,6 +137,7 @@ export class SearchService {
         limit = 20,
         chunkLimit = 6,
         groupBy = 'docType',
+        sort,
         nativeRankThreshold = config.nativeRankThreshold,
         slack = {},
         ticket = {},
@@ -247,6 +249,7 @@ export class SearchService {
           useFuzzy,
           useSemanticAnyway,
           wsId,
+          sort,
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
