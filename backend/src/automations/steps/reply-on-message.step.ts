@@ -6,6 +6,9 @@ import type { AutomationContext } from '../types/context';
 import { conversationService } from '@/services/conversationService';
 import { MessageType } from '@prisma/client';
 import { getAutomationsBotUserId } from './automations-bot';
+import { logger } from '@/utils/logger';
+import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
+import { buildUserQueryContext } from '@/utils/queryContext';
 
 const ReplyOnMessageConfigSchema = z.object({
   conversationId: variableRef(z.string().min(1)),
@@ -54,6 +57,36 @@ export class ReplyOnMessageStep extends BaseActionStep<
       isBot,
       metadata: { contentFormat: 'markdown' },
     });
+
+    // Fire the message side-effect so automation-posted mentions create
+    // notifications + activities (and unread counts / app-mention events).
+    // conversationService does not trigger this internally, so without it the
+    // entire side-effect pipeline is skipped. Mirrors the app/bot reply path in
+    // apps/core/conversationUtils.ts (findOrCreateConversation). The whole
+    // block is best-effort: a failure building the query context or dispatching
+    // the side-effect must never fail the automation step (the message is
+    // already persisted at this point).
+    try {
+      const ctx = await buildUserQueryContext(senderId);
+      const handler = new MessagesSideEffectHandler(ctx);
+      handler
+        .onInsert({
+          entityId: result.message.messageId,
+          entityType: 'messages',
+          operation: 'insert',
+        })
+        .catch((err) =>
+          logger.error(
+            '[REPLY_ON_MESSAGE] Message side-effect handler error',
+            err,
+          ),
+        );
+    } catch (err) {
+      logger.error(
+        '[REPLY_ON_MESSAGE] Failed to trigger message side-effects',
+        err,
+      );
+    }
 
     return {
       messageId: result.message.messageId,
