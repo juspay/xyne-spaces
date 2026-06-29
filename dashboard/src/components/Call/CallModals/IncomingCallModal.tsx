@@ -327,7 +327,7 @@ export function IncomingCallModal(): React.ReactElement | null {
     const title = latestCallData?.title || incomingCallData.title;
     const metadata = latestCallData?.metadata as { conversationId?: string } | undefined;
     const conversationId = metadata?.conversationId;
-    const channelId = latestCallData?.channelId;
+    const callUpdatesChannelId = latestCallData?.callUpdatesChannel ?? latestCallData?.channelId;
     const callOrigin = (latestCallData as CallWithRelations)?.callOrigin;
     const notificationWithTitle = {
       ...incomingCallData,
@@ -338,7 +338,7 @@ export function IncomingCallModal(): React.ReactElement | null {
       <CallNotificationUI
         notification={notificationWithTitle}
         {...(conversationId && { conversationId })}
-        {...(channelId && { channelId })}
+        {...(callUpdatesChannelId && { channelId: callUpdatesChannelId })}
         {...(callOrigin && { callOrigin })}
         onAccept={() => handleAcceptCall(incomingCallData.callId)}
         onReject={() => handleRejectCall(incomingCallData.callId)}
