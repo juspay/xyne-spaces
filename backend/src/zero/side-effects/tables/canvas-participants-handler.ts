@@ -75,29 +75,9 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
     const canvas = await db.canvas.findUnique({
       where: { id: canvasId },
-      select: { title: true, channelId: true },
+      select: { title: true },
     });
     const canvasTitle = canvas?.title || 'Untitled Canvas';
-
-    let channelName: string | undefined;
-    if (canvas?.channelId) {
-      const channel = await db.channel.findUnique({
-        where: { id: canvas.channelId },
-        select: { name: true, scopeType: true },
-      });
-      if (channel) {
-        if (channel.scopeType === 'GROUP_DM' || channel.scopeType === 'DM') {
-          const participantIds = channel.name.split(',').filter(Boolean);
-          const users = await db.user.findMany({
-            where: { id: { in: participantIds } },
-            select: { name: true },
-          });
-          channelName = users.map(u => u.name).filter(Boolean).join(', ');
-        } else {
-          channelName = channel.name;
-        }
-      }
-    }
 
     await notificationService.createCanvasSharedNotifications(
       filteredRecipientIds,
@@ -116,8 +96,6 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
         actionSource: 'canvas_participants',
         actionSourceId,
         canvasId,
-        ...(canvas?.channelId ? { channelId: canvas.channelId } : {}),
-        ...(channelName ? { channelName } : {}),
         actorId: this.ctx.userID,
         classification: ActivityClassification.ACTIONABLE,
       })),
