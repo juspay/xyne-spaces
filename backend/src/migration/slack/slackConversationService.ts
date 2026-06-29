@@ -1336,6 +1336,8 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
         if (xyneChannel && !(xyneChannel as any).isMigrated) {
           await channelRepo.update(xyneSpaceChannelId, { isMigrated: true });
         }
+        // Replace the `now` placeholder so the DM list sorts by the real last message time, not the migration run time.
+        await channelRepo.recalculateLastActivityFromMessages(xyneSpaceChannelId);
         logger.info('[MigrationDM] Channel marked fully migrated', { xyneSpaceChannelId, dmChannelId });
       } catch (err) {
         logger.warn('[MigrationDM] Failed to mark channel migrated', {
