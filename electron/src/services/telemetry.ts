@@ -88,27 +88,6 @@ export function safeRecordMetric(fn: () => void): void {
   }
 }
 
-/**
- * Shutdown OpenTelemetry metrics provider
- * Should be called after enrollment is complete to stop sending metrics
- */
-export async function shutdownTelemetry(): Promise<void> {
-  if (!meterProviderInstance) {
-    Logger.info(EnrollmentEvent.OTEL_NO_PROVIDER);
-    return;
-  }
-
-  try {
-    // Shutdown will flush any pending metrics and stop the periodic export
-    await meterProviderInstance.shutdown();
-    Logger.info(EnrollmentEvent.OTEL_SHUTDOWN_SUCCESS);
-    meterProviderInstance = null;
-  } catch (error) {
-    Logger.logError(EnrollmentEvent.OTEL_SHUTDOWN_FAILED, error);
-    throw error;
-  }
-}
-
 function getOrGenerateDeviceId(): string {
   let deviceId = store.get('deviceId');
   if (!deviceId) {

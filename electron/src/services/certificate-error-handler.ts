@@ -3,14 +3,6 @@ import { config } from '../app/config';
 import path from 'path';
 import { getMainWindow } from '../window/manager';
 import { keychain } from '../keychain';
-
-export type MtlsHealthResult = { 
-  isHealthy: boolean; 
-  status?: number; 
-  isCertificateError?: boolean;
-  error?: string;
-};
-
 /**
  * SSL/TLS error codes that indicate certificate issues requiring re-enrollment
  */
