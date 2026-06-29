@@ -6,6 +6,7 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { redisService } from './redisService';
 import { sendLocalIosPush } from './localIosPush';
+import { getNotificationFcmPayloadTruncated } from '@/services/otel';
 import { Prisma, SessionStatus } from '@prisma/client';
 
 type CachedAccessToken = {
@@ -590,6 +591,36 @@ class FcmPushService {
 
     if (!response.ok) {
       const errorText = await response.text();
+
+      // Diagnostic: FCM's generic `INVALID_ARGUMENT` ("Request contains an
+      // invalid argument") does NOT echo the payload size, so it is impossible
+      // to tell an over-4KB rejection apart from a different payload/token
+      // problem from the error alone. Log the computed `data` byte size plus a
+      // per-field byte breakdown so failures are classifiable in prod. We log
+      // only byte SIZES (never field values) and a short token suffix (never
+      // the full token) to avoid leaking message content or credentials.
+      const fcmData = requestBody.message.data;
+      const dataBytes = fcmDataByteSize(fcmData);
+      const fieldBytes = Object.fromEntries(
+        Object.entries(fcmData).map(([k, v]) => [k, Buffer.byteLength(v, 'utf8')])
+      );
+      logger.error('[MobilePush] FCM send rejected — payload diagnostics', {
+        status: response.status,
+        fcmError: truncateString(errorText, 500),
+        notificationId: payload.notificationId,
+        type: payload.type,
+        platform: platform ?? 'unknown',
+        appVersion,
+        tokenSuffix: token.slice(-6),
+        dataBytes,
+        totalMessageBytes: Buffer.byteLength(JSON.stringify(requestBody), 'utf8'),
+        fcmDataLimitBytes: FCM_DATA_HARD_LIMIT,
+        overFcmDataLimit: dataBytes > FCM_DATA_HARD_LIMIT,
+        hasApns: Boolean(apns),
+        hasWebpush: Boolean(webpush),
+        fieldBytes,
+      });
+
       const error = new Error(
         `FCM send failed: ${response.status} ${response.statusText} - ${errorText}`
       ) as Error & { status?: number; responseBody?: string };
@@ -605,19 +636,30 @@ class FcmPushService {
       category: payload.type,
     };
 
-    if(!isSilent) {
+    if (!isSilent) {
       data.msg_title = payload.title;
-      data.msg_body = payload.message;
+      // Bound the body so one long message cannot dominate FCM's 4KB data budget.
+      data.msg_body = truncateString(payload.message, MSG_BODY_MAX_CHARS);
     }
     if (payload.notificationId) data.notificationId = payload.notificationId;
     if (payload.actionUrl) data.actionUrl = payload.actionUrl;
     if (payload.actionUrl) data.deeplink = payload.actionUrl;
     if (payload.relatedEntityType) data.relatedEntityType = payload.relatedEntityType;
     if (payload.relatedEntityId) data.relatedEntityId = payload.relatedEntityId;
-    if (payload.metadata) data.metadata = JSON.stringify(payload.metadata);
+    if (payload.metadata) {
+      // Strip heavy, client-unused blobs (notably the full `conversation` object
+      // carrying initial_message_md + attachments) before serializing. The native
+      // clients deep-link and render from the slim id/string fields and `msg_body`;
+      // they never read `metadata.conversation`. Keeping it blows past FCM's 4KB
+      // `data` limit and makes the provider reject the whole push (INVALID_ARGUMENT).
+      const slimMetadata = stripHeavyMetadata(payload.metadata);
+      data.metadata = JSON.stringify(slimMetadata);
+    }
     // TODO: add image support once native clients need rich media notifications.
 
-    return data;
+    // Defense-in-depth: guarantee the assembled data map fits FCM's 4KB limit,
+    // progressively trimming the least-critical fields if anything still overflows.
+    return enforceFcmByteBudget(data, payload);
   }
 
   private buildApnsPayload(payload: FcmNotificationPayload, isSilent: boolean): {
@@ -803,6 +845,85 @@ class FcmPushService {
 
     return undefined;
   }
+}
+
+// FCM/APNs hard ceiling for the `data` payload. We trim proactively at
+// FCM_DATA_BYTE_BUDGET (below); this is the provider's actual reject point
+// and is used only to classify rejections in diagnostics.
+const FCM_DATA_HARD_LIMIT = 4096;
+const FCM_DATA_BYTE_BUDGET = 3800;
+const MSG_BODY_MAX_CHARS = 500;
+const HEAVY_METADATA_KEYS = ['conversation'];
+
+function truncateString(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, Math.max(0, maxChars - 1))}\u2026`;
+}
+
+function stripHeavyMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
+  const slim: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (HEAVY_METADATA_KEYS.includes(key) || value === undefined) continue;
+    slim[key] = value;
+  }
+  return slim;
+}
+
+function fcmDataByteSize(data: Record<string, string>): number {
+  let total = 0;
+  for (const [key, value] of Object.entries(data)) {
+    total += Buffer.byteLength(key, 'utf8') + Buffer.byteLength(value, 'utf8');
+  }
+  return total;
+}
+
+function enforceFcmByteBudget(
+  data: Record<string, string>,
+  payload: FcmNotificationPayload
+): Record<string, string> {
+  if (fcmDataByteSize(data) <= FCM_DATA_BYTE_BUDGET) {
+    return data;
+  }
+
+  const trimmed: string[] = [];
+
+  // 1. Drop metadata entirely — the client can refetch via notificationId/deeplink.
+  if (data.metadata !== undefined) {
+    delete data.metadata;
+    trimmed.push('metadata');
+  }
+
+  // 2. Shorten the body further if still over budget.
+  if (fcmDataByteSize(data) > FCM_DATA_BYTE_BUDGET && data.msg_body !== undefined) {
+    data.msg_body = truncateString(data.msg_body, 120);
+    trimmed.push('msg_body_shortened');
+  }
+
+  // 3. Last resort — drop the body; title + deeplink still render a useful push.
+  if (fcmDataByteSize(data) > FCM_DATA_BYTE_BUDGET && data.msg_body !== undefined) {
+    delete data.msg_body;
+    trimmed.push('msg_body');
+  }
+
+  try {
+    getNotificationFcmPayloadTruncated().add(1, { type: payload.type });
+  } catch (err) {
+    // metrics are best-effort; never let them break delivery, but surface the
+    // failure at debug level so observability gaps are diagnosable in prod.
+    logger.debug('Failed to emit notification_fcm_payload_truncated metric', {
+      type: payload.type,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  logger.warn('FCM payload exceeded 4KB budget; trimmed before send', {
+    type: payload.type,
+    notificationId: payload.notificationId,
+    trimmed,
+    finalBytes: fcmDataByteSize(data),
+  });
+
+  return data;
 }
 
 function extractFcmErrorCode(error: unknown): string | undefined {
