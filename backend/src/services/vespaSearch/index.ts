@@ -78,6 +78,16 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
   return { grouped: true, groups , cntRemoved:removedCount};
 }
 
+const MAX_FILTER_VALUES = 50;
+
+class ValidationError extends Error {
+  readonly statusCode = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
 const toCommaSeparatedValues = (value: unknown): string[] => {
   if (value === undefined || value === null) {
     return [];
@@ -94,6 +104,16 @@ const toCommaSeparatedValues = (value: unknown): string[] => {
       .map(part => part.trim())
       .filter(Boolean);
   });
+};
+
+const toFilterValues = (value: unknown, fieldName = 'filter'): string[] => {
+  const arr = toCommaSeparatedValues(value);
+  if (arr.length > MAX_FILTER_VALUES) {
+    throw new ValidationError(
+      `Filter "${fieldName}" exceeds the maximum of ${MAX_FILTER_VALUES} values (got ${arr.length})`,
+    );
+  }
+  return arr;
 };
 
 const parseJsonObject = <T extends Record<string, unknown>>(value: unknown): T | undefined => {
@@ -180,6 +200,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     const workspaceId = (req as any).user?.workspaceId;
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+    if (!workspaceId) {
+      res.status(403).json({ success: false, error: 'Forbidden: workspace context required' });
       return;
     }
 
@@ -586,65 +610,63 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     
     // Map frontend 'from' filter to senderId (messages), createdBy (tickets), and createdBy (files)
     if (from) {
-      options.slack.senderId = from;
-      options.ticket.createdBy = from;
-      options.file.createdBy = from;
+      const fromVals = toFilterValues(from, 'from');
+      options.slack.senderId = fromVals;
+      options.ticket.createdBy = fromVals;
+      options.file.createdBy = fromVals;
     }
 
     if (fromEmail) {
-      options.mail.from = Array.isArray(fromEmail)
-        ? fromEmail
-        : toCommaSeparatedValues(fromEmail as string);
+      options.mail.from = toFilterValues(fromEmail, 'fromEmail');
     }
 
     if (toEmail) {
-      options.mail.to = Array.isArray(toEmail)
-        ? toEmail
-        : toCommaSeparatedValues(toEmail as string);
+      options.mail.to = toFilterValues(toEmail, 'toEmail');
     }
 
     if (withUser) {
-      options.slack.participants = withUser
+      options.slack.participants = toFilterValues(withUser, 'withUser');
     }
 
     // Map frontend 'in' filter to channelId
     if (inChannel) {
-      options.slack.channelId = inChannel;
-      options.ticket.channelId = inChannel;
-      options.mail.channelId = inChannel;
+      const inVals = toFilterValues(inChannel, 'in');
+      options.slack.channelId = inVals;
+      options.ticket.channelId = inVals;
+      options.mail.channelId = inVals;
     }
-    
+
     // Add unified filters (apply to both slack and ticket)
     if (projectId) {
-      const projectIds = toCommaSeparatedValues(projectId);
+      const projectIds = toFilterValues(projectId, 'projectId');
       options.slack.projectId = projectIds;
       options.ticket.projectId = projectIds;
     }
 
     // Add ticket-specific filters
     if (status) {
-      options.ticket.status = toCommaSeparatedValues(status);
+      options.ticket.status = toFilterValues(status, 'status');
     }
 
     if (ticketId) {
-      options.ticket.ticketId = toCommaSeparatedValues(ticketId);
+      options.ticket.ticketId = toFilterValues(ticketId, 'ticketId');
     }
 
     if (priority) {
-      options.ticket.priority = toCommaSeparatedValues(priority);
+      options.ticket.priority = toFilterValues(priority, 'priority');
     }
 
     // New ticket filters
     if (board) {
-      options.ticket.boardId = toCommaSeparatedValues(board);
+      options.ticket.boardId = toFilterValues(board, 'board');
     }
 
     if (tags) {
-      options.ticket.tags = toCommaSeparatedValues(tags);
+      options.ticket.tags = toFilterValues(tags, 'tags');
     }
 
     if (dynamicFieldValues) {
-      options.ticket.dynamicFieldValues = toCommaSeparatedValues(dynamicFieldValues);
+      options.ticket.dynamicFieldValues = toFilterValues(dynamicFieldValues, 'dynamicFieldValues');
     }
 
     const parsedDynamicFieldDateRanges = parseJsonObject<Record<string, { start?: number; end?: number }>>(
@@ -681,27 +703,27 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
 
     if (stage) {
-      options.ticket.stage = toCommaSeparatedValues(stage);
+      options.ticket.stage = toFilterValues(stage, 'stage');
     }
 
     if (assignee) {
-      options.ticket.assignedTo = toCommaSeparatedValues(assignee);
+      options.ticket.assignedTo = toFilterValues(assignee, 'assignee');
     }
 
     if (subApp) {
-      options.file.subApp = toCommaSeparatedValues(subApp);
+      options.file.subApp = toFilterValues(subApp, 'subApp');
     }
 
     if (collectionId) {
-      options.file.collectionId = toCommaSeparatedValues(collectionId);
+      options.file.collectionId = toFilterValues(collectionId, 'collectionId');
     }
 
     if (fileId) {
-      options.file.fileId = toCommaSeparatedValues(fileId);
+      options.file.fileId = toFilterValues(fileId, 'fileId');
     }
 
     if (callType) {
-      options.file.callType = toCommaSeparatedValues(callType);
+      options.file.callType = toFilterValues(callType, 'callType');
     }
 
     if (presentationSummary) {
@@ -800,10 +822,14 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       });
     }
   } catch (error: any) {
+    if (error instanceof ValidationError) {
+      res.status(400).json({ success: false, error: error.message });
+      return;
+    }
     logger.error('Search error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Internal server error' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
     });
   }
 };
