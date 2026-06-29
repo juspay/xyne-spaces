@@ -340,10 +340,38 @@ function isHumanMessage(
 }
 
 /**
- * Transform raw Slack files to SlackFile[]
+ * Collect every raw file carried by a Slack message: top-level `msg.files`
+ * plus files nested inside `msg.attachments[]` (forwarded/shared messages).
+ * De-duplicated by Slack file id so a file referenced in both places is kept once.
  */
-function transformFiles(rawFiles: any[] | undefined, includeAttachments: boolean): SlackFile[] | undefined {
-  if (!includeAttachments || !rawFiles?.length) return undefined;
+function collectRawFiles(msg: any): any[] {
+  const out: any[] = [];
+  const seen = new Set<string>();
+  const push = (f: any) => {
+    if (!f) return;
+    const key = f.id || f.url_private || f.permalink;
+    if (key && seen.has(key)) return;
+    if (key) seen.add(key);
+    out.push(f);
+  };
+
+  if (Array.isArray(msg?.files)) msg.files.forEach(push);
+  if (Array.isArray(msg?.attachments)) {
+    for (const att of msg.attachments) {
+      if (Array.isArray(att?.files)) att.files.forEach(push);
+    }
+  }
+  return out;
+}
+
+/**
+ * Transform raw Slack files (incl. files nested in attachments) to SlackFile[]
+ */
+function transformFiles(msg: any, includeAttachments: boolean): SlackFile[] | undefined {
+  if (!includeAttachments) return undefined;
+
+  const rawFiles = collectRawFiles(msg);
+  if (!rawFiles.length) return undefined;
 
   const validFiles = rawFiles
     .filter((f) => f.name && f.mimetype && f.url_private && f.size)
@@ -355,6 +383,45 @@ function transformFiles(rawFiles: any[] | undefined, includeAttachments: boolean
     }));
 
   return validFiles.length ? validFiles : undefined;
+}
+
+/**
+ * Pick the attachments worth rendering for a *human* message: forwarded/shared
+ * messages, Slack-message unfurls, or attachments that carry their own content
+ * (files / message_blocks / text). Skips empty auto link-unfurls to avoid noise.
+ * Normalizes Slack's `message_blocks` (forwarded rich content) into the `blocks`
+ * field the block-kit parser already understands.
+ */
+function extractRenderableAttachments(msg: any): any[] | undefined {
+  const attachments: any[] = Array.isArray(msg?.attachments) ? msg.attachments : [];
+  if (!attachments.length) return undefined;
+
+  // Only forwarded/shared Slack messages and attachments carrying their own
+  // files or rich content (incl. Block Kit `blocks` like tables) — NOT generic
+  // web link-unfurls (preview cards of pasted URLs), which use legacy fields
+  // (text/title/image_url) rather than `blocks` and would just be noise.
+  const renderable = attachments
+    .filter(
+      (att) =>
+        att?.is_share ||
+        att?.is_msg_unfurl ||
+        att?.files?.length ||
+        att?.message_blocks?.length ||
+        att?.blocks?.length,
+    )
+    .map((att) => {
+      // Lift forwarded rich content (message_blocks[].message.blocks) into `blocks`
+      // so the existing parser renders it. Only when `blocks` isn't already set.
+      if (!att.blocks?.length && Array.isArray(att.message_blocks) && att.message_blocks.length) {
+        const lifted = att.message_blocks
+          .flatMap((mb: any) => mb?.message?.blocks ?? [])
+          .filter(Boolean);
+        if (lifted.length) return { ...att, blocks: lifted };
+      }
+      return att;
+    });
+
+  return renderable.length ? renderable : undefined;
 }
 
 // ============================================================================
@@ -752,11 +819,19 @@ async function extractMessageContent(msg: any, isBotContext: boolean = false, bo
   const token = botToken || process.env.SLACK_BOT_TOKEN || '';
 
   if (!isBotContext) {
-    // Normal messages: text only, no blocks, no attachments
+    // Normal (human) messages: text plus any forwarded/shared attachments.
+    // Plain messages carry no attachments, so this is a no-op for them; forwarded
+    // messages render the original author/body/files/permalink as a quote block.
     const resolvedText = msg.text
       ? await resolveSlackMentions(msg.text, token, false, workspaceId)
       : '';
-    return blockKitParser.parse({ text: resolvedText });
+
+    const renderableAttachments = extractRenderableAttachments(msg);
+    const resolvedAttachments = renderableAttachments
+      ? await deepResolveMentions(renderableAttachments, token, workspaceId)
+      : undefined;
+
+    return blockKitParser.parse({ text: resolvedText, attachments: resolvedAttachments });
   }
 
   // Bot context: blocks primary, text fallback, attachments always resolved
@@ -836,7 +911,7 @@ export async function transformReply(
     ...(!isBot && userInfo?.isDeactivated === true && { isDeactivated: true }),
     isPinned: pinnedMessageTs?.has(reply.ts),
     showInChannel: reply.subtype === 'thread_broadcast',
-    files: transformFiles(reply.files, includeAttachments),
+    files: transformFiles(reply, includeAttachments),
     ...(effectiveBotId && { botId: effectiveBotId }),
     // botUserId only for explicit bot_id messages (links the bot app to its Slack UID)
     ...(reply.bot_id && reply.user && { botUserId: reply.user }),
@@ -904,7 +979,7 @@ async function transformMessage(
     ...(!isBot && userInfo?.isDeactivated === true && { isDeactivated: true }),
     isPinned: pinnedMessageTs?.has(rawMessage.ts),
     replies,
-    files: transformFiles(rawMessage.files, includeAttachments),
+    files: transformFiles(rawMessage, includeAttachments),
     ...(effectiveBotId && { botId: effectiveBotId }),
     // botUserId only for explicit bot_id messages (links the bot app to its Slack UID)
     ...(rawMessage.bot_id && rawMessage.user && { botUserId: rawMessage.user }),

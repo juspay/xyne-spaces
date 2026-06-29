@@ -45,6 +45,8 @@ import {
   SlackTextObject,
   SlackBlockElement,
   SlackButtonElement,
+  SlackTableBlock,
+  SlackTableCell,
 } from './slackBlockKitTypes';
 
 // Reusable CSS styles
@@ -160,6 +162,13 @@ export class SlackBlockKitParser {
       content.push(`<div class="attachment-footer" style="${STYLES.smallText} margin-top: 0.5rem;">${escapeForSlack(attachment.footer)}</div>`);
     }
 
+    // Permalink to the original message (forwarded/shared attachments) — "View in Slack"
+    if (attachment.from_url) {
+      content.push(
+        `<div class="attachment-permalink" style="${STYLES.smallText} margin-top: 0.5rem;">${this.createLink(attachment.from_url, 'View in Slack', STYLES.link)}</div>`,
+      );
+    }
+
     return `<blockquote data-slack="true" style="--border-color: ${color};">${content.join('')}</blockquote>`;
   }
 
@@ -182,9 +191,42 @@ export class SlackBlockKitParser {
       context: () => this.parseContextBlock(block as SlackContextBlock),
       header: () => this.parseHeaderBlock(block as SlackHeaderBlock),
       rich_text: () => this.parseRichTextBlock(block as SlackRichTextBlock),
+      table: () => this.parseTableBlock(block as SlackTableBlock),
     };
 
     return parsers[block.type]?.() || '';
+  }
+
+  /**
+   * Parse a Slack `table` block (rows of cells). Each cell is either a
+   * `rich_text` block (styled content) or a `raw_text` cell (plain string).
+   */
+  private parseTableBlock(block: SlackTableBlock): string {
+    const rows = Array.isArray(block.rows) ? block.rows : [];
+    if (!rows.length) return '';
+
+    const rowsHtml = rows
+      .map((row) => {
+        const cells = Array.isArray(row) ? row : [];
+        const cellsHtml = cells
+          .map(
+            (cell) =>
+              `<td style="border: 1px solid #d1d5db; padding: 0.375rem 0.5rem; vertical-align: top;">${this.parseTableCell(cell)}</td>`,
+          )
+          .join('');
+        return `<tr>${cellsHtml}</tr>`;
+      })
+      .join('');
+
+    return `<table class="slack-table" style="border-collapse: collapse; margin: 0.5rem 0;"><tbody>${rowsHtml}</tbody></table>`;
+  }
+
+  /** Parse a single table cell (`rich_text` block or `raw_text` string). */
+  private parseTableCell(cell: SlackTableCell): string {
+    if (!cell) return '';
+    if (cell.type === 'raw_text') return escapeForSlack(cell.text ?? '');
+    if (cell.type === 'rich_text') return this.parseRichTextBlock(cell as SlackRichTextBlock);
+    return '';
   }
 
   /**
