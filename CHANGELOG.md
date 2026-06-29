@@ -1,3 +1,10 @@
+## [1.180.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.180.1...v1.180.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* fix(pythonQuery): workflow-executions ACL counts 0 runs for all automations ([97e90b0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/97e90b0b26c77eda742447662d140ceec38ce173)), closes [#8186](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8186)
+
 ## [1.180.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.180.0...v1.180.1) (2026-06-29)
 
 
