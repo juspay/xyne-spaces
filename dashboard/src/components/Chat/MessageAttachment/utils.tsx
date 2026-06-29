@@ -190,37 +190,6 @@ export const getFileCategory = (
   if (isDocumentFile(mimeType)) return 'document';
   return 'unknown';
 };
-
-/**
- * Validate file size against limits
- */
-export const validateFileSize = (
-  fileSize: number,
-  maxSizeInMB: number = 50,
-): { valid: boolean; error?: string } => {
-  const maxSizeInBytes = maxSizeInMB * 1024 * 1024;
-
-  if (fileSize > maxSizeInBytes) {
-    return {
-      valid: false,
-      error: `File size (${formatFileSize(fileSize)}) exceeds the maximum limit of ${maxSizeInMB}MB`,
-    };
-  }
-
-  return { valid: true };
-};
-
-/**
- * Generate a safe download filename
- * Removes potentially dangerous characters
- */
-export const sanitizeFileName = (fileName: string): string => {
-  return fileName
-    .replace(/[<>:"/\\|?*]/g, '_') // Replace invalid characters
-    .replace(/\s+/g, '_') // Replace spaces with underscores
-    .replace(/_{2,}/g, '_'); // Replace multiple underscores with single
-};
-
 /**
  * Download an attachment file by ID
  * Uses shared service for API call

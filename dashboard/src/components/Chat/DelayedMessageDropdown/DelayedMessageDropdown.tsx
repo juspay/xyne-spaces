@@ -151,5 +151,3 @@ export const DelayedMessageDropdown = ({
 };
 
 DelayedMessageDropdown.displayName = 'DelayedMessageDropdown';
-
-export default DelayedMessageDropdown;

@@ -388,5 +388,3 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
     </Drawer>
   );
 };
-
-export default MessageActionsDrawer;

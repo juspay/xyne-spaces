@@ -1,5 +1,3 @@
-import { VisibleChannel } from '../../../machines/stateMachine';
-import { User } from '@xyne/shared';
 import { MessageWithOptionalNudgeCounts } from '../../ui/MessageBubble/MessageBubble.types';
 
 export type MessageType = MessageWithOptionalNudgeCounts;
@@ -17,15 +15,6 @@ export interface ForwardMessageFormProps {
   channelId: string;
   onCancel: () => void;
   onSuccess?: () => void;
-}
-
-export interface SearchResultItem {
-  type: 'channel' | 'user';
-  id: string;
-  name: string;
-  description?: string | null;
-  channel?: VisibleChannel;
-  user?: User;
 }
 
 /** Selection mode determines what type of targets can be selected */

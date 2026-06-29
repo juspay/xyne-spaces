@@ -23,9 +23,6 @@ export const SearchableTypes = {
   RCA: 'rca',
   EMAILS: 'emails',
 } as const;
-
-export type SearchableType = (typeof SearchableTypes)[keyof typeof SearchableTypes];
-
 /**
  * Type suggestions for the type: filter autocomplete
  * These are the available types that can be used with the type filter
@@ -43,12 +40,6 @@ export const TYPE_SUGGESTIONS = [
   { id: SearchableTypes.RCA, name: SearchableTypes.RCA, subApp: 'RCA' },
   { id: SearchableTypes.EMAILS, name: SearchableTypes.EMAILS },
 ] as const;
-
-/**
- * Type suggestion item type
- */
-export type TypeSuggestion = (typeof TYPE_SUGGESTIONS)[number];
-
 export const TabType = {
   ALL: 'all',
   USERS: 'users',

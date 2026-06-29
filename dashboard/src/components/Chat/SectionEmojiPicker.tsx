@@ -71,5 +71,3 @@ export const SectionEmojiPicker = ({
     </div>
   );
 };
-
-export default SectionEmojiPicker;

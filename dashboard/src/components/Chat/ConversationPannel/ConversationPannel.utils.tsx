@@ -76,4 +76,3 @@ export const useConversationTabs = (channelScopeType?: ChannelScopeType) => {
 
 // Export the static list for backward compatibility (deprecated)
 // Use useConversationTabs() instead for permission-based filtering
-export const CONVERSATION_TABS_LIST: ConversationTabListType[] = STATIC_TABS;

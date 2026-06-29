@@ -2,8 +2,6 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import { useEffect, useRef } from 'react';
 import { $getRoot } from 'lexical';
 
-export type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE';
-
 interface PastePluginProps {
   onPasteDetected?: () => void;
   onManualKeystroke?: () => void;

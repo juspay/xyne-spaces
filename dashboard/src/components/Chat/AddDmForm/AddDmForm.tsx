@@ -182,5 +182,3 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
     </form>
   );
 };
-
-export default AddDmForm;

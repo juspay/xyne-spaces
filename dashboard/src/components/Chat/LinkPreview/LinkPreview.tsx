@@ -59,8 +59,6 @@ export interface InternalMessageLinkMetadata {
   ticket?: TicketPreviewSnapshot;
 }
 
-export type LinkMetadata = ExternalLinkMetadata | InternalMessageLinkMetadata;
-
 interface LinkPreviewProps {
   metadata: ExternalLinkMetadata;
   onClick?: () => void;

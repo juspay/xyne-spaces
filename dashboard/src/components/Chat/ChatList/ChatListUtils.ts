@@ -20,37 +20,6 @@ export type CombinedMessageItem =
       data: ThreadMessage;
       createdAt: Date;
     };
-
-/**
- * Creates a conversation-like object from a message for thread messages that don't have a full conversation object.
- * This is a typed utility to avoid using 'as any' casting.
- */
-export const createConversationFromMessage = (
-  message: ThreadMessage,
-  channelId: string,
-): ChatListConversation => {
-  return {
-    conversationId: message.conversationId,
-    channelId: channelId,
-    createdBy: message.senderId,
-    initialMessageId: message.messageId,
-    parentMessageId: null,
-    lastActivityAt: message.createdAt,
-    replyCount: 0,
-    pinned: false,
-    ticketId: null,
-    metadata: null,
-    callId: null,
-    createdAt: message.createdAt,
-    replies_md: null,
-    ticket_md: null,
-    initial_message_md: null,
-    parent_message_md: null,
-    initialMessageAttachments: [],
-    initialMessageNudgeCounts: [],
-  } as unknown as ChatListConversation;
-};
-
 /**
  * Extract origin conversation ID from URL hash
  * Example: #origin=9d305bdb-2a05-4833-8bd2-1d4e911db695 → 9d305bdb-2a05-4833-8bd2-1d4e911db695
@@ -196,44 +165,4 @@ export const createMessagePreview = (content: string | undefined): string => {
   const plainText = getPlainText(content).trim();
   const preview = plainText.substring(0, 50);
   return `"${preview}${plainText.length > 50 ? '...' : ''}"`;
-};
-
-/**
- * Combines regular conversations and thread messages in chronological order
- */
-export const combineMessages = (
-  messages: QueryResultType<typeof queries.channelConversationsPaginatedV3> | undefined,
-  channelThreadMessages: ThreadMessage[],
-): CombinedMessageItem[] => {
-  if (!messages && !channelThreadMessages?.length) return [];
-
-  // Create a combined array with type indicators
-  const allItems: CombinedMessageItem[] = [];
-
-  // Add regular conversations
-  if (messages) {
-    messages.forEach(conversation => {
-      allItems.push({
-        type: 'conversation',
-        data: conversation,
-        createdAt: new Date(conversation.createdAt),
-      });
-    });
-  }
-
-  // Add thread messages
-  if (channelThreadMessages) {
-    channelThreadMessages.forEach(message => {
-      allItems.push({
-        type: 'thread-message',
-        data: message,
-        createdAt: new Date(message.createdAt),
-      });
-    });
-  }
-
-  // Sort by creation time (chronological order)
-  allItems.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-
-  return allItems;
 };

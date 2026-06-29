@@ -37,18 +37,6 @@ export interface InitialMessage {
   sender: MessageSender;
 }
 
-export interface ConversationMessage {
-  messageId: string;
-  conversationId: string;
-  content: string;
-  msgType: string;
-  hasAttachment?: boolean;
-  edited?: boolean;
-  attachments?: MessageAttachment[];
-  createdAt: string;
-  sender: MessageSender;
-}
-
 export interface CreateConversationRequest {
   content: string;
   msgType?: 'USER' | 'BOT';

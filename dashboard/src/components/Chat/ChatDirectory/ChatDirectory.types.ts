@@ -10,9 +10,6 @@ export type DraftMessage = {
   html: string;
   text: string;
 };
-
-export type DraftMessages = Record<string, DraftMessage>;
-
 // Channel category types (using const objects due to erasableSyntaxOnly)
 export const ChannelCategory = {
   STARRED: 'starred',
