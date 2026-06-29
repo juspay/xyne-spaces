@@ -9,6 +9,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { config } from '@/config';
@@ -554,18 +555,32 @@ async function createChannel(adminUser: StoredUser): Promise<BaselineChannel> {
   return { id: channelId, name: channelName, url: channelUrl };
 }
 
-async function sendSeedChannelMessage(): Promise<BaselineSeedMessage> {
+async function sendSeedChannelMessage(channelId: string): Promise<BaselineSeedMessage> {
   const page = testContext.activePage;
   const baseText = 'baseline-channel-seed';
   const text = `${baseText}-${buildRandomSuffix()}`;
 
-  const messageInput = page.locator("[data-testid='message-input']").first();
-  await messageInput.waitFor({ state: 'visible' });
-  await messageInput.fill(text);
-  await page.locator("[data-testid='send-message-button']").first().click();
-  const list = page.locator("[data-testid='virtuoso-item-list']").first();
-  await list.waitFor({ state: 'visible' });
-  await list.getByText(text, { exact: false }).first().waitFor({ state: 'visible' });
+  const response = await page.request.post(
+    `${config.dashboard.baseUrl}/api/zero/push-fallback`,
+    {
+      data: {
+        name: 'conversations.send',
+        args: {
+          channelId,
+          content: text,
+          conversationId: randomUUID(),
+          messageId: randomUUID(),
+          timestamp: Date.now(),
+          type: 'USER',
+        },
+      },
+    }
+  );
+  assert.equal(
+    response.ok(),
+    true,
+    `Expected baseline seed message POST to succeed, got status ${response.status()}.`
+  );
 
   baselineLogger.info('[6/8] Seed message sent in baseline channel');
   return { baseText, text };
@@ -579,32 +594,29 @@ async function createBaselineDmWithSeedMessage(
   const baseText = 'baseline-dm-seed';
   const text = `${baseText}-${buildRandomSuffix()}`;
 
-  await page.locator("[data-testid='nav-chat']").first().click();
-  await page.locator("[data-testid='create-new-dm']").first().click();
+  const response = await page.request.post(
+    `${config.dashboard.baseUrl}/api/users/me/dms`,
+    {
+      data: {
+        participantIds: [partnerUser.id],
+        message: text,
+      },
+    }
+  );
+  assert.equal(
+    response.ok(),
+    true,
+    `Expected baseline DM creation POST to succeed, got status ${response.status()}.`
+  );
 
-  const searchInput = page.locator("[data-testid='user-search-input']").first();
-  await searchInput.waitFor({ state: 'visible' });
-  await searchInput.fill(partnerUser.email);
+  const body = (await response.json().catch(() => null)) as { id?: string } | null;
+  const dmId = body?.id;
+  assert.ok(
+    typeof dmId === 'string' && dmId.length > 0,
+    `Expected DM creation response to contain id, got: ${JSON.stringify(body)}`
+  );
 
-  const searchResults = page.locator("[data-testid='user-search-results']").first();
-  await searchResults.waitFor({ state: 'visible' });
-  await searchResults.getByText(partnerUser.name, { exact: false }).first().click();
-
-  const messageInput = page.locator("[data-testid='message-input']").first();
-  await messageInput.waitFor({ state: 'visible' });
-  await messageInput.fill(text);
-  await page.locator("[data-testid='send-message-button']").first().click();
-
-  // Sending the first message in a new DM is what causes the SPA to push the
-  // canonical /chat/dir/<dmId> route. Wait for that before capturing the URL.
-  await page.waitForURL(/\/chat\/dir\/[^/?#]+/);
-  const dmUrl = page.url();
-  const dmIdMatch = dmUrl.match(/\/chat\/dir\/([^/?#]+)/);
-  const dmId = dmIdMatch?.[1];
-
-  const list = page.locator("[data-testid='virtuoso-item-list']").first();
-  await list.waitFor({ state: 'visible' });
-  await list.getByText(text, { exact: false }).first().waitFor({ state: 'visible' });
+  const dmUrl = `${config.dashboard.baseUrl}/${ownerUser.workspaceId}/chat/dir/${dmId}`;
 
   baselineLogger.info('[8/8] Baseline DM created with seed message');
 
@@ -635,9 +647,10 @@ export async function bootstrapBaselineFixture(): Promise<void> {
     baselineLogger.info(`[3/8] User created: ${adminUser.alias}`);
     const project = await createProject(adminUser);
     const channel = await createChannel(adminUser);
+    assertString(channel.id, 'baseline channel id');
     await addMemberToChannel(adminUser, user);
     await addMemberToChannel(adminUser, partnerUser);
-    const channelSeed = await sendSeedChannelMessage();
+    const channelSeed = await sendSeedChannelMessage(channel.id);
 
     await loginAsUser(BASELINE_USER_ALIAS);
     baselineLogger.info('[7/8] Re-logged in as baseline user to create DM');
