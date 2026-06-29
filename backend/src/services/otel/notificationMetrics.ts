@@ -83,3 +83,19 @@ export function getNotificationJobsExpected(): Counter {
   }
   return _notificationJobsExpected;
 }
+
+// FCM Payload Truncated Counter
+let _notificationFcmPayloadTruncated: Counter | null = null;
+export function getNotificationFcmPayloadTruncated(): Counter {
+  if (!_notificationFcmPayloadTruncated) {
+    _notificationFcmPayloadTruncated = getMeter().createCounter(
+      'notification_fcm_payload_truncated_total',
+      {
+        description:
+          'Total number of FCM push payloads that had to be trimmed to fit the 4KB data limit',
+        unit: '1',
+      },
+    );
+  }
+  return _notificationFcmPayloadTruncated;
+}

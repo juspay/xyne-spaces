@@ -1,5 +1,6 @@
 import { DatabaseClient } from '@/database/client';
 import { NotificationLevel, NotificationType } from '@prisma/client';
+import { logger } from '@/utils/logger';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -7,6 +8,33 @@ const prisma = DatabaseClient.getInstance();
 const DEFAULT_CHANNEL_NOTIFICATION_LEVEL = NotificationLevel.MENTIONS_ONLY;
 // 1:1 DMs always notify unless explicitly muted.
 const DEFAULT_DM_NOTIFICATION_LEVEL: NotificationLevel = NotificationLevel.ALL;
+
+// ── Targeted notification-decision tracing ────────────────────────
+// Concrete-proof instrumentation for the question "is user X actually eligible
+// for a MOBILE push for this message, or is the filter classifying them
+// desktop-only?". Set NOTIFICATION_TRACE_USER_IDS to a comma-separated list of
+// userIds; for each traced user we emit one structured line per fan-out
+// recording the resolved desktop/mobile notification levels (channel override +
+// global fallback) and the exact reason they were included in / excluded from
+// the mobile list. Empty env (the default) makes this a zero-cost no-op, so prod
+// logs are never flooded for the full recipient set of a channel-wide message.
+const NOTIFICATION_TRACE_USER_IDS: ReadonlySet<string> = new Set(
+  (process.env.NOTIFICATION_TRACE_USER_IDS ?? '')
+    .split(',')
+    .map(id => id.trim())
+    .filter(Boolean),
+);
+
+function isTracedUser(userId: string): boolean {
+  return NOTIFICATION_TRACE_USER_IDS.size > 0 && NOTIFICATION_TRACE_USER_IDS.has(userId);
+}
+
+function emitDecisionTrace(userId: string, fields: Record<string, unknown>): void {
+  if (!isTracedUser(userId)) return;
+  // info-level so it survives prod log filters; gated by an explicit userId
+  // allowlist so it only fires for the handful of users under investigation.
+  logger.info('[NotificationFilter] mobile-eligibility decision', { userId, ...fields });
+}
 
 // ── Pre-fetch types ───────────────────────────────────────────────────────────
 
@@ -338,6 +366,12 @@ export async function filterUsers(
     const globalPausedTs = parseTimestamp(globalPausedUntil);
     const isGloballyPaused = globalPausedTs !== null && globalPausedTs > Date.now();
     if (isGloballyPaused) {
+      emitDecisionTrace(userId, {
+        channelId, context, isDMChannel, isGroupDM,
+        notificationType: notificationType ?? null, mentionType: mentionType ?? null,
+        desktop: false, mobile: false, reason: 'global_pause',
+        globalPausedUntil: new Date(globalPausedTs!).toISOString(),
+      });
       continue;
     }
 
@@ -349,8 +383,17 @@ export async function filterUsers(
       const desktopLevel = channelStatus?.desktopNotificationLevel ?? DEFAULT_DM_NOTIFICATION_LEVEL;
       const mobileLevel  = channelStatus?.mobileNotificationLevel  ?? desktopLevel;
 
-      if (desktopLevel !== NotificationLevel.NONE) desktopUsers.push(userId);
-      if (mobileLevel  !== NotificationLevel.NONE) mobileUsers.push(userId);
+      const dmDesktop = desktopLevel !== NotificationLevel.NONE;
+      const dmMobile  = mobileLevel  !== NotificationLevel.NONE;
+      if (dmDesktop) desktopUsers.push(userId);
+      if (dmMobile)  mobileUsers.push(userId);
+      emitDecisionTrace(userId, {
+        channelId, context, isDMChannel, isGroupDM,
+        notificationType: notificationType ?? null, mentionType: mentionType ?? null,
+        desktop: dmDesktop, mobile: dmMobile, reason: 'dm_path',
+        channelMobileLevel: channelStatus?.mobileNotificationLevel ?? null,
+        effectiveMobileLevel: mobileLevel, effectiveDesktopLevel: desktopLevel,
+      });
       continue;
     }
 
@@ -361,6 +404,13 @@ export async function filterUsers(
     const effectiveThreadReply =
       channelStatus?.threadReplyNotificationsEnabled ?? globalPrefs.threadReplyNotificationsEnabled;
     if (notificationType === NotificationType.THREAD_REPLY && !effectiveThreadReply) {
+      emitDecisionTrace(userId, {
+        channelId, context, isDMChannel, isGroupDM,
+        notificationType, mentionType: mentionType ?? null,
+        desktop: false, mobile: false, reason: 'thread_reply_toggle_off',
+        channelThreadReplyEnabled: channelStatus?.threadReplyNotificationsEnabled ?? null,
+        globalThreadReplyEnabled: globalPrefs.threadReplyNotificationsEnabled,
+      });
       continue;
     }
 
@@ -368,6 +418,12 @@ export async function filterUsers(
     const effectiveChannelWideMentions =
       channelStatus?.channelWideMentionsEnabled ?? globalPrefs.channelWideMentionsEnabled;
     if (mentionType && !effectiveChannelWideMentions) {
+      emitDecisionTrace(userId, {
+        channelId, context, isDMChannel, isGroupDM,
+        notificationType: notificationType ?? null, mentionType,
+        desktop: false, mobile: false, reason: 'channel_wide_mentions_off',
+        channelWideMentionsEnabled: effectiveChannelWideMentions,
+      });
       continue;
     }
 
@@ -389,8 +445,17 @@ export async function filterUsers(
     // We already passed the toggle check in Layer 4 above. Only NONE (channel
     // explicitly muted) still blocks — ALL vs MENTIONS_ONLY does not.
     if (notificationType === NotificationType.THREAD_REPLY) {
-      if (effectiveDesktop !== NotificationLevel.NONE) desktopUsers.push(userId);
-      if (effectiveMobile  !== NotificationLevel.NONE) mobileUsers.push(userId);
+      const trDesktop = effectiveDesktop !== NotificationLevel.NONE;
+      const trMobile  = effectiveMobile  !== NotificationLevel.NONE;
+      if (trDesktop) desktopUsers.push(userId);
+      if (trMobile)  mobileUsers.push(userId);
+      emitDecisionTrace(userId, {
+        channelId, context, isDMChannel, isGroupDM,
+        notificationType, mentionType: mentionType ?? null,
+        desktop: trDesktop, mobile: trMobile, reason: 'thread_reply_level',
+        channelMobileLevel: channelStatus?.mobileNotificationLevel ?? null,
+        effectiveMobileLevel: effectiveMobile, effectiveDesktopLevel: effectiveDesktop,
+      });
       continue;
     }
 
@@ -405,6 +470,14 @@ export async function filterUsers(
     const result = evaluateNotificationSettings(settings, context);
     if (result.shouldNotifyDesktop) desktopUsers.push(userId);
     if (result.shouldNotifyMobile) mobileUsers.push(userId);
+    emitDecisionTrace(userId, {
+      channelId, context, isDMChannel, isGroupDM,
+      notificationType: notificationType ?? null, mentionType: mentionType ?? null,
+      desktop: result.shouldNotifyDesktop, mobile: result.shouldNotifyMobile,
+      reason: 'level_evaluation',
+      channelMobileLevel: channelStatus?.mobileNotificationLevel ?? null,
+      effectiveMobileLevel: effectiveMobile, effectiveDesktopLevel: effectiveDesktop,
+    });
   }
 
   return { desktopUsers, mobileUsers };
@@ -465,6 +538,11 @@ export async function filterGlobalUsers(
     const globalPausedUntil = globalPauseMap.get(userId) ?? null;
     const globalPausedTs = parseTimestamp(globalPausedUntil);
     if (globalPausedTs !== null && globalPausedTs > Date.now()) {
+      emitDecisionTrace(userId, {
+        channelId: null, context, notificationType,
+        desktop: false, mobile: false, reason: 'global_pause',
+        globalPausedUntil: new Date(globalPausedTs).toISOString(),
+      });
       continue;
     }
 
@@ -473,7 +551,14 @@ export async function filterGlobalUsers(
     // ─── Layer 4: Type-specific gate ──────────────────────────────────────
     if (notificationType === NotificationType.THREAD_REPLY) {
       const threadReplyEnabled = pref?.threadReplyNotificationsEnabled ?? DEFAULT_GLOBAL_PREFS.threadReplyNotificationsEnabled;
-      if (!threadReplyEnabled) continue;
+      if (!threadReplyEnabled) {
+        emitDecisionTrace(userId, {
+          channelId: null, context, notificationType,
+          desktop: false, mobile: false, reason: 'thread_reply_toggle_off',
+          globalThreadReplyEnabled: threadReplyEnabled,
+        });
+        continue;
+      }
     }
 
     // ─── Layer 3: Global notification level ───────────────────────────────
@@ -482,8 +567,15 @@ export async function filterGlobalUsers(
     const mobileLevel =
       pref?.globalMobileNotificationLevel ?? pref?.globalDesktopNotificationLevel ?? DEFAULT_GLOBAL_PREFS.globalMobileNotificationLevel;
 
-    if (isLevelAllowed(desktopLevel, context)) desktopUsers.push(userId);
-    if (isLevelAllowed(mobileLevel, context)) mobileUsers.push(userId);
+    const globalDesktop = isLevelAllowed(desktopLevel, context);
+    const globalMobile  = isLevelAllowed(mobileLevel, context);
+    if (globalDesktop) desktopUsers.push(userId);
+    if (globalMobile)  mobileUsers.push(userId);
+    emitDecisionTrace(userId, {
+      channelId: null, context, notificationType,
+      desktop: globalDesktop, mobile: globalMobile, reason: 'global_level_evaluation',
+      globalDesktopLevel: desktopLevel, globalMobileLevel: mobileLevel,
+    });
   }
 
   return { desktopUsers, mobileUsers };
