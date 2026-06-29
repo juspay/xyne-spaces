@@ -174,6 +174,7 @@ export function useDeskSettingsForm(
     defaultCc: parseDefaultCc(emailChannelPreference?.defaultCc).join(','),
     assigneeUserGroupId: emailChannelPreference?.assigneeUserGroupId ?? '',
     autoMergeEmails: emailChannelPreference?.emailMergeMode === EmailMergeMode.ENABLED,
+    twoStepSendEnabled: emailChannelPreference?.twoStepSendEnabled ?? false,
     autoAIDraft: emailChannelPreference?.autoDraftMode === AutoDraftMode.DRAFT,
     autoDraftAgentSlug: emailChannelPreference?.autoDraftAgentSlug ?? null,
   });
@@ -198,6 +199,7 @@ export function useDeskSettingsForm(
   const ccEmails = parseDefaultCc(pref.draft.defaultCc);
   const defaultAssigneeGroupId = pref.draft.assigneeUserGroupId;
   const autoMergeEmails = pref.draft.autoMergeEmails;
+  const twoStepSend = pref.draft.twoStepSendEnabled;
   const autoAIDraft = pref.draft.autoAIDraft;
   const autoAIDraftSaved = emailChannelPreference?.autoDraftMode === AutoDraftMode.DRAFT;
   const autoDraftAgentSlug = pref.draft.autoDraftAgentSlug;
@@ -226,6 +228,7 @@ export function useDeskSettingsForm(
   const setAssigneeGroup = (next: string) =>
     pref.setField('assigneeUserGroupId', next === 'none' ? '' : next);
   const setAutoMergeEmails = (checked: boolean) => pref.setField('autoMergeEmails', checked);
+  const setTwoStepSend = (checked: boolean) => pref.setField('twoStepSendEnabled', checked);
   const setAutoAIDraft = (checked: boolean) => pref.setField('autoAIDraft', checked);
   const setAutoDraftAgentSlug = (slug: string | null) => pref.setField('autoDraftAgentSlug', slug);
 
@@ -286,6 +289,9 @@ export function useDeskSettingsForm(
       }
       if (d.autoMergeEmails !== s.autoMergeEmails) {
         patch.emailMergeMode = d.autoMergeEmails ? EmailMergeMode.ENABLED : EmailMergeMode.DISABLED;
+      }
+      if (d.twoStepSendEnabled !== s.twoStepSendEnabled) {
+        patch.twoStepSendEnabled = d.twoStepSendEnabled;
       }
       if (d.autoAIDraft !== s.autoAIDraft) {
         patch.autoDraftMode = d.autoAIDraft ? AutoDraftMode.DRAFT : AutoDraftMode.OFF;
@@ -385,6 +391,8 @@ export function useDeskSettingsForm(
     setAssigneeGroup,
     autoMergeEmails,
     setAutoMergeEmails,
+    twoStepSend,
+    setTwoStepSend,
     autoAIDraft,
     autoAIDraftSaved,
     setAutoAIDraft,

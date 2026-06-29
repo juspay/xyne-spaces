@@ -59,6 +59,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     sendAsAliasError,
     ccEmails,
     setCcEmails,
+    twoStepSend,
+    setTwoStepSend,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
@@ -340,6 +342,25 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {isEmail && (
+        <div className='flex items-start justify-between gap-4'>
+          <div className='flex flex-col gap-[4px]'>
+            <div className='text-desk-label'>Two-step send</div>
+            <div className='text-desk-helper w-full max-w-[500px]'>
+              Show a review step before an email is sent. When on, clicking Send opens a
+              confirmation card so you can double-check recipients and content before it goes out.
+            </div>
+          </div>
+          <Switch
+            variant='desk'
+            checked={twoStepSend}
+            onCheckedChange={setTwoStepSend}
+            disabled={!canManage}
+            aria-label='Toggle two-step send'
+          />
         </div>
       )}
 

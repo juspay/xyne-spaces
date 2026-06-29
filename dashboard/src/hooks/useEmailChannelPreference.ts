@@ -31,6 +31,7 @@ export function useUpdateEmailChannelPreference() {
       sendAsEmail,
       defaultCc,
       emailMergeMode,
+      twoStepSendEnabled,
       autoDraftMode,
       autoDraftAgentSlug,
     }: {
@@ -40,6 +41,7 @@ export function useUpdateEmailChannelPreference() {
       sendAsEmail?: string | null;
       defaultCc?: string | null;
       emailMergeMode?: EmailMergeMode;
+      twoStepSendEnabled?: boolean;
       autoDraftMode?: AutoDraftMode;
       autoDraftAgentSlug?: string | null;
     }): Promise<void> => {
@@ -51,6 +53,7 @@ export function useUpdateEmailChannelPreference() {
           ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
           ...(defaultCc !== undefined ? { defaultCc } : {}),
           ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
+          ...(twoStepSendEnabled !== undefined ? { twoStepSendEnabled } : {}),
           ...(autoDraftMode !== undefined ? { autoDraftMode } : {}),
           ...(autoDraftAgentSlug !== undefined
             ? { autoDraftAgentSlug: autoDraftAgentSlug || null }

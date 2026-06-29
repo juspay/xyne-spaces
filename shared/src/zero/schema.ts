@@ -2048,6 +2048,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     subCategoryField: string().optional(),
     defaultCc: string().optional(),
     emailMergeMode: enumeration<EmailMergeMode>().optional(),
+    twoStepSendEnabled: boolean().optional(),
     priorityClassificationEnabled: boolean(),
     priorityClassificationPrompt: string().optional(),
     priorityClassificationThreshold: number(),

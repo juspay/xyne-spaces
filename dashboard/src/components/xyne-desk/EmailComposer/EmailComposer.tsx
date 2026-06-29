@@ -20,10 +20,12 @@ import {
   PencilLine,
   RefreshCw,
   ReplyAll,
+  Send,
   Signature,
   Sparkles,
   Trash2,
   Wand2,
+  X,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -302,6 +304,10 @@ export const EmailComposer = ({
     [aiPanelMode, setAIPanelMode],
   );
   const [isSending, setIsSending] = useState<boolean>(false);
+  // Two-step send: when the channel has it enabled, the first Send click opens a
+  // review/confirm dialog and the actual send only fires after the user confirms.
+  const twoStepSendEnabled = channelPreference?.twoStepSendEnabled ?? false;
+  const [showSendConfirm, setShowSendConfirm] = useState<boolean>(false);
   const aiActiveRef = useRef<boolean>(false);
   const users = useUsers();
   const [signatures] = useCachedQuery(queries.userEmailSignatures());
@@ -1204,6 +1210,13 @@ export const EmailComposer = ({
     } else if (!conversationId) {
       return;
     }
+    // Two-step send — first click only opens the confirm dialog; the real send
+    // happens when the dialog's "Send" button calls this again after confirming.
+    if (twoStepSendEnabled && !showSendConfirm) {
+      setShowSendConfirm(true);
+      return;
+    }
+    setShowSendConfirm(false);
     setIsSending(true);
     try {
       // Separate attachments: those with IDs already uploaded vs those needing upload
@@ -1338,6 +1351,17 @@ export const EmailComposer = ({
     } finally {
       setIsSending(false);
     }
+  };
+
+  // Fire-and-forget wrapper for handleSendEmail that surfaces any rejection
+  // that escapes its internal try/catch instead of swallowing it. Used by the
+  // onClick/onSendShortcut handlers below; never call handleSendEmail() with a
+  // bare `void` — a rejection there becomes an unhandled promise rejection.
+  const runSendEmail = (): void => {
+    handleSendEmail().catch(error => {
+      toast.error('Failed to send');
+      console.error('Failed to send email:', error);
+    });
   };
 
   const addFilesToAttachments = useCallback(
@@ -1796,6 +1820,152 @@ export const EmailComposer = ({
             <span className='text-sm font-medium text-violet-700 dark:text-violet-200'>
               Drop files to attach
             </span>
+          </div>
+        )}
+        {showSendConfirm && (
+          <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-foreground/30 p-4 backdrop-blur-sm'>
+            <div className='flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl'>
+              <div className='flex flex-shrink-0 items-start justify-between gap-3 border-b border-border px-5 py-4'>
+                <div className='flex flex-col gap-0.5'>
+                  <h2 className='text-base font-semibold leading-tight text-foreground'>
+                    Review &amp; send
+                  </h2>
+                  <p className='text-xs text-muted-foreground'>
+                    Make sure everything looks right before this email goes out.
+                  </p>
+                </div>
+                <button
+                  type='button'
+                  onClick={() => setShowSendConfirm(false)}
+                  className='-mr-1.5 flex size-8 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                  aria-label='Close review dialog'
+                  data-track-category='Support'
+                  data-track-name='CloseTwoStepSendReview'
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className='min-h-0 flex-1 overflow-y-auto overflow-x-hidden'>
+                <div className='divide-y divide-border/60 border-b border-border'>
+                  <div className='flex gap-3 px-5 py-2.5'>
+                    <span className='w-12 flex-shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                      To
+                    </span>
+                    <span className='flex-1 break-words text-sm text-foreground [overflow-wrap:anywhere]'>
+                      {toEmails.join(', ')}
+                    </span>
+                  </div>
+                  {ccEmails.length > 0 && (
+                    <div className='flex gap-3 px-5 py-2.5'>
+                      <span className='w-12 flex-shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                        Cc
+                      </span>
+                      <span className='flex-1 break-words text-sm text-foreground [overflow-wrap:anywhere]'>
+                        {ccEmails.join(', ')}
+                      </span>
+                    </div>
+                  )}
+                  {bccEmails.length > 0 && (
+                    <div className='flex gap-3 px-5 py-2.5'>
+                      <span className='w-12 flex-shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                        Bcc
+                      </span>
+                      <span className='flex-1 break-words text-sm text-foreground [overflow-wrap:anywhere]'>
+                        {bccEmails.join(', ')}
+                      </span>
+                    </div>
+                  )}
+                  {(isComposeMode ? composeSubject.trim() : ticketSubject?.trim()) && (
+                    <div className='flex gap-3 px-5 py-2.5'>
+                      <span className='w-12 flex-shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                        Subject
+                      </span>
+                      <span className='flex-1 break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]'>
+                        {isComposeMode ? composeSubject.trim() : ticketSubject?.trim()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className='px-5 py-4'>
+                  {hasEmailBody ? (
+                    <div
+                      className='prose prose-sm dark:prose-invert max-w-none break-words text-sm text-foreground [overflow-wrap:anywhere]'
+                      dangerouslySetInnerHTML={{
+                        __html: DOMPurify.sanitize(emailContent),
+                      }}
+                    />
+                  ) : (
+                    <p className='text-sm italic text-muted-foreground'>No message body.</p>
+                  )}
+                  {(() => {
+                    const activeSig = selectedSignatureId
+                      ? signatures?.find(s => s.id === selectedSignatureId)
+                      : null;
+                    if (!activeSig) return null;
+                    return (
+                      <div
+                        className='prose prose-sm dark:prose-invert mt-4 break-words border-t border-border pt-4 text-sm text-muted-foreground [overflow-wrap:anywhere]'
+                        dangerouslySetInnerHTML={{
+                          __html: DOMPurify.sanitize(activeSig.content),
+                        }}
+                      />
+                    );
+                  })()}
+                </div>
+
+                {attachments.length > 0 && (
+                  <div className='border-t border-border px-5 py-4'>
+                    <p className='mb-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                      {attachments.length} attachment{attachments.length > 1 ? 's' : ''}
+                    </p>
+                    <div className='flex flex-wrap gap-2'>
+                      {attachments.map((attachment, index) => (
+                        <AttachmentPreview
+                          key={attachment.attachmentId ?? attachment.tempId ?? index}
+                          file={attachment.file}
+                          onRemove={() => handleRemoveAttachment(index)}
+                          onPreview={() => handlePreviewAttachment(attachment)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className='flex flex-shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/30 px-5 py-3.5'>
+                <span className='text-xs text-muted-foreground'>
+                  {toEmails.length} recipient{toEmails.length === 1 ? '' : 's'}
+                </span>
+                <div className='flex items-center gap-2'>
+                  <button
+                    type='button'
+                    onClick={() => setShowSendConfirm(false)}
+                    className='rounded-lg px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted'
+                    data-track-category='Support'
+                    data-track-name='CancelTwoStepSend'
+                  >
+                    Back to edit
+                  </button>
+                  <button
+                    type='button'
+                    onClick={runSendEmail}
+                    disabled={isSending}
+                    className='inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60'
+                    data-track-category='Support'
+                    data-track-name='ConfirmTwoStepSend'
+                  >
+                    {isSending ? (
+                      <Loader2 size={14} className='animate-spin' />
+                    ) : (
+                      <Send size={14} />
+                    )}
+                    {isSending ? 'Sending…' : 'Send email'}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
         {isExpanded && features.showResizeGrip && (
@@ -2387,7 +2557,7 @@ export const EmailComposer = ({
                       !isSending &&
                       toEmails.length > 0
                     ) {
-                      void handleSendEmail();
+                      runSendEmail();
                     }
                   }}
                   onBlur={() => {
@@ -2618,7 +2788,7 @@ export const EmailComposer = ({
               )}
               <button
                 className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
-                onClick={() => void handleSendEmail()}
+                onClick={runSendEmail}
                 disabled={
                   (!hasEmailBody && attachments.length === 0 && !hasInlineImages) ||
                   (isComposeMode
