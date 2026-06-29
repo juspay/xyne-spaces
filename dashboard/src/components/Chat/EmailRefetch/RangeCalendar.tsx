@@ -338,5 +338,3 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
   if (view === 'months') return renderMonthsView();
   return renderDaysView();
 };
-
-export default RangeCalendar;

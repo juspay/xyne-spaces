@@ -1,2 +1,2 @@
-export { MessageActionsDrawer, default } from './MessageActionsDrawer';
+export { MessageActionsDrawer } from './MessageActionsDrawer';
 export type { MessageActionsDrawerProps } from './MessageActionsDrawer';

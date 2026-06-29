@@ -255,12 +255,6 @@ export function $createFilterChipIconNode(mentionData: MentionData): FilterChipI
   return new FilterChipIconNode(mentionData);
 }
 
-export function $isFilterChipIconNode(
-  node: LexicalNode | null | undefined,
-): node is FilterChipIconNode {
-  return node instanceof FilterChipIconNode;
-}
-
 // ---- Pill wrapper (FilterChipContainerNode) ----
 
 /**

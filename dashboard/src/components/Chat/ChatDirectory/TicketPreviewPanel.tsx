@@ -192,5 +192,3 @@ export const TicketPreviewPanel = ({ ticket }: TicketPreviewPanelProps): ReactEl
     </div>
   );
 };
-
-export default TicketPreviewPanel;

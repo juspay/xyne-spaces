@@ -193,28 +193,6 @@ export type StreamEventType =
   | 'end'
   | 'ping';
 
-/**
- * v2 Stream Event structure from SSE
- */
-export interface StreamEvent {
-  type: StreamEventType;
-  sessionId?: string;
-  traceId?: string;
-  content?: string;
-  delta?: string;
-  reasoningDelta?: string;
-  toolInvocation?: ToolInvocation;
-  debugEvent?: DebugEventRecord;
-  attachments?: Array<{
-    fileName: string;
-    mimeType: string;
-    data: string;
-  }>;
-  pendingActions?: PendingAction[];
-  status?: 'completed' | 'failed';
-  error?: string;
-}
-
 export interface DebugEventRecord {
   seq: number;
   at: string;

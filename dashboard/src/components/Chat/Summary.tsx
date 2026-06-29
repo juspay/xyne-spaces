@@ -938,5 +938,3 @@ export const ThreadSummary = (props: Omit<ThreadSummaryProps, 'type'>) => (
 export const ChannelSummary = (props: Omit<ChannelSummaryProps, 'type'>) => (
   <Summary type='channel' {...props} />
 );
-
-export default Summary;

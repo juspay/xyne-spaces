@@ -336,5 +336,3 @@ const DateField: React.FC<DateFieldProps> = ({
     </div>
   );
 };
-
-export default RefetchRangeDialog;

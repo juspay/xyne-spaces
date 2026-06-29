@@ -159,9 +159,6 @@ export function useRecipientName(
   return 'Unknown';
 }
 
-/** @see useRecipientName */
-export const getRecipientName = useRecipientName;
-
 /**
  * Returns a subtitle/info string for a message's recipient.
  *
@@ -194,6 +191,3 @@ export function useRecipientSubtitle(
 
   return '';
 }
-
-/** @see useRecipientSubtitle */
-export const getRecipientSubtitle = useRecipientSubtitle;

@@ -451,5 +451,3 @@ export const useChannelSectionDnd = ({
     },
   };
 };
-
-export default useChannelSectionDnd;
