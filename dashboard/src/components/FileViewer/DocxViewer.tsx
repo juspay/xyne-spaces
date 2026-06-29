@@ -153,7 +153,7 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source }) => {
       >
         <div
           ref={containerRef}
-          className={`docx-container bg-background flex ${isMobile ? 'flex-col' : 'flex-row'} flex-wrap align-center justify-center mt-[65px] mb-[65px] max-w-full overflow-x-hidden`}
+          className={`docx-container bg-transparent flex ${isMobile ? 'flex-col' : 'flex-row'} flex-wrap align-center justify-center mt-[65px] mb-[65px] max-w-full overflow-x-hidden`}
         />
       </div>
     </div>
@@ -175,12 +175,6 @@ function makeResponsive(root: HTMLElement, isMobile: boolean): void {
       }
     }
   }
-
-  // Remove width constraints from all wrappers
-  root.querySelectorAll('.docx, .docx-wrapper').forEach(el => {
-    const wrapper = el as HTMLElement;
-    wrapper.style.boxShadow = '0 0 10px rgba(0, 0, 0, 0.5)';
-  });
 
   // Make tables responsive
   root.querySelectorAll('table').forEach(table => {
