@@ -30,6 +30,12 @@ interface DmListItemProps {
   latestConversation?: { initial_message_md?: string | null } | undefined;
 }
 
+const getSenderLabel = (isCurrentUser: boolean, isDM: boolean, senderName?: string): string => {
+  if (isCurrentUser) return 'You';
+  if (isDM) return '';
+  return senderName?.split(' ')[0] ?? '';
+};
+
 export const DmListItem = ({
   channel,
   unreadCount = 0,
@@ -97,11 +103,11 @@ export const DmListItem = ({
   const messagePreview = useMemo(() => {
     if (!lastMessage) return 'No messages yet';
 
-    // Get sender's first name, fallback to "You" for current user
-    const senderFirstName =
-      lastMessage.senderId === context.userID
-        ? 'You'
-        : (lastMessageSender?.name?.split(' ')[0] ?? '');
+    const senderFirstName = getSenderLabel(
+      lastMessage.senderId === context.userID,
+      isDM,
+      lastMessageSender?.name,
+    );
 
     const prefix = senderFirstName ? `${senderFirstName}: ` : '';
 
@@ -123,7 +129,7 @@ export const DmListItem = ({
         </span>
       </>
     );
-  }, [sanitizedHtml, flowPreviewText, lastMessage, lastMessageSender, context.userID]);
+  }, [sanitizedHtml, flowPreviewText, lastMessage, lastMessageSender, context.userID, isDM]);
 
   // 3. Format elapsed time (now, 5m, 2h, 3d, 1 month, 2 years, etc.)
   const formatTime = (timestamp?: number): string => {
