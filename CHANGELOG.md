@@ -1,3 +1,10 @@
+## [1.180.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.179.0...v1.180.0) (2026-06-29)
+
+
+### Features
+
+* add GET /api/vespaSearch/schema endpoint ([638d07f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/638d07fd9570e1baca63a6e70ca5a75026c8ab78)), closes [#8161](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8161)
+
 ## [1.179.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.178.0...v1.179.0) (2026-06-29)
 
 
