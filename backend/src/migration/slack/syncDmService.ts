@@ -231,6 +231,9 @@ export async function runMigrationAllDms({
   let skippedUnresolvable = 0;
   let failed = 0;
   let alreadyMigrated = 0;
+  // Non-empty DMs we actually consider. Empty DMs (zero messages) are skipped
+  // up front and never counted or surfaced anywhere.
+  let consideredDms = 0;
 
   // ── Step 4: Classify each DM — already fully migrated vs. pending ─────────
   // A DM's Xyne channel is marked isMigrated=true only after ALL of its batches
@@ -246,7 +249,27 @@ export async function runMigrationAllDms({
     const slackDmId: string = dm.id;
 
     try {
-      // ── 4a: Resolve other participant(s) ─────────────────────────────
+      // ── 4a: Skip empty DMs up front ──────────────────────────────────
+      // conversations.history(limit:1) with an empty `messages` array means the
+      // DM has no messages at all — nothing to migrate, so we never create a
+      // Xyne channel for it and don't count it anywhere. On a probe error we do
+      // NOT skip (fall through) so a transient failure can't drop a real DM.
+      try {
+        const probe = await userClient.conversations.history({ channel: slackDmId, limit: 1, inclusive: true });
+        if (!probe.messages || probe.messages.length === 0) {
+          logger.info('[SyncDM] Empty DM (no messages) — skipping, no channel created', { slackDmId });
+          continue;
+        }
+      } catch (err) {
+        logger.warn('[SyncDM] Empty-DM probe failed, proceeding with migration', {
+          slackDmId,
+          error: err instanceof Error ? err.message : err,
+        });
+      }
+
+      consideredDms++;
+
+      // ── 4b: Resolve other participant(s) ─────────────────────────────
       let otherSlackIds: string[] = [];
 
       if (dm.is_im) {
@@ -310,8 +333,9 @@ export async function runMigrationAllDms({
   }
 
   // ── Step 4.5: Report the plan (migrated vs. yet-to-migrate) ───────────────
+  // Counts reflect only non-empty DMs (consideredDms); empty DMs are excluded.
   logger.info('[SyncDM] Migration plan', {
-    total: allDms.length,
+    total: consideredDms,
     alreadyMigrated,
     toMigrate: pending.length,
     skippedUnresolvable,
@@ -321,7 +345,7 @@ export async function runMigrationAllDms({
       channelId: logChannelId,
       text:
         `📊 DM migration plan for <@${slackUserId}>:\n` +
-        `• Total conversations: *${allDms.length}*\n` +
+        `• Total conversations: *${consideredDms}*\n` +
         `• ✅ Already migrated (skipping): *${alreadyMigrated}*\n` +
         `• 🔄 To migrate now: *${pending.length}*\n` +
         `• ⏭️ Skipped (bot/unresolvable): *${skippedUnresolvable}*`,

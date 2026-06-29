@@ -136,15 +136,29 @@ export interface SlackRichTextBlock {
   elements: SlackRichTextBlockElement[];
 }
 
+// ========== Table Block Types ==========
+
+/** A plain-text table cell. */
+export interface SlackRawTextCell {
+  type: 'raw_text';
+  text: string;
+}
+
+/** A table cell is either a rich-text block or a raw-text cell. */
+export type SlackTableCell = SlackRichTextBlock | SlackRawTextCell;
+
+/** Slack's `table` block — a grid of cells (rows of cells). */
+export interface SlackTableBlock {
+  type: 'table';
+  block_id?: string;
+  rows: SlackTableCell[][];
+}
+
 // ========== Combined Block Types ==========
 export interface SlackTableColumnSetting {
   align?: 'left' | 'center' | 'right';
   is_wrapped?: boolean;
 }
-
-export type SlackTableCell =
-  | { type: 'raw_text'; text: string }
-  | { type: 'rich_text'; elements: SlackRichTextBlockElement[] };
 
 export interface SlackTableBlock {
   type: 'table';
@@ -188,6 +202,8 @@ export interface SlackAttachment {
   image_url?: string;
   thumb_url?: string;
   footer?: string;
+  /** Permalink to the original message, present on forwarded/shared attachments. */
+  from_url?: string;
 }
 
 // ========== Message Types ==========
