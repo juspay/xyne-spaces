@@ -76,7 +76,9 @@ const envSchema = Joi.object({
   BACKEND_URL: Joi.string().default(''),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default(''),
-  FRONTEND_URL: Joi.string().allow('').default(''),
+  FRONTEND_URL: Joi.string().default(''),
+  GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
+  MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default(''),
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
@@ -481,6 +483,8 @@ export const config = {
   slackBotToken: envVars.SLACK_BOT_TOKEN,
   slackFrontendUrl: envVars.SLACK_FRONTEND_URL,
   frontendUrl: envVars.FRONTEND_URL,
+  googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
+  microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
   slackSigningSecret: envVars.SLACK_SIGNING_SECRET,
   slackMigrationApprovals: envVars.SLACK_MIGRATION_APPROVALS

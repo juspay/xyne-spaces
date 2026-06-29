@@ -37,7 +37,7 @@ import {
   createOAuth2Client as createGoogleOAuth2Client,
   setOAuthState as setGoogleOAuthState,
 } from './google-auth';
-import { getBackendUrl } from './urlHelpers';
+import { getBackendUrl } from '@/utils/publicUrls';
 import { MICROSOFT_OAUTH_SCOPES } from '@/services/microsoftDeskService';
 
 const TAG = '[DeskIntegration]';
@@ -302,7 +302,7 @@ router.post(
           platform,
         });
 
-        const redirectUri = `${getBackendUrl(req)}/api/integrations/microsoft/callback`;
+        const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
         const authUrl = oauthClient.authorizeURL({
           redirect_uri: redirectUri,
           scope: MICROSOFT_OAUTH_SCOPES,
@@ -433,7 +433,7 @@ router.post(
         platform,
       });
 
-      const redirectUri = `${getBackendUrl(req)}/api/integrations/microsoft/callback`;
+      const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
       const authUrl = oauthClient.authorizeURL({
         redirect_uri: redirectUri,
         scope: MICROSOFT_OAUTH_SCOPES,

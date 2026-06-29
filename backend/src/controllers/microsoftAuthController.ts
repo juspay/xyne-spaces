@@ -10,6 +10,7 @@ import '../types/express';
 import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
 import jwt from 'jsonwebtoken';
+import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
@@ -61,49 +62,22 @@ export class MicrosoftAuthController {
     this.userSessionService = new UserSessionService();
   }
 
-  private getFrontendUrl(req: Request | null = null): string {
-    logger.info(`[X-Original-Host]: value: ${req?.headers['x-original-host']}`);
-
-    if (req) {
-      const originalHost = req.headers['x-original-host'];
-      if (originalHost && typeof originalHost === 'string') {
-        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-        return `${protocol}://${originalHost}`;
-      }
-    }
-
-    const url = process.env.FRONTEND_URL;
-    if (!url) {
-      throw new Error('FRONTEND_URL environment variable is required');
-    }
-    return url.trim();
-  }
-
-  private getRedirectUrl(req: Request, platform: string, params: Record<string, string>): string {
+  private getRedirectUrl(platform: string, params: Record<string, string>): string {
     const query = new URLSearchParams(params).toString();
     if (platform === 'mobile') {
       return `xyne-spaces://auth/microsoft/callback?${query}`;
     }
-    const frontendUrl = this.getFrontendUrl(req);
+    const frontendUrl = getFrontendUrl();
     return `${frontendUrl}?${query}`;
   }
 
-  private getBackendUrl(req: Request | null = null): string {
-    logger.info(`[X-Original-Host]: value: ${req?.headers['x-original-host']}`);
-
-    if (req) {
-      const originalHost = req.headers['x-original-host'];
-      if (originalHost && typeof originalHost === 'string') {
-        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-        return `${protocol}://${originalHost}`;
-      }
-    }
-
-    const url = process.env.BACKEND_URL;
-    if (!url) {
-      throw new Error('BACKEND_URL environment variable is required');
-    }
-    return url.trim();
+  private getMicrosoftRedirectUri(): string {
+    return resolveConfiguredOAuthRedirectUrl(
+      config.microsoftAuthRedirectUri,
+      config.backendUrl,
+      '/api/v2/auth/microsoft/callback',
+      'MICROSOFT_AUTH_REDIRECT_URI',
+    );
   }
 
   initiateLogin = async (req: Request, res: Response): Promise<void> => {
@@ -142,9 +116,9 @@ export class MicrosoftAuthController {
 
         await pkceServiceV2.storeVerifier(state, codeVerifier);
 
-        const redirectUri = `${this.getBackendUrl(req)}/api/v2/auth/microsoft/callback`;
+        const redirectUri = this.getMicrosoftRedirectUri();
 
-        logger.info('[X-Original-Host] : Redirect URI:', redirectUri);
+        logger.info('[OAuth] Redirect URI:', redirectUri);
 
         const authorizationUri = this.oauthClient.authorizeURL({
           redirect_uri: redirectUri,
@@ -162,7 +136,7 @@ export class MicrosoftAuthController {
         res.redirect(authorizationUri);
       } else {
         logger.error(`[${requestId}] Microsoft OAuth client not configured`);
-        const frontendUrl = this.getFrontendUrl(req);
+        const frontendUrl = getFrontendUrl();
         res.redirect(
           `${frontendUrl}?error=microsoft_not_configured&message=${encodeURIComponent('Microsoft SSO is not configured')}`
         );
@@ -171,7 +145,7 @@ export class MicrosoftAuthController {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.error(`[${requestId}] Error initiating Microsoft login: ${errorMessage}`);
 
-      const frontendUrl = this.getFrontendUrl(req);
+      const frontendUrl = getFrontendUrl();
       res.redirect(
         `${frontendUrl}?error=oauth_init_failed&message=${encodeURIComponent(errorMessage)}`
       );
@@ -202,7 +176,7 @@ export class MicrosoftAuthController {
           logger.error(`[${requestId}] Microsoft OAuth error: ${error}`);
           if (state) await oauthStateServiceV2.deleteState(state as string);
           res.redirect(
-            this.getRedirectUrl(req, resolvedPlatform, {
+            this.getRedirectUrl(resolvedPlatform, {
               error: 'oauth_error',
               message: error as string,
             })
@@ -213,7 +187,7 @@ export class MicrosoftAuthController {
         if (!code || !state) {
           logger.error(`[${requestId}] Missing code or state`);
           res.redirect(
-            this.getRedirectUrl(req, resolvedPlatform, {
+            this.getRedirectUrl(resolvedPlatform, {
               error: 'missing_params',
               message: 'Missing authorization code or state',
             })
@@ -229,7 +203,7 @@ export class MicrosoftAuthController {
         // record and routes Microsoft states to the Microsoft exchange handler.
         // State and PKCE verifier must remain intact until that exchange.
         if (resolvedPlatform === 'electron') {
-          const frontendUrl = this.getFrontendUrl(req);
+          const frontendUrl = getFrontendUrl();
           const launchParams = new URLSearchParams({
             code: code as string,
             state: state as string,
@@ -251,7 +225,7 @@ export class MicrosoftAuthController {
         if (!codeVerifier) {
           logger.error(`[${requestId}] Code verifier not found`);
           res.redirect(
-            this.getRedirectUrl(req, resolvedPlatform, {
+            this.getRedirectUrl(resolvedPlatform, {
               error: 'pkce_error',
               message: 'PKCE verification failed',
             })
@@ -259,7 +233,7 @@ export class MicrosoftAuthController {
           return;
         }
 
-        const redirectUri = `${this.getBackendUrl(req)}/api/v2/auth/microsoft/callback`;
+        const redirectUri = this.getMicrosoftRedirectUri();
 
         // Exchange code for tokens
         const tokenParams = {
@@ -426,7 +400,7 @@ export class MicrosoftAuthController {
         }
 
         // Redirect to frontend with success
-        const frontendUrl = this.getFrontendUrl(req);
+        const frontendUrl = getFrontendUrl();
 
         // If this was a "connect calendar" re-auth, redirect straight to the calls page
         if (peekedState?.connectCalendar && user.workspaceId) {
@@ -447,7 +421,7 @@ export class MicrosoftAuthController {
       } else {
         logger.error(`[${requestId}] Microsoft OAuth client not configured`);
         res.redirect(
-          this.getRedirectUrl(req, resolvedPlatform, {
+          this.getRedirectUrl(resolvedPlatform, {
             error: 'microsoft_not_configured',
             message: 'Microsoft SSO is not configured',
           })
@@ -458,7 +432,7 @@ export class MicrosoftAuthController {
       logger.error(`[${requestId}] Microsoft OAuth callback failed: ${errorMessage}`);
 
       res.redirect(
-        this.getRedirectUrl(req, resolvedPlatform, {
+        this.getRedirectUrl(resolvedPlatform, {
           error: 'auth_failed',
           message: errorMessage,
         })
@@ -556,7 +530,7 @@ export class MicrosoftAuthController {
 
       await oauthStateServiceV2.markCodeAsUsed(code);
 
-      const redirectUri = `${this.getBackendUrl(req)}/api/v2/auth/microsoft/callback`;
+      const redirectUri = this.getMicrosoftRedirectUri();
 
       logger.info(`[${requestId}] Exchanging code for tokens`);
       const tokenResult = await this.oauthClient.getToken({

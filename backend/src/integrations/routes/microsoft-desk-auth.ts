@@ -18,20 +18,15 @@ import { db } from '../../database/client';
 import { emailFetchQueue } from '../../queues/emailFetchQueue';
 import { logger } from '../../utils/logger';
 import { WorkspaceRole } from '@prisma/client';
+import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import {
   appendQueryToReturnPath,
   buildReturnPathOrSupportPath,
   buildSupportPath,
-  getFrontendUrl,
-  getBackendUrl,
   sanitizeReturnPath,
 } from './urlHelpers';
 
 const router = Router();
-
-function getPublicUrl(req: Request): string {
-  return getBackendUrl(req);
-}
 
 function buildPostOAuthRedirect(
   frontendUrl: string,
@@ -104,7 +99,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
       platform,
     });
 
-    const redirectUri = `${getPublicUrl(req)}/api/integrations/microsoft/callback`;
+    const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
 
     const authorizationUri = oauthClient.authorizeURL({
       redirect_uri: redirectUri,
@@ -162,7 +157,7 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
       platform,
     });
 
-    const redirectUri = `${getPublicUrl(req)}/api/integrations/microsoft/callback`;
+    const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
     const authorizationUri = oauthClient.authorizeURL({
       redirect_uri: redirectUri,
       scope: MICROSOFT_OAUTH_SCOPES,
@@ -207,7 +202,7 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
       platform,
     });
 
-    const redirectUri = `${getPublicUrl(req)}/api/integrations/microsoft/callback`;
+    const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
     const authorizationUri = oauthClient.authorizeURL({
       redirect_uri: redirectUri,
       scope: MICROSOFT_OAUTH_SCOPES,
@@ -279,7 +274,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       return;
     }
 
-    const redirectUri = `${getPublicUrl(req)}/api/integrations/microsoft/callback`;
+    const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
     let tokenResult;
     try {
       tokenResult = await oauthClient.getToken({
@@ -375,7 +370,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       });
 
       try {
-        const webhookUrl = `${getPublicUrl(req)}/api/external-source-sync/${source.name}/ingest`;
+        const webhookUrl = `${getBackendUrl()}/api/external-source-sync/${source.name}/ingest`;
         await microsoftDeskService.registerGraphWebhook(accessToken, webhookUrl);
       } catch (err) {
         logger.warn(`[${requestId}] Failed to re-register webhook on reconnect`, err);
@@ -406,7 +401,7 @@ router.get('/callback', async (req: Request, res: Response) => {
             email,
             expiresAt: token.expires_at ? new Date(token.expires_at as string).toISOString() : undefined,
           },
-          getPublicUrl(req),
+          getBackendUrl(),
         );
       } catch (err) {
         const errCode = (err as Error & { code?: string })?.code;
@@ -516,7 +511,7 @@ router.get('/callback', async (req: Request, res: Response) => {
             email,
             expiresAt: token.expires_at ? new Date(token.expires_at as string).toISOString() : undefined,
           },
-          getPublicUrl(req),
+          getBackendUrl(),
         );
       } catch (err) {
         const errCode = (err as Error & { code?: string })?.code;
@@ -589,7 +584,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       refreshToken: (token.refresh_token as string) ?? undefined,
       email,
       expiresAt: token.expires_at ? new Date(token.expires_at as string).toISOString() : undefined,
-    }, getPublicUrl(req));
+    }, getBackendUrl());
 
     logger.info(`[${requestId}] Microsoft email channel created: ${channelId}`);
 

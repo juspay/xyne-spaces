@@ -17,7 +17,7 @@ import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
-import { getFrontendUrl, getBackendUrl } from './urlHelpers';
+import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 
 const TAG = '[SlackUserAuth]';
 const router = express.Router();
@@ -73,7 +73,7 @@ router.get(
         OAUTH_STATE_TTL_SECONDS,
       );
 
-      const redirectUri = `${getBackendUrl(req)}/api/integrations/slack-user/callback`;
+      const redirectUri = `${getBackendUrl()}/api/integrations/slack-user/callback`;
 
       const params = new URLSearchParams({
         client_id: creds.clientId,
@@ -98,7 +98,7 @@ router.get(
 router.get('/callback', async (req: Request, res: Response): Promise<void> => {
   let frontendUrl: string;
   try {
-    frontendUrl = getFrontendUrl(req);
+    frontendUrl = getFrontendUrl();
   } catch {
     frontendUrl = 'http://localhost:5173';
   }
@@ -146,7 +146,7 @@ router.get('/callback', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const redirectUri = `${getBackendUrl(req)}/api/integrations/slack-user/callback`;
+    const redirectUri = `${getBackendUrl()}/api/integrations/slack-user/callback`;
 
     // Exchange code for token
     const tokenResponse = await fetch('https://slack.com/api/oauth.v2.access', {

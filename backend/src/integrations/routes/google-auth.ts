@@ -19,11 +19,11 @@ import {
   appendQueryToReturnPath,
   buildReturnPathOrSupportPath,
   buildSupportPath,
-  getFrontendUrl,
   sanitizeReturnPath,
 } from './urlHelpers';
 import { encrypt } from '@/services/encryptionService';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
+import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
 
 const TAG = '[GoogleAuth]';
 const router = express.Router();
@@ -100,7 +100,7 @@ export function createOAuth2Client(redirectUri?: string) {
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    redirectUri || process.env.GOOGLE_REDIRECT_URI || `${process.env.BACKEND_URL}/api/integrations/google/auth/callback`
+    redirectUri || process.env.GOOGLE_REDIRECT_URI || `${getBackendUrl()}/api/integrations/google/auth/callback`
   );
 }
 
@@ -193,7 +193,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
     logger.error(`${TAG} Error initiating Google connect:`, error);
     redirectError(
       res,
-      getFrontendUrl(req),
+      getFrontendUrl(),
       'google_connect_failed',
       platform,
       req.user!.workspaceId,
@@ -250,7 +250,7 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
     logger.error(`${TAG} Error initiating workspace Google connect:`, error);
     redirectError(
       res,
-      getFrontendUrl(req),
+      getFrontendUrl(),
       'workspace_google_connect_failed',
       platform,
       req.user!.workspaceId,
@@ -299,7 +299,7 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
     });
     res.redirect(
       buildPostOAuthRedirect(
-        getFrontendUrl(req),
+        getFrontendUrl(),
         buildReturnPathOrSupportPath(
           returnPath,
           req.user!.workspaceId,
@@ -344,7 +344,7 @@ router.post('/auth/start', async (req: Request, res: Response): Promise<void> =>
 
 // GET /api/integrations/google/auth/callback
 router.get('/auth/callback', async (req: Request, res: Response): Promise<void> => {
-  const frontendUrl = getFrontendUrl(req);
+  const frontendUrl = getFrontendUrl();
   const { code, state, error } = req.query;
   const stateData = state ? await getOAuthState(state as string) : null;
   const platform = stateData?.platform;
