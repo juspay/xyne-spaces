@@ -107,10 +107,17 @@ export function CustomLiveKitRoom({
             ? 'disconnecting'
             : 'idle';
 
-  const metadata = useMemo(() => {
-    const activeCall = activeCalls.find(call => call.externalId === externalId);
-    return activeCall?.metadata as { conversationId?: string; channelId?: string } | undefined;
-  }, [activeCalls, externalId]);
+  const activeCall = useMemo(
+    () => activeCalls.find(call => call.externalId === externalId),
+    [activeCalls, externalId],
+  );
+
+  const metadata = useMemo(
+    () => activeCall?.metadata as { conversationId?: string; channelId?: string } | undefined,
+    [activeCall],
+  );
+
+  const callUpdatesChannelId = activeCall?.callUpdatesChannel ?? metadata?.channelId ?? channelId;
 
   const currentChannel = useChannel(channelId || '');
 
@@ -236,10 +243,10 @@ export function CustomLiveKitRoom({
   }, [handleDisconnect]);
 
   const handleToggleThread = useCallback(() => {
-    if (channelId && metadata?.conversationId) {
+    if (callUpdatesChannelId && metadata?.conversationId) {
       roomActor.send({ type: 'TOGGLE_CHAT' });
     }
-  }, [channelId, metadata]);
+  }, [callUpdatesChannelId, metadata]);
 
   const handleToggleCallChat = useCallback(() => {
     roomActor.send({ type: 'TOGGLE_CALL_CHAT' });
@@ -333,7 +340,7 @@ export function CustomLiveKitRoom({
           callId={callId}
           roomLink={roomLink || ''}
           isChatOpen={isChatOpen}
-          channelId={channelId}
+          channelId={callUpdatesChannelId}
           conversationId={metadata?.conversationId || null}
           room={room}
           pendingControlRequest={pendingControlRequest}
@@ -402,7 +409,7 @@ export function CustomLiveKitRoom({
         machineState={machineState}
         roomLink={roomLink || ''}
         isChatOpen={isChatOpen}
-        channelId={channelId}
+        channelId={callUpdatesChannelId}
         conversationId={metadata?.conversationId || null}
         room={room}
         pendingControlRequest={pendingControlRequest}

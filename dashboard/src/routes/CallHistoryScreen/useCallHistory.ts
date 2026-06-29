@@ -629,6 +629,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   const handleGotoTranscript = (call: Call): void => {
     const metadata = call.metadata as { conversationId?: string } | null;
     const conversationId = metadata?.conversationId;
+    const callUpdatesChannelId = call.callUpdatesChannel ?? call.channelId;
 
     const showInfo = ({
       header,
@@ -642,7 +643,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
         duration: 3000,
       });
 
-    if (!call.channelId) {
+    if (!callUpdatesChannelId) {
       showInfo({ header: 'No channel found', description: 'No channel found for this call.' });
       return;
     }
@@ -655,7 +656,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       return;
     }
 
-    void navigate(`/chat/dir/${call.channelId}/${conversationId}#origin=${conversationId}`);
+    void navigate(`/chat/dir/${callUpdatesChannelId}/${conversationId}#origin=${conversationId}`);
   };
 
   const handleDownloadTranscript = (call: Call): void => {

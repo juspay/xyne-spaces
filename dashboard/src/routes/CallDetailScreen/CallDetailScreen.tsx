@@ -193,10 +193,13 @@ export default function CallDetailScreen(): ReactElement {
   const title = call.title ?? 'Untitled Call';
   const heldOn = call.startedAt ? format(new Date(call.startedAt), 'MM/dd/yyyy, h:mm a') : null;
   const participants = call.participants ?? [];
+  const callUpdatesChannelId = call.callUpdatesChannel ?? call.channelId;
 
   const handleGotoCallMessage = (): void => {
-    if (!call.channelId || !callConversationId) return;
-    void navigate(`/chat/dir/${call.channelId}/${callConversationId}#origin=${callConversationId}`);
+    if (!callUpdatesChannelId || !callConversationId) return;
+    void navigate(
+      `/chat/dir/${callUpdatesChannelId}/${callConversationId}#origin=${callConversationId}`,
+    );
   };
 
   const renderSummaryTab = (): ReactElement => {
