@@ -2,8 +2,6 @@
 export const MAX_EMAIL_ATTACHMENT_FILES = 10;
 export const MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 
-const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
-
 /** True for placeholder/provider ids that must not be shown as sender or preview text. */
 export const looksLikeTechnicalId = (value: string): boolean => {
   const trimmed = (value || '').trim();
@@ -43,9 +41,4 @@ export const stripHtml = (html: string): string => {
   const tmp = document.createElement('DIV');
   tmp.innerHTML = html;
   return tmp.textContent || tmp.innerText || '';
-};
-
-/** Plain-text snippet for collapsed email thread rows; removes embedded UUIDs only. */
-export const buildEmailPreviewText = (html: string, maxLength = 140): string => {
-  return stripHtml(html).replace(UUID_RE, '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 };

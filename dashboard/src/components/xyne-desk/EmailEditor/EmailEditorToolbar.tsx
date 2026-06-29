@@ -844,5 +844,3 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
     </>
   );
 };
-
-export default EmailEditorToolbar;
