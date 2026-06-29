@@ -20,20 +20,6 @@ export interface DeskSettingsProps {
 }
 
 export type TabId = 'inbox' | 'assignment' | 'automation' | 'ai-features' | 'ai-sync';
-
-/** Configuration for a single settings tab */
-export interface TabConfig {
-  id: TabId;
-  label: string;
-  icon: string;
-}
-
-export interface DeskSignature {
-  id: string;
-  name: string;
-  content: string;
-}
-
 export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'inbox', label: 'Inbox', icon: Inbox },
   { id: 'assignment', label: 'Assignment & Routing', icon: Route },

@@ -204,5 +204,3 @@ export const ReplyPill: React.FC<ReplyPillProps> = ({
     </motion.div>
   );
 };
-
-export default ReplyPill;

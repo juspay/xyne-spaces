@@ -199,5 +199,3 @@ export function ThreadCitationModal(): ReactElement | null {
     </div>
   );
 }
-
-export default ThreadCitationModal;
