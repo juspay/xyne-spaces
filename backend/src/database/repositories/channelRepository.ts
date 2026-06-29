@@ -190,6 +190,22 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
   }
 
+  // Set lastActivityAt to MAX(message.createdAt); used post-migration to replace the `now` placeholder.
+  async recalculateLastActivityFromMessages(channelId: string): Promise<void> {
+    const latest = await this.db.message.findFirst({
+      where: { conversation: { channelId } },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    if (!latest) return;
+
+    await this.db.channelStats.upsert({
+      where: { channelId },
+      update: { lastActivityAt: latest.createdAt },
+      create: { channelId, lastActivityAt: latest.createdAt },
+    });
+  }
+
   async incrementUnreadForAllMembers(channelId: string, increment: number): Promise<void> {
     if (increment <= 0) return;
     await this.db.channelUserStatus.updateMany({
