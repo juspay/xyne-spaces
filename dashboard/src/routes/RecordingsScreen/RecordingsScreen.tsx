@@ -41,7 +41,7 @@ export default function RecordingsScreen(): ReactElement {
   const [showTitleModal, setShowTitleModal] = useState(false);
   const [savingTitle, setSavingTitle] = useState(false);
   const [showSttPicker, setShowSttPicker] = useState(false);
-  const [sttModel, setSttModel] = useState<'google' | 'azure' | 'deepgram'>('azure');
+  const [sttModel, setSttModel] = useState<'google' | 'azure' | 'deepgram'>('google');
   const navigate = useNavigate();
 
   const { recordings, hasMoreRecordings, loadMoreRecordings, isLoading } = usePaginatedRecordings();
