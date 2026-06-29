@@ -1,3 +1,29 @@
+## [1.179.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.178.0...v1.179.0) (2026-06-29)
+
+
+### Features
+
+* added test for navigation ([52163f8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/52163f872232bd62ca63f4c21b00837666a489c5)), closes [#8154](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8154)
+* api call in dm fixture ([260925e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/260925e021e21e27ed4d53429e7e0c05c57b5fdc)), closes [#8167](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8167)
+* Revert "Pull request [#7662](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7662): feat: XYNE-15289 resolve unknown-channel activity notifications for non-members" ([9b81b33](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9b81b33278cb06617b64dbe944341017967667a9))
+* schedule call for apps ([6453d7d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6453d7d436b4d7f16d84b8d180161c0e50944b7c)), closes [#8124](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8124)
+* Table Block and Attachment and Valid Dm's ([f6b3225](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f6b3225cffd81e64d4939d56694bb85109ed402f)), closes [#8135](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8135)
+
+
+### Bug Fixes
+
+* Change default recording screen model to Google ([8939188](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8939188c197e9d5381baeafcce3a7a7760b44c02)), closes [#8143](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8143)
+* chat related code cleanup ([572b9f8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/572b9f8455a73494025fefe4f90813d2664d8664)), closes [#7910](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7910)
+* dms view fix ([7434fc8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7434fc8009c19a168745581fc39bd8ef595c22e2)), closes [#8141](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8141)
+* docx rendering fix ([f7d72ff](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f7d72ffc3f1242353e7b941a098058ee3ab5877f)), closes [#8137](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8137)
+* Fix post-call update redirection bug ([4f1d32d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4f1d32d14f4d14a838620b9da69b5f925454f5f0))
+* fixed auth code hijacking ([f391f05](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f391f05195fbd79db15fbc834e0a0e126550a793))
+* lastActivityAt col of channelStats for dm;s order ([f84765d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f84765df18b73417a6231079f9d84244e32c8ca5)), closes [#8148](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8148)
+* Refactor Electron app codebase ([454e53f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/454e53fdc171298f8d691e4d587c8866c98b3eb7)), closes [#8068](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8068)
+* Remove boldness from active chat items + remove tooltip from channelItems ([da8ed5d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/da8ed5df8de6d2b1fa26366ad3f7161c6e84026c)), closes [#8151](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8151)
+* trigger side effects for automation mentions ([3348415](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3348415e364114da0e3f7b989ed13aff4c15b364)), closes [#8115](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8115)
+* Xyne Desk Code Cleanup ([1959c53](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1959c53086efa4a341ba51b2387fbbe82c970523)), closes [#8069](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8069)
+
 ## [1.178.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.177.0...v1.178.0) (2026-06-28)
 
 
