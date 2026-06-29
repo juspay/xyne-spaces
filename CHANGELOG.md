@@ -1,3 +1,10 @@
+## [1.180.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.180.0...v1.180.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* keep mobile push payload under FCM 4KB data limit ([f7dcdea](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f7dcdeaccfbe6db8a3a63ec86bc3abd78aae2766)), closes [#8105](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8105)
+
 ## [1.180.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.179.0...v1.180.0) (2026-06-29)
 
 
