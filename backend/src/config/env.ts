@@ -275,6 +275,7 @@ const envSchema = Joi.object({
   VESPA_QUEUE_NAMES: Joi.string().default(''),
   VESPA_FEED_URL: Joi.string().uri().default(''),
   VESPA_QUERY_URL: Joi.string().uri().default(''),
+  VESPA_CONFIG_SERVER_URL: Joi.string().uri().default(''),
   // Microsoft Graph API
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default(''),
   // XYNE Claw Integration (Ask AI v2)

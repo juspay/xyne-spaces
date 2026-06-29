@@ -318,7 +318,7 @@ export class YqlBuilder {
     }
 
     if (apps.some((a) => a.toLowerCase() === 'transcript')) {
-      openConditions.push(this.buildMeetingConditions(meetingFilters, params));
+      openConditions.push(this.buildMeetingConditions(meetingFilters, params, userId));
     }
 
     // Combine per-app guarded groups with open conditions.
@@ -369,7 +369,7 @@ export class YqlBuilder {
       // keeping the highest-relevance hit within each thread.
       yql += ` | all(group(threadId) max(${safeLimit}) order(-max(relevance())) each(max(1) each(output(summary(default)))))`;
     } else if (groupBy && apps.length != 1) {
-      const groupClause = this.buildGroupingClause(groupBy, safeLimit);
+      const groupClause = this.buildGroupingClause(groupBy, Math.min(safeLimit, 50));
       if (groupClause) {
         yql += `| ${groupClause}`;
       }
@@ -945,11 +945,16 @@ export class YqlBuilder {
    * Build YQL condition for SAM Transcript search
    * Applies to sam_transcript schema only
    */
-  private buildMeetingConditions(filters: MeetingFilters, params: VespaQueryParams): string {
+  private buildMeetingConditions(filters: MeetingFilters, params: VespaQueryParams, userId?: string): string {
     const conditions: string[] = [];
 
     // DocType filter (always sam_transcript)
     conditions.push(`docType contains "sam_transcript"`);
+
+    // Per-user ACL guard — restrict to meetings where the user has explicit access
+    if (userId) {
+      conditions.push(`permissions contains ${params.bind('permissions', userId)}`);
+    }
 
     // Platform filter
     if (filters.platform && filters.platform.length > 0) {

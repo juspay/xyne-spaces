@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { searchHandler } from '../services/vespaSearch';
 import { validateQuery, validateSearchFilters } from '../middleware/validation';
-import { vespaSearchQuerySchema } from '../validators/vespaSearchValidator';
+import { vespaSearchQuerySchema, vespaSchemaQuerySchema } from '../validators/vespaSearchValidator';
+import { schemaHandler } from '../services/vespaSearch/schemaHandler';
 
 const router = Router();
 
@@ -35,5 +36,15 @@ const router = Router();
  * @param {string} presentationSummary - Vespa presentation.summary profile, e.g. "lean" (optional)
  */
 router.get('/', validateQuery(vespaSearchQuerySchema), validateSearchFilters(), searchHandler);
+
+/**
+ * @route GET /api/vespaSearch/schema
+ * @desc Returns the raw Vespa .sd schema definition for the requested schema.
+ *       Used by the AI agent to discover available fields before building YQL queries.
+ * @access Private
+ * @param {string} schema - Required. One of: chat_message, chat_attachment, chat_container,
+ *                          ticket, user, file, sam_transcript, mail, mail_attachment, project, memory
+ */
+router.get('/schema', validateQuery(vespaSchemaQuerySchema), schemaHandler);
 
 export default router;

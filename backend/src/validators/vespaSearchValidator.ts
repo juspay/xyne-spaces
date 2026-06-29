@@ -24,10 +24,11 @@ export const vespaSearchQuerySchema = Joi.object({
     }),
 
   // Pagination
-  offset: Joi.number().integer().min(0).default(0).messages({
+  offset: Joi.number().integer().min(0).max(10000).default(0).messages({
     'number.base': 'Offset must be a number',
     'number.integer': 'Offset must be an integer',
-    'number.min': 'Offset cannot be negative'
+    'number.min': 'Offset cannot be negative',
+    'number.max': 'Offset cannot exceed 10000',
   }),
 
   limit: Joi.number().integer().min(1).max(200).default(20).messages({
@@ -300,4 +301,20 @@ export const vespaSearchQuerySchema = Joi.object({
   }),
 }).messages({
   'object.unknown': 'Unknown query parameter: {{#label}}'
+});
+
+export const vespaSchemaQuerySchema = Joi.object({
+  schema: Joi.string()
+    .valid(
+      'chat_message', 'chat_attachment', 'chat_container',
+      'ticket', 'user', 'file', 'sam_transcript',
+      'mail', 'mail_attachment', 'project', 'memory',
+    )
+    .required()
+    .messages({
+      'any.only': 'schema must be one of: chat_message, chat_attachment, chat_container, ticket, user, file, sam_transcript, mail, mail_attachment, project, memory',
+      'any.required': 'Query parameter "schema" is required',
+    }),
+}).messages({
+  'object.unknown': 'Unknown query parameter: {{#label}}',
 });
