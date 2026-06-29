@@ -198,6 +198,8 @@ class WorkerService {
       }
 
       if (appConfig.enableAutomationWorker) {
+        logger.info('Initializing notification service for automation worker...');
+        await notificationService.initialize();
         logger.info('Initializing automations module...');
         const { initializeAutomations } = await import('@/automations');
         await initializeAutomations();
