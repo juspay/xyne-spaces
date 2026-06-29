@@ -34,19 +34,14 @@ export class TicketsACL extends BaseQueryACL<'tickets'> {
       );
     }
 
-    return query.where(({ or, cmp, exists }) =>
-      or(
-        cmp('assignedTo', '=', this.ctx.userID),
-        exists('channel', (ch) =>
-          ch.where(({ or, cmp, exists }) =>
-            or(
-              cmp('visibility', ChannelVisibility.PUBLIC),
-              exists('participants', (p) => p.where('userId', this.ctx.userID))
-            )
-          )
+    return query.whereExists('channel', (ch) =>
+      ch.where(({ or, cmp, exists }) =>
+        or(
+          cmp('visibility', ChannelVisibility.PUBLIC),
+          exists('participants', (p) => p.where('userId', this.ctx.userID))
         )
       )
     );
-
+  
   }
 }
