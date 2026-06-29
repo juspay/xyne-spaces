@@ -9,6 +9,7 @@ export type ChannelPreferencePatch = {
   sendAsEmail?: string | null;
   defaultCc?: string | null;
   emailMergeMode?: EmailMergeMode;
+  twoStepSendEnabled?: boolean;
   autoDraftMode?: AutoDraftMode;
   autoDraftAgentSlug?: string | null;
 };

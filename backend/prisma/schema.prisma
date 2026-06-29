@@ -2313,6 +2313,7 @@ model EmailChannelPreference {
   categoryField                String?  // Label for the top-level category
   subCategoryField             String?  // Label for the sub-category
   emailMergeMode               EmailMergeMode @default(ENABLED) // Auto-merge similar emails (cross-thread duplicate merge + per-email demerge); enum so future variants can be added
+  twoStepSendEnabled           Boolean  @default(false) // When on, sending shows a review/confirm step before the email actually goes out
   priorityClassificationEnabled Boolean @default(false)
   priorityClassificationPrompt String?  // Custom system prompt for the priority classification LLM
   priorityClassificationThreshold Float @default(0.5) // Minimum confidence threshold (0.0 - 1.0) to auto-apply priority
