@@ -158,24 +158,3 @@ export type BotActionType =
   | 'workflow_trigger'
   | 'user_interaction'
   | 'system_command';
-
-/**
- * Bot action definition
- */
-export interface BotAction {
-  readonly type: BotActionType;
-  readonly description: string;
-  readonly parameters: Record<string, unknown>;
-  readonly requiresConfirmation?: boolean;
-  readonly timeout?: number;
-}
-
-/**
- * Bot capability definition
- */
-export interface BotCapability {
-  readonly name: string;
-  readonly description: string;
-  readonly actions: readonly BotActionType[];
-  readonly permissions?: readonly string[];
-}

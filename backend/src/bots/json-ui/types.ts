@@ -344,9 +344,4 @@ export const FlowJsonSchema = z.object({
   }).passthrough(), // Allow additional properties beyond the defined ones
   root: ComponentSchema,
 });
-
-/**
- * Additional types
- */
-export type BaseComponent = z.infer<typeof BaseComponentSchema>;
 export type FlowJson = z.infer<typeof FlowJsonSchema>;

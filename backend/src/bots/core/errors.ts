@@ -119,40 +119,6 @@ export function createBotRegistrationError(
 }
 
 /**
- * Create a timeout error
- */
-export function createBotTimeoutError(
-  botName: string,
-  timeout: number,
-  details?: Record<string, unknown>
-): BotError {
-  return {
-    type: 'timeout',
-    message: `Bot execution timed out after ${timeout}ms`,
-    botName,
-    details: {
-      timeout,
-      ...details
-    }
-  };
-}
-
-/**
- * Create an abort error
- */
-export function createBotAbortError(
-  botName: string,
-  details?: Record<string, unknown>
-): BotError {
-  return {
-    type: 'abort',
-    message: 'Bot execution was aborted',
-    botName,
-    details
-  };
-}
-
-/**
  * Check if an error is a bot error class
  */
 export function isBotErrorClass(error: unknown): error is 
@@ -166,14 +132,4 @@ export function isBotErrorClass(error: unknown): error is
          error instanceof BotRegistrationErrorClass ||
          error instanceof BotTimeoutErrorClass ||
          error instanceof BotAbortErrorClass;
-}
-
-/**
- * Extract bot error from error class
- */
-export function extractBotError(error: unknown): BotError | null {
-  if (isBotErrorClass(error)) {
-    return error.botError;
-  }
-  return null;
 }

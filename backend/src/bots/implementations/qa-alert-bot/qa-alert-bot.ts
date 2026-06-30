@@ -21,16 +21,6 @@ import {
   formatUserMention,
   type JenkinsWebhookPayload,
 } from './alert-formatting';
-
-export enum JenkinsEventType {
-  BUILD_SUCCESS = 'build_success',
-  BUILD_FAILED = 'build_failed',
-  BUILD_UNSTABLE = 'build_unstable',
-  BUILD_ABORTED = 'build_aborted',
-  AUTOMATION_SKIPPED = 'automation_skipped',
-  BUILD_UNKNOWN = 'build_unknown',
-}
-
 type QaAlertBotInput = { message: string };
 type QaAlertBotOutput = { response: string };
 
