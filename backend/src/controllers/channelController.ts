@@ -1732,11 +1732,16 @@ export class ChannelController {
     try {
       const currentUserId = req.user!.id;
       const workspaceId = req.user!.workspaceId!;
-      const { participantIds, message, forwardedMessage }: {
+      const { participantIds, message, forwardedMessage, silent }: {
         participantIds: string[],
         message?: string,
         forwardedMessage?: { originalMessageId: string; optionalMessage?: string }
+        silent?: boolean,
       } = req.body;
+
+      // When a DM is auto-created without an initial message, keep it hidden from
+      // the creator's list until the first message is actually sent.
+      const shouldHideCreator = Boolean(silent) && !message && !forwardedMessage;
 
       // Validate participantIds
       if (!participantIds || !Array.isArray(participantIds) || participantIds.length === 0) {
@@ -1982,8 +1987,15 @@ export class ChannelController {
 
         const channel = await this.channelRepository.create(channelData);
 
-        // Add participants - creator sees DM immediately, recipient only sees it after first message
-        await this.channelParticipantRepository.addParticipant(channel.id, currentUserId, 'ADMIN');
+        // Add participants - creator sees DM immediately unless this is a silent auto-create
+        // without an initial message, in which case the channel is hidden until the first
+        // message is sent.
+        await this.channelParticipantRepository.addParticipant(
+          channel.id,
+          currentUserId,
+          'ADMIN',
+          shouldHideCreator,
+        );
         await this.channelParticipantRepository.addParticipant(channel.id, targetUserId, 'MEMBER', true);
 
         // If message or forwarded message is provided, create initial conversation and message using helper method
@@ -2094,8 +2106,15 @@ export class ChannelController {
 
         const channel = await this.channelRepository.create(channelData);
 
-        // Add all participants - creator sees DM immediately, recipients only see it after first message
-        await this.channelParticipantRepository.addParticipant(channel.id, currentUserId, 'ADMIN');
+        // Add all participants - creator sees DM immediately unless this is a silent auto-create
+        // without an initial message, in which case the channel is hidden until the first
+        // message is sent.
+        await this.channelParticipantRepository.addParticipant(
+          channel.id,
+          currentUserId,
+          'ADMIN',
+          shouldHideCreator,
+        );
 
         const participantAddResults = [];
         for (const participantId of uniqueParticipantIds) {
@@ -2315,7 +2334,7 @@ export class ChannelController {
         if (includeHistory) {
           // Add participants to current channel
           let participantsAdded = 0;
-          let participantsAddedList = [];
+          const participantsAddedList: string[] = [];
           for (const userId of uniqueUserIds) {
             // Check if already a participant
             const alreadyParticipant = currentParticipants.some(p => p.userId === userId);

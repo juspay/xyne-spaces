@@ -192,6 +192,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hideSendButton = false,
       sendDisabled = false,
       bottomLeftSlot,
+      disableDraftUpload = false,
     },
 
     ref,
@@ -216,6 +217,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     // Load attachments from provider when channelId or conversationId changes
     React.useEffect(() => {
       const loadAttachments = () => {
+        if (disableDraftUpload) return;
+
         if (!channelId) {
           setAttachmentsMap(new Map());
           return;
@@ -235,7 +238,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       };
 
       void loadAttachments();
-    }, [channelId, conversationId, getDroppedFilesForEntity]);
+    }, [channelId, conversationId, getDroppedFilesForEntity, disableDraftUpload]);
 
     // Convert Map to array for rendering (keep attachmentId for removal)
     const allAttachments = React.useMemo(() => {
@@ -328,6 +331,24 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     // Helper function to upload a single file as draft attachment
     const addDraftAttachments = useCallback(
       async (files: File[]) => {
+        if (disableDraftUpload) {
+          // Generate temporary attachment IDs for local tracking
+          const newAttachments = files.map(file => ({
+            attachmentId: `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            file,
+          }));
+
+          // Update local state directly
+          setAttachmentsMap(prev => {
+            const newMap = new Map(prev);
+            newAttachments.forEach(({ attachmentId, file }) => {
+              newMap.set(attachmentId, file);
+            });
+            return newMap;
+          });
+          return;
+        }
+
         if (!channelId) {
           toast.error('Channel ID is required for file attachments');
           return;
@@ -347,7 +368,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           });
         }
       },
-      [providerAddDroppedFiles, channelId, conversationId],
+      [providerAddDroppedFiles, channelId, conversationId, disableDraftUpload],
     );
 
     // Helper function to add files with limit and validation
@@ -959,6 +980,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           if (channelId) {
             void providerClearDroppedFiles(channelId, conversationId ?? null);
           }
+          if (disableDraftUpload) {
+            setAttachmentsMap(new Map());
+          }
         },
         clearTextOnly: (): void => {
           editor?.commands.setContent('');
@@ -985,7 +1009,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           editor?.commands.focus();
         },
       }),
-      [editor, addFilesWithLimit, providerClearDroppedFiles, channelId, conversationId],
+      [
+        editor,
+        addFilesWithLimit,
+        providerClearDroppedFiles,
+        channelId,
+        conversationId,
+        disableDraftUpload,
+      ],
     );
 
     const handleSend = useCallback(async () => {
@@ -1047,6 +1078,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         editor.commands.setContent('');
         setContent('');
         setAttachedCanvas(null);
+        if (disableDraftUpload) {
+          setAttachmentsMap(new Map());
+        }
         editor.commands.focus();
       } finally {
         setIsSending(false);
@@ -1061,6 +1095,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       sendDisabled,
       commandItems,
       onCommandSelect,
+      disableDraftUpload,
     ]);
 
     // Canvas attachment handlers
@@ -1145,7 +1180,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     const handleRemoveAttachment = useCallback(
       async ({ attachmentId }: { attachmentId: string; file: File | UploadedFile }) => {
-        await providerRemoveDroppedFile(attachmentId);
+        if (!disableDraftUpload) {
+          await providerRemoveDroppedFile(attachmentId);
+        }
         // Update local state immediately for responsiveness
         setAttachmentsMap(prev => {
           const newMap = new Map(prev);
@@ -1153,7 +1190,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           return newMap;
         });
       },
-      [providerRemoveDroppedFile],
+      [providerRemoveDroppedFile, disableDraftUpload],
     );
 
     const handlePreview = (file: File | UploadedFile): void => {

@@ -61,6 +61,8 @@ export interface CreateDmRequest {
   participantIds: string[];
   message?: string | undefined;
   forwardedMessage?: ForwardedMessageData;
+  /** To hide auto-created channels */
+  silent?: boolean;
 }
 
 export interface CreateDmResponse {

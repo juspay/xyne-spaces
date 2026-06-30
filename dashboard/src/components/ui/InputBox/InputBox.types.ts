@@ -64,4 +64,5 @@ export interface InputBoxProps {
   sendDisabled?: boolean;
   /** Extra buttons rendered in the left side of the desktop bottom action bar, after the # button */
   bottomLeftSlot?: React.ReactNode;
+  disableDraftUpload?: boolean;
 }
