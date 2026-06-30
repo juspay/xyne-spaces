@@ -60,7 +60,13 @@ import {
   DEFAULT_CONTAINER,
   DM_CONTAINER,
 } from './useChannelSectionDnd';
-import { ChannelSortOrder, ChannelSection, ChannelType, ChannelScopeType } from '@xyne/shared';
+import {
+  ChannelSortOrder,
+  ChannelSection,
+  ChannelType,
+  ChannelScopeType,
+  isDeskChannelType,
+} from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Accordion } from 'radix-ui';
@@ -181,13 +187,11 @@ const ChatDirectory = ({
 
   const unreadActivityStats = useMemo(() => {
     const allOrdered = [...starred, ...channels, ...directMessages];
-    let sum = 0;
     let hasUnread = false;
     for (const c of allOrdered) {
-      if (c.type === ChannelType.EMAIL || c.type === ChannelType.SUPPORT) continue;
+      if (isDeskChannelType(c.type) || c.type === ChannelType.SUPPORT) continue;
 
       const count = unreadCounts[c.id] ?? 0;
-      sum += count;
 
       const status = allChannelsUserStatus.find(
         s => s.channelId === c.id && s.userId === context.userID,
@@ -206,7 +210,7 @@ const ChatDirectory = ({
         }
       }
     }
-    return { sum, hasUnread };
+    return { hasUnread };
   }, [starred, channels, directMessages, unreadCounts, allChannelsUserStatus, context.userID]);
 
   const starredUnreadCount = sumSectionUnread(starred, unreadCounts, activeChannelId);
@@ -466,16 +470,6 @@ const ChatDirectory = ({
             <MessageSquareDot className='size-4' />
           </span>
           <span className='flex-1 min-w-0 text-left truncate block'>Unreads</span>
-          {unreadActivityStats.sum > 0 && (
-            <span className='size-5 flex items-center justify-center shrink-0'>
-              <Badge
-                variant='success'
-                className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
-              >
-                {unreadActivityStats.sum > 99 ? '99+' : unreadActivityStats.sum}
-              </Badge>
-            </span>
-          )}
         </button>
         <button
           className={cn(

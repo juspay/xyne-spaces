@@ -79,6 +79,10 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
       ? storedChannelWideMentions
       : globalSettings.channelWideMentionsEnabled;
 
+  const hasAnyDeliveryEnabled = desktopEnabled || mobileEnabled;
+  const displayedThreadReply = hasAnyDeliveryEnabled && effectiveThreadReply;
+  const displayedChannelWideMentions = hasAnyDeliveryEnabled && effectiveChannelWideMentions;
+
   const setNotificationLevel = (
     field: 'desktop' | 'mobile',
     level: NotificationLevel | null,
@@ -240,8 +244,8 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                 </div>
                 <Switch.Root
                   id='channel-thread-reply-toggle'
-                  checked={effectiveThreadReply}
-                  disabled={!settingsReady || (!desktopEnabled && !mobileEnabled)}
+                  checked={displayedThreadReply}
+                  disabled={!settingsReady || !hasAnyDeliveryEnabled}
                   onCheckedChange={checked => {
                     void zero.mutate(
                       mutators.notificationSettings.setChannelNotificationLevel({
@@ -255,8 +259,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                   data-track-name='toggle_channel_thread_reply'
                   className={cn(
                     switchClass,
-                    (!settingsReady || (!desktopEnabled && !mobileEnabled)) &&
-                      'opacity-40 cursor-not-allowed',
+                    (!settingsReady || !hasAnyDeliveryEnabled) && 'opacity-40 cursor-not-allowed',
                   )}
                 >
                   <Switch.Thumb className={thumbClass} />
@@ -280,8 +283,8 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                 </div>
                 <Switch.Root
                   id='channel-wide-mentions-toggle'
-                  checked={effectiveChannelWideMentions}
-                  disabled={!settingsReady || (!desktopEnabled && !mobileEnabled)}
+                  checked={displayedChannelWideMentions}
+                  disabled={!settingsReady || !hasAnyDeliveryEnabled}
                   onCheckedChange={checked => {
                     void zero.mutate(
                       mutators.notificationSettings.setChannelNotificationLevel({
@@ -295,8 +298,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                   data-track-name='toggle_channel_wide_mentions'
                   className={cn(
                     switchClass,
-                    (!settingsReady || (!desktopEnabled && !mobileEnabled)) &&
-                      'opacity-40 cursor-not-allowed',
+                    (!settingsReady || !hasAnyDeliveryEnabled) && 'opacity-40 cursor-not-allowed',
                   )}
                 >
                   <Switch.Thumb className={thumbClass} />

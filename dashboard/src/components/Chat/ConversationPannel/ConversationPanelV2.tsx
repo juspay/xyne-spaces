@@ -86,6 +86,8 @@ const ConversationPanelV2 = ({
   linkedItemCreatedAtOverride,
   onClose,
   showHeader = true,
+  hideComposer = false,
+  skipMarkAsRead = false,
 }: {
   channelId: string;
   previousChannelId: string | null;
@@ -93,6 +95,10 @@ const ConversationPanelV2 = ({
   linkedItemCreatedAtOverride?: number | null;
   onClose?: () => void;
   showHeader?: boolean;
+  // When true, suppress the message composer / join / archive footer entirely.
+  // Used by read-only surfaces such as the Unreads inbox.
+  hideComposer?: boolean;
+  skipMarkAsRead?: boolean;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -172,7 +178,7 @@ const ConversationPanelV2 = ({
   );
 
   // Skip mark as read functionality
-  const skipMarkAsReadRef = useRef(false);
+  const skipMarkAsReadRef = useRef(skipMarkAsRead || false);
   const setSkipMarkAsRead = useCallback((skip: boolean) => {
     skipMarkAsReadRef.current = skip;
   }, []);
@@ -256,7 +262,7 @@ const ConversationPanelV2 = ({
                   skipMarkAsReadRef={skipMarkAsReadRef}
                 ></ChatListV4>
               )}
-              {shouldShowJoinChannel ? (
+              {hideComposer ? null : shouldShowJoinChannel ? (
                 <JoinChannel channelId={channelId} channelTitle={channel?.name} />
               ) : isDeactivatedDmArchive ? (
                 <DeactivatedDmArchiveBanner />
