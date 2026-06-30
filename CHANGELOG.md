@@ -1,3 +1,10 @@
+## [1.181.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.181.0...v1.181.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* idor access block on scheduled messages ([dc628a2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dc628a23d820dea1b2e7a58b53656ede2dea71e9)), closes [#8003](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8003)
+
 ## [1.181.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.180.2...v1.181.0) (2026-06-30)
 
 
