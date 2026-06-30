@@ -384,6 +384,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
         </div>
       )}
       <div
+        data-testid='attachment-preview'
         className='relative flex items-center justify-center bg-background cursor-pointer group rounded-xl border border-border hover:border-input shadow-sm hover:shadow-md transition-all duration-200'
         style={{ width: '64px', height: '64px' }}
         onClick={() => {
@@ -433,6 +434,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
               isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
             }`}
             title='Remove attachment'
+            aria-label={`Remove attachment ${getFileName(file)}`}
           >
             <X className='h-3.5 w-3.5 text-red-600' />
           </button>

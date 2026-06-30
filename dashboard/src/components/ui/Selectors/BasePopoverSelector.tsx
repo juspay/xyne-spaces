@@ -179,6 +179,7 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
           sticky='always'
           onOpenAutoFocus={e => e.preventDefault()}
           onCloseAutoFocus={e => e.preventDefault()}
+          data-testid={triggerChar === '#' ? 'channel-search-results' : 'user-search-results'}
         >
           {isLoading ? (
             <div className='p-2 px-3 text-sm text-muted-foreground text-center'>
