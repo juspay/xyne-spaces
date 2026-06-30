@@ -6,6 +6,12 @@ import { EmailRepliesCursor, EmailRepliesItem, EmailRepliesResponse, AppEventTyp
 import { handleEventSubscriptionsForUsers } from './eventSubscriptionUtils';
 import { emitEmailReceived } from '@/automations/triggers/email-received.trigger';
 
+// A thread root is the first message of a thread: an inbound email (DEFAULT)
+// or a brand-new outbound email we composed (COMPOSE). REPLY / REPLY_ALL hang
+// off a root.
+const isRootEmailType = (type: EmailType): boolean =>
+  type === EmailType.DEFAULT || type === EmailType.COMPOSE;
+
 /**
  * Get all emails in a conversation thread with cursor-based pagination
  *
@@ -39,10 +45,10 @@ export async function getEmailReplies(
       decodedCursor
     );
 
-    // Resolve parent (root DEFAULT email) per externalThreadId in one query
+    // Resolve parent (root email) per externalThreadId in one query
     const rootByThread = new Map<string, string>();
     const replyThreadIds = Array.from(
-      new Set(emails.filter(e => e.type !== EmailType.DEFAULT).map(e => e.externalThreadId))
+      new Set(emails.filter(e => !isRootEmailType(e.type)).map(e => e.externalThreadId))
     );
     const roots = await repositories.emails.findRootsByExternalThreadIds(replyThreadIds);
     for (const r of roots) {
@@ -54,7 +60,7 @@ export async function getEmailReplies(
     const itemsResults: EmailRepliesItem[] = emails.map((email) => ({
       id: email.id,
       parentId:
-        email.type === EmailType.DEFAULT
+        isRootEmailType(email.type)
           ? email.id
           : (rootByThread.get(email.externalThreadId) ?? email.id),
       type: email.type,

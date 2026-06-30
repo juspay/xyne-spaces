@@ -22,6 +22,7 @@ import {
   ChannelScopeType,
   ConversationParticipation,
   DocType,
+  EmailType,
   schema,
   LinkVisibility,
   NudgeState,
@@ -1157,10 +1158,60 @@ export const queries = defineQueries({
       let query = zql.email_drafts
         .where('channelId', channelId)
         .where('userId', '=', ctx.userID)
-        .orderBy('updatedAt', 'desc');
+        // id is part of the keyset cursor below, so it must also be in the sort —
+        // otherwise drafts sharing an updatedAt can be skipped/duplicated across pages.
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc');
 
       if (start) {
         query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
+      }
+
+      return query
+        .limit(limit)
+        .related('ticket');
+    },
+  ),
+  // Per-desk "Sent" view: outbound emails in a channel (REPLY / REPLY_ALL /
+  // COMPOSE), newest-first, keyset-paginated on (createdAt, id).
+  //   scope 'mine'    → only the current user's sends (ctx.userID is the boundary).
+  //   scope 'channel' → every user's sends in the channel; gated to channel
+  //                     members (public channel, or a participant of a private one)
+  //                     so a crafted request can't read another channel's mail.
+  userEmailsSent: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ id: z.string(), createdAt: z.number() }).nullable(),
+      scope: z.enum(['mine', 'channel']).optional(),
+    }),
+    ({ ctx, args: { channelId, limit, start, scope = 'mine' } }) => {
+      let query = zql.emails
+        .where('channelId', channelId)
+        .where('type', 'IN', [EmailType.REPLY, EmailType.REPLY_ALL, EmailType.COMPOSE]);
+
+      if (scope === 'channel') {
+        query = query.whereExists('channel', ch =>
+          ch.where(helpers =>
+            helpers.or(
+              helpers.cmp('visibility', ChannelVisibility.PUBLIC),
+              helpers.and(
+                helpers.cmp('visibility', ChannelVisibility.PRIVATE),
+                helpers.exists('participants', p => p.where('userId', ctx.userID)),
+              ),
+            ),
+          ),
+        );
+      } else {
+        query = query.where('sentByUserId', '=', ctx.userID);
+      }
+
+      // id is part of the keyset cursor below, so it must also be in the sort —
+      // otherwise emails sharing a createdAt can be skipped/duplicated across pages.
+      query = query.orderBy('createdAt', 'desc').orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ createdAt: start.createdAt, id: start.id }, { inclusive: false });
       }
 
       return query

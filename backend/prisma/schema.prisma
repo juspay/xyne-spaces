@@ -2220,6 +2220,7 @@ enum EmailType {
   DEFAULT
   REPLY
   REPLY_ALL
+  COMPOSE
   @@schema("public")
 }
 
@@ -2237,6 +2238,7 @@ model Email {
   channelId String
   externalThreadId String
   externalMessageId String
+  sentByUserId String?            // User who sent this outbound email (REPLY / REPLY_ALL / COMPOSE). Null for inbound and automation/system sends. Powers the per-desk "Sent" view.
   rfcMessageId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2248,6 +2250,7 @@ model Email {
   @@index([channelId])
   @@index([channelId, rfcMessageId])
   @@index([conversationId, id])
+  @@index([sentByUserId, createdAt(sort: Desc)]) // "Sent by me" list, ordered newest-first
   @@map("emails")
   @@schema("public")
 }

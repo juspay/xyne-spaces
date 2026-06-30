@@ -558,6 +558,7 @@ export enum EmailType {
   DEFAULT = 'DEFAULT',
   REPLY = 'REPLY',
   REPLY_ALL = 'REPLY_ALL',
+  COMPOSE = 'COMPOSE',
 }
 
 // @ts-ignore TS1294
@@ -1990,6 +1991,7 @@ export const emailTable = table('emails')
     channelId: string(),
     externalThreadId: string(),
     externalMessageId: string(),
+    sentByUserId: string().optional(),
     rfcMessageId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
@@ -4169,6 +4171,11 @@ export const emailTableRelationships = relationships(emailTable, ({ one, many })
     sourceField: ['conversationId'],
     destField: ['conversationId'],
     destSchema: conversationTable,
+  }),
+  ticket: one({
+    sourceField: ['conversationId'],
+    destField: ['conversationId'],
+    destSchema: ticketTable,
   }),
   channel: one({
     sourceField: ['channelId'],

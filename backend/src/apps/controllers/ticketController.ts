@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
-import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, FormContextType, FormEntityType, Prisma, DeskType, EmailType } from '@prisma/client';
+import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, FormContextType, FormEntityType, Prisma, EmailType, DeskType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
@@ -1766,6 +1766,8 @@ export class TicketController {
             fromEmailAddress: senderEmail,
           },
           receivedAt: new Date(),
+          emailType: EmailType.COMPOSE,
+          sentByUserId: userId,
           ...(effectiveBoardId && { boardId: effectiveBoardId }),
         });
       } catch (createErr) {
