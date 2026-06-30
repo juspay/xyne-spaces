@@ -616,6 +616,27 @@
   .chat-input-field code:not(pre code) strong {
     @apply font-bold;
   }
+  .chat-input-field code:not(pre code):has(+ :is(strong, em, s) code:not(pre code)) {
+    @apply border-r-0 rounded-r-none pr-0;
+  }
+  .chat-input-field
+    code:not(pre code)
+    + :is(strong, em, s):has(+ code:not(pre code))
+    code:not(pre code) {
+    @apply border-x-0 rounded-none px-0;
+  }
+  .chat-input-field
+    code:not(pre code)
+    + :is(strong, em, s):not(:has(+ code:not(pre code)))
+    code:not(pre code) {
+    @apply border-l-0 rounded-l-none pl-0;
+  }
+  .chat-input-field :is(strong, em, s):has(code:not(pre code)) + code:not(pre code) {
+    @apply border-l-0 rounded-l-none pl-0;
+  }
+  .chat-input-field :is(strong, em, s):has(+ code:not(pre code)) code:not(pre code) {
+    @apply border-r-0 rounded-r-none pr-0;
+  }
 
   /* Code Block Inner Code*/
   .chat-input-field pre code {
