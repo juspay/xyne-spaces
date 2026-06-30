@@ -5,13 +5,67 @@ import { logger } from '@/utils/logger';
 import { buildCronPattern } from '@/utils/cronUtils';
 import { scheduledMessageService } from '@/services/scheduledMessageService';
 
+async function checkMutatePermission(
+  channelId: string,
+  creatorId: string,
+  userId: string,
+): Promise<{ status: number; error: string } | null> {
+  const rows = await db.channelParticipant.findMany({
+    where: { channelId, userId: { in: [userId, creatorId] } },
+    select: { userId: true, role: true },
+  });
+  const callerParticipant = rows.find((r) => r.userId === userId);
+  if (!callerParticipant) {
+    return { status: 403, error: 'You must be a participant of this channel' };
+  }
+
+  const isOwner = creatorId === userId;
+  const creatorParticipant = rows.find((r) => r.userId === creatorId);
+  const creatorIsActiveAdmin = creatorParticipant?.role === ChannelRole.ADMIN;
+
+  if (creatorIsActiveAdmin) {
+    if (!isOwner) {
+      return {
+        status: 403,
+        error: 'Only the creator may modify this message while they remain a channel admin',
+      };
+    }
+  } else if (callerParticipant.role !== ChannelRole.ADMIN) {
+    return { status: 403, error: 'Only a channel admin may modify this message' };
+  }
+  return null;
+}
+
 // ── List all scheduled messages ─────────────────────────────────────────────
-export async function listScheduledMessages(_req: Request, res: Response) {
+export async function listScheduledMessages(req: Request, res: Response) {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
+    const adminChannels = await db.channelParticipant.findMany({
+      where: { userId, role: ChannelRole.ADMIN },
+      select: { channelId: true },
+    });
+    const channelIds = adminChannels.map((p) => p.channelId);
     const messages = await db.scheduledMessage.findMany({
+      where: { channelId: { in: channelIds } },
       orderBy: { createdAt: 'desc' },
     });
-    return res.json({ scheduledMessages: messages });
+
+    const creatorAdminRows = messages.length
+      ? await db.channelParticipant.findMany({
+          where: {
+            role: ChannelRole.ADMIN,
+            OR: messages.map((m) => ({ channelId: m.channelId, userId: m.createdBy })),
+          },
+          select: { channelId: true, userId: true },
+        })
+      : [];
+    const creatorIsAdmin = new Set(creatorAdminRows.map((r) => `${r.channelId}:${r.userId}`));
+    const scheduledMessages = messages.map((m) => ({
+      ...m,
+      canEdit: m.createdBy === userId || !creatorIsAdmin.has(`${m.channelId}:${m.createdBy}`),
+    }));
+    return res.json({ scheduledMessages });
   } catch (error) {
     logger.error('[SCHEDULED-MESSAGE-CTRL] List failed:', error);
     return res.status(500).json({ error: 'Failed to list scheduled messages' });
@@ -90,18 +144,8 @@ export async function updateScheduledMessage(req: Request, res: Response) {
       return res.status(404).json({ error: 'Scheduled message not found' });
     }
 
-    // Permission: only creator or channel admin
-    const isOwner = existing.createdBy === userId;
-    if (!isOwner) {
-      const participant = await db.channelParticipant.findUnique({
-        where: { channelId_userId: { channelId: existing.channelId, userId } },
-      });
-      if (participant?.role !== ChannelRole.ADMIN) {
-        return res
-          .status(403)
-          .json({ error: 'Only the creator or a channel admin may update this message' });
-      }
-    }
+    const denied = await checkMutatePermission(existing.channelId, existing.createdBy, userId);
+    if (denied) return res.status(denied.status).json({ error: denied.error });
 
     // Build partial update
     const data: Record<string, unknown> = {};
@@ -149,18 +193,8 @@ export async function deleteScheduledMessage(req: Request, res: Response) {
       return res.status(404).json({ error: 'Scheduled message not found' });
     }
 
-    // Permission: only creator or channel admin
-    const isOwner = existing.createdBy === userId;
-    if (!isOwner) {
-      const participant = await db.channelParticipant.findUnique({
-        where: { channelId_userId: { channelId: existing.channelId, userId } },
-      });
-      if (participant?.role !== ChannelRole.ADMIN) {
-        return res
-          .status(403)
-          .json({ error: 'Only the creator or a channel admin may delete this message' });
-      }
-    }
+    const denied = await checkMutatePermission(existing.channelId, existing.createdBy, userId);
+    if (denied) return res.status(denied.status).json({ error: denied.error });
 
     await db.scheduledMessage.delete({ where: { id } });
 

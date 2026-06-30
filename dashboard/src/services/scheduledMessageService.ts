@@ -11,6 +11,7 @@ export interface ScheduledMessage {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  canEdit: boolean;
 }
 
 export interface CreateScheduledMessagePayload {
