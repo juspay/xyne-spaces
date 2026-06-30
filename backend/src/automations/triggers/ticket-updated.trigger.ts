@@ -56,7 +56,7 @@ const TicketUpdatedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      'Fire only when any of these board form fields changed. Empty matches any form field update.',
+      'Fire only when any of these form fields changed. Leave empty to skip form field tracking entirely.',
     ),
 });
 
@@ -151,42 +151,46 @@ export class TicketUpdatedTrigger extends BaseTrigger<typeof TicketUpdatedConfig
 
     const hasTransitionConfig = cfg.transitions && cfg.transitions.length > 0;
     const hasFormFieldConfig = cfg.formFieldIds && cfg.formFieldIds.length > 0;
-    const isFormFieldOnlyEvent =
-      Object.keys(p.formFieldChanges ?? {}).length > 0 &&
-      Object.keys(p.changes).length === 0;
+    const changedFormFieldIds = new Set(Object.keys(p.formFieldChanges ?? {}));
+    const hasStaticChanges = Object.keys(p.changes).length > 0;
+    const hasFormFieldChanges = changedFormFieldIds.size > 0;
 
-    // Form field changes are ignored unless formFieldIds is explicitly configured.
-    if (isFormFieldOnlyEvent && !hasFormFieldConfig) return false;
+    const matchesTransition = (rule: z.infer<typeof FieldTransitionSchema>): boolean => {
+      const change = p.changes[rule.field];
+      if (!change) return false;
+      if (
+        rule.previousValue !== undefined &&
+        String(change.previousValue ?? '') !== String(rule.previousValue ?? '')
+      ) {
+        return false;
+      }
+      if (
+        rule.newValue !== undefined &&
+        String(change.newValue ?? '') !== String(rule.newValue ?? '')
+      ) {
+        return false;
+      }
+      return true;
+    };
 
-    if (hasTransitionConfig || hasFormFieldConfig) {
-      const matchesTransition = (rule: z.infer<typeof FieldTransitionSchema>): boolean => {
-        const change = p.changes[rule.field];
-        if (!change) return false;
-        if (
-          rule.previousValue !== undefined &&
-          String(change.previousValue ?? '') !== String(rule.previousValue ?? '')
-        ) {
-          return false;
-        }
-        if (
-          rule.newValue !== undefined &&
-          String(change.newValue ?? '') !== String(rule.newValue ?? '')
-        ) {
-          return false;
-        }
-        return true;
-      };
-
-      const transitionMatches = hasTransitionConfig && cfg.transitions!.some(matchesTransition);
-      const changedFormFieldIds = Object.keys(p.formFieldChanges ?? {});
-      const formFieldMatches =
-        hasFormFieldConfig && cfg.formFieldIds!.some(id => changedFormFieldIds.includes(id));
-
-      // OR logic: fire if EITHER transition matches OR form field matches
-      if (!transitionMatches && !formFieldMatches) return false;
+    // Empty transitions = fire on any static field change.
+    if (hasStaticChanges && !hasFormFieldChanges) {
+      if (hasTransitionConfig && !cfg.transitions!.some(matchesTransition)) return false;
+      return true;
     }
 
-    return true;
+    // Form field event — requires explicit opt-in via formFieldIds.
+    if (hasFormFieldChanges && !hasStaticChanges) {
+      if (!hasFormFieldConfig) return false;
+      if (!cfg.formFieldIds!.some(id => changedFormFieldIds.has(id))) return false;
+      return true;
+    }
+
+    // Mixed event (both static and form field changes in same payload).
+    // Fire if either the static change matches OR the form field matches.
+    const staticMatches = !hasTransitionConfig || cfg.transitions!.some(matchesTransition);
+    const formFieldMatches = !!(hasFormFieldConfig && cfg.formFieldIds?.some(id => changedFormFieldIds.has(id))); 
+    return staticMatches || formFieldMatches;
   }
 }
 
