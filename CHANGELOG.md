@@ -1,3 +1,19 @@
+## [1.181.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.180.2...v1.181.0) (2026-06-30)
+
+
+### Features
+
+* input box tests ([d0a5318](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d0a53186c0ec6645621a9820f9135761e5dec6e2)), closes [#8195](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8195)
+
+
+### Bug Fixes
+
+* bot related code cleanup ([6c558c6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6c558c6a4334e343d02ef4f53bf010c5a8124dbe)), closes [#8147](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8147)
+* Fix SSH/HTTPS-clone Bitbucket URLs Parsing ([3f0fc2f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3f0fc2f05c6e560de8459783c94a7688abf53137))
+* general citations + calls + debug pannel ui revamp ([5f25141](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5f251412799229e896be8b17fca4113e2c1f4401)), closes [#8175](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8175)
+* ticket-updated trigger fires and some UI fix ([1d11937](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1d11937706f85bc461a2da3316618c76ea9ccc96)), closes [#8122](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8122)
+* unable to search dm ([cb219b5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cb219b58cfbbd51c6b142e7ec9fa7c6ad4f1e27b)), closes [#8193](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8193)
+
 ## [1.180.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.180.1...v1.180.2) (2026-06-29)
 
 
