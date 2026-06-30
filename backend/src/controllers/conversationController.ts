@@ -45,6 +45,7 @@ import {
 } from '../serializers/conversationMessageSerializer';
 import { getCallTicketsCreatedFromSuggestionsTotal } from '@/services/otel/suggestionMetrics';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
+import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 
 // Local type definitions
 interface UserInfo {
@@ -492,6 +493,9 @@ export class ConversationController {
       // Update channel last activity
       await this.channelRepository.updateLastActivity(channelId);
 
+      // Reopen for all participants when a new conversation is started.
+      await this.channelUserStatusRespository.reopenForAllParticipants(channelId);
+
       // Get sender info
       const senderInfo = await this.getUserInfo(message.senderId);
 
@@ -543,6 +547,15 @@ export class ConversationController {
       );
 
       await unreadService.markChannelAsViewed(channelId, userId, conversation.conversationId);
+
+      // Update unread counts for participants so the badge number appears for recipients.
+      const channelParticipants = await this.channelParticipantRepository.getChannelParticipants(channelId);
+      await handleUnreadCount(
+        channelId,
+        true,
+        channelParticipants.map(p => ({ userId: p.userId })),
+        userId,
+      );
 
       const handler = new MessagesSideEffectHandler({
         userID: userId,

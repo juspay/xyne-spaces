@@ -1,6 +1,6 @@
 import { useZero } from '../../../hooks/useZero';
 import { useForm } from '@tanstack/react-form';
-import { useMutation } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   User,
   ChannelVisibility,
@@ -23,13 +23,13 @@ import {
   EVENTS,
   mixpanelService,
 } from '../../../services/Analytics/mixpanelService';
-import { channelService, CreateDmRequest } from '../../../services/Chat/channelService';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { InputBox } from '../../ui/InputBox';
 import { SearchUserV2, type SearchEntry } from '../../ui/SearchUser/SearchUserV2';
 import ChatListV2 from '../ChatList/ChatListV2';
-import { useExistingDmChannel } from './useExistingDmChannel';
+import { sendConversationWithAttachments, useExistingDmChannel } from './useExistingDmChannel';
+import { useDebouncedDmCreation } from './useDebouncedDmCreation';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import {
   useChannelSearch,
@@ -48,6 +48,7 @@ export const ComposeDmPanel: React.FC = () => {
   const [isSearchUserOpen, setIsSearchUserOpen] = useState(false);
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [preselectedInitialized, setPreselectedInitialized] = useState(false);
+  const [createdChannelId, setCreatedChannelId] = useState<string | undefined>(undefined);
   const searchUserRef = useRef<HTMLInputElement>(null);
   const inputBoxRef = useRef<InputBoxHandle>(null);
   const context = useAuthContextValues();
@@ -82,53 +83,103 @@ export const ComposeDmPanel: React.FC = () => {
     setPreselectedInitialized(true);
   }, [preselectedUserId, preselectedUser, preselectedInitialized]);
 
-  const createDmMutation = useMutation({
-    mutationFn: (data: CreateDmRequest) => channelService.createDm(data),
-    onSuccess: (response, variables) => {
-      // Track group creation if more than 1 participant (excluding current user)
-      const isGroupDm = variables.participantIds.length > 1;
+  const existingDmChannel = useExistingDmChannel(selectedUsers);
 
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: isGroupDm
-          ? EVENT_PROPERTIES.ACTION_TYPES.NEW_GROUP_DM
-          : EVENT_PROPERTIES.ACTION_TYPES.NEW_DM,
-        hasInitialMessage: !!variables.message,
-      });
-
-      // If existing DM was returned (might have been closed), reopen it
-      if (response.isExisting) {
-        zero.mutate(mutators.channel.reopenDm({ channelId: response.id, updatedAt: Date.now() }));
-      }
-      // Navigate to the DM channel — stay inside /chat/dm if accessed from DmsPage
-      const targetPath = location.pathname.startsWith('/chat/dm')
-        ? `/chat/dm/${response.id}`
-        : `/chat/dir/${response.id}`;
-      void navigate(targetPath);
+  const { cancelAutoCreate, createDm } = useDebouncedDmCreation({
+    selectedUsers,
+    existingDmChannel,
+    onChannelCreated: (channelId: string) => {
+      setCreatedChannelId(channelId);
     },
   });
 
-  const handleAddDmSubmit = (data: CreateDmFormData): void => {
-    const dmRequest: CreateDmRequest = {
-      participantIds: data.participants.map(user => user.id),
-      ...(data.message && data.message.trim() && { message: data.message }),
-    };
-    createDmMutation.mutate(dmRequest);
-  };
+  const effectiveChannelId = existingDmChannel?.id ?? createdChannelId;
+
+  // Clear the auto-created channelId when the recipient list changes
+  // so we don't send to a stale channel.
+  useEffect(() => {
+    setCreatedChannelId(undefined);
+  }, [selectedUsers]);
+
+  const navigateToChannel = useCallback(
+    (channelId: string) => {
+      const targetPath = location.pathname.includes('/chat/dm')
+        ? `/chat/dm/${channelId}`
+        : `/chat/dir/${channelId}`;
+      void navigate(targetPath);
+    },
+    [location.pathname, navigate],
+  );
+
+  const handleSendMessage = useCallback(
+    async (_plainText: string, html: string, files: File[]): Promise<void> => {
+      if (selectedUsers.length === 0) {
+        setHasAttemptedSubmit(true);
+        throw new Error('Please select at least one person to message');
+      }
+
+      // Cancel any pending auto-create debounce — we'll create immediately
+      cancelAutoCreate();
+
+      let channelId = effectiveChannelId;
+
+      // Create the DM channel now if it doesn't exist yet
+      if (!channelId) {
+        try {
+          const response = await createDm({
+            participantIds: selectedUsers.map(user => user.id),
+          });
+          channelId = response.id;
+
+          // Track group creation if more than 1 participant (excluding current user)
+          const isGroupDm = selectedUsers.length > 1;
+          mixpanelService.track(EVENTS.INITIATE_ACTION, {
+            type: isGroupDm
+              ? EVENT_PROPERTIES.ACTION_TYPES.NEW_GROUP_DM
+              : EVENT_PROPERTIES.ACTION_TYPES.NEW_DM,
+            hasInitialMessage: false,
+          });
+
+          // If existing DM was returned (might have been closed), reopen it
+          if (response.isExisting) {
+            zero.mutate(
+              mutators.channel.reopenDm({ channelId: response.id, updatedAt: Date.now() }),
+            );
+          }
+        } catch (error) {
+          toast.error('Failed to create DM channel', {
+            description: error instanceof Error ? error.message : 'Please try again.',
+          });
+          throw error;
+        }
+      }
+
+      // Send the message (with or without attachments)
+      try {
+        await sendConversationWithAttachments(channelId, html, files);
+        navigateToChannel(channelId);
+      } catch (error) {
+        toast.error('Failed to send message', {
+          description: error instanceof Error ? error.message : 'Please try again.',
+        });
+        throw error;
+      }
+    },
+    [selectedUsers, effectiveChannelId, cancelAutoCreate, createDm, navigateToChannel, zero],
+  );
 
   const form = useForm({
     defaultValues: {
       message: '',
     },
-    onSubmit: ({ value }) => {
-      handleAddDmSubmit({
-        participants: selectedUsers,
-        message: value.message,
-      });
-    },
+    onSubmit: () => {},
   });
 
   const handleUsersChange = (users: User[]): void => {
     setSelectedUsers(users);
+    if (users.length > 0) {
+      setHasAttemptedSubmit(false);
+    }
   };
 
   // Mention search within the compose panel input box
@@ -163,8 +214,6 @@ export const ComposeDmPanel: React.FC = () => {
         hasAccess: true,
       }));
   }, [channelResults]);
-
-  const existingDmChannel = useExistingDmChannel(selectedUsers);
 
   const channelParticipation = useGetChannelUserStatus(existingDmChannel?.id || '');
   const [latestMessage] = useCachedQuery(
@@ -489,10 +538,8 @@ export const ComposeDmPanel: React.FC = () => {
                       field.handleChange(html);
                     }}
                     disabled={selectedUsers.length === 0 || selectedUsers.length > 9}
-                    onSendMessage={async () => {
-                      if (form.state.isSubmitting) return;
-                      await form.handleSubmit();
-                    }}
+                    disableDraftUpload
+                    onSendMessage={handleSendMessage}
                     features={{
                       richText: true,
                       mentions: true,
