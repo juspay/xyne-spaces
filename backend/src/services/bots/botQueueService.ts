@@ -9,12 +9,6 @@ export interface BotJobData {
   userId: string;
 }
 
-export interface BotJobResult {
-  success: boolean;
-  error?: string;
-  messagesCreated?: number;
-}
-
 class BotQueueService {
   private queue: Bull.Queue<BotJobData> | null = null;
   private isInitialized = false;

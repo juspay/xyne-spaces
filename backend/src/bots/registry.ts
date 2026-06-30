@@ -208,17 +208,3 @@ export function initializeBotRegistry(): void {
 
   logger.info(`[BotRegistry] Bot registry initialized with ${botCatalog.count} bot(s)`);
 }
-
-/**
- * Get all external bot definitions (for inspection/debugging)
- */
-export function getExternalBotDefinitions(): ExternalBotDefinition[] {
-  return [...externalBots];
-}
-
-/**
- * Check if a bot ID is an external bot
- */
-export function isExternalBotId(botId: string): boolean {
-  return externalBots.some((bot) => bot.id === botId);
-}

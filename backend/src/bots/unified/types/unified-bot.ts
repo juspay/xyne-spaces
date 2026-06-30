@@ -205,31 +205,6 @@ export interface BotCatalogEntry {
 // ============================================================================
 // Bot Execution Results
 // ============================================================================
-
-/**
- * Bot execution metadata for tracing and debugging
- */
-export interface BotExecutionMetadata {
-  readonly botId: string;
-  readonly executionId: string;
-  readonly startTime: Date;
-  readonly endTime?: Date;
-  readonly duration?: number;
-  readonly conversationId?: string;
-  readonly userId?: string;
-}
-
-/**
- * Bot error interface
- */
-export interface BotError {
-  readonly type: 'validation' | 'execution' | 'registration' | 'timeout' | 'abort' | 'network';
-  readonly message: string;
-  readonly botId: string;
-  readonly details?: Record<string, unknown>;
-  readonly originalError?: Error;
-}
-
 // ============================================================================
 // Tool Output Types (from Genius integration)
 // ============================================================================

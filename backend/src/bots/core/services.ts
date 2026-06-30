@@ -68,19 +68,6 @@ export interface FileStorageService extends ServiceProvider {
 }
 
 /**
- * External API service interface
- */
-export interface ExternalApiService extends ServiceProvider {
-  readonly name: string; // e.g., 'openai', 'stripe', 'slack'
-  request<T = unknown>(
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
-    endpoint: string,
-    data?: unknown,
-    options?: Record<string, unknown>
-  ): Promise<T>;
-}
-
-/**
  * Service registry for managing service providers
  */
 export class ServiceRegistry {
