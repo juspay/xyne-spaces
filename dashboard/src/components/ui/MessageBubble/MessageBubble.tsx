@@ -87,6 +87,8 @@ import { mutators } from '../../../zero/mutators';
 import { toast } from 'sonner';
 import { isPreviewableDocument } from '../../../services/documentThumbnailService';
 import { ChannelEmailCard } from './ChannelEmailCard';
+import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
+import { recordingService } from '../../../services/Recording/recordingService';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -110,6 +112,50 @@ interface AttachmentsBlockProps {
 const hasDocumentThumbnail = (attachment: AttachmentType): boolean => {
   return isPreviewableDocument(attachment.mimetype) && !!attachment.thumbnailUrl;
 };
+
+function InlineVideoPreview({
+  callId,
+  recordingId,
+}: {
+  callId: string;
+  recordingId?: string;
+}): React.ReactElement {
+  const [blobUrl, setBlobUrl] = React.useState<string | null>(null);
+  const blobUrlRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    // Per-recording download when we have a recordingId; fall back to the legacy
+    // latest-recording path for older messages that predate the field.
+    const fetchBlob = recordingId
+      ? recordingService.downloadCallRecordingBlob(callId, recordingId)
+      : recordingService.downloadRecordingBlob(callId);
+    fetchBlob
+      .then(blob => {
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
+        blobUrlRef.current = url;
+        setBlobUrl(url);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+    };
+  }, [callId, recordingId]);
+
+  if (!blobUrl) return <></>;
+  return (
+    <video
+      src={blobUrl}
+      controls
+      className='mt-2 rounded-md max-w-sm w-full'
+      style={{ maxHeight: '240px' }}
+    >
+      <track kind='captions' />
+    </video>
+  );
+}
 
 /**
  * AttachmentsBlock renders message attachments with expand/collapse functionality.
@@ -1061,6 +1107,35 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     markdownComponents={markdownComponents}
                     messageSubtype={metadata?.messageSubtype}
                   />
+                  {metadata?.messageSubtype === 'recording' &&
+                    metadata?.callId &&
+                    (metadata?.['recordingType'] && metadata['recordingType'] !== 'AUDIO_ONLY' ? (
+                      <InlineVideoPreview
+                        callId={String(metadata.callId)}
+                        {...(metadata?.recordingId
+                          ? { recordingId: String(metadata.recordingId) }
+                          : {})}
+                      />
+                    ) : (
+                      <div className='mt-2'>
+                        <AudioPlayer
+                          onLoad={signal =>
+                            metadata?.recordingId
+                              ? recordingService.downloadCallRecordingBlob(
+                                  String(metadata.callId),
+                                  String(metadata.recordingId),
+                                  signal,
+                                )
+                              : recordingService.downloadRecordingBlob(
+                                  String(metadata.callId),
+                                  signal,
+                                )
+                          }
+                          trackCategory='RecordingLinkReply'
+                          showToastOnError
+                        />
+                      </div>
+                    ))}
                   {(ticketSuggestions.length > 0 || ticketsCreated.length > 0) && channelId && (
                     <TicketSuggestions
                       suggestions={ticketSuggestions}
@@ -1286,13 +1361,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <>
                   {isMobile ? (
                     <MobileAttachmentsGrid
-                      attachments={attachments}
+                      attachments={
+                        metadata?.messageSubtype === 'recording'
+                          ? attachments.filter(a => !a.mimetype.startsWith('video/'))
+                          : attachments
+                      }
                       {...(message.conversationId && { conversationId: message.conversationId })}
                       {...(channelId && { channelId })}
                     />
                   ) : (
                     <AttachmentsBlock
-                      attachments={attachments}
+                      attachments={
+                        metadata?.messageSubtype === 'recording'
+                          ? attachments.filter(a => !a.mimetype.startsWith('video/'))
+                          : attachments
+                      }
                       isMobile={isMobile}
                       {...(message.conversationId && { conversationId: message.conversationId })}
                       {...(channelId && { channelId })}

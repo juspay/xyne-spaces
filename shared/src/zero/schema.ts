@@ -295,6 +295,13 @@ export enum CallStatus {
 }
 
 // @ts-ignore TS1294
+export enum RecordingType {
+  AUDIO_ONLY = 'AUDIO_ONLY',
+  AUDIO_SCREEN = 'AUDIO_SCREEN',
+  AUDIO_VIDEO = 'AUDIO_VIDEO',
+}
+
+// @ts-ignore TS1294
 export enum RecurringCallSeriesStatus {
   ACTIVE = 'ACTIVE',
   ENDED = 'ENDED',

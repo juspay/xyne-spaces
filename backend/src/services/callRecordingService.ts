@@ -1,18 +1,39 @@
-import { EgressClient, EgressStatus, EncodedFileOutput, EncodedFileType, GCPUpload, S3Upload, EgressInfo } from 'livekit-server-sdk';
-import { AttachmentEntityType } from '@prisma/client';
+import { EgressClient, EgressStatus, SegmentedFileOutput, SegmentedFileProtocol, GCPUpload, S3Upload, EgressInfo } from 'livekit-server-sdk';
+import { AttachmentEntityType, RecordingType, type Call, type CallRecording } from '@prisma/client';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 import { config } from '@/config/env';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { getStorageService } from '@/services/storage';
+import { livekitService } from '@/services/liveKitService';
+import { stitchHlsToMp4 } from '@/utils/ffmpeg';
+import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
+import { MessageType } from '@xyne/shared';
 
+/** HLS segment length. Smaller = more frequent uploads (less data lost on crash). */
+const SEGMENT_DURATION_SECONDS = 6;
+
+export interface StartRecordingResult {
+  recording: CallRecording;
+  /** true when an ACTIVE recording already existed — no new egress was started (C3). */
+  alreadyActive: boolean;
+}
+
+/**
+ * In-call recording, backed by the `call_recordings` table (1 row per session).
+ * The table is the single source of truth — the in-memory map below is only a
+ * fast-path cache; egressId is always read back from the row. See
+ * docs/call_recording_tech_review.md.
+ */
 class CallRecordingService {
   private egressClient: EgressClient;
-  /** In-memory map of roomName → active egressId. Sufficient for a single-process dev server. */
+  /** Optional fast-path cache of recordingId → egressId. The row is authoritative. */
   private activeEgress = new Map<string, string>();
 
   private get storageService() {
-    const bucket = config.gcs.transcriptionBucketName;
-    return getStorageService(bucket);
+    return getStorageService(config.gcs.transcriptionBucketName);
   }
 
   constructor() {
@@ -23,99 +44,186 @@ class CallRecordingService {
     );
   }
 
-  /** Get retention days from config */
   getRetentionDays(): number {
     return config.callRecording.retentionDays;
   }
 
-  /** Check if recording is enabled */
   isRecordingEnabled(): boolean {
     return config.callRecording.enabled;
   }
 
-  /** Build the GCS filepath for a recording */
-  private buildRecordingPath(callExternalId: string, createdAt: Date): string {
-    const dateStr = createdAt.toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
-    return `recordings/${callExternalId}_${dateStr}.mp4`;
+  /**
+   * All GCS keys for one recording, keyed on the recording's own id so two
+   * recordings in the same call never collide (C1). HLS segments live in a
+   * per-recording dir; the stitched MP4 sits beside it at the same path
+   * recordings used before, so every consumer that reads `storagePath` is
+   * unchanged.
+   */
+  private buildPaths(callExternalId: string, recordingId: string) {
+    const dir = `recordings/${callExternalId}/${recordingId}`;
+    return {
+      mp4Path: `${dir}.mp4`,
+      segmentPrefix: `${dir}/`,
+      filenamePrefix: `${dir}/segment`,
+      playlistPath: `${dir}/index.m3u8`,
+    };
   }
 
-  /** Start composite audio recording for a room */
-  async startRecording(callExternalId: string, callCreatedAt: Date): Promise<string | null> {
+  private buildUploadOutput() {
+    return config.fileStorage.provider === 's3'
+      ? {
+          case: 's3' as const,
+          value: new S3Upload({
+            bucket: config.gcs.transcriptionBucketName,
+            region: config.s3.region,
+            accessKey: config.s3.accessKeyId,
+            secret: config.s3.secretAccessKey,
+            ...((config.s3.endpoint) ? { endpoint: config.s3.endpoint, forcePathStyle: true } : {}),
+          }),
+        }
+      : {
+          case: 'gcp' as const,
+          value: new GCPUpload({
+            bucket: config.gcs.transcriptionBucketName,
+          }),
+        };
+  }
+
+  /**
+   * Start a recording for a call. Any participant may call this. The DB partial
+   * unique index enforces a single ACTIVE recording per call: the insert IS the
+   * lock. Concurrent starts return the existing recording (alreadyActive=true)
+   * instead of starting a second egress.
+   *
+   * Sequence: insert ACTIVE row → set per-recording storagePath → startEgress →
+   * patch egressId. If egress fails to start the row is moved to RECORDING_FAILED
+   * so the lock is freed immediately.
+   */
+  async startRecording(params: {
+    call: Call;
+    recordingType: RecordingType;
+    startedBy: string;
+    name?: string | null;
+  }): Promise<StartRecordingResult | null> {
+    const { call, recordingType, startedBy, name } = params;
+
+    const { recording, created } = await repositories.callRecordings.startActive({
+      callId: call.id,
+      recordingType,
+      startedBy,
+      name: name ?? null,
+    });
+
+    // Single-active lock already held by another recording — idempotent no-op.
+    if (!created) {
+      logger.info(`[CallRecording] start ignored — recording ${recording.id} already ACTIVE for call ${call.externalId}`);
+      return { recording, alreadyActive: true };
+    }
+
+    const paths = this.buildPaths(call.externalId, recording.id);
+    await repositories.callRecordings.setSegmentPrefix(recording.id, paths.segmentPrefix);
+
     try {
-      const filepath = this.buildRecordingPath(callExternalId, callCreatedAt);
-
-      const uploadOutput =
-        config.fileStorage.provider === 's3'
-          ? {
-              case: 's3' as const,
-              value: new S3Upload({
-                bucket: config.gcs.transcriptionBucketName,
-                region: config.s3.region,
-                accessKey: config.s3.accessKeyId,
-                secret: config.s3.secretAccessKey,
-                ...(config.s3.endpoint ? { endpoint: config.s3.endpoint, forcePathStyle: true } : {}),
-              }),
-            }
-          : {
-              case: 'gcp' as const,
-              value: new GCPUpload({
-                bucket: config.gcs.transcriptionBucketName,
-              }),
-            };
-
-      const output = new EncodedFileOutput({
-        fileType: EncodedFileType.MP4,
-        filepath,
-        output: uploadOutput,
+      const output = new SegmentedFileOutput({
+        protocol: SegmentedFileProtocol.HLS_PROTOCOL,
+        filenamePrefix: paths.filenamePrefix,
+        playlistName: paths.playlistPath,
+        segmentDuration: SEGMENT_DURATION_SECONDS,
+        output: this.buildUploadOutput(),
       });
 
-      const info: EgressInfo = await this.egressClient.startRoomCompositeEgress(
-        callExternalId,
-        output,
-        { audioOnly: true },
-      );
+      let info: EgressInfo;
+      if (recordingType === RecordingType.AUDIO_ONLY) {
+        info = await this.egressClient.startRoomCompositeEgress(call.externalId, output, {
+          audioOnly: true,
+        });
+      } else {
+        // AUDIO_SCREEN: speaker-dark keeps the active screen-share large.
+        // AUDIO_VIDEO: grid-dark shows all camera tiles equally.
+        const layout = recordingType === RecordingType.AUDIO_SCREEN ? 'speaker-dark' : 'grid-dark';
+        info = await this.egressClient.startRoomCompositeEgress(call.externalId, output, {
+          layout,
+          audioOnly: false,
+        });
+      }
 
-      this.activeEgress.set(callExternalId, info.egressId);
-      logger.info(`[CallRecording] Started egress for call ${callExternalId}, egressId=${info.egressId}, path=${filepath}`);
-      return info.egressId;
+      this.activeEgress.set(recording.id, info.egressId);
+      await repositories.callRecordings.setEgressId(recording.id, info.egressId);
+
+      logger.info(`[CallRecording] Started ${recordingType} HLS egress for call ${call.externalId}, recordingId=${recording.id}, egressId=${info.egressId}, segments=${paths.segmentPrefix}`);
+      const withEgress = { ...recording, egressId: info.egressId, segmentPrefix: paths.segmentPrefix };
+
+      // Publish active-recording state to room metadata so all clients (incl. late
+      // joiners) show the indicator (H4). Non-blocking; the DB row is authoritative.
+      const starter = await repositories.users.findById(startedBy).catch(() => null);
+      void livekitService.setRecordingState(call.externalId, {
+        recordingId: recording.id,
+        startedBy,
+        startedByName: starter?.name ?? null,
+        startedAt: new Date(recording.startedAt).getTime(),
+        recordingType: recording.recordingType,
+      });
+
+      return { recording: withEgress, alreadyActive: false };
     } catch (error) {
-      logger.error(`[CallRecording] Failed to start egress for call ${callExternalId}:`, error);
+      // Free the single-active lock so the call is immediately recordable again (H1).
+      logger.error(`[CallRecording] startEgress failed for call ${call.externalId}, recordingId=${recording.id}:`, error);
+      await repositories.callRecordings.markRecordingFailed(recording.id).catch((e) =>
+        logger.error(`[CallRecording] failed to mark recording ${recording.id} RECORDING_FAILED:`, e));
       return null;
     }
   }
 
   /**
-   * Gracefully stop an active egress when the last participant leaves.
-   * This tells the egress worker to flush its buffer and upload to GCS before the room closes.
-   * The egress_ended webhook will fire with EGRESS_COMPLETE once done.
+   * Stop a specific recording. Moves ACTIVE → STOPPED (freeing the lock) and asks
+   * the egress worker to flush + upload; the egress_ended webhook finalises it.
+   * Authorization (starter-only) is enforced in the controller.
    */
-  async stopRecording(callExternalId: string): Promise<void> {
-    const egressId = this.activeEgress.get(callExternalId);
+  async stopRecording(recording: CallRecording): Promise<void> {
+    await repositories.callRecordings.markStopped(recording.id);
+    await this.stopEgress(recording);
+
+    // Clear the active-recording indicator on every stop path (HTTP stop, call-end).
+    // The egress_ended webhook still finalizes the file. Non-blocking; row is authoritative.
+    const call = await repositories.calls.findById(recording.callId);
+    if (call) void livekitService.setRecordingState(call.externalId, null);
+  }
+
+  /**
+   * Stop the ACTIVE recording for a call (looked up by externalId / room name).
+   * Used when the call ends so egress can flush to storage before the room tears
+   * down (LiveKit also auto-ends egress, but this triggers a graceful stop).
+   */
+  async stopActiveRecordingsForCall(callExternalId: string): Promise<void> {
+    const call = await repositories.calls.findByExternalId(callExternalId);
+    if (!call) return;
+    const active = await repositories.callRecordings.findActiveByCallId(call.id);
+    if (!active) return;
+    await this.stopRecording(active);
+  }
+
+  /** Tell the egress worker to stop, if it is still running. */
+  private async stopEgress(recording: CallRecording): Promise<void> {
+    let egressId = this.activeEgress.get(recording.id) ?? recording.egressId ?? undefined;
     if (!egressId) {
-      // Promote from debug to warn — this can happen when the backend process restarted
-      // between startRecording and stopRecording, losing the in-memory activeEgress map.
-      // In that case the egress auto-terminates and the recording file may be truncated.
-      logger.warn('[CallRecording] egress_tracking_lost', { call: callExternalId, reason: 'no_active_egress_tracked', possible_process_restart: true });
+      logger.warn('[CallRecording] egress_tracking_lost', { recording: recording.id, call: recording.callId, reason: 'no_egressId_on_row' });
       return;
     }
-    this.activeEgress.delete(callExternalId);
+    this.activeEgress.delete(recording.id);
     try {
-      // Check current status before attempting to stop — only STARTING and ACTIVE can be stopped
       const [egressInfo] = await this.egressClient.listEgress({ egressId });
       const stoppable =
         egressInfo?.status === EgressStatus.EGRESS_STARTING ||
         egressInfo?.status === EgressStatus.EGRESS_ACTIVE;
-
       if (!stoppable) {
         const statusName = egressInfo ? (EgressStatus[egressInfo.status] ?? egressInfo.status) : 'unknown';
         logger.info(`[CallRecording] Egress ${egressId} already in terminal state ${statusName}, skipping stop`);
         return;
       }
-
       await this.egressClient.stopEgress(egressId);
-      logger.info(`[CallRecording] Gracefully stopped egress ${egressId} for call ${callExternalId}`);
+      logger.info(`[CallRecording] Gracefully stopped egress ${egressId} for recording ${recording.id}`);
     } catch (err) {
-      logger.error(`[CallRecording] Failed to stop egress ${egressId} for call ${callExternalId}:`, err);
+      logger.error(`[CallRecording] Failed to stop egress ${egressId} for recording ${recording.id}:`, err);
     }
   }
 
@@ -141,175 +249,349 @@ class CallRecordingService {
     return false;
   }
 
-  /** Handle egress_ended webhook — save recordingUrl and create MessageAttachment */
-  async handleEgressCompleted(callExternalId: string): Promise<void> {
-    // Clean up tracking entry in case stopRecording wasn't called (e.g. EGRESS_COMPLETE from natural end)
-    this.activeEgress.delete(callExternalId);
-    const call = await repositories.calls.findByExternalId(callExternalId);
-    if (!call) {
-      logger.warn(`[CallRecording] No call found for externalId=${callExternalId}`);
+  /**
+   * Handle the egress_ended webhook, correlated by egressId (C2). Egress now
+   * produces HLS segments, so this moves the row to PROCESSING and enqueues the
+   * stitch job rather than finalising directly. Even on egress failure we salvage
+   * a partial recording if any segments landed; only a truly empty recording
+   * moves to UPLOAD_FAILED (freeing the lock).
+   */
+  async handleEgressEnded(egressId: string, completedSuccessfully: boolean): Promise<void> {
+    const recording = await repositories.callRecordings.findByEgressId(egressId);
+    if (!recording) {
+      logger.warn('[CallRecording] egress_ended_no_recording', { egressId, reason: 'no_row_for_egressId' });
+      return;
+    }
+    // activeEgress is keyed by recording.id — delete by that, not egressId, or the entry leaks.
+    this.activeEgress.delete(recording.id);
+
+    // Only rows still awaiting egress act on this; anything else is a redelivery.
+    if (recording.status !== 'RECORDING_ACTIVE' && recording.status !== 'RECORDING_STOPPED') {
+      logger.info(`[CallRecording] egress_ended ignored — recording ${recording.id} already in state ${recording.status}`);
       return;
     }
 
-    const recordingPath = this.buildRecordingPath(call.externalId, call.createdAt);
-
-    // Verify the file actually landed in GCS before committing anything to the DB.
-    // The egress_ended webhook can arrive before GCS propagation completes.
-    const fileReady = await this.waitForFileExists(recordingPath);
-    if (!fileReady) {
-      // Structured error so this is greppable/alertable — distinguishes GCS outage from
-      // a missing file. The recording is now permanently lost; no retry will be attempted.
-      logger.error('[CallRecording] recording_permanently_dropped', {
-        call: callExternalId,
-        path: recordingPath,
-        total_wait_seconds: 341,
-        reason: 'file_not_found_after_all_retries',
-      });
+    if (!(await this.hasSegments(recording.segmentPrefix))) {
+      await repositories.callRecordings.markUploadFailed(recording.id);
+      logger.warn('[CallRecording] recording_upload_failed', { recording: recording.id, egressId, completedSuccessfully, reason: 'no_segments' });
       return;
     }
 
-    await repositories.calls.setRecordingUrl(call.id, recordingPath);
-    logger.info(`[CallRecording] Saved recordingUrl for call ${call.externalId}, path=${recordingPath}`);
+    await repositories.callRecordings.markProcessing(recording.id);
+    const { recordingStitchQueue } = await import('@/queues/recordingStitchQueue');
+    await recordingStitchQueue.enqueue(recording.id);
+    logger.info(`[CallRecording] recording ${recording.id} PROCESSING — stitch enqueued (completedSuccessfully=${completedSuccessfully})`);
+  }
 
-    // Create (or skip if already exists) a MessageAttachment so the recording
-    // appears inline in the call message bubble.
+  /**
+   * Stitch a recording's HLS segments into a single MP4 (called by the stitch
+   * queue). Downloads the playlist + segments, remuxes with ffmpeg, uploads the
+   * MP4, marks UPLOADED, deletes the segments, then posts the thread message.
+   * Throws on a stitch/upload failure (after marking PROCESSING_FAILED) so the
+   * queue retries; message posting is best-effort and never reverts the upload.
+   */
+  async stitchRecording(recordingId: string): Promise<void> {
+    const recording = await repositories.callRecordings.findById(recordingId);
+    if (!recording) {
+      logger.warn('[CallRecording] stitch_no_recording', { recordingId });
+      return;
+    }
+    if (recording.status !== 'PROCESSING_RECORDING' && recording.status !== 'PROCESSING_FAILED') {
+      logger.info(`[CallRecording] stitch skipped — recording ${recordingId} in state ${recording.status}`);
+      return;
+    }
+    const call = await repositories.calls.findById(recording.callId);
+    if (!call || !recording.segmentPrefix) {
+      await repositories.callRecordings.markProcessingFailed(recordingId);
+      logger.error('[CallRecording] stitch_missing_context', { recordingId, hasCall: !!call, segmentPrefix: recording.segmentPrefix });
+      return;
+    }
+
+    const paths = this.buildPaths(call.externalId, recordingId);
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), `rec-${recordingId}-`));
     try {
-      const existing = await repositories.messageAttachments.findRecordingByCallId(callExternalId);
-      if (existing) {
-        logger.info(`[CallRecording] Recording attachment already exists for call ${callExternalId}, skipping creation`);
-        return;
+      await this.downloadSegments(recording.segmentPrefix, workDir);
+      const localOut = path.join(workDir, 'out.mp4');
+      await stitchHlsToMp4(path.join(workDir, path.basename(paths.playlistPath)), localOut);
+
+      const mimetype = recording.recordingType === RecordingType.AUDIO_ONLY ? 'audio/mp4' : 'video/mp4';
+      const buffer = await fs.readFile(localOut);
+      await this.storageService.uploadFileV2(buffer, { path: paths.mp4Path, contentType: mimetype });
+      if (!(await this.waitForFileExists(paths.mp4Path))) {
+        throw new Error(`stitched MP4 not found at ${paths.mp4Path}`);
       }
 
-      const callMessage = await repositories.messages.findHeadMessageByCallId(callExternalId);
-      if (!callMessage) {
-        // recordingUrl IS saved at this point — the file exists and the download endpoint works.
-        // This log makes it greppable: "recording exists but will not appear inline in chat".
-        logger.warn('[CallRecording] recording_attachment_skipped', { call: callExternalId, reason: 'head_message_not_found', recording_url_set: true });
-        return;
-      }
+      await repositories.callRecordings.markUploaded(recordingId, { storagePath: paths.mp4Path });
+      logger.info(`[CallRecording] recording ${recordingId} UPLOADED (stitched), path=${paths.mp4Path}`);
+      await this.deleteSegments(recording.segmentPrefix);
 
-      // Get workspaceId from call creator's user record
-      const callCreator = await repositories.users.findById(call.createdByUserId);
-      
-      if (!callCreator?.workspaceId) {
-        logger.warn('[CallRecording] recording_attachment_skipped', { call: callExternalId, reason: 'workspace_not_found', creator: call.createdByUserId, recording_url_set: true });
-        return;
-      }
-      const workspaceId = callCreator.workspaceId;
-
-      if (!call.channelId) {
-        logger.warn('[CallRecording] recording_attachment_skipped', { call: callExternalId, reason: 'no_channelId', recording_url_set: true });
-        return;
-      }
-      const channel = await repositories.channels.findById(call.channelId);
-      if (!channel) {
-        logger.warn('[CallRecording] recording_attachment_skipped', { call: callExternalId, reason: 'channel_not_found', channel_id: call.channelId, recording_url_set: true });
-        return;
-      }
-
-      const filename = recordingPath.split('/').pop() ?? `recording-${callExternalId}.mp4`;
-
-      // Fetch real file size from storage so the attachment doesn't show "0 B" in the UI.
-      let fileSize = 0;
       try {
-        const meta = await this.storageService.getFileMetadata(recordingPath);
-        fileSize = parseInt(String(meta.size || '0'), 10);
+        await this.postRecordingMessageAndAttachment(call, { ...recording, storagePath: paths.mp4Path });
       } catch (err) {
-        logger.warn(`[CallRecording] Could not get file size for ${recordingPath}: ${err}`);
+        logger.error(`[CallRecording] Failed to post recording message/attachment for recording ${recordingId}:`, err);
       }
-
-      await repositories.messageAttachments.create({
-        entityId: callMessage.messageId,
-        entityType: AttachmentEntityType.CHAT,
-        workspaceId,
-        originalFilename: filename,
-        size: fileSize,
-        mimetype: 'audio/mp4',
-        url: recordingPath,
-        uploadedByUserId: call.createdByUserId,
-        createdBy: call.createdByUserId,
-        storageProvider: config.fileStorage.provider,
-        conversationId: callMessage.conversationId,
-        metadata: {
-          callId: callExternalId,
-          type: 'recording',
-        },
-      });
-
-      await repositories.messages.update(callMessage.messageId, { hasAttachment: true });
-      logger.info(`[CallRecording] Created recording attachment for call ${callExternalId}, message ${callMessage.messageId}`);
     } catch (err) {
-      logger.error(`[CallRecording] Failed to create recording attachment for call ${callExternalId}:`, err);
+      await repositories.callRecordings.markProcessingFailed(recordingId).catch(() => {});
+      logger.error(`[CallRecording] stitch failed for recording ${recordingId}:`, err);
+      throw err;
+    } finally {
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 
-  /** Create a readable stream for the recording file from storage */
-  async streamRecording(callExternalId: string): Promise<{ stream: NodeJS.ReadableStream; filename: string } | null> {
-    const path = await this.getRecordingPath(callExternalId);
+  /** True if any HLS object landed under the prefix (segments or playlist). */
+  private async hasSegments(segmentPrefix: string | null): Promise<boolean> {
+    if (!segmentPrefix) return false;
+    try {
+      const files = await this.storageService.listFiles(segmentPrefix);
+      return files.length > 0;
+    } catch (err) {
+      logger.warn(`[CallRecording] listFiles failed for ${segmentPrefix}: ${err}`);
+      return false;
+    }
+  }
+
+  /** Download every object under the HLS prefix into a flat local dir (by basename). */
+  private async downloadSegments(segmentPrefix: string, destDir: string): Promise<void> {
+    const files = await this.storageService.listFiles(segmentPrefix);
+    if (files.length === 0) throw new Error(`no segments under ${segmentPrefix}`);
+    await Promise.all(files.map(async (f) => {
+      const buffer = await this.storageService.getFileBuffer(f.name);
+      await fs.writeFile(path.join(destDir, path.basename(f.name)), buffer);
+    }));
+  }
+
+  /** Remove all HLS segments + playlist once the MP4 is safely stored. */
+  private async deleteSegments(segmentPrefix: string): Promise<void> {
+    try {
+      const files = await this.storageService.listFiles(segmentPrefix);
+      await Promise.all(files.map((f) => this.storageService.deleteFile(f.name).catch((e) =>
+        logger.warn(`[CallRecording] failed to delete segment ${f.name}: ${e}`))));
+    } catch (err) {
+      logger.warn(`[CallRecording] deleteSegments failed for ${segmentPrefix}: ${err}`);
+    }
+  }
+
+  /**
+   * Post one thread message per recording (M3), carrying its own attachment.
+   * The attachment metadata uses the 'recording' discriminator and carries
+   * recordingId so cleanup can target exactly this recording.
+   */
+  private async postRecordingMessageAndAttachment(call: Call, recording: CallRecording): Promise<void> {
+    const headMessage = await repositories.messages.findHeadMessageByCallId(call.externalId);
+    if (!headMessage) {
+      logger.warn('[CallRecording] recording_message_skipped', { recording: recording.id, reason: 'head_message_not_found' });
+      return;
+    }
+
+    const callCreator = await repositories.users.findById(call.createdByUserId);
+    if (!callCreator?.workspaceId) {
+      logger.warn('[CallRecording] recording_message_skipped', { recording: recording.id, reason: 'workspace_not_found' });
+      return;
+    }
+    const workspaceId = callCreator.workspaceId;
+
+    const bot = await unifiedBotUserService.getBotByBotId('xyne-automatic', workspaceId);
+    const senderId = bot?.id ?? call.createdByUserId;
+
+    const isAudio = recording.recordingType === RecordingType.AUDIO_ONLY;
+    const mimetype = isAudio ? 'audio/mp4' : 'video/mp4';
+    const recordingName = recording.name?.trim() || 'Recording';
+    const displayFilename = call.title ? `${call.title} - ${recordingName}.mp4` : `${recordingName}.mp4`;
+
+    // Post the per-recording thread message first so the attachment hangs off it.
+    const message = await repositories.messages.create({
+      conversationId: headMessage.conversationId,
+      senderId,
+      content: `🎙️ **${recordingName}** ready`,
+      msgType: bot ? MessageType.BOT : MessageType.SYSTEM,
+      showInChannel: false,
+      hasAttachment: true,
+      metadata: {
+        messageSubtype: 'recording',
+        callId: call.externalId,
+        recordingId: recording.id,
+        recordingType: recording.recordingType,
+        contentFormat: 'markdown',
+      },
+    });
+    await repositories.callRecordings.setMessageId(recording.id, message.messageId);
+
+    let fileSize = 0;
+    try {
+      const meta = await this.storageService.getFileMetadata(recording.storagePath!);
+      fileSize = parseInt(String(meta.size || '0'), 10);
+    } catch (err) {
+      logger.warn(`[CallRecording] Could not get file size for ${recording.storagePath}: ${err}`);
+    }
+
+    await repositories.messageAttachments.create({
+      entityId: message.messageId,
+      entityType: AttachmentEntityType.CHAT,
+      workspaceId,
+      originalFilename: displayFilename,
+      size: fileSize,
+      mimetype,
+      url: recording.storagePath!,
+      uploadedByUserId: recording.startedBy ?? call.createdByUserId,
+      createdBy: recording.startedBy ?? call.createdByUserId,
+      storageProvider: config.fileStorage.provider,
+      conversationId: headMessage.conversationId,
+      metadata: {
+        callId: call.externalId,
+        recordingId: recording.id,
+        type: 'recording',
+      },
+    });
+
+    await repositories.conversations.incrementReplyCount(headMessage.conversationId);
+    logger.info(`[CallRecording] Posted recording message ${message.messageId} + attachment for recording ${recording.id}`);
+  }
+
+  /**
+   * Update the display filename of a call's recording attachments to include the
+   * (newly generated) call title. Called when a call title is generated late.
+   * Operates per-recording — each recording owns its own thread message + attachment.
+   */
+  async updateRecordingFilename(callExternalId: string, callTitle: string): Promise<void> {
+    try {
+      const call = await repositories.calls.findByExternalId(callExternalId);
+      if (!call) return;
+      const recordings = await repositories.callRecordings.listByCallId(call.id);
+      for (const recording of recordings) {
+        if (!recording.messageId) continue;
+        const attachments = await repositories.messageAttachments.findByEntityIdAndType(
+          recording.messageId,
+          AttachmentEntityType.CHAT,
+        );
+        const label = recording.name?.trim() || 'Recording';
+        for (const attachment of attachments) {
+          await repositories.messageAttachments.update(attachment.id, {
+            originalFilename: `${callTitle} - ${label}.mp4`,
+          });
+        }
+      }
+      logger.info(`[CallRecording] Updated recording filenames for call ${callExternalId} → "${callTitle}"`);
+    } catch (err) {
+      logger.warn(`[CallRecording] Failed to update recording filename for call ${callExternalId}:`, err);
+    }
+  }
+
+  /**
+   * Manual user delete (starter-only authz is enforced in the controller). Soft
+   * delete: status → DELETED (row kept for audit), file + attachment + thread
+   * message removed so the chat doesn't show a dead player.
+   */
+  async deleteRecording(recording: CallRecording): Promise<void> {
+    if (recording.storagePath) {
+      try {
+        await this.storageService.deleteFile(recording.storagePath);
+      } catch (err) {
+        logger.warn(`[CallRecording] Could not delete file ${recording.storagePath} for recording ${recording.id}: ${err}`);
+      }
+    }
+    // Drop any HLS segments left behind (recording deleted mid-processing).
+    if (recording.segmentPrefix) {
+      await this.deleteSegments(recording.segmentPrefix);
+    }
+    if (recording.messageId) {
+      try {
+        await repositories.messageAttachments.deleteByMessageId(recording.messageId);
+        await repositories.messages.update(recording.messageId, {
+          content: 'Recording deleted',
+          hasAttachment: false,
+        });
+      } catch (err) {
+        logger.warn(`[CallRecording] Could not clean message ${recording.messageId} for recording ${recording.id}: ${err}`);
+      }
+    }
+    await repositories.callRecordings.markDeleted(recording.id);
+    logger.info(`[CallRecording] Soft-deleted recording ${recording.id}`);
+  }
+
+  /** Create a readable stream for a recording file from storage, by recording id. */
+  async streamRecordingById(recordingId: string): Promise<{ stream: NodeJS.ReadableStream; filename: string } | null> {
+    const path = await this.getStoragePathById(recordingId);
     if (!path) return null;
     const stream = await this.storageService.createReadStream(path);
-    const filename = path.split('/').pop() ?? `recording-${callExternalId}.mp4`;
+    const filename = path.split('/').pop() ?? `recording-${recordingId}.mp4`;
     return { stream, filename };
   }
 
-  /** Return storage metadata for the recording file, or null if not available */
-  async getRecordingMetadata(callExternalId: string): Promise<Record<string, unknown> | null> {
-    const path = await this.getRecordingPath(callExternalId);
+  async getRecordingMetadataById(recordingId: string): Promise<Record<string, unknown> | null> {
+    const path = await this.getStoragePathById(recordingId);
     if (!path) return null;
     try {
       return await this.storageService.getFileMetadata(path) as Record<string, unknown>;
     } catch (err) {
-      logger.warn(`[CallRecording] getRecordingMetadata failed for ${callExternalId}: ${err}`);
+      logger.warn(`[CallRecording] getRecordingMetadataById failed for ${recordingId}: ${err}`);
       return null;
     }
   }
 
-  /** Get the storage path for a call recording, or null if not available/found */
-  async getRecordingPath(callExternalId: string): Promise<string | null> {
-    const call = await repositories.calls.findByExternalIdWithRecordingUrl(callExternalId);
-    if (!call?.recordingUrl) {
-      logger.warn(`[CallRecording] getRecordingPath: no recordingUrl stored in DB for call ${callExternalId}`);
+  /** Resolve a recording's storage path, verifying the file still exists. */
+  async getStoragePathById(recordingId: string): Promise<string | null> {
+    const recording = await repositories.callRecordings.findById(recordingId);
+    if (!recording?.storagePath) {
+      logger.warn(`[CallRecording] getStoragePathById: no storagePath for recording ${recordingId}`);
       return null;
     }
-
-    let exists: boolean;
     try {
-      exists = await this.storageService.fileExists(call.recordingUrl);
+      const exists = await this.storageService.fileExists(recording.storagePath);
+      if (!exists) {
+        logger.warn(`[CallRecording] getStoragePathById: file not found at ${recording.storagePath}`);
+        return null;
+      }
     } catch (err) {
-      logger.error(`[CallRecording] getRecordingPath: fileExists check threw for path=${call.recordingUrl}:`, err);
+      logger.error(`[CallRecording] getStoragePathById: fileExists threw for ${recording.storagePath}:`, err);
       return null;
     }
-
-    if (!exists) {
-      logger.warn(`[CallRecording] getRecordingPath: file not found at path=${call.recordingUrl}`);
-      return null;
-    }
-
-    return call.recordingUrl;
+    return recording.storagePath;
   }
 
-  /** Cleanup expired recordings (called by cron) */
+  /**
+   * Cleanup expired recordings (cron). Two passes for different retention windows.
+   * Deletes the file, marks the row EXPIRED, and removes the recording's thread
+   * message attachment so the chat doesn't show a dead player (H2).
+   */
   async cleanupExpiredRecordings(): Promise<void> {
-    const retentionDays = this.getRetentionDays();
-    if (retentionDays <= 0) return;
+    let totalCleaned = 0;
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+    const passes: Array<{ days: number; types: RecordingType[] }> = [
+      { days: this.getRetentionDays(), types: [RecordingType.AUDIO_ONLY] },
+      { days: config.screenRecording.retentionDays, types: [RecordingType.AUDIO_SCREEN, RecordingType.AUDIO_VIDEO] },
+    ];
 
-    const expiredCalls = await repositories.calls.findExpiredRecordings(cutoffDate);
-
-    for (const call of expiredCalls) {
-      try {
-        await this.storageService.deleteFile(call.recordingUrl);
-        await repositories.calls.setRecordingUrl(call.id, null);
-        logger.info(`[CallRecording] Deleted expired recording: ${call.recordingUrl}`);
-      } catch (err) {
-        logger.error(`[CallRecording] Failed to delete recording ${call.recordingUrl}:`, err);
+    for (const pass of passes) {
+      if (pass.days <= 0) continue;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - pass.days);
+      for (const type of pass.types) {
+        const expired = await repositories.callRecordings.findExpiredUploaded(cutoff, type);
+        for (const recording of expired) {
+          try {
+            if (recording.storagePath) {
+              await this.storageService.deleteFile(recording.storagePath);
+            }
+            await repositories.callRecordings.markExpired(recording.id);
+            if (recording.messageId) {
+              await repositories.messageAttachments.deleteByMessageId(recording.messageId);
+              await repositories.messages.update(recording.messageId, {
+                content: 'Recording expired',
+                hasAttachment: false,
+              });
+            }
+            logger.info(`[CallRecording] Expired recording ${recording.id} (${type}), path=${recording.storagePath}`);
+            totalCleaned++;
+          } catch (err) {
+            logger.error(`[CallRecording] Failed to expire recording ${recording.id}:`, err);
+          }
+        }
       }
     }
 
-    if (expiredCalls.length > 0) {
-      logger.info(`[CallRecording] Cleaned up ${expiredCalls.length} expired recordings`);
+    if (totalCleaned > 0) {
+      logger.info(`[CallRecording] Cleaned up ${totalCleaned} expired recordings`);
     }
   }
 }

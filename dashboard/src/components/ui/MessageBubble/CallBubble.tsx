@@ -215,12 +215,16 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
     return attType !== 'identified_transcript';
   });
 
-  // Recording audio attachments are rendered separately by AudioPlayer below.
-  // Exclude them from the file grid to avoid showing "FILE 0 B" cards.
-  const isRecordingAudio = (a: AttachmentType): boolean =>
-    a.mimetype === 'audio/mp4' && (a.metadata as { type?: string } | null)?.type === 'recording';
+  // Recording attachments (audio or video) are excluded from inline display.
+  // Audio recordings are surfaced via the AudioPlayer action icon instead.
+  // Video/screen recordings are linked via a bot message in the thread.
+  const isRecording = (a: AttachmentType): boolean =>
+    (a.metadata as { type?: string } | null)?.type === 'recording';
 
-  const displayAttachments = (visibleAttachments ?? []).filter(a => !isRecordingAudio(a));
+  const isRecordingAudio = (a: AttachmentType): boolean =>
+    a.mimetype === 'audio/mp4' && isRecording(a);
+
+  const displayAttachments = (visibleAttachments ?? []).filter(a => !isRecording(a));
   const recordingAttachment = attachments?.find(isRecordingAudio);
 
   return (
@@ -297,10 +301,9 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                               />
                               {recordingAttachment && (
                                 <AudioPlayer
-                                  onLoad={async signal => {
-                                    await recordingService.saveRecordingAttachment(callId);
-                                    return recordingService.downloadRecordingBlob(callId, signal);
-                                  }}
+                                  onLoad={signal =>
+                                    recordingService.downloadRecordingBlob(callId, signal)
+                                  }
                                   trackCategory='CallBubble'
                                 />
                               )}

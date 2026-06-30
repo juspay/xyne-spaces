@@ -1,0 +1,218 @@
+flowchart TD
+    %% ══════════════════════════════════════════════════════
+    %% 1. START RECORDING  (POST /api/calls/:callId/recordings)
+    %% ══════════════════════════════════════════════════════
+    StartReq([Participant starts recording]) --> AuthStart{userId present?
+    req.user?.id}
+    AuthStart -->|No| Reject401a(["401 — Unauthorized"])
+    AuthStart -->|Yes| ValidateType{Valid recordingType?
+    AUDIO_ONLY / AUDIO_SCREEN / AUDIO_VIDEO}
+    ValidateType -->|No| Reject400a(["400 — Invalid recordingType"])
+    ValidateType -->|Yes| FindCall["Find call by externalId
+    callRepository.findByExternalId"]
+    FindCall --> CallExists{Call found?}
+    CallExists -->|No| Reject404a(["404 — Call not found"])
+    CallExists -->|Yes| ParticipantCheck{Is call participant?
+    assertCallParticipant}
+    ParticipantCheck -->|No| Reject403a(["403 — Only participants
+    can start recording"])
+    ParticipantCheck -->|Yes| InsertActive["startActive — INSERT row
+    callRecordingRepository.ts
+    status: RECORDING_ACTIVE
+    startedBy, recordingType, name
+    The INSERT is the lock"]
+
+    InsertActive --> LockHit{P2002 unique violation?
+    call_recordings_one_active
+    WHERE status = RECORDING_ACTIVE}
+    LockHit -->|Yes — already recording| ReturnExisting(["200 — alreadyActive=true
+    return existing ACTIVE row
+    no second egress (C3)"])
+    LockHit -->|No — row created| SetPrefix["setSegmentPrefix
+    buildPaths: recordings/{callExt}/{recId}/
+    per-recording dir, no collision (C1)"]
+
+    SetPrefix --> StartEgress["egressClient.startRoomCompositeEgress
+    callRecordingService.ts
+    HLS SegmentedFileOutput, 6s segments
+    layout by type, GCP/S3 upload"]
+    StartEgress --> EgressOk{Egress started?}
+    EgressOk -->|No — threw| MarkRecFailed["markRecordingFailed
+    status: RECORDING_FAILED
+    Lock freed immediately (H1)"]
+    MarkRecFailed --> Return500a(["500 — Failed to start recording"])
+    EgressOk -->|Yes| PatchEgress["setEgressId(recordingId, egressId)
+    + cache recordingId → egressId
+    (row is authoritative)"]
+    PatchEgress --> PublishMeta["livekitService.setRecordingState
+    Room metadata indicator (H4)
+    so late joiners see it"]
+    PublishMeta --> StartDone(["200 — recordingId
+    Recording ACTIVE, egress running"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 2. STOP RECORDING  (manual HTTP + auto on call-end)
+    %% ══════════════════════════════════════════════════════
+    StopReq([Starter stops recording
+    POST .../recordings/stop]) --> AuthStop{userId present?}
+    AuthStop -->|No| Reject401b(["401 — Unauthorized"])
+    AuthStop -->|Yes| ResolveRec["Resolve recording
+    by recordingId or findActiveByCallId"]
+    ResolveRec --> RecActive{Found + status RECORDING_ACTIVE?}
+    RecActive -->|No| Reject404b(["404 — No active recording"])
+    RecActive -->|Yes| StarterOnly{startedBy === userId?}
+    StarterOnly -->|No| Reject403b(["403 — Only the starter
+    can stop the recording"])
+    StarterOnly -->|Yes| OptionalRename["Optional rename
+    if name provided"]
+    OptionalRename --> DoStop
+
+    AutoStop([Call ends / last participant leaves
+    livekitWebhookController]) --> FindActiveForCall["stopActiveRecordingsForCall
+    findActiveByCallId by externalId"]
+    FindActiveForCall --> HasActive{Active recording?}
+    HasActive -->|No| NoStop(["Nothing to stop"])
+    HasActive -->|Yes| DoStop["stopRecording
+    callRecordingService.ts"]
+
+    DoStop --> MarkStopped["markStopped
+    status: RECORDING_STOPPED
+    endedAt set — lock freed"]
+    MarkStopped --> StopEgress["stopEgress
+    listEgress → stopEgress if STARTING/ACTIVE
+    egress flushes last HLS segments to storage"]
+    StopEgress --> ClearMeta["livekitService.setRecordingState(null)
+    Clear room indicator (every stop path)"]
+    ClearMeta --> StopDone(["200 — recordingId
+    egress_ended webhook finalizes file"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 3. EGRESS_ENDED WEBHOOK → PROCESSING / UPLOAD_FAILED
+    %% ══════════════════════════════════════════════════════
+    EgressEnded([LiveKit egress_ended webhook]) --> CorrelateRec["findByEgressId (C2)
+    correlate row by egressId"]
+    CorrelateRec --> RecFound{Recording row found?}
+    RecFound -->|No| WebhookNoop1(["No-op — log + return"])
+    RecFound -->|Yes| RedeliverGuard{status ACTIVE or STOPPED?}
+    RedeliverGuard -->|No — terminal already| WebhookNoop2(["Ignore — webhook redelivery"])
+    RedeliverGuard -->|Yes| HasSegments{Any HLS segments landed?
+    storage.listFiles(segmentPrefix)}
+    HasSegments -->|No — empty recording| MarkUploadFailed["markUploadFailed
+    status: RECORDING_UPLOAD_FAILED
+    Lock freed (H1)"]
+    MarkUploadFailed --> WebhookFail(["Done — nothing to salvage"])
+    HasSegments -->|Yes| MarkProcessing["markProcessing
+    status: PROCESSING_RECORDING"]
+    MarkProcessing --> EnqueueStitch["recordingStitchQueue.enqueue
+    Bull job, jobId = stitch-{recId}
+    (idempotent vs redelivery)"]
+    EnqueueStitch --> WebhookDone(["Stitch enqueued
+    handled off the API process"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 4. STITCH JOB (dedicated worker) → UPLOADED / PROCESSING_FAILED
+    %% ══════════════════════════════════════════════════════
+    StitchFires([Stitch worker picks up job
+    recordingStitchQueue.startConsumer]) --> LoadRec["stitchRecording(recordingId)
+    findById"]
+    LoadRec --> StitchState{status PROCESSING_RECORDING
+    or PROCESSING_FAILED?}
+    StitchState -->|No| StitchSkip(["Skip — wrong state"])
+    StitchState -->|Yes| HasContext{call + segmentPrefix present?}
+    HasContext -->|No| MarkProcFailed1["markProcessingFailed
+    status: PROCESSING_FAILED"]
+    MarkProcFailed1 --> StitchCtxDone(["Return — missing context"])
+    HasContext -->|Yes| Download["downloadSegments → tmp dir
+    stitchHlsToMp4 (ffmpeg remux)
+    upload MP4 to storagePath"]
+    Download --> WaitExists["waitForFileExists
+    exponential backoff 1s→256s
+    (GCS propagation race)"]
+    WaitExists --> StitchOk{MP4 confirmed in storage?}
+    StitchOk -->|No — threw| MarkProcFailed2["markProcessingFailed
+    status: PROCESSING_FAILED
+    rethrow → Bull retries
+    (3 attempts, backoff)"]
+    MarkProcFailed2 --> StitchRetry(["Job fails → retry / dead-letter"])
+    StitchOk -->|Yes| MarkUploaded["markUploaded
+    status: RECORDING_UPLOADED
+    storagePath = final MP4 (terminal success)"]
+    MarkUploaded --> DeleteSegs["deleteSegments
+    drop HLS segments + playlist"]
+    DeleteSegs --> PostMessage["postRecordingMessageAndAttachment
+    thread message (bot) + attachment (M3)
+    setMessageId, incrementReplyCount
+    best-effort — never reverts upload"]
+    PostMessage --> StitchDone(["Recording UPLOADED
+    posted to call thread"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 5. DOWNLOAD / STREAM  (GET .../recordings/:recordingId)
+    %% ══════════════════════════════════════════════════════
+    DownloadReq([User downloads recording]) --> AuthDl{userId present?}
+    AuthDl -->|No| Reject401c(["401 — Unauthorized"])
+    AuthDl -->|Yes| ViewAuthz{Can view recordings?
+    assertCanViewCallRecordings}
+    ViewAuthz -->|No| Reject403c(["403 — Access denied"])
+    ViewAuthz -->|Yes| ResolvePath["streamRecordingById
+    getStoragePathById + fileExists"]
+    ResolvePath --> FileThere{File present in storage?}
+    FileThere -->|No| Reject404c(["404 — Recording file not found"])
+    FileThere -->|Yes| StreamFile(["200 — stream MP4
+    Content-Disposition attachment"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 6. RENAME  (PATCH .../recordings/:recordingId)
+    %% ══════════════════════════════════════════════════════
+    RenameReq([Starter renames recording]) --> RenameValid{name provided + participant?}
+    RenameValid -->|No| Reject403d(["400/403 — invalid or denied"])
+    RenameValid -->|Yes| RenameStarter{startedBy === userId?
+    fail closed}
+    RenameStarter -->|No| Reject403e(["403 — Only the starter
+    can rename"])
+    RenameStarter -->|Yes| DoRename["rename(recordingId, name)
+    + updateRecordingFilename
+    sync attachment filename"]
+    DoRename --> RenameDone(["200 — recording renamed"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 7. MANUAL DELETE (soft delete, starter-only)
+    %% ══════════════════════════════════════════════════════
+    DeleteReq([Starter deletes recording]) --> DeleteRec["deleteRecording
+    callRecordingService.ts"]
+    DeleteRec --> DelFile["delete MP4 file
+    + deleteSegments (if mid-processing)"]
+    DelFile --> DelMessage["clean thread message
+    deleteByMessageId
+    message → 'Recording deleted'"]
+    DelMessage --> MarkDeleted["markDeleted
+    status: RECORDING_DELETED
+    (soft delete — row kept for audit)"]
+    MarkDeleted --> DeleteDone(["Recording removed
+    no dead player in chat"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 8. RETENTION CRON (daily 3AM) → EXPIRED
+    %% ══════════════════════════════════════════════════════
+    CronFires([recordingCleanupQueue
+    daily 3AM repeatable Bull job]) --> CleanupSvc["cleanupExpiredRecordings
+    two passes per retention window
+    audio vs screen/video days"]
+    CleanupSvc --> FindExpired["findExpiredUploaded(cutoff, type)
+    status RECORDING_UPLOADED
+    endedAt < cutoff, storagePath set"]
+    FindExpired --> AnyExpired{Expired recordings?}
+    AnyExpired -->|No| CronDone(["Nothing to clean"])
+    AnyExpired -->|Yes| ExpireEach["Per recording:
+    delete file → markExpired
+    status: RECORDING_EXPIRED
+    clean message → 'Recording expired' (H2)"]
+    ExpireEach --> CleanedDone(["Expired recordings cleaned"])
+
+    classDef node fill:#ffffff,stroke:#333,stroke-width:2px
+    classDef success fill:#d4edda,stroke:#28a745,stroke-width:2px
+    classDef reject fill:#f8d7da,stroke:#dc3545,stroke-width:2px
+    classDef done fill:#d1ecf1,stroke:#0c5460,stroke-width:2px
+    class Reject401a,Reject400a,Reject404a,Reject403a,Return500a,Reject401b,Reject404b,Reject403b,Reject401c,Reject403c,Reject404c,Reject403d,Reject403e reject
+    class StartDone,StopDone,WebhookDone,StitchDone,StreamFile,RenameDone,DeleteDone,CleanedDone,ReturnExisting success
+    class NoStop,WebhookNoop1,WebhookNoop2,WebhookFail,StitchSkip,StitchCtxDone,StitchRetry,CronDone done

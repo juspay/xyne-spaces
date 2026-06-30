@@ -40,6 +40,28 @@ export const isUserActiveInCall = <T extends { userId: string; response?: string
   );
 
 /**
+ * Find the active call matching the given externalId.
+ * @param activeCalls - Array of active calls
+ * @param externalId - The call's externalId to find
+ * @returns The active call, or undefined if not found
+ */
+export const findActiveCall = <T extends { externalId: string }>(
+  activeCalls: T[],
+  externalId: string,
+): T | undefined => activeCalls.find(call => call.externalId === externalId);
+
+/**
+ * Whether the active call for externalId currently has recording enabled.
+ * @param activeCalls - Array of active calls (with recordingEnabled flag)
+ * @param externalId - The call's externalId
+ * @returns true if that call has recording enabled
+ */
+export const isCallRecording = (
+  activeCalls: Array<{ externalId: string; recordingEnabled?: boolean | null }>,
+  externalId: string,
+): boolean => findActiveCall(activeCalls, externalId)?.recordingEnabled === true;
+
+/**
  * Determines what UI action a user should see for a call:
  * - 'canJoin': User has accepted/invited/left/declined — show "Join" button
  * - 'requested': User has pending request — show "Waiting..."

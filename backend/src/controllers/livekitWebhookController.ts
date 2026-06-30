@@ -96,6 +96,10 @@ class LiveKitWebhookController {
           await this.handleParticipantLeft(event);
           break;
 
+        case 'egress_started':
+          await this.handleEgressStarted(event);
+          break;
+
         case 'egress_ended':
           await this.handleEgressEnded(event);
           break;
@@ -362,23 +366,6 @@ class LiveKitWebhookController {
 
         logger.info(`[LiveKit Webhook] Successfully created all records for first participant in call ${roomName}`);
 
-        // Start recording if enabled via env config
-        try {
-          const recordingEnabled = callRecordingService.isRecordingEnabled();
-          if (recordingEnabled && call) {
-            const egressId = await callRecordingService.startRecording(roomName, call.createdAt);
-            if (egressId) {
-              logger.info(`[LiveKit Webhook] Started recording for call ${roomName}, egressId=${egressId}`);
-            } else {
-              // Null egressId means startRecording caught an error internally and returned null.
-              // Log structured so we can distinguish "recording disabled" from "recording failed to start".
-              logger.error('[LiveKit Webhook] recording_start_failed', { call: roomName, reason: 'egressId_null', recording_disabled: false });
-            }
-          }
-        } catch (recordingError) {
-          logger.error(`[LiveKit Webhook] Failed to start recording for call ${roomName}:`, recordingError);
-        }
-
         // Generate title from thread call
         if (callOrigin === CallOrigin.CONVERSATION && existingConversationId && call) {
           const callIdForUpdate = call.id;
@@ -555,10 +542,8 @@ class LiveKitWebhookController {
         });
         // Still attempt to stop the recording so the egress can flush to GCS before the room tears down.
         try {
-          if (callRecordingService.isRecordingEnabled()) {
-            await callRecordingService.stopRecording(callId);
-            logger.info('[LiveKit Webhook] recording_stop_attempted_after_db_error', { call: callId });
-          }
+          await callRecordingService.stopActiveRecordingsForCall(callId);
+          logger.info('[LiveKit Webhook] recording_stop_attempted_after_db_error', { call: callId });
         } catch (stopErr) {
           logger.error('[LiveKit Webhook] recording_stop_failed_after_db_error', { call: callId, error: stopErr instanceof Error ? stopErr.message : String(stopErr) });
         }
@@ -577,11 +562,9 @@ class LiveKitWebhookController {
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);
 
-        // Gracefully stop egress so it can flush to GCS before the room tears down
+        // Gracefully stop any active recording so egress can flush to GCS before the room tears down
         try {
-          if (callRecordingService.isRecordingEnabled()) {
-            await callRecordingService.stopRecording(callId);
-          }
+          await callRecordingService.stopActiveRecordingsForCall(callId);
         } catch (stopErr) {
           logger.error(`[LiveKit Webhook] Failed to stop recording for call ${callId}:`, stopErr);
         }
@@ -630,8 +613,24 @@ class LiveKitWebhookController {
   }
 
   /**
-   * Handle egress_ended event
-   * Called when an egress job completes (recording finished uploading to GCS)
+   * Handle egress_started event.
+   * The recording-started notification is published synchronously from the start
+   * API (toast + room metadata for late joiners), so this is a confirmation log
+   * only — kept to make egress lifecycle greppable.
+   */
+  private async handleEgressStarted(event: WebhookEvent): Promise<void> {
+    const egressInfo = event.egressInfo;
+    if (!egressInfo?.egressId) return;
+    logger.info(`[LiveKit Webhook] Egress started: ${egressInfo.egressId}`, {
+      roomName: egressInfo.roomName,
+    });
+  }
+
+  /**
+   * Handle egress_ended event.
+   * Correlated by egressId (C2) so the right recording row is updated even with
+   * multiple recordings per call. Terminal-but-failed statuses are passed through
+   * so the row moves to UPLOAD_FAILED and the single-active lock is freed (H1).
    */
   private async handleEgressEnded(event: WebhookEvent): Promise<void> {
     const egressInfo = event.egressInfo;
@@ -641,35 +640,19 @@ class LiveKitWebhookController {
     }
 
     const statusName = EgressStatus[egressInfo.status] ?? `UNKNOWN(${egressInfo.status})`;
+    const completedSuccessfully = egressInfo.status === EgressStatus.EGRESS_COMPLETE;
     logger.info(`[LiveKit Webhook] Egress ended: ${egressInfo.egressId}`, {
       roomName: egressInfo.roomName,
       status: egressInfo.status,
       statusName,
+      completedSuccessfully,
       error: egressInfo.error || undefined,
     });
 
-    if (egressInfo.status !== EgressStatus.EGRESS_COMPLETE) {
-      logger.warn(
-        `[LiveKit Webhook] Egress for room ${egressInfo.roomName} did not complete successfully ` +
-        `(status=${statusName}, egressId=${egressInfo.egressId}, error=${egressInfo.error ?? 'none'}). ` +
-        `Recording will NOT be saved.`
-      );
-      return;
-    }
-
-    if (!callRecordingService.isRecordingEnabled()) {
-      logger.info(
-        `[LiveKit Webhook] Call recording is disabled — ignoring egress_ended for room ${egressInfo.roomName} ` +
-        `(egressId=${egressInfo.egressId}). Set CALL_RECORDING_ENABLED=true to enable.`
-      );
-      return;
-    }
-
     try {
-      await callRecordingService.handleEgressCompleted(egressInfo.roomName);
-      logger.info(`[LiveKit Webhook] Processed egress completion for room ${egressInfo.roomName}`);
+      await callRecordingService.handleEgressEnded(egressInfo.egressId, completedSuccessfully);
     } catch (error) {
-      logger.error(`[LiveKit Webhook] Error handling egress_ended for room ${egressInfo.roomName}:`, error);
+      logger.error(`[LiveKit Webhook] Error handling egress_ended for egress ${egressInfo.egressId}:`, error);
     }
   }
 }

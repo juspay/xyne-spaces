@@ -70,30 +70,11 @@ export class CallRepository {
     return result;
   }
 
-  async findByExternalIdWithRecordingUrl(externalId: string): Promise<{ id: string; recordingUrl: string | null } | null> {
-    return await DatabaseClient.getInstance().call.findUnique({
-      where: { externalId },
-      select: { id: true, recordingUrl: true },
-    });
-  }
-
   async setRecordingUrl(id: string, recordingUrl: string | null): Promise<void> {
     await DatabaseClient.getInstance().call.update({
       where: { id },
       data: { recordingUrl },
     });
-  }
-
-  async findExpiredRecordings(cutoffDate: Date): Promise<Array<{ id: string; externalId: string; recordingUrl: string }>> {
-    const results = await DatabaseClient.getInstance().call.findMany({
-      where: {
-        recordingUrl: { not: null },
-        endedAt: { lt: cutoffDate },
-      },
-      select: { id: true, externalId: true, recordingUrl: true },
-    });
-    // Filter out null recordingUrls (Prisma type doesn't narrow for us)
-    return results.filter((c): c is { id: string; externalId: string; recordingUrl: string } => c.recordingUrl !== null);
   }
 
   async findActiveCallByChannelId(channelId: string): Promise<Call | null> {

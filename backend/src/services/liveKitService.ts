@@ -183,6 +183,35 @@ export class LiveKitService {
     }
   }
 
+  /**
+   * Publish the call's active-recording state into room metadata so it is readable
+   * by late joiners (LiveKit data messages aren't delivered to participants who
+   * join later — H4). Pass `null` to clear when no recording is active.
+   */
+  async setRecordingState(
+    roomName: string,
+    state: { recordingId: string; startedBy: string | null; startedByName?: string | null; startedAt: number; recordingType: string } | null,
+  ): Promise<void> {
+    try {
+      const rooms = await this.roomService.listRooms([roomName]);
+      if (!rooms || rooms.length === 0) {
+        logger.debug(`[LiveKit] Room ${roomName} not found, skipping recording-state update`);
+        return;
+      }
+      const existingMetadata = rooms[0].metadata ? JSON.parse(rooms[0].metadata) : {};
+      const updatedMetadata = {
+        ...existingMetadata,
+        activeRecording: state,
+        recordingVersion: Date.now(),
+      };
+      await this.roomService.updateRoomMetadata(roomName, JSON.stringify(updatedMetadata));
+      logger.info(`[LiveKit] Updated recording state for room ${roomName}`, { active: !!state });
+    } catch (error) {
+      // Non-critical — the DB row is the source of truth; this only drives the indicator.
+      logger.warn(`[LiveKit] Failed to set recording state for room ${roomName}:`, error);
+    }
+  }
+
   getClientUrl(): string {
     return this.clientUrl;
   }

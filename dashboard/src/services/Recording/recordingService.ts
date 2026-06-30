@@ -5,6 +5,7 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
+import type { RecordingType } from '@xyne/shared';
 
 export interface RecordingSession {
   id: string;
@@ -37,6 +38,40 @@ export interface RecordingDetail extends Recording {
   channelId: string | null;
   messageId: string | null;
   hasRecording?: boolean;
+}
+
+/** A single in-call recording session (call_recordings row). */
+export interface CallRecording {
+  id: string;
+  name: string | null;
+  recordingType: RecordingType;
+  status:
+    | 'RECORDING_ACTIVE'
+    | 'RECORDING_STOPPED'
+    | 'RECORDING_UPLOADED'
+    | 'RECORDING_FAILED'
+    | 'RECORDING_UPLOAD_FAILED'
+    | 'RECORDING_EXPIRED'
+    | 'RECORDING_DELETED';
+  startedBy: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  messageId: string | null;
+  downloadUrl: string | null;
+}
+
+export interface StartRecordingResponse {
+  success: boolean;
+  alreadyActive: boolean;
+  recording: {
+    id: string;
+    name: string | null;
+    recordingType: RecordingType;
+    status: string;
+    startedBy: string | null;
+    startedAt: string;
+  };
 }
 
 interface InitiateCallResponse {
@@ -131,17 +166,63 @@ class RecordingService {
   }
 
   /**
-   * Ensure the recording is persisted as a MessageAttachment in the DB.
-   * Idempotent – safe to call multiple times. Returns the attachment ID.
+   * Start an in-call recording. Any participant may start; the backend enforces a
+   * single ACTIVE recording per call, so a concurrent start returns the existing
+   * recording with `alreadyActive: true` instead of starting a second egress.
    */
-  async saveRecordingAttachment(callId: string): Promise<{ attachmentId: string }> {
-    const response: AxiosResponse<{ success: boolean; attachmentId: string }> =
-      await apiInstance.post(`/calls/${callId}/save-recording-attachment`);
-    return { attachmentId: response.data.attachmentId };
+  async startCallRecording(
+    callId: string,
+    recordingType: RecordingType,
+    name?: string,
+  ): Promise<StartRecordingResponse> {
+    const response: AxiosResponse<StartRecordingResponse> = await apiInstance.post(
+      `/calls/${callId}/recording/start`,
+      { recordingType, ...(name ? { name } : {}) },
+    );
+    return response.data;
   }
 
   /**
-   * Download the raw audio blob for a recording via the streaming endpoint.
+   * Stop the call's active recording. Only the participant who started it may stop
+   * it. `recordingId` defaults server-side to the call's active recording; `name`
+   * renames the recording at stop (the rename popup).
+   */
+  async stopCallRecording(
+    callId: string,
+    opts?: { recordingId?: string; name?: string },
+  ): Promise<void> {
+    await apiInstance.post(`/calls/${callId}/recording/stop`, {
+      ...(opts?.recordingId ? { recordingId: opts.recordingId } : {}),
+      ...(opts?.name ? { name: opts.name } : {}),
+    });
+  }
+
+  /** Rename a recording (starter-only). */
+  async renameCallRecording(callId: string, recordingId: string, name: string): Promise<void> {
+    await apiInstance.patch(`/calls/${callId}/recordings/${recordingId}`, { name });
+  }
+
+  /** Soft-delete a recording (starter-only). */
+  async deleteCallRecording(callId: string, recordingId: string): Promise<void> {
+    await apiInstance.delete(`/calls/${callId}/recordings/${recordingId}`);
+  }
+
+  /** Download a specific recording's file blob. */
+  async downloadCallRecordingBlob(
+    callId: string,
+    recordingId: string,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const response: AxiosResponse<Blob> = await apiInstance.get(
+      `/calls/${callId}/recordings/${recordingId}/download`,
+      { responseType: 'blob', ...(signal ? { signal } : {}) },
+    );
+    return response.data;
+  }
+
+  /**
+   * Download the call's latest recording blob via the legacy single-recording
+   * endpoint (used by the recordings list / headless player).
    * Pass the signal to abort the fetch when the component unmounts mid-download.
    */
   async downloadRecordingBlob(callId: string, signal?: AbortSignal): Promise<Blob> {

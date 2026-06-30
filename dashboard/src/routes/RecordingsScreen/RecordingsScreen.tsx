@@ -369,13 +369,9 @@ export default function RecordingsScreen(): ReactElement {
                         {/* Inline audio player — only present when a GCS file exists */}
                         {!!recording.recordingUrl && (
                           <AudioPlayer
-                            onLoad={async signal => {
-                              await recordingService.saveRecordingAttachment(recording.externalId);
-                              return recordingService.downloadRecordingBlob(
-                                recording.externalId,
-                                signal,
-                              );
-                            }}
+                            onLoad={signal =>
+                              recordingService.downloadRecordingBlob(recording.externalId, signal)
+                            }
                             initialDurationSec={
                               recording.endedAt
                                 ? (recording.endedAt - recording.startedAt) / 1000

@@ -29,6 +29,8 @@ import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
 import { callLobbyService } from '../../../services/Call/callLobbyService';
+import type { RecordingType } from '@xyne/shared';
+import { RecordingButton } from './RecordingButton';
 
 interface CallControlsProps {
   isMicEnabled: boolean;
@@ -67,6 +69,14 @@ interface CallControlsProps {
   hideAIAssistant?: boolean | undefined;
   hideMinimize?: boolean | undefined;
   isExternalUser?: boolean | undefined;
+  /** Whether this user is the call host (can start/stop recording) */
+  isHost?: boolean | undefined;
+  /** Whether recording is currently active */
+  isRecording?: boolean | undefined;
+  /** Whether the current user may stop the active recording (only the starter can) */
+  canStopRecording?: boolean | undefined;
+  onStartRecording?: ((type: RecordingType) => void | Promise<void>) | undefined;
+  onStopRecording?: (() => void | Promise<void>) | undefined;
 }
 
 export function CallControls({
@@ -103,6 +113,10 @@ export function CallControls({
   hideAIAssistant = false,
   hideMinimize = false,
   isExternalUser = false,
+  isRecording = false,
+  canStopRecording = true,
+  onStartRecording,
+  onStopRecording,
 }: CallControlsProps): React.ReactElement {
   const [showCopied, setShowCopied] = useState(false);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
@@ -259,7 +273,7 @@ export function CallControls({
   const midnightSeparatorClass = 'bg-gray-600';
 
   // Calculate button gap based on iconSize
-  const gapClass = iconSize < 16 ? 'gap-1' : iconSize < 20 ? 'gap-1.5' : 'gap-1 sm:gap-3';
+  const gapClass = iconSize < 16 ? 'gap-1' : iconSize < 20 ? 'gap-1.5' : 'gap-1 sm:gap-1.5';
 
   const isAiButtonDisabled =
     hasPendingRequestFromOther || isRequestingUser || requestedAiController;
@@ -295,7 +309,7 @@ export function CallControls({
 
   return (
     <>
-      <div ref={controlsRef} className={`flex items-center justify-center ${gapClass} flex-wrap`}>
+      <div ref={controlsRef} className={`flex items-center justify-center ${gapClass} flex-nowrap`}>
         {/* Microphone Toggle with Device Selector */}
         <div className='relative' ref={micMenuRef}>
           <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
@@ -516,6 +530,23 @@ export function CallControls({
             />
           )}
         </button>
+
+        {/* Recording — any participant can start; only the starter can stop (enforced server-side) */}
+        {(onStartRecording || onStopRecording) && (
+          <RecordingButton
+            isRecording={isRecording}
+            canStopRecording={canStopRecording}
+            onStartRecording={onStartRecording}
+            onStopRecording={onStopRecording}
+            hasCustomSizing={hasCustomSizing}
+            iconSize={iconSize}
+            buttonPadding={buttonPadding}
+            buttonClasses={buttonClasses}
+            midnightControlClass={midnightControlClass}
+            midnightPopoverClass={midnightPopoverClass}
+            callId={callId}
+          />
+        )}
 
         {/* Annotate (Draw) Toggle — only shown when a screen share is active */}
         {isAnySharingScreen && (
