@@ -83,7 +83,10 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
       />
 
       {/* Modal */}
-      <div className='relative z-10 w-full max-w-2xl max-h-[80vh] bg-card rounded-lg shadow-lg flex flex-col m-4'>
+      <div
+        data-testid='canvas-attachment-modal'
+        className='relative z-10 w-full max-w-2xl max-h-[80vh] bg-card rounded-lg shadow-lg flex flex-col m-4'
+      >
         {/* Header */}
         <div className='flex items-center justify-between px-6 py-4 border-b border-border'>
           <h2 className='text-lg font-semibold text-foreground'>Attach a canvas</h2>

@@ -37,7 +37,11 @@ export function MentionNodeView({ node, editor }: NodeViewProps): React.JSX.Elem
 
   return (
     <NodeViewWrapper as='span' className='mention-node-wrapper inline'>
-      <span contentEditable={false} data-mention=''>
+      <span
+        contentEditable={false}
+        data-mention=''
+        data-mention-type={isChannel ? 'channel' : isGroup ? 'group' : 'user'}
+      >
         {isSpecial ? (
           <span className='chat-input-special-mention'>@{mentionType}</span>
         ) : isChannel ? (

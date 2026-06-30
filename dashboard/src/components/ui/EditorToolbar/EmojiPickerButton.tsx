@@ -205,7 +205,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
         avoidCollisions
         showCloseButton={false}
       >
-        <div className='w-[350px]'>
+        <div className='w-[350px]' data-testid='emoji-picker'>
           <EmojiPicker
             emojiStyle={EmojiStyle.NATIVE}
             theme={emojiPickerTheme}
