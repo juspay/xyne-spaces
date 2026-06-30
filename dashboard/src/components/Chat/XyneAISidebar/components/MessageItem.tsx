@@ -91,6 +91,9 @@ interface ClawCitationChipProps {
   chunkIndex: number;
   toolNumber: number;
   toolInvocations: ToolInvocationType[] | undefined;
+  /** Generic auto-citations carry no link — clicking opens the originating tool
+   *  call in the debug panel instead. Absent for normal (linkable) citations. */
+  onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
 }
 
 /**
@@ -134,6 +137,7 @@ const ClawCitationChip = ({
   chunkIndex,
   toolNumber,
   toolInvocations,
+  onOpenToolDebug,
 }: ClawCitationChipProps): ReactElement => {
   // Prefer the conversation-wide pool (cross-turn lookup); fall back to the
   // per-message prop so the chip still resolves if the provider is absent.
@@ -185,6 +189,18 @@ const ClawCitationChip = ({
     >
       {chipInner}
     </CitationLink>
+  ) : onOpenToolDebug ? (
+    // No link (generic auto-citation) — open the source tool call in the debug panel.
+    <button
+      type='button'
+      className={chipClass}
+      aria-label={`${tooltip} — open in debugger`}
+      onClick={() => onOpenToolDebug(toolCallId)}
+      data-track-category='XyneAI'
+      data-track-name='DEBUG_CITATION_OPEN'
+    >
+      {chipInner}
+    </button>
   ) : (
     <span className={chipClass} aria-label={tooltip}>
       {chipInner}
@@ -570,6 +586,9 @@ interface MessageContentProps {
   parsedContent: StreamingParsedContent | undefined;
   /** toolCallId → display number map, used to render inline `[clf-…#N]` chips. */
   clawCitationToolNumbers: ReadonlyMap<string, number>;
+  /** Open the debug panel focused on a tool call — for generic auto-citation
+   *  chips that have no link target. */
+  onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
   onCitationClick: (
     messageNumber: number,
     conversationIdMapping: Record<string, string>,
@@ -632,6 +651,9 @@ interface MessageItemProps {
   branchInfo?: { index: number; total: number } | undefined;
   onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
   onDebug?: (() => void) | undefined;
+  /** Open the debug panel focused on a specific tool call — used by generic
+   *  auto-citation chips (which have no link target). */
+  onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
 }
 
 // Image preview component that fetches with auth and creates blob URL
@@ -1014,6 +1036,7 @@ export const MessageItem = React.memo(
     onSummarizerCitationClick,
     feedbackValue,
     onRegenerate,
+    onOpenToolDebug,
     onEditSubmit,
     onEditMobile,
     isLatestBotMessage,
@@ -1322,6 +1345,7 @@ export const MessageItem = React.memo(
                 clawCitationToolNumbers={clawCitationToolNumbers}
                 onCitationClick={onCitationClick}
                 onSummarizerCitationClick={onSummarizerCitationClick}
+                onOpenToolDebug={onOpenToolDebug}
               />
             )}
           </div>
@@ -1501,6 +1525,7 @@ const MessageContent = ({
   clawCitationToolNumbers,
   onCitationClick,
   onSummarizerCitationClick,
+  onOpenToolDebug,
 }: MessageContentProps): ReactElement => {
   const resolveMention = useMentionResolver(message.userTags);
   // Memoize markdown components to prevent re-renders on parent updates
@@ -1663,6 +1688,7 @@ const MessageContent = ({
                       <ClawCitationGroup
                         refs={groupRefs}
                         toolInvocations={message.toolInvocations}
+                        onOpenToolDebug={onOpenToolDebug}
                       />
                     );
                   }
@@ -1686,6 +1712,7 @@ const MessageContent = ({
                           chunkIndex={chunkIndex}
                           toolNumber={toolNumber}
                           toolInvocations={message.toolInvocations}
+                          onOpenToolDebug={onOpenToolDebug}
                         />
                       );
                     }

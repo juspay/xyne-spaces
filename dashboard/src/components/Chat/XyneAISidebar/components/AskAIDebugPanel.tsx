@@ -1,5 +1,5 @@
-import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Activity,
   AlertCircle,
@@ -10,10 +10,11 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   CirclePlay,
-  CircleSlash,
   Copy,
   FileText,
+  Lightbulb,
   ListTree,
   Maximize2,
   MessagesSquare,
@@ -27,28 +28,95 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { fetchV2DebugArtifacts } from '../../../../services/XyneAI/XyneAISessionsV2Service';
 import type { DebugArtifactBundle, DebugEventRecord } from '../utils/XyneAITypes';
 
-interface AskAIDebugPanelProps {
+/** Inlined from claw's `toolFormat`: deep-parse JSON-in-strings and unwrap MCP
+ *  `[{type:"text",text}]` content blocks so the tree viewer expands nested
+ *  payloads instead of showing one escaped blob. Depth-bounded. */
+function tryParseJson(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed || !['{', '['].includes(trimmed[0] ?? '')) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+function unwrapContentBlocks(value: unknown): string | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const texts: string[] = [];
+  for (const block of value) {
+    if (!isRecord(block) || block['type'] !== 'text' || typeof block['text'] !== 'string')
+      return null;
+    texts.push(block['text']);
+  }
+  return texts.join('\n');
+}
+function deepParseJson(value: unknown, depth = 0): unknown {
+  if (depth > 6) return value;
+  const parsed = tryParseJson(value);
+  const unwrapped = unwrapContentBlocks(parsed);
+  if (unwrapped !== null) return deepParseJson(unwrapped, depth + 1);
+  if (Array.isArray(parsed)) return parsed.map(item => deepParseJson(item, depth + 1));
+  if (isRecord(parsed)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(parsed)) out[key] = deepParseJson(val, depth + 1);
+    return out;
+  }
+  return parsed;
+}
+
+/** True when the dashboard is on the `midnight` (dark) theme. The dashboard
+ *  toggles themes via a `data-theme` attribute on <html> and never sets a
+ *  `.dark` class, so Tailwind `dark:` variants are inert app-wide. We scope a
+ *  `dark` class onto this panel's root (below) only under midnight, so claw's
+ *  `dark:` accent styling lights up inside the debugger without changing the
+ *  app-wide theme strategy. */
+function useIsMidnightTheme(): boolean {
+  const [isDark, setIsDark] = useState(
+    () =>
+      typeof document !== 'undefined' &&
+      document.documentElement.getAttribute('data-theme') === 'midnight',
+  );
+  useEffect(() => {
+    const el = document.documentElement;
+    const update = () => setIsDark(el.getAttribute('data-theme') === 'midnight');
+    update();
+    const observer = new MutationObserver(update);
+    observer.observe(el, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+  return isDark;
+}
+
+type AskAIDebugPanelProps = {
   open: boolean;
+  agentSlug: string;
+  conversationId: string | null | undefined;
+  onClose: () => void;
   inline?: boolean;
   width?: number;
   minWidth?: number;
-  conversationId: string;
-  agentSlug: string;
-  liveEvents: DebugEventRecord[];
-  running: boolean;
-  artifactsReadyVersion: number;
-  selectedTurnIndex: number | null;
-  selectedTurnLive: boolean;
-  /** Branching-safe turn selection. When set, the panel renders ONLY the run
+  liveEvents?: DebugEventRecord[];
+  running?: boolean;
+  artifactsReadyVersion?: number;
+  selectedTurnIndex?: number | null;
+  selectedTurnLive?: boolean;
+  /** Branching-safe turn selection. When set, the drawer renders ONLY the run
    *  whose data.sessionId matches — chronological turn indexes don't survive
-   *  branching (the Nth visible assistant may not be the Nth run by time once
-   *  siblings exist). Caller derives this from Message.debugSessionId. */
+   *  branching (the Nth visible assistant may not be the Nth run by time
+   *  once siblings exist). Caller derives this from runByAssistantMsgId. */
   selectedSessionId?: string | null;
-  onClose: () => void;
-}
+  /** When set, after the panel opens it expands + scrolls to the tool-call event
+   *  whose toolCallId matches — used by generic auto-citation chips in the chat
+   *  ("show the tool call in debug panel"). Matched via the `data-tool-call-id`
+   *  attribute each event row carries. */
+  focusToolCallId?: string | null;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -60,66 +128,25 @@ function asString(value: unknown): string {
   return '';
 }
 
-function get<T>(obj: Record<string, unknown>, key: string): T | undefined {
-  const value = obj[key];
-  return typeof value !== 'undefined' ? (value as T) : undefined;
+/** Stringify an event `seq` id (number or string) for React keys — avoids
+ *  no-base-to-string / restrict-template tripping on the `unknown` event shape. */
+function seqKey(value: unknown): string {
+  return typeof value === 'number' || typeof value === 'string' ? String(value) : '';
 }
 
-function getString(obj: Record<string, unknown>, key: string): string {
-  return asString(obj[key]);
-}
-
-function getNumber(obj: Record<string, unknown>, key: string): number | undefined {
-  const value = obj[key];
-  return typeof value === 'number' ? value : undefined;
-}
-
-function getBool(obj: Record<string, unknown>, key: string): boolean | undefined {
-  const value = obj[key];
-  return typeof value === 'boolean' ? value : undefined;
-}
-
-function getArray<T>(obj: Record<string, unknown>, key: string): T[] | undefined {
-  const value = obj[key];
-  return Array.isArray(value) ? (value as T[]) : undefined;
-}
-
-function formatTime(value: unknown): string {
-  if (typeof value !== 'string') return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function prettyJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function parseJsonLike(value: unknown): unknown {
-  if (typeof value !== 'string') return value;
-  const trimmed = value.trim();
-  if (!trimmed || !['{', '['].includes(trimmed[0] ?? '')) return value;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return value;
-  }
-}
-
-function truncate(value: string, limit = 220): string {
-  return value.length <= limit ? value : `${value.slice(0, limit)}…`;
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 }
 
 function messageText(message: Record<string, unknown>): string {
+  // compactionSummary / branchSummary messages carry their text in `summary`,
+  // not `content` — without this they render as "(empty)".
+  if (typeof message['summary'] === 'string') return message['summary'];
   if (typeof message['content'] === 'string') return message['content'];
   if (!Array.isArray(message['content'])) return '';
-  const content = message['content'] as unknown[];
-  const textBlocks = content
+  const textBlocks = message['content']
     .map(block => {
       if (!isRecord(block)) return '';
       if (typeof block['text'] === 'string') return block['text'];
@@ -128,7 +155,7 @@ function messageText(message: Record<string, unknown>): string {
     .filter(Boolean)
     .join('\n');
   if (textBlocks) return textBlocks;
-  return content
+  return message['content']
     .map(block =>
       isRecord(block) && typeof block['thinking'] === 'string' ? block['thinking'] : '',
     )
@@ -148,15 +175,28 @@ function messageTime(message: Record<string, unknown>): string {
 function displayMessageText(message: Record<string, unknown>): string {
   const text = messageText(message);
   if (asString(message['role']) !== 'user') return text;
-  const match = /## (?:Query|User Reply)\s*\n([\s\S]*)$/m.exec(text);
+  const match = /## (?:Query|User Reply)\s*\n([\s\S]*)$/.exec(text);
   return match?.[1]?.trim() || text;
 }
 
-function messageLabel(role: string): string {
-  if (role === 'user') return 'User';
-  if (role === 'assistant') return 'Assistant';
-  if (role === 'system') return 'System';
-  return role || 'Message';
+function prettyJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function parseJsonLike(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  if (!['{', '['].includes(trimmed[0] ?? '')) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
 }
 
 function jsonTypeLabel(value: unknown): string {
@@ -170,18 +210,32 @@ function jsonTypeLabel(value: unknown): string {
 }
 
 function JsonPrimitive({ value }: { value: unknown }) {
-  if (value === null) return <span className='text-neutral-500'>null</span>;
-  if (value === undefined) return <span className='text-neutral-500'>undefined</span>;
+  if (value === null) return <span className='text-xyne-fg-muted'>null</span>;
+  if (value === undefined) return <span className='text-xyne-fg-muted'>undefined</span>;
   if (typeof value === 'string') {
+    // Multi-line or long strings (markdown, code, search results) render as raw
+    // text with real newlines on their own line — `JSON.stringify` would escape
+    // them to a single unreadable `\n`-laden quoted line.
+    if (value.includes('\n') || value.length > 120) {
+      return (
+        <span className='mt-0.5 block break-words whitespace-pre-wrap text-emerald-700 dark:text-emerald-300'>
+          {value}
+        </span>
+      );
+    }
     return (
-      <span className='whitespace-pre-wrap break-words text-emerald-300'>
+      <span className='break-words whitespace-pre-wrap text-emerald-700 dark:text-emerald-300'>
         {JSON.stringify(value)}
       </span>
     );
   }
-  if (typeof value === 'number') return <span className='text-amber-300'>{String(value)}</span>;
-  if (typeof value === 'boolean') return <span className='text-violet-300'>{String(value)}</span>;
-  return <span className='break-words text-zinc-300'>{prettyJson(value)}</span>;
+  if (typeof value === 'number')
+    return <span className='text-amber-700 dark:text-amber-300'>{String(value)}</span>;
+  if (typeof value === 'boolean')
+    return <span className='text-violet-700 dark:text-violet-300'>{String(value)}</span>;
+  // Leftover leaf kinds (bigint / symbol / function). Cast away the `unknown`
+  // object case so the linter is happy; String() renders them fine at runtime.
+  return <span className='break-words text-xyne-fg-secondary'>{String(value as bigint)}</span>;
 }
 
 function JsonNode({
@@ -202,7 +256,7 @@ function JsonNode({
     return (
       <div className='flex min-w-0 gap-1.5 py-px font-mono text-[11px] leading-5'>
         {label !== undefined && (
-          <span className='shrink-0 text-sky-300'>{JSON.stringify(label)}:</span>
+          <span className='shrink-0 text-sky-700 dark:text-sky-300'>{JSON.stringify(label)}:</span>
         )}
         <JsonPrimitive value={value} />
       </div>
@@ -219,24 +273,24 @@ function JsonNode({
     <div className='font-mono text-[11px] leading-5'>
       <button
         type='button'
-        onClick={() => setExpanded(current => !current)}
-        className='flex w-full min-w-0 items-center gap-1 py-px text-left hover:bg-white/5'
         data-track-category='XyneAI'
-        data-track-name='DEBUG_JSON_TOGGLE'
+        data-track-name='DEBUG_JSON_NODE_TOGGLE'
+        onClick={() => setExpanded(current => !current)}
+        className='flex w-full min-w-0 items-center gap-1 py-px text-left hover:bg-black/[0.04] dark:hover:bg-white/[0.04]'
       >
         <ChevronDown
           size={11}
-          className={`shrink-0 text-neutral-500 transition-transform ${expanded ? '' : '-rotate-90'}`}
+          className={`shrink-0 text-xyne-fg-muted transition-transform ${expanded ? '' : '-rotate-90'}`}
         />
         {label !== undefined && (
-          <span className='shrink-0 text-sky-300'>{JSON.stringify(label)}:</span>
+          <span className='shrink-0 text-sky-700 dark:text-sky-300'>{JSON.stringify(label)}:</span>
         )}
-        <span className='text-neutral-400'>{openBracket}</span>
-        {!expanded && <span className='text-neutral-500'>{jsonTypeLabel(value)}</span>}
-        {!expanded && <span className='text-neutral-400'>{closeBracket}</span>}
+        <span className='text-xyne-fg-muted'>{openBracket}</span>
+        {!expanded && <span className='text-xyne-fg-muted'>{jsonTypeLabel(value)}</span>}
+        {!expanded && <span className='text-xyne-fg-muted'>{closeBracket}</span>}
       </button>
       {expanded && (
-        <div className='ml-[5px] border-l border-neutral-700 pl-3'>
+        <div className='ml-[5px] border-l border-xyne-border pl-3'>
           {entries.map(([key, child]) => (
             <JsonNode
               key={key}
@@ -246,10 +300,44 @@ function JsonNode({
               defaultExpandedDepth={defaultExpandedDepth}
             />
           ))}
-          <div className='text-neutral-400'>{closeBracket}</div>
+          <div className='text-xyne-fg-muted'>{closeBracket}</div>
         </div>
       )}
     </div>
+  );
+}
+
+function CopyJsonButton({ value }: { value: unknown }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      // Strings copy verbatim (markdown/text stays usable); structured values
+      // copy as pretty JSON.
+      await navigator.clipboard.writeText(typeof value === 'string' ? value : prettyJson(value));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <button
+      type='button'
+      data-track-category='XyneAI'
+      data-track-name='DEBUG_JSON_COPY'
+      onClick={() => void copy()}
+      className='flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
+      title='Copy'
+    >
+      {copied ? (
+        <Check size={12} className='text-emerald-600 dark:text-emerald-400' />
+      ) : (
+        <Copy size={12} />
+      )}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
   );
 }
 
@@ -271,31 +359,36 @@ function JsonViewerModal({
   }, [onClose]);
 
   const modal = (
-    <div className='fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm'>
-      <div className='flex h-[min(900px,calc(100vh-24px))] w-[min(1200px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-zinc-700 bg-[#101418] shadow-2xl'>
-        <div className='flex h-11 shrink-0 items-center gap-2 border-b border-zinc-700 px-3'>
-          <Braces size={14} className='text-sky-400' />
-          <span className='min-w-0 flex-1 truncate text-xs font-semibold text-zinc-100'>
+    <div
+      role='presentation'
+      className='fixed inset-0 z-[200] flex items-center justify-center bg-black/65 p-3 backdrop-blur-sm'
+      onMouseDown={event => {
+        // Close only on a true backdrop click — clicks inside the dialog don't
+        // bubble a close (avoids a stop-propagation handler on the dialog, which
+        // a non-interactive role isn't allowed to carry).
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role='dialog'
+        aria-modal='true'
+        aria-label={title}
+        className='flex h-[min(900px,calc(100vh-24px))] w-[min(1200px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-xyne-border bg-xyne-surface shadow-2xl'
+      >
+        <div className='flex h-11 shrink-0 items-center gap-2 border-b border-xyne-border px-3'>
+          <Braces size={14} className='text-sky-600 dark:text-sky-400' />
+          <span className='min-w-0 flex-1 truncate text-xs font-semibold text-xyne-fg-primary'>
             {title}
           </span>
-          <span className='text-[10px] text-zinc-500'>{jsonTypeLabel(value)}</span>
+          <span className='text-[10px] text-xyne-fg-muted'>{jsonTypeLabel(value)}</span>
+          <CopyJsonButton value={value} />
           <button
             type='button'
-            onClick={() => {
-              void navigator.clipboard.writeText(prettyJson(value));
-            }}
-            className='rounded px-2 py-1 text-xs text-zinc-400 hover:bg-white/10 hover:text-zinc-100'
-            data-track-category='XyneAI'
-            data-track-name='DEBUG_JSON_MODAL_COPY'
-          >
-            Copy
-          </button>
-          <button
-            type='button'
-            onClick={onClose}
-            className='rounded p-1 text-zinc-400 hover:bg-white/10 hover:text-white'
             data-track-category='XyneAI'
             data-track-name='DEBUG_JSON_MODAL_CLOSE'
+            onClick={onClose}
+            className='rounded p-1 text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
+            title='Close'
           >
             <X size={15} />
           </button>
@@ -306,35 +399,8 @@ function JsonViewerModal({
       </div>
     </div>
   );
+
   return createPortal(modal, document.body);
-}
-
-function CopyJsonButton({ value }: { value: unknown }) {
-  const [copied, setCopied] = useState(false);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(prettyJson(value));
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  return (
-    <button
-      type='button'
-      onClick={() => void copy()}
-      className='flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-zinc-400 hover:bg-white/10 hover:text-zinc-100'
-      title='Copy JSON'
-      data-track-category='XyneAI'
-      data-track-name='DEBUG_JSON_COPY'
-    >
-      {copied ? <Check size={12} className='text-emerald-400' /> : <Copy size={12} />}
-      {copied ? 'Copied' : 'Copy'}
-    </button>
-  );
 }
 
 function JsonViewer({
@@ -350,21 +416,21 @@ function JsonViewer({
   const parsedValue = useMemo(() => parseJsonLike(value), [value]);
   return (
     <>
-      <div className='overflow-hidden rounded-md border border-zinc-700/80 bg-[#101418] shadow-inner'>
-        <div className='flex h-8 items-center gap-1.5 border-b border-zinc-700/80 px-2'>
-          <Braces size={12} className='text-sky-400' />
-          <span className='min-w-0 flex-1 truncate text-[10px] font-semibold text-zinc-300'>
+      <div className='overflow-hidden rounded-md border border-xyne-border bg-xyne-surface-sunken shadow-inner'>
+        <div className='flex h-8 items-center gap-1.5 border-b border-xyne-border px-2'>
+          <Braces size={12} className='text-sky-600 dark:text-sky-400' />
+          <span className='min-w-0 flex-1 truncate text-[10px] font-semibold text-xyne-fg-secondary'>
             {title}
           </span>
-          <span className='text-[9px] text-zinc-500'>{jsonTypeLabel(parsedValue)}</span>
+          <span className='text-[9px] text-xyne-fg-muted'>{jsonTypeLabel(parsedValue)}</span>
           <CopyJsonButton value={parsedValue} />
           <button
             type='button'
-            onClick={() => setExpanded(true)}
-            className='rounded p-1 text-zinc-400 hover:bg-white/10 hover:text-white'
-            title='Open expanded JSON viewer'
             data-track-category='XyneAI'
             data-track-name='DEBUG_JSON_EXPAND'
+            onClick={() => setExpanded(true)}
+            className='rounded p-1 text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
+            title='Open expanded JSON viewer'
           >
             <Maximize2 size={12} />
           </button>
@@ -380,6 +446,106 @@ function JsonViewer({
   );
 }
 
+/** Markdown body shared by the result view and any other rendered-text surface. */
+function MarkdownBody({ text }: { text: string }) {
+  return (
+    <div className='prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-table:my-2 prose-hr:my-2 prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-th:border prose-td:border prose-th:border-xyne-border prose-td:border-xyne-border'>
+      <Markdown remarkPlugins={[remarkGfm]}>{text || '_(empty)_'}</Markdown>
+    </div>
+  );
+}
+
+type ResultView = 'tree' | 'raw' | 'markdown';
+
+/**
+ * Renders a tool-call result readably with a view switch. Results arrive as a
+ * string: compact JSON, an MCP content-block array, or plain text. We deep-parse
+ * it — structured payloads default to an expandable tree (nested JSON-in-string
+ * unwrapped); string payloads default to raw text with a Markdown toggle so
+ * agent answers, summaries, and docs can be read rendered in the same panel.
+ */
+function ToolResultView({ value }: { value: unknown }) {
+  const parsed = useMemo(() => deepParseJson(value), [value]);
+  const isString = typeof parsed === 'string';
+  const rawText = useMemo(
+    () => (typeof parsed === 'string' ? parsed : prettyJson(parsed)),
+    [parsed],
+  );
+
+  // Markdown only makes sense for text results; structured JSON gets Tree/Raw.
+  const views: Array<{ id: ResultView; label: string }> = isString
+    ? [
+        { id: 'raw', label: 'Text' },
+        { id: 'markdown', label: 'Markdown' },
+      ]
+    : [
+        { id: 'tree', label: 'Tree' },
+        { id: 'raw', label: 'Raw' },
+      ];
+  const [view, setView] = useState<ResultView>(isString ? 'raw' : 'tree');
+  const [expanded, setExpanded] = useState(false);
+  const activeView = views.some(v => v.id === view) ? view : views[0]!.id;
+
+  return (
+    <>
+      <div className='overflow-hidden rounded-md border border-xyne-border bg-xyne-surface-sunken shadow-inner'>
+        <div className='flex h-8 items-center gap-1.5 border-b border-xyne-border px-2'>
+          <Braces size={12} className='text-sky-600 dark:text-sky-400' />
+          <span className='min-w-0 flex-1 truncate text-[10px] font-semibold text-xyne-fg-secondary'>
+            Result
+          </span>
+          <div className='flex items-center gap-0.5 rounded border border-xyne-border bg-xyne-surface p-0.5'>
+            {views.map(v => (
+              <button
+                key={v.id}
+                type='button'
+                data-track-category='XyneAI'
+                data-track-name='DEBUG_TOOL_RESULT_VIEW'
+                onClick={() => setView(v.id)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${activeView === v.id ? 'bg-xyne-brand text-xyne-fg-inverse' : 'text-xyne-fg-muted hover:text-xyne-fg-primary'}`}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <CopyJsonButton value={isString ? rawText : parsed} />
+          {activeView !== 'markdown' && (
+            <button
+              type='button'
+              data-track-category='XyneAI'
+              data-track-name='DEBUG_TOOL_RESULT_EXPAND'
+              onClick={() => setExpanded(true)}
+              className='rounded p-1 text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
+              title='Open expanded viewer'
+            >
+              <Maximize2 size={12} />
+            </button>
+          )}
+        </div>
+        <div className='max-h-72 overflow-auto p-2'>
+          {activeView === 'tree' && (
+            <JsonNode value={parsed} depth={0} defaultExpandedDepth={999} />
+          )}
+          {activeView === 'raw' && (
+            <pre className='whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-xyne-fg-secondary'>
+              {rawText || '(empty)'}
+            </pre>
+          )}
+          {activeView === 'markdown' && <MarkdownBody text={rawText} />}
+        </div>
+      </div>
+      {expanded && (
+        <JsonViewerModal value={parsed} title='Result' onClose={() => setExpanded(false)} />
+      )}
+    </>
+  );
+}
+
+function truncate(text: string, limit = 320): string {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}…`;
+}
+
 type StreamRateSample = {
   offsetMs: number;
   streamsPerSec: number;
@@ -390,41 +556,36 @@ function streamRateSamples(value: unknown): StreamRateSample[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap(sample => {
     if (!isRecord(sample)) return [];
-    const offsetMs = getNumber(sample, 'offsetMs');
-    const streamsPerSec = getNumber(sample, 'streamsPerSec');
-    const streamsCollected = getNumber(sample, 'streamsCollected');
-    if (offsetMs === undefined || streamsPerSec === undefined || streamsCollected === undefined)
-      return [];
-    return [{ offsetMs, streamsPerSec, streamsCollected }];
+    const offsetMs = typeof sample['offsetMs'] === 'number' ? sample['offsetMs'] : null;
+    const streamsPerSec =
+      typeof sample['streamsPerSec'] === 'number' ? sample['streamsPerSec'] : null;
+    const streamsCollected =
+      typeof sample['streamsCollected'] === 'number' ? sample['streamsCollected'] : null;
+    return offsetMs !== null && streamsPerSec !== null && streamsCollected !== null
+      ? [{ offsetMs, streamsPerSec, streamsCollected }]
+      : [];
   });
 }
 
-function streamTone(rate: number): {
-  dot: string;
-  text: string;
-  bar: string;
-  label: string;
-} {
-  if (rate >= 20) {
+function streamRateTone(rate: number): { dot: string; text: string; bar: string; label: string } {
+  if (rate >= 20)
     return {
       dot: 'bg-emerald-400',
       text: 'text-emerald-600 dark:text-emerald-300',
       bar: 'bg-emerald-400',
       label: 'Fast',
     };
-  }
-  if (rate >= 8) {
+  if (rate >= 8)
     return {
       dot: 'bg-amber-400',
       text: 'text-amber-600 dark:text-amber-300',
       bar: 'bg-amber-400',
       label: 'Moderate',
     };
-  }
   return {
-    dot: 'bg-rose-400',
-    text: 'text-rose-600 dark:text-rose-300',
-    bar: 'bg-rose-400',
+    dot: 'bg-red-400',
+    text: 'text-red-600 dark:text-red-300',
+    bar: 'bg-red-400',
     label: 'Slow',
   };
 }
@@ -459,7 +620,7 @@ function combineStreamRateWindows(windows: StreamRateSample[][]): StreamRateSamp
       });
     }
     const last = window[window.length - 1]!;
-    elapsedOffset += last.offsetMs + 1000;
+    elapsedOffset += last.offsetMs + 1_000;
     collectedOffset += last.streamsCollected;
   }
   return combined;
@@ -471,15 +632,13 @@ function StreamRateGraph({ samples }: { samples: StreamRateSample[] }) {
   const peak = Math.max(...samples.map(sample => sample.streamsPerSec), 1);
   const average = samples.reduce((sum, sample) => sum + sample.streamsPerSec, 0) / samples.length;
   const total = samples.at(-1)?.streamsCollected ?? 0;
-  const tone = streamTone(average);
-
   return (
     <div className='overflow-hidden rounded-md border border-xyne-border-subtle bg-xyne-surface/70'>
       <div className='flex items-center gap-3 border-b border-xyne-border-subtle px-2 py-1 text-[9px] text-xyne-fg-muted'>
         <span className='font-semibold uppercase tracking-wide text-xyne-fg-tertiary'>
           Stream rate
         </span>
-        <span className={tone.text}>
+        <span>
           <strong className='text-xyne-fg-secondary'>Avg</strong> {average.toFixed(1)}/s
         </span>
         <span>
@@ -493,16 +652,19 @@ function StreamRateGraph({ samples }: { samples: StreamRateSample[] }) {
         className='grid h-16 items-end gap-px px-2 pt-2'
         style={{ gridTemplateColumns: `repeat(${displaySamples.length}, minmax(0, 1fr))` }}
       >
-        {displaySamples.map((sample, index) => (
-          <div
-            key={`${sample.offsetMs}-${index}`}
-            className={`w-full rounded-t-sm ${sample.streamsPerSec >= 20 ? 'bg-emerald-400' : sample.streamsPerSec >= 8 ? 'bg-amber-400' : 'bg-rose-400'}`}
-            style={{ height: `${Math.max(5, (sample.streamsPerSec / peak) * 100)}%` }}
-            title={`${(sample.offsetMs / 1000).toFixed(1)}s · ${sample.streamsPerSec.toFixed(1)} streams/s`}
-          />
-        ))}
+        {displaySamples.map((sample, index) => {
+          const tone = streamRateTone(sample.streamsPerSec);
+          return (
+            <div
+              key={`${sample.offsetMs}-${index}`}
+              className={`w-full rounded-t-sm ${tone.bar} opacity-80 hover:opacity-100`}
+              style={{ height: `${Math.max(4, (sample.streamsPerSec / peak) * 100)}%` }}
+              title={`${(sample.offsetMs / 1000).toFixed(1)}s · ${sample.streamsPerSec.toFixed(1)} streams/s · ${sample.streamsCollected} collected`}
+            />
+          );
+        })}
       </div>
-      <div className='flex justify-between px-2 pb-1 text-[9px] text-neutral-400'>
+      <div className='flex justify-between px-2 pb-1 text-[8px] text-xyne-fg-muted'>
         <span>0s</span>
         <span>{((samples.at(-1)?.offsetMs ?? 0) / 1000).toFixed(1)}s</span>
       </div>
@@ -519,120 +681,43 @@ function StreamRateStatus({
   collected: number;
   live: boolean;
 }) {
-  const tone = streamTone(rate);
+  const tone = streamRateTone(rate);
   return (
-    <div className='flex items-center gap-2 border-b border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[10px]'>
-      <span className={`h-2 w-2 animate-pulse rounded-full ${tone.dot}`} />
-      <span className={`font-semibold ${tone.text}`}>{live ? 'Streaming' : 'Stream rate'}</span>
-      <span className='font-mono text-xs text-xyne-fg-secondary'>{rate.toFixed(1)} streams/s</span>
-      <span className='ml-auto text-xyne-fg-muted'>{collected} collected</span>
+    <div className='flex shrink-0 items-center gap-2 border-b border-xyne-border-subtle bg-xyne-surface-subtle/60 px-3 py-1.5 text-[10px]'>
+      <span className={`h-2 w-2 rounded-full ${tone.dot} ${live ? 'animate-pulse' : ''}`} />
+      <span className='font-semibold text-xyne-fg-secondary'>Streaming</span>
+      <span className={`font-mono text-[12px] font-semibold ${tone.text}`}>
+        {rate.toFixed(1)} streams/s
+      </span>
+      <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${tone.text}`}>
+        {tone.label}
+      </span>
+      <span className='ml-auto text-xyne-fg-muted'>
+        {collected} streams collected{live ? ' · live' : ' · persisted'}
+      </span>
     </div>
   );
 }
 
-function eventTitle(kind: string, data: Record<string, unknown>): string {
-  if (kind === 'tool_execution_start' || kind === 'tool_execution_end') {
-    const name = getString(data, 'toolName');
-    return name ? `Tool · ${name}` : 'Tool call';
-  }
-  if (kind === 'session_prompt') return 'LLM request';
-  if (kind === 'assistant_turn_end') return 'Assistant response';
-  if (kind === 'session_start') return 'Session started';
-  if (kind === 'session_end') return 'Session completed';
-  if (kind === 'session_cancelled') return 'Session cancelled';
-  if (kind === 'session_error') return 'Error';
-  if (kind === 'auto_retry_start') return 'Retry attempt';
-  if (kind === 'compaction_start') return 'Context compaction started';
-  if (kind === 'compaction_end') return 'Context compaction completed';
-  if (kind === 'citation_reflection') return 'Citation check';
-  return kind.replaceAll('_', ' ');
+function messageLabel(role: string): string {
+  if (role === 'user') return 'User';
+  if (role === 'assistant') return 'Assistant';
+  if (role === 'system') return 'System';
+  return role || 'Message';
 }
 
-function eventIcon(kind: string): { Icon: typeof Bug; color: string } {
-  if (kind === 'session_prompt')
-    return { Icon: BrainCircuit, color: 'text-indigo-500 dark:text-indigo-400' };
-  if (kind === 'tool_execution_start' || kind === 'tool_execution_end')
-    return { Icon: Wrench, color: 'text-amber-500 dark:text-amber-400' };
-  if (kind === 'assistant_turn_end')
-    return { Icon: Bot, color: 'text-emerald-500 dark:text-emerald-400' };
-  if (kind === 'session_start')
-    return { Icon: CirclePlay, color: 'text-sky-500 dark:text-sky-400' };
-  if (kind === 'session_end')
-    return { Icon: CheckCircle2, color: 'text-cyan-500 dark:text-cyan-400' };
-  if (kind === 'session_cancelled') return { Icon: CircleSlash, color: 'text-muted-foreground' };
-  if (kind === 'session_error')
-    return { Icon: AlertCircle, color: 'text-red-500 dark:text-red-400' };
-  if (kind === 'auto_retry_start')
-    return { Icon: RotateCcw, color: 'text-orange-500 dark:text-orange-400' };
-  if (kind === 'compaction_start' || kind === 'compaction_end')
-    return { Icon: Zap, color: 'text-violet-500 dark:text-violet-400' };
-  if (kind === 'citation_reflection')
-    return { Icon: Quote, color: 'text-teal-500 dark:text-teal-400' };
-  return { Icon: CirclePlay, color: 'text-xyne-fg-tertiary' };
-}
+type TimelineEvent = Record<string, unknown> & { startedAt?: string };
 
-function eventSummary(kind: string, data: Record<string, unknown>): string {
-  switch (kind) {
-    case 'session_start':
-      return getString(data, 'task');
-    case 'session_prompt': {
-      const count = getNumber(data, 'messageCount') ?? 0;
-      return count ? `Sending ${count} message${count === 1 ? '' : 's'} to the model` : '';
-    }
-    case 'tool_execution_start':
-    case 'tool_execution_end':
-      return '';
-    case 'assistant_turn_end':
-      return getString(data, 'assistantText')
-        ? truncate(getString(data, 'assistantText'), 240)
-        : '';
-    case 'compaction_start':
-      return 'Conversation history is being condensed';
-    case 'compaction_end':
-      return 'Conversation history condensed';
-    case 'auto_retry_start':
-      return 'Retrying after a transient error';
-    case 'session_error':
-      return getString(data, 'error');
-    case 'session_cancelled': {
-      const reason = getString(data, 'reason');
-      const len = getNumber(data, 'partialTextLength') ?? 0;
-      const tools = getNumber(data, 'toolCount') ?? 0;
-      const parts: string[] = [];
-      if (reason) parts.push(reason);
-      if (len) parts.push(`${len} char${len === 1 ? '' : 's'} streamed`);
-      if (tools) parts.push(`${tools} tool${tools === 1 ? '' : 's'}`);
-      return parts.join(' · ');
-    }
-    case 'session_end':
-      return '';
-    case 'citation_reflection': {
-      if (getString(data, 'phase') === 'nudge') {
-        const round = getNumber(data, 'round') ?? 0;
-        const maxRounds = getNumber(data, 'maxRounds') ?? 0;
-        return `Answer used sources but isn't cited — nudging the model to add citations (round ${round}/${maxRounds})`;
-      }
-      const outcome = getString(data, 'outcome');
-      const labels: Record<string, string> = {
-        already_cited: 'Answer already cited — no action needed',
-        no_citeable_sources: 'No citeable sources retrieved — nothing to enforce',
-        fixed_after_nudge: 'Citations added after reflection',
-        still_uncited: 'Still uncited after reflection',
-        aborted: 'Reflection aborted (run cancelled)',
-      };
-      return labels[outcome] ?? outcome.replaceAll('_', ' ');
-    }
-    default:
-      return '';
-  }
-}
-
-function compactTimeline(events: Record<string, unknown>[]): Record<string, unknown>[] {
-  const compacted: Record<string, unknown>[] = [];
+function compactTimeline(events: unknown[]): TimelineEvent[] {
+  const compacted: TimelineEvent[] = [];
   const pendingTools = new Map<string, number>();
-  for (const event of events) {
-    const kind = getString(event, 'kind');
-    const toolCallId = getString(event, 'toolCallId');
+
+  for (const value of events) {
+    if (!isRecord(value) || ['message_update', 'stream_rate'].includes(asString(value['kind'])))
+      continue;
+    const event = value as TimelineEvent;
+    const kind = asString(event['kind']);
+    const toolCallId = asString(event['toolCallId']);
     if (kind === 'tool_execution_start' && toolCallId) {
       pendingTools.set(toolCallId, compacted.length);
       compacted.push(event);
@@ -641,92 +726,422 @@ function compactTimeline(events: Record<string, unknown>[]): Record<string, unkn
     if (kind === 'tool_execution_end' && toolCallId && pendingTools.has(toolCallId)) {
       const index = pendingTools.get(toolCallId)!;
       const start = compacted[index]!;
-      const startData = get<Record<string, unknown>>(start, 'data');
-      const eventData = get<Record<string, unknown>>(event, 'data');
       compacted[index] = {
         ...event,
-        startedAt: getString(start, 'at'),
+        startedAt: asString(start['at']),
         data: {
-          ...(startData ?? {}),
-          ...(eventData ?? {}),
+          ...(isRecord(start['data']) ? start['data'] : {}),
+          ...(isRecord(event['data']) ? event['data'] : {}),
         },
       };
       pendingTools.delete(toolCallId);
       continue;
     }
-    if (kind === 'stream_rate') continue;
     compacted.push(event);
   }
+
   return compacted;
 }
 
-type SubagentTraceGroup = {
-  subagentName: string;
-  parentToolCallId: string;
-  trace: Record<string, unknown>;
-};
-
-function groupSubagentTraces(traces: DebugArtifactBundle['subagents']): SubagentTraceGroup[] {
-  return traces
-    .map(sub => ({
-      subagentName: getString(sub.data, 'subagentName') || sub.fileName,
-      parentToolCallId: getString(sub.data, 'parentToolCallId'),
-      trace: sub.data,
-    }))
-    .filter(item => item.parentToolCallId);
+function eventTitle(kind: string, data: Record<string, unknown>): string {
+  if (kind === 'tool_execution_start' || kind === 'tool_execution_end') {
+    const name = asString(data['toolName']);
+    return name ? `Tool · ${name}` : 'Tool call';
+  }
+  if (kind === 'session_prompt') return 'LLM request';
+  if (kind === 'thinking') return 'Thinking';
+  if (kind === 'assistant_turn_end') return 'Assistant response';
+  if (kind === 'session_start') return 'Session started';
+  if (kind === 'session_end') return 'Session completed';
+  if (kind === 'session_error') return 'Error';
+  if (kind === 'auto_retry_start') return 'Retry attempt';
+  if (kind === 'compaction_start') return 'Context compaction started';
+  if (kind === 'compaction_end') return 'Context compaction completed';
+  if (kind === 'citation_reflection') return 'Citation check';
+  return kind.replaceAll('_', ' ');
 }
 
-function subagentTraceMapForSession(
-  subagents: DebugArtifactBundle['subagents'],
-  sessionId: string,
-): Map<string, SubagentTraceGroup[]> {
-  const map = new Map<string, SubagentTraceGroup[]>();
-  for (const trace of groupSubagentTraces(subagents)) {
-    if (getString(trace.trace, 'parentSessionId') !== sessionId) continue;
-    const list = map.get(trace.parentToolCallId) ?? [];
-    list.push(trace);
-    map.set(trace.parentToolCallId, list);
-  }
-  return map;
-}
+/**
+ * Structured-Trace row config per event kind: the short uppercase chip label,
+ * the lucide icon, the 2px left-rail border color, and the chip text/bg.
+ * `quiet` marks low-signal rows (LLM request) that recede via weight + opacity
+ * rather than a hue. Colors are light/dark-safe Tailwind palette tokens — the
+ * xyne fg-tertiary/fg-muted tokens are the SAME hex, so "quiet" can never come
+ * from a second grey.
+ */
+type EventVisual = { Icon: typeof Bug; label: string; rail: string; chip: string; quiet?: boolean };
 
-function liveSubagentTraceMap(events: DebugEventRecord[]): Map<string, SubagentTraceGroup[]> {
-  const grouped = new Map<string, DebugEventRecord[]>();
-  for (const event of events) {
-    if (!event.subagentName) continue;
-    const key = `${event.parentToolCallId ?? 'unknown'}`;
-    const list = grouped.get(key) ?? [];
-    list.push(event);
-    grouped.set(key, list);
-  }
-  const map = new Map<string, SubagentTraceGroup[]>();
-  for (const [parentToolCallId, group] of grouped.entries()) {
-    const first = group[0];
-    if (!first) continue;
-    const compacted = compactTimeline(group as unknown as Record<string, unknown>[]);
-    const firstData = isRecord(first.data) ? first.data : {};
-    const trace = {
-      ...firstData,
-      question: getString(firstData, 'question') || getString(firstData, 'task') || 'Subagent task',
-      task: getString(firstData, 'task') || getString(firstData, 'question') || 'Subagent task',
-      events: compacted,
+function eventVisual(kind: string, isError: boolean): EventVisual {
+  if (isError)
+    return {
+      Icon: AlertCircle,
+      label: kind === 'session_cancelled' ? 'CANCEL' : 'ERROR',
+      rail: 'border-red-500',
+      chip: 'bg-red-500/10 text-red-700 dark:text-red-300',
     };
-    const list = map.get(parentToolCallId) ?? [];
-    list.push({
-      subagentName: first.subagentName || 'Subagent',
-      parentToolCallId,
-      trace,
-    });
-    map.set(parentToolCallId, list);
+  if (kind.startsWith('tool_execution'))
+    return {
+      Icon: Wrench,
+      label: 'TOOL',
+      rail: 'border-amber-500',
+      chip: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    };
+  switch (kind) {
+    case 'session_start':
+      return {
+        Icon: CirclePlay,
+        label: 'SESSION',
+        rail: 'border-sky-500',
+        chip: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+      };
+    case 'session_prompt':
+      return {
+        Icon: BrainCircuit,
+        label: 'LLM',
+        rail: 'border-xyne-border-strong',
+        chip: 'text-xyne-fg-muted',
+        quiet: true,
+      };
+    case 'thinking':
+      return {
+        Icon: Lightbulb,
+        label: 'THINK',
+        rail: 'border-violet-500',
+        chip: 'bg-violet-500/10 text-violet-700 dark:text-violet-300',
+      };
+    case 'assistant_turn_end':
+      return {
+        Icon: MessageSquareText,
+        label: 'ASST',
+        rail: 'border-emerald-500',
+        chip: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+      };
+    case 'compaction_start':
+    case 'compaction_end':
+      return {
+        Icon: Zap,
+        label: 'COMPACT',
+        rail: 'border-fuchsia-500',
+        chip: 'bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300',
+      };
+    case 'auto_retry_start':
+      return {
+        Icon: RotateCcw,
+        label: 'RETRY',
+        rail: 'border-orange-500',
+        chip: 'bg-orange-500/10 text-orange-700 dark:text-orange-300',
+      };
+    case 'citation_reflection':
+      return {
+        Icon: Quote,
+        label: 'CITE',
+        rail: 'border-teal-500',
+        chip: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
+      };
+    case 'session_end':
+      return {
+        Icon: CheckCircle2,
+        label: 'DONE',
+        rail: 'border-cyan-500',
+        chip: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300',
+      };
+    default:
+      return {
+        Icon: CirclePlay,
+        label: kind.replaceAll('_', ' ').slice(0, 7).toUpperCase(),
+        rail: 'border-xyne-border-strong',
+        chip: 'text-xyne-fg-muted',
+        quiet: true,
+      };
   }
-  return map;
+}
+
+/** Δ-from-origin label for the trace time column, e.g. "+0.0s", "+5.1s", "+1m04s". */
+function formatDelta(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const s = ms / 1000;
+  if (s < 60) return `+${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  return `+${m}m${String(Math.round(s % 60)).padStart(2, '0')}s`;
+}
+
+function DebugTimelineSection({
+  title,
+  data,
+  defaultOpen = false,
+  subagentTracesByParentToolCallId,
+  selectedEventKey,
+  onSelectEvent,
+  timeMode = 'delta',
+}: {
+  title: string;
+  data: Record<string, unknown> | null;
+  defaultOpen?: boolean;
+  subagentTracesByParentToolCallId?: Map<string, SubagentTraceGroup[]>;
+  selectedEventKey?: string | null;
+  onSelectEvent?: (key: string) => void;
+  timeMode?: 'delta' | 'abs';
+}) {
+  const events = useMemo<unknown[]>(() => {
+    const raw = data?.['events'];
+    return Array.isArray(raw) ? (raw as unknown[]) : [];
+  }, [data]);
+
+  const visibleEvents = useMemo(() => compactTimeline(events), [events]);
+
+  // Expand/collapse all timeline cards. The cards are native <details> elements
+  // (no React state to lift), so we flip their `open` attribute through a ref.
+  // Scoped to the timeline's direct-child cards — opens each tool/event card
+  // without also unfurling every nested raw-data block inside them.
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const setAllCards = (open: boolean) => {
+    timelineRef.current?.querySelectorAll(':scope > details').forEach(node => {
+      (node as HTMLDetailsElement).open = open;
+    });
+  };
+
+  // Earliest event time = the origin for Δ timestamps in this run/turn.
+  const originMs = useMemo(() => {
+    let min = Number.POSITIVE_INFINITY;
+    for (const e of visibleEvents) {
+      if (!isRecord(e)) continue;
+      const t = Date.parse(asString(e['at']) || asString(e.startedAt));
+      if (Number.isFinite(t)) min = Math.min(min, t);
+    }
+    return Number.isFinite(min) ? min : undefined;
+  }, [visibleEvents]);
+
+  // Sub-steps (thinking / assistant / tool) indent under the spine; the LAST
+  // assistant turn is the conclusion and stays flush.
+  const lastAssistantIdx = useMemo(() => {
+    let idx = -1;
+    visibleEvents.forEach((e, i) => {
+      if (isRecord(e) && asString(e['kind']) === 'assistant_turn_end') idx = i;
+    });
+    return idx;
+  }, [visibleEvents]);
+
+  const streamGraph = useMemo(
+    () =>
+      combineStreamRateWindows(
+        events.flatMap(event => {
+          if (
+            !isRecord(event) ||
+            asString(event['kind']) !== 'assistant_turn_end' ||
+            !isRecord(event['data'])
+          )
+            return [];
+          const samples = streamRateSamples(event['data']['streamRateSamples']);
+          return samples.length > 0 ? [samples] : [];
+        }),
+      ),
+    [events],
+  );
+
+  const toolsUsed = useMemo<unknown[]>(() => {
+    const raw = data?.['toolsUsed'];
+    return Array.isArray(raw) ? (raw as unknown[]) : [];
+  }, [data]);
+
+  const tokenUsage = isRecord(data?.['tokenUsage']) ? data?.['tokenUsage'] : null;
+  const latency = isRecord(data?.['latency']) ? data?.['latency'] : null;
+  const streamChars = typeof data?.['streamChars'] === 'number' ? data['streamChars'] : undefined;
+  const streamThinkingChars =
+    typeof data?.['streamThinkingChars'] === 'number' ? data['streamThinkingChars'] : undefined;
+  const streamTextChars =
+    typeof data?.['streamTextChars'] === 'number' ? data['streamTextChars'] : undefined;
+  const streamCharsPerSec =
+    typeof data?.['streamCharsPerSec'] === 'number' ? data['streamCharsPerSec'] : undefined;
+
+  const headerMeta = [
+    asString(data?.['provider']),
+    asString(data?.['model']),
+    toolsUsed.length ? `${toolsUsed.length} tools` : '',
+    `${visibleEvents.length} events`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const TurnIcon = data?.['subagentName'] ? Workflow : MessageSquareText;
+  const turnIconColor = data?.['subagentName']
+    ? 'text-cyan-600 dark:text-cyan-400'
+    : 'text-xyne-fg-tertiary';
+  return (
+    <details open={defaultOpen} className='group/turn border-b border-xyne-border last:border-b-0'>
+      <summary className='cursor-pointer list-none py-2'>
+        <div className='flex items-baseline gap-2'>
+          <ChevronDown
+            size={13}
+            className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/turn:rotate-0'
+          />
+          <TurnIcon size={13} className={`shrink-0 self-center ${turnIconColor}`} />
+          <div className='min-w-0 flex-1'>
+            <p className='truncate text-[14px] font-semibold text-xyne-fg-primary'>{title}</p>
+            {headerMeta && <p className='truncate text-[11px] text-xyne-fg-muted'>{headerMeta}</p>}
+          </div>
+        </div>
+      </summary>
+
+      <div className='pb-3 pt-1 space-y-2'>
+        {Boolean(data?.['task'] || data?.['question'] || data?.['providerError']) && (
+          <p
+            className={`text-[12px] leading-relaxed ${data?.['providerError'] ? 'text-red-600 dark:text-red-400' : 'text-xyne-fg-secondary'}`}
+          >
+            {asString(data?.['providerError']) ||
+              asString(data?.['question']) ||
+              asString(data?.['task'])}
+          </p>
+        )}
+
+        {(tokenUsage || latency || streamGraph.length > 0) && (
+          <details className='group/sm'>
+            <summary className='flex cursor-pointer list-none items-baseline gap-2 py-1'>
+              <ChevronDown
+                size={11}
+                className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/sm:rotate-0'
+              />
+              <Activity size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
+              <span className='text-[12px] font-semibold text-xyne-fg-secondary'>
+                Stream metrics
+              </span>
+            </summary>
+            <div className='ml-1.5 border-l border-xyne-border-subtle pl-4 pt-1.5 pb-1 space-y-2'>
+              {(tokenUsage || latency) && (
+                <div className='flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-xyne-fg-secondary'>
+                  {tokenUsage && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Tokens:</span>{' '}
+                      {asString(tokenUsage['input'])} in / {asString(tokenUsage['output'])} out
+                    </span>
+                  )}
+                  {latency && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Total:</span>{' '}
+                      {asString(latency['totalMs'])}ms
+                    </span>
+                  )}
+                  {latency && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>LLM:</span>{' '}
+                      {asString(latency['llmTotalMs'])}ms
+                    </span>
+                  )}
+                  {streamCharsPerSec !== undefined && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Stream:</span>{' '}
+                      {streamCharsPerSec.toFixed(1)} chars/s
+                    </span>
+                  )}
+                  {streamChars !== undefined && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Chars:</span> {streamChars}
+                    </span>
+                  )}
+                  {streamTextChars !== undefined && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Text:</span> {streamTextChars}
+                    </span>
+                  )}
+                  {streamThinkingChars !== undefined && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Thinking:</span> {streamThinkingChars}
+                    </span>
+                  )}
+                </div>
+              )}
+              {streamGraph.length > 0 && <StreamRateGraph samples={streamGraph} />}
+            </div>
+          </details>
+        )}
+
+        {visibleEvents.length > 0 && (
+          <details open className='group/tl'>
+            <summary className='flex cursor-pointer list-none items-baseline gap-2 py-1'>
+              <ChevronDown
+                size={11}
+                className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/tl:rotate-0'
+              />
+              <ListTree size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
+              <span className='text-[12px] font-semibold text-xyne-fg-secondary'>Timeline</span>
+              <div className='ml-auto flex items-baseline gap-2'>
+                <button
+                  type='button'
+                  data-track-category='XyneAI'
+                  data-track-name='DEBUG_TIMELINE_EXPAND_ALL'
+                  onClick={e => {
+                    // Inside <summary> — stop the click from toggling the Timeline itself.
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setAllCards(true);
+                  }}
+                  className='text-[11px] text-xyne-fg-muted transition-colors hover:text-xyne-fg-secondary'
+                >
+                  Expand all
+                </button>
+                <span className='text-[11px] text-xyne-fg-muted'>·</span>
+                <button
+                  type='button'
+                  data-track-category='XyneAI'
+                  data-track-name='DEBUG_TIMELINE_COLLAPSE_ALL'
+                  onClick={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setAllCards(false);
+                  }}
+                  className='text-[11px] text-xyne-fg-muted transition-colors hover:text-xyne-fg-secondary'
+                >
+                  Collapse all
+                </button>
+                <span className='text-[11px] text-xyne-fg-muted'>
+                  {visibleEvents.length} event{visibleEvents.length === 1 ? '' : 's'}
+                </span>
+              </div>
+            </summary>
+            <div ref={timelineRef} className='pt-1'>
+              {visibleEvents.map((event, idx) => {
+                const ekind = isRecord(event) ? asString(event['kind']) : '';
+                const indented =
+                  (ekind === 'thinking' ||
+                    ekind === 'assistant_turn_end' ||
+                    ekind.startsWith('tool_execution')) &&
+                  idx !== lastAssistantIdx;
+                const ek = seqKey(event['seq']) || String(idx);
+                return (
+                  <DebugEventItem
+                    key={ek}
+                    event={event}
+                    eventKey={ek}
+                    displayIndex={idx + 1}
+                    selected={selectedEventKey === ek}
+                    onSelect={onSelectEvent}
+                    subagentTracesByParentToolCallId={subagentTracesByParentToolCallId}
+                    originMs={originMs}
+                    timeMode={timeMode}
+                    indented={indented}
+                  />
+                );
+              })}
+            </div>
+          </details>
+        )}
+
+        <details className='group/raw'>
+          <summary className='cursor-pointer list-none py-1 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
+            Show raw run data
+          </summary>
+          <div className='ml-1.5 border-l border-xyne-border-subtle pl-4 pt-1'>
+            <JsonViewer value={{ ...data, events: visibleEvents }} title='Run artifact' />
+          </div>
+        </details>
+      </div>
+    </details>
+  );
 }
 
 function MessageSnapshot({ message }: { message: unknown }) {
   if (!isRecord(message)) return <JsonViewer value={message} title='Message' />;
-  const role = getString(message, 'role');
+  const role = asString(message['role']);
   const content = displayMessageText(message);
-  const status = getString(message, 'status');
+  const status = asString(message['status']);
   const createdAt = messageTime(message);
   const isAssistant = role === 'assistant';
   const isUser = role === 'user';
@@ -758,7 +1173,7 @@ function MessageSnapshot({ message }: { message: unknown }) {
           {content || '(empty)'}
         </p>
       </summary>
-      <div className='mt-1 space-y-2 pl-2'>
+      <div className='ml-1.5 mt-1 border-l border-xyne-border-subtle pl-4 space-y-2'>
         <pre className='max-h-72 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary'>
           {content || '(empty)'}
         </pre>
@@ -769,7 +1184,7 @@ function MessageSnapshot({ message }: { message: unknown }) {
           <div className='mt-1'>
             <JsonViewer
               value={message}
-              title={`${messageLabel(role)} snapshot`}
+              title={`${messageLabel(role)} message`}
               defaultExpandedDepth={999}
             />
           </div>
@@ -779,115 +1194,154 @@ function MessageSnapshot({ message }: { message: unknown }) {
   );
 }
 
-function SubagentTraceInline({ traces }: { traces: SubagentTraceGroup[] }) {
-  if (traces.length === 0) return null;
-  return (
-    <div className='mt-1 space-y-1.5'>
-      <p className='flex items-center gap-1.5 text-[12px] font-semibold text-xyne-fg-secondary'>
-        <Workflow size={12} className='text-cyan-600 dark:text-cyan-400' />
-        Subagent trace{traces.length === 1 ? '' : 's'}
-      </p>
-      <div className='space-y-1.5'>
-        {traces.map(sub => (
-          <div
-            key={`${sub.parentToolCallId}:${sub.subagentName}`}
-            className='rounded-md bg-xyne-surface px-2'
-          >
-            <TurnPanel
-              data={sub.trace}
-              title={`${sub.subagentName}: ${truncate(getString(sub.trace, 'question') || 'Subagent task', 80)}`}
-              defaultOpen={false}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function DebugEventItem({
   event,
+  eventKey,
+  selected = false,
+  onSelect,
   subagentTracesByParentToolCallId,
+  originMs,
+  timeMode = 'delta',
+  indented = false,
 }: {
   event: unknown;
-  subagentTracesByParentToolCallId?: Map<string, SubagentTraceGroup[]>;
+  eventKey: string;
+  displayIndex?: number | undefined;
+  selected?: boolean;
+  onSelect?: ((key: string) => void) | undefined;
+  subagentTracesByParentToolCallId?: Map<string, SubagentTraceGroup[]> | undefined;
+  /** Run start (ms) used to compute Δ timestamps. */
+  originMs?: number | undefined;
+  /** "delta" → +Xs from run start (default); "abs" → wall-clock time. */
+  timeMode?: 'delta' | 'abs';
+  /** Sub-steps of a turn (thinking / assistant / tool) indent under the spine. */
+  indented?: boolean;
 }) {
-  if (!isRecord(event)) return <JsonViewer value={event} title='Event' />;
+  if (!isRecord(event)) {
+    return <JsonViewer value={event} title='Event' />;
+  }
 
-  const kind = getString(event, 'kind') || 'event';
-  const seq = getString(event, 'seq');
-  const at = getString(event, 'at');
-  const startedAt = getString(event, 'startedAt');
-  const subagentName = getString(event, 'subagentName');
-  const data = get<Record<string, unknown>>(event, 'data') ?? {};
+  const kind = asString(event['kind']) || 'event';
+  const seq = asString(event['seq']);
+  const at = asString(event['at']);
+  const startedAt = asString(event['startedAt']);
+  const subagentName = asString(event['subagentName']);
+  const data = isRecord(event['data']) ? event['data'] : {};
   const isTool = kind.startsWith('tool_execution');
   const isPendingTool = kind === 'tool_execution_start';
-  const dataIsError = getBool(data, 'isError') === true;
-  const isError = kind === 'session_error' || (isTool && dataIsError);
-  const duration = getString(data, 'durationMs');
-  const toolCallId = getString(data, 'toolCallId') || getString(event, 'toolCallId');
+  const isError = kind === 'session_error' || (isTool && data['isError'] === true);
+  const duration = asString(data['durationMs']);
   const subagentTraces =
-    isTool && toolCallId && subagentTracesByParentToolCallId
-      ? (subagentTracesByParentToolCallId.get(toolCallId) ?? [])
+    isTool && subagentTracesByParentToolCallId
+      ? (subagentTracesByParentToolCallId.get(
+          asString(data['toolCallId']) || asString(event['toolCallId']),
+        ) ?? [])
       : [];
 
-  const title = eventTitle(kind, data);
   const summary = eventSummary(kind, data);
+  // LLM request is low-signal: its msg count rides on the title, so suppress the
+  // redundant "Sending N messages" preview.
+  const showSummary = Boolean(summary) && kind !== 'session_prompt';
   const timestamp = isTool ? at || startedAt : at;
-  const statusLabel = isTool ? (dataIsError ? 'Failed' : isPendingTool ? 'Running' : 'OK') : '';
-  const { Icon: EventIcon, color: eventColor } = eventIcon(kind);
+  const visual = eventVisual(kind, isError);
+  const VisualIcon = visual.Icon;
+
+  // Title: tool name (mono) for tools; LLM request carries its msg count; the
+  // final assistant turn is tagged; everything else uses its label.
+  const msgCount = typeof data['messageCount'] === 'number' ? data['messageCount'] : null;
+  const isFinalAssistant = kind === 'assistant_turn_end' && !indented;
+  const titleText = isTool
+    ? asString(data['toolName']) || 'tool'
+    : kind === 'session_prompt'
+      ? `LLM request${msgCount !== null ? ` · ${msgCount} msgs` : ''}`
+      : isFinalAssistant
+        ? 'Assistant response · final'
+        : eventTitle(kind, data);
+  const titleClass = isError
+    ? 'font-semibold text-red-600 dark:text-red-400'
+    : visual.quiet
+      ? 'font-normal text-xyne-fg-tertiary opacity-70'
+      : isTool
+        ? 'font-mono font-medium text-xyne-fg-primary'
+        : 'font-semibold text-xyne-fg-primary';
+
+  // Time column: Δ-from-start by default (de-noises repeated wall-clock times),
+  // absolute on the abs toggle and always on hover.
+  const eventMs = timestamp ? Date.parse(timestamp) : NaN;
+  const absTime = timestamp ? formatTime(timestamp) : '';
+  const timeText =
+    timeMode === 'abs' || originMs === undefined || !Number.isFinite(eventMs)
+      ? absTime
+      : formatDelta(eventMs - originMs);
 
   return (
-    <details className='group/event border-b border-xyne-border-subtle/50 last:border-b-0'>
-      <summary className='cursor-pointer list-none py-2'>
-        <div className='flex items-baseline gap-2'>
-          <ChevronDown
-            size={11}
-            className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/event:rotate-0'
-          />
-          <EventIcon
-            size={12}
-            className={`shrink-0 self-center ${isError ? 'text-red-500 dark:text-red-400' : eventColor}`}
-          />
+    <details
+      data-tool-call-id={asString(data['toolCallId']) || asString(event['toolCallId']) || undefined}
+      className={`group/event border-l-2 ${visual.rail} ${selected ? 'bg-xyne-surface-subtle/60' : 'hover:bg-black/[0.015] dark:hover:bg-white/[0.025]'}`}
+    >
+      <summary
+        className='cursor-pointer list-none py-[5px] pl-2 pr-1'
+        onPointerDown={() => onSelect?.(eventKey)}
+      >
+        <div className='flex items-center gap-2'>
           <span
-            className={`text-[13px] font-semibold ${isError ? 'text-red-600 dark:text-red-400' : 'text-xyne-fg-primary'}`}
+            className={`flex w-[58px] shrink-0 items-center gap-1 rounded px-1 py-px text-[9px] font-bold uppercase tracking-[0.03em] ${visual.chip}`}
           >
-            {title}
+            <VisualIcon size={10} className='shrink-0' />
+            <span className='truncate'>{visual.label}</span>
+          </span>
+          <span className={`min-w-0 truncate text-[12.5px] leading-tight ${titleClass}`}>
+            {titleText}
           </span>
           {subagentName && (
-            <span className='text-[11px] text-cyan-600 dark:text-cyan-400'>
-              subagent: {subagentName}
-            </span>
-          )}
-          {isTool && duration && (
-            <span className='text-[11px] text-xyne-fg-muted'>{duration}ms</span>
-          )}
-          {statusLabel && (
-            <span
-              className={`text-[11px] ${dataIsError ? 'text-red-600 dark:text-red-400' : isPendingTool ? 'text-amber-600 dark:text-amber-400' : 'text-xyne-fg-muted'}`}
-            >
-              {statusLabel}
+            <span className='shrink-0 rounded bg-cyan-500/10 px-1 text-[9px] text-cyan-700 dark:text-cyan-300'>
+              {subagentName}
             </span>
           )}
           {subagentTraces.length > 0 && (
-            <span className='text-[11px] text-cyan-600 dark:text-cyan-400'>
-              spawned {subagentTraces.length} subagent{subagentTraces.length === 1 ? '' : 's'}
+            <span className='shrink-0 text-[10px] text-cyan-600 dark:text-cyan-400'>
+              +{subagentTraces.length} sub
             </span>
           )}
-          <span className='ml-auto shrink-0 text-[11px] text-xyne-fg-muted'>
-            {timestamp ? formatTime(timestamp) : ''}
+          <span className='ml-auto flex shrink-0 items-center font-mono text-[10.5px] tabular-nums'>
+            <span className='w-[50px] text-right text-xyne-fg-secondary' title={absTime}>
+              {timeText}
+            </span>
+            <span className='w-[50px] text-right text-xyne-fg-muted'>
+              {isTool && duration ? `${duration}ms` : ''}
+            </span>
+            <span className='w-[58px] text-right'>
+              {isTool &&
+                (data['isError'] ? (
+                  <span className='rounded bg-red-500/15 px-1 font-semibold text-red-700 dark:text-red-300'>
+                    Failed
+                  </span>
+                ) : isPendingTool ? (
+                  <span className='text-amber-600 dark:text-amber-400'>Running</span>
+                ) : (
+                  <span className='text-emerald-600 dark:text-emerald-400'>OK</span>
+                ))}
+            </span>
           </span>
+          <ChevronRight
+            size={11}
+            className='ml-0.5 shrink-0 text-xyne-fg-tertiary opacity-0 transition group-hover/event:opacity-60 group-open/event:rotate-90'
+          />
         </div>
-        {summary && (
-          <p className='mt-1 ml-[34px] line-clamp-2 whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary group-open/event:hidden'>
+        {showSummary && (
+          <p
+            className={`mt-0.5 line-clamp-2 whitespace-pre-wrap pl-[66px] pr-6 text-[12px] leading-relaxed group-open/event:hidden ${kind === 'thinking' ? 'italic text-xyne-fg-secondary' : 'text-xyne-fg-secondary'}`}
+          >
             {summary}
           </p>
         )}
       </summary>
-      <div className='space-y-1.5 pb-3 pl-2 pt-1'>
+      <div
+        className={`pl-2 pr-2 pb-3 pt-1 space-y-1.5 ${selected ? 'bg-xyne-surface-subtle/60' : ''}`}
+      >
         {kind === 'session_prompt' && (
           <div className='space-y-1.5'>
-            {getString(data, 'systemPrompt') && (
+            {typeof data['systemPrompt'] === 'string' && data['systemPrompt'] && (
               <details className='group/sp rounded-md bg-xyne-surface'>
                 <summary className='flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5'>
                   <ChevronDown
@@ -899,17 +1353,17 @@ function DebugEventItem({
                     System prompt
                   </span>
                   <span className='ml-auto text-[11px] text-xyne-fg-muted'>
-                    {getString(data, 'systemPrompt').length} chars
+                    {data['systemPrompt'].length} chars
                   </span>
                 </summary>
                 <div className='px-2 pb-2 pt-1'>
                   <pre className='max-h-72 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary'>
-                    {getString(data, 'systemPrompt')}
+                    {data['systemPrompt']}
                   </pre>
                 </div>
               </details>
             )}
-            {(getArray(data, 'messages')?.length ?? 0) > 0 && (
+            {Array.isArray(data['messages']) && data['messages'].length > 0 && (
               <details className='group/im rounded-md bg-xyne-surface'>
                 <summary className='flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5'>
                   <ChevronDown
@@ -924,18 +1378,17 @@ function DebugEventItem({
                     Input messages
                   </span>
                   <span className='ml-auto text-[11px] text-xyne-fg-muted'>
-                    {getArray(data, 'messages')!.length} message
-                    {getArray(data, 'messages')!.length === 1 ? '' : 's'}
+                    {data['messages'].length} message{data['messages'].length === 1 ? '' : 's'}
                   </span>
                 </summary>
                 <div className='px-2 pb-2 pt-1'>
-                  {getArray<unknown>(data, 'messages')!.map((msg, index) => (
-                    <MessageSnapshot key={`${seq}-msg-${index}`} message={msg} />
+                  {(data['messages'] as unknown[]).map((msg, idx) => (
+                    <MessageSnapshot key={`${seq}-msg-${idx}`} message={msg} />
                   ))}
                 </div>
               </details>
             )}
-            {getString(data, 'prompt') && (
+            {typeof data['prompt'] === 'string' && data['prompt'] && (
               <details className='group/up rounded-md bg-xyne-surface'>
                 <summary className='flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5'>
                   <ChevronDown
@@ -947,12 +1400,12 @@ function DebugEventItem({
                     User prompt
                   </span>
                   <span className='ml-auto text-[11px] text-xyne-fg-muted'>
-                    {getString(data, 'prompt').length} chars
+                    {data['prompt'].length} chars
                   </span>
                 </summary>
                 <div className='px-2 pb-2 pt-1'>
                   <pre className='max-h-64 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary'>
-                    {getString(data, 'prompt')}
+                    {data['prompt']}
                   </pre>
                 </div>
               </details>
@@ -970,14 +1423,10 @@ function DebugEventItem({
 
         {kind === 'tool_execution_start' && (
           <div className='space-y-1.5'>
-            {get(data, 'args') !== undefined && (
+            {'args' in data && (
               <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
                 <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Arguments</p>
-                <JsonViewer
-                  value={get(data, 'args')}
-                  title='Arguments'
-                  defaultExpandedDepth={999}
-                />
+                <JsonViewer value={data['args']} title='Arguments' defaultExpandedDepth={999} />
               </div>
             )}
             <SubagentTraceInline traces={subagentTraces} />
@@ -986,41 +1435,32 @@ function DebugEventItem({
 
         {kind === 'tool_execution_end' && (
           <div className='space-y-1.5'>
-            {get(data, 'args') !== undefined && (
+            {'args' in data && (
               <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
                 <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Arguments</p>
-                <JsonViewer
-                  value={get(data, 'args')}
-                  title='Arguments'
-                  defaultExpandedDepth={999}
-                />
+                <JsonViewer value={data['args']} title='Arguments' defaultExpandedDepth={999} />
               </div>
             )}
-            {/* Vespa query — emitted by kb-search and spaces-search. Lives on
-                  data.debug.payloads (one entry per Vespa hit: "exact" + optional
-                  "fuzzy-fallback"). Renders the YQL string verbatim so it can be
-                  copy-pasted into a Vespa shell for replay. */}
-            {(() => {
-              const debugBlock = get<Record<string, unknown>>(data, 'debug');
-              const payloads = isRecord(debugBlock)
-                ? getArray<Record<string, unknown>>(debugBlock, 'payloads')
-                : undefined;
-              if (!payloads || payloads.length === 0) return null;
-              return (
-                <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
-                  <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Vespa query</p>
-                  {payloads.map((p, i) => (
+            {/* Vespa query — emitted by kb-search and spaces-search. Lives
+                  on data.debug.payloads (one entry per Vespa hit: "exact" +
+                  optional "fuzzy-fallback"). Renders the YQL string verbatim so
+                  it can be copy-pasted into a Vespa shell for replay. */}
+            {isRecord(data['debug']) && Array.isArray(data['debug']['payloads']) && (
+              <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
+                <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Vespa query</p>
+                {(data['debug'] as { payloads: Array<Record<string, unknown>> }).payloads.map(
+                  (p, i) => (
                     <div key={i} className='space-y-1'>
                       {typeof p['stage'] === 'string' && (
                         <p className='text-[11px] text-xyne-fg-muted'>stage: {p['stage']}</p>
                       )}
                       {typeof p['yql'] === 'string' && (
-                        <pre className='max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-xyne-bg p-2 text-[11px] leading-relaxed text-xyne-fg-secondary'>
+                        <pre className='max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-xyne-surface-sunken p-2 text-[11px] leading-relaxed text-xyne-fg-secondary'>
                           {p['yql']}
                         </pre>
                       )}
                       {isRecord(p['vespaParams']) && (
-                        <details className='rounded-md bg-xyne-bg'>
+                        <details className='rounded-md bg-xyne-surface-sunken'>
                           <summary className='cursor-pointer list-none px-2 py-1.5 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
                             Bound params + ranking inputs
                           </summary>
@@ -1030,118 +1470,118 @@ function DebugEventItem({
                         </details>
                       )}
                     </div>
-                  ))}
-                </div>
-              );
-            })()}
-            {get(data, 'result') !== undefined && (
+                  ),
+                )}
+              </div>
+            )}
+            {'result' in data && (
               <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
                 <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Result</p>
-                <JsonViewer value={get(data, 'result')} title='Result' defaultExpandedDepth={999} />
+                <ToolResultView value={data['result']} />
               </div>
             )}
             <SubagentTraceInline traces={subagentTraces} />
           </div>
         )}
 
+        {kind === 'thinking' && typeof data['text'] === 'string' && (
+          // Match the collapsed preview exactly (italic sans, secondary, aligned
+          // under the title) so expanding just reveals the FULL text in place,
+          // not a heavier card with a different font.
+          <p className='whitespace-pre-wrap pl-[58px] pr-6 text-[12px] italic leading-relaxed text-xyne-fg-secondary'>
+            {data['text']}
+          </p>
+        )}
+
         {kind === 'assistant_turn_end' && (
           <div className='space-y-1.5'>
-            {getString(data, 'assistantText') && (
-              <pre className='max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-xyne-surface p-2 text-[12px] leading-relaxed text-xyne-fg-secondary'>
-                {getString(data, 'assistantText')}
-              </pre>
+            {typeof data['assistantText'] === 'string' && (
+              // Same casual-expand treatment as thinking (non-italic, matches the
+              // assistant preview). Usage stats stay below as a metadata row.
+              <p className='whitespace-pre-wrap pl-[58px] pr-6 text-[12px] leading-relaxed text-xyne-fg-secondary'>
+                {data['assistantText']}
+              </p>
             )}
-            {(isRecord(get(data, 'usage')) ||
-              getNumber(data, 'streamChars') !== undefined ||
-              getNumber(data, 'streamCharsPerSec') !== undefined ||
-              getNumber(data, 'streamTextChars') !== undefined ||
-              getNumber(data, 'streamThinkingChars') !== undefined) && (
+            {(isRecord(data['usage']) ||
+              typeof data['streamChars'] === 'number' ||
+              typeof data['streamCharsPerSec'] === 'number') && (
               <div className='flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-xyne-surface px-2 py-1.5 text-[11px] text-xyne-fg-secondary'>
-                {(() => {
-                  const usage = get<Record<string, unknown>>(data, 'usage');
-                  if (!isRecord(usage)) return null;
-                  const input =
-                    getString(usage, 'input_tokens') || getString(usage, 'input') || '0';
-                  const output =
-                    getString(usage, 'output_tokens') || getString(usage, 'output') || '0';
-                  return (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Usage:</span> {input} in / {output} out
-                    </span>
-                  );
-                })()}
-                {getNumber(data, 'streamChars') !== undefined && (
+                {isRecord(data['usage']) && (
                   <span>
-                    <span className='text-xyne-fg-muted'>Chars:</span>{' '}
-                    {getNumber(data, 'streamChars')}
+                    <span className='text-xyne-fg-muted'>Usage:</span>{' '}
+                    {asString(data['usage']['input_tokens']) ||
+                      asString(data['usage']['input']) ||
+                      '0'}{' '}
+                    in /{' '}
+                    {asString(data['usage']['output_tokens']) ||
+                      asString(data['usage']['output']) ||
+                      '0'}{' '}
+                    out
                   </span>
                 )}
-                {getNumber(data, 'streamCharsPerSec') !== undefined && (
+                {typeof data['streamChars'] === 'number' && (
+                  <span>
+                    <span className='text-xyne-fg-muted'>Chars:</span> {data['streamChars']}
+                  </span>
+                )}
+                {typeof data['streamCharsPerSec'] === 'number' && (
                   <span>
                     <span className='text-xyne-fg-muted'>Rate:</span>{' '}
-                    {getString(data, 'streamCharsPerSec')} chars/s
+                    {asString(data['streamCharsPerSec'])} chars/s
                   </span>
                 )}
-                {getNumber(data, 'streamTextChars') !== undefined && (
+                {typeof data['streamTextChars'] === 'number' && (
                   <span>
-                    <span className='text-xyne-fg-muted'>Text:</span>{' '}
-                    {getNumber(data, 'streamTextChars')}
+                    <span className='text-xyne-fg-muted'>Text:</span> {data['streamTextChars']}
                   </span>
                 )}
-                {getNumber(data, 'streamThinkingChars') !== undefined && (
+                {typeof data['streamThinkingChars'] === 'number' && (
                   <span>
                     <span className='text-xyne-fg-muted'>Thinking:</span>{' '}
-                    {getNumber(data, 'streamThinkingChars')}
+                    {data['streamThinkingChars']}
                   </span>
                 )}
               </div>
             )}
-            {(getArray(data, 'streamRateSamples')?.length ?? 0) > 0 && (
-              <StreamRateGraph samples={streamRateSamples(getArray(data, 'streamRateSamples'))} />
-            )}
           </div>
         )}
 
-        {kind === 'session_error' && getString(data, 'error') && (
+        {kind === 'session_error' && typeof data['error'] === 'string' && (
           <pre className='whitespace-pre-wrap rounded-md bg-xyne-surface p-2 text-[12px] leading-relaxed text-red-700 dark:text-red-300'>
-            {getString(data, 'error')}
+            {data['error']}
           </pre>
         )}
 
         {kind === 'session_end' && (
           <div className='flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-xyne-surface px-2 py-1.5 text-[11px] text-xyne-fg-secondary'>
-            {getNumber(data, 'textLength') !== undefined && (
+            {typeof data['textLength'] === 'number' && (
               <span>
-                <span className='text-xyne-fg-muted'>Length:</span> {getNumber(data, 'textLength')}
+                <span className='text-xyne-fg-muted'>Length:</span> {data['textLength']}
               </span>
             )}
-            {getNumber(data, 'durationMs') !== undefined && (
+            {typeof data['durationMs'] === 'number' && (
               <span>
-                <span className='text-xyne-fg-muted'>Duration:</span>{' '}
-                {getNumber(data, 'durationMs')}ms
+                <span className='text-xyne-fg-muted'>Duration:</span> {data['durationMs']}ms
               </span>
             )}
-            {getNumber(data, 'streamChars') !== undefined && (
+            {typeof data['streamChars'] === 'number' && (
               <span>
-                <span className='text-xyne-fg-muted'>Chars:</span> {getNumber(data, 'streamChars')}
+                <span className='text-xyne-fg-muted'>Chars:</span> {data['streamChars']}
               </span>
             )}
-            {getNumber(data, 'streamCharsPerSec') !== undefined && (
+            {typeof data['streamCharsPerSec'] === 'number' && (
               <span>
                 <span className='text-xyne-fg-muted'>Rate:</span>{' '}
-                {getString(data, 'streamCharsPerSec')} chars/s
+                {asString(data['streamCharsPerSec'])} chars/s
               </span>
             )}
-            {(() => {
-              const usage = get<Record<string, unknown>>(data, 'tokenUsage');
-              if (!isRecord(usage)) return null;
-              return (
-                <span>
-                  <span className='text-xyne-fg-muted'>Tokens:</span> {getString(usage, 'input')} in
-                  / {getString(usage, 'output')} out
-                </span>
-              );
-            })()}
+            {isRecord(data['tokenUsage']) && (
+              <span>
+                <span className='text-xyne-fg-muted'>Tokens:</span>{' '}
+                {asString(data['tokenUsage']['input'])} in /{' '}
+                {asString(data['tokenUsage']['output'])} out
+              </span>
+            )}
           </div>
         )}
 
@@ -1152,7 +1592,6 @@ function DebugEventItem({
           'assistant_turn_end',
           'session_error',
           'session_end',
-          'session_cancelled',
         ].includes(kind) && (
           <details className='rounded-md bg-xyne-surface'>
             <summary className='cursor-pointer list-none px-2 py-1.5 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
@@ -1168,194 +1607,156 @@ function DebugEventItem({
   );
 }
 
-function TurnPanel({
-  data,
-  title,
-  defaultOpen = true,
-  subagentTracesByParentToolCallId,
-  isSelected = false,
+function LiveDebugTrace({
+  events,
+  selectedEventKey,
+  onSelectEvent,
 }: {
-  data: Record<string, unknown>;
-  title: string;
-  defaultOpen?: boolean;
-  subagentTracesByParentToolCallId?: Map<string, SubagentTraceGroup[]>;
-  isSelected?: boolean;
+  events: DebugEventRecord[];
+  selectedEventKey?: string | null;
+  onSelectEvent?: (key: string) => void;
 }) {
-  const dataEvents = getArray(data, 'events');
-  const events = compactTimeline(
-    dataEvents
-      ? dataEvents.filter(isRecord).filter(event => getString(event, 'kind') !== 'stream_rate')
-      : [],
-  );
-  const streamSamples = combineStreamRateWindows(
-    events.flatMap(event => {
-      const eventData = get<Record<string, unknown>>(event, 'data');
-      return getString(event, 'kind') === 'assistant_turn_end' && eventData
-        ? [streamRateSamples(getArray(eventData, 'streamRateSamples'))]
-        : [];
-    }),
-  );
-  const tokens = get<Record<string, unknown>>(data, 'tokenUsage');
-  const latency = get<Record<string, unknown>>(data, 'latency');
-  const streamChars = getNumber(data, 'streamChars');
-  const streamThinkingChars = getNumber(data, 'streamThinkingChars');
-  const streamTextChars = getNumber(data, 'streamTextChars');
-  const streamCharsPerSec = getNumber(data, 'streamCharsPerSec');
-  const toolsUsed = getArray(data, 'toolsUsed') ?? [];
-  const isSubagent = Boolean(getString(data, 'subagentName'));
-  const TurnIcon = isSubagent ? Workflow : MessageSquareText;
-  const turnIconColor = isSubagent ? 'text-cyan-600 dark:text-cyan-400' : 'text-xyne-fg-tertiary';
-  const headerMeta = [
-    getString(data, 'provider'),
-    getString(data, 'model'),
-    toolsUsed.length ? `${toolsUsed.length} tools` : '',
-    `${events.length} events`,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const hasStreamMetrics =
-    Boolean(tokens) ||
-    Boolean(latency) ||
-    streamSamples.length > 0 ||
-    streamChars !== undefined ||
-    streamTextChars !== undefined ||
-    streamThinkingChars !== undefined ||
-    streamCharsPerSec !== undefined;
+  const rootEvents = compactTimeline(events.filter(event => !event.subagentName));
+  const subagentGroups = new Map<string, DebugEventRecord[]>();
+  for (const event of events) {
+    if (!event.subagentName) continue;
+    const key = `${event.parentToolCallId ?? 'unknown'}`;
+    const group = subagentGroups.get(key) ?? [];
+    group.push(event);
+    subagentGroups.set(key, group);
+  }
+  const subagentTraceGroups = new Map<string, SubagentTraceGroup[]>();
+  for (const [key, group] of subagentGroups.entries()) {
+    const first = group[0];
+    if (!first) continue;
+    const compactedGroup = compactTimeline(group);
+    const trace = {
+      subagentName: first.subagentName || 'Subagent',
+      parentToolCallId: first.parentToolCallId ?? key,
+      question:
+        asString(first.data?.['question']) || asString(first.data?.['task']) || 'Subagent task',
+      task: asString(first.data?.['task']) || asString(first.data?.['question']) || 'Subagent task',
+      events: compactedGroup,
+    };
+    const list = subagentTraceGroups.get(trace.parentToolCallId) ?? [];
+    list.push({
+      subagentName: trace.subagentName,
+      parentToolCallId: trace.parentToolCallId,
+      trace,
+    });
+    subagentTraceGroups.set(trace.parentToolCallId, list);
+  }
 
   return (
-    <details open={defaultOpen} className='group/turn border-b border-xyne-border last:border-b-0'>
-      <summary className='cursor-pointer list-none py-2'>
-        <div className='flex items-baseline gap-2'>
-          <ChevronDown
-            size={13}
-            className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/turn:rotate-0'
-          />
-          <TurnIcon size={13} className={`shrink-0 self-center ${turnIconColor}`} />
-          <div className='min-w-0 flex-1'>
-            <p className='truncate text-[14px] font-semibold text-xyne-fg-primary'>{title}</p>
-            {headerMeta && <p className='truncate text-[11px] text-xyne-fg-muted'>{headerMeta}</p>}
-          </div>
+    <div>
+      {rootEvents.length > 0 && (
+        <div>
+          {rootEvents.map((event, idx) => {
+            const ek = `live-root-${seqKey(event['seq'])}-${idx}`;
+            return (
+              <DebugEventItem
+                key={ek}
+                event={event}
+                eventKey={ek}
+                selected={selectedEventKey === ek}
+                onSelect={onSelectEvent}
+                subagentTracesByParentToolCallId={subagentTraceGroups}
+              />
+            );
+          })}
         </div>
-      </summary>
+      )}
+    </div>
+  );
+}
 
-      <div className={`space-y-2 pb-3 pl-2 pt-1 ${isSelected ? 'bg-xyne-surface-subtle/60' : ''}`}>
-        {Boolean(
-          getString(data, 'task') ||
-          getString(data, 'question') ||
-          getString(data, 'providerError'),
-        ) && (
-          <p
-            className={`text-[12px] leading-relaxed ${getString(data, 'providerError') ? 'text-red-600 dark:text-red-400' : 'text-xyne-fg-secondary'}`}
-          >
-            {getString(data, 'providerError') ||
-              getString(data, 'question') ||
-              getString(data, 'task')}
-          </p>
-        )}
+function eventSummary(kind: string, data: Record<string, unknown>): string {
+  switch (kind) {
+    case 'session_start':
+      return asString(data['task']);
+    case 'session_prompt': {
+      const count = typeof data['messageCount'] === 'number' ? data['messageCount'] : 0;
+      return count ? `Sending ${count} message${count === 1 ? '' : 's'} to the model` : '';
+    }
+    case 'tool_execution_start':
+    case 'tool_execution_end':
+      return '';
+    case 'thinking':
+      return typeof data['text'] === 'string' ? truncate(data['text'], 240) : '';
+    case 'assistant_turn_end':
+      return typeof data['assistantText'] === 'string' ? truncate(data['assistantText'], 240) : '';
+    case 'compaction_start':
+      return 'Conversation history is being condensed';
+    case 'compaction_end': {
+      if (typeof data['errorMessage'] === 'string' && data['errorMessage'])
+        return truncate(data['errorMessage'], 240);
+      // Show the compacted summary (the "response") when present; the full text
+      // is in the raw event data. Falls back to the generic line for no-op/aborted.
+      return typeof data['summary'] === 'string' && data['summary']
+        ? truncate(data['summary'], 240)
+        : 'Conversation history condensed';
+    }
+    case 'auto_retry_start':
+      return 'Retrying after a transient error';
+    case 'session_error':
+      return asString(data['error']);
+    case 'session_end':
+      return '';
+    case 'citation_reflection': {
+      if (asString(data['phase']) === 'nudge') {
+        const round = typeof data['round'] === 'number' ? data['round'] : 0;
+        const maxRounds = typeof data['maxRounds'] === 'number' ? data['maxRounds'] : 0;
+        return `Answer used sources but isn't cited — nudging the model to add citations (round ${round}/${maxRounds})`;
+      }
+      const outcome = asString(data['outcome']);
+      const labels: Record<string, string> = {
+        already_cited: 'Answer already cited — no action needed',
+        no_citeable_sources: 'No citeable sources retrieved — nothing to enforce',
+        fixed_after_nudge: 'Citations added after reflection',
+        still_uncited: 'Still uncited after reflection',
+        aborted: 'Reflection aborted (run cancelled)',
+      };
+      return labels[outcome] ?? outcome.replaceAll('_', ' ');
+    }
+    default:
+      return '';
+  }
+}
 
-        {hasStreamMetrics && (
-          <details className='group/sm'>
-            <summary className='flex cursor-pointer list-none items-baseline gap-2 py-1'>
-              <ChevronDown
-                size={11}
-                className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/sm:rotate-0'
-              />
-              <Activity size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
-              <span className='text-[12px] font-semibold text-xyne-fg-secondary'>
-                Stream metrics
-              </span>
-            </summary>
-            <div className='space-y-2 pb-1 pl-2 pt-1.5'>
-              {(tokens ||
-                latency ||
-                streamChars !== undefined ||
-                streamTextChars !== undefined ||
-                streamThinkingChars !== undefined ||
-                streamCharsPerSec !== undefined) && (
-                <div className='flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-xyne-fg-secondary'>
-                  {tokens && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Tokens:</span>{' '}
-                      {getString(tokens, 'input')} in / {getString(tokens, 'output')} out
-                    </span>
-                  )}
-                  {latency && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Total:</span>{' '}
-                      {getString(latency, 'totalMs')}ms
-                    </span>
-                  )}
-                  {latency && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>LLM:</span>{' '}
-                      {getString(latency, 'llmTotalMs')}ms
-                    </span>
-                  )}
-                  {streamCharsPerSec !== undefined && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Stream:</span>{' '}
-                      {streamCharsPerSec.toFixed(1)} chars/s
-                    </span>
-                  )}
-                  {streamChars !== undefined && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Chars:</span> {streamChars}
-                    </span>
-                  )}
-                  {streamTextChars !== undefined && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Text:</span> {streamTextChars}
-                    </span>
-                  )}
-                  {streamThinkingChars !== undefined && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Thinking:</span> {streamThinkingChars}
-                    </span>
-                  )}
-                </div>
-              )}
-              {streamSamples.length > 0 && <StreamRateGraph samples={streamSamples} />}
-            </div>
-          </details>
-        )}
+type SubagentTraceGroup = {
+  subagentName: string;
+  parentToolCallId: string;
+  trace: Record<string, unknown>;
+};
 
-        {events.length > 0 && (
-          <details open className='group/tl'>
-            <summary className='flex cursor-pointer list-none items-baseline gap-2 py-1'>
-              <ChevronDown
-                size={11}
-                className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/tl:rotate-0'
-              />
-              <ListTree size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
-              <span className='text-[12px] font-semibold text-xyne-fg-secondary'>Timeline</span>
-              <span className='ml-auto text-[11px] text-xyne-fg-muted'>
-                {events.length} event{events.length === 1 ? '' : 's'}
-              </span>
-            </summary>
-            <div className='pl-1 pt-1'>
-              {events.map((event, index) => (
-                <DebugEventItem
-                  key={`${getString(event, 'seq')}-${index}`}
-                  event={event}
-                  {...(subagentTracesByParentToolCallId
-                    ? { subagentTracesByParentToolCallId }
-                    : {})}
-                />
-              ))}
-            </div>
-          </details>
-        )}
+function groupSubagentTraces(traces: DebugArtifactBundle['subagents']): SubagentTraceGroup[] {
+  return traces
+    .map(sub => ({
+      subagentName: asString(sub.data['subagentName']) || sub.fileName,
+      parentToolCallId: asString(sub.data['parentToolCallId']),
+      trace: sub.data,
+    }))
+    .filter(item => item.parentToolCallId);
+}
 
-        <details className='group/raw'>
-          <summary className='cursor-pointer list-none py-1 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
-            Show raw run data
-          </summary>
-          <div className='pl-2 pt-1'>
-            <JsonViewer value={{ ...data, events }} title='Run artifact' />
-          </div>
-        </details>
+function SubagentTraceInline({ traces }: { traces: SubagentTraceGroup[] }) {
+  if (traces.length === 0) return null;
+  return (
+    <div className='mt-1 space-y-1.5'>
+      <p className='flex items-center gap-1.5 text-[12px] font-semibold text-xyne-fg-secondary'>
+        <Workflow size={12} className='text-cyan-600 dark:text-cyan-400' />
+        Subagent trace{traces.length === 1 ? '' : 's'}
+      </p>
+      <div>
+        {traces.map(sub => (
+          <DebugTimelineSection
+            key={`${sub.parentToolCallId}:${sub.subagentName}`}
+            title={`${sub.subagentName}: ${truncate(asString(sub.trace['question']) || 'Subagent task', 80)}`}
+            data={sub.trace}
+          />
+        ))}
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -1365,7 +1766,7 @@ function conversationPairs(
   const pairs: Array<{ user: Record<string, unknown>; assistant?: Record<string, unknown> }> = [];
   for (const message of messages) {
     if (!isRecord(message)) continue;
-    const role = getString(message, 'role');
+    const role = asString(message['role']);
     if (role === 'user') {
       // Internal harness nudges (structured-output / verify-responses / citation
       // reflection) are delivered via session.prompt("<system>…") and land in the
@@ -1378,6 +1779,21 @@ function conversationPairs(
     }
   }
   return pairs;
+}
+
+function bundleContainsRun(
+  bundle: DebugArtifactBundle,
+  expected: { sessionId?: string; startedAt: number } | null,
+): boolean {
+  if (!expected) return true;
+  const candidates = [bundle.debugSession, ...(bundle.runs ?? []).map(run => run.data)].filter(
+    (candidate): candidate is Record<string, unknown> => Boolean(candidate),
+  );
+  return candidates.some(candidate => {
+    if (expected.sessionId && asString(candidate['sessionId']) === expected.sessionId) return true;
+    const startedAt = new Date(asString(candidate['startedAt'])).getTime();
+    return Number.isFinite(startedAt) && startedAt >= expected.startedAt - 2_000;
+  });
 }
 
 function liveStreamStatus(
@@ -1396,12 +1812,10 @@ function liveStreamStatus(
   let collected = 0;
   let live = false;
   for (const event of latestBySource.values()) {
-    const eventData = isRecord(event.data) ? event.data : {};
-    const active = eventData['active'] === true;
-    if (active && typeof eventData['streamsPerSec'] === 'number')
-      rate += eventData['streamsPerSec'];
-    if (typeof eventData['streamsCollected'] === 'number')
-      collected += eventData['streamsCollected'];
+    const data = isRecord(event.data) ? event.data : {};
+    const active = data['active'] === true;
+    if (active && typeof data['streamsPerSec'] === 'number') rate += data['streamsPerSec'];
+    if (typeof data['streamsCollected'] === 'number') collected += data['streamsCollected'];
     live ||= active;
   }
   return { rate, collected, live };
@@ -1417,21 +1831,27 @@ function persistedStreamStatus(
   let latest: Record<string, unknown> | null = null;
   let latestAt = '';
   for (const candidate of candidates) {
-    const events = getArray(candidate, 'events') ?? [];
+    const events = Array.isArray(candidate['events']) ? candidate['events'] : [];
     for (const event of events) {
-      if (!isRecord(event) || getString(event, 'kind') !== 'assistant_turn_end') continue;
-      const eventData = get<Record<string, unknown>>(event, 'data');
-      if (!eventData) continue;
-      const at = getString(event, 'at');
+      if (
+        !isRecord(event) ||
+        asString(event['kind']) !== 'assistant_turn_end' ||
+        !isRecord(event['data'])
+      )
+        continue;
+      const at = asString(event['at']);
       if (!latest || at >= latestAt) {
-        latest = eventData;
+        latest = event['data'];
         latestAt = at;
       }
     }
   }
   if (!latest) return null;
-  const samples = streamRateSamples(getArray(latest, 'streamRateSamples'));
-  const collected = getNumber(latest, 'streamsCollected') ?? samples.at(-1)?.streamsCollected ?? 0;
+  const samples = streamRateSamples(latest['streamRateSamples']);
+  const collected =
+    typeof latest['streamsCollected'] === 'number'
+      ? latest['streamsCollected']
+      : (samples.at(-1)?.streamsCollected ?? 0);
   if (samples.length === 0 && collected === 0) return null;
   const rate =
     samples.length > 0
@@ -1449,43 +1869,82 @@ function DebugSessionBody({
   selectedTurnIndex?: number | null;
   selectedSessionId?: string | null;
 }) {
+  const [selectedEventKey, setSelectedEventKey] = useState<string | null>(null);
+  const [timeMode, setTimeMode] = useState<'delta' | 'abs'>('delta');
   const root = bundle.debugSession;
-  const rootEvents = getArray(root ?? {}, 'events') ?? bundle.debugEvents ?? [];
+  const rootEvents = Array.isArray(root?.['events'])
+    ? (root['events'] as Record<string, unknown>[])
+    : (bundle.debugEvents ?? []);
   const persistedRuns = (bundle.runs ?? [])
     .slice()
-    .sort((a, b) => getString(a.data, 'startedAt').localeCompare(getString(b.data, 'startedAt')));
-  const historicalMessages = getArray(root ?? {}, 'messages') ?? [];
+    .sort((a, b) => asString(a.data['startedAt']).localeCompare(asString(b.data['startedAt'])));
+  const historicalMessages = Array.isArray(root?.['messages']) ? root['messages'] : [];
   const historicalPairs = conversationPairs(historicalMessages);
   const legacyPairs = historicalPairs.slice(
     0,
     Math.max(0, historicalPairs.length - persistedRuns.length),
   );
-  const turnCount = legacyPairs.length + persistedRuns.length || historicalPairs.length;
+  const turnCount = legacyPairs.length + persistedRuns.length;
   const subagents = bundle.subagents.slice().sort((a, b) => {
-    const aStarted = getString(a.data, 'startedAt');
-    const bStarted = getString(b.data, 'startedAt');
+    const aStarted = asString(a.data['startedAt']);
+    const bStarted = asString(b.data['startedAt']);
     return aStarted.localeCompare(bStarted);
   });
+  const subagentTracesBySession = new Map<string, SubagentTraceGroup[]>();
+  for (const trace of groupSubagentTraces(subagents)) {
+    const parentSessionId = asString(trace.trace['parentSessionId']);
+    if (!parentSessionId) continue;
+    const list = subagentTracesBySession.get(parentSessionId) ?? [];
+    list.push(trace);
+    subagentTracesBySession.set(parentSessionId, list);
+  }
 
   return (
     <div className='space-y-2'>
-      <div className='flex items-baseline justify-between pb-1'>
+      <div className='flex items-center justify-between pb-1'>
         <p className='text-[13px] font-semibold text-xyne-fg-primary'>Conversation turns</p>
-        <p className='text-[11px] text-xyne-fg-muted'>
-          {turnCount} turn{turnCount === 1 ? '' : 's'}
-        </p>
+        <div className='flex items-center gap-2'>
+          <div
+            className='flex items-center gap-0.5 rounded border border-xyne-border bg-xyne-surface p-0.5'
+            title='Timestamp display'
+          >
+            {(['delta', 'abs'] as const).map(m => (
+              <button
+                key={m}
+                type='button'
+                data-track-category='XyneAI'
+                data-track-name='DEBUG_TIME_MODE'
+                onClick={() => setTimeMode(m)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${timeMode === m ? 'bg-xyne-brand text-xyne-fg-inverse' : 'text-xyne-fg-muted hover:text-xyne-fg-primary'}`}
+              >
+                {m === 'delta' ? 'Δ' : 'abs'}
+              </button>
+            ))}
+          </div>
+          <p className='text-[11px] text-xyne-fg-muted'>
+            {turnCount || historicalPairs.length} turn
+            {(turnCount || historicalPairs.length) === 1 ? '' : 's'}
+          </p>
+        </div>
       </div>
 
       {legacyPairs.map((pair, index) => {
         // Hide legacy pairs entirely when a sessionId selector is active —
-        // those rows don't have a sessionId to match against, so the user's
-        // pinned run can't be among them. Mirrors v3 DebugDrawer.
+        // those rows pre-date the per-run files and can't be matched by sid.
         if (selectedSessionId !== null) return null;
         if (selectedTurnIndex !== null && selectedTurnIndex !== index) return null;
         const useRootTimeline = persistedRuns.length === 0 && index === legacyPairs.length - 1;
-        const rootSessionId = getString(root ?? {}, 'sessionId');
+        const legacyTraces = useRootTimeline
+          ? (subagentTracesBySession.get(asString(root?.['sessionId'] ?? '')) ?? [])
+          : [];
+        const legacyTracesByToolCallId = new Map<string, SubagentTraceGroup[]>();
+        for (const trace of legacyTraces) {
+          const list = legacyTracesByToolCallId.get(trace.parentToolCallId) ?? [];
+          list.push(trace);
+          legacyTracesByToolCallId.set(trace.parentToolCallId, list);
+        }
         return (
-          <TurnPanel
+          <DebugTimelineSection
             key={`legacy-turn-${index}`}
             title={`Turn ${index + 1}: ${truncate(displayMessageText(pair.user) || 'User request', 90)}`}
             data={
@@ -1498,149 +1957,239 @@ function DebugSessionBody({
                   }
             }
             defaultOpen={useRootTimeline}
-            isSelected={selectedTurnIndex !== null}
-            {...(useRootTimeline && rootSessionId
-              ? {
-                  subagentTracesByParentToolCallId: subagentTraceMapForSession(
-                    subagents,
-                    rootSessionId,
-                  ),
-                }
-              : {})}
+            subagentTracesByParentToolCallId={legacyTracesByToolCallId}
+            selectedEventKey={selectedEventKey}
+            onSelectEvent={setSelectedEventKey}
+            timeMode={timeMode}
           />
         );
       })}
 
-      {persistedRuns.length > 0
-        ? persistedRuns.map((run, index) => {
-            const turnIndex = legacyPairs.length + index;
-            // Branching-safe: prefer sessionId match. Chronological turn order
-            // doesn't survive sibling branches (regenerate, edit-user), so the
-            // turn-index path picks the wrong run as soon as branches exist.
-            const runSessionId = getString(run.data, 'sessionId');
-            if (selectedSessionId !== null && runSessionId !== selectedSessionId) return null;
-            if (
-              selectedSessionId === null &&
-              selectedTurnIndex !== null &&
-              selectedTurnIndex !== turnIndex
-            )
-              return null;
-            return (
-              <TurnPanel
-                key={run.fileName}
-                title={`Turn ${legacyPairs.length + index + 1}: ${truncate(getString(run.data, 'task') || 'User request', 90)}`}
-                data={run.data}
-                defaultOpen={index === persistedRuns.length - 1}
-                isSelected={selectedTurnIndex !== null || selectedSessionId !== null}
-                subagentTracesByParentToolCallId={subagentTraceMapForSession(
-                  subagents,
-                  runSessionId,
-                )}
-              />
-            );
-          })
-        : legacyPairs.length === 0 &&
-          historicalPairs.length === 0 &&
-          selectedSessionId === null &&
-          (selectedTurnIndex === null || selectedTurnIndex === 0) && (
-            <TurnPanel
-              title='Latest run'
-              data={root ? { ...root, events: rootEvents } : { events: [] }}
-              defaultOpen
-              isSelected={selectedTurnIndex !== null}
-              {...(root
-                ? {
-                    subagentTracesByParentToolCallId: subagentTraceMapForSession(
-                      subagents,
-                      getString(root, 'sessionId'),
-                    ),
-                  }
-                : {})}
+      {persistedRuns.length > 0 ? (
+        persistedRuns.map((run, index) => {
+          const turnIndex = legacyPairs.length + index;
+          // Branching-safe: prefer sessionId match. Chronological turn order
+          // diverges from visible-path order once siblings exist.
+          if (selectedSessionId !== null && asString(run.data['sessionId']) !== selectedSessionId)
+            return null;
+          if (
+            selectedSessionId === null &&
+            selectedTurnIndex !== null &&
+            selectedTurnIndex !== turnIndex
+          )
+            return null;
+          const traceGroups = subagentTracesBySession.get(asString(run.data['sessionId'])) ?? [];
+          const subagentTracesByParentToolCallId = new Map<string, SubagentTraceGroup[]>();
+          for (const trace of traceGroups) {
+            const list = subagentTracesByParentToolCallId.get(trace.parentToolCallId) ?? [];
+            list.push(trace);
+            subagentTracesByParentToolCallId.set(trace.parentToolCallId, list);
+          }
+          return (
+            <DebugTimelineSection
+              key={run.fileName}
+              title={`Turn ${legacyPairs.length + index + 1}: ${truncate(asString(run.data['task']) || 'User request', 90)}`}
+              data={run.data}
+              defaultOpen={index === persistedRuns.length - 1}
+              subagentTracesByParentToolCallId={subagentTracesByParentToolCallId}
+              selectedEventKey={selectedEventKey}
+              onSelectEvent={setSelectedEventKey}
+              timeMode={timeMode}
             />
-          )}
+          );
+        })
+      ) : legacyPairs.length === 0 &&
+        historicalPairs.length === 0 &&
+        (selectedTurnIndex === null || selectedTurnIndex === 0) ? (
+        <DebugTimelineSection
+          title='Latest run'
+          data={root ? { ...root, events: rootEvents } : null}
+          defaultOpen
+          subagentTracesByParentToolCallId={(() => {
+            const traces = subagentTracesBySession.get(asString(root?.['sessionId'] ?? '')) ?? [];
+            const map = new Map<string, SubagentTraceGroup[]>();
+            for (const trace of traces) {
+              const list = map.get(trace.parentToolCallId) ?? [];
+              list.push(trace);
+              map.set(trace.parentToolCallId, list);
+            }
+            return map;
+          })()}
+          selectedEventKey={selectedEventKey}
+          onSelectEvent={setSelectedEventKey}
+          timeMode={timeMode}
+        />
+      ) : null}
+
+      {selectedTurnIndex === null &&
+        subagents.filter(
+          sub =>
+            !persistedRuns.some(
+              run => asString(run.data['sessionId']) === asString(sub.data['parentSessionId']),
+            ),
+        ).length > 0 && (
+          <p className='border-t border-xyne-border-subtle pt-2 text-[12px] text-xyne-fg-muted'>
+            Some subagent traces could not be matched to a parent turn. Open the raw run data in the
+            relevant turn to inspect them.
+          </p>
+        )}
     </div>
   );
 }
 
 export function AskAIDebugPanel({
   open,
-  inline = false,
-  width = 460,
-  minWidth = 460,
-  conversationId,
   agentSlug,
-  liveEvents,
-  running,
-  artifactsReadyVersion,
-  selectedTurnIndex,
-  selectedTurnLive,
-  selectedSessionId = null,
+  conversationId,
   onClose,
+  width = 460,
+  minWidth,
+  liveEvents = [],
+  running = false,
+  artifactsReadyVersion = 0,
+  selectedTurnIndex = null,
+  selectedTurnLive = false,
+  selectedSessionId = null,
+  focusToolCallId = null,
 }: AskAIDebugPanelProps) {
+  const isDark = useIsMidnightTheme();
+  const bodyRef = useRef<HTMLDivElement>(null);
   const [bundle, setBundle] = useState<DebugArtifactBundle | null>(null);
+  const [bundleHasCurrentRun, setBundleHasCurrentRun] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [refresh, setRefresh] = useState(0);
-  const previousReady = useRef(artifactsReadyVersion);
-  const runningRef = useRef(running);
-  const bundleRef = useRef(bundle);
-  runningRef.current = running;
-  bundleRef.current = bundle;
-  const liveRate = useMemo(() => liveStreamStatus(liveEvents), [liveEvents]);
-  const savedRate = useMemo(() => persistedStreamStatus(bundle), [bundle]);
-  const streamStatus = running && liveRate ? liveRate : (savedRate ?? liveRate);
-  const liveSubagentTracesByParentToolCallId = useMemo(
-    () => liveSubagentTraceMap(liveEvents),
-    [liveEvents],
-  );
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [showLiveTrace, setShowLiveTrace] = useState(false);
+  const expectedRunRef = useRef<{ sessionId?: string; startedAt: number } | null>(null);
+  const previousRunningRef = useRef(false);
+  const previousArtifactsReadyVersionRef = useRef(artifactsReadyVersion);
+  const currentLiveStream = useMemo(() => liveStreamStatus(liveEvents), [liveEvents]);
+  const savedStream = useMemo(() => persistedStreamStatus(bundle), [bundle]);
+  const streamStatus =
+    running && currentLiveStream ? currentLiveStream : (savedStream ?? currentLiveStream);
 
   useEffect(() => {
-    bundleRef.current = null;
-    setBundle(null);
-    setError(null);
-  }, [conversationId, agentSlug]);
+    if (running && liveEvents.length > 0) {
+      setShowLiveTrace(true);
+      return;
+    }
+    // Hold the live overlay until the bundle has actually caught up to the
+    // most recent run — otherwise follow-up turns flash live events for a
+    // moment and then vanish because a stale bundle from a prior turn was
+    // already present.
+    if (!bundle || !bundleHasCurrentRun) return;
+    const timer = window.setTimeout(() => setShowLiveTrace(false), 240);
+    return () => window.clearTimeout(timer);
+  }, [running, liveEvents.length, bundle, bundleHasCurrentRun]);
 
   useEffect(() => {
-    if (!open || !conversationId) return;
-    const readyChanged = artifactsReadyVersion !== previousReady.current;
-    previousReady.current = artifactsReadyVersion;
-    if (runningRef.current && !readyChanged && bundleRef.current) return;
-    let cancelled = false;
-    setLoading(!bundleRef.current && !runningRef.current);
-    const load = async () => {
-      const attempts = readyChanged ? 3 : 1;
-      for (let attempt = 0; attempt < attempts && !cancelled; attempt += 1) {
-        try {
-          const data = await fetchV2DebugArtifacts(conversationId, agentSlug);
-          if (!cancelled) {
-            setBundle(data);
-            setError(null);
-          }
-          break;
-        } catch (err) {
-          if (attempt < attempts - 1) {
-            await new Promise(resolve => window.setTimeout(resolve, 400));
-          } else if (!cancelled && !runningRef.current) {
-            setError(err instanceof Error ? err.message : String(err));
-          }
-        }
-      }
-      if (!cancelled) setLoading(false);
+    if (running && !previousRunningRef.current) {
+      expectedRunRef.current = { startedAt: Date.now() };
+      // A new run started — any existing bundle is now stale until we refetch.
+      setBundleHasCurrentRun(false);
+    }
+    previousRunningRef.current = running;
+  }, [running]);
+
+  useEffect(() => {
+    const start = liveEvents.find(event => event.kind === 'session_start');
+    if (!start) return;
+    const sessionId = isRecord(start.data) ? asString(start.data['sessionId']) : '';
+    const startedAt = new Date(start.at).getTime();
+    expectedRunRef.current = {
+      ...(sessionId ? { sessionId } : {}),
+      startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
     };
-    void load();
+  }, [liveEvents]);
+
+  useEffect(() => {
+    setBundle(null);
+    setBundleHasCurrentRun(true);
+    setError(null);
+    previousArtifactsReadyVersionRef.current = artifactsReadyVersion;
+  }, [agentSlug, conversationId]);
+
+  useEffect(() => {
+    if (!open || !agentSlug || !conversationId) return;
+    let cancelled = false;
+    let inFlight = false;
+    const readinessChanged = artifactsReadyVersion !== previousArtifactsReadyVersionRef.current;
+    previousArtifactsReadyVersionRef.current = artifactsReadyVersion;
+
+    const fetchArtifacts = async (
+      showError: boolean,
+      requireCurrentRun = false,
+    ): Promise<boolean> => {
+      if (inFlight) return false;
+      inFlight = true;
+      try {
+        const data = await fetchV2DebugArtifacts(conversationId, agentSlug);
+        if (cancelled) return false;
+        setBundle(data);
+        setError(null);
+        if (requireCurrentRun && !bundleContainsRun(data, expectedRunRef.current)) return false;
+        if (requireCurrentRun) {
+          expectedRunRef.current = null;
+          setBundleHasCurrentRun(true);
+        }
+        return true;
+      } catch (err) {
+        if (!cancelled && showError) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+        return false;
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    setLoading(!bundle && !running);
+    setError(null);
+    if (running && !readinessChanged) {
+      void fetchArtifacts(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void (async () => {
+      const requireCurrentRun = readinessChanged && expectedRunRef.current !== null;
+      let loaded = false;
+      const attempts = requireCurrentRun ? 3 : 1;
+      for (let attempt = 0; attempt < attempts && !cancelled; attempt += 1) {
+        loaded = await fetchArtifacts(false, requireCurrentRun);
+        if (loaded) break;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      if (!loaded && !cancelled) await fetchArtifacts(true, requireCurrentRun);
+      if (!cancelled) setLoading(false);
+    })();
+
     return () => {
       cancelled = true;
     };
-  }, [open, conversationId, agentSlug, artifactsReadyVersion, refresh]);
+  }, [open, agentSlug, conversationId, artifactsReadyVersion, refreshVersion]);
+
+  // Focus a specific tool call: expand its event row (and every collapsed
+  // <details> ancestor — turn, timeline) and scroll it into view. Driven by a
+  // generic auto-citation chip click in the chat. Runs after the bundle renders.
+  useEffect(() => {
+    if (!open || !focusToolCallId) return;
+    const root = bodyRef.current;
+    if (!root) return;
+    const timer = window.setTimeout(() => {
+      const el = root.querySelector<HTMLDetailsElement>(
+        `details[data-tool-call-id="${(window.CSS?.escape ?? ((s: string) => s))(focusToolCallId)}"]`,
+      );
+      if (!el) return;
+      for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+        if (node instanceof HTMLDetailsElement) node.open = true;
+      }
+      el.scrollIntoView({ block: 'center' });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [open, focusToolCallId, bundle]);
 
   if (!open) return null;
-
-  const liveRootEvents = liveEvents.filter(event => !event.subagentName);
-  const liveData: Record<string, unknown> = {
-    events: liveRootEvents,
-    messages: [],
-    task: 'Live response',
-  };
 
   const panel = (
     <>
@@ -1649,40 +2198,41 @@ export function AskAIDebugPanel({
           <Bug size={14} />
         </div>
         <div className='min-w-0 flex-1'>
-          <p className='truncate text-[12px] font-semibold text-xyne-fg-primary'>
+          <p className='truncate text-[12px] font-semibold text-xyne-fg-primary'>Debugger</p>
+          <p className='truncate text-[10px] text-xyne-fg-muted'>
             {selectedSessionId
               ? `Run ${selectedSessionId.slice(0, 8)}`
-              : selectedTurnIndex === null
-                ? 'Ask AI Debugger'
-                : `Response ${selectedTurnIndex + 1} Debugger`}
-          </p>
-          <p className='truncate text-[10px] text-xyne-fg-muted'>
-            {agentSlug} {conversationId ? `· ${conversationId}` : ''}
+              : selectedTurnIndex !== null
+                ? `Turn ${selectedTurnIndex + 1}`
+                : agentSlug}{' '}
+            {conversationId ? `· ${conversationId}` : ''}
           </p>
         </div>
         <button
           type='button'
-          onClick={() => setRefresh(value => value + 1)}
-          disabled={!conversationId || loading}
-          className='inline-flex items-center gap-1 rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle px-2 py-1 text-[10px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border hover:bg-xyne-surface disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category='XyneAI'
           data-track-name='DEBUG_PANEL_REFRESH'
+          onClick={() => {
+            if (!conversationId) return;
+            setRefreshVersion(version => version + 1);
+          }}
+          disabled={!conversationId || loading}
+          className='inline-flex items-center gap-1 rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle px-2 py-1 text-[10px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border hover:bg-xyne-surface disabled:cursor-not-allowed disabled:opacity-50'
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           Refresh
         </button>
         <button
           type='button'
+          data-track-category='XyneAI'
+          data-track-name='DEBUG_PANEL_CLOSE'
           onClick={onClose}
           className='flex h-7 w-7 items-center justify-center rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle text-xyne-fg-secondary transition hover:border-xyne-border hover:bg-xyne-surface hover:text-xyne-fg-primary'
           aria-label='Close debugger'
-          data-track-category='XyneAI'
-          data-track-name='DEBUG_PANEL_CLOSE'
         >
           <X size={16} />
         </button>
       </div>
-
       {streamStatus && (
         <StreamRateStatus
           rate={streamStatus.rate}
@@ -1691,30 +2241,7 @@ export function AskAIDebugPanel({
         />
       )}
 
-      <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5 [overflow-anchor:none]'>
-        {conversationId &&
-          running &&
-          liveEvents.length > 0 &&
-          selectedSessionId === null &&
-          (selectedTurnIndex === null || selectedTurnLive) && (
-            <div className='mb-2.5'>
-              <div className='mb-1 flex items-baseline gap-2'>
-                <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Live run</p>
-                <p className='text-[11px] text-xyne-fg-muted'>
-                  updates while the request is in flight
-                </p>
-              </div>
-              <TurnPanel
-                data={liveData}
-                title='Live response'
-                defaultOpen
-                {...(liveSubagentTracesByParentToolCallId.size > 0
-                  ? { subagentTracesByParentToolCallId: liveSubagentTracesByParentToolCallId }
-                  : {})}
-              />
-            </div>
-          )}
-
+      <div ref={bodyRef} className='min-h-0 flex-1 overflow-y-auto p-2.5'>
         {!conversationId ? (
           running && liveEvents.length > 0 ? (
             <div className='space-y-4'>
@@ -1723,14 +2250,7 @@ export function AskAIDebugPanel({
                   <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Live run</p>
                   <p className='text-[11px] text-xyne-fg-muted'>waiting for conversation id</p>
                 </div>
-                <TurnPanel
-                  data={liveData}
-                  title='Live response'
-                  defaultOpen
-                  {...(liveSubagentTracesByParentToolCallId.size > 0
-                    ? { subagentTracesByParentToolCallId: liveSubagentTracesByParentToolCallId }
-                    : {})}
-                />
+                <LiveDebugTrace events={liveEvents} />
               </div>
               <p className='border-t border-xyne-border-subtle pt-3 text-[12px] text-xyne-fg-muted'>
                 The conversation record will appear here once the backend assigns an id.
@@ -1748,36 +2268,58 @@ export function AskAIDebugPanel({
           </div>
         ) : error && !bundle ? (
           <p className='py-4 text-[13px] text-red-700 dark:text-red-300'>{error}</p>
-        ) : bundle ? (
-          <DebugSessionBody
-            bundle={bundle}
-            selectedTurnIndex={selectedTurnIndex}
-            selectedSessionId={selectedSessionId}
-          />
         ) : (
-          <p className='py-6 text-[13px] text-xyne-fg-muted'>
-            No debugger artifacts found for this conversation.
-          </p>
+          <div className='space-y-3'>
+            {conversationId &&
+              (showLiveTrace || (running && liveEvents.length > 0)) &&
+              selectedSessionId === null &&
+              (selectedTurnIndex === null || selectedTurnLive) &&
+              (() => {
+                const liveHandedOff = Boolean(bundle && bundleHasCurrentRun);
+                return (
+                  <div
+                    className={`transition-all duration-300 ease-out ${liveHandedOff ? 'pointer-events-none opacity-0 -translate-y-1' : 'opacity-100 translate-y-0'}`}
+                    aria-hidden={liveHandedOff}
+                  >
+                    <div className='mb-1 flex items-baseline gap-2'>
+                      <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Live run</p>
+                      <p className='text-[11px] text-xyne-fg-muted'>
+                        {liveHandedOff
+                          ? 'handoff to persisted trace'
+                          : 'updates while the request is in flight'}
+                      </p>
+                    </div>
+                    <LiveDebugTrace events={liveEvents} />
+                  </div>
+                );
+              })()}
+            <div
+              className={`transition-all duration-300 ease-out ${bundle ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 pointer-events-none'}`}
+            >
+              {bundle ? (
+                <DebugSessionBody
+                  bundle={bundle}
+                  selectedTurnIndex={selectedTurnIndex}
+                  selectedSessionId={selectedSessionId}
+                />
+              ) : (
+                <p className='py-6 text-[13px] text-xyne-fg-muted'>
+                  No debugger artifacts found for this conversation.
+                </p>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </>
   );
 
-  if (inline) {
-    return (
-      <div
-        className='flex h-full min-h-0 shrink-0 flex-col border-l border-xyne-border-subtle bg-xyne-surface shadow-2xl'
-        style={{ width, minWidth }}
-      >
-        {panel}
-      </div>
-    );
-  }
-
+  // The dashboard always embeds the panel inline (a fixed side column); there is
+  // no modal-overlay caller, so we render the inline container unconditionally.
   return (
     <div
-      className='flex h-full min-h-0 shrink-0 flex-col border-l border-xyne-border-subtle bg-xyne-surface shadow-2xl'
-      style={{ width, minWidth }}
+      className={`${isDark ? 'dark ' : ''}flex h-full min-h-0 shrink-0 flex-col border-l border-xyne-border-subtle bg-xyne-surface shadow-2xl`}
+      style={{ width, minWidth: minWidth ?? width }}
     >
       {panel}
     </div>

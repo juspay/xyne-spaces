@@ -160,6 +160,9 @@ const XyneAISidebar = ({
   // (carried on Message.debugSessionId from /messages runByMsgId). Falls back
   // to turn-index when not set (legacy rows, live streams pre-finalize).
   const [debugSessionId, setDebugSessionId] = useState<string | null>(null);
+  // When the debugger is opened by clicking a generic auto-citation chip, this
+  // holds the tool call to expand + scroll to. Cleared when opened any other way.
+  const [debugFocusToolCallId, setDebugFocusToolCallId] = useState<string | null>(null);
   const [debuggerWidth] = useState(() => {
     if (typeof window === 'undefined') return 460;
     const persisted = Number(window.localStorage.getItem(DEBUGGER_WIDTH_STORAGE_KEY));
@@ -1938,6 +1941,7 @@ const XyneAISidebar = ({
                     ? () => {
                         setDebugTurnIndex(null);
                         setDebugSessionId(null);
+                        setDebugFocusToolCallId(null);
                         setShowDebugger(true);
                       }
                     : undefined
@@ -2161,6 +2165,17 @@ const XyneAISidebar = ({
                                           // whose AgentRun hasn't been linked
                                           // to chatMessageId yet.
                                           setDebugSessionId(message.debugSessionId ?? null);
+                                          setDebugFocusToolCallId(null);
+                                          setShowDebugger(true);
+                                        }
+                                      : undefined
+                                  }
+                                  onOpenToolDebug={
+                                    isV2 && message.type === 'bot'
+                                      ? (toolCallId: string) => {
+                                          setDebugTurnIndex(botTurnIndex);
+                                          setDebugSessionId(message.debugSessionId ?? null);
+                                          setDebugFocusToolCallId(toolCallId);
                                           setShowDebugger(true);
                                         }
                                       : undefined
@@ -2261,6 +2276,7 @@ const XyneAISidebar = ({
             selectedTurnIndex={debugTurnIndex}
             selectedTurnLive={debugTurnIndex !== null && debugTurnIndex === streamingBotTurnIndex}
             selectedSessionId={debugSessionId}
+            focusToolCallId={debugFocusToolCallId}
             onClose={() => setShowDebugger(false)}
           />
         </>

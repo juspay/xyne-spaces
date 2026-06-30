@@ -368,7 +368,7 @@ export class YqlBuilder {
       // Deduplicate mail results by conversation: one result per threadId,
       // keeping the highest-relevance hit within each thread.
       yql += ` | all(group(threadId) max(${safeLimit}) order(-max(relevance())) each(max(1) each(output(summary(default)))))`;
-    } else if (groupBy && apps.length != 1) {
+    } else if (groupBy && this.shouldGroup(groupBy, schemas, apps)) {
       const groupClause = this.buildGroupingClause(groupBy, Math.min(safeLimit, 50));
       if (groupClause) {
         yql += `| ${groupClause}`;
@@ -1102,6 +1102,52 @@ export class YqlBuilder {
     }
 
     return conditions.join(' and ');
+  }
+
+  /**
+   * Schemas that declare the field each supported groupBy value targets (imported
+   * fields included). Vespa rejects grouping on a field absent from every selected
+   * source, so a grouping clause may only be emitted when at least one of the
+   * `from sources` schemas has the field. Verified against vespa-core/vespa/schemas/*.sd:
+   *   senderId / userId -> userId    : chat_message, chat_attachment
+   *   channelId         -> channelId : chat_message, chat_attachment, ticket, file, mail
+   *                                    (imported as channelRef.docId)
+   *   docType           -> docType   : every schema ('all')
+   *   date / hour       -> createdAt : every schema except mail (mail uses `timestamp`)
+   */
+  private static readonly GROUP_FIELD_SCHEMAS: Record<string, VespaSchema[] | 'all'> = {
+    senderId: [messageSchema, attachmentSchema],
+    userId: [messageSchema, attachmentSchema],
+    channelId: [messageSchema, attachmentSchema, ticketSchema, fileSchema, mailSchema],
+    docType: 'all',
+    date: [messageSchema, channelSchema, attachmentSchema, ticketSchema, fileSchema, userSchema],
+    hour: [messageSchema, channelSchema, attachmentSchema, ticketSchema, fileSchema, userSchema],
+  };
+
+  /**
+   * True when groupBy's target field exists in at least one selected source.
+   * Unknown/unsupported groupBy values return false (no grouping emitted).
+   */
+  private groupFieldAvailable(groupBy: string, selectedSchemas: VespaSchema[]): boolean {
+    const allowed = YqlBuilder.GROUP_FIELD_SCHEMAS[groupBy];
+    if (!allowed) return false;
+    if (allowed === 'all') return true;
+    return selectedSchemas.some((s) => allowed.includes(s));
+  }
+
+  /**
+   * Decide whether a grouping clause should be emitted.
+   * Gated on field presence (see GROUP_FIELD_SCHEMAS) so we never reference a field
+   * absent from every selected source. `docType` is the implicit default groupBy
+   * (searchService applies it when the caller omits one); a single-app query collapses
+   * to essentially one docType, so those results stay flat. An explicit field grouping
+   * (senderId / channelId / ...) is honored even for a single app — this fixes the prior
+   * footgun where a single app/type + groupBy silently dropped the grouping entirely.
+   */
+  private shouldGroup(groupBy: string, selectedSchemas: VespaSchema[], apps: string[]): boolean {
+    if (!this.groupFieldAvailable(groupBy, selectedSchemas)) return false;
+    if (groupBy === 'docType') return apps.length !== 1;
+    return true;
   }
 
   /**
