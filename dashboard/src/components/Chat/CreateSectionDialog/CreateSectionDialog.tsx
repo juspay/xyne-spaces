@@ -15,12 +15,14 @@ import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
-import { keyBetween, isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import { keyBetween, isDMChannel, getDMSearchableName } from '../ChatDirectory/ChatDirectory.utils';
 import { SectionEmojiPicker } from '../SectionEmojiPicker';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import type { VisibleChannel } from '../../../machines/stateMachine';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useUsers } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface CreateSectionDialogProps {
   channels: VisibleChannel[];
@@ -79,6 +81,8 @@ export const CreateSectionDialog = ({
   const [createdSectionId, setCreatedSectionId] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const { userID } = useAuthContextValues();
+  const allUsers = useUsers();
 
   const showHintOnDismissRef = useRef(false);
   useEffect(() => {
@@ -130,16 +134,22 @@ export const CreateSectionDialog = ({
     setCreatedSectionId(id);
     setStep(2);
   };
+  const userMap = useMemo(
+    () => new Map(allUsers.map(u => [u.id, getUserDisplayName(u)])),
+    [allUsers],
+  );
 
   const filteredChannels = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const base = !q ? channels : channels.filter(c => (c.name ?? '').toLowerCase().includes(q));
+    const base = !q
+      ? channels
+      : channels.filter(c => getDMSearchableName(c, userMap, userID).toLowerCase().includes(q));
     return [...base].sort((a, b) => {
       const aSelected = selected.has(a.id) ? 0 : 1;
       const bSelected = selected.has(b.id) ? 0 : 1;
       return aSelected - bSelected;
     });
-  }, [channels, filter, selected]);
+  }, [channels, filter, selected, userMap, userID]);
 
   const allFilteredSelected =
     filteredChannels.length > 0 && filteredChannels.every(c => selected.has(c.id));

@@ -183,3 +183,14 @@ export const getDMParticipantIdsToFetch = (
   // For GROUP_DM: limit to 4 (we only need 3 names + count)
   return otherIds.slice(0, 4);
 };
+
+export const getDMSearchableName = (
+  channel: VisibleChannel,
+  userMap: Map<string, string>,
+  currentUserId: string,
+): string => {
+  if (!isDMChannel(channel.scopeType)) return channel.name ?? '';
+  const participantIds = parseDMParticipantIds(channel).filter(id => id !== currentUserId);
+  const names = participantIds.map(id => userMap.get(id)).filter(Boolean) as string[];
+  return names.length > 0 ? names.join(', ') : (channel.name ?? '');
+};
