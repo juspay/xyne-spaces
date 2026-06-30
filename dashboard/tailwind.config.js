@@ -39,6 +39,24 @@ export default {
         'xyne-red': XYNE_FOUNDATION_TOKENS.colors.red,
         'xyne-green': XYNE_FOUNDATION_TOKENS.colors.green,
         'xyne-yellow': XYNE_FOUNDATION_TOKENS.colors.yellow,
+        // Xyne semantic tokens — mirror claw's `tokens.css` so shared claw
+        // components (the Ask AI debugger) render with identical surfaces/text/
+        // borders. Values resolve from CSS vars in global.css (light on :root,
+        // dark under [data-theme="midnight"]). Only the debugger uses these
+        // today, so the addition is additive and collision-free.
+        'xyne-surface': 'var(--color-xyne-surface)',
+        'xyne-surface-subtle': 'var(--color-xyne-surface-subtle)',
+        'xyne-surface-sunken': 'var(--color-xyne-surface-sunken)',
+        'xyne-fg-primary': 'var(--color-xyne-fg-primary)',
+        'xyne-fg-secondary': 'var(--color-xyne-fg-secondary)',
+        'xyne-fg-tertiary': 'var(--color-xyne-fg-tertiary)',
+        'xyne-fg-muted': 'var(--color-xyne-fg-muted)',
+        'xyne-fg-inverse': 'var(--color-xyne-fg-inverse)',
+        'xyne-border': 'var(--color-xyne-border)',
+        'xyne-border-subtle': 'var(--color-xyne-border-subtle)',
+        'xyne-border-strong': 'var(--color-xyne-border-strong)',
+        'xyne-brand': 'var(--color-xyne-brand)',
+        'xyne-brand-ghost': 'var(--color-xyne-brand-ghost)',
         // Existing shadcn colors
 
         border: 'hsl(var(--border))',

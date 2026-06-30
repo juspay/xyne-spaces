@@ -16,6 +16,9 @@ interface ResolvedCite {
   label: string;
   iconUrl?: string;
   newTab: boolean;
+  /** Source tool call — used to open the debug panel for generic auto-citations
+   *  (which have no link target). */
+  toolCallId: string;
 }
 
 const MAX_STACKED_ICONS = 3;
@@ -32,9 +35,13 @@ const MAX_STACKED_ICONS = 3;
 export function ClawCitationGroup({
   refs,
   toolInvocations,
+  onOpenToolDebug,
 }: {
   refs: ClawCiteGroupRef[];
   toolInvocations: ToolInvocation[] | undefined;
+  /** Generic auto-citations carry no link — clicking opens the source tool call
+   *  in the debug panel instead. Absent for normal (linkable) citations. */
+  onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
 }): ReactElement | null {
   const items: ResolvedCite[] = [];
   for (const ref of refs) {
@@ -45,6 +52,7 @@ export function ClawCitationGroup({
       url: buildClawCitationUrl(citation),
       label: getClawCitationLabel(citation),
       newTab: citationOpensInNewTab(citation),
+      toolCallId: ref.toolCallId,
       ...(iconUrl ? { iconUrl } : {}),
     });
   }
@@ -71,6 +79,17 @@ export function ClawCitationGroup({
       <CitationLink url={it.url} newTab={it.newTab} className={chipClass} ariaLabel={it.label}>
         {inner}
       </CitationLink>
+    ) : onOpenToolDebug ? (
+      <button
+        type='button'
+        className={chipClass}
+        aria-label={`${it.label} — open in debugger`}
+        onClick={() => onOpenToolDebug(it.toolCallId)}
+        data-track-category='XyneAI'
+        data-track-name='DEBUG_CITATION_OPEN'
+      >
+        {inner}
+      </button>
     ) : (
       <span className={chipClass} aria-label={it.label}>
         {inner}
@@ -157,6 +176,17 @@ export function ClawCitationGroup({
             <CitationLink key={i} url={it.url} newTab={it.newTab} className={rowClass}>
               {inner}
             </CitationLink>
+          ) : onOpenToolDebug ? (
+            <button
+              key={i}
+              type='button'
+              className={`${rowClass} w-full text-left`}
+              onClick={() => onOpenToolDebug(it.toolCallId)}
+              data-track-category='XyneAI'
+              data-track-name='DEBUG_CITATION_OPEN'
+            >
+              {inner}
+            </button>
           ) : (
             <span key={i} className={rowClass}>
               {inner}

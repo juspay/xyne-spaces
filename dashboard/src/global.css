@@ -3340,6 +3340,45 @@ img.inline-emoji,
     0 0 16px 2px rgba(255, 137, 4, 0.05);
 }
 
+/* ================================================================
+   Xyne semantic tokens (mirrors claw's tokens.css)
+   Power the shared Ask AI debugger panel's xyne-* utilities. Light
+   values on :root apply to the classic/summer_breeze themes; the
+   midnight (dark) theme overrides them below. Keep in sync with
+   xyne-claw-auth/frontend/src/styles/tokens.css.
+================================================================ */
+:root {
+  --color-xyne-surface: #ffffff;
+  --color-xyne-surface-subtle: #f5f5f5;
+  --color-xyne-surface-sunken: #f3f4f6;
+  --color-xyne-fg-primary: #101828;
+  --color-xyne-fg-secondary: #374151;
+  --color-xyne-fg-tertiary: #7c8698;
+  --color-xyne-fg-muted: #7c8698;
+  --color-xyne-fg-inverse: #ffffff;
+  --color-xyne-border-subtle: #f3f4f6;
+  --color-xyne-border: #e5e7eb;
+  --color-xyne-border-strong: #d1d5db;
+  --color-xyne-brand: #0a0a0a;
+  --color-xyne-brand-ghost: #f5f5f5;
+}
+
+[data-theme="midnight"] {
+  --color-xyne-surface: #171717;
+  --color-xyne-surface-subtle: #0a0a0a;
+  --color-xyne-surface-sunken: #262626;
+  --color-xyne-fg-primary: #fafafa;
+  --color-xyne-fg-secondary: #d4d4d4;
+  --color-xyne-fg-tertiary: #a3a3a3;
+  --color-xyne-fg-muted: #a3a3a3;
+  --color-xyne-fg-inverse: #0a0a0a;
+  --color-xyne-border-subtle: #262626;
+  --color-xyne-border: #404040;
+  --color-xyne-border-strong: #525252;
+  --color-xyne-brand: #fafafa;
+  --color-xyne-brand-ghost: #262626;
+}
+
 .docx-container {
   color-scheme: light;
 }
