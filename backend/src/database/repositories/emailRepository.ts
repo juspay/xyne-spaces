@@ -19,6 +19,7 @@ export class EmailRepository {
     channelId: string;
     externalThreadId: string;
     externalMessageId: string;
+    sentByUserId?: string;
     rfcMessageId?: string | null;
     createdAt?: Date;
   }): Promise<Email> {
@@ -44,6 +45,7 @@ export class EmailRepository {
         channelId: data.channelId,
         externalThreadId: data.externalThreadId,
         externalMessageId: data.externalMessageId,
+        ...(data.sentByUserId && { sentByUserId: data.sentByUserId }),
         ...(rfcMessageId && { rfcMessageId }),
         ...(data.createdAt && { createdAt: data.createdAt }),
       },
@@ -145,7 +147,11 @@ export class EmailRepository {
     if (externalThreadIds.length === 0) return [];
 
     return await this.db.email.findMany({
-      where: { externalThreadId: { in: externalThreadIds }, type: EmailType.DEFAULT },
+      // DEFAULT (inbound) and COMPOSE (outbound-new) are both thread roots.
+      where: {
+        externalThreadId: { in: externalThreadIds },
+        type: { in: [EmailType.DEFAULT, EmailType.COMPOSE] },
+      },
       orderBy: { createdAt: 'asc' },
       select: { id: true, externalThreadId: true },
     });

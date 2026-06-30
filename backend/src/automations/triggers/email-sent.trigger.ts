@@ -172,7 +172,10 @@ export async function emitEmailSent(emailId: string): Promise<void> {
   try {
     const email = await repositories.emails.findById(emailId);
     if (!email) return;
-    if (email.type === EmailType.DEFAULT) return; // only REPLY / REPLY_ALL
+    // Only outbound replies fire EMAIL_SENT. DEFAULT (inbound) and COMPOSE
+    // (outbound-new) are intentionally excluded — composed mail does not fire
+    // this trigger today and we keep that behavior.
+    if (email.type !== EmailType.REPLY && email.type !== EmailType.REPLY_ALL) return;
 
     const ticketStub = await repositories.tickets.findFirstByConversationId(email.conversationId);
     const workspaceId =

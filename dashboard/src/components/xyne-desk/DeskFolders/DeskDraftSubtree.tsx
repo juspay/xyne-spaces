@@ -1,20 +1,22 @@
 import { ReactElement } from 'react';
-import { Pencil } from 'lucide-react';
+import { Pencil, Send } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 
 /**
  * Lazy per-desk subtree rendered under an expanded desk row. Shows the user's
- * Drafts folder as a navigation entry into the per-desk drafts view.
+ * Drafts and Sent folders as navigation entries into the per-desk views.
  */
 
 interface DeskDraftSubtreeProps {
-  activeFolder?: 'userDrafts' | null;
+  activeFolder?: 'userDrafts' | 'userSent' | null;
   onOpenUserDrafts: () => void;
+  onOpenUserSent: () => void;
 }
 
 export const DeskDraftSubtree = ({
   activeFolder = null,
   onOpenUserDrafts,
+  onOpenUserSent,
 }: DeskDraftSubtreeProps): ReactElement => {
   return (
     <div className='mt-0.5 ml-3 pl-2 border-l border-border/60 flex flex-col gap-0.5'>
@@ -24,6 +26,13 @@ export const DeskDraftSubtree = ({
         active={activeFolder === 'userDrafts'}
         onClick={onOpenUserDrafts}
         trackName='OpenDeskUserDrafts'
+      />
+      <SubItem
+        icon={<Send size={12} className='text-muted-foreground' />}
+        label='Sent'
+        active={activeFolder === 'userSent'}
+        onClick={onOpenUserSent}
+        trackName='OpenDeskUserSent'
       />
     </div>
   );

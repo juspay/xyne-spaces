@@ -384,6 +384,7 @@ export class EmailController {
         channelId: conversation.channelId,
         externalThreadId: result.threadId,
         externalMessageId,
+        sentByUserId: userId,
       });
       
       await db.ticket.updateMany({
@@ -889,6 +890,8 @@ export class EmailController {
           externalThreadId: sendResult.threadId,
           externalMessageId,
           receivedAt: new Date(),
+          emailType: EmailType.COMPOSE,
+          sentByUserId: userId,
         });
 
         if (!created || !('conversation' in created) || !('ticket' in created) || !('email' in created)) {

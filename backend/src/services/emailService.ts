@@ -106,6 +106,11 @@ export interface CreateConversationWithEmailParams {
   uploadedFiles?: UploadedFileResult[];
   sourceName?: string; // External source name for Superposition context
   receivedAt?: Date;
+  // Type of the initial email row. Defaults to DEFAULT (inbound thread root).
+  // Outbound-new flows (compose / apps email-ticket creation) pass COMPOSE.
+  emailType?: EmailType;
+  // User who sent this email, for outbound-new flows. Null/undefined for inbound.
+  sentByUserId?: string;
 }
 
 export interface AddEmailToConversationParams {
@@ -884,6 +889,8 @@ export class EmailService {
       uploadedFiles = [],
       sourceName,
       receivedAt,
+      emailType = EmailType.DEFAULT,
+      sentByUserId,
     } = params;
     const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
@@ -1034,7 +1041,7 @@ export class EmailService {
       // If this fails (P2002), the entire transaction rolls back.
       const createdEmail = await tx.email.create({
         data: {
-          type: EmailType.DEFAULT,
+          type: emailType,
           subject: emailSubject,
           body: emailBody,
           to: emailTo,
@@ -1046,6 +1053,7 @@ export class EmailService {
           channelId,
           externalThreadId,
           externalMessageId,
+          ...(sentByUserId && { sentByUserId }),
           ...(normalizedRfcMessageId && { rfcMessageId: normalizedRfcMessageId }),
           ...(receivedAt && { createdAt: receivedAt }),
         } as Prisma.EmailUncheckedCreateInput,

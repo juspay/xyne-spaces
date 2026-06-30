@@ -135,6 +135,7 @@ import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThr
 import { useEmailDraft } from '../../hooks/useEmailDraft';
 import { DeskDraftSubtree } from '../../components/xyne-desk/DeskFolders/DeskDraftSubtree';
 import { UserDraftsView } from '../../components/xyne-desk/DeskFolders/UserDraftsView';
+import { UserSentView } from '../../components/xyne-desk/DeskFolders/UserSentView';
 import { useMarkEmailRead } from '../../hooks/useMarkEmailRead';
 import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
@@ -547,7 +548,7 @@ const SupportScreen = (): ReactElement => {
   });
   const [filters, setFilters] = useState<TicketFilters>({});
   const [expandedDeskIds, setExpandedDeskIds] = useState<Set<string>>(new Set());
-  const [deskView, setDeskView] = useState<'tickets' | 'userDrafts'>('tickets');
+  const [deskView, setDeskView] = useState<'tickets' | 'userDrafts' | 'userSent'>('tickets');
   // Build the filter args once — reused by both the kanban query and the list view.
   // "My Tickets" toggle is the assignee fallback when the explicit assignee filter is empty.
   const ticketFilter = useMemo(
@@ -1368,6 +1369,14 @@ const SupportScreen = (): ReactElement => {
     [setSelectedChannelId],
   );
 
+  const openUserSent = useCallback(
+    (id: string): void => {
+      setSelectedChannelId(id);
+      setDeskView('userSent');
+    },
+    [setSelectedChannelId],
+  );
+
   const openDeskTicket = useCallback(
     (item: {
       channelId: string;
@@ -1469,9 +1478,12 @@ const SupportScreen = (): ReactElement => {
         {isExpanded && (
           <DeskDraftSubtree
             activeFolder={
-              selectedChannelId === c.id && deskView === 'userDrafts' ? 'userDrafts' : null
+              selectedChannelId === c.id && (deskView === 'userDrafts' || deskView === 'userSent')
+                ? deskView
+                : null
             }
             onOpenUserDrafts={() => openUserDrafts(c.id)}
+            onOpenUserSent={() => openUserSent(c.id)}
           />
         )}
       </div>
@@ -1581,6 +1593,12 @@ const SupportScreen = (): ReactElement => {
                       composeDrafts={composeDraftRefs}
                       onReopenCompose={reopenDraft}
                       onDiscardCompose={discardDraft}
+                      onOpenTicket={openDeskTicket}
+                      onClose={() => setDeskView('tickets')}
+                    />
+                  ) : deskView === 'userSent' && selectedChannelId ? (
+                    <UserSentView
+                      channelId={selectedChannelId}
                       onOpenTicket={openDeskTicket}
                       onClose={() => setDeskView('tickets')}
                     />
