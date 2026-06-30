@@ -37,7 +37,9 @@ export const ScheduledMessageFilters = ({
   }, [messages, channelsMap]);
 
   const creatorOptions = useMemo(() => {
-    const uniqueCreatorIds = [...new Set(messages.map(m => m.createdBy))];
+    const uniqueCreatorIds = [
+      ...new Set([...messages.map(m => m.createdBy), ...filters.createdByIds]),
+    ];
     return uniqueCreatorIds
       .map(userId => ({
         value: userId,
@@ -48,32 +50,18 @@ export const ScheduledMessageFilters = ({
         if (b.value === currentUserId) return 1;
         return a.label.localeCompare(b.label);
       });
-  }, [messages, usersMap, currentUserId]);
+  }, [messages, usersMap, currentUserId, filters.createdByIds]);
 
   const hasActiveFilters = filters.channelIds.length > 0 || filters.createdByIds.length > 0;
 
   return (
     <div className='bg-background border border-border rounded-lg p-4'>
-      <div className='flex items-center justify-between mb-4'>
-        <div className='flex items-center gap-2'>
-          <Filter className='w-4 h-4 text-muted-foreground' />
-          <h3 className='text-sm font-medium text-foreground'>Filters</h3>
-        </div>
-
-        {hasActiveFilters && (
-          <Button
-            onClick={() => onFiltersChange({ channelIds: [], createdByIds: [] })}
-            variant='ghost'
-            size='sm'
-            className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground'
-          >
-            <X className='w-3 h-3' />
-            Clear all
-          </Button>
-        )}
+      <div className='flex items-center gap-2 mb-4'>
+        <Filter className='w-4 h-4 text-muted-foreground' />
+        <h3 className='text-sm font-medium text-foreground'>Filters</h3>
       </div>
 
-      <div className='flex flex-wrap gap-4'>
+      <div className='flex flex-wrap items-center gap-4'>
         <FilterMultiSelect
           options={channelOptions}
           selectedValues={filters.channelIds}
@@ -87,6 +75,18 @@ export const ScheduledMessageFilters = ({
           onChange={createdByIds => onFiltersChange({ ...filters, createdByIds })}
           placeholder='All creators'
         />
+
+        {hasActiveFilters && (
+          <Button
+            onClick={() => onFiltersChange({ channelIds: [], createdByIds: [] })}
+            variant='ghost'
+            size='sm'
+            className='ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground'
+          >
+            <X className='w-3 h-3' />
+            Clear all
+          </Button>
+        )}
       </div>
     </div>
   );

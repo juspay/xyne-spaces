@@ -126,7 +126,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
                   selectedOptions.map(opt => (
                     <span
                       key={opt.value}
-                      className='inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground max-w-[100px] truncate'
+                      className='inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground max-w-[160px] truncate'
                     >
                       {opt.label}
                       <button

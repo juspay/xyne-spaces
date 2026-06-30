@@ -938,6 +938,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       },
     });
 
+    useEffect(() => {
+      editor?.setEditable(!disabled && !isSending);
+    }, [editor, disabled, isSending]);
+
     // Expose imperative API for drag and drop and clearing content
     useImperativeHandle(
       ref,

@@ -8,7 +8,6 @@ import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { useBrowsableChannels, useChannelSearch } from '../../hooks/useChannels';
-import { useAuth } from '../../hooks/useAuth';
 import { toast } from 'sonner';
 import { InputBox } from '../ui/InputBox';
 import type { InputBoxHandle } from '../../hooks/useDragAndDropAreaRef';
@@ -44,7 +43,6 @@ const ScheduledMessageModal = ({
   scheduledMessage,
   onSaved,
 }: ScheduledMessageModalProps): ReactElement => {
-  const { user } = useAuth();
   const channels = useBrowsableChannels();
   const isEditMode = !!scheduledMessage;
   const inputBoxRef = useRef<InputBoxHandle>(null);
@@ -67,11 +65,7 @@ const ScheduledMessageModal = ({
     return channels?.filter(ch => adminChannelIds.has(ch.id));
   }, [channels, myAdminParticipations, isEditMode]);
 
-  // Check if current user is admin of the scheduled message's channel
-  const isChannelAdmin = !!myAdminParticipations?.some(
-    p => p.channelId === scheduledMessage?.channelId,
-  );
-  const canEdit = isChannelAdmin || scheduledMessage?.createdBy === user?.id;
+  const canEdit = scheduledMessage?.canEdit ?? false;
 
   const {
     control,
@@ -207,7 +201,10 @@ const ScheduledMessageModal = ({
       onSaved?.();
       onOpenChange(false);
     } catch (error) {
-      toast.error('Failed to save scheduled message');
+      const message =
+        (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        'Failed to save scheduled message';
+      toast.error(message);
       console.error('Error saving scheduled message:', error);
     } finally {
       setIsSubmitting(false);
@@ -222,7 +219,10 @@ const ScheduledMessageModal = ({
       onSaved?.();
       onOpenChange(false);
     } catch (error) {
-      toast.error('Failed to delete scheduled message');
+      const message =
+        (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        'Failed to delete scheduled message';
+      toast.error(message);
       console.error('Error deleting scheduled message:', error);
     }
   };
