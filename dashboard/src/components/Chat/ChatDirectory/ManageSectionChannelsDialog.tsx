@@ -1,12 +1,14 @@
 import { useMemo, useState, type ChangeEvent, type ReactElement } from 'react';
 import { Hash, Lock, MessageCircle, Search, X } from 'lucide-react';
 import { ChannelVisibility, type ChannelSection } from '@xyne/shared';
-import { isDMChannel } from './ChatDirectory.utils';
+import { isDMChannel, getDMSearchableName } from './ChatDirectory.utils';
 import { Button } from '../../ui/Button';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import type { VisibleChannel } from '../../../machines/stateMachine';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useUsers } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface ManageSectionChannelsDialogProps {
   section: ChannelSection;
@@ -59,16 +61,25 @@ export const ManageSectionChannelsDialog = ({
   const original = useMemo(() => new Set(currentChannelIds), [currentChannelIds]);
   const [selected, setSelected] = useState<Set<string>>(new Set(currentChannelIds));
   const [filter, setFilter] = useState('');
+  const { userID } = useAuthContextValues();
+  const allUsers = useUsers();
+
+  const userMap = useMemo(
+    () => new Map(allUsers.map(u => [u.id, getUserDisplayName(u)])),
+    [allUsers],
+  );
 
   const filteredChannels = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const base = !q ? channels : channels.filter(c => (c.name ?? '').toLowerCase().includes(q));
+    const base = !q
+      ? channels
+      : channels.filter(c => getDMSearchableName(c, userMap, userID).toLowerCase().includes(q));
     return [...base].sort((a, b) => {
       const aSelected = selected.has(a.id) ? 0 : 1;
       const bSelected = selected.has(b.id) ? 0 : 1;
       return aSelected - bSelected;
     });
-  }, [channels, filter, selected]);
+  }, [channels, filter, selected, userMap, userID]);
 
   const allSelected = channels.length > 0 && channels.every(c => selected.has(c.id));
 
