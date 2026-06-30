@@ -40,11 +40,13 @@ router.post('/:callId/process-transcript', callController.processTranscript);
 // Download transcript endpoint (downloads transcript file from GCS)
 router.get('/:callId/download-transcript', callController.downloadTranscript);
 
-// Download recording endpoint (redirects to signed GCS URL for MP4)
+// Download recording endpoint (streams the call's latest recording — legacy/headless player)
 router.get('/:callId/download-recording', callController.downloadRecording);
 
-// Save recording attachment — creates the MessageAttachment row on first play
-router.post('/:callId/save-recording-attachment', callController.saveRecordingAttachment);
+// In-call recordings (call_recordings table) — per-recording download, rename, delete
+router.get('/:callId/recordings/:recordingId/download', callController.downloadCallRecording);
+router.patch('/:callId/recordings/:recordingId', callController.renameCallRecording);
+router.delete('/:callId/recordings/:recordingId', callController.deleteCallRecording);
 
 // PRD Generation endpoint (generates PRD canvas from call transcript)
 router.post('/:callId/generate-prd', callController.generatePRD);
@@ -83,6 +85,10 @@ router.post('/:callId/mute-all', callController.muteAllParticipants);
 
 // Mute individual participant endpoint (host only)
 router.post('/:callId/mute-participant', callController.muteParticipant);
+
+// In-call recording start/stop (any participant; starter-only to stop)
+router.post('/:callId/recording/start', callController.startCallRecording);
+router.post('/:callId/recording/stop', callController.stopCallRecording);
 
 export default router;
 

@@ -73,6 +73,7 @@ const envSchema = Joi.object({
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   ENABLE_TAG_GENERATION_PIPELINE: Joi.boolean().default(false),
+  ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   BACKEND_URL: Joi.string().default(''),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default(''),
@@ -111,6 +112,7 @@ const envSchema = Joi.object({
   // Call Recording Configuration
   CALL_RECORDING_ENABLED: Joi.boolean().default(false),
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
+  SCREEN_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(30),
   FCM_PROJECT_ID: Joi.string().allow('').default(''),
   FCM_SERVICE_ACCOUNT_BASE64: Joi.string().allow('').default(''),
   FCM_PROJECT_ID_NEW: Joi.string().allow('').default(''),
@@ -480,6 +482,7 @@ export const config = {
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
   enableTagGenerationPipeline: envVars.ENABLE_TAG_GENERATION_PIPELINE,
+  enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
   backendUrl: envVars.BACKEND_URL,
   slackBotToken: envVars.SLACK_BOT_TOKEN,
   slackFrontendUrl: envVars.SLACK_FRONTEND_URL,
@@ -528,6 +531,9 @@ export const config = {
   callRecording: {
     enabled: envVars.CALL_RECORDING_ENABLED,
     retentionDays: envVars.CALL_RECORDING_RETENTION_DAYS,
+  },
+  screenRecording: {
+    retentionDays: envVars.SCREEN_RECORDING_RETENTION_DAYS,
   },
   fcm: {
     projectId: envVars.FCM_PROJECT_ID,

@@ -48,10 +48,10 @@ class TranscriptionAgentController {
       const db = DatabaseClient.getInstance();
       const callMessage = await db.message.findFirst({
         where: {
-          metadata: {
-            path: ['callId'],
-            equals: callId,
-          },
+          AND: [
+            { metadata: { path: ['callId'], equals: callId } },
+            { metadata: { path: ['isCallMessage'], equals: true } },
+          ],
         },
       });
 
@@ -131,10 +131,10 @@ class TranscriptionAgentController {
       // 2. Get call message to find conversationId
       const callMessage = await db.message.findFirst({
         where: {
-          metadata: {
-            path: ['callId'],
-            equals: callId,
-          },
+          AND: [
+            { metadata: { path: ['callId'], equals: callId } },
+            { metadata: { path: ['isCallMessage'], equals: true } },
+          ],
         },
       });
 

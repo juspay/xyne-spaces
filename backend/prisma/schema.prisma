@@ -301,6 +301,27 @@ enum OrgRole {
 }
 
 // Call Feature Enums
+enum RecordingType {
+  AUDIO_ONLY
+  AUDIO_SCREEN
+  AUDIO_VIDEO
+  @@schema("public")
+}
+
+// Lifecycle of a single call_recordings row. See docs/call_recording_tech_review.md.
+enum RecordingStatus {
+  RECORDING_ACTIVE         // egress running, writing HLS segments — only status the single-active lock guards
+  RECORDING_STOPPED        // user stopped; egress finalizing last segments (lock freed)
+  PROCESSING_RECORDING     // segments in cloud; stitching HLS → single MP4
+  RECORDING_UPLOADED       // stitched MP4 confirmed in cloud — terminal success
+  RECORDING_FAILED         // startEgress threw / egress failed before any segment
+  RECORDING_UPLOAD_FAILED  // egress reported failure / segments never landed
+  PROCESSING_FAILED        // segments landed but the stitch failed (retryable)
+  RECORDING_EXPIRED        // retention removed the file (+ attachment/message cleaned)
+  RECORDING_DELETED        // user manually deleted (soft delete)
+  @@schema("non_zero")
+}
+
 enum CallType {
   AUDIO
   VIDEO
@@ -1197,6 +1218,7 @@ model User {
   incomingWebhooksRevoked   AppIncomingWebhook[]     @relation("AppIncomingWebhookRevokedBy")
   orgMember                 OrgMember?              @relation(fields: [orgMemberId], references: [memberId])
   externalTokens            UserExternalToken[]
+  recordings                CallRecording[]         // call recordings this user started
 
   permissions CollectionPermission[]
   @@unique([providerUserId, workspaceId])
@@ -2946,6 +2968,7 @@ model Call {
   // Relations
   channel      Channel?          @relation(fields: [channelId], references: [id])
   participants CallParticipant[]
+  recordings   CallRecording[]   // 1:N — every recording session for this call
   recurringSeries RecurringCallSeries? @relation(fields: [recurringSeriesId], references: [id])
 
   @@index([externalId]) // Fast lookup by public ID
@@ -2990,6 +3013,35 @@ model CallParticipant {
   @@index([response]) // Fast response lookup
   @@map("call_participants")
   @@schema("public")
+}
+
+// One row per recording session (start → stop). A call can have many.
+// See docs/call_recording_tech_review.md for the locked design + state machine.
+// A partial unique index `call_recordings_one_active ON call_recordings (call_id)
+// WHERE status = 'RECORDING_ACTIVE'` is added via raw SQL in the migration (Prisma can't
+// express it) — it is the single-active concurrency lock.
+model CallRecording {
+  id            String          @id @default(cuid())
+  callId        String
+  egressId      String?         @unique          // webhook correlation key
+  startedBy     String                           // user id; always set at creation. Cascade on user hard-delete
+  name          String?                          // prefilled "Recording 1", renamable on stop
+  recordingType RecordingType                    // explicit at start (no default)
+  status        RecordingStatus                  // explicit at insert (born RECORDING_ACTIVE, no default)
+  storagePath   String?                          // final MP4 object key, set only on UPLOADED (read by all consumers)
+  segmentPrefix String?                          // HLS segment dir, set at start; deleted after a successful stitch
+  messageId     String?                          // thread message this recording is posted under
+  startedAt     DateTime                         // Set explicitly in code (no DB default — team convention)
+  endedAt       DateTime?
+  createdAt     DateTime                         // Set explicitly in code (no DB default — team convention)
+  updatedAt     DateTime        @updatedAt
+
+  call    Call  @relation(fields: [callId], references: [id], onDelete: Cascade)
+  starter User @relation(fields: [startedBy], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@map("call_recordings")
+  @@schema("non_zero")
 }
 
 model RecurringCallSeries {

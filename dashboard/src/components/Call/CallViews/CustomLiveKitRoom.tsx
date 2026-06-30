@@ -13,7 +13,13 @@ import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketM
 import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { EndCallModal } from '../EndCallModal/EndCallModal';
-import { useIsCallHost, useIsOnlyParticipant, useCallParticipants } from '../../../hooks/useCalls';
+import {
+  useIsCallHost,
+  useIsOnlyParticipant,
+  useCallParticipants,
+  findActiveCall,
+  isCallRecording,
+} from '../../../hooks/useCalls';
 import { useUsers } from '../../../hooks/useUsers';
 import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
 import { ScreenPickerModal } from '../../ScreenPicker/ScreenPickerModal';
@@ -108,7 +114,7 @@ export function CustomLiveKitRoom({
             : 'idle';
 
   const activeCall = useMemo(
-    () => activeCalls.find(call => call.externalId === externalId),
+    () => findActiveCall(activeCalls, externalId),
     [activeCalls, externalId],
   );
 
@@ -118,6 +124,11 @@ export function CustomLiveKitRoom({
   );
 
   const callUpdatesChannelId = activeCall?.callUpdatesChannel ?? metadata?.channelId ?? channelId;
+
+  const isRecording = useMemo(
+    () => isCallRecording(activeCalls, externalId),
+    [activeCalls, externalId],
+  );
 
   const currentChannel = useChannel(channelId || '');
 
@@ -163,7 +174,7 @@ export function CustomLiveKitRoom({
   const isOnlyParticipant = useIsOnlyParticipant(callParticipants);
 
   const internalCallId = useMemo(() => {
-    const activeCall = activeCalls.find(c => c.externalId === externalId);
+    const activeCall = findActiveCall(activeCalls, externalId);
     return (activeCall as { id?: string } | undefined)?.id;
   }, [activeCalls, externalId]);
 
@@ -423,6 +434,7 @@ export function CustomLiveKitRoom({
         requestedAiController={isAiControlRequested}
         callParticipants={callParticipants}
         isHost={isHost}
+        isRecording={isRecording}
         currentUserId={user?.id ?? null}
         onApproveLobbyRequest={handleApproveLobbyRequest}
         onRejectLobbyRequest={handleRejectLobbyRequest}

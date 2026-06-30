@@ -180,6 +180,15 @@ class WorkerService {
       const { recordingCleanupQueue } = await import('@/queues/recordingCleanupQueue');
       await recordingCleanupQueue.initialize();
 
+      // HLS → MP4 stitch worker. Queue-based and CPU/disk-heavy (ffmpeg), so it
+      // is isolated behind its own flag: deploy a dedicated stitch node by enabling
+      // ONLY ENABLE_STITCH_WORKER. The API never consumes (enqueue is producer-only).
+      if (appConfig.enableStitchWorker) {
+        logger.info('Starting recording stitch worker...');
+        const { stitchWorker } = await import('@/workers/stitchWorker');
+        stitchWorker.start();
+      }
+
       if (appConfig.enableScheduledMessageWorker) {
         logger.info('Initializing notification service for scheduled message worker...');
         await notificationService.initialize();

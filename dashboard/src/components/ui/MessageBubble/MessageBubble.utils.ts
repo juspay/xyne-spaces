@@ -17,6 +17,8 @@ export interface MessageMetadata {
   isCallMessage?: boolean;
   operation?: string;
   callId?: string;
+  recordingId?: string;
+  recordingType?: string;
   prdCanvasUrl?: string;
   detailedSummaryCanvasUrl?: string;
   completedSteps?: Array<{

@@ -6,6 +6,7 @@ import {
   useParticipantNetworkQuality,
   useNetworkQualityToast,
 } from '../hooks/useParticipantNetworkQuality';
+import { type RecordingType } from '@xyne/shared';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
@@ -22,6 +23,9 @@ import { useReactions } from '../hooks/useReactions';
 import { ReactionsOverlay } from '../components/ReactionsOverlay';
 import { CallChatPanel } from '../CallChatPanel/CallChatPanel';
 import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
+import { recordingService } from '../../../services/Recording/recordingService';
+import { useActiveRecording } from '../hooks/useActiveRecording';
+import { RecordingStopDialog } from '../CallControls/RecordingStopDialog';
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -89,6 +93,8 @@ interface FullCallViewProps {
   unreadCallChatCount?: number | undefined;
   /** Called when a new remote call chat message arrives (for unread tracking) */
   onCallChatNewMessage?: (() => void) | undefined;
+  /** Whether screen recording is currently active (synced from Zero) */
+  isRecording?: boolean | undefined;
 }
 
 export function FullCallView({
@@ -130,6 +136,7 @@ export function FullCallView({
   onToggleCallChat,
   unreadCallChatCount = 0,
   onCallChatNewMessage,
+  isRecording: isRecordingProp = false,
 }: FullCallViewProps): React.ReactElement {
   // ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS
   // UI state
@@ -138,6 +145,98 @@ export function FullCallView({
   // Track local participant's network quality
   const networkQuality = useParticipantNetworkQuality(room?.localParticipant ?? null);
   const showQualityToast = useNetworkQualityToast(networkQuality);
+
+  const isHost = isHostProp ?? false;
+
+  // Active-recording state is driven by room metadata so every participant (incl.
+  // late joiners) sees the indicator. `isRecordingProp`/optimistic local state are
+  // only fallbacks for the brief window before metadata propagates.
+  const activeRecording = useActiveRecording(room);
+  const [optimisticRecording, setOptimisticRecording] = useState(false);
+  const isRecordingActive = !!activeRecording || optimisticRecording || isRecordingProp;
+
+  // Only the participant who started the recording may stop it (mirrors the
+  // backend starter-only authz). When we started it optimistically and metadata
+  // hasn't propagated yet, treat ourselves as the starter.
+  const canStopRecording = activeRecording
+    ? activeRecording.startedBy === currentUserId
+    : optimisticRecording;
+
+  // Reconcile optimistic flag once authoritative metadata arrives.
+  useEffect(() => {
+    if (activeRecording) setOptimisticRecording(true);
+    else setOptimisticRecording(false);
+  }, [activeRecording]);
+
+  // Elapsed recording timer (MM:SS) from the recording's start time.
+  const recordingStartedAt = activeRecording?.startedAt ?? null;
+  const [recordingElapsed, setRecordingElapsed] = useState('00:00');
+  useEffect(() => {
+    if (!recordingStartedAt) {
+      setRecordingElapsed('00:00');
+      return;
+    }
+    const tick = (): void => {
+      const seconds = Math.max(0, Math.floor((Date.now() - recordingStartedAt) / 1000));
+      const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
+      const ss = String(seconds % 60).padStart(2, '0');
+      setRecordingElapsed(`${mm}:${ss}`);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [recordingStartedAt]);
+
+  // Rename-on-stop popup state. When set, the dialog is shown.
+  const [stopDialog, setStopDialog] = useState<{
+    recordingId?: string;
+    defaultName: string;
+  } | null>(null);
+
+  const handleStartRecording = useCallback(
+    async (type: RecordingType): Promise<void> => {
+      setOptimisticRecording(true);
+      try {
+        const res = await recordingService.startCallRecording(callId, type);
+        if (res.alreadyActive) {
+          // Someone else already started one — metadata reflects the real state.
+          setOptimisticRecording(false);
+        }
+      } catch (err) {
+        console.error('[Recording] start error', err);
+        setOptimisticRecording(false);
+      }
+    },
+    [callId],
+  );
+
+  // Opening the rename popup; the actual stop happens on confirm/skip.
+  // Non-starters never reach here (the button is disabled for them), but guard anyway.
+  const handleStopRecording = useCallback((): void => {
+    if (!canStopRecording) return;
+    setStopDialog(
+      activeRecording?.recordingId
+        ? { recordingId: activeRecording.recordingId, defaultName: 'Recording' }
+        : { defaultName: 'Recording' },
+    );
+  }, [canStopRecording, activeRecording]);
+
+  const finalizeStopRecording = useCallback(
+    async (name?: string): Promise<void> => {
+      const recordingId = stopDialog?.recordingId;
+      setStopDialog(null);
+      setOptimisticRecording(false);
+      try {
+        await recordingService.stopCallRecording(callId, {
+          ...(recordingId ? { recordingId } : {}),
+          ...(name ? { name } : {}),
+        });
+      } catch (err) {
+        console.error('[Recording] stop error', err);
+      }
+    },
+    [callId, stopDialog],
+  );
 
   // Reactions
   const { reactions, sendReaction } = useReactions(room);
@@ -257,6 +356,22 @@ export function FullCallView({
           <span className='text-muted-foreground text-xs' data-testid='participant-count'>
             {participants.length} participant{participants.length !== 1 ? 's' : ''}
           </span>
+          {isRecordingActive && (
+            <>
+              <span className='text-muted-foreground text-xs'>·</span>
+              <span
+                className='flex items-center gap-1 text-red-400 text-xs font-semibold'
+                title={
+                  activeRecording?.startedByName
+                    ? `Recording started by ${activeRecording.startedByName}`
+                    : 'This call is being recorded'
+                }
+              >
+                <span className='w-2 h-2 bg-red-500 rounded-full animate-pulse inline-block' />
+                REC {recordingElapsed}
+              </span>
+            </>
+          )}
         </div>
         <ConnectionStatusIndicators room={room} />
       </div>
@@ -343,6 +458,11 @@ export function FullCallView({
             hideAIAssistant={hideAIAssistant}
             hideMinimize={hideMinimize}
             isExternalUser={isExternalUser}
+            isHost={isHost}
+            isRecording={isRecordingActive}
+            canStopRecording={canStopRecording}
+            onStartRecording={handleStartRecording}
+            onStopRecording={handleStopRecording}
           />
         </div>
       </CallStateTransition>
@@ -396,6 +516,16 @@ export function FullCallView({
           requesterName={pendingControlRequest.requesterName}
           onApprove={() => roomActor.send({ type: 'APPROVE_CONTROL_REQUEST' })}
           onDeny={() => roomActor.send({ type: 'DENY_CONTROL_REQUEST' })}
+        />
+      )}
+
+      {/* Rename-on-stop popup. Skipping keeps the prefilled name; either way the
+          recording is stopped and saved. */}
+      {stopDialog && (
+        <RecordingStopDialog
+          defaultName={stopDialog.defaultName}
+          onConfirm={name => void finalizeStopRecording(name)}
+          onDismiss={() => void finalizeStopRecording()}
         />
       )}
     </div>

@@ -17,6 +17,7 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CacConfigService } from '@/services/cacConfigService';
 import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
 import { executeCallLlmWithRetry } from './callLlmRetry';
+import { callRecordingService } from '@/services/callRecordingService';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -1513,6 +1514,7 @@ Output ONLY the processed transcript, nothing else.`;
         // Save summary and title to call record.
         // Skip title update for HEADLESS recordings to preserve user-provided title.
         // Only set title from AI if the call doesn't already have one (scheduled calls have a pre-set title).
+        const effectiveTitle = (title && !call.title) ? title : (call.title ?? null);
         // Wrap individually so a DB failure here is distinguishable from a transcript
         // post failure or a summary-post failure in the outer catch.
         try {
@@ -1528,6 +1530,11 @@ Output ONLY the processed transcript, nothing else.`;
             return;
           }
           logger.error(`[${callId}] call_record_update_failed`, { stage: 'call_record_update', error: updateError instanceof Error ? updateError.message : String(updateError), stack: updateError instanceof Error ? updateError.stack : undefined });
+        }
+
+        // Update recording attachment filename to use call title
+        if (effectiveTitle) {
+          void callRecordingService.updateRecordingFilename(callId, effectiveTitle);
         }
 
         // Update the call system message with the title (if generated)
