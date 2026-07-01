@@ -4449,6 +4449,29 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
         },
       ),
+      // Persist the notes-canvas viewAccessId onto the call as soon as the user creates the
+      // canvas mid-recording. The link is posted to the thread later by the automatic summary
+      // pipeline (transcriptService.postSummaryAsReply), so it survives any stop path.
+      linkNotesCanvas: defineMutator(
+        z.object({ callId: z.string(), notesCanvasViewAccessId: z.string().min(1) }),
+        async ({ tx, args: { callId, notesCanvasViewAccessId } }) => {
+          const call = await tx.run(zql.calls.where('externalId', callId).one());
+          if (!call) {
+            throw new Error('Call not found');
+          }
+          if (call.createdByUserId !== authData.sub) {
+            throw new Error('Access denied');
+          }
+          const currentMetadata =
+            call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+              ? (call.metadata as Record<string, unknown>)
+              : {};
+          await tx.mutate.calls.update({
+            id: call.id,
+            metadata: { ...currentMetadata, notesCanvasViewAccessId },
+          });
+        },
+      ),
       reject: defineMutator(
         z.object({ callId: z.string(), timestamp: z.number() }),
         async ({ tx, args: { callId, timestamp } }) => {

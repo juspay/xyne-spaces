@@ -2935,6 +2935,33 @@ export const mutators = defineMutators({
     ),
   },
   calls: {
+    // Persist the notes-canvas viewAccessId onto the call as soon as the user creates the
+    // canvas mid-recording. The link is posted to the thread later by the automatic summary
+    // pipeline (transcriptService.postSummaryAsReply), so it survives any stop path.
+    linkNotesCanvas: defineMutator(
+      z.object({ callId: z.string(), notesCanvasViewAccessId: z.string().min(1) }),
+      async ({ tx, ctx, args: { callId, notesCanvasViewAccessId } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+        // Headless recording calls are fetched over REST and are not synced into the
+        // client's Zero cache, so the optimistic (client) pass won't find the row. Skip
+        // it and let the authoritative server mutator perform the write against Postgres,
+        // where the call always exists. (The server copy throws if the call is missing.)
+        if (!call) {
+          return;
+        }
+        if (call.createdByUserId !== ctx.userID) {
+          throw new Error('Access denied');
+        }
+        const currentMetadata =
+          call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+            ? (call.metadata as Record<string, unknown>)
+            : {};
+        await tx.mutate.calls.update({
+          id: call.id,
+          metadata: { ...currentMetadata, notesCanvasViewAccessId },
+        });
+      },
+    ),
     reject: defineMutator(
       z.object({ callId: z.string(), timestamp: z.number() }),
       async ({ tx, ctx, args: { callId, timestamp } }) => {

@@ -1158,6 +1158,61 @@ A Product Requirements Document has been generated from this call discussion.
   }
 
   /**
+   * Post a notes-canvas link (notes taken live during a recording) to the conversation thread.
+   * Mirrors postPRDToConversation: posts as the Xyne Automatic bot and stamps the call message.
+   */
+  async postNotesCanvasToConversation(
+    conversationId: string,
+    callId: string,
+    canvasUrl: string,
+    workspaceId: string
+  ): Promise<void> {
+    try {
+      // Idempotent: the automatic summary pipeline may run more than once per call
+      const existing = await repositories.messages.findNotesCanvasByCallId(conversationId, callId);
+      if (existing) {
+        logger.info(`[CallDocumentService] Notes canvas already posted for call ${callId}, skipping`);
+        return;
+      }
+
+      const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', workspaceId);
+      if (!xyneAutomaticBot) {
+        throw new Error('Xyne Automatic bot not found');
+      }
+
+      const messageContent = `## 📝 Recording Notes
+
+Notes taken during this recording:
+
+[📄 View Notes Canvas](${canvasUrl})`;
+
+      await repositories.messages.create({
+        conversationId,
+        senderId: xyneAutomaticBot.id,
+        content: messageContent,
+        msgType: MessageType.BOT,
+        showInChannel: false,
+        metadata: {
+          messageSubtype: 'recording_notes',
+          callId,
+          canvasUrl,
+          contentFormat: 'markdown',
+        },
+      });
+
+      await repositories.conversations.incrementReplyCount(conversationId);
+
+      // Update the original call message with the notes canvas URL
+      await this.updateCallMessageMetadata(conversationId, callId, 'notesCanvasUrl', canvasUrl);
+
+      logger.info(`[CallDocumentService] Posted notes canvas link to conversation ${conversationId}`);
+    } catch (error) {
+      logger.error('[CallDocumentService] Failed to post notes canvas to conversation:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Post detailed summary canvas link to conversation (or update existing message)
    */
   async postDetailedSummaryToConversation(

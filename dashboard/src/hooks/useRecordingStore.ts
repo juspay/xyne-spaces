@@ -29,7 +29,8 @@ export type RecordingStoreEvent =
   | { type: 'error'; error: string }
   | { type: 'reset' }
   | { type: 'addTranscript'; entry: RecordingState['transcripts'][number] }
-  | { type: 'clearTranscripts' };
+  | { type: 'clearTranscripts' }
+  | { type: 'setNotesCanvas'; canvasId: string; viewAccessId: string };
 
 interface TypedRecordingStore {
   subscribe: (cb: () => void) => { unsubscribe: () => void };

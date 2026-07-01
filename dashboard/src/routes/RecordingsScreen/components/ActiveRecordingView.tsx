@@ -5,7 +5,7 @@
  */
 
 import { ReactElement, useEffect, useRef } from 'react';
-import { Mic } from 'lucide-react';
+import { Mic, Plus, Loader2 } from 'lucide-react';
 import { TranscriptEntry } from '../../../stores/recordingStore';
 import { formatTime12Hour, formatElapsedTime } from '../../../utils/recordingUtils';
 
@@ -13,6 +13,12 @@ interface ActiveRecordingViewProps {
   transcripts: TranscriptEntry[];
   startTime: number | null;
   isPaused: boolean;
+  /** Whether a notes canvas already exists for this recording. Hides the create button. */
+  hasCanvas?: boolean;
+  /** Spinner state while the canvas is being created. */
+  isCreatingCanvas?: boolean;
+  /** Triggered by the "Create Canvas" button. Omit (with hasCanvas) to hide the button. */
+  onCreateCanvas?: () => void;
 }
 
 // Re-export utility functions for local use
@@ -22,7 +28,11 @@ export function ActiveRecordingView({
   transcripts,
   startTime,
   isPaused,
+  hasCanvas = false,
+  isCreatingCanvas = false,
+  onCreateCanvas,
 }: ActiveRecordingViewProps): ReactElement {
+  const showCreateCanvas = !hasCanvas && !!onCreateCanvas;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new transcripts arrive
@@ -36,32 +46,52 @@ export function ActiveRecordingView({
     <div className='flex flex-col h-full'>
       {/* Recording Header */}
       <div className='px-6 py-4 border-b border-input dark:border-gray-700'>
-        <div className='flex items-center gap-3'>
-          <div className='w-10 h-10 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center'>
-            <Mic className='w-5 h-5 text-red-500' />
-          </div>
-          <div>
-            <h2 className='text-lg font-semibold text-foreground dark:text-gray-100'>
-              Note Taker Recording
-            </h2>
-            <div className='flex items-center gap-2 text-sm text-muted-foreground dark:text-muted-foreground'>
-              {startTime && <span>{formatTime(startTime)}</span>}
-              <span className='w-1 h-1 rounded-full bg-gray-400' />
-              <span className='flex items-center gap-1.5'>
-                {isPaused ? (
-                  <>
-                    <span className='w-2 h-2 rounded-full bg-yellow-500' />
-                    Paused
-                  </>
-                ) : (
-                  <>
-                    <span className='w-2 h-2 rounded-full bg-red-500 animate-pulse' />
-                    Recording...
-                  </>
-                )}
-              </span>
+        <div className='flex items-center justify-between gap-3'>
+          <div className='flex items-center gap-3 min-w-0'>
+            <div className='w-10 h-10 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center flex-shrink-0'>
+              <Mic className='w-5 h-5 text-red-500' />
+            </div>
+            <div className='min-w-0'>
+              <h2 className='text-lg font-semibold text-foreground dark:text-gray-100 truncate'>
+                Note Taker Recording
+              </h2>
+              <div className='flex items-center gap-2 text-sm text-muted-foreground dark:text-muted-foreground'>
+                {startTime && <span>{formatTime(startTime)}</span>}
+                <span className='w-1 h-1 rounded-full bg-gray-400' />
+                <span className='flex items-center gap-1.5'>
+                  {isPaused ? (
+                    <>
+                      <span className='w-2 h-2 rounded-full bg-yellow-500' />
+                      Paused
+                    </>
+                  ) : (
+                    <>
+                      <span className='w-2 h-2 rounded-full bg-red-500 animate-pulse' />
+                      Recording...
+                    </>
+                  )}
+                </span>
+              </div>
             </div>
           </div>
+
+          {/* Create Canvas — only shown until a notes canvas exists */}
+          {showCreateCanvas && (
+            <button
+              onClick={onCreateCanvas}
+              disabled={isCreatingCanvas}
+              className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-background dark:bg-gray-800 border border-border dark:border-gray-700 rounded-lg hover:bg-muted dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0'
+              data-track-category='RecordingsScreen'
+              data-track-name='create_notes_canvas'
+            >
+              {isCreatingCanvas ? (
+                <Loader2 className='w-3.5 h-3.5 animate-spin' />
+              ) : (
+                <Plus className='w-3.5 h-3.5' />
+              )}
+              Create Canvas
+            </button>
+          )}
         </div>
       </div>
 

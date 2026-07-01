@@ -108,6 +108,29 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     }
   }
 
+  async findNotesCanvasByCallId(conversationId: string, callId: string): Promise<Message | null> {
+    return await this.db.message.findFirst({
+      where: {
+        conversationId,
+        msgType: MessageType.BOT,
+        AND: [
+          {
+            metadata: {
+              path: ['messageSubtype'],
+              equals: 'recording_notes',
+            },
+          },
+          {
+            metadata: {
+              path: ['callId'],
+              equals: callId,
+            },
+          },
+        ],
+      },
+    });
+  }
+
   async create(data: CreateMessageInput, disableMessageCountIncrement: boolean = false): Promise<Message> {
 
       await this.validateString(data.conversationId, 'conversationId');
