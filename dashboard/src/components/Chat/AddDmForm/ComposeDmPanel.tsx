@@ -113,11 +113,6 @@ export const ComposeDmPanel: React.FC = () => {
 
   const handleSendMessage = useCallback(
     async (_plainText: string, html: string, files: File[]): Promise<void> => {
-      if (selectedUsers.length === 0) {
-        setHasAttemptedSubmit(true);
-        throw new Error('Please select at least one person to message');
-      }
-
       // Cancel any pending auto-create debounce — we'll create immediately
       cancelAutoCreate();
 
@@ -177,9 +172,6 @@ export const ComposeDmPanel: React.FC = () => {
 
   const handleUsersChange = (users: User[]): void => {
     setSelectedUsers(users);
-    if (users.length > 0) {
-      setHasAttemptedSubmit(false);
-    }
   };
 
   // Mention search within the compose panel input box
@@ -537,7 +529,7 @@ export const ComposeDmPanel: React.FC = () => {
                     onContentChange={(html: string) => {
                       field.handleChange(html);
                     }}
-                    disabled={selectedUsers.length === 0 || selectedUsers.length > 9}
+                    disabled={selectedUsers.length > 9}
                     disableDraftUpload
                     onSendMessage={handleSendMessage}
                     features={{
@@ -546,7 +538,7 @@ export const ComposeDmPanel: React.FC = () => {
                       fileAttachments: true,
                       emojiPicker: true,
                     }}
-                    sendDisabled={field.state.meta.errors.length > 0}
+                    sendDisabled={field.state.meta.errors.length > 0 || selectedUsers.length === 0}
                     className={cn(
                       field.state.meta.errors.length > 0 &&
                         'border-destructive aria-invalid:ring-destructive/20 aria-invalid:border-destructive',
