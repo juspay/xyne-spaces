@@ -4,6 +4,7 @@ import { repositories } from '../database/repositories/index';
 import { DatabaseClient } from '@/database/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { grantPermissionsForRole } from './permissionMatrix';
+import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '@/constants/userPreferenceDefaults';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -221,6 +222,7 @@ export class UserService {
         logger.info(`Creating user preference entry for user ${userId}`);
         await this.prisma.userPreference.create({
           data: {
+            ...USER_PREFERENCE_NOTIFICATION_DEFAULTS,
             userId,
             askai_custom_instruction: null, // Initialize with null
           },
