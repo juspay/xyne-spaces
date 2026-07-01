@@ -1,22 +1,24 @@
 import { ReactElement, useState, useMemo, useRef } from 'react';
 import { useZero } from '../../../../hooks/useZero';
 import { toast } from 'sonner';
-import { SingleSelect } from '@juspay/blend-design-system';
 import { Button } from '../../../ui/Button/Button';
 import Avatar from '../../../ui/Avatar/Avatar';
 import Input from '../../../ui/Input/Input';
-import type { User } from '@xyne/shared';
-import { UserResponsibility } from '@xyne/shared';
+import { EntitySelector } from '../../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../../ui/EntitySelector/EntitySelector.types';
+import type { User, Role } from '@xyne/shared';
 import { mutators } from '../../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { Search, Trash2 } from 'lucide-react';
 import { useUserSearch } from '../../../../hooks/useUsers';
+import { useCachedQuery } from '../../../../hooks/useCachedQuery';
+import { queries } from '../../../../zero/queries';
 import { getUserDisplayName, isUserDeactivated } from '../../../../utils/userDisplayName';
 import { usePlatform } from '../../../../hooks/usePlatform';
 
 interface UserListProps {
   users: User[];
-  responsibilities: Map<string, UserResponsibility>;
+  roleIds: Map<string, string>;
   onUserRemove?: () => void;
   onUsersAdded?: () => void;
   disabled?: boolean;
@@ -27,7 +29,7 @@ interface UserListProps {
 
 export const UserList = ({
   users,
-  responsibilities,
+  roleIds,
   onUserRemove,
   onUsersAdded,
   disabled = false,
@@ -44,14 +46,8 @@ export const UserList = ({
   // Get users matching search query (for adding)
   const searchResults = useUserSearch(searchTerm, 10);
 
-  // Responsibility options for SingleSelect
-  const responsibilityOptions = [
-    { label: 'Manager', value: UserResponsibility.MANAGER },
-    { label: 'Team Lead', value: UserResponsibility.TEAM_LEAD },
-    { label: 'Dev', value: UserResponsibility.MEMBER },
-    { label: 'PR Reviewer', value: UserResponsibility.PR_REVIEWER },
-    { label: 'QA', value: UserResponsibility.QA },
-  ];
+  // Fetch workspace roles for the role dropdown
+  const [roles] = useCachedQuery(queries.roles({}));
 
   // Filter existing users by search term
   const filteredUsers = useMemo(() => {
@@ -126,6 +122,40 @@ export const UserList = ({
     }
   };
 
+  const handleRoleChange = (userId: string, roleId: string | null): void => {
+    if (roleId === null) {
+      // Deselect: only supported in create mode (no clear-role mutator in edit mode)
+      if (isCreateMode) {
+        roleIds.delete(userId);
+        forceUpdate(n => n + 1);
+      }
+      return;
+    }
+
+    if (isCreateMode) {
+      roleIds.set(userId, roleId);
+      forceUpdate(n => n + 1);
+      return;
+    }
+
+    // Edit mode: persist via mutator
+    try {
+      zero.mutate(
+        mutators.userGroup.update({
+          userGroupId: userGroupId,
+          userRoleUpdates: { [userId]: roleId },
+          timestamp: Date.now(),
+        }),
+      );
+      roleIds.set(userId, roleId);
+      forceUpdate(n => n + 1);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to update user role. Please try again.',
+      );
+    }
+  };
+
   return (
     <div className='flex flex-col h-full'>
       {/* Search Bar */}
@@ -164,6 +194,7 @@ export const UserList = ({
                 <div className='divide-y divide-border'>
                   {filteredUsers.map(user => {
                     const deactivated = isUserDeactivated(user);
+                    const selectedRoleId = roleIds.get(user.id);
                     return (
                       <div
                         key={user.id}
@@ -206,19 +237,13 @@ export const UserList = ({
                             </Button>
                           )}
 
-                          {/* Responsibility Selector - only in edit mode */}
-                          {!disabled && !isCreateMode && (
-                            <div className='w-[140px] shrink-0 [&>div]:h-7 [&>div]:w-[140px] [&_button]:h-7 [&_button]:w-[140px] [&_button]:!text-xs [&_button]:rounded-md [&_span]:!text-xs [&_div]:!text-xs [&_*]:!text-xs'>
-                              <SingleSelect
-                                placeholder='Role'
-                                items={[{ items: responsibilityOptions }]}
-                                selected={
-                                  responsibilities.get(user.id) || UserResponsibility.MEMBER
-                                }
-                                onSelect={selected => {
-                                  responsibilities.set(user.id, selected as UserResponsibility);
-                                  forceUpdate(n => n + 1);
-                                }}
+                          {/* Role Selector (searchable) */}
+                          {!disabled && (
+                            <div className='w-[160px] shrink-0'>
+                              <RoleSelector
+                                roles={roles ?? []}
+                                selectedRoleId={selectedRoleId}
+                                onSelect={roleId => handleRoleChange(user.id, roleId)}
                               />
                             </div>
                           )}
@@ -296,3 +321,37 @@ export const UserList = ({
     </div>
   );
 };
+
+interface RoleSelectorProps {
+  roles: Role[];
+  selectedRoleId: string | null | undefined;
+  onSelect: (roleId: string | null) => void;
+}
+
+const RoleSelector = ({ roles, selectedRoleId, onSelect }: RoleSelectorProps): ReactElement => {
+  const options: SelectorOption[] = useMemo(
+    () =>
+      roles.map(r => ({
+        value: r.id,
+        label: r.name,
+        subtitle: r.description ?? null,
+        icon: null,
+      })),
+    [roles],
+  );
+
+  return (
+    <EntitySelector
+      options={options}
+      selectedValue={selectedRoleId ?? null}
+      onSelect={onSelect}
+      placeholder='Select role'
+      searchPlaceholder='Search roles...'
+      showSearch={true}
+      width='160px'
+      testId='member-role-selector'
+    />
+  );
+};
+
+export default UserList;

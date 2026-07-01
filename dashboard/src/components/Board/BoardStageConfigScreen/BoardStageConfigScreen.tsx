@@ -12,17 +12,7 @@ import {
   NonLinearTransitionEditor,
   type TransitionMeta,
 } from '../NonLinearTransitionEditor/NonLinearTransitionEditor';
-import {
-  Plus,
-  X,
-  Timer,
-  ChevronDown,
-  GitBranch,
-  MoreVertical,
-  ChevronLeft,
-  Clock,
-  Pencil,
-} from 'lucide-react';
+import { Plus, X, Timer, ChevronDown, GitBranch, ChevronLeft, Clock, Pencil } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -37,14 +27,13 @@ import {
 } from '../../../components/ui/dropdown-menu';
 import {
   TicketStatusV2,
-  type User,
   PRStatusEvent,
   FormContextType,
   FormFieldType,
   BoardType,
 } from '@xyne/shared';
 import { toast } from 'sonner';
-import { useUsers } from '../../../hooks/useUsers';
+import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 import type { StageNode as Stage, StageCondition } from './BoardStageConfigScreen.types';
 import { ConditionBuilder } from '../../../components/Board/ConditionBuilder/ConditionBuilder';
 import { CreateFormSlideOut } from '../../../components/Board/CreateFormSlideOut/CreateFormSlideOut';
@@ -60,6 +49,7 @@ interface BoardStageConfigScreenProps {
   isOpen: boolean;
   onClose: () => void;
   onSave?: () => void;
+  onNext?: () => void;
   onBack?: () => void;
   initialBoard?: unknown; // Optional board data to avoid Zero sync delay
 }
@@ -460,6 +450,7 @@ const BoardStageConfigScreen = ({
   isOpen,
   onClose,
   onSave,
+  onNext,
   onBack,
   initialBoard,
 }: BoardStageConfigScreenProps): ReactElement | null => {
@@ -508,7 +499,9 @@ const BoardStageConfigScreen = ({
       }[];
       readonly approvers?: readonly {
         readonly id: string;
-        readonly userId: string;
+        readonly userId: string | null;
+        readonly roleId: string | null;
+        readonly approverType: 'USER' | 'ROLE' | null;
         readonly stageId: string;
       }[];
       readonly formContextMappings?: readonly {
@@ -520,12 +513,9 @@ const BoardStageConfigScreen = ({
     }[];
   }, [board]);
 
-  const allUsers = useUsers();
-  const userMap = useMemo(() => new Map(allUsers.map(u => [u.id, u.name])), [allUsers]);
-
   // Fetch forms list (lightweight - only scalar fields for name lookup)
   const [allForms] = useCachedQuery(queries.getAllFormsList());
-  const formMap = useMemo(() => new Map(allForms?.map(f => [f.id, f.formName]) || []), [allForms]);
+  const formMap = useMemo(() => new Map(allForms?.map(f => [f.id, f.formName]) || []), []);
 
   // Track if we've initialized stages to prevent re-syncing
   const hasInitializedStages = useRef(false);
@@ -571,9 +561,7 @@ const BoardStageConfigScreen = ({
   } | null>(null);
   const [selectedStageForEditForm, setSelectedStageForEditForm] = useState<number | null>(null);
 
-  // ── Transfer Toggle State ────────────────────────────────────────────────────
-  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
-  const [isAllowedToTransfer, setIsAllowedToTransfer] = useState(false);
+  // ── Board Config Dropdown State ─────────────────────────────────────────────
   const [fullRoleAssignment, setFullRoleAssignment] = useState(false);
 
   // ── SLA Policy Type Toggle ───────────────────────────────────────────────────
@@ -628,8 +616,7 @@ const BoardStageConfigScreen = ({
       sequenceNumber: 1,
       defaultTicketStatusV2: TicketStatusV2.TODO,
       prStatuses: [],
-      approverIds: [],
-      selectedApprovers: [],
+      approvers: [],
       conditions: [],
       position: { x: 0, y: 0 },
     },
@@ -640,8 +627,7 @@ const BoardStageConfigScreen = ({
       sequenceNumber: 2,
       defaultTicketStatusV2: TicketStatusV2.STARTED,
       prStatuses: [],
-      approverIds: [],
-      selectedApprovers: [],
+      approvers: [],
       conditions: [],
       position: { x: 0, y: 0 },
     },
@@ -652,8 +638,7 @@ const BoardStageConfigScreen = ({
       sequenceNumber: 3,
       defaultTicketStatusV2: TicketStatusV2.COMPLETED,
       prStatuses: [],
-      approverIds: [],
-      selectedApprovers: [],
+      approvers: [],
       conditions: [],
       position: { x: 0, y: 0 },
     },
@@ -664,8 +649,7 @@ const BoardStageConfigScreen = ({
       sequenceNumber: 4,
       defaultTicketStatusV2: TicketStatusV2.CANCELLED,
       prStatuses: [],
-      approverIds: [],
-      selectedApprovers: [],
+      approvers: [],
       conditions: [],
       position: { x: 0, y: 0 },
     },
@@ -689,9 +673,6 @@ const BoardStageConfigScreen = ({
   useEffect(() => {
     if (board && typeof board === 'object' && 'metadata' in board) {
       const metadata = board.metadata as Record<string, unknown>;
-      if (metadata?.['isAllowedToTransfer'] !== undefined) {
-        setIsAllowedToTransfer(Boolean(metadata['isAllowedToTransfer']));
-      }
       if (metadata?.['fullRoleAssignment'] !== undefined) {
         setFullRoleAssignment(Boolean(metadata['fullRoleAssignment']));
       }
@@ -741,12 +722,27 @@ const BoardStageConfigScreen = ({
               formId: t.formId,
               // NULL columns are treated as their defaults in code.
               requiresApproval: t.requiresApproval ?? false,
-              approverUserIds: (t.transitionApprovers ?? [])
-                .filter(
-                  (a: { approverType?: string | null }) => (a.approverType ?? 'USER') === 'USER',
+              approvers: (t.transitionApprovers ?? [])
+                .map(
+                  (a: {
+                    approverType?: string | null;
+                    userId: string | null;
+                    roleId: string | null;
+                  }) => {
+                    const type = a.approverType ?? 'USER';
+                    if (type === 'ROLE') {
+                      return a.roleId
+                        ? { approverId: a.roleId, approverType: 'ROLE' as const }
+                        : null;
+                    }
+                    return a.userId
+                      ? { approverId: a.userId, approverType: 'USER' as const }
+                      : null;
+                  },
                 )
-                .map((a: { userId: string | null }) => a.userId)
-                .filter((id: string | null): id is string => id !== null),
+                .filter(
+                  (x): x is { approverId: string; approverType: 'USER' | 'ROLE' } => x !== null,
+                ),
               visitSlaMode: t.visitSlaMode ?? 'STAGE_DEFAULT',
               fixedEtaHours: t.fixedEtaHours,
               onReenter: t.onReenter ?? 'RESET',
@@ -760,9 +756,9 @@ const BoardStageConfigScreen = ({
         console.error('Failed to load stage transitions:', err);
       })
       .finally(() => setIsTransitionsLoading(false));
-    // formMap/userMap are read inside to resolve form/user display names; the
+    // formMap is read inside to resolve form/user display names; the
     // hasLoadedTransitions ref guard prevents this effect from re-running.
-  }, [isOpen, boardId, boardType, stages, formMap, userMap]);
+  }, [isOpen, boardId, boardType, stages, formMap]);
 
   // ── Load stages from board (same approach as BoardForm) ─────────────────────
   useEffect(() => {
@@ -821,10 +817,15 @@ const BoardStageConfigScreen = ({
         sequenceNumber: s.sequenceNumber,
         defaultTicketStatusV2: s.defaultTicketStatusV2 || TicketStatusV2.TODO,
         prStatuses,
-        approverIds: s.approvers?.map(a => a.userId) || [],
-        selectedApprovers:
-          s.approvers?.map(a => ({ id: a.userId, name: userMap.get(a.userId) || '' }) as User) ||
-          [],
+        approvers: (s.approvers ?? [])
+          .map(a => {
+            const type = a.approverType ?? 'USER';
+            if (type === 'ROLE') {
+              return a.roleId ? { approverId: a.roleId, approverType: 'ROLE' as const } : null;
+            }
+            return a.userId ? { approverId: a.userId, approverType: 'USER' as const } : null;
+          })
+          .filter((x): x is ApproverEntry => x !== null),
         formId: s.formContextMappings?.[0]?.formId || '',
         conditions,
         position: { x: 0, y: 0 },
@@ -852,7 +853,7 @@ const BoardStageConfigScreen = ({
 
       // Add approver conditions to PREVIOUS stage (for UI display)
       // If this stage has approvers, show condition on previous stage
-      if (stage.approverIds.length > 0 && idx > 0) {
+      if (stage.approvers.length > 0 && idx > 0) {
         const prevStage = loadedStages[idx - 1];
         if (prevStage) {
           prevStage.conditions.push({
@@ -864,14 +865,14 @@ const BoardStageConfigScreen = ({
             thenField: 'approver',
             thenCondition: 'is_needed',
             thenValue: '',
-            approverIds: stage.approverIds,
+            approvers: stage.approvers,
           });
         }
       }
     });
     setStages(loadedStages);
     setNextTempId(loadedStages.length + 1);
-  }, [board, boardStages, userMap, formMap]);
+  }, [board, boardStages, formMap]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAddStageAt = useCallback(
@@ -887,8 +888,7 @@ const BoardStageConfigScreen = ({
         sequenceNumber: insertIndex + 1,
         defaultTicketStatusV2: defaultStatus,
         prStatuses: [],
-        approverIds: [],
-        selectedApprovers: [],
+        approvers: [],
         conditions: [],
         position: { x: 0, y: 0 },
       };
@@ -951,7 +951,7 @@ const BoardStageConfigScreen = ({
         const existing = prev.get(key);
         const newMeta: TransitionMeta = {
           requiresApproval: false,
-          approverUserIds: [],
+          approvers: [],
           visitSlaMode: 'STAGE_DEFAULT',
           onReenter: 'RESET',
           ...existing,
@@ -1058,9 +1058,9 @@ const BoardStageConfigScreen = ({
             }
           }
 
-          // Case 3: Approver - store approverIds on the NEXT stage
+          // Case 3: Approver - store approvers on the NEXT stage
           // Handles both status-based and form-based approvers
-          if (condition.thenField === 'approver' && condition.approverIds) {
+          if (condition.thenField === 'approver' && condition.approvers) {
             let nextStageName: string | undefined;
 
             if (condition.whenField === 'status') {
@@ -1074,9 +1074,12 @@ const BoardStageConfigScreen = ({
               nextStageName = targetStage?.name;
             }
 
-            // If this stage is the next stage, store the approverIds
+            // If this stage is the next stage, store the full mixed approvers
             if (nextStageName && stage.name === nextStageName) {
-              return { ...stage, approverIds: condition.approverIds || [], selectedApprovers: [] };
+              return {
+                ...stage,
+                approvers: condition.approvers,
+              };
             }
           }
 
@@ -1308,10 +1311,10 @@ const BoardStageConfigScreen = ({
         updateTransitionMeta(fromTempId, toTempId, {
           formId: condition.thenValue,
         });
-      } else if (condition.thenField === 'approver' && condition.approverIds) {
+      } else if (condition.thenField === 'approver' && condition.approvers) {
         updateTransitionMeta(fromTempId, toTempId, {
           requiresApproval: true,
-          approverUserIds: condition.approverIds,
+          approvers: condition.approvers,
         });
       }
       handleCloseEdgeConditionModal();
@@ -1668,7 +1671,7 @@ const BoardStageConfigScreen = ({
           sequenceNumber: stage.sequenceNumber,
           defaultTicketStatusV2: stage.defaultTicketStatusV2,
           prStatuses: (stage.prStatuses || []) as PRStatusEvent[],
-          approverIds: stage.approverIds,
+          approvers: stage.approvers,
           formId: stage.formId,
         };
       });
@@ -1693,12 +1696,12 @@ const BoardStageConfigScreen = ({
           mappingId: uuidv4(),
         }));
 
-      // Build stage approvers - extract from stages that have approverIds
+      // Build stage approvers - extract from stages that have approvers
       const stageApprovers = stages
-        .filter(stage => stage.approverIds && stage.approverIds.length > 0)
+        .filter(stage => stage.approvers && stage.approvers.length > 0)
         .map(stage => ({
           stageId: stageIds[stage.sequenceNumber],
-          approverIds: stage.approverIds,
+          approvers: stage.approvers,
         }));
 
       const mutatorArgs = {
@@ -1706,7 +1709,6 @@ const BoardStageConfigScreen = ({
         name: getBoardName(board),
         metadata: {
           ...existingMetadata,
-          isAllowedToTransfer,
           fullRoleAssignment,
           slaPolicyType,
         },
@@ -1735,7 +1737,7 @@ const BoardStageConfigScreen = ({
             toStageId: string;
             formId?: string | null;
             requiresApproval?: boolean;
-            approverUserIds?: string[];
+            approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
             visitSlaMode?: string;
             fixedEtaHours?: number | null;
             onReenter?: string;
@@ -1762,8 +1764,8 @@ const BoardStageConfigScreen = ({
                 ...(meta?.requiresApproval !== undefined && {
                   requiresApproval: meta.requiresApproval,
                 }),
-                ...(meta?.approverUserIds !== undefined && {
-                  approverUserIds: meta.approverUserIds,
+                ...(meta?.approvers !== undefined && {
+                  approvers: meta.approvers,
                 }),
                 ...(meta?.visitSlaMode !== undefined && { visitSlaMode: meta.visitSlaMode }),
                 ...(meta?.fixedEtaHours !== undefined && { fixedEtaHours: meta.fixedEtaHours }),
@@ -1773,7 +1775,7 @@ const BoardStageConfigScreen = ({
           }
 
           const invalidApprovalTransitions = desiredTransitions.filter(
-            t => t.requiresApproval && !t.approverUserIds?.length,
+            t => t.requiresApproval && !t.approvers?.length,
           );
           if (invalidApprovalTransitions.length > 0) {
             toast.error('Some transitions require approval but have no approvers assigned.', {
@@ -1792,10 +1794,10 @@ const BoardStageConfigScreen = ({
             ...(t.visitSlaMode !== undefined && { visitSlaMode: t.visitSlaMode }),
             ...(t.fixedEtaHours !== undefined && { fixedEtaHours: t.fixedEtaHours }),
             ...(t.onReenter !== undefined && { onReenter: t.onReenter }),
-            approvers: (t.approverUserIds ?? []).map(approverId => ({
+            approvers: (t.approvers ?? []).map(entry => ({
               id: uuidv4(),
-              approverId,
-              approverType: 'USER' as const,
+              approverId: entry.approverId,
+              approverType: entry.approverType,
             })),
           }));
           const syncResult = zero.mutate(
@@ -1823,8 +1825,12 @@ const BoardStageConfigScreen = ({
           });
         }
         toast.success('Board stages updated successfully');
-        onSave?.();
-        onClose();
+        if (onNext) {
+          onNext();
+        } else {
+          onSave?.();
+          onClose();
+        }
       }
     } catch (error) {
       toast.error('Failed to update board stages', {
@@ -1837,9 +1843,9 @@ const BoardStageConfigScreen = ({
     board,
     stages,
     onSave,
+    onNext,
     onClose,
     zero,
-    isAllowedToTransfer,
     fullRoleAssignment,
     slaPolicyType,
     boardType,
@@ -1904,7 +1910,7 @@ const BoardStageConfigScreen = ({
               className='bg-[#6276BE] hover:bg-[#5060A0] text-white'
               onClick={() => void handleSave()}
             >
-              Finish
+              {onNext ? 'Next' : 'Finish'}
             </Button>
           </div>
         </div>
@@ -1919,88 +1925,6 @@ const BoardStageConfigScreen = ({
                 Configure the workflow stages for your board. Each card represents a stage in your
                 workflow.
               </p>
-            </div>
-            {/* Three Dot Menu Button with Dropdown */}
-            <div className='relative'>
-              <Button
-                onClick={() => setIsTransferModalOpen(v => !v)}
-                variant='ghost'
-                size='iconSm'
-                className='p-2 hover:bg-muted rounded-lg transition-colors'
-                data-track-category='board_config'
-                data-track-name='open_transfer_settings'
-              >
-                <MoreVertical size={20} className='text-muted-foreground' />
-              </Button>
-
-              {/* Dropdown Menu */}
-              {isTransferModalOpen && (
-                <div className='absolute right-0 top-full mt-2 w-[280px] bg-background rounded-lg shadow-lg border border-border z-50 py-2'>
-                  <div className='px-4 py-3'>
-                    <div className='flex items-start justify-between gap-3'>
-                      <div>
-                        <label
-                          htmlFor='allow-transfer-toggle'
-                          className='text-[13px] font-medium text-foreground block'
-                        >
-                          Allow Ticket Transfer
-                        </label>
-                        <p className='text-[11px] text-muted-foreground mt-0.5 leading-[14px]'>
-                          Only Manager and Team Lead can transfer tickets
-                        </p>
-                      </div>
-                      <button
-                        id='allow-transfer-toggle'
-                        onClick={() => setIsAllowedToTransfer(v => !v)}
-                        className={`w-[36px] h-[20px] rounded-full relative transition-colors flex-shrink-0 ${
-                          isAllowedToTransfer ? 'bg-[#6276be]' : 'bg-muted'
-                        }`}
-                        data-track-category='board_config'
-                        data-track-name='toggle_allow_transfer'
-                        type='button'
-                      >
-                        <span
-                          className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
-                            isAllowedToTransfer ? 'left-[18px]' : 'left-[2px]'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                  <div className='px-4 py-3 border-t border-border'>
-                    <div className='flex items-start justify-between gap-3'>
-                      <div>
-                        <label
-                          htmlFor='full-role-assignment-toggle'
-                          className='text-[13px] font-medium text-foreground block'
-                        >
-                          Full Role Assignment
-                        </label>
-                        <p className='text-[11px] text-muted-foreground mt-0.5 leading-[14px]'>
-                          Auto-assign Manager, Team Lead, Dev, PR Reviewer &amp; QA when a ticket is
-                          assigned to a user group
-                        </p>
-                      </div>
-                      <button
-                        id='full-role-assignment-toggle'
-                        onClick={() => setFullRoleAssignment(v => !v)}
-                        className={`w-[36px] h-[20px] rounded-full relative transition-colors flex-shrink-0 ${
-                          fullRoleAssignment ? 'bg-[#6276be]' : 'bg-muted'
-                        }`}
-                        data-track-category='board_config'
-                        data-track-name='toggle_full_role_assignment'
-                        type='button'
-                      >
-                        <span
-                          className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
-                            fullRoleAssignment ? 'left-[18px]' : 'left-[2px]'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -2088,8 +2012,6 @@ const BoardStageConfigScreen = ({
                     onDeleteStage={handleDeleteStage}
                     onAddStage={() => handleAddStageAt(stages.length)}
                     formMap={formMap}
-                    allUsers={allUsers}
-                    userMap={userMap}
                     onOpenEdgeForm={handleOpenEdgeForm}
                     onAddConditionForEdge={handleAddConditionForEdge}
                     isTransitionsLoading={isTransitionsLoading}

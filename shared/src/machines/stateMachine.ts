@@ -191,6 +191,7 @@ interface StateMachineContext {
   userPreference: UserPreference;
   allUserGroups: UserGroup[];
   userGroupMappings: UserGroupMapping[];
+  currentUserRoleIds: string[];
   metrics: MetricsState;
   filteredTicketIds: string[];
   zeroRefreshCounter?: number;
@@ -220,6 +221,7 @@ type StateMachineEvent =
   | { type: 'REMOVE_DRAFT'; lookupId: string }
   | { type: 'ADD_ALL_USER_GROUPS'; userGroups: UserGroup[] }
   | { type: 'ADD_USER_GROUP_MAPPINGS'; userGroupMappings: UserGroupMapping[] }
+  | { type: 'SET_CURRENT_USER_ROLE_IDS'; roleIds: string[] }
   | { type: 'ADD_USER_DRAFTS'; draftMessages: DraftMessageDB[] }
   | { type: 'ADD_USER_DELAYED_MESSAGES'; delayedMessages: DelayedMessageDB[] }
   | { type: 'SET_USER_PREFERENCE'; userPreference: UserPreference }
@@ -456,6 +458,14 @@ export const stateMachine = setup({
         return context.userGroupMappings;
       },
     }),
+    addCurrentUserRoleMappings: assign({
+      currentUserRoleIds: ({ context, event }) => {
+        if (event.type === 'SET_CURRENT_USER_ROLE_IDS') {
+          return event.roleIds;
+        }
+        return context.currentUserRoleIds;
+      },
+    }),
     addUserDrafts: assign({
       draftMessages: ({ context, event }) => {
         if (event.type === 'ADD_USER_DRAFTS') {
@@ -682,6 +692,7 @@ export const stateMachine = setup({
     userPreference: undefined,
     allUserGroups: [],
     userGroupMappings: [],
+    currentUserRoleIds: [],
     metrics: initialMetricsState,
     filteredTicketIds: [],
     onlineUsers: [],
@@ -737,6 +748,9 @@ export const stateMachine = setup({
         },
         ADD_USER_GROUP_MAPPINGS: {
           actions: 'addUserGroupMappings',
+        },
+        SET_CURRENT_USER_ROLE_IDS: {
+          actions: 'addCurrentUserRoleMappings',
         },
         ADD_USER_DRAFTS: {
           actions: 'addUserDrafts',

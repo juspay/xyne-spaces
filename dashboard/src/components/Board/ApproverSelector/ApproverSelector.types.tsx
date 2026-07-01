@@ -1,6 +1,11 @@
-import { type User } from '@xyne/shared';
+export type ApproverType = 'USER' | 'ROLE';
+
+export interface ApproverEntry {
+  approverId: string;
+  approverType: ApproverType;
+}
 
 export interface ApproverSelectorProps {
-  selectedApprovers: User[];
-  onApproversChange: (approvers: User[]) => void;
+  selectedApprovers: ApproverEntry[];
+  onApproversChange: (approvers: ApproverEntry[]) => void;
 }

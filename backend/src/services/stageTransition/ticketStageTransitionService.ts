@@ -176,7 +176,10 @@ export class TicketStageTransitionService {
     const bypassApproval = isAutomation && (transition?.bypassApprovalForAutomation ?? false);
 
     if (transition?.requiresApproval && !bypassApproval) {
-      // Check if the requesting user is a listed transition approver (self-approve path)
+      // Check if the requesting user is a listed transition approver (self-approve path).
+      // A user qualifies if they are listed as a USER approver OR they hold any role listed
+      // as a ROLE approver (via user_role_mappings). Legacy rows with NULL approverType are
+      // treated as USER.
       const isTransitionApprover = await prisma.stageApprovers.findFirst({
         // userId is populated only for USER-type approvers, so matching transitionId+userId
         // already identifies a USER self-approver — including legacy rows whose approverType
@@ -187,7 +190,35 @@ export class TicketStageTransitionService {
         },
       });
 
-      if (isTransitionApprover) {
+      let isRoleApprover = false;
+      if (!isTransitionApprover) {
+        const roleApproverRows = await prisma.stageApprovers.findMany({
+          where: {
+            transitionId: transition.id,
+            approverType: 'ROLE',
+            roleId: { not: null },
+          },
+          select: { roleId: true },
+        });
+        const roleIds = roleApproverRows
+          .map(r => r.roleId)
+          .filter((id): id is string => id !== null);
+        if (roleIds.length > 0) {
+          const membership = await prisma.userRoleMapping.findFirst({
+            where: { userId, roleId: { in: roleIds } },
+          });
+          if (!membership) {
+            const groupMembership = await prisma.userGroupMapping.findFirst({
+              where: { userId, roleId: { in: roleIds } },
+            });
+            isRoleApprover = !!groupMembership;
+          } else {
+            isRoleApprover = true;
+          }
+        }
+      }
+
+      if (isTransitionApprover || isRoleApprover) {
         // User is an approver — record approval and fall through to execute the transition
         await prisma.ticketStageRequest.upsert({
           where: { ticketId_stageId: { ticketId, stageId: targetStage.id } },

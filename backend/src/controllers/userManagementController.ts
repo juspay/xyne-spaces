@@ -358,6 +358,23 @@ export class UserManagementController {
     }
   };
 
+  getCurrentUserRoles = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+      const roleIds = await userManagementService.getCurrentUserRoleIds(
+        req.user.id,
+        req.user.workspaceId,
+      );
+      res.status(200).json({ success: true, roleIds });
+    } catch (error) {
+      logger.error('Error getting current user roles:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  };
+
   /**
    * Search users
    */

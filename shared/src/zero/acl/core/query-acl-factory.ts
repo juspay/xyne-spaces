@@ -53,6 +53,8 @@ import {
   UserGroupMappingsACL,
   UserGroupsACL,
   UserPresenceACL,
+  RolesACL,
+  UserRoleMappingsACL,
   UsersACL,
   UserWorkloadMappingsACL,
   WorkflowExecutionsACL,
@@ -182,6 +184,10 @@ export class QueryACLFactory {
         return new UserGroupMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'user_groups':
         return new UserGroupsACL(ctx) as BaseQueryACL<TTable>;
+      case 'roles':
+        return new RolesACL(ctx) as BaseQueryACL<TTable>;
+      case 'user_role_mappings':
+        return new UserRoleMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'user_presence':
         return new UserPresenceACL(ctx) as BaseQueryACL<TTable>;
       case 'user_profiles':

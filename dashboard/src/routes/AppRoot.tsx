@@ -152,6 +152,7 @@ import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCi
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
+import { RoleManagementScreen } from './RoleManagementScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
@@ -1305,6 +1306,14 @@ export const router = createBrowserRouter([
                 element: (
                   <ResourceProtectedRoute resourceName='USERS'>
                     <ResourceAccessScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'roles',
+                element: (
+                  <ResourceProtectedRoute resourceName='ROLES'>
+                    <RoleManagementScreen />
                   </ResourceProtectedRoute>
                 ),
               },

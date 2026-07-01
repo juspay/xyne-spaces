@@ -36,7 +36,7 @@ async function fetchTicketActors(ticketId: string): Promise<string[]> {
     getFormFieldUserActors(ticketId),
   ]);
 
-  return roleAssignments.map(a => a.userId).concat(formFieldUserActors);
+  return roleAssignments.map(a => a.userId).filter((id): id is string => Boolean(id)).concat(formFieldUserActors);
 }
 
 export class TicketsSideEffectHandler extends BaseSideEffectHandler {
@@ -126,6 +126,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
           tags: [],
           prReviewers: [],
           qaAssigned: [],
+          roleAssignments: [],
           formFieldValues: {},
         };
         websocketService.broadcastTicketCountsUpdate({

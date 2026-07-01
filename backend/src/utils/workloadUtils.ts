@@ -6,54 +6,110 @@ import { logger } from './logger';
 const db = DatabaseClient.getInstance();
 
 /**
- * Sync UserWorkloadMapping for a specific user on a specific board
- * Calculates activeTasks (TODO, STARTED) and totalTasks from tickets
+ * Collect every unique roleId configured in `metadata.assignmentRoles` across
+ * all boards in the given project. Returns an empty array if no board has the
+ * config set.
+ */
+async function getProjectAssignmentRoleIds(projectId: string): Promise<string[]> {
+  const boards = await db.board.findMany({
+    where: { projectId },
+    select: { metadata: true },
+  });
+  const roleIds = new Set<string>();
+  for (const board of boards) {
+    const metadata = board.metadata as { assignmentRoles?: Array<{ roleId: string }> } | null;
+    if (Array.isArray(metadata?.assignmentRoles)) {
+      for (const slot of metadata!.assignmentRoles!) {
+        if (slot?.roleId) roleIds.add(slot.roleId);
+      }
+    }
+  }
+  return Array.from(roleIds);
+}
+
+/**
+ * All roleIds the user currently holds, unioned across both binding tables:
+ *   - user_role_mappings (direct)
+ *   - user_group_mappings.roleId (via group)
+ */
+async function getUserRoleIds(userId: string): Promise<string[]> {
+  const [directMappings, groupMappings] = await Promise.all([
+    db.userRoleMapping.findMany({
+      where: { userId, role: { isActive: true } },
+      select: { roleId: true },
+    }),
+    db.userGroupMapping.findMany({
+      where: { userId, roleId: { not: null }, role: { isActive: true } },
+      select: { roleId: true },
+    }),
+  ]);
+  const roleIds = new Set<string>();
+  for (const m of directMappings) roleIds.add(m.roleId);
+  for (const m of groupMappings) if (m.roleId) roleIds.add(m.roleId);
+  return Array.from(roleIds);
+}
+
+/**
+ * Sync UserWorkloadMapping for a specific user on a specific board.
+ *
+ * A ticket counts toward the user's workload on this board if:
+ *   - it is directly assigned to the user (ticket.assignedTo === userId), OR
+ *   - the user holds a role (via user_role_mappings or user_group_mappings.roleId)
+ *     that matches any roleId in `metadata.assignmentRoles` of any board in the
+ *     same project as this board.
+ * activeTasks further restricts to statusV2 IN (TODO, STARTED).
+ *
+ * Callers that sync multiple boards for the same user (e.g.
+ * `syncUserWorkloadAllBoards`) should pass pre-fetched `userRoleIds` to avoid
+ * re-querying the user's roles on every iteration.
  */
 export async function syncUserWorkload(
   userId: string,
   userGroupId: string,
   boardId: string,
-  createdBy: string
+  createdBy: string,
+  userRoleIds?: string[],
 ): Promise<void> {
-  // Count tickets directly in the database for better performance
-  // Include tickets where user is assignee, PR reviewer (via TicketAssignment), or QA (via TicketAssignment)
-  
-  // Get ticket IDs where user is PR reviewer or QA from TicketAssignment table
-  const ticketAssignments = await db.ticketAssignment.findMany({
-    where: {
-      userId: userId,
-      userResponsibility: { in: ['PR_REVIEWER', 'QA'] },
-    },
-    select: { ticketId: true },
+  const board = await db.board.findUnique({
+    where: { id: boardId },
+    select: { projectId: true },
   });
-  
-  const assignmentTicketIds = ticketAssignments.map(ta => ta.ticketId);
-  
+  if (!board) {
+    logger.warn(`[Workload Sync] Board ${boardId} not found; skipping workload sync`);
+    return;
+  }
+
+  const [projectAssignmentRoleIds, resolvedUserRoleIds] = await Promise.all([
+    getProjectAssignmentRoleIds(board.projectId),
+    userRoleIds !== undefined ? Promise.resolve(userRoleIds) : getUserRoleIds(userId),
+  ]);
+  const workloadRoleIds = projectAssignmentRoleIds.filter(id => resolvedUserRoleIds.includes(id));
+
+  let roleMatchedTicketIds: string[] = [];
+  if (workloadRoleIds.length > 0) {
+    const roleAssignments = await db.ticketAssignment.findMany({
+      where: { roleId: { in: workloadRoleIds } },
+      select: { ticketId: true },
+    });
+    roleMatchedTicketIds = Array.from(new Set(roleAssignments.map(ta => ta.ticketId)));
+  }
+
+  const ticketWhere = {
+    boardId: boardId,
+    userGroupId: userGroupId,
+    OR: [
+      { assignedTo: userId },
+      ...(roleMatchedTicketIds.length > 0 ? [{ id: { in: roleMatchedTicketIds } }] : []),
+    ],
+  };
+
   const [activeTasks, totalTasks] = await Promise.all([
     db.ticket.count({
-      where: {
-        OR: [
-          { assignedTo: userId },
-          { id: { in: assignmentTicketIds } },
-        ],
-        boardId: boardId,
-        userGroupId: userGroupId,
-        statusV2: { in: [TicketStatusV2.TODO, TicketStatusV2.STARTED] },
-      },
+      where: { ...ticketWhere, statusV2: { in: [TicketStatusV2.TODO, TicketStatusV2.STARTED] } },
     }),
-    db.ticket.count({
-      where: {
-        OR: [
-          { assignedTo: userId },
-          { id: { in: assignmentTicketIds } },
-        ],
-        boardId: boardId,
-        userGroupId: userGroupId,
-      },
-    }),
+    db.ticket.count({ where: ticketWhere }),
   ]);
 
-  // Upsert the workload mapping
   await repositories.userWorkloadMapping.upsert({
     where: {
       userId_userGroupId_boardId: {
@@ -99,10 +155,12 @@ export async function syncUserWorkloadAllBoards(
   });
 
   const boardIds = tickets.map((t: any) => t.boardId);
+  if (boardIds.length === 0) return;
+  const userRoleIds = await getUserRoleIds(userId);
 
   // Sync workload for each board
   for (const boardId of boardIds) {
-    await syncUserWorkload(userId, userGroupId, boardId, createdBy);
+    await syncUserWorkload(userId, userGroupId, boardId, createdBy, userRoleIds);
   }
 }
 

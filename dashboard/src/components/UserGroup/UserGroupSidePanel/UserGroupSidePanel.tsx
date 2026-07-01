@@ -1,12 +1,12 @@
 import { ReactElement, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { X, Users } from 'lucide-react';
-import { queries } from '../../../zero/queries';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroupById } from '../../../hooks/useUserGroup';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import type { User } from '@xyne/shared';
-import { UserResponsibility, UserStatus } from '@xyne/shared';
+import { UserStatus } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -39,28 +39,15 @@ export const UserGroupSidePanel = (): ReactElement | null => {
     return map;
   }, [allUsers]);
 
-  // Get member details with their responsibilities
+  // Get member details with their resolved role name (role comes nested via .related('role'))
   const membersWithRoles = useMemo(() => {
     if (!userGroupMembers) return [];
     return userGroupMembers
       .map(mapping => ({
         user: usersById.get(mapping.userId),
-        responsibility: mapping.responsibility,
+        roleName: (mapping as { role?: { name?: string } | null }).role?.name ?? null,
       }))
-      .filter((item): item is { user: User; responsibility: UserResponsibility } =>
-        Boolean(item.user),
-      )
-      .sort((a, b) => {
-        // Sort by responsibility: MANAGER > TEAM_LEAD > others
-        const priority = {
-          [UserResponsibility.MANAGER]: 0,
-          [UserResponsibility.TEAM_LEAD]: 1,
-          [UserResponsibility.MEMBER]: 2,
-          [UserResponsibility.PR_REVIEWER]: 3,
-          [UserResponsibility.QA]: 4,
-        };
-        return priority[a.responsibility] - priority[b.responsibility];
-      });
+      .filter((item): item is { user: User; roleName: string | null } => Boolean(item.user));
   }, [userGroupMembers, usersById]);
 
   const memberCount = membersWithRoles.length;
@@ -107,7 +94,7 @@ export const UserGroupSidePanel = (): ReactElement | null => {
         <div className='px-6 py-4'>
           <h3 className='text-[13px] font-semibold text-foreground mb-3'>Members</h3>
           <div className='divide-y divide-border'>
-            {membersWithRoles.map(({ user, responsibility }) => {
+            {membersWithRoles.map(({ user, roleName }) => {
               const isDeactivated = user.status === UserStatus.INACTIVE;
               return (
                 <div
@@ -130,25 +117,11 @@ export const UserGroupSidePanel = (): ReactElement | null => {
                     </div>
                     <p className='text-[12px] text-muted-foreground truncate'>{user.email}</p>
                   </div>
-                  <span
-                    className={`text-[12px] px-2 py-0.5 rounded font-medium flex-shrink-0 ${
-                      responsibility === UserResponsibility.MANAGER
-                        ? 'bg-purple-100 text-purple-700'
-                        : responsibility === UserResponsibility.TEAM_LEAD
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-muted text-muted-foreground'
-                    }`}
-                  >
-                    {responsibility === UserResponsibility.MANAGER
-                      ? 'Manager'
-                      : responsibility === UserResponsibility.TEAM_LEAD
-                        ? 'Team Lead'
-                        : responsibility === UserResponsibility.PR_REVIEWER
-                          ? 'Reviewer'
-                          : responsibility === UserResponsibility.QA
-                            ? 'QA'
-                            : 'Member'}
-                  </span>
+                  {roleName && (
+                    <span className='text-[12px] px-2 py-0.5 rounded font-medium flex-shrink-0 bg-muted text-muted-foreground'>
+                      {roleName}
+                    </span>
+                  )}
                 </div>
               );
             })}

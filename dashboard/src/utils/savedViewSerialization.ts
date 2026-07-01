@@ -51,12 +51,6 @@ export function valuesToFilters(values: ReadonlyArray<SavedConfigValueRow>): Tic
       case 'userGroups':
         result.userGroups = [...(result.userGroups ?? []), fieldValue];
         break;
-      case 'prReviewers':
-        result.prReviewers = [...(result.prReviewers ?? []), fieldValue];
-        break;
-      case 'qaAssigned':
-        result.qaAssigned = [...(result.qaAssigned ?? []), fieldValue];
-        break;
       case 'tags':
         result.tags = [...(result.tags ?? []), fieldValue];
         break;

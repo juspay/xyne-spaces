@@ -49,8 +49,7 @@ type TicketCountsSnapshot = {
   eta: number | null;
   createdAt: number;
   tags: string[];
-  prReviewers: string[];
-  qaAssigned: string[];
+  roleAssignments: Array<{ roleId: string; userIds: string[] }>;
   formFieldValues: Record<string, unknown>;
 };
 
@@ -244,16 +243,13 @@ const matchesRequest = (
   if (filters.userGroups?.length && !matchesFilterList(snapshot.userGroupId, filters.userGroups))
     return false;
   if (filters.tags?.length && !filters.tags.some(tag => snapshot.tags.includes(tag))) return false;
-  if (
-    filters.prReviewers?.length &&
-    !filters.prReviewers.some(id => snapshot.prReviewers.includes(id))
-  )
-    return false;
-  if (
-    filters.qaAssigned?.length &&
-    !filters.qaAssigned.some(id => snapshot.qaAssigned.includes(id))
-  )
-    return false;
+  if (filters.roleAssignments?.length) {
+    for (const ra of filters.roleAssignments) {
+      if (!ra.userIds.length) continue;
+      const snap = snapshot.roleAssignments.find(s => s.roleId === ra.roleId);
+      if (!snap || !ra.userIds.some(u => snap.userIds.includes(u))) return false;
+    }
+  }
   if (filters.dueDateStart !== undefined && (snapshot.eta ?? 0) < filters.dueDateStart)
     return false;
   if (filters.dueDateEnd !== undefined && (snapshot.eta ?? 0) > filters.dueDateEnd) return false;
@@ -494,11 +490,16 @@ const normalizeFilters = (filters?: TicketFilters): KanbanCountsFilters | undefi
   const createdBy = sortUniqueValues(filters.createdBy);
   if (createdBy) normalized.createdBy = createdBy;
 
-  const prReviewers = sortUniqueValues(filters.prReviewers);
-  if (prReviewers) normalized.prReviewers = prReviewers;
-
-  const qaAssigned = sortUniqueValues(filters.qaAssigned);
-  if (qaAssigned) normalized.qaAssigned = qaAssigned;
+  if (filters.roleAssignments?.length) {
+    const roleAssignments = filters.roleAssignments
+      .filter(ra => ra.userIds.length > 0)
+      .map(ra => ({
+        roleId: ra.roleId,
+        userIds: sortUniqueValues(ra.userIds) ?? [],
+      }))
+      .sort((a, b) => a.roleId.localeCompare(b.roleId));
+    if (roleAssignments.length) normalized.roleAssignments = roleAssignments;
+  }
 
   if (filters.dueDateStart !== undefined) normalized.dueDateStart = filters.dueDateStart;
   if (filters.dueDateEnd !== undefined) normalized.dueDateEnd = filters.dueDateEnd;

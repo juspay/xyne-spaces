@@ -44,6 +44,7 @@ import {
   DynamicFieldSubmenu,
   StagesSubmenu,
   TicketTypeSubmenu,
+  RoleSubmenu,
 } from './Submenus';
 import { TicketFiltersProps, DateRange, BoardOption } from './types';
 import type { TicketFilters } from './types';
@@ -72,8 +73,6 @@ const ARRAY_FILTER_KEYS = [
   'assignee',
   'createdBy',
   'userGroups',
-  'prReviewers',
-  'qaAssigned',
   'tags',
   'stages',
   'ticketTypes',
@@ -90,8 +89,7 @@ const FILTER_MENU_ITEMS: FilterMenuItem[] = [
   { id: 'priority', label: 'Priority', icon: BarChart4Icon, filterKey: 'priority' },
   { id: 'userGroups', label: 'User Groups', icon: Users, filterKey: 'userGroups' },
   { id: 'createdBy', label: 'Created by', icon: User, filterKey: 'createdBy' },
-  { id: 'prReviewers', label: 'PR Reviewer', icon: User, filterKey: 'prReviewers' },
-  { id: 'qaAssigned', label: 'QA', icon: User, filterKey: 'qaAssigned' },
+  { id: 'roleAssignments', label: 'Roles', icon: User, filterKey: 'roleAssignments' },
   { id: 'dueDate', label: 'Due Date', icon: Calendar, filterKey: 'dueDate' },
   { id: 'createdAt', label: 'Created At', icon: Calendar, filterKey: 'createdAt' },
   { id: 'tags', label: 'Labels', icon: Tag, filterKey: 'tags' },
@@ -415,8 +413,7 @@ export const TicketFiltersDropdown = ({
     if (filters.priority?.length) count++;
     if (filters.userGroups?.length) count++;
     if (filters.createdBy?.length) count++;
-    if (filters.prReviewers?.length) count++;
-    if (filters.qaAssigned?.length) count++;
+    if (filters.roleAssignments?.some(ra => ra.userIds.length > 0)) count++;
     if (filters.dueDateStart !== undefined || filters.dueDateEnd !== undefined) count++;
     if (filters.createdDateStart !== undefined || filters.createdDateEnd !== undefined) count++;
     if (filters.tags?.length) count++;
@@ -471,6 +468,10 @@ export const TicketFiltersDropdown = ({
     for (const key of ARRAY_FILTER_KEYS) {
       (filters[key] as string[] | undefined)?.forEach(v => addTicket(key, v));
     }
+    filters.roleAssignments?.forEach(ra => {
+      if (!ra.userIds.length) return;
+      addTicket('roleAssignments', `${ra.roleId}|${ra.userIds.join(',')}`);
+    });
     for (const key of NUMERIC_FILTER_KEYS) {
       const v = filters[key];
       if (v !== undefined) addTicket(key, String(v));
@@ -571,23 +572,12 @@ export const TicketFiltersDropdown = ({
             availableUserGroups={availableUserGroups || []}
           />
         );
-      case 'prReviewers':
+      case 'roleAssignments':
         return (
-          <UserSubmenu
-            key='pr-reviewers-submenu'
-            selectedUsers={filters.prReviewers || []}
-            onChange={(users: string[]) => handleFilterChange('prReviewers', users)}
-            label='PR Reviewer'
-            availableUsers={availableUsers || []}
-          />
-        );
-      case 'qaAssigned':
-        return (
-          <UserSubmenu
-            key='qa-assigned-submenu'
-            selectedUsers={filters.qaAssigned || []}
-            onChange={(users: string[]) => handleFilterChange('qaAssigned', users)}
-            label='QA'
+          <RoleSubmenu
+            key='role-assignments-submenu'
+            selectedRoles={filters.roleAssignments || []}
+            onChange={value => handleFilterChange('roleAssignments', value)}
             availableUsers={availableUsers || []}
           />
         );

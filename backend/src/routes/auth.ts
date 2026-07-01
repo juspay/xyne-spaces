@@ -65,6 +65,7 @@ router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
 });
 
 router.get('/permissions', authV2Middleware.authenticate, userManagementController.getCurrentUserPermissions);
+router.get('/roles', authV2Middleware.authenticate, userManagementController.getCurrentUserRoles);
 
 router.post('/login-workspace', authV2Controller.loginWorkspace);
 router.post('/create-org', authV2Controller.createOrg);

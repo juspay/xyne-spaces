@@ -1,5 +1,6 @@
 import { CircleDashed, CircleDot, Signature, CircleX, CircleCheck } from 'lucide-react';
-import { TicketStatusV2, type User } from '@xyne/shared';
+import { TicketStatusV2 } from '@xyne/shared';
+import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 
 /**
  * Types for Board Stage Configuration Screen
@@ -15,6 +16,7 @@ export interface StageCondition {
   thenCondition: string;
   thenValue: string;
   approverIds?: string[];
+  approvers?: ApproverEntry[];
 }
 
 export interface StageNode {
@@ -25,16 +27,12 @@ export interface StageNode {
   sequenceNumber: number;
   defaultTicketStatusV2: TicketStatusV2;
   prStatuses: string[];
-  approverIds: string[];
-  selectedApprovers: User[];
+  approvers: ApproverEntry[];
   formId?: string;
   conditions: StageCondition[];
   // Visual properties
   position: { x: number; y: number };
 }
-
-// Re-export from shared for convenience
-export type { User };
 
 // Constants
 // Status options for the status indicator (used in stage config)

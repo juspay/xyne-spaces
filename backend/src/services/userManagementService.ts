@@ -616,6 +616,23 @@ export class UserManagementService {
     };
   }
 
+  async getCurrentUserRoleIds(userId: string, workspaceId: string): Promise<string[]> {
+    const [directMappings, groupMappings] = await Promise.all([
+      this.prisma.userRoleMapping.findMany({
+        where: { userId, role: { workspaceId, isActive: true } },
+        select: { roleId: true },
+      }),
+      this.prisma.userGroupMapping.findMany({
+        where: { userId, roleId: { not: null }, role: { workspaceId, isActive: true } },
+        select: { roleId: true },
+      }),
+    ]);
+    const roleIds = new Set<string>();
+    for (const m of directMappings) roleIds.add(m.roleId);
+    for (const m of groupMappings) if (m.roleId) roleIds.add(m.roleId);
+    return Array.from(roleIds);
+  }
+
   // User Group Assignment Operations
 
   /**

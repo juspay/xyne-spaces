@@ -96,6 +96,18 @@ const kanbanTicketsPageArgsSchema = z.object({
 
 type KanbanTicketsPageArgs = z.infer<typeof kanbanTicketsPageArgsSchema>;
 
+const kanbanTicketPageV2FiltersSchema = kanbanTicketPageFiltersSchema.extend({
+  roleAssignments: z
+    .array(z.object({ roleId: z.string(), userIds: z.array(z.string()) }))
+    .optional(),
+});
+
+const kanbanTicketsPageV2ArgsSchema = kanbanTicketsPageArgsSchema.extend({
+  filters: kanbanTicketPageV2FiltersSchema.optional(),
+});
+
+type KanbanTicketsPageV2Args = z.infer<typeof kanbanTicketsPageV2ArgsSchema>;
+
 const prefixedKanbanIdentityValues = (id: string): string[] => [
   id,
   `user:${id}`,
@@ -327,6 +339,25 @@ const applyKanbanTicketPageConditions = (
         .where('fieldId', groupBy.fieldId)
         .where('actualFieldValue', '=', toActualFieldValueQueryValue(formFieldValue)),
     );
+  }
+
+  return query;
+};
+
+const applyKanbanTicketPageV2Conditions = (
+  query: any,
+  ctx: { userID: string },
+  args: KanbanTicketsPageV2Args,
+) => {
+  query = applyKanbanTicketPageConditions(query, ctx, args);
+
+  if (args.filters?.roleAssignments?.length) {
+    for (const roleAssignment of args.filters.roleAssignments) {
+      if (!roleAssignment.userIds.length) continue;
+      query = query.whereExists('assignments', (assignment: any) =>
+        assignment.where('roleId', roleAssignment.roleId).where('userId', 'IN', roleAssignment.userIds),
+      );
+    }
   }
 
   return query;
@@ -750,7 +781,7 @@ export const queries = defineQueries({
       // Build the base query with related data
       let finalQuery = query
         .orderBy('createdAt', 'desc')
-        .related('assignments')
+        .related('assignments', a => a.related('role'))
         .related('tagMappings')
         .related('stageEtaEntries');
 
@@ -780,6 +811,33 @@ export const queries = defineQueries({
       let finalQuery = query
         .limit(args.limit)
         .related('assignments')
+        .related('stageEtaEntries')
+        .related('tagMappings');
+
+      if (args.formEntityValueFieldIds?.length) {
+        finalQuery = finalQuery.related('formEntityValues', (fev: any) =>
+          fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField'),
+        );
+      }
+
+      return finalQuery;
+    },
+  ),
+
+  kanbanTicketsPageV2: defineQuery(
+    kanbanTicketsPageV2ArgsSchema,
+    ({ ctx, args }) => {
+      let query = applyKanbanTicketPageV2Conditions(zql.tickets, ctx, args)
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'asc');
+
+      if (args.start) {
+        query = query.start({ createdAt: args.start.createdAt, id: args.start.id }, { inclusive: false });
+      }
+
+      let finalQuery = query
+        .limit(args.limit)
+        .related('assignments', (a: any) => a.related('role'))
         .related('stageEtaEntries')
         .related('tagMappings');
 
@@ -1470,7 +1528,7 @@ export const queries = defineQueries({
       .where('id', ticketId)
       .related('project')
       .related('tagMappings')
-      .related('assignments')
+      .related('assignments', a => a.related('role'))
       .related('referencesOut', (ref) => ref.related('targetTicket'))
       .related('referencesIn', (ref) => ref.related('sourceTicket'))
       .related('entity')
@@ -1500,7 +1558,7 @@ export const queries = defineQueries({
       .where('id', ticketId)
       .related('project')
       .related('tagMappings')
-      .related('assignments')
+      .related('assignments', a => a.related('role'))
       .related('referencesOut', (ref) => ref.related('targetTicket'))
       .related('referencesIn', (ref) => ref.related('sourceTicket'))
       .related('entity')
@@ -2591,8 +2649,11 @@ export const queries = defineQueries({
   getUserGroupMembers: defineQuery(
     z.object({ userGroupId: z.string() }),
     ({ args: { userGroupId } }) => {
-      return zql.user_group_mappings.where('userGroupId', userGroupId).orderBy('createdAt', 'desc');
-    }
+      return zql.user_group_mappings
+        .where('userGroupId', userGroupId)
+        .orderBy('createdAt', 'desc')
+        .related('role');
+    },
   ),
 
   getUserGroupMappingsByUserId: defineQuery(({ ctx }) => {
@@ -3940,4 +4001,34 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       return query.limit(limit).related('attachments');
     },
   ),
+  roles: defineQuery(
+    z.object({
+      limit: z.number().optional(),
+      start: z.object({ id: z.string(), createdAt: z.number() }).nullable().optional(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.roles
+        .where('workspaceId', ctx.workspaceId)
+        .where('isActive', true)
+        .orderBy('createdAt', 'desc');
+
+      if (start) {
+        query = query.start({ id: start.id, createdAt: start.createdAt }, { inclusive: false });
+      }
+
+      if (limit !== undefined) {
+        query = query.limit(limit);
+      }
+
+      return query;
+    },
+  ),
+  roleById: defineQuery(z.object({ id: z.string() }), ({ ctx, args: { id } }) => {
+    return zql.roles
+      .where('id', id)
+      .where('workspaceId', ctx.workspaceId)
+      .where('isActive', true)
+      .related('userMappings')
+      .one();
+  }),
 });

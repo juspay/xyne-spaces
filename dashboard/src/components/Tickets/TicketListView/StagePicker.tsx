@@ -10,6 +10,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { getStageColor } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { cn } from '../../../utils/classNames';
 import { useAuth } from '../../../hooks/useAuth';
+import { useCurrentUserRoleIds } from '../../../hooks/useRoles';
 import { TicketStageRequestStatus, BoardType, ApproverType, FormContextType } from '@xyne/shared';
 import type { Ticket, TicketStageRequest } from '@xyne/shared';
 import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
@@ -41,6 +42,7 @@ export function StagePicker({
   const [open, setOpen] = useState(false);
   const zero = useZero();
   const { user: currentUser } = useAuth();
+  const currentUserRoleIds = useCurrentUserRoleIds();
 
   const currentStage = stageName ?? '';
 
@@ -215,11 +217,13 @@ export function StagePicker({
         // Approval gate
         if (matchingTransition.requiresApproval) {
           const approvers = matchingTransition.transitionApprovers ?? [];
-          const isApprover = approvers.some(
-            a =>
-              (a.approverType ?? ApproverType.USER) === ApproverType.USER &&
-              a.userId === currentUser?.id,
-          );
+          const isApprover = approvers.some(a => {
+            const type = a.approverType ?? ApproverType.USER;
+            if (type === ApproverType.ROLE) {
+              return !!a.roleId && currentUserRoleIds.includes(a.roleId);
+            }
+            return a.userId === currentUser?.id;
+          });
 
           if (!isApprover) {
             // Reuse the existing record's ID for revisits (unique constraint on ticketId+stageId)

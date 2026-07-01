@@ -20,6 +20,9 @@ const kanbanCountsBodySchema = z.object({
       createdBy: z.array(z.string()).optional(),
       prReviewers: z.array(z.string()).optional(),
       qaAssigned: z.array(z.string()).optional(),
+      roleAssignments: z
+        .array(z.object({ roleId: z.string(), userIds: z.array(z.string()) }))
+        .optional(),
       dueDateStart: z.number().optional(),
       dueDateEnd: z.number().optional(),
       createdDateStart: z.number().optional(),

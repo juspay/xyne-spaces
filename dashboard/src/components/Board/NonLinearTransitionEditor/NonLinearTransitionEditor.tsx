@@ -37,6 +37,7 @@ import {
   type StageNode,
 } from '../BoardStageConfigScreen/BoardStageConfigScreen.types';
 import { StatusIndicator } from '../StatusIndicator';
+import { ApproverSelector } from '../ApproverSelector';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,7 +51,7 @@ export interface TransitionMeta {
   id?: string; // persisted DB id — populated after first save, undefined for new transitions
   formId?: string | null;
   requiresApproval: boolean;
-  approverUserIds?: string[];
+  approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
   visitSlaMode: string;
   fixedEtaHours?: number | null;
   onReenter: string;
@@ -66,8 +67,6 @@ export interface NonLinearTransitionEditorProps {
   onDeleteStage: (tempId: number) => void;
   onAddStage: () => void;
   formMap: Map<string, string>;
-  allUsers: Array<{ id: string; name: string }>;
-  userMap: Map<string, string>;
   onOpenEdgeForm: (from: number, to: number, existingFormId?: string | null) => void;
   onAddConditionForEdge: (from: number, to: number) => void;
   isTransitionsLoading: boolean;
@@ -433,8 +432,6 @@ interface EdgeSettingsPanelProps {
   toStage: StageNode;
   meta: TransitionMeta;
   formMap: Map<string, string>;
-  allUsers: Array<{ id: string; name: string }>;
-  userMap: Map<string, string>;
   onUpdateMeta: (patch: Partial<TransitionMeta>) => void;
   onRemoveEdge: () => void;
   onClose: () => void;
@@ -447,8 +444,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = ({
   toStage,
   meta,
   formMap,
-  allUsers,
-  userMap,
   onUpdateMeta,
   onRemoveEdge,
   onClose,
@@ -548,7 +543,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = ({
             onClick={() =>
               onUpdateMeta({
                 requiresApproval: !meta.requiresApproval,
-                approverUserIds: !meta.requiresApproval ? (meta.approverUserIds ?? []) : [],
+                approvers: !meta.requiresApproval ? (meta.approvers ?? []) : [],
               })
             }
             data-track-category='transition_config'
@@ -563,50 +558,10 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = ({
         </div>
         {meta.requiresApproval && (
           <div className='mt-2'>
-            <div className='flex flex-wrap gap-1 mb-2'>
-              {(meta.approverUserIds ?? []).map(uid => (
-                <span
-                  key={uid}
-                  className='inline-flex items-center gap-1 text-[11px] bg-[#6276be]/10 text-[#6276be] border border-[#6276be]/20 px-2 py-0.5 rounded-full'
-                >
-                  {userMap.get(uid) || uid}
-                  <button
-                    type='button'
-                    onClick={() =>
-                      onUpdateMeta({
-                        approverUserIds: (meta.approverUserIds ?? []).filter(id => id !== uid),
-                      })
-                    }
-                    data-track-category='transition_config'
-                    data-track-name='remove_approver'
-                    className='hover:text-red-500 transition-colors'
-                  >
-                    <X size={9} />
-                  </button>
-                </span>
-              ))}
-            </div>
-            <select
-              className='w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-[#6276be]'
-              data-track-category='transition_config'
-              data-track-name='select_approver'
-              value=''
-              onChange={e => {
-                const uid = e.target.value;
-                if (!uid) return;
-                const cur = meta.approverUserIds ?? [];
-                if (!cur.includes(uid)) onUpdateMeta({ approverUserIds: [...cur, uid] });
-              }}
-            >
-              <option value=''>+ Add approver</option>
-              {allUsers
-                .filter(u => !(meta.approverUserIds ?? []).includes(u.id))
-                .map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-            </select>
+            <ApproverSelector
+              selectedApprovers={meta.approvers ?? []}
+              onApproversChange={approvers => onUpdateMeta({ approvers })}
+            />
           </div>
         )}
       </div>
@@ -701,8 +656,6 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
   onDeleteStage,
   onAddStage,
   formMap,
-  allUsers,
-  userMap,
   onOpenEdgeForm,
   onAddConditionForEdge,
   isTransitionsLoading,
@@ -880,7 +833,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         const reverseKey = `${toTempId}->${fromTempId}`;
         const meta: TransitionMeta = transitionsMeta.get(metaKey) ?? {
           requiresApproval: false,
-          approverUserIds: [],
+          approvers: [],
           visitSlaMode: 'STAGE_DEFAULT',
           onReenter: 'RESET',
         };
@@ -945,7 +898,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     if (!fromStage || !toStage) return null;
     const meta: TransitionMeta = transitionsMeta.get(`${fromTempId}->${toTempId}`) ?? {
       requiresApproval: false,
-      approverUserIds: [],
+      approvers: [],
       visitSlaMode: 'STAGE_DEFAULT',
       onReenter: 'RESET',
     };
@@ -1039,8 +992,6 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
               toStage={selectedEdge.toStage}
               meta={selectedEdge.meta}
               formMap={formMap}
-              allUsers={allUsers}
-              userMap={userMap}
               onUpdateMeta={patch =>
                 updateTransitionMeta(selectedEdge.fromTempId, selectedEdge.toTempId, patch)
               }

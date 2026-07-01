@@ -10,6 +10,7 @@ import { queries } from '../zero/queries';
 import type { Stage } from '../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import { sortByKanbanPosition } from '../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { useAuth } from './useAuth';
+import { useCurrentUserRoleIds } from './useRoles';
 import { v4 as uuidv4 } from 'uuid';
 import { findMatchingTransition } from '../utils/stageTransitionUtils';
 
@@ -77,6 +78,7 @@ export const useDragAndDrop = ({
     requestId: string;
   } | null>(null);
   const { user: currentUser } = useAuth();
+  const currentUserRoleIds = useCurrentUserRoleIds();
 
   // Always-current ref so the async .server.then() handler sees up-to-date transitions.
   const transitionsRef = useRef(transitions ?? []);
@@ -216,9 +218,12 @@ export const useDragAndDrop = ({
 
                   if (matchingTransition.requiresApproval) {
                     const isApprover =
-                      matchingTransition.approvers?.some(
-                        a => a.approverType === 'USER' && a.approverId === (currentUser?.id ?? ''),
-                      ) ?? false;
+                      matchingTransition.approvers?.some(a => {
+                        if (a.approverType === 'ROLE') {
+                          return currentUserRoleIds.includes(a.approverId);
+                        }
+                        return a.approverId === (currentUser?.id ?? '');
+                      }) ?? false;
 
                     if (!isApprover) {
                       // Reuse the existing record's ID for revisits (unique constraint on ticketId+stageId)
@@ -297,7 +302,13 @@ export const useDragAndDrop = ({
                 const targetStageFormId = stageFormMap.get(targetStage.id);
                 const hasApprovers = targetStageApprovers && targetStageApprovers.length > 0;
                 const isApprover = hasApprovers
-                  ? (targetStageApprovers.some(a => a.userId === currentUser?.id) ?? false)
+                  ? (targetStageApprovers.some(a => {
+                      const type = (a.approverType ?? 'USER') as 'USER' | 'ROLE';
+                      if (type === 'ROLE') {
+                        return !!a.roleId && currentUserRoleIds.includes(a.roleId);
+                      }
+                      return a.userId === currentUser?.id;
+                    }) ?? false)
                   : false;
 
                 const ticketRequests = await zero.run(

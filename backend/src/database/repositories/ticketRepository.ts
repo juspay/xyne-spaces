@@ -52,6 +52,9 @@ const makeFallbackCountsSnapshot = (ticket: {
   ticketType: ticket.ticketType,
   eta: ticket.eta?.getTime() ?? null,
   createdAt: ticket.createdAt.getTime(),
+  prReviewers: [],
+  qaAssigned: [],
+  roleAssignments: [],
 });
 
 export class TicketRepository {

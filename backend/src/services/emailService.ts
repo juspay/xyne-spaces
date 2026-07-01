@@ -40,7 +40,7 @@ import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
 import { PrismaClient, EmailMergeMode } from '@prisma/client';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
-import { ticketAssignmentService } from '@/services/ticketAssignmentService';
+import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { BaseTicketType, type BoardMetadata, isDeskChannelType } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
@@ -1539,7 +1539,10 @@ export class EmailService {
         const boardRow = await this.prisma.board.findUnique({ where: { id: boardId }, select: { metadata: true } });
         const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
 
-        if (boardMetadata?.fullRoleAssignment === true) {
+        if (
+          (Array.isArray(boardMetadata?.assignmentRoles) && boardMetadata!.assignmentRoles!.length > 0)
+          || boardMetadata?.fullRoleAssignment === true
+        ) {
           const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
             ticketId: ticket.id,
             userGroupId,
@@ -1548,10 +1551,11 @@ export class EmailService {
             projectId: ticket.projectId,
             channelId,
           });
-          if (fullRoles.member) {
+          const primaryUserId = primaryUserIdOf(fullRoles);
+          if (primaryUserId) {
             const updatedTicket = await this.prisma.ticket.update({
               where: { id: ticket.id },
-              data: { assignedTo: fullRoles.member },
+              data: { assignedTo: primaryUserId },
             });
             await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
           }

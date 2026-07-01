@@ -6,7 +6,6 @@ import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
 import { UserManagement } from '../UserManagement';
 import type { UserGroup, User } from '@xyne/shared';
-import { UserResponsibility } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -24,7 +23,7 @@ interface UserGroupFormProps {
     alias?: string;
     description?: string;
     userIds?: string[];
-    responsibilities?: Record<string, UserResponsibility>; // Send ALL, not just updates
+    userRoleUpdates?: Record<string, string>;
   }) => Promise<{ id: string }> | Promise<void> | void;
   onCancel: () => void;
   loading?: boolean;
@@ -42,8 +41,8 @@ export const UserGroupForm = ({
   const [activeTab, setActiveTab] = useState<'about' | 'members'>('about');
   const { isMobile } = usePlatform();
   // ONE Map - mutate directly
-  const responsibilitiesRef = useRef<Map<string, UserResponsibility>>(new Map());
-  const responsibilities = responsibilitiesRef.current;
+  const roleIdsRef = useRef<Map<string, string>>(new Map());
+  const roleIds = roleIdsRef.current;
 
   // Load server data
   const [userGroupMembers] = useCachedQuery(
@@ -56,9 +55,11 @@ export const UserGroupForm = ({
   // Initialize from server data
   useEffect(() => {
     if (isEdit && userGroupMembers) {
-      responsibilitiesRef.current.clear();
+      roleIdsRef.current.clear();
       userGroupMembers.forEach(mapping => {
-        responsibilitiesRef.current.set(mapping.userId, mapping.responsibility);
+        if (mapping.roleId) {
+          roleIdsRef.current.set(mapping.userId, mapping.roleId);
+        }
       });
     }
   }, [isEdit, userGroupMembers]);
@@ -93,7 +94,7 @@ export const UserGroupForm = ({
           alias?: string;
           description?: string;
           userIds?: string[];
-          userResponsibilityUpdates?: Record<string, UserResponsibility>;
+          userRoleUpdates?: Record<string, string>;
         } = {};
 
         if (name.trim() !== userGroup.name) {
@@ -115,15 +116,21 @@ export const UserGroupForm = ({
         // Always include userIds for update
         updateData.userIds = selectedUsers.map(user => user.id);
 
-        // Send ALL responsibilities (like form sends all fields)
-        if (responsibilities.size > 0) {
-          updateData.userResponsibilityUpdates = Object.fromEntries(responsibilities);
+        // Send ALL role assignments (like form sends all fields)
+        if (roleIds.size > 0) {
+          updateData.userRoleUpdates = Object.fromEntries(roleIds);
         }
 
         await onSubmit(updateData);
       } else {
         // Create mode - send all fields
-        const data: { name: string; alias?: string; description?: string; userIds?: string[] } = {
+        const data: {
+          name: string;
+          alias?: string;
+          description?: string;
+          userIds?: string[];
+          userRoleUpdates?: Record<string, string>;
+        } = {
           name: name.trim(),
         };
 
@@ -137,6 +144,10 @@ export const UserGroupForm = ({
 
         if (selectedUsers.length > 0) {
           data.userIds = selectedUsers.map(user => user.id);
+        }
+
+        if (roleIds.size > 0) {
+          data.userRoleUpdates = Object.fromEntries(roleIds);
         }
 
         await onSubmit(data);
@@ -299,7 +310,7 @@ export const UserGroupForm = ({
               selectedUsers={isEdit ? undefined : selectedUsers}
               onUsersChange={isEdit ? undefined : setSelectedUsers}
               disabled={isLoading}
-              responsibilities={responsibilities}
+              roleIds={roleIds}
             />
           </div>
         )}

@@ -1,11 +1,11 @@
-import { ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
 import { X, ChevronDown, Plus } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import { type User, FormContextType } from '@xyne/shared';
+import { FormContextType } from '@xyne/shared';
 import { ApproverSelector } from '../ApproverSelector/ApproverSelector';
+import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
-import { useUsers } from '../../../hooks/useUsers';
 import { Button } from '../../ui/Button';
 import type { StageCondition } from '../BoardStageConfigScreen/BoardStageConfigScreen.types';
 import {
@@ -215,16 +215,13 @@ export const ConditionBuilder = ({
   const [thenField, setThenField] = useState<ThenFieldType | ''>('');
   const [thenCondition, setThenCondition] = useState('');
   const [thenValue, setThenValue] = useState('');
-  const [selectedApprovers, setSelectedApprovers] = useState<User[]>([]);
+  const [selectedApprovers, setSelectedApprovers] = useState<ApproverEntry[]>([]);
 
   // Fetch forms for name lookup - only STAGE context forms
   const [allForms] = useCachedQuery(
     queries.getFormsByContextType({ contextType: FormContextType.STAGE }),
   );
   const formMap = useMemo(() => new Map(allForms?.map(f => [f.id, f.formName]) || []), [allForms]);
-
-  // Fetch users for approver lookup
-  const allUsers = useUsers();
 
   // Generate condition name based on selected values
   const generateConditionName = useCallback((): string => {
@@ -273,17 +270,6 @@ export const ConditionBuilder = ({
       setSelectedApprovers([]);
     }
   }, [isOpen, condition]);
-
-  // Backfill approvers once per condition (guarded) so allUsers churn can't
-  // clobber manual edits. length===0, not !allUsers — an empty array is truthy.
-  const approversFilledForRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!condition?.approverIds || condition.approverIds.length === 0) return;
-    if (allUsers.length === 0) return;
-    if (approversFilledForRef.current === condition.id) return;
-    approversFilledForRef.current = condition.id;
-    setSelectedApprovers(allUsers.filter(user => condition.approverIds!.includes(user.id)));
-  }, [condition, allUsers]);
 
   // Reset dependent fields when whenField changes
   const handleWhenFieldChange = (value: WhenFieldType | ''): void => {
@@ -404,7 +390,9 @@ export const ConditionBuilder = ({
       thenField,
       thenCondition,
       thenValue,
-      ...(thenField === 'approver' && { approverIds: selectedApprovers.map(u => u.id) }),
+      ...(thenField === 'approver' && {
+        approvers: selectedApprovers,
+      }),
     };
     onSave(newCondition);
     onClose();

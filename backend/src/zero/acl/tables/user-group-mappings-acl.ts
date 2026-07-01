@@ -3,7 +3,7 @@ import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
-import { hasUserGroupsAdminAccess, verifyManagerOrTeamLead } from '../core/admin-access';
+import { hasUserGroupsAdminAccess } from '../core/admin-access';
 
 export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
 
@@ -27,14 +27,11 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
     }
     await this.verifyUserGroupInWorkspace(args.userGroupId, tx, userGroup.workspaceId);
 
-    // Allow if user has ADMIN access to USER-GROUPS resource
+    // Only ADMIN access to the USER-GROUPS resource can control user group mappings
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
-    if (hasAdminAccess) {
-      return;
+    if (!hasAdminAccess) {
+      throw new MutationACLError('User group mapping insert failed: only ADMIN access allowed', 'user_group_mappings');
     }
-
-    // Otherwise, verify user is MANAGER or TEAM_LEAD
-    await verifyManagerOrTeamLead(this.ctx, args.userGroupId, tx, 'user_group_mappings');
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'user_group_mappings'>>, tx: Transaction<Schema>): Promise<void> {
@@ -50,14 +47,11 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
     }
     await this.verifyUserGroupInWorkspace(userGroupMapping.userGroupId, tx);
 
-    // Allow if user has ADMIN access to USER-GROUPS resource
+    // Only ADMIN access to the USER-GROUPS resource can control user group mappings
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
-    if (hasAdminAccess) {
-      return;
+    if (!hasAdminAccess) {
+      throw new MutationACLError('User group mapping update failed: only ADMIN access allowed', 'user_group_mappings');
     }
-
-    // Otherwise, verify user is MANAGER or TEAM_LEAD
-    await verifyManagerOrTeamLead(this.ctx, userGroupMapping.userGroupId, tx, 'user_group_mappings');
   }
 
   async canDelete(args: DeleteID<TableSchema<'user_group_mappings'>>, tx: Transaction<Schema>): Promise<void> {
@@ -73,13 +67,10 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
     }
     await this.verifyUserGroupInWorkspace(userGroupMapping.userGroupId, tx);
 
-    // Allow if user has ADMIN access to USER-GROUPS resource
+    // Only ADMIN access to the USER-GROUPS resource can control user group mappings
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
-    if (hasAdminAccess) {
-      return;
+    if (!hasAdminAccess) {
+      throw new MutationACLError('User group mapping delete failed: only ADMIN access allowed', 'user_group_mappings');
     }
-
-    // Otherwise, verify user is MANAGER or TEAM_LEAD
-    await verifyManagerOrTeamLead(this.ctx, userGroupMapping.userGroupId, tx, 'user_group_mappings');
   }
 }

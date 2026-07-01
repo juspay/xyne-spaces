@@ -125,8 +125,6 @@ const WORKSPACE_VIEW_ARRAY_KEYS = [
   'assignee',
   'createdBy',
   'userGroups',
-  'prReviewers',
-  'qaAssigned',
   'tags',
   'stages',
   'ticketTypes',

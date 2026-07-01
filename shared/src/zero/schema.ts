@@ -986,7 +986,8 @@ export const ticketAssignmentTable = table('ticket_assignments')
     id: string(),
     ticketId: string(),
     userId: string(),
-    userResponsibility: string(),
+    userResponsibility: string().optional(),
+    roleId: string().optional(),
     createdAt: number(),
     createdBy: string(),
   })
@@ -1130,7 +1131,8 @@ export const userGroupMappingTable = table('user_group_mappings')
     id: string(),
     userId: string(),
     userGroupId: string(),
-    responsibility: enumeration<UserResponsibility>(),
+    responsibility: enumeration<UserResponsibility>().optional(),
+    roleId: string().optional(),
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
     createdAt: number(),
@@ -2164,6 +2166,29 @@ export const stageApproversTable = table('stage_approvers')
   })
   .primaryKey('id');
 
+export const rolesTable = table('roles')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    name: string(),
+    description: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+    isActive: boolean(),
+  })
+  .primaryKey('id');
+
+export const userRoleMappingsTable = table('user_role_mappings')
+  .columns({
+    id: string(),
+    userId: string(),
+    roleId: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const stageTransitionTable = table('stage_transitions') // Prisma: StageTransition
   .columns({
     id: string(),
@@ -2841,6 +2866,11 @@ export const ticketAssignmentTableRelationships = relationships(
       destField: ['id'],
       destSchema: ticketTable,
     }),
+    role: one({
+      sourceField: ['roleId'],
+      destField: ['id'],
+      destSchema: rolesTable,
+    }),
   }),
 );
 
@@ -3099,6 +3129,45 @@ export const userGroupMappingTableRelationships = relationships(
       sourceField: ['userGroupId'],
       destField: ['id'],
       destSchema: userGroupTable,
+    }),
+    role: one({
+      sourceField: ['roleId'],
+      destField: ['id'],
+      destSchema: rolesTable,
+    }),
+  }),
+);
+
+export const rolesTableRelationships = relationships(rolesTable, ({ one, many }) => ({
+  createdByUser: one({
+    sourceField: ['createdBy'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+  userMappings: many({
+    sourceField: ['id'],
+    destField: ['roleId'],
+    destSchema: userRoleMappingsTable,
+  }),
+  userGroupMappings: many({
+    sourceField: ['id'],
+    destField: ['roleId'],
+    destSchema: userGroupMappingTable,
+  }),
+}));
+
+export const userRoleMappingsTableRelationships = relationships(
+  userRoleMappingsTable,
+  ({ one }) => ({
+    user: one({
+      sourceField: ['userId'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+    role: one({
+      sourceField: ['roleId'],
+      destField: ['id'],
+      destSchema: rolesTable,
     }),
   }),
 );
@@ -4581,6 +4650,8 @@ export const schema = createSchema({
     stageTable,
     stagePRStatusMappingTable,
     userGroupMappingTable,
+    rolesTable,
+    userRoleMappingsTable,
     userAssignmentStateTable,
     boardComplexityScoreTable,
     userWorkloadMappingTable,
@@ -4701,6 +4772,8 @@ export const schema = createSchema({
     stageTableRelationships,
     stagePRStatusMappingTableRelationships,
     userGroupMappingTableRelationships,
+    rolesTableRelationships,
+    userRoleMappingsTableRelationships,
     userAssignmentStateTableRelationships,
     boardComplexityScoreTableRelationships,
     userWorkloadMappingTableRelationships,
@@ -4822,6 +4895,8 @@ export type WorkflowExecution = Row<typeof schema.tables.workflow_executions>;
 export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type User = Row<typeof schema.tables.users>;
 export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
+export type Role = Row<typeof schema.tables.roles>;
+export type UserRoleMapping = Row<typeof schema.tables.user_role_mappings>;
 export type UserAssignmentState = Row<typeof schema.tables.user_assignment_states>;
 export type BoardComplexityScore = Row<typeof schema.tables.board_complexity_scores>;
 export type UserWorkloadMapping = Row<typeof schema.tables.user_workload_mappings>;

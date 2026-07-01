@@ -12,6 +12,7 @@ import adminRoutes from './admin';
 import cleanupRoutes from './cleanUp';
 import userActivationRoutes from '@/routes/userActivation';
 import vespaWorkspaceBackfillRoutes from './vespaWorkspaceBackfill';
+import roleFrameworkBackfillRoutes from './roleFrameworkBackfill';
 
 const router = Router();
 
@@ -47,6 +48,9 @@ router.use('/user-activation', userActivationRoutes);
 
 // Vespa workspace/orgId backfill (accessible at /migrate/api/migration/vespa-workspace-backfill)
 router.use('/vespa-workspace-backfill', vespaWorkspaceBackfillRoutes);
+
+// Role-framework backfill (accessible at /migrate/api/migration/role-framework-backfill)
+router.use('/role-framework-backfill', roleFrameworkBackfillRoutes);
 
 // Admin migration utilities
 router.use('/admin', adminRoutes);

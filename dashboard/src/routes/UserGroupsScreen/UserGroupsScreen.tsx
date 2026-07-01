@@ -10,9 +10,8 @@ import { UserGroupListItem } from '../../components/UserGroup/UserGroupListItem/
 import { UserGroupForm } from '../../components/UserGroup/UserGroupForm/UserGroupForm';
 import { apiInstance } from '../../services/clients/apiClient';
 import type { UserGroup as ZeroUserGroup } from '@xyne/shared';
-import { UserResponsibility } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
-import { useUserGroups, useUserGroupMappings } from '../../hooks/useUserGroup';
+import { useUserGroups } from '../../hooks/useUserGroup';
 import { usePlatform } from '../../hooks/usePlatform';
 
 const UserGroupsScreen = (): ReactElement => {
@@ -21,38 +20,16 @@ const UserGroupsScreen = (): ReactElement => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUserGroup, setEditingUserGroup] = useState<ZeroUserGroup | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showManagedOnly, setShowManagedOnly] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const userGroups = useUserGroups();
-  // Fetch current user's group memberships to find which groups they manage
-  const userMemberships = useUserGroupMappings();
 
   const loading = userGroups === undefined;
 
-  // Get set of group IDs where current user is MANAGER or TEAM_LEAD
-  const managedGroupIds = useMemo(() => {
-    if (!userMemberships) return new Set<string>();
-    return new Set(
-      userMemberships
-        .filter(
-          m =>
-            m.responsibility === UserResponsibility.MANAGER ||
-            m.responsibility === UserResponsibility.TEAM_LEAD,
-        )
-        .map(m => m.userGroupId),
-    );
-  }, [userMemberships]);
-
-  // Filter groups based on search and "Managed by Me" filter
+  // Filter groups based on search
   const filteredUserGroups = useMemo(() => {
     if (!userGroups) return [];
 
     let filtered = userGroups;
-
-    // Apply "Managed by Me" filter
-    if (showManagedOnly) {
-      filtered = filtered.filter(group => managedGroupIds.has(group.id));
-    }
 
     // Apply search filter
     if (searchQuery.trim()) {
@@ -66,7 +43,7 @@ const UserGroupsScreen = (): ReactElement => {
     }
 
     return filtered;
-  }, [userGroups, showManagedOnly, managedGroupIds, searchQuery]);
+  }, [userGroups, searchQuery]);
 
   const createUserGroupMutation = useMutation({
     mutationFn: async (data: {
@@ -74,6 +51,7 @@ const UserGroupsScreen = (): ReactElement => {
       alias?: string;
       description?: string;
       userIds?: string[];
+      userRoleUpdates?: Record<string, string>;
     }) => {
       const response = await apiInstance.post('/user-groups', data);
       return response.data as { id: string };
@@ -88,6 +66,7 @@ const UserGroupsScreen = (): ReactElement => {
     alias?: string;
     description?: string;
     userIds?: string[];
+    userRoleUpdates?: Record<string, string>;
   }): Promise<{ id: string }> => {
     return await createUserGroupMutation.mutateAsync(data);
   };
@@ -98,7 +77,7 @@ const UserGroupsScreen = (): ReactElement => {
       name?: string;
       alias?: string;
       description?: string;
-      userResponsibilityUpdates?: Record<string, UserResponsibility>;
+      userRoleUpdates?: Record<string, string>;
     },
   ): Promise<void> => {
     const result = zero.mutate(
@@ -107,8 +86,8 @@ const UserGroupsScreen = (): ReactElement => {
         ...(data.name !== undefined && { name: data.name }),
         ...(data.alias !== undefined && { alias: data.alias }),
         ...(data.description !== undefined && { description: data.description }),
-        ...(data.userResponsibilityUpdates !== undefined && {
-          userResponsibilityUpdates: data.userResponsibilityUpdates,
+        ...(data.userRoleUpdates !== undefined && {
+          userRoleUpdates: data.userRoleUpdates,
         }),
         timestamp: Date.now(),
       }),
@@ -182,7 +161,7 @@ const UserGroupsScreen = (): ReactElement => {
       searchInputRef.current?.focus();
     });
     return () => cancelAnimationFrame(rafId);
-  }, [isMobile, editingUserGroup, showManagedOnly, showCreateModal]);
+  }, [isMobile, editingUserGroup, showCreateModal]);
 
   if (loading) {
     return (
@@ -231,15 +210,6 @@ const UserGroupsScreen = (): ReactElement => {
                   className='pl-10 w-full'
                 />
               </div>
-
-              {/* Filter Button */}
-              <Button
-                variant={showManagedOnly ? 'default' : 'outline'}
-                onClick={() => setShowManagedOnly(!showManagedOnly)}
-                className='whitespace-nowrap'
-              >
-                {showManagedOnly ? 'Managed by Me' : 'Managed by Me'}
-              </Button>
             </div>
           </div>
 
@@ -260,13 +230,11 @@ const UserGroupsScreen = (): ReactElement => {
               <div className='text-center py-16'>
                 <div className='text-muted-foreground text-5xl mb-4'>👥</div>
                 <h3 className='text-xl font-semibold text-foreground mb-2'>
-                  {searchQuery || showManagedOnly
-                    ? 'No matching user groups'
-                    : 'No user groups yet'}
+                  {searchQuery ? 'No matching user groups' : 'No user groups yet'}
                 </h3>
                 <p className='text-muted-foreground'>
-                  {searchQuery || showManagedOnly
-                    ? 'Try adjusting your search or filter'
+                  {searchQuery
+                    ? 'Try adjusting your search'
                     : 'Get started by creating your first user group'}
                 </p>
               </div>

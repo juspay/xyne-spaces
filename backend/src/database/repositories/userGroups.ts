@@ -12,6 +12,7 @@ import { aclAuditService } from '@/services/aclAuditService';
 
 export interface CreateUserGroupWithUsersInput extends CreateUserGroupInput {
   userIds?: string[];
+  userRoleUpdates?: Record<string, string>;
 }
 
 export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGroupInput, UpdateUserGroupInput> {
@@ -72,17 +73,16 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
           data: data.userIds.map(userId => ({
             userGroupId: userGroup.id,
             userId,
-            // Set creator as MANAGER, others as MEMBER (default)
-            responsibility: actorUserId && userId === actorUserId ? 'MANAGER' : 'MEMBER',
+            ...(data.userRoleUpdates?.[userId] ? { roleId: data.userRoleUpdates[userId] } : {}),
           })),
         });
       } else if (actorUserId) {
-        // If no userIds provided, add creator as MANAGER
+        // If no userIds provided, add creator as a member
         await tx.userGroupMapping.create({
           data: {
             userGroupId: userGroup.id,
             userId: actorUserId,
-            responsibility: 'MANAGER',
+            ...(data.userRoleUpdates?.[actorUserId] ? { roleId: data.userRoleUpdates[actorUserId] } : {}),
           },
         });
       }
