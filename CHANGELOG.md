@@ -1,3 +1,20 @@
+## [1.182.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.181.1...v1.182.0) (2026-07-01)
+
+
+### Features
+
+* added sent in xyne desk ([5e7a60d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5e7a60dc44a9c8496098a09c680e745babc416f6)), closes [#7730](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7730)
+* Call Recording ([ce5b512](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ce5b512265eafc88a30e39aa2197b3a997da9547)), closes [#7091](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7091)
+* removed badge and added mark as read per channel in Unreads ([a99bfde](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a99bfde3642588381b260d914594b9bcec141bc8)), closes [#8212](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8212)
+
+
+### Bug Fixes
+
+* ADDED OPTION OF EXPORT CANVA ([f759531](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f759531f4f5aacab9551cf11c5d8a7ed1c6691a3)), closes [#8109](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8109) [#8109](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8109)
+* Backend Build failure ([f749350](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f749350c53e430ecd83dcaee99aae066ef64f8b8)), closes [#8251](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8251)
+* reverts view more button for message bubble - desktop view ([b6b6103](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b6b610395b5d74581282f7998b728b4d054d5415)), closes [#8224](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8224)
+* XYNE-13200 Allow attachment sending in new dms ([ae8148e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ae8148e61b1fe7a42944203e17b99a7b4aa93d70)), closes [#8163](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8163)
+
 ## [1.181.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.181.0...v1.181.1) (2026-06-30)
 
 
