@@ -9,7 +9,12 @@
 import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
+import { v4 as uuidv4 } from 'uuid';
+import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { recordingService } from '../../services/Recording/recordingService';
+import { canvasService } from '../../services/Canvas/canvasService';
+import { useZero } from '../../hooks/useZero';
+import { mutators } from '../../zero/mutators';
 import { Mic, Clock, FileText, Loader2, AlertCircle, ChevronDown } from 'lucide-react';
 import { ConnectionState } from 'livekit-client';
 import { formatDistanceToNow } from 'date-fns';
@@ -20,6 +25,7 @@ import {
 } from '../../hooks/useRecordingStore';
 import { RecordingControlBar } from './components/RecordingControlBar';
 import { ActiveRecordingView } from './components/ActiveRecordingView';
+import { RecordingCanvasPane } from './components/RecordingCanvasPane';
 import { SaveTitleModal } from './components/SaveTitleModal';
 import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { toast } from 'sonner';
@@ -43,6 +49,7 @@ export default function RecordingsScreen(): ReactElement {
   const [showSttPicker, setShowSttPicker] = useState(false);
   const [sttModel, setSttModel] = useState<'google' | 'azure' | 'deepgram'>('google');
   const navigate = useNavigate();
+  const zero = useZero();
 
   const { recordings, hasMoreRecordings, loadMoreRecordings, isLoading } = usePaginatedRecordings();
 
@@ -50,9 +57,16 @@ export default function RecordingsScreen(): ReactElement {
   const recordingStatus = useRecordingStore(ctx => ctx.status);
   const startTime = useRecordingStore(ctx => ctx.startTime);
   const externalId = useRecordingStore(ctx => ctx.externalId);
+  const channelId = useRecordingStore(ctx => ctx.channelId);
+  const notesCanvasId = useRecordingStore(ctx => ctx.notesCanvasId);
+  const notesCanvasViewAccessId = useRecordingStore(ctx => ctx.notesCanvasViewAccessId);
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
   const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
   const room = useRecordingStore(ctx => ctx.room);
+
+  const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
+
+  const hasCanvas = !!notesCanvasId && !!notesCanvasViewAccessId;
 
   const isActive =
     recordingStatus === 'recording' ||
@@ -94,6 +108,36 @@ export default function RecordingsScreen(): ReactElement {
 
   const handleResumeRecording = (): void => {
     sendRecordingEvent({ type: 'resumeRecording' });
+  };
+
+  // Create a collaborative notes canvas for the active recording and open the split view
+  const handleCreateCanvas = async (): Promise<void> => {
+    if (hasCanvas || isCreatingCanvas) return;
+    setIsCreatingCanvas(true);
+    try {
+      const canvasId = uuidv4();
+      const viewAccessId = uuidv4();
+      await canvasService.createCollaborativeCanvas({
+        id: canvasId,
+        title: 'Recording Notes',
+        ...(channelId ? { channelId } : {}),
+        viewAccessId,
+      });
+      sendRecordingEvent({ type: 'setNotesCanvas', canvasId, viewAccessId });
+      // Persist the link on the call now; the thread post happens in the summary pipeline
+      if (externalId) {
+        await zero.mutate(
+          mutators.calls.linkNotesCanvas({
+            callId: externalId,
+            notesCanvasViewAccessId: viewAccessId,
+          }),
+        ).server;
+      }
+    } catch {
+      toast.error('Failed to create notes canvas');
+    } finally {
+      setIsCreatingCanvas(false);
+    }
   };
 
   const sttModelLabels = STT_MODEL_LABELS;
@@ -402,11 +446,36 @@ export default function RecordingsScreen(): ReactElement {
           inset: isActive ? undefined : '0',
         }}
       >
-        <ActiveRecordingView
-          transcripts={transcripts}
-          startTime={startTime}
-          isPaused={recordingStatus === 'paused'}
-        />
+        {notesCanvasId && notesCanvasViewAccessId ? (
+          /* Split view — only after a notes canvas is created */
+          <PanelGroup direction='horizontal' autoSaveId='recording-split-view'>
+            <Panel defaultSize={50} minSize={30}>
+              <ActiveRecordingView
+                transcripts={transcripts}
+                startTime={startTime}
+                isPaused={recordingStatus === 'paused'}
+                hasCanvas
+              />
+            </Panel>
+            <PanelResizeHandle className='w-px bg-border hover:bg-blue-400 transition-colors' />
+            <Panel defaultSize={50} minSize={25}>
+              <RecordingCanvasPane
+                channelId={channelId}
+                notesCanvasId={notesCanvasId}
+                notesCanvasViewAccessId={notesCanvasViewAccessId}
+              />
+            </Panel>
+          </PanelGroup>
+        ) : (
+          /* Default — full-width transcript with a "Create Canvas" button in the header */
+          <ActiveRecordingView
+            transcripts={transcripts}
+            startTime={startTime}
+            isPaused={recordingStatus === 'paused'}
+            isCreatingCanvas={isCreatingCanvas}
+            onCreateCanvas={() => void handleCreateCanvas()}
+          />
+        )}
 
         {/* Reconnecting overlay — mirrors CallStateTransition style */}
         {roomConnectionState === ConnectionState.Reconnecting && <RecordingReconnectingOverlay />}

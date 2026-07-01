@@ -1,4 +1,5 @@
 import { repositories } from '@/database/repositories';
+import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 import { AttachmentEntityType, CallOrigin, CallType, Prisma } from '@prisma/client';
 import { config } from '@/config/env';
@@ -18,6 +19,7 @@ import { CacConfigService } from '@/services/cacConfigService';
 import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
 import { executeCallLlmWithRetry } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
+import { callDocumentService } from '@/services/callDocumentService';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -1236,7 +1238,31 @@ Output ONLY the processed transcript, nothing else.`;
       `[postSummaryAsReply] Bot found: ${xyneAutomaticBot.id} (${xyneAutomaticBot.email})`
     );
 
-    // ── 1. Post / update the AI summary as its own standalone message ──────────
+    // ── 1. Post the notes-canvas link, if the user created one during the recording ──
+    // The viewAccessId is persisted on the call when the canvas is created (see the
+    // calls.linkNotesCanvas Zero mutator). Best-effort: never blocks the summary.
+    // Posted here (before the summary) so the notes reply appears first in the thread;
+    // it still runs after the call-message title swap in processCallWithSummary, so the
+    // notesCanvasUrl stamp on the call message is not clobbered.
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      const notesCanvasViewAccessId = (call?.metadata as Record<string, unknown> | null)
+        ?.notesCanvasViewAccessId;
+
+      if (typeof notesCanvasViewAccessId === 'string' && notesCanvasViewAccessId) {
+        const canvasUrl = getCanvasUrl(notesCanvasViewAccessId);
+        await callDocumentService.postNotesCanvasToConversation(
+          conversationId,
+          callId,
+          canvasUrl,
+          channel.workspaceId
+        );
+      }
+    } catch (notesError) {
+      logger.warn(`[postSummaryAsReply] Failed to post notes canvas for callId: ${callId}`, notesError);
+    }
+
+    // ── 2. Post / update the AI summary as its own standalone message ──────────
     const existingSummary = await repositories.messages.findSummaryByCallId(conversationId, callId);
 
     if (existingSummary) {
@@ -1283,7 +1309,7 @@ Output ONLY the processed transcript, nothing else.`;
       );
     }
 
-    // ── 2. Post ticket suggestions as batched separate messages ──────────────
+    // ── 3. Post ticket suggestions as batched separate messages ──────────────
     // Update existing ticket messages in place (preserves chat position).
     // Delete extras if batch count shrinks. Create new ones if it grows.
     getCallTicketSuggestionsTotal().add(ticketSuggestions?.length ?? 0, { workspaceId: channel.workspaceId });
@@ -1640,7 +1666,6 @@ Output ONLY the processed transcript, nothing else.`;
         }
 
         try {
-          const { callDocumentService } = await import('@/services/callDocumentService');
           await callDocumentService.generateAndPostDetailedSummary(
             callId,
             formattedTranscript,
