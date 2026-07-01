@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useZero } from '../../../../src/hooks/useZero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { X } from 'lucide-react';
+import { SingleSelect, SelectMenuAlignment } from '@juspay/blend-design-system';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
+import { MultiSelect } from '../../ui/MultiSelect';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { mutators } from '../../../zero/mutators';
@@ -14,6 +16,7 @@ import { FormEntityType, FormFieldType, TicketStageRequestStatus } from '@xyne/s
 import type { Ticket, FormEntityValues, FormFields, TicketStageRequest } from '@xyne/shared';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import { StageFormDocField } from './StageFormDocField';
+import { cn } from '../../../utils/classNames';
 
 // Local in-session state for a DOC field. Tracked separately from formData
 // because the actual attachmentId doesn't exist until submit-time upload.
@@ -146,13 +149,45 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
   // True if the field has SOMETHING the user has effectively provided —
   // either a persisted value in formData, or a pending in-session DOC upload.
   // A DOC field marked as 'removed' is treated as empty.
-  const isFieldFilled = (field: FormFields): boolean => {
-    const change = localDocChanges.get(field.id);
-    if (change && 'file' in change) return true;
-    if (change && 'removed' in change) return false;
-    const value = formData[field.id];
-    return !!(value && value.length > 0 && value[0] !== '');
-  };
+  const isFieldFilled = useCallback(
+    (field: FormFields): boolean => {
+      const change = localDocChanges.get(field.id);
+
+      if (field.fieldType === FormFieldType.DOC) {
+        if (change && 'file' in change) return true;
+        if (change && 'removed' in change) return false;
+        const value = formData[field.id];
+        if (value && value.length > 0 && value[0]?.trim() !== '') return true;
+        const values = Array.isArray(formEntityValues) ? formEntityValues : [];
+        const latestValue = values
+          .filter(
+            (fev: FormEntityValues) => fev.fieldId === field.id && fev.contextId === targetStage.id,
+          )
+          .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+        return !!latestValue?.attachments?.[0];
+      }
+
+      const value = formData[field.id];
+      if (!value || value.length === 0) return false;
+
+      if (field.fieldType === FormFieldType.MULTI_SELECT) {
+        return value.some(v => v.trim() !== '');
+      }
+
+      if (field.fieldType === FormFieldType.BOOLEAN) {
+        return value[0] === 'true' || value[0] === 'false';
+      }
+
+      return value.some(v => v.trim() !== '');
+    },
+    [formData, localDocChanges, formEntityValues, targetStage.id],
+  );
+
+  const isFormValid = useMemo(() => {
+    if (formFieldsDetails.type !== 'complete') return false;
+    const fieldsList = Array.isArray(formFields) ? formFields : [];
+    return fieldsList.filter(field => !field.isOptional).every(field => isFieldFilled(field));
+  }, [formFields, formFieldsDetails.type, isFieldFilled]);
 
   // Resolve the FormEntityValues row id we'd update (or undefined if a fresh
   // create is required). Mirrors the existing mutator-time lookup logic so
@@ -172,10 +207,15 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
   };
 
   const handleSubmit = async (status: TicketStageRequestStatus): Promise<void> => {
-    // Validate required fields on every submitter-initiated submit. The DRAFT
-    // path no longer has a UI entry point (Save-as-Draft was removed), so the
-    // only submitter status we'll see here is SUBMITTED.
-    if (status === TicketStageRequestStatus.SUBMITTED) {
+    // Validate required fields for all submitter saves (with or without approvers).
+    const isReviewerAction =
+      hasApprovers &&
+      isReviewer &&
+      existingApproval !== null &&
+      (status === TicketStageRequestStatus.APPROVED ||
+        status === TicketStageRequestStatus.REJECTED);
+
+    if (!isReviewerAction) {
       const fields = Array.isArray(formFields) ? formFields : [];
       const missingFields = fields.filter(field => !field.isOptional && !isFieldFilled(field));
 
@@ -393,15 +433,6 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
         onSuccess?.();
         onClose();
       } else {
-        // Validate required fields before submitting directly (no approval workflow).
-        const missingFields = fields.filter(field => !field.isOptional && !isFieldFilled(field));
-        if (missingFields.length > 0) {
-          toast.error(
-            `Please fill in all required fields: ${missingFields.map(f => f.fieldName).join(', ')}`,
-          );
-          return;
-        }
-
         // Build fieldName→value map so the mutator can persist values by visitIndex
         const formValuesByName: Record<string, unknown> = {};
         for (const field of fields) {
@@ -488,6 +519,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
   const isSubmitted =
     hasApprovers && existingApproval?.status === TicketStageRequestStatus.SUBMITTED;
   const isDraft = hasApprovers && existingApproval?.status === TicketStageRequestStatus.DRAFT;
+  const isFormReadOnly = isApproved || (isSubmitted && !isReviewer);
 
   const fields = Array.isArray(formFields) ? formFields : [];
   const isFieldsLoading = formFieldsDetails.type !== 'complete';
@@ -524,7 +556,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
       onOpenChange={onClose}
       title={isReviewer ? `${targetStage.name} Form Review` : `${targetStage.name} Form`}
     >
-      <div className='p-6'>
+      <div className='p-6 max-h-[80vh] overflow-y-auto'>
         {/* Ticket Info Header */}
         <div className='mb-6 pb-4 border-b border-border flex items-center justify-between gap-4'>
           <div className='flex items-center gap-3'>
@@ -601,8 +633,8 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
               <input
                 type='text'
                 value={formData[field.id]?.[0] || ''}
-                onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
-                disabled={isApproved}
+                onChange={e => setFormData(prev => ({ ...prev, [field.id]: [e.target.value] }))}
+                disabled={isFormReadOnly}
                 className='w-full px-3 py-2 border border-input rounded-md disabled:bg-muted disabled:text-muted-foreground'
                 data-track-category='Tickets'
                 data-track-name='StageFormStringInput'
@@ -616,8 +648,8 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
               <input
                 type='number'
                 value={formData[field.id]?.[0] || ''}
-                onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
-                disabled={isApproved}
+                onChange={e => setFormData(prev => ({ ...prev, [field.id]: [e.target.value] }))}
+                disabled={isFormReadOnly}
                 className='w-full px-3 py-2 border border-input rounded-md disabled:bg-muted disabled:text-muted-foreground'
                 data-track-category='Tickets'
                 data-track-name='StageFormNumberInput'
@@ -628,34 +660,50 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
               />
             )}
             {field.fieldType === FormFieldType.BOOLEAN && (
-              <div className='flex items-center gap-2'>
-                <input
-                  type='checkbox'
-                  id={`field-${field.id}`}
-                  checked={formData[field.id]?.[0] === 'true'}
-                  onChange={e =>
-                    setFormData({ ...formData, [field.id]: [String(e.target.checked)] })
-                  }
-                  disabled={isApproved}
-                  className='h-4 w-4 text-blue-600 border-input rounded disabled:opacity-50'
-                  data-track-category='Tickets'
-                  data-track-name='StageFormCheckbox'
-                  data-track-metadata={JSON.stringify({
-                    fieldId: field.id,
-                    fieldName: field.fieldName,
-                  })}
-                />
-                <label htmlFor={`field-${field.id}`} className='text-sm text-muted-foreground'>
-                  Yes
-                </label>
+              <div
+                className='inline-flex rounded-md border border-input overflow-hidden'
+                role='radiogroup'
+                aria-label={field.fieldName}
+              >
+                {(['true', 'false'] as const).map((option, index) => {
+                  const label = option === 'true' ? 'Yes' : 'No';
+                  const isSelected = formData[field.id]?.[0] === option;
+                  return (
+                    <button
+                      key={option}
+                      type='button'
+                      role='radio'
+                      aria-checked={isSelected}
+                      onClick={() => setFormData(prev => ({ ...prev, [field.id]: [option] }))}
+                      disabled={isFormReadOnly}
+                      className={cn(
+                        'px-4 py-2 text-sm font-medium transition-colors min-w-[72px]',
+                        index > 0 && 'border-l border-input',
+                        isSelected
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-foreground hover:bg-muted',
+                        'disabled:opacity-50 disabled:cursor-not-allowed',
+                      )}
+                      data-track-category='Tickets'
+                      data-track-name={`StageFormBoolean${label}`}
+                      data-track-metadata={JSON.stringify({
+                        fieldId: field.id,
+                        fieldName: field.fieldName,
+                        value: option,
+                      })}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
             )}
             {field.fieldType === FormFieldType.DATE && (
               <input
                 type='date'
                 value={formData[field.id]?.[0] || ''}
-                onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
-                disabled={isApproved}
+                onChange={e => setFormData(prev => ({ ...prev, [field.id]: [e.target.value] }))}
+                disabled={isFormReadOnly}
                 className='w-full px-3 py-2 border border-input rounded-md disabled:bg-muted disabled:text-muted-foreground'
                 data-track-category='Tickets'
                 data-track-name='StageFormDateInput'
@@ -665,43 +713,54 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 })}
               />
             )}
-            {(field.fieldType === FormFieldType.SINGLE_SELECT ||
-              field.fieldType === FormFieldType.MULTI_SELECT) && (
-              <select
-                value={formData[field.id]?.[0] || ''}
-                onChange={e =>
-                  setFormData({
-                    ...formData,
-                    [field.id]:
-                      field.fieldType === FormFieldType.MULTI_SELECT
-                        ? Array.from(e.target.selectedOptions).map(opt => opt.value)
-                        : [e.target.value],
-                  })
+            {field.fieldType === FormFieldType.SINGLE_SELECT && (
+              <div className={cn(isFormReadOnly && 'pointer-events-none opacity-50')}>
+                <SingleSelect
+                  placeholder={`Select ${field.fieldName.toLowerCase()}`}
+                  items={[
+                    {
+                      items:
+                        (field.fieldEnum as string[] | undefined)?.map((option: string) => ({
+                          label: option,
+                          value: option,
+                        })) || [],
+                    },
+                  ]}
+                  selected={formData[field.id]?.[0] || ''}
+                  onSelect={selected => {
+                    setFormData(prev => ({
+                      ...prev,
+                      [field.id]: selected ? [selected] : [],
+                    }));
+                  }}
+                  alignment={SelectMenuAlignment.START}
+                />
+              </div>
+            )}
+            {field.fieldType === FormFieldType.MULTI_SELECT && (
+              <MultiSelect
+                className='w-full'
+                placeholder={`Select ${field.fieldName.toLowerCase()}`}
+                options={
+                  (field.fieldEnum as string[] | undefined)?.map((option: string) => ({
+                    label: option,
+                    value: option,
+                  })) || []
                 }
-                disabled={isApproved}
-                multiple={field.fieldType === FormFieldType.MULTI_SELECT}
-                className='w-full px-3 py-2 border border-input rounded-md disabled:bg-muted disabled:text-muted-foreground'
-                data-track-category='Tickets'
-                data-track-name='StageFormSelect'
-                data-track-metadata={JSON.stringify({
-                  fieldId: field.id,
-                  fieldName: field.fieldName,
-                })}
-              >
-                {(field.fieldEnum as string[] | null | undefined)?.map((option: string) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+                selectedValues={formData[field.id] ?? []}
+                onChange={newValues => {
+                  setFormData(prev => ({ ...prev, [field.id]: newValues }));
+                }}
+                disabled={isFormReadOnly}
+              />
             )}
             {field.fieldType === FormFieldType.USER && (
               <input
                 type='text'
                 placeholder='User ID'
                 value={formData[field.id]?.[0] || ''}
-                onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
-                disabled={isApproved}
+                onChange={e => setFormData(prev => ({ ...prev, [field.id]: [e.target.value] }))}
+                disabled={isFormReadOnly}
                 className='w-full px-3 py-2 border border-input rounded-md disabled:bg-muted disabled:text-muted-foreground'
                 data-track-category='Tickets'
                 data-track-name='StageFormUserInput'
@@ -747,7 +806,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                         return next;
                       });
                     }}
-                    disabled={isApproved}
+                    disabled={isFormReadOnly}
                     readOnly={isReviewer}
                   />
                 );
@@ -814,7 +873,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
               onClick={() => {
                 void handleSubmit(TicketStageRequestStatus.SUBMITTED);
               }}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isFieldsLoading || !isFormValid || isFormReadOnly}
               data-track-category='Tickets'
               data-track-name='SubmitStageFormForApproval'
             >
@@ -826,7 +885,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 // If no approvers, just save form data without approval workflow
                 void handleSubmit(TicketStageRequestStatus.APPROVED);
               }}
-              disabled={isSubmitting || isFieldsLoading}
+              disabled={isSubmitting || isFieldsLoading || !isFormValid}
             >
               {isSubmitting ? 'Saving...' : isFieldsLoading ? 'Loading...' : 'Save'}
             </Button>

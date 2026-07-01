@@ -41,6 +41,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   testId,
   showUnassignOption = false,
   unassignLabel = 'Unassign',
+  headerAction,
 }) => {
   // ==================== STATE ====================
   const [internalOpen, setInternalOpen] = useState(false);
@@ -372,6 +373,25 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                   className='w-full pl-7 pr-3 rounded-md text-sm ring-none outline-none bg-transparent text-foreground placeholder:text-muted-foreground'
                 />
               </div>
+            </div>
+          )}
+
+          {headerAction && (
+            <div className='p-1 border-b border-border'>
+              <button
+                type='button'
+                onClick={() => {
+                  headerAction.onClick();
+                  handleOpenChange(false);
+                  setSearchValue('');
+                }}
+                className='flex w-full items-center gap-2 px-2 py-1.5 text-sm text-[#6276be] font-medium rounded hover:bg-accent'
+                data-track-category={headerAction.trackCategory}
+                data-track-name={headerAction.trackName}
+              >
+                {headerAction.icon}
+                {headerAction.label}
+              </button>
             </div>
           )}
 

@@ -44,6 +44,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
+import { TransitionFormPicker } from '../TransitionFormPicker/TransitionFormPicker';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,6 +69,8 @@ export interface NonLinearTransitionEditorProps {
   onAddStage: () => void;
   formMap: Map<string, string>;
   onOpenEdgeForm: (from: number, to: number, existingFormId?: string | null) => void;
+  onAttachExistingEdgeForm: (from: number, to: number, formId: string) => void;
+  stageForms: Array<{ id: string; formName: string }>;
   onAddConditionForEdge: (from: number, to: number) => void;
   isTransitionsLoading: boolean;
   editingEtaId: number | null;
@@ -436,6 +439,8 @@ interface EdgeSettingsPanelProps {
   onRemoveEdge: () => void;
   onClose: () => void;
   onOpenEdgeForm: () => void;
+  onAttachExistingForm: (formId: string) => void;
+  stageForms: Array<{ id: string; formName: string }>;
   onAddCondition: () => void;
 }
 
@@ -448,6 +453,8 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = ({
   onRemoveEdge,
   onClose,
   onOpenEdgeForm,
+  onAttachExistingForm,
+  stageForms,
   onAddCondition,
 }) => (
   <div className='w-[280px] bg-background border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col'>
@@ -517,16 +524,13 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = ({
             </div>
           </div>
         ) : (
-          <button
-            type='button'
-            onClick={onOpenEdgeForm}
-            data-track-category='board_stage_config'
-            data-track-name='attach_transition_form'
-            className='flex items-center gap-2 w-full rounded-lg border border-dashed border-border px-3 py-2 text-[12px] text-muted-foreground hover:border-[#6276be] hover:text-[#6276be] transition-colors'
-          >
-            <Plus size={12} />
-            Attach form
-          </button>
+          <TransitionFormPicker
+            allForms={stageForms}
+            onCreateForm={onOpenEdgeForm}
+            onSelectForm={onAttachExistingForm}
+            variant='dashed-button'
+            triggerLabel='Attach form'
+          />
         )}
       </div>
 
@@ -657,6 +661,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
   onAddStage,
   formMap,
   onOpenEdgeForm,
+  onAttachExistingEdgeForm,
+  stageForms,
   onAddConditionForEdge,
   isTransitionsLoading,
   editingEtaId,
@@ -1007,6 +1013,10 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
                   selectedEdge.meta.formId,
                 )
               }
+              onAttachExistingForm={formId =>
+                onAttachExistingEdgeForm(selectedEdge.fromTempId, selectedEdge.toTempId, formId)
+              }
+              stageForms={stageForms}
               onAddCondition={() =>
                 onAddConditionForEdge(selectedEdge.fromTempId, selectedEdge.toTempId)
               }

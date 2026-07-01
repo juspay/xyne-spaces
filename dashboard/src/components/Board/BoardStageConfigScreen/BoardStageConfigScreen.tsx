@@ -37,6 +37,7 @@ import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 import type { StageNode as Stage, StageCondition } from './BoardStageConfigScreen.types';
 import { ConditionBuilder } from '../../../components/Board/ConditionBuilder/ConditionBuilder';
 import { CreateFormSlideOut } from '../../../components/Board/CreateFormSlideOut/CreateFormSlideOut';
+import { TransitionFormPicker } from '../TransitionFormPicker/TransitionFormPicker';
 import { formService } from '../../../services/Form/formService';
 import { FormEntityType } from '@xyne/shared';
 import { StatusIndicator } from '../../../components/Board/StatusIndicator';
@@ -128,6 +129,8 @@ interface LinearStageCardProps {
   handleOpenEditForm: (stageTempId: number, formId: string) => Promise<void> | void;
   handleRemoveStageForm: (stageTempId: number) => void;
   handleOpenDirectForm: (stageTempId: number) => void;
+  handleAttachExistingStageForm: (stageTempId: number, formId: string) => void;
+  stageFormsList: Array<{ id: string; formName: string }>;
   isConditionModalOpen: boolean;
   selectedStageForCondition: number | null;
   editingCondition: StageCondition | null;
@@ -156,6 +159,8 @@ const LinearStageCard = ({
   handleOpenEditForm,
   handleRemoveStageForm,
   handleOpenDirectForm,
+  handleAttachExistingStageForm,
+  stageFormsList,
   isConditionModalOpen,
   selectedStageForCondition,
   editingCondition,
@@ -376,17 +381,13 @@ const LinearStageCard = ({
                     </div>
                   </div>
                 ) : (
-                  <Button
-                    onClick={() => handleOpenDirectForm(stage.tempId)}
-                    variant='ghost'
-                    size='sm'
-                    className='flex items-center gap-[6px] text-[13px] font-medium text-muted-foreground hover:text-foreground p-[4px] rounded-[6px] h-auto'
-                    data-track-category='board_config'
-                    data-track-name='configure_transition_form'
-                  >
-                    <Plus size={13} />
-                    <span>Configure Transition Form</span>
-                  </Button>
+                  <TransitionFormPicker
+                    allForms={stageFormsList}
+                    onCreateForm={() => handleOpenDirectForm(stage.tempId)}
+                    onSelectForm={formId => handleAttachExistingStageForm(stage.tempId, formId)}
+                    variant='dashed-button'
+                    triggerLabel='Configure Transition Form'
+                  />
                 )}
               </div>
             )}
@@ -516,6 +517,13 @@ const BoardStageConfigScreen = ({
   // Fetch forms list (lightweight - only scalar fields for name lookup)
   const [allForms] = useCachedQuery(queries.getAllFormsList());
   const formMap = useMemo(() => new Map(allForms?.map(f => [f.id, f.formName]) || []), []);
+  const stageFormsList = useMemo(
+    () =>
+      (allForms ?? [])
+        .filter(f => f.contextType === FormContextType.STAGE)
+        .map(f => ({ id: f.id, formName: f.formName })),
+    [allForms],
+  );
 
   // Track if we've initialized stages to prevent re-syncing
   const hasInitializedStages = useRef(false);
@@ -1291,6 +1299,16 @@ const BoardStageConfigScreen = ({
     setSelectedStageForDirectForm(null);
   }, []);
 
+  const handleAttachExistingStageForm = useCallback(
+    (stageTempId: number, formId: string) => {
+      setStages(prev =>
+        prev.map(stage => (stage.tempId === stageTempId ? { ...stage, formId } : stage)),
+      );
+      toast.success(`Form "${formMap.get(formId) ?? 'Form'}" attached`);
+    },
+    [formMap],
+  );
+
   // ── Edge Condition Handlers (NON_LINEAR boards) ─────────────────────────────
 
   const handleAddConditionForEdge = useCallback((from: number, to: number) => {
@@ -1576,6 +1594,14 @@ const BoardStageConfigScreen = ({
       }
     },
     [],
+  );
+
+  const handleAttachExistingEdgeForm = useCallback(
+    (fromTempId: number, toTempId: number, formId: string) => {
+      updateTransitionMeta(fromTempId, toTempId, { formId });
+      toast.success(`Form "${formMap.get(formId) ?? 'Form'}" attached`);
+    },
+    [updateTransitionMeta, formMap],
   );
 
   const handleCloseEdgeForm = useCallback(() => {
@@ -2013,6 +2039,8 @@ const BoardStageConfigScreen = ({
                     onAddStage={() => handleAddStageAt(stages.length)}
                     formMap={formMap}
                     onOpenEdgeForm={handleOpenEdgeForm}
+                    onAttachExistingEdgeForm={handleAttachExistingEdgeForm}
+                    stageForms={stageFormsList}
                     onAddConditionForEdge={handleAddConditionForEdge}
                     isTransitionsLoading={isTransitionsLoading}
                     editingEtaId={editingEtaId}
@@ -2093,6 +2121,8 @@ const BoardStageConfigScreen = ({
                       handleOpenEditForm={handleOpenEditForm}
                       handleRemoveStageForm={handleRemoveStageForm}
                       handleOpenDirectForm={handleOpenDirectForm}
+                      handleAttachExistingStageForm={handleAttachExistingStageForm}
+                      stageFormsList={stageFormsList}
                       isConditionModalOpen={isConditionModalOpen}
                       selectedStageForCondition={selectedStageForCondition}
                       editingCondition={editingCondition}
