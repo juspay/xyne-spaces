@@ -2,10 +2,12 @@ import { ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Mail } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
+import { toast } from 'sonner';
 import { Button } from '../../ui/Button/Button';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { API_BASE_URL } from '../../../config';
 import { getWorkspaceChannelEmailMailboxStatus } from '../../../services/clients/workspaceDeskApi';
+import { initWorkspaceChannelEmailOAuth } from '../../../services/clients/integrationOAuthApi';
 
 export const WorkspaceChannelEmailCard = (): ReactElement => {
   const { role } = useAuthContextValues();
@@ -19,17 +21,24 @@ export const WorkspaceChannelEmailCard = (): ReactElement => {
 
   const handleConnect = (provider: 'google' | 'microsoft'): void => {
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
-    const params = new URLSearchParams();
-    if (isElectron) params.set('platform', 'electron');
-    params.set('returnPath', `${location.pathname}${location.search}`);
-    const qs = params.toString() ? `?${params.toString()}` : '';
-    const url = `${API_BASE_URL}/integrations/${provider}/connect/channel-email-workspace${qs}`;
-
     if (isElectron && window.electronAPI?.openExternal) {
-      window.electronAPI.openExternal(url);
+      void initWorkspaceChannelEmailOAuth(provider, {
+        returnPath: `${location.pathname}${location.search}`,
+        platform: 'electron',
+      })
+        .then(authUrl => {
+          window.electronAPI?.openExternal(authUrl);
+        })
+        .catch(error => {
+          toast.error(error instanceof Error ? error.message : 'Failed to start mailbox OAuth');
+        });
       return;
     }
 
+    const params = new URLSearchParams();
+    params.set('returnPath', `${location.pathname}${location.search}`);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const url = `${API_BASE_URL}/integrations/${provider}/connect/channel-email-workspace${qs}`;
     window.location.href = url;
   };
 

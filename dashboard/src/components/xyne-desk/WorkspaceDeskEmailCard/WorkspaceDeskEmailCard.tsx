@@ -18,6 +18,7 @@ import {
   getWorkspaceSharedMailboxStatus,
   disconnectWorkspaceDeskIntegration,
 } from '../../../services/clients/workspaceDeskApi';
+import { initWorkspaceDeskOAuth } from '../../../services/clients/integrationOAuthApi';
 
 export const WorkspaceDeskEmailCard = (): ReactElement => {
   const { role } = useAuthContextValues();
@@ -36,13 +37,16 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
 
   const handleConnect = (provider: 'google' | 'microsoft'): void => {
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
-    const params = new URLSearchParams();
-    if (isElectron) params.set('platform', 'electron');
-    const qs = params.toString() ? `?${params.toString()}` : '';
-    const url = `${API_BASE_URL}/integrations/${provider}/connect/workspace${qs}`;
     if (isElectron && window.electronAPI?.openExternal) {
-      window.electronAPI.openExternal(url);
+      void initWorkspaceDeskOAuth(provider, 'electron')
+        .then(authUrl => {
+          window.electronAPI?.openExternal(authUrl);
+        })
+        .catch(error => {
+          toast.error(error instanceof Error ? error.message : 'Failed to start mailbox OAuth');
+        });
     } else {
+      const url = `${API_BASE_URL}/integrations/${provider}/connect/workspace`;
       window.location.href = url;
     }
   };

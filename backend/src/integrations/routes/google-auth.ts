@@ -40,6 +40,30 @@ type PendingChannelData = {
   boardId?: string;
 };
 
+type ProviderPlatform = 'electron' | 'web';
+
+type GoogleChannelConnectInitParams = {
+  name: string;
+  description?: string;
+  visibility?: string;
+  projectId: string;
+  assigneeUserGroupId?: string;
+  boardId?: string;
+  userId: string;
+  workspaceId: string;
+  platform: ProviderPlatform;
+};
+
+class GoogleAuthRouteError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'GoogleAuthRouteError';
+  }
+}
+
 // Redis-backed CSRF state store. Replaces the previous in-memory Map so OAuth
 // state survives across server restarts and multi-instance deployments. TTL is
 // enforced by Redis itself — no manual eviction needed.
@@ -143,54 +167,165 @@ function htmlPage(title: string, body: string, status: 'success' | 'error' = 'su
 <body><div class="card">${body}</div></body></html>`;
 }
 
+async function createGoogleChannelConnectAuthUrl(
+  params: GoogleChannelConnectInitParams,
+): Promise<string> {
+  const project = await db.project.findUnique({ where: { id: params.projectId } });
+  if (!project) {
+    throw new GoogleAuthRouteError('Project not found', 404);
+  }
+
+  const state = Math.random().toString(36).substring(7);
+  await setOAuthState(state, {
+    channelData: {
+      name: params.name,
+      description: params.description,
+      visibility: params.visibility || 'public',
+      projectId: params.projectId,
+      userId: params.userId,
+      workspaceId: params.workspaceId,
+      assigneeUserGroupId: params.assigneeUserGroupId,
+      boardId: params.boardId,
+    },
+    platform: params.platform,
+    timestamp: Date.now(),
+  });
+
+  return createOAuth2Client().generateAuthUrl({
+    access_type: 'offline',
+    scope: GMAIL_SCOPES,
+    prompt: 'consent',
+    state,
+  });
+}
+
+async function createGoogleWorkspaceConnectAuthUrl(
+  workspaceId: string,
+  role: WorkspaceRole,
+  platform: ProviderPlatform,
+): Promise<string> {
+  if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
+    throw new GoogleAuthRouteError('Workspace admin/owner role required to set up the desk email', 403);
+  }
+
+  const existing = await db.externalSource.findFirst({
+    where: { workspaceId, sourceType: ExternalSourcePlatform.GOOGLE },
+  });
+  if (existing?.isActive) {
+    throw new GoogleAuthRouteError('Workspace already has a shared desk email configured', 409);
+  }
+
+  const state = Math.random().toString(36).substring(7);
+  await setOAuthState(state, {
+    mode: 'workspace',
+    workspaceId,
+    platform,
+    timestamp: Date.now(),
+  });
+
+  return createOAuth2Client().generateAuthUrl({
+    access_type: 'offline',
+    scope: GMAIL_SCOPES,
+    prompt: 'consent',
+    state,
+  });
+}
+
+async function createGoogleChannelEmailWorkspaceAuthUrl(
+  workspaceId: string,
+  role: WorkspaceRole,
+  returnPath: string | undefined,
+  platform: ProviderPlatform,
+): Promise<string> {
+  if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
+    throw new GoogleAuthRouteError('Workspace admin/owner role required to set up channel email', 403);
+  }
+
+  GoogleService.validatePushInfrastructure();
+
+  const state = Math.random().toString(36).substring(7);
+  await setOAuthState(state, {
+    mode: 'channel-email-workspace',
+    workspaceId,
+    returnPath,
+    platform,
+    timestamp: Date.now(),
+  });
+
+  return createOAuth2Client().generateAuthUrl({
+    access_type: 'offline',
+    scope: GMAIL_SCOPES,
+    prompt: 'consent',
+    state,
+  });
+}
+
+router.post('/connect/init', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+  const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
+  try {
+    const { name, description, visibility, projectId, assigneeUserGroupId, boardId } = req.body;
+    if (!name || !projectId) {
+      res.status(400).json({ error: 'name and projectId are required' });
+      return;
+    }
+
+    const authUrl = await createGoogleChannelConnectAuthUrl({
+      name,
+      description,
+      visibility,
+      projectId,
+      assigneeUserGroupId,
+      boardId,
+      userId: req.user!.id,
+      workspaceId: req.user!.workspaceId,
+      platform,
+    });
+
+    logger.info(`${TAG} Prepared Google OAuth URL for email channel creation`);
+    res.json({ authUrl });
+  } catch (error: any) {
+    logger.error(`${TAG} Error initiating Google connect:`, error);
+    if (error instanceof GoogleAuthRouteError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    res.status(400).json({ error: error?.message || 'google_connect_failed' });
+  }
+});
+
 // GET /api/integrations/google/connect
 // Initiates Google OAuth flow for email channel creation (mirrors Microsoft /connect)
 router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
-  const platform: 'electron' | 'web' =
+  const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
   try {
     const { name, description, visibility, projectId, assigneeUserGroupId, boardId } = req.query;
-    const userId = req.user!.id;
-    const workspaceId = req.user!.workspaceId;
 
     if (!name || !projectId) {
       res.status(400).json({ error: 'name and projectId are required' });
       return;
     }
 
-    const project = await db.project.findUnique({ where: { id: projectId as string } });
-    if (!project) {
-      res.status(404).json({ error: 'Project not found' });
-      return;
-    }
-
-    const state = Math.random().toString(36).substring(7);
-    await setOAuthState(state, {
-      channelData: {
-        name: name as string,
-        description: description as string | undefined,
-        visibility: (visibility as string) || 'public',
-        projectId: projectId as string,
-        userId,
-        workspaceId,
-        assigneeUserGroupId: assigneeUserGroupId as string | undefined,
-        boardId: boardId as string | undefined,
-      },
+    const authUrl = await createGoogleChannelConnectAuthUrl({
+      name: name as string,
+      description: description as string | undefined,
+      visibility: visibility as string | undefined,
+      projectId: projectId as string,
+      assigneeUserGroupId: assigneeUserGroupId as string | undefined,
+      boardId: boardId as string | undefined,
+      userId: req.user!.id,
+      workspaceId: req.user!.workspaceId,
       platform,
-      timestamp: Date.now(),
-    });
-
-    const authUrl = createOAuth2Client().generateAuthUrl({
-      access_type: 'offline',
-      scope: GMAIL_SCOPES,
-      prompt: 'consent',
-      state,
     });
 
     logger.info(`${TAG} Redirecting to Google OAuth for email channel creation`);
     res.redirect(authUrl);
   } catch (error: any) {
     logger.error(`${TAG} Error initiating Google connect:`, error);
+    if (error instanceof GoogleAuthRouteError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     redirectError(
       res,
       getFrontendUrl(),
@@ -201,53 +336,49 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
   }
 });
 
+router.post('/connect/workspace/init', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+  const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
+  try {
+    const authUrl = await createGoogleWorkspaceConnectAuthUrl(
+      req.user!.workspaceId,
+      req.user!.role as WorkspaceRole,
+      platform,
+    );
+    res.json({ authUrl });
+  } catch (error: any) {
+    logger.error(`${TAG} Error initiating workspace Google connect:`, error);
+    if (error instanceof GoogleAuthRouteError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    res.status(400).json({ error: error?.message || 'workspace_google_connect_failed' });
+  }
+});
+
 // GET /api/integrations/google/connect/workspace
 // Workspace-level OAuth: connects xyne.desk@<orgDomain> as the shared mailbox that
 // DL desks ride on. No channel/preference is created — only an ExternalSource scoped
 // to the workspace (channelId: null, workspaceId set). Only one shared mailbox per
 // workspace is permitted (enforced by ExternalSource.workspaceId @unique).
 router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
-  const platform: 'electron' | 'web' =
+  const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
   try {
     const workspaceId = req.user!.workspaceId;
-
-    // Gate on workspace OWNER / ADMIN. req.user.role is the WorkspaceRole written
-    // by authV2Middleware (fetched fresh from the User row).
-    const role = req.user!.role as WorkspaceRole;
-    if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
-      res.status(403).json({ error: 'Workspace admin/owner role required to set up the desk email' });
-      return;
-    }
-
-    const existing = await db.externalSource.findFirst({ where: { workspaceId, sourceType: ExternalSourcePlatform.GOOGLE } });
-    if (existing?.isActive) {
-      res.status(409).json({
-        error: 'Workspace already has a shared desk email configured',
-        existingDisplayName: existing.displayName,
-      });
-      return;
-    }
-
-    const state = Math.random().toString(36).substring(7);
-    await setOAuthState(state, {
-      mode: 'workspace',
+    const authUrl = await createGoogleWorkspaceConnectAuthUrl(
       workspaceId,
+      req.user!.role as WorkspaceRole,
       platform,
-      timestamp: Date.now(),
-    });
-
-    const authUrl = createOAuth2Client().generateAuthUrl({
-      access_type: 'offline',
-      scope: GMAIL_SCOPES,
-      prompt: 'consent',
-      state,
-    });
+    );
 
     logger.info(`${TAG} Redirecting to Google OAuth for workspace shared mailbox`, { workspaceId });
     res.redirect(authUrl);
   } catch (error: any) {
     logger.error(`${TAG} Error initiating workspace Google connect:`, error);
+    if (error instanceof GoogleAuthRouteError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     redirectError(
       res,
       getFrontendUrl(),
@@ -258,35 +389,39 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
   }
 });
 
+router.post('/connect/channel-email-workspace/init', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+  const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
+  const returnPath = sanitizeReturnPath(req.body.returnPath);
+  try {
+    const authUrl = await createGoogleChannelEmailWorkspaceAuthUrl(
+      req.user!.workspaceId,
+      req.user!.role as WorkspaceRole,
+      returnPath,
+      platform,
+    );
+    res.json({ authUrl });
+  } catch (error: any) {
+    logger.error(`${TAG} Error initiating channel-email workspace Google connect:`, error);
+    if (error instanceof GoogleAuthRouteError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    res.status(400).json({ error: error?.message || 'channel_email_google_connect_failed' });
+  }
+});
+
 router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
-  const platform: 'electron' | 'web' =
+  const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
   const returnPath = sanitizeReturnPath(req.query.returnPath);
   try {
     const workspaceId = req.user!.workspaceId;
-    const role = req.user!.role as WorkspaceRole;
-    if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
-      res.status(403).json({ error: 'Workspace admin/owner role required to set up channel email' });
-      return;
-    }
-
-    GoogleService.validatePushInfrastructure();
-
-    const state = Math.random().toString(36).substring(7);
-    await setOAuthState(state, {
-      mode: 'channel-email-workspace',
+    const authUrl = await createGoogleChannelEmailWorkspaceAuthUrl(
       workspaceId,
+      req.user!.role as WorkspaceRole,
       returnPath,
       platform,
-      timestamp: Date.now(),
-    });
-
-    const authUrl = createOAuth2Client().generateAuthUrl({
-      access_type: 'offline',
-      scope: GMAIL_SCOPES,
-      prompt: 'consent',
-      state,
-    });
+    );
 
     logger.info(`${TAG} Redirecting to Google OAuth for channel-email workspace mailbox`, {
       workspaceId,
@@ -294,6 +429,10 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
     res.redirect(authUrl);
   } catch (error: any) {
     logger.error(`${TAG} Error initiating channel-email workspace Google connect:`, error);
+    if (error instanceof GoogleAuthRouteError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     const params = new URLSearchParams({
       emailError: error?.message || 'channel_email_google_connect_failed',
     });

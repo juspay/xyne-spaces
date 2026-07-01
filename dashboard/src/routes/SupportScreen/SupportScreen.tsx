@@ -155,6 +155,7 @@ import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm'
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
 import { API_BASE_URL, SHAREABLE_ORIGIN } from '../../config';
+import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
 import { useMutation } from '@tanstack/react-query';
@@ -1246,56 +1247,78 @@ const SupportScreen = (): ReactElement => {
     }
 
     if (connector === 'microsoft') {
-      const params = new URLSearchParams({
-        name: rest.name,
-        projectId: rest.projectId,
-        visibility: rest.visibility,
-      });
-      if (rest.description) {
-        params.set('description', rest.description);
-      }
-      if (rest.assigneeUserGroupId) {
-        params.set('assigneeUserGroupId', rest.assigneeUserGroupId);
-      }
-      if (rest.boardId) {
-        params.set('boardId', rest.boardId);
-      }
-      if (isElectron) {
-        params.set('platform', 'electron');
-      }
-      const microsoftUrl = `${API_BASE_URL}/integrations/microsoft/connect?${params.toString()}`;
       if (isElectron && window.electronAPI?.openExternal) {
-        window.electronAPI.openExternal(microsoftUrl);
-        setShowCreateChannelModal(false);
+        void initDeskChannelOAuth('microsoft', {
+          name: rest.name,
+          projectId: rest.projectId,
+          visibility: rest.visibility,
+          ...(rest.description && { description: rest.description }),
+          ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
+          ...(rest.boardId && { boardId: rest.boardId }),
+          platform: 'electron',
+        })
+          .then(authUrl => {
+            window.electronAPI?.openExternal(authUrl);
+            setShowCreateChannelModal(false);
+          })
+          .catch(error => {
+            toast.error(error instanceof Error ? error.message : 'Failed to start Microsoft OAuth');
+          });
       } else {
+        const params = new URLSearchParams({
+          name: rest.name,
+          projectId: rest.projectId,
+          visibility: rest.visibility,
+        });
+        if (rest.description) {
+          params.set('description', rest.description);
+        }
+        if (rest.assigneeUserGroupId) {
+          params.set('assigneeUserGroupId', rest.assigneeUserGroupId);
+        }
+        if (rest.boardId) {
+          params.set('boardId', rest.boardId);
+        }
+        const microsoftUrl = `${API_BASE_URL}/integrations/microsoft/connect?${params.toString()}`;
         window.location.href = microsoftUrl;
       }
       return;
     }
 
     if (connector === 'google') {
-      const params = new URLSearchParams({
-        name: rest.name,
-        projectId: rest.projectId,
-        visibility: rest.visibility,
-      });
-      if (rest.description) {
-        params.set('description', rest.description);
-      }
-      if (rest.assigneeUserGroupId) {
-        params.set('assigneeUserGroupId', rest.assigneeUserGroupId);
-      }
-      if (rest.boardId) {
-        params.set('boardId', rest.boardId);
-      }
-      if (isElectron) {
-        params.set('platform', 'electron');
-      }
-      const googleUrl = `${API_BASE_URL}/integrations/google/connect?${params.toString()}`;
       if (isElectron && window.electronAPI?.openExternal) {
-        window.electronAPI.openExternal(googleUrl);
-        setShowCreateChannelModal(false);
+        void initDeskChannelOAuth('google', {
+          name: rest.name,
+          projectId: rest.projectId,
+          visibility: rest.visibility,
+          ...(rest.description && { description: rest.description }),
+          ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
+          ...(rest.boardId && { boardId: rest.boardId }),
+          platform: 'electron',
+        })
+          .then(authUrl => {
+            window.electronAPI?.openExternal(authUrl);
+            setShowCreateChannelModal(false);
+          })
+          .catch(error => {
+            toast.error(error instanceof Error ? error.message : 'Failed to start Google OAuth');
+          });
       } else {
+        const params = new URLSearchParams({
+          name: rest.name,
+          projectId: rest.projectId,
+          visibility: rest.visibility,
+        });
+        if (rest.description) {
+          params.set('description', rest.description);
+        }
+        if (rest.assigneeUserGroupId) {
+          params.set('assigneeUserGroupId', rest.assigneeUserGroupId);
+        }
+        if (rest.boardId) {
+          params.set('boardId', rest.boardId);
+        }
+        const googleUrl = `${API_BASE_URL}/integrations/google/connect?${params.toString()}`;
         window.location.href = googleUrl;
       }
       return;
