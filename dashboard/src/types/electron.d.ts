@@ -81,6 +81,14 @@ export interface ElectronAPI {
     settings: Partial<{ popups: boolean; openLinksExternally: boolean }>,
   ) => Promise<{ popups: boolean; openLinksExternally: boolean }>;
   clearSiteData: () => Promise<{ success: boolean }>;
+  exportCanvasMarkdown?: (
+    fileName: string,
+    content: string,
+  ) => Promise<{ saved: boolean; filePath?: string }>;
+  exportCanvasPdf?: (
+    fileName: string,
+    html: string,
+  ) => Promise<{ saved: boolean; filePath?: string }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
   getErrorReportNativeLogs?: () => Promise<ErrorReportNativeLog[]>;

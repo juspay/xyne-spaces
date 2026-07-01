@@ -184,6 +184,59 @@ export function setupIpcHandlers(): void {
     return { saved: true };
   });
 
+  ipcMain.handle('canvas:export-pdf', async (_event, { fileName, html }: { fileName: string; html: string }) => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: fileName,
+      filters: [
+        { name: 'PDF', extensions: ['pdf'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) return { saved: false };
+
+    const printWindow = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    try {
+      await printWindow.loadURL('about:blank');
+      await printWindow.webContents.executeJavaScript(
+        `document.open();document.write(${JSON.stringify(html)});document.close();`,
+      );
+
+      const pdf = await printWindow.webContents.printToPDF({
+        pageSize: 'A4',
+        printBackground: true,
+      });
+
+      await fs.writeFile(result.filePath, pdf);
+      return { saved: true, filePath: result.filePath };
+    } finally {
+      printWindow.destroy();
+    }
+  });
+
+  ipcMain.handle('canvas:export-markdown', async (_event, { fileName, content }: { fileName: string; content: string }) => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: fileName,
+      filters: [
+        { name: 'Markdown', extensions: ['md'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) return { saved: false };
+
+    await fs.writeFile(result.filePath, content, 'utf8');
+    return { saved: true, filePath: result.filePath };
+  });
+
   ipcMain.on('clear-all-cookies', () => {
     void clearAllCookies();
   });
@@ -387,4 +440,3 @@ export function setupIpcHandlers(): void {
     }
   });
 }
-
