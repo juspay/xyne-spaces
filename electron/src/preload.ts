@@ -159,6 +159,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // File Management APIs
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
+  exportCanvasMarkdown: (fileName: string, content: string) =>
+    ipcRenderer.invoke('canvas:export-markdown', { fileName, content }),
+  exportCanvasPdf: (fileName: string, html: string) =>
+    ipcRenderer.invoke('canvas:export-pdf', { fileName, html }),
 
   // Docs Publish APIs
   docsPublish: {
@@ -294,4 +298,3 @@ contextBridge.exposeInMainWorld('electronAPI', {
     cancelRecording: () => ipcRenderer.send('recording-pill:cancel-recording'),
   },
 });
-
