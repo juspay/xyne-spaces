@@ -75,13 +75,10 @@ function frontendBase(): string {
   return base;
 }
 
-/**
- * Application Links manifest. typeId `jira` is the trigger that makes Bitbucket
- * apply JIRA issue-key linkification to this link.
- */
-router.get('/rest/applinks/1.0/manifest', (req: Request, res: Response) => {
-  res.type('application/xml').send(
-    `<?xml version="1.0" encoding="UTF-8"?>
+// typeId `jira` is the trigger that makes Bitbucket apply JIRA issue-key
+// linkification to this link.
+function manifestXml(req: Request): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <manifest>
   <id>${escapeXml(APPLINK_ID)}</id>
   <name>${escapeXml(SERVER_TITLE)}</name>
@@ -90,8 +87,18 @@ router.get('/rest/applinks/1.0/manifest', (req: Request, res: Response) => {
   <buildNumber>${JIRA_BUILD_NUMBER}</buildNumber>
   <url>${escapeXml(selfBase(req))}</url>
   <publicSignup>false</publicSignup>
-</manifest>`
-  );
+</manifest>`;
+}
+
+/**
+ * Application Links manifest, served at both the mount root (the base URL itself)
+ * and the canonical /rest/applinks/1.0/manifest. Serving the root matters: it's
+ * where Bitbucket's app-link availability probe (and manual visits) land, and
+ * without a handler that request falls through to the /api auth wall (401),
+ * which shows as STATUS UNAVAILABLE on the link.
+ */
+router.get(['/', '/rest/applinks/1.0/manifest'], (req: Request, res: Response) => {
+  res.type('application/xml').send(manifestXml(req));
 });
 
 /** Version/capability probe used during application-link setup. */
@@ -231,6 +238,16 @@ router.get('/browse/:key', async (req: Request, res: Response) => {
     logger.error(`[Jira-Compat] /browse/${key} error:`, error);
     res.redirect(302, home);
   }
+});
+
+// Catch-all for any other GET under the mount. Returns a JIRA-style 404 instead
+// of letting the request fall through to the /api auth wall, which answers 401
+// and makes the Application Link show STATUS UNAVAILABLE. Logged so the exact
+// path Bitbucket probes is visible without another deploy. GET-only on purpose:
+// the webhook POST /bitbucket/:workspaceId must still fall through to its handler.
+router.get('*', (req: Request, res: Response) => {
+  logger.info(`[Jira-Compat] unhandled probe: ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ errorMessages: ['Not found'], errors: {} });
 });
 
 export default router;
