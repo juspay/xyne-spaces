@@ -232,6 +232,12 @@ export default function RecordingDetailScreen(): ReactElement {
                   type='text'
                   value={editedTitle}
                   onChange={e => setEditedTitle(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void handleSaveTitle();
+                    }
+                  }}
                   className='flex-1 px-3 py-2 text-2xl font-bold bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring'
                   // eslint-disable-next-line jsx-a11y/no-autofocus
                   autoFocus

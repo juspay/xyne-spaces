@@ -205,7 +205,7 @@ export default function CallDetailScreen(): ReactElement {
   const renderSummaryTab = (): ReactElement => {
     if (call.aiSummary) {
       return (
-        <div className='bot-markdown-content-call-summary prose prose-sm max-w-none text-foreground'>
+        <div className='bot-markdown-content-call-summary prose prose-sm max-w-none text-foreground !ml-0'>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{call.aiSummary}</ReactMarkdown>
         </div>
       );

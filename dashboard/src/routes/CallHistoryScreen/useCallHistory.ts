@@ -40,6 +40,8 @@ interface UseCallHistoryReturn {
   calls: Call[] | undefined;
   scheduledCalls: ScheduledCall[] | undefined;
   missedCalls: QueryResultType<typeof queries.userCallHistory>;
+  isLoading: boolean;
+  isScheduledCallsLoading: boolean;
   queryDetails: ReturnType<typeof useCachedQuery>[1];
   selectedCall: Call | null;
   isParticipantsModalOpen: boolean;
@@ -94,9 +96,11 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     hasMoreCalls,
     loadMoreCalls,
     onVisibleRangeChanged,
+    isLoading,
+    queryDetails,
   } = usePaginatedCalls();
 
-  const [allScheduledCalls] = useCachedQuery(queries.userScheduledCalls());
+  const [allScheduledCalls, scheduledQueryDetails] = useCachedQuery(queries.userScheduledCalls());
 
   // Fetch all calls when user is searching, so search covers everything
   const [searchQuery, setSearchQuery] = useState('');
@@ -734,7 +738,9 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     calls: recentCalls,
     scheduledCalls,
     missedCalls,
-    queryDetails: { type: 'complete' },
+    isLoading,
+    isScheduledCallsLoading: scheduledQueryDetails.type === 'unknown',
+    queryDetails,
     selectedCall,
     isParticipantsModalOpen,
     searchQuery,

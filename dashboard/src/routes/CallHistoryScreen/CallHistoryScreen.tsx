@@ -4,6 +4,7 @@ import {
   ChevronDown,
   Info,
   LayoutList,
+  Loader2,
   LucideIcon,
   Phone,
   Plus,
@@ -127,6 +128,8 @@ const CallHistoryScreen = (): ReactElement => {
     calls,
     scheduledCalls,
     missedCalls,
+    isLoading,
+    isScheduledCallsLoading,
     queryDetails,
     selectedCall,
     isParticipantsModalOpen,
@@ -193,6 +196,21 @@ const CallHistoryScreen = (): ReactElement => {
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Show a loader for at least 10 seconds (or until calls load) so the screen
+  // doesn't flash the empty state while the Zero query is still warming up.
+  const [showMinLoader, setShowMinLoader] = useState(true);
+  useEffect(() => {
+    if (!isLoading) {
+      setShowMinLoader(false);
+      return;
+    }
+    setShowMinLoader(true);
+    const timer = setTimeout(() => setShowMinLoader(false), 10000);
+    return () => clearTimeout(timer);
+  }, [isLoading]);
+
+  const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
 
   // Fetch the current user's calendar provider once on mount.
   // If syncCalendar=true is in the URL (returning from connect-calendar OAuth),
@@ -588,14 +606,6 @@ const CallHistoryScreen = (): ReactElement => {
     });
   }, [filteredRecentCallsNoGcal, filteredMissedCalls, recentCallFilter, user?.id]);
 
-  if (queryDetails.type === 'unknown') {
-    return (
-      <div className='flex items-center justify-center h-full'>
-        <div className='text-sm text-muted-foreground'>Loading call history...</div>
-      </div>
-    );
-  }
-
   if (queryDetails.type === 'error') {
     return (
       <div className='flex items-center justify-center h-full'>
@@ -931,16 +941,26 @@ const CallHistoryScreen = (): ReactElement => {
             </div>
 
             {viewMode === 'list' ? (
-              <UpcomingCallsList
-                grouped
-                calls={limitedScheduledCalls || []}
-                selectedDay={upcomingDay}
-                onCallClick={undefined}
-                onJoinCall={call => handleCallRowClick(call)}
-                onEditCall={call => handleEditClick(call)}
-                onCancelCall={call => handleDeleteClick(call)}
-                currentUserId={user?.id}
-              />
+              isScheduledCallsLoading ? (
+                <div className='py-10 flex items-center justify-center'>
+                  <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
+                </div>
+              ) : (limitedScheduledCalls?.length ?? 0) === 0 ? (
+                <div className='py-4 text-sm text-muted-foreground text-center'>
+                  No upcoming calls
+                </div>
+              ) : (
+                <UpcomingCallsList
+                  grouped
+                  calls={limitedScheduledCalls || []}
+                  selectedDay={upcomingDay}
+                  onCallClick={undefined}
+                  onJoinCall={call => handleCallRowClick(call)}
+                  onEditCall={call => handleEditClick(call)}
+                  onCancelCall={call => handleDeleteClick(call)}
+                  currentUserId={user?.id}
+                />
+              )
             ) : (
               <div className='flex-1 min-h-0 overflow-hidden pb-3'>
                 {calendarSubView === 'month' && (
@@ -1028,7 +1048,11 @@ const CallHistoryScreen = (): ReactElement => {
               </div>
 
               {displayRecentCalls.length === 0 ? (
-                searchQuery.trim() ? (
+                showRecentCallsLoader ? (
+                  <div className='py-10 flex items-center justify-center'>
+                    <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
+                  </div>
+                ) : searchQuery.trim() ? (
                   <NoFiltredCalls searchQuery={searchQuery} />
                 ) : (
                   <EmptyState

@@ -2099,6 +2099,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                           }}
                                           placeholder='Pick end date'
                                           minDate={startsAt ?? new Date()}
+                                          // The recurrence panel is a DropdownMenuContent at
+                                          // z-[60]; without this the calendar popover (z-50)
+                                          // renders behind it. Raise it above the panel.
+                                          contentClassName='z-[70]'
                                           inputClassName={cn(
                                             'text-sm leading-5 bg-transparent rounded-lg h-8 gap-2.5 min-w-44',
                                             seriesEndsType !== 'on' &&

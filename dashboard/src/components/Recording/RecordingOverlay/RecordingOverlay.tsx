@@ -248,76 +248,78 @@ export function RecordingOverlay(): React.ReactElement | null {
         </button>
 
         {/* Card */}
-        <div className='bg-background dark:bg-gray-800 rounded-lg shadow-2xl border border-border dark:border-gray-700 p-4 w-[200px]'>
-          {/* Header */}
-          <div className='flex items-center gap-3 mb-3'>
-            <div className='relative'>
-              {isRecording && (
-                <span className='flex h-3 w-3'>
-                  <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75' />
-                  <span className='relative inline-flex rounded-full h-3 w-3 bg-red-500' />
-                </span>
-              )}
-              {isPaused && (
-                <span className='relative inline-flex rounded-full h-3 w-3 bg-yellow-500' />
-              )}
-              {isStarting && (
-                <span className='animate-pulse relative inline-flex rounded-full h-3 w-3 bg-blue-500' />
-              )}
+        <div className='bg-background dark:bg-gray-800 rounded-2xl shadow-2xl border border-border dark:border-gray-700 p-4 w-[280px]'>
+          {/* Top row: status/time + controls */}
+          <div className='flex items-start justify-between gap-4 mb-4'>
+            <div className='flex items-center gap-3 min-w-0'>
+              <div className='relative mt-0.5'>
+                {isRecording && (
+                  <span className='flex h-3 w-3'>
+                    <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75' />
+                    <span className='relative inline-flex rounded-full h-3 w-3 bg-red-500' />
+                  </span>
+                )}
+                {isPaused && (
+                  <span className='relative inline-flex rounded-full h-3 w-3 bg-yellow-500' />
+                )}
+                {isStarting && (
+                  <span className='animate-pulse relative inline-flex rounded-full h-3 w-3 bg-blue-500' />
+                )}
+              </div>
+
+              <div className='min-w-0'>
+                <div className='font-semibold text-sm text-foreground dark:text-gray-100 leading-tight'>
+                  {isStarting ? 'Starting...' : isPaused ? 'Paused' : 'Recording'}
+                </div>
+                <div className='text-xs text-muted-foreground dark:text-muted-foreground tabular-nums'>
+                  {isStarting ? 'Connecting...' : formatRecordingDuration(elapsedTime)}
+                </div>
+              </div>
             </div>
 
-            <div className='flex-1'>
-              <div className='font-semibold text-sm text-foreground dark:text-gray-100'>
-                {isStarting ? 'Starting...' : isPaused ? 'Paused' : 'Recording'}
-              </div>
-              <div className='text-xs text-muted-foreground dark:text-muted-foreground'>
-                {isStarting ? 'Connecting...' : formatRecordingDuration(elapsedTime)}
-              </div>
+            <div className='flex items-center gap-2 shrink-0'>
+              <button
+                onClick={handlePauseResume}
+                disabled={isStarting}
+                className='flex items-center justify-center w-9 h-9 rounded-full bg-muted dark:bg-gray-700 hover:bg-muted-foreground/20 transition-colors'
+                data-track-category='RecordingOverlay'
+                data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
+              >
+                {isPaused ? <Play className='w-4 h-4' /> : <Pause className='w-4 h-4' />}
+              </button>
+
+              <button
+                onClick={handleStop}
+                disabled={isStarting}
+                className='flex items-center justify-center w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 transition-colors'
+                data-track-category='RecordingOverlay'
+                data-track-name='stop_recording'
+              >
+                <Square className='w-4 h-4 text-white fill-current' />
+              </button>
             </div>
           </div>
 
           {/* Waveform */}
-          {isRecording && (
-            <div className='flex items-center justify-center gap-[3px] h-8 mb-3'>
-              {Array.from({ length: 12 }, (_, i) => (
+          {(isRecording || isPaused) && (
+            <div className='flex items-center justify-between gap-[3px] h-8 mb-4'>
+              {Array.from({ length: 16 }, (_, i) => (
                 <div
                   key={i}
-                  className='w-1 bg-emerald-500 rounded-full'
+                  className='flex-1 bg-emerald-500 rounded-full'
                   style={{
-                    animation: `waveform 0.6s ease-in-out ${i * 0.05}s infinite alternate`,
+                    animation: `waveform 0.6s ease-in-out ${i * 0.04}s infinite alternate`,
+                    animationPlayState: isPaused ? 'paused' : 'running',
                   }}
                 />
               ))}
             </div>
           )}
 
-          {/* Controls */}
-          <div className='flex items-center justify-center gap-2'>
-            <button
-              onClick={handlePauseResume}
-              disabled={isStarting}
-              className='flex items-center justify-center w-10 h-10 rounded-full bg-muted dark:bg-gray-700'
-              data-track-category='RecordingOverlay'
-              data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
-            >
-              {isPaused ? <Play /> : <Pause />}
-            </button>
-
-            <button
-              onClick={handleStop}
-              disabled={isStarting}
-              className='flex items-center justify-center w-12 h-12 rounded-full bg-red-500'
-              data-track-category='RecordingOverlay'
-              data-track-name='stop_recording'
-            >
-              <Square className='text-white fill-current' />
-            </button>
-          </div>
-
           {/* Link */}
           <button
             onClick={() => void navigate('/recordings')}
-            className='mt-3 w-full flex items-center justify-center gap-1.5 text-xs text-blue-600'
+            className='w-full flex items-center justify-center gap-1.5 text-xs text-blue-600 hover:underline'
             data-track-category='RecordingOverlay'
             data-track-name='go_to_recordings'
           >
