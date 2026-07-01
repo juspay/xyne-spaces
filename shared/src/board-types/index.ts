@@ -49,6 +49,39 @@ export interface BoardMetadata {
   fieldOrder?: FieldOrderItem[];
   customFieldsFormId?: string;
   /**
+   * Auto-assign one user per configured roleId when a ticket is assigned to a
+   * user group. Non-empty → role-driven path (each slot's user has
+   * `UserGroupMapping.roleId === slot.roleId`; the slot with `isPrimary: true`
+   * also becomes `ticket.assignedTo`). Empty/missing → falls back to the legacy
+   * `fullRoleAssignment` 5-enum path (MANAGER/TEAM_LEAD/MEMBER/PR_REVIEWER/QA).
+   */
+  assignmentRoles?: Array<{ roleId: string; isPrimary: boolean }>;
+  /**
+   * RoleIds allowed to change a ticket's Assignee, ETA, Stage, or Board on this
+   * board. Non-empty → the actor's `UserGroupMapping.roleId` must be in this
+   * list (raw roleId membership; works for custom roles). Empty/missing →
+   * falls back to the legacy `isAllowedToTransfer` + MANAGER/TEAM_LEAD enum
+   * path. A board with neither config is unrestricted. Restriction is opt-in:
+   * `ticketControlRoleIds` is only set when a user explicitly adds roleIds via
+   * the board config UI; it is never auto-populated.
+   */
+  ticketControlRoleIds?: string[];
+  /**
+   * RoleIds used by the bitbucket/github PR-webhook flow to auto-assign a user
+   * to the linked ticket when a PR event fires. Each event picks one user whose
+   * `UserGroupMapping.roleId === <roleId>`.
+   *
+   * - `prOpenedRoleId`: fires on PR CREATED or UPDATED (PR-opened/updated event).
+   * - `prMergedRoleId`: fires on PR MERGED.
+   *
+   * Missing/empty → falls back to the legacy enum path
+   * (`evaluateAssignmentRule(PR_REVIEWER/QA)` which reads `mapping.responsibility`).
+   */
+  bitbucketEventRoles?: {
+    prOpenedRoleId?: string;
+    prMergedRoleId?: string;
+  };
+  /**
    * Controls which SLA mechanism is active for this board.
    *
    * - `'stages'` (default): SLA deadlines are derived from per-stage ETAs

@@ -1,5 +1,5 @@
-import { type User } from '@xyne/shared';
 import type { StageCondition } from '../BoardStageConfigScreen/BoardStageConfigScreen.types';
+import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 import { type SelectOption } from '../../../utils/board';
 
 export interface SelectDropdownProps {
@@ -33,7 +33,7 @@ export interface FormDropdownProps {
 }
 
 export interface ApproverDropdownProps {
-  selectedApprovers: User[];
-  onApproversChange: (approvers: User[]) => void;
+  selectedApprovers: ApproverEntry[];
+  onApproversChange: (approvers: ApproverEntry[]) => void;
   disabled?: boolean;
 }

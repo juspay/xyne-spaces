@@ -7,7 +7,7 @@ import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, F
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
-import { ticketAssignmentService } from '@/services/ticketAssignmentService';
+import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
@@ -750,10 +750,11 @@ export class TicketController {
             createdBy: userId,
             projectId,
           });
-          if (fullRoles.member) {
+          const primaryUserId = primaryUserIdOf(fullRoles);
+          if (primaryUserId) {
             const updatedTicket = await prismaClient.ticket.update({
               where: { id: result.ticketId },
-              data: { assignedTo: fullRoles.member },
+              data: { assignedTo: primaryUserId },
             });
             await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
           }
@@ -1059,7 +1060,10 @@ export class TicketController {
           });
           const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
 
-          if (boardMetadata?.fullRoleAssignment === true) {
+          if (
+            (Array.isArray(boardMetadata?.assignmentRoles) && boardMetadata!.assignmentRoles!.length > 0)
+            || boardMetadata?.fullRoleAssignment === true
+          ) {
             const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
               ticketId,
               userGroupId: effectiveGroupId,
@@ -1067,10 +1071,11 @@ export class TicketController {
               createdBy: userId,
               projectId: ticket.projectId,
             });
-            if (fullRoles.member) {
+            const primaryUserId = primaryUserIdOf(fullRoles);
+            if (primaryUserId) {
               const updatedTicket = await prismaClient.ticket.update({
                 where: { id: ticketId },
-                data: { assignedTo: fullRoles.member, updatedBy: userId, updatedAt: new Date() },
+                data: { assignedTo: primaryUserId, updatedBy: userId, updatedAt: new Date() },
               });
               await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
             }
@@ -1900,10 +1905,11 @@ export class TicketController {
             createdBy: userId,
             projectId: ticket.projectId,
           });
-          if (fullRoles.member) {
+          const primaryUserId = primaryUserIdOf(fullRoles);
+          if (primaryUserId) {
             const updatedTicket = await prismaClient.ticket.update({
               where: { id: ticket.id },
-              data: { assignedTo: fullRoles.member },
+              data: { assignedTo: primaryUserId },
             });
             await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
           }

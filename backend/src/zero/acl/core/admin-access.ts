@@ -1,7 +1,7 @@
 import { Transaction } from '@rocicorp/zero';
-import { Schema, AccessType, UserResponsibility, WorkspaceRole } from '@xyne/shared';
+import { Schema, AccessType, WorkspaceRole } from '@xyne/shared';
 import { zql } from '../../queries';
-import { MutationACLError, QueryContext, TableName } from './types';
+import { MutationACLError, QueryContext } from './types';
 
 /**
  * Checks if the current user has ADMIN access to the PROJECTS resource (direct or via group).
@@ -93,22 +93,39 @@ export function verifyWorkspaceAdminOrOwnerFromContext(
   }
 }
 
-export async function verifyManagerOrTeamLead(ctx: { userID: string }, userGroupId: string, tx: Transaction<Schema>, tableName: TableName = 'user_group_mappings'): Promise<void> {
-  const requesterMapping = await tx.run(
-    zql.user_group_mappings
-      .where('userGroupId', userGroupId)
-      .where('userId', ctx.userID)
-      .one()
-  );
-    
-  if (!requesterMapping) {
-    throw new MutationACLError('Operation failed: you must be a member of the group', tableName);
+/**
+ * Assert the current user can manage roles (create / update / delete).
+ *
+ * Permission model:
+ *   - Workspace OWNER or ADMIN implicitly gets ADMIN access to the ROLES resource.
+ *   - Any user with WRITE or ADMIN access to the ROLES resource (direct only)
+ *     can manage roles.
+ */
+export async function assertCanManageRoles(
+  ctx: QueryContext,
+  tx: Transaction<Schema>,
+): Promise<void> {
+  if (ctx.role === WorkspaceRole.OWNER || ctx.role === WorkspaceRole.ADMIN) {
+    return;
   }
 
-  if (requesterMapping.responsibility !== UserResponsibility.MANAGER && 
-      requesterMapping.responsibility !== UserResponsibility.TEAM_LEAD) {
-    throw new MutationACLError('Operation failed: only MANAGER or TEAM_LEAD can perform this operation', tableName);
+  const rolesResource = await tx.run(zql.resources.where('name', 'ROLES').one());
+  if (!rolesResource) {
+    throw new MutationACLError('ROLES resource is not configured', 'roles');
   }
+
+  const directAccess = await tx.run(
+    zql.resource_access
+      .where('userId', ctx.userID)
+      .where('resourceId', rolesResource.id)
+      .where(helpers => helpers.cmp('accessType', 'IN', [AccessType.WRITE, AccessType.ADMIN]))
+      .one(),
+  );
+  if (directAccess) {
+    return;
+  }
+
+  throw new MutationACLError('Operation failed: ROLES resource access required to manage roles', 'roles');
 }
 
 /**

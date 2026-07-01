@@ -18,6 +18,7 @@ export type KanbanCountsSnapshot = {
   tags: string[];
   prReviewers: string[];
   qaAssigned: string[];
+  roleAssignments: Array<{ roleId: string; userIds: string[] }>;
   formFieldValues: Record<string, unknown>;
 };
 
@@ -53,14 +54,8 @@ export const buildKanbanCountsSnapshot = async (
       select: { name: true },
     }),
     db.ticketAssignment.findMany({
-      where: {
-        ticketId,
-        userResponsibility: { in: [UserResponsibility.PR_REVIEWER, UserResponsibility.QA] },
-      },
-      select: {
-        userId: true,
-        userResponsibility: true,
-      },
+      where: { ticketId },
+      select: { userId: true, roleId: true, userResponsibility: true },
     }),
     db.formEntityValues.findMany({
       where: {
@@ -76,10 +71,27 @@ export const buildKanbanCountsSnapshot = async (
 
   const prReviewers = assignments
     .filter(item => item.userResponsibility === UserResponsibility.PR_REVIEWER)
-    .map(item => item.userId);
+    .map(item => item.userId)
+    .filter((id): id is string => Boolean(id));
   const qaAssigned = assignments
     .filter(item => item.userResponsibility === UserResponsibility.QA)
-    .map(item => item.userId);
+    .map(item => item.userId)
+    .filter((id): id is string => Boolean(id));
+
+  const roleAssignmentsMap = new Map<string, string[]>();
+  for (const assignment of assignments) {
+    if (!assignment.roleId || !assignment.userId) continue;
+    const existing = roleAssignmentsMap.get(assignment.roleId);
+    if (existing) {
+      existing.push(assignment.userId);
+    } else {
+      roleAssignmentsMap.set(assignment.roleId, [assignment.userId]);
+    }
+  }
+  const roleAssignments = Array.from(roleAssignmentsMap.entries()).map(([roleId, userIds]) => ({
+    roleId,
+    userIds,
+  }));
 
   const formFieldValues: Record<string, unknown> = {};
   for (const value of formValues) {
@@ -103,6 +115,7 @@ export const buildKanbanCountsSnapshot = async (
     tags: tags.map(tag => tag.name),
     prReviewers,
     qaAssigned,
+    roleAssignments,
     formFieldValues,
   };
 };

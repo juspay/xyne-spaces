@@ -8,3 +8,5 @@ export { StagesSubmenu } from './StagesSubmenu/StagesSubmenu';
 export { DynamicFieldSubmenu } from './DynamicFieldSubmenu/DynamicFieldSubmenu';
 export { TicketTypeSubmenu } from './TicketTypeSubmenu/TicketTypeSubmenu';
 export { AICategorySubmenu } from './AICategorySubmenu/AICategorySubmenu';
+export { RoleSubmenu } from './RoleSubmenu/RoleSubmenu';
+export type { RoleAssignmentValue } from './RoleSubmenu/RoleSubmenu';

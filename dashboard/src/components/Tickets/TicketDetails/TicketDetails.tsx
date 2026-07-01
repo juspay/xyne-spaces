@@ -47,6 +47,7 @@ import {
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useCurrentUserRoleIds } from '../../../hooks/useRoles';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { TicketActivity } from '../TicketActivity';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
@@ -113,6 +114,7 @@ interface StageInfo {
   approvers?: readonly {
     userId: string | null;
     roleId: string | null | undefined;
+    approverType: string | null | undefined;
     stageId: string | null;
   }[];
   formId?: string | null;
@@ -535,16 +537,31 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // ticketDetailsById already loads assignments, so reuse them instead of subscribing twice.
   const ticketAssignments = useMemo(() => ticket?.assignments ?? [], [ticket?.assignments]);
 
-  // Filter PR reviewers and QA from assignments
-  const prReviewerIds =
-    ticketAssignments
-      ?.filter(a => a.userResponsibility === 'PR_REVIEWER')
-      .map(a => a.userId)
-      .filter(Boolean) || [];
-
-  const qaId = ticketAssignments?.find(a => a.userResponsibility === 'QA')?.userId || null;
-  const managerId =
-    ticketAssignments?.find(a => a.userResponsibility === 'MANAGER')?.userId || null;
+  // Group assignments by role. Role-driven rows carry roleId (with a related
+  // role row for the name); legacy enum rows carry userResponsibility. We
+  // group by whichever key is set so both old and new tickets render their
+  // assigned users. `role` may be undefined if the backend hasn't been
+  // updated yet — fall back to a generic label in that case.
+  const roleGroups = useMemo(() => {
+    const groups = new Map<string, { label: string; userIds: string[] }>();
+    for (const a of ticketAssignments) {
+      const userId = a.userId;
+      if (!userId) continue;
+      const key = a.roleId ?? a.userResponsibility;
+      if (!key) continue;
+      const label =
+        (a.roleId && (a as { role?: { name?: string } | null }).role?.name) ||
+        a.userResponsibility ||
+        'Role';
+      const existing = groups.get(key);
+      if (existing) {
+        existing.userIds.push(userId);
+      } else {
+        groups.set(key, { label, userIds: [userId] });
+      }
+    }
+    return Array.from(groups.values());
+  }, [ticketAssignments]);
   // Check if description needs truncation by comparing scrollHeight with clientHeight
   useEffect(() => {
     if (!descriptionRef.current || showFullDescription) return;
@@ -575,6 +592,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query all user groups for activity display
   const userGroups = useUserGroups();
   const { user: currentUser } = useAuth();
+  const currentUserRoleIds = useCurrentUserRoleIds();
 
   // Query stages if ticket has a boardId
   const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: ticket?.boardId ?? '' }), {
@@ -1559,9 +1577,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
       if (mt.requiresApproval) {
         const isApprover =
-          mt.transitionApprovers?.some(
-            a => (a.approverType ?? 'USER') === 'USER' && a.userId === currentUser?.id,
-          ) ?? false;
+          mt.transitionApprovers?.some(a => {
+            const type = (a.approverType ?? 'USER') as 'USER' | 'ROLE';
+            if (type === 'ROLE') return !!a.roleId && currentUserRoleIds.includes(a.roleId);
+            return a.userId === currentUser?.id;
+          }) ?? false;
         if (!isApprover) {
           // Reuse the existing record's ID for revisits (unique constraint on ticketId+stageId)
           const existingForStage = ticket.ticketStageRequests?.find(
@@ -2541,76 +2561,39 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               }
             />
 
-            {/* Manager - Only show if assigned */}
-            {managerId && (
+            {/* Role assignments — one row per role on the ticket. Replaces the
+                old hardcoded Manager / PR Reviewer / QA sections so any role
+                (including custom ones) shows up with its own name. */}
+            {roleGroups.map(group => (
               <TicketKeyValuePair
-                ticketKey='Manager'
+                key={group.label}
+                ticketKey={group.userIds.length > 1 ? `${group.label}s` : group.label}
                 value={
-                  <div className='flex items-center gap-2'>
-                    <UserAvatar
-                      userId={managerId}
-                      size={AvatarSize.SM}
-                      shape={AvatarShape.CIRCULAR}
-                      showActiveStatus={false}
-                    />
-                    <span className='text-sm text-foreground'>
-                      {users?.find((u: { id: string; name: string }) => u.id === managerId)?.name ||
-                        'Unknown'}
-                    </span>
-                  </div>
-                }
-              />
-            )}
-
-            {/* PR Reviewers - Only show if assigned */}
-            {prReviewerIds && prReviewerIds.length > 0 && (
-              <TicketKeyValuePair
-                ticketKey={prReviewerIds.length > 1 ? 'PR Reviewers' : 'PR Reviewer'}
-                value={
-                  <div className='flex flex-col gap-2'>
-                    {prReviewerIds.map((reviewerId: string) => {
-                      const reviewer = users?.find(
-                        (u: { id: string; name: string }) => u.id === reviewerId,
+                  <div
+                    className={
+                      group.userIds.length > 1 ? 'flex flex-col gap-2' : 'flex items-center gap-2'
+                    }
+                  >
+                    {group.userIds.map(userId => {
+                      const user = users?.find(
+                        (u: { id: string; name: string }) => u.id === userId,
                       );
                       return (
-                        <div key={reviewerId} className='flex items-center gap-2'>
+                        <div key={userId} className='flex items-center gap-2'>
                           <UserAvatar
-                            userId={reviewerId}
+                            userId={userId}
                             size={AvatarSize.SM}
                             shape={AvatarShape.CIRCULAR}
                             showActiveStatus={false}
                           />
-                          <span className='text-sm text-foreground'>
-                            {reviewer?.name || 'Unknown'}
-                          </span>
+                          <span className='text-sm text-foreground'>{user?.name || 'Unknown'}</span>
                         </div>
                       );
                     })}
                   </div>
                 }
               />
-            )}
-
-            {/* QA - Only show if assigned */}
-            {qaId && (
-              <TicketKeyValuePair
-                ticketKey='QA'
-                value={
-                  <div className='flex items-center gap-2'>
-                    <UserAvatar
-                      userId={qaId}
-                      size={AvatarSize.SM}
-                      shape={AvatarShape.CIRCULAR}
-                      showActiveStatus={false}
-                    />
-                    <span className='text-sm text-foreground'>
-                      {users?.find((u: { id: string; name: string }) => u.id === qaId)?.name ||
-                        'Unknown'}
-                    </span>
-                  </div>
-                }
-              />
-            )}
+            ))}
 
             {/* Created At */}
             <TicketKeyValuePair
@@ -3203,13 +3186,19 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     ? stageTransitions.some(
                         t =>
                           t.toStageId === item.stageId &&
-                          t.transitionApprovers?.some(
-                            a =>
-                              a.userId === currentUser?.id &&
-                              (a.approverType ?? ApproverType.USER) === ApproverType.USER,
-                          ),
+                          t.transitionApprovers?.some(a => {
+                            const type = (a.approverType ?? ApproverType.USER) as 'USER' | 'ROLE';
+                            if (type === 'ROLE')
+                              return !!a.roleId && currentUserRoleIds.includes(a.roleId);
+                            return a.userId === currentUser?.id;
+                          }),
                       )
-                    : (stage?.approvers?.some(a => a.userId === currentUser?.id) ?? false);
+                    : (stage?.approvers?.some(a => {
+                        const type = (a.approverType ?? 'USER') as 'USER' | 'ROLE';
+                        if (type === 'ROLE')
+                          return !!a.roleId && currentUserRoleIds.includes(a.roleId);
+                        return a.userId === currentUser?.id;
+                      }) ?? false);
                   const hasApprovers = isNonLinearBoard
                     ? stageTransitions.some(
                         t =>

@@ -5,12 +5,10 @@ import { MutationACLError, type TableSchema, type QueryContext } from '../core/t
 import { zql } from '../../queries';
 
 const ticketCols = schema.tables.tickets.columns;
-const assignmentCols = schema.tables.ticket_assignments.columns;
 const tagCols = schema.tables.ticket_tags.columns;
 
 type AnySchemaColumn =
   | (typeof ticketCols)[keyof typeof ticketCols]
-  | (typeof assignmentCols)[keyof typeof assignmentCols]
   | (typeof tagCols)[keyof typeof tagCols];
 
 interface TicketFilterFieldDescriptor {
@@ -30,8 +28,6 @@ const TICKET_FILTER_SCHEMA: Record<string, TicketFilterFieldDescriptor> = {
   assignee:         { col: ticketCols.assignedTo,      enumValues: null },
   createdBy:        { col: ticketCols.createdBy,       enumValues: null },
   userGroups:       { col: ticketCols.userGroupId,     enumValues: null },
-  prReviewers:      { col: assignmentCols.userId,      enumValues: null },
-  qaAssigned:       { col: assignmentCols.userId,      enumValues: null },
   tags:             { col: tagCols.name,               enumValues: null },
   stages:           { col: ticketCols.stageName,       enumValues: null },
   ticketTypes:      { col: ticketCols.ticketType,      enumValues: null },
@@ -51,6 +47,21 @@ function validateTicketValue(fieldName: string, fieldValue: string): void {
 
   // Virtual UI-state field (the groupBy column name), not a real column.
   if (fieldName === '__groupBy') return;
+
+  if (fieldName === 'roleAssignments') {
+    const [roleId, userIdsCsv] = fieldValue.split('|');
+    if (!roleId) {
+      throw new MutationACLError(`roleAssignments must include a roleId`, table);
+    }
+    if (!userIdsCsv) {
+      throw new MutationACLError(`roleAssignments must include at least one userId`, table);
+    }
+    const userIds = userIdsCsv.split(',').filter(Boolean);
+    if (userIds.length === 0) {
+      throw new MutationACLError(`roleAssignments must include at least one userId`, table);
+    }
+    return;
+  }
 
   const descriptor = TICKET_FILTER_SCHEMA[fieldName];
   if (!descriptor) {

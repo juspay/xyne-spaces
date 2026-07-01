@@ -11,6 +11,7 @@ export interface Stage {
   approvers?: readonly {
     userId: string | null;
     roleId: string | null | undefined;
+    approverType: string | null | undefined;
     stageId: string | null;
   }[];
   formContextMappings?: readonly {

@@ -10,8 +10,7 @@ export interface TicketFilters {
   assignee?: string[]; // user IDs
   userGroups?: string[]; // user group IDs
   createdBy?: string[]; // user IDs
-  prReviewers?: string[]; // user IDs (from ticket_assignments with responsibility PR_REVIEWER)
-  qaAssigned?: string[]; // user IDs (from ticket_assignments with responsibility QA)
+  roleAssignments?: Array<{ roleId: string; userIds: string[] }>;
   dueDateStart?: number;
   dueDateEnd?: number;
   createdDateStart?: number;

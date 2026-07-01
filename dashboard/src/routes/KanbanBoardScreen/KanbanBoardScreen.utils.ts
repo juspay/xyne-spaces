@@ -228,7 +228,7 @@ export const ticketBoardSnapshotSignature = (ticket: KanbanSnapshotTicket): stri
     .map((tag: TicketTagMapping) => `${tag.tagId}:${tag.tagName}`)
     .join('|');
   const assignmentsSignature = (ticket.assignments ?? [])
-    .map((assignment: TicketAssignment) => `${assignment.userId}:${assignment.userResponsibility}`)
+    .map((assignment: TicketAssignment) => `${assignment.userId}:${assignment.roleId ?? ''}`)
     .join('|');
 
   return [
@@ -414,30 +414,16 @@ export const applyTicketFilters = (
       }
     }
 
-    // PR Reviewer filter (from ticket_assignments with responsibility PR_REVIEWER)
-    if (filters.prReviewers && filters.prReviewers.length > 0) {
+    if (filters.roleAssignments && filters.roleAssignments.length > 0) {
       const assignments = (
-        ticket as Ticket & { assignments?: Array<{ userId: string; userResponsibility: string }> }
+        ticket as Ticket & { assignments?: Array<{ userId: string; roleId?: string | null }> }
       ).assignments;
-      const prReviewerAssignments =
-        assignments?.filter(a => a.userResponsibility === 'PR_REVIEWER') || [];
-      const prReviewerIds = prReviewerAssignments.map(a => a.userId);
-      const hasMatchingPRReviewer = filters.prReviewers.some(id => prReviewerIds.includes(id));
-      if (!hasMatchingPRReviewer) {
-        return false;
-      }
-    }
-
-    // QA filter (from ticket_assignments with responsibility QA)
-    if (filters.qaAssigned && filters.qaAssigned.length > 0) {
-      const assignments = (
-        ticket as Ticket & { assignments?: Array<{ userId: string; userResponsibility: string }> }
-      ).assignments;
-      const qaAssignments = assignments?.filter(a => a.userResponsibility === 'QA') || [];
-      const qaIds = qaAssignments.map(a => a.userId);
-      const hasMatchingQA = filters.qaAssigned.some(id => qaIds.includes(id));
-      if (!hasMatchingQA) {
-        return false;
+      for (const ra of filters.roleAssignments) {
+        if (!ra.userIds.length) continue;
+        const matching = (assignments ?? []).filter(a => a.roleId === ra.roleId);
+        if (!matching.some(a => ra.userIds.includes(a.userId))) {
+          return false;
+        }
       }
     }
 

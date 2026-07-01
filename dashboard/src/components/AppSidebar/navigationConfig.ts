@@ -18,6 +18,7 @@ import {
   CalendarClock,
   Globe,
   ShieldUser,
+  ShieldCheck,
   Brain,
   LayoutDashboard,
   ArrowRightLeft,
@@ -57,6 +58,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarClock },
   { path: '/user-groups', label: 'User Groups', icon: UsersIcon },
   { path: '/resource-access', label: 'User Management', icon: ShieldUser, iconSize: 18 },
+  { path: '/roles', label: 'Roles', icon: ShieldCheck, iconSize: 18 },
   { path: '/workspace-management', label: 'Workspace Management', icon: Settings },
   { path: '/organisations', label: 'Organisations', icon: Building2 },
   { path: '/analytics', label: 'Analytics', icon: ChartSpline },
@@ -114,7 +116,7 @@ export const filterNavItemsByPermission = (
 
     let hasAccess = true;
     if (requiresAccess) {
-      if (resourceName === 'USER-GROUPS') {
+      if (resourceName === 'USER-GROUPS' || resourceName === 'ROLES') {
         hasAccess = permissions.some(
           p =>
             p.resourceName === resourceName &&

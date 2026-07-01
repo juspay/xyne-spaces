@@ -47,6 +47,8 @@ import {
   UserPresenceACL,
   UserWorkloadMappingsACL,
   UsersACL,
+  RolesACL,
+  UserRoleMappingsACL,
   WorkflowExecutionsACL,
   WorkflowsACL,
   TicketAssignmentsACL,
@@ -186,6 +188,12 @@ export class ACLFactory {
 
       case 'userGroup':
         return new UserGroupsACL(ctx, prisma)
+
+      case 'role':
+        return new RolesACL(ctx, prisma)
+
+      case 'userRoleMapping':
+        return new UserRoleMappingsACL(ctx, prisma)
 
       case 'userPresence':
         return new UserPresenceACL(ctx, prisma)

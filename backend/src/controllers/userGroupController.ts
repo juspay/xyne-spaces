@@ -12,7 +12,7 @@ export class UserGroupController {
    */
   createGroup = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, alias, description, metadata, userIds } = req.body;
+      const { name, alias, description, metadata, userIds, userRoleUpdates } = req.body;
 
       if (!name) {
         res.status(400).json({ error: 'Name is required' });
@@ -30,12 +30,22 @@ export class UserGroupController {
         }
       }
 
+      if (userRoleUpdates && typeof userRoleUpdates === 'object') {
+        for (const [userId, roleId] of Object.entries(userRoleUpdates)) {
+          if (typeof userId !== 'string' || typeof roleId !== 'string') {
+            res.status(400).json({ error: 'userRoleUpdates must be a map of userId to roleId' });
+            return;
+          }
+        }
+      }
+
       const group = await userGroupRepository.createWithUsers({
         name,
         alias: alias || null, // Allow null if alias not provided
         description,
         metadata,
         userIds: userIds && userIds.length > 0 ? userIds : undefined,
+        userRoleUpdates: userRoleUpdates && Object.keys(userRoleUpdates).length > 0 ? userRoleUpdates : undefined,
         workspace: { connect: { id: req.user!.workspaceId! } }
       }, req.user?.id);
 

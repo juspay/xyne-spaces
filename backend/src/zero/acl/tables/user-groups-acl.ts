@@ -2,7 +2,7 @@ import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/
 import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { TableSchema, MutationACLError } from '../core/types';
-import { hasUserGroupsAdminAccess, verifyManagerOrTeamLead } from '../core/admin-access';
+import { hasUserGroupsAdminAccess } from '../core/admin-access';
 import { zql } from '../../queries';
 
 export class UserGroupsACL extends BaseACL<'user_groups'> {
@@ -27,22 +27,19 @@ export class UserGroupsACL extends BaseACL<'user_groups'> {
 
   async canUpdate(args: UpdateValue<TableSchema<'user_groups'>>, tx: Transaction<Schema>): Promise<void> {
     await this.verifyWorkspace(args.id, tx);
-    // Allow if user has ADMIN access to USER-GROUPS resource
+    // Only ADMIN access to the USER-GROUPS resource can control user groups
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
-    if (hasAdminAccess) {
-      return;
+    if (!hasAdminAccess) {
+      throw new MutationACLError('User group update failed: only ADMIN access allowed', 'user_groups');
     }
-
-    await verifyManagerOrTeamLead(this.ctx, args.id, tx, 'user_groups');
   }
 
   async canDelete(args: DeleteID<TableSchema<'user_groups'>>, tx: Transaction<Schema>): Promise<void> {
     await this.verifyWorkspace(args.id, tx);
-    // Allow if user has ADMIN access to USER-GROUPS resource
+    // Only ADMIN access to the USER-GROUPS resource can control user groups
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
-    if (hasAdminAccess) {
-      return;
+    if (!hasAdminAccess) {
+      throw new MutationACLError('User group delete failed: only ADMIN access allowed', 'user_groups');
     }
-    throw new MutationACLError('User group delete failed: only ADMIN access allowed', 'user_groups');
   }
 }

@@ -46,8 +46,7 @@ export interface KanbanCountsFilters {
   assignee?: string[];
   userGroups?: string[];
   createdBy?: string[];
-  prReviewers?: string[];
-  qaAssigned?: string[];
+  roleAssignments?: Array<{ roleId: string; userIds: string[] }>;
   dueDateStart?: number;
   dueDateEnd?: number;
   createdDateStart?: number;

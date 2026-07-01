@@ -58,7 +58,10 @@ type KanbanCursor = {
   id: string;
 };
 
-type KanbanTicketsPageQueryArgs = Omit<Parameters<typeof queries.kanbanTicketsPage>[0], 'start'> & {
+type KanbanTicketsPageQueryArgs = Omit<
+  Parameters<typeof queries.kanbanTicketsPageV2>[0],
+  'start'
+> & {
   start: KanbanCursor | null;
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
 };
@@ -106,8 +109,7 @@ const hasZeroOnlyFilters = (
 
   const {
     dynamicFields,
-    prReviewers,
-    qaAssigned,
+    roleAssignments,
     dueDateStart,
     dueDateEnd,
     createdDateStart,
@@ -119,8 +121,7 @@ const hasZeroOnlyFilters = (
   } = filters;
 
   if (
-    prReviewers?.length ||
-    qaAssigned?.length ||
+    roleAssignments?.some(ra => ra.userIds.length > 0) ||
     dueDateStart !== undefined ||
     dueDateEnd !== undefined ||
     createdDateStart !== undefined ||
@@ -207,8 +208,7 @@ const toQueryFilters = (
     assignee: filters.assignee,
     userGroups: filters.userGroups,
     createdBy: filters.createdBy,
-    prReviewers: filters.prReviewers,
-    qaAssigned: filters.qaAssigned,
+    roleAssignments: filters.roleAssignments,
     dueDateStart: filters.dueDateStart,
     dueDateEnd: filters.dueDateEnd,
     createdDateStart: filters.createdDateStart,
@@ -422,7 +422,7 @@ export const useKanbanTicketsPage = (
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
   const pageArgs = buildKanbanTicketsPageArgs(pageOptions, fetchCursor);
   const [page, pageDetails] = useCachedQuery(
-    queries.kanbanTicketsPage(pageArgs as Parameters<typeof queries.kanbanTicketsPage>[0]),
+    queries.kanbanTicketsPageV2(pageArgs as Parameters<typeof queries.kanbanTicketsPageV2>[0]),
     {
       enabled:
         (options.enabled ?? true) &&

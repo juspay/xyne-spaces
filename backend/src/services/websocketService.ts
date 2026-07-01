@@ -1149,6 +1149,7 @@ class WebSocketService {
       tags?: string[];
       prReviewers?: string[];
       qaAssigned?: string[];
+      roleAssignments?: Array<{ roleId: string; userIds: string[] }>;
       formFieldValues?: Record<string, unknown>;
     };
     previousTicket?: {
@@ -1168,6 +1169,7 @@ class WebSocketService {
       tags?: string[];
       prReviewers?: string[];
       qaAssigned?: string[];
+      roleAssignments?: Array<{ roleId: string; userIds: string[] }>;
       formFieldValues?: Record<string, unknown>;
     } | null;
   }): void {

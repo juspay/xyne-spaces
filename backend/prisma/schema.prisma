@@ -623,8 +623,9 @@ model TicketSubTicketMapping {
 model TicketAssignment {
   id                 String             @id @default(cuid())
   ticketId           String             // Foreign key to Ticket
-  userId             String             // User ID assigned to this responsibility
-  userResponsibility UserResponsibility // PR_REVIEWER | QA | etc.
+  userId             String?             // User ID assigned to this responsibility
+  userResponsibility UserResponsibility? // PR_REVIEWER | QA | etc.
+  roleId             String?             // nullable for legacy enum rows
   createdAt          DateTime           @default(now())
   createdBy          String             // User who created the assignment
 
@@ -636,6 +637,7 @@ model TicketAssignment {
   @@index([userId])
 
   @@index([ticketId, id])
+  @@unique([ticketId, roleId])
   @@map("ticket_assignments")
   @@schema("public")
 }
@@ -1110,6 +1112,45 @@ model UserGroup {
   @@schema("public")
 }
 
+model Role {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  description String?
+  createdBy   String
+  createdAt   DateTime
+  updatedAt   DateTime
+  isActive    Boolean
+
+  createdByUser User            @relation(fields: [createdBy], references: [id])
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id])
+  userMappings  UserRoleMapping[]
+  userGroupMappings UserGroupMapping[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, createdAt(sort: Desc), id])
+  @@index([workspaceId, isActive])
+  @@map("roles")
+  @@schema("public")
+}
+
+model UserRoleMapping {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  createdAt DateTime
+  updatedAt DateTime
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_role_mappings")
+  @@schema("public")
+}
+
 enum SessionStatus {
   ACTIVE
   EXPIRED
@@ -1201,6 +1242,8 @@ model User {
   updatedSubTickets         SubTicket[]            @relation("SubTicketUpdatedBy")
   assignedSubTickets        SubTicket[]            @relation("SubTicketAssignedTo")
   userGroupMappings         UserGroupMapping[]
+  userRoleMappings          UserRoleMapping[]
+  createdRoles              Role[]
   channelParticipations     ChannelParticipant[]   @relation("ChannelParticipantUser")
   channelUserStatuses       ChannelUserStatus[]    @relation("ChannelUserStatusUser")
   canvasUserStatuses        CanvasUserStatus[]     @relation("CanvasUserStatusUser")
@@ -1303,7 +1346,8 @@ model UserGroupMapping {
   id             String              @id @default(cuid())
   userId         String              // No FK constraint
   userGroupId    String              // No FK constraint
-  responsibility UserResponsibility  @default(MEMBER) // User responsibility level within this group
+  roleId         String?             // References Role.id; null = legacy rows using responsibility column
+  responsibility UserResponsibility? // Legacy column; new writes set roleId instead
   onCallSetNumber    Int?                // Deprecated: use onCallSetNumbers instead. Only set when autoRotationEnabled is true
   onCallSetNumbers   Int[]               // Array of set numbers for on-call rotation
   createdAt      DateTime            @default(now())
@@ -1312,10 +1356,12 @@ model UserGroupMapping {
   // Relations
   user      User      @relation(fields: [userId], references: [id])
   userGroup UserGroup @relation(fields: [userGroupId], references: [id])
+  role      Role?     @relation(fields: [roleId], references: [id])
 
   @@unique([userId, userGroupId])
   @@index([userId])
   @@index([userGroupId])
+  @@index([roleId])
   @@index([userGroupId, createdAt(sort: Desc), id(sort: Asc)]) // for getUserGroupMembers
   @@index([userGroupId, onCallSetNumber]) // for on-call rotation queries (deprecated)
   @@index([userGroupId, onCallSetNumbers]) // for on-call rotation queries
@@ -1846,6 +1892,7 @@ model Workspace {
   models            Model[]
   tools             Tool[]
   userGroups        UserGroup[]
+  roles             Role[]
 
   @@unique([orgId, name])
   @@index([orgId])

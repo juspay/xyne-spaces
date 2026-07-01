@@ -700,3 +700,117 @@ export async function evaluateAllRoles(
 
   return { manager, teamLead, member, prReviewer, qa };
 }
+
+// ─── Role-driven evaluation (board.metadata.assignmentRoles) ─────────────────
+// Returns one AssignmentResult per roleId the board configured for auto-assignment.
+// Each slot is scored independently against the same shared context, reusing the
+// `pickBest` scoring/fallback logic. The slot keyed by `roleId` maps to the user
+// whose `UserGroupMapping.roleId === roleId`.
+
+export type RoleSlotsResult = Record<string, AssignmentResult>;
+
+function filterUsersByRoleId(
+  userGroupMappings: UserGroupMapping[],
+  roleId: string,
+): string[] {
+  return userGroupMappings
+    .filter(mapping => mapping.roleId === roleId)
+    .map(mapping => mapping.userId);
+}
+
+export async function evaluateRoleSlots(
+  userGroupId: string,
+  boardId: string,
+  roleIds: string[],
+  projectId?: string,
+  channelId?: string,
+  excludeUserId?: string,
+): Promise<RoleSlotsResult> {
+  logger.info(
+    `[Assignment] evaluateRoleSlots for userGroupId: ${userGroupId}, boardId: ${boardId}, roleIds: [${roleIds.join(', ')}]${projectId ? `, projectId: ${projectId}` : ''}${channelId ? `, channelId: ${channelId}` : ''}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}`,
+  );
+
+  const result: RoleSlotsResult = {};
+  if (roleIds.length === 0) return result;
+
+  let userGroupMappings = await repositories.userGroupMapping.findMany({ where: { userGroupId } });
+
+  if (channelId) {
+    userGroupMappings = await filterMappingsToChannelParticipants(userGroupMappings, channelId);
+  }
+
+  if (userGroupMappings.length === 0) {
+    for (const roleId of roleIds) result[roleId] = { reason: 'NO_ON_CALL_USERS' };
+    return result;
+  }
+
+  if (excludeUserId) {
+    userGroupMappings = userGroupMappings.filter(m => m.userId !== excludeUserId);
+  }
+
+  const allUserIds = userGroupMappings.map(m => m.userId);
+
+  let projectBoardIds: Set<string> | undefined;
+  if (projectId) {
+    const projectBoards = await repositories.boards.findBoardsByProject(projectId);
+    projectBoardIds = new Set(projectBoards.map(b => b.id));
+    if (!projectBoardIds.has(boardId)) {
+      logger.warn(`[Assignment] Board ${boardId} does not belong to project ${projectId}. Falling back to all boards.`);
+      projectBoardIds = undefined;
+    }
+  }
+
+  let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores] = await Promise.all([
+    repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
+    repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
+  ]);
+
+  if (projectBoardIds) {
+    allWorkloadMappings = allWorkloadMappings.filter(w => projectBoardIds!.has(w.boardId));
+    allBoardScores = allBoardScores.filter(s => projectBoardIds!.has(s.boardId));
+  }
+
+  const boardWeightMap = new Map<string, number>(allBoardScores.map(s => [s.boardId, s.weight]));
+  const userStateMap = new Map<string, UserAssignmentState>(userStates.map(s => [s.userId, s]));
+  const workloadsByUserId = new Map<string, UserWorkloadMapping[]>();
+  for (const w of allWorkloadMappings) {
+    if (!workloadsByUserId.has(w.userId)) workloadsByUserId.set(w.userId, []);
+    workloadsByUserId.get(w.userId)!.push(w);
+  }
+  const workloadByUserAndBoard = new Map<string, UserWorkloadMapping>();
+  for (const w of allWorkloadMappings) workloadByUserAndBoard.set(`${w.userId}#${w.boardId}`, w);
+  const expertiseMap = new Map<string, UserExpertiseMapping>(expertiseMappings.map(e => [e.userId, e]));
+  const totalTicketsOnBoard = allWorkloadMappings
+    .filter(w => w.boardId === boardId)
+    .reduce((sum, w) => sum + (w.activeTasks ?? 0), 0);
+
+  const ctx: SharedContext = {
+    userGroupMappings,
+    userStates,
+    userStateMap,
+    expertiseMappings,
+    allWorkloadMappings,
+    boardWeightMap,
+    workloadsByUserId,
+    workloadByUserAndBoard,
+    expertiseMap,
+    totalTicketsOnBoard,
+  };
+
+  // Score each roleId's pool independently. `excludeUserId` (if set) removes
+  // that user from every pool — used by the PR-webhook flow to avoid self-review
+  // (the ticket assignee shouldn't be picked as the PR reviewer).
+  const summary: string[] = [];
+  for (const roleId of roleIds) {
+    const pool = filterUsersByRoleId(userGroupMappings, roleId);
+    const res = pickBest(pool, AssignmentType.TICKET_ASSIGNEE, ctx, boardId);
+    result[roleId] = res;
+    summary.push(`${roleId}:${res.assignedUserId ?? 'none'}`);
+  }
+
+  logger.info(`[Assignment] evaluateRoleSlots results — ${summary.join(' ')}`);
+
+  return result;
+}

@@ -7,6 +7,7 @@ import * as Tabs from '@radix-ui/react-tabs';
 
 import BoardEditScreen from '../../components/Board/BoardEditScreen/BoardEditScreen';
 import BoardStageConfigScreen from '../../components/Board/BoardStageConfigScreen/BoardStageConfigScreen';
+import { BoardRolesConfigScreen } from '../../components/Board/BoardRolesConfigScreen';
 import BoardCreateScreen from '../../components/Board/BoardCreateScreen/BoardCreateScreen';
 import { ProjectForm } from '../../components/Project';
 import { ReleaseConfigWizard } from '../../components/Release/ReleaseConfigWizard/ReleaseConfigWizard';
@@ -56,6 +57,7 @@ const ProjectDetailScreen = (): ReactElement => {
   const [editingBoard, setEditingBoard] = useState<BoardWithStages | null>(null);
   const [configuringStagesForBoard, setConfiguringStagesForBoard] =
     useState<BoardWithStages | null>(null);
+  const [configuringRolesForBoardId, setConfiguringRolesForBoardId] = useState<string | null>(null);
   const [boardIdToEdit, setBoardIdToEdit] = useState<string | null>(null);
 
   // Fetch project details
@@ -377,22 +379,52 @@ const ProjectDetailScreen = (): ReactElement => {
       )}
 
       {/* Configure Stages for Newly Created Board */}
-      {createdBoardId && projectId && !showBoardEditModal && !showReleaseConfigModal && (
-        <BoardStageConfigScreen
+      {createdBoardId &&
+        projectId &&
+        !showBoardEditModal &&
+        !showReleaseConfigModal &&
+        !configuringRolesForBoardId && (
+          <BoardStageConfigScreen
+            boardId={createdBoardId}
+            projectId={projectId}
+            isOpen={true}
+            initialBoard={createdBoardData}
+            onClose={() => {
+              setCreatedBoardId(null);
+              setCreatedBoardData(null);
+              setReleaseBoardFlow(null);
+            }}
+            onBack={() => {
+              // The board already exists, so Back must edit the same board.
+              setShowBoardEditModal(true);
+            }}
+            onNext={() => {
+              setConfiguringRolesForBoardId(createdBoardId);
+            }}
+            onSave={() => {
+              setCreatedBoardId(null);
+              setCreatedBoardData(null);
+              setReleaseBoardFlow(null);
+            }}
+          />
+        )}
+
+      {/* Configure Roles for Newly Created Board */}
+      {configuringRolesForBoardId && createdBoardId && projectId && (
+        <BoardRolesConfigScreen
           boardId={createdBoardId}
-          projectId={projectId}
           isOpen={true}
-          initialBoard={createdBoardData}
           onClose={() => {
+            setConfiguringRolesForBoardId(null);
             setCreatedBoardId(null);
             setCreatedBoardData(null);
             setReleaseBoardFlow(null);
           }}
           onBack={() => {
-            // The board already exists, so Back must edit the same board.
-            setShowBoardEditModal(true);
+            setConfiguringRolesForBoardId(null);
           }}
           onSave={() => {
+            setConfiguringRolesForBoardId(null);
             setCreatedBoardId(null);
             setCreatedBoardData(null);
             setReleaseBoardFlow(null);
@@ -444,7 +476,7 @@ const ProjectDetailScreen = (): ReactElement => {
       )}
 
       {/* Configure Stages Modal */}
-      {configuringStagesForBoard && projectId && (
+      {configuringStagesForBoard && projectId && !configuringRolesForBoardId && (
         <BoardStageConfigScreen
           boardId={configuringStagesForBoard.id}
           projectId={projectId}
@@ -457,7 +489,31 @@ const ProjectDetailScreen = (): ReactElement => {
             setEditingBoard(configuringStagesForBoard);
             setConfiguringStagesForBoard(null);
           }}
+          onNext={() => {
+            setConfiguringRolesForBoardId(configuringStagesForBoard.id);
+          }}
           onSave={() => {
+            setConfiguringStagesForBoard(null);
+            setBoardIdToEdit(null);
+          }}
+        />
+      )}
+
+      {/* Configure Roles Modal (existing board) */}
+      {configuringRolesForBoardId && configuringStagesForBoard && projectId && (
+        <BoardRolesConfigScreen
+          boardId={configuringStagesForBoard.id}
+          isOpen={true}
+          onClose={() => {
+            setConfiguringRolesForBoardId(null);
+            setConfiguringStagesForBoard(null);
+            setBoardIdToEdit(null);
+          }}
+          onBack={() => {
+            setConfiguringRolesForBoardId(null);
+          }}
+          onSave={() => {
+            setConfiguringRolesForBoardId(null);
             setConfiguringStagesForBoard(null);
             setBoardIdToEdit(null);
           }}

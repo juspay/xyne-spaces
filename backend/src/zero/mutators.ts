@@ -110,8 +110,9 @@ import { initializeRotationForGroup } from '@/utils/rotationEngine';
 import { livekitService } from '@/services/liveKitService';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
-import { ticketAssignmentService } from '@/services/ticketAssignmentService';
+import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
+import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
 import {
   deleteDraftEntityAttachments,
   deleteDelayedMessageEntityAttachments,
@@ -173,7 +174,8 @@ function computeStageEtaDeadline(
 
 // Authorize a stage-request review (APPROVE/REJECT): only listed approvers may act, which also
 // prevents self-approval. NON_LINEAR boards keep approvers on the transition edge; other boards
-// keep them on the target stage. USER approvers only. Throws if the user is not an approver.
+// keep them on the target stage. A user is an approver if they are listed as a USER approver OR
+// they hold any role listed as a ROLE approver (via user_role_mappings). Throws if not authorized.
 async function assertCanReviewStageRequest(
   tx: Transaction<Schema>,
   ticket: { boardId: string; stageName: string | null },
@@ -182,6 +184,7 @@ async function assertCanReviewStageRequest(
 ): Promise<void> {
   const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
   let approverIds: string[] = [];
+  let roleIds: string[] = [];
 
   if (board?.boardType === BoardType.NON_LINEAR) {
     const currentStage = ticket.stageName
@@ -202,21 +205,48 @@ async function assertCanReviewStageRequest(
       const transitionApprovers = await tx.run(
         zql.stage_approvers.where('transitionId', transition.id),
       );
-      approverIds = transitionApprovers
-        .filter(a => (a.approverType ?? ApproverType.USER) === ApproverType.USER)
-        .map(a => a.userId)
-        .filter((id): id is string => id !== null);
+      for (const a of transitionApprovers) {
+        const type = a.approverType ?? ApproverType.USER;
+        if (type === ApproverType.ROLE) {
+          if (a.roleId) roleIds.push(a.roleId);
+        } else if (a.userId) {
+          approverIds.push(a.userId);
+        }
+      }
     }
   } else {
     const stageApprovers = await tx.run(zql.stage_approvers.where('stageId', stageId));
-    approverIds = stageApprovers
-      .map(a => a.userId)
-      .filter((id): id is string => id !== null);
+    for (const a of stageApprovers) {
+      const type = a.approverType ?? ApproverType.USER;
+      if (type === ApproverType.ROLE) {
+        if (a.roleId) roleIds.push(a.roleId);
+      } else if (a.userId) {
+        approverIds.push(a.userId);
+      }
+    }
   }
 
-  if (!approverIds.includes(userId)) {
-    throw new Error('You are not authorized to approve or reject this stage request');
+  if (approverIds.includes(userId)) return;
+
+  if (roleIds.length > 0) {
+    const membership = await tx.run(
+      zql.user_role_mappings
+        .where('userId', userId)
+        .where('roleId', 'IN', roleIds)
+        .one(),
+    );
+    if (membership) return;
+
+    const groupMembership = await tx.run(
+      zql.user_group_mappings
+        .where('userId', userId)
+        .where('roleId', 'IN', roleIds)
+        .one(),
+    );
+    if (groupMembership) return;
   }
+
+  throw new Error('You are not authorized to approve or reject this stage request');
 }
 
 async function getConversationSeenCutoffAt(
@@ -401,9 +431,25 @@ async function hasCanvasVersionEditAccess(
 }
 
 /**
- * Handles the full-role-assignment path when a board has `fullRoleAssignment` enabled.
- * Assigns MANAGER, TEAM_LEAD, MEMBER (Dev), PR_REVIEWER, QA into ticket_assignments,
- * sets ticket.assignedTo = MEMBER, and optionally logs an activity + system message.
+ * True when the board has auto-assignment enabled — either the new
+ * `metadata.assignmentRoles` (non-empty) or the legacy `fullRoleAssignment`
+ * boolean. Drives whether `assignFullRoles` runs vs the single-assignee
+ * `evaluateAssignmentRule` path.
+ */
+function hasBoardAutoAssignment(metadata: BoardMetadata | undefined): boolean {
+  if (!metadata) return false;
+  if (Array.isArray(metadata.assignmentRoles) && metadata.assignmentRoles.length > 0) {
+    return true;
+  }
+  return metadata.fullRoleAssignment === true;
+}
+
+/**
+ * Handles the full-role-assignment path when a board has auto-assignment enabled
+ * (either `metadata.assignmentRoles` non-empty → role-driven, or
+ * `metadata.fullRoleAssignment === true` → legacy 5-enum fallback).
+ * Persists the per-role ticket_assignments, sets ticket.assignedTo to the
+ * primary assignee, and optionally logs an activity + system message.
  */
 async function assignFullRoles(
   tx: Transaction<Schema>,
@@ -435,7 +481,7 @@ async function assignFullRoles(
     workspaceId?: string;
   }
 ): Promise<void> {
-  logger.info(`[AUTO-ASSIGN] Board ${boardId} has fullRoleAssignment enabled for ticket ${ticketId}`);
+  logger.info(`[AUTO-ASSIGN] Board ${boardId} has auto-assignment enabled for ticket ${ticketId}`);
 
   const fullResult = await ticketAssignmentService.assignFullRolesToTicket({
     ticketId,
@@ -445,10 +491,11 @@ async function assignFullRoles(
     projectId,
   });
 
-  if (fullResult.member) {
+  const primaryUserId = primaryUserIdOf(fullResult);
+  if (primaryUserId) {
     await tx.mutate.tickets.update({
       id: ticketId,
-      assignedTo: fullResult.member,
+      assignedTo: primaryUserId,
       updatedBy: createdBy,
       updatedAt: timestamp,
     });
@@ -460,12 +507,12 @@ async function assignFullRoles(
         updatedBy: createdBy,
         timestamp,
         activityType: ActivityType.ASSIGNED_TO,
-        value: { oldValue: oldAssignedTo, newValue: fullResult.member },
+        value: { oldValue: oldAssignedTo, newValue: primaryUserId },
       });
     }
 
     if (messageId && conversationId) {
-      const assignedUser = await tx.run(zql.users.where('id', fullResult.member).one());
+      const assignedUser = await tx.run(zql.users.where('id', primaryUserId).one());
       if (assignedUser) {
         await tx.mutate.messages.insert({
           messageId,
@@ -5250,8 +5297,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             if (board?.metadata && typeof board.metadata === 'object') {
               const metadata = board.metadata as BoardMetadata;
 
-              // If board has transfer restriction enabled
-              if (metadata.isAllowedToTransfer === true) {
+              const controlRoleIds = Array.isArray(metadata.ticketControlRoleIds)
+                ? metadata.ticketControlRoleIds
+                : [];
+              // Restriction fires when the board has ticketControlRoleIds set
+              // (role-driven path) OR the legacy isAllowedToTransfer toggle is on
+              // (enum fallback). Boards with neither are unrestricted.
+              if (controlRoleIds.length > 0 || metadata.isAllowedToTransfer === true) {
                 // User must be part of the current user group with proper responsibility
                 const userGroupMapping = await tx.run(
                   zql.user_group_mappings
@@ -5264,10 +5316,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   throw new Error('You must be a member of the current user group to modify this ticket');
                 }
 
-                // Check responsibility from the mapping
-                const responsibility = userGroupMapping.responsibility;
-                if (responsibility !== UserResponsibility.MANAGER && responsibility !== UserResponsibility.TEAM_LEAD) {
-                  throw new Error('Only users with MANAGER or TEAM_LEAD responsibility can modify Assignee, ETA, Stage, or Board on this board');
+                if (controlRoleIds.length > 0) {
+                  // Role-driven: raw roleId membership. Works for custom roles.
+                  if (!userGroupMapping.roleId || !controlRoleIds.includes(userGroupMapping.roleId)) {
+                    throw new Error('Only users with a configured role can modify Assignee, ETA, Stage, or Board on this board');
+                  }
+                } else {
+                  // Legacy enum fallback (only fires when isAllowedToTransfer===true).
+                  const responsibility = userGroupMapping.responsibility;
+                  if (responsibility !== UserResponsibility.MANAGER && responsibility !== UserResponsibility.TEAM_LEAD) {
+                    throw new Error('Only users with MANAGER or TEAM_LEAD responsibility can modify Assignee, ETA, Stage, or Board on this board');
+                  }
                 }
               }
             }
@@ -5367,7 +5426,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   const boardRow = await tx.run(zql.boards.where('id', newBoardId).one());
                   const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
 
-                  if (boardMetadata?.fullRoleAssignment === true) {
+                  if (hasBoardAutoAssignment(boardMetadata)) {
                     await assignFullRoles(tx, {
                       ticketId: params.id,
                       userGroupId: ticket.userGroupId!,
@@ -5714,7 +5773,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 const boardRow = await tx.run(zql.boards.where('id', targetBoardId).one());
                 const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
 
-                  if (boardMetadata?.fullRoleAssignment === true) {
+                  if (hasBoardAutoAssignment(boardMetadata)) {
                     await assignFullRoles(tx, {
                       ticketId: params.id,
                       userGroupId: params.userGroupId!,
@@ -6646,8 +6705,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
     userGroup: {
       update: defineMutator(
-        z.object({ userGroupId: z.string(), name: z.string().optional(), alias: z.string().optional(), description: z.string().optional(), userResponsibilityUpdates: z.record(z.string(), z.nativeEnum(UserResponsibility)).optional(), timestamp: z.number() }),
-        async ({ tx, args: { userGroupId, name, alias, description, userResponsibilityUpdates, timestamp } }) => {
+        z.object({ userGroupId: z.string(), name: z.string().optional(), alias: z.string().optional(), description: z.string().optional(), userResponsibilityUpdates: z.record(z.string(), z.nativeEnum(UserResponsibility)).optional(), userRoleUpdates: z.record(z.string(), z.string()).optional(), timestamp: z.number() }),
+        async ({ tx, args: { userGroupId, name, alias, description, userResponsibilityUpdates, userRoleUpdates, timestamp } }) => {
           // Get all user groups to check for duplicates in a single query
           const allUserGroups = await tx.run(zql.user_groups);
 
@@ -6685,89 +6744,47 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             updatedAt: timestamp,
           });
 
-          // Update user responsibilities if provided
+          if (userRoleUpdates) {
+            const roleIdsToUpdate = [...new Set(Object.values(userRoleUpdates))];
+            const roles = await tx.run(
+              zql.roles.where('id', 'IN', roleIdsToUpdate).where('workspaceId', userGroup.workspaceId),
+            );
+            for (const [userId, roleId] of Object.entries(userRoleUpdates)) {
+              const mapping = await tx.run(
+                zql.user_group_mappings.where('userGroupId', userGroupId).where('userId', userId).one(),
+              );
+              if (mapping) {
+                const role = roles.find(r => r.id === roleId);
+                const responsibility = role ? DEFAULT_ROLE_NAME_TO_ENUM[role.name] : null;
+                await tx.mutate.user_group_mappings.update({
+                  id: mapping.id,
+                  roleId,
+                  ...(responsibility ? { responsibility } : {}),
+                  updatedAt: timestamp,
+                });
+              }
+            }
+          }
+
           if (userResponsibilityUpdates) {
+            const responsibilities = [...new Set(Object.values(userResponsibilityUpdates))];
+            const roleNames = responsibilities.map(r => r as string);
+            const roles = await tx.run(
+              zql.roles.where('name', 'IN', roleNames).where('workspaceId', userGroup.workspaceId),
+            );
             for (const [userId, responsibility] of Object.entries(userResponsibilityUpdates)) {
               const mapping = await tx.run(
                 zql.user_group_mappings.where('userGroupId', userGroupId).where('userId', userId).one(),
               );
               if (mapping) {
-                const oldResponsibility = mapping.responsibility;
+                const role = roles.find(r => r.name === (responsibility as string));
                 await tx.mutate.user_group_mappings.update({
                   id: mapping.id,
                   responsibility,
+                  ...(role ? { roleId: role.id } : {}),
                   updatedAt: timestamp,
                 });
-
-                // Handle resource_access for USER-GROUPS based on role changes
-                const wasManagerOrLead = oldResponsibility === UserResponsibility.MANAGER ||
-                  oldResponsibility === UserResponsibility.TEAM_LEAD;
-                const isManagerOrLead = responsibility === UserResponsibility.MANAGER ||
-                  responsibility === UserResponsibility.TEAM_LEAD;
-
-                if (!wasManagerOrLead && isManagerOrLead) {
-                  // Upgraded to MANAGER/TEAM_LEAD → grant WRITE access
-                  const userGroupsResource = await tx.run(zql.resources.where('name', 'USER-GROUPS').one());
-                  if (userGroupsResource) {
-                    const existingAccess = await tx.run(
-                      zql.resource_access
-                        .where('userId', userId)
-                        .where('resourceId', userGroupsResource.id)
-                    );
-                    const hasWriteAccess = existingAccess.some(
-                      a => a.accessType === AccessType.WRITE || a.accessType === AccessType.ADMIN
-                    );
-                    if (!hasWriteAccess) {
-                      const now = Date.now();
-                      await tx.mutate.resource_access.insert({
-                        id: uuidv4(),
-                        userId: userId,
-                        resourceId: userGroupsResource.id,
-                        accessType: AccessType.WRITE,
-                        createdAt: now,
-                        updatedAt: now,
-                      });
-                      logger.info(`[Mutator] Granted WRITE access to USER-GROUPS for user ${userId}`);
-                    }
-                  }
-                } else if (wasManagerOrLead && !isManagerOrLead) {
-                  // Downgraded from MANAGER/TEAM_LEAD → check if other MANAGER/TEAM_LEAD roles exist
-                  const otherManagerMappings = await tx.run(
-                    zql.user_group_mappings
-                      .where('userId', userId)
-                      .where('responsibility', 'IN', [UserResponsibility.MANAGER, UserResponsibility.TEAM_LEAD])
-                  );
-                  // Filter out current mapping (still has old value in transaction)
-                  const hasOtherManagerRole = otherManagerMappings.some(m => m.id !== mapping.id);
-                  if (!hasOtherManagerRole) {
-                    // Revoke WRITE access
-                    const userGroupsResource = await tx.run(zql.resources.where('name', 'USER-GROUPS').one());
-                    if (userGroupsResource) {
-                      const existingAccess = await tx.run(
-                        zql.resource_access
-                          .where('userId', userId)
-                          .where('resourceId', userGroupsResource.id)
-                          .where('accessType', AccessType.WRITE)
-                          .one()
-                      );
-                      if (existingAccess) {
-                        await tx.mutate.resource_access.delete({ id: existingAccess.id });
-                        logger.info(`[Mutator] Revoked WRITE access to USER-GROUPS for user ${userId}`);
-                      }
-                    }
-                  }
-                }
               }
-            }
-
-            // Verify at least one MANAGER or TEAM_LEAD remains after updates
-            const updatedMappings = await tx.run(zql.user_group_mappings.where('userGroupId', userGroupId));
-            const hasLeadership = updatedMappings.some(
-              m => m.responsibility === 'MANAGER' || m.responsibility === 'TEAM_LEAD'
-            );
-
-            if (!hasLeadership) {
-              throw new Error('User group must have at least one MANAGER or TEAM_LEAD');
             }
           }
         },
@@ -6846,15 +6863,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       addUsers: defineMutator(
-        z.object({ userGroupId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), mappingIds: z.record(z.string(), z.string()) }),
-        async ({ tx, args: { userGroupId, userIds, timestamp, mappingIds } }) => {
-          // Validate user group exists
+        z.object({ userGroupId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), mappingIds: z.record(z.string(), z.string()), roleIds: z.array(z.string()).optional() }),
+        async ({ tx, args: { userGroupId, userIds, timestamp, mappingIds, roleIds } }) => {
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
           if (!userGroup) {
             throw new Error('User group not found');
           }
 
-          // Fetch all users to validate they exist
           const users = await Promise.all(
             userIds.map(userId => tx.run(zql.users.where('id', userId).one()))
           );
@@ -6865,7 +6880,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error(`Users with ids '${notFound.join(', ')}' not found`);
           }
 
-          // Fetch existing mappings to avoid duplicates
           const existingMappings = await Promise.all(
             userIds.map(userId =>
               tx.run(zql.user_group_mappings
@@ -6878,20 +6892,31 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             existingMappings.filter((m): m is NonNullable<typeof m> => m !== undefined).map(m => m.userId)
           );
 
-          // Filter out users who are already in the group
           const userIdsToAdd = userIds.filter(userId => !existingUserIds.has(userId));
 
-          // Add new users
+          const distinctRoleIds = roleIds
+            ? [...new Set(roleIds.filter((r): r is string => Boolean(r)))]
+            : [];
+          const roles = distinctRoleIds.length
+            ? await tx.run(zql.roles.where('id', 'IN', distinctRoleIds).where('workspaceId', userGroup.workspaceId))
+            : [];
+
           for (const userId of userIdsToAdd) {
             const mappingId = mappingIds[userId];
             if (!mappingId) {
               throw new Error(`mappingId is required for user ${userId}`);
             }
+            const index = userIds.indexOf(userId);
+            const roleId = roleIds?.[index];
+            const role = roleId ? roles.find(r => r.id === roleId) : undefined;
+            const responsibility = role ? DEFAULT_ROLE_NAME_TO_ENUM[role.name] : undefined;
             await tx.mutate.user_group_mappings.insert({
               id: uuidv4(),
               userGroupId,
               userId,
-              responsibility: UserResponsibility.MEMBER,
+              ...(roleId
+                ? { roleId, ...(responsibility ? { responsibility } : {}) }
+                : { responsibility: UserResponsibility.MEMBER }),
               onCallSetNumbers: [],
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -6948,6 +6973,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 defaultTicketStatusV2: z.string().optional(),
                 prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
                 approverIds: z.array(z.string()).optional(),
+                approvers: z
+                  .array(
+                    z.object({
+                      approverId: z.string(),
+                      approverType: z.enum(['USER', 'ROLE']),
+                    })
+                  )
+                  .optional(),
                 formId: z.string().optional(),
               })
             )
@@ -7208,12 +7241,26 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               }
 
               // Insert new approvers if provided
+              const normalizedApprovers = (stage.approvers ?? []).map(entry => ({
+                approverId: entry.approverId,
+                approverType: entry.approverType === 'ROLE' ? ApproverType.ROLE : ApproverType.USER,
+              }));
               if (stage.approverIds && stage.approverIds.length > 0) {
                 for (const approverId of stage.approverIds) {
-                  await tx.mutate.stage_approvers.insert({
-                    id: `${stageId}-${approverId}`,
-                    userId: approverId,
+                  normalizedApprovers.push({
+                    approverId,
                     approverType: ApproverType.USER,
+                  });
+                }
+              }
+              if (normalizedApprovers.length > 0) {
+                for (const entry of normalizedApprovers) {
+                  await tx.mutate.stage_approvers.insert({
+                    id: `${stageId}-${entry.approverType}-${entry.approverId}`,
+                    ...(entry.approverType === ApproverType.ROLE
+                      ? { roleId: entry.approverId }
+                      : { userId: entry.approverId }),
+                    approverType: entry.approverType,
                     stageId: stageId,
                     createdAt: now,
                   });
@@ -14469,6 +14516,145 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             }
           });
+        },
+      ),
+    },
+    role: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          description: z.string().optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, name, description, timestamp } }) => {
+          const trimmedName = name.trim();
+          if (!trimmedName) {
+            throw new Error('Role name cannot be empty');
+          }
+          if (!/^[A-Z]+(_[A-Z]+)*$/.test(trimmedName)) {
+            throw new Error('Role name can only contain uppercase letters and single underscores between words (e.g. XYNE_PM, APPROVER)');
+          }
+
+          const existing = await tx.run(
+            zql.roles
+              .where('name', trimmedName)
+              .where('workspaceId', authData.workspaceId)
+              .where('isActive', true)
+              .one(),
+          );
+          if (existing) {
+            throw new Error(`Role with name '${trimmedName}' already exists`);
+          }
+
+          await tx.mutate.roles.insert({
+            id,
+            workspaceId: authData.workspaceId,
+            name: trimmedName,
+            description: description ?? null,
+            createdBy: authData.sub,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            isActive: true,
+          });
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string().optional(),
+          description: z.string().optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, name, description, timestamp } }) => {
+          const role = await tx.run(zql.roles.where('id', id).one());
+          if (!role) {
+            throw new Error('Role not found');
+          }
+          if (!role.isActive) {
+            throw new Error('Cannot update an inactive role');
+          }
+
+          if (name !== undefined) {
+            const trimmedName = name.trim();
+            if (!trimmedName) {
+              throw new Error('Role name cannot be empty');
+            }
+            if (!/^[A-Z]+(_[A-Z]+)*$/.test(trimmedName)) {
+              throw new Error('Role name can only contain uppercase letters and single underscores between words (e.g. XYNE_PM, APPROVER)');
+            }
+            if (trimmedName !== role.name) {
+              const existing = await tx.run(
+                zql.roles
+                  .where('name', trimmedName)
+                  .where('workspaceId', role.workspaceId)
+                  .where('isActive', true)
+                  .one(),
+              );
+              if (existing && existing.id !== id) {
+                throw new Error(`Role with name '${trimmedName}' already exists`);
+              }
+            }
+          }
+
+          await tx.mutate.roles.update({
+            id,
+            ...(name !== undefined && { name: name.trim() }),
+            ...(description !== undefined && { description }),
+            updatedAt: timestamp,
+          });
+        },
+      ),
+      addMembers: defineMutator(
+        z.object({
+          roleId: z.string(),
+          userIds: z.array(z.string()),
+          mappingIds: z.record(z.string(), z.string()),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { roleId, userIds, mappingIds, timestamp } }) => {
+          if (userIds.length === 0) return;
+
+          const role = await tx.run(zql.roles.where('id', roleId).one());
+          if (!role) {
+            throw new Error('Role not found');
+          }
+          if (!role.isActive) {
+            throw new Error('Cannot add members to an inactive role');
+          }
+
+          const existing = await tx.run(
+            zql.user_role_mappings.where('roleId', roleId).where('userId', 'IN', userIds),
+          );
+          const existingUserIds = new Set(existing.map(m => m.userId));
+          const toAdd = userIds.filter(userId => !existingUserIds.has(userId));
+
+          await Promise.all(
+            toAdd.map(userId => {
+              const mappingId = mappingIds[userId];
+              if (!mappingId) {
+                throw new Error(`mappingId is required for user ${userId}`);
+              }
+              return tx.mutate.user_role_mappings.insert({
+                id: mappingId,
+                roleId,
+                userId,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+            }),
+          );
+        },
+      ),
+      removeMembers: defineMutator(
+        z.object({
+          mappingIds: z.array(z.string()),
+        }),
+        async ({ tx, args: { mappingIds } }) => {
+          if (mappingIds.length === 0) return;
+          await Promise.all(
+            mappingIds.map(mappingId => tx.mutate.user_role_mappings.delete({ id: mappingId })),
+          );
         },
       ),
     },

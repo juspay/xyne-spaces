@@ -5,7 +5,7 @@ import { EmailClassificationService } from '@/services/emailClassificationServic
 import { buildEmailMetadata } from '@/types/classification';
 import { DatabaseClient } from '@/database/client';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
-import { ticketAssignmentService } from '@/services/ticketAssignmentService';
+import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { activityService } from '@/services/activity/activityService';
@@ -173,7 +173,10 @@ class EmailClassificationWorker {
         });
         const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
 
-        if (boardMetadata?.fullRoleAssignment === true) {
+        if (
+          (Array.isArray(boardMetadata?.assignmentRoles) && boardMetadata!.assignmentRoles!.length > 0)
+          || boardMetadata?.fullRoleAssignment === true
+        ) {
           const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
             ticketId,
             userGroupId: effectiveGroupId!,
@@ -182,11 +185,12 @@ class EmailClassificationWorker {
             projectId: ticket.projectId ?? undefined,
             channelId: ticket.channelId ?? undefined,
           });
-          if (fullRoles.member) {
-            newAssignedTo = fullRoles.member;
+          const primaryUserId = primaryUserIdOf(fullRoles);
+          if (primaryUserId) {
+            newAssignedTo = primaryUserId;
             assignmentSucceeded = true;
             logger.info(
-              `[EMAIL-CLASSIFICATION-WORKER] Full-role assigned ticket ${ticketId}: member=${fullRoles.member}`,
+              `[EMAIL-CLASSIFICATION-WORKER] Full-role assigned ticket ${ticketId}: primary=${primaryUserId}`,
             );
           }
         } else {

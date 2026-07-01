@@ -29,6 +29,7 @@ export type KanbanTicketFilters = {
   createdBy?: string[];
   prReviewers?: string[];
   qaAssigned?: string[];
+  roleAssignments?: Array<{ roleId: string; userIds: string[] }>;
   dueDateStart?: number;
   dueDateEnd?: number;
   createdDateStart?: number;
@@ -200,6 +201,16 @@ export const buildKanbanTicketWhere = (
             },
           }
         : undefined,
+      ...(filters.roleAssignments ?? [])
+        .filter(ra => ra.userIds.length > 0)
+        .map(ra => ({
+          assignments: {
+            some: {
+              roleId: ra.roleId,
+              userId: { in: ra.userIds },
+            },
+          },
+        })),
       dueDateFilter ? { eta: dueDateFilter } : undefined,
       createdAtFilter ? { createdAt: createdAtFilter } : undefined,
       hasItems(filters.tags) ? { tags: { some: { name: { in: [...filters.tags] } } } } : undefined,

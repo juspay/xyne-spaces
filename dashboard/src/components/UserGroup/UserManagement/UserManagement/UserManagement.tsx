@@ -3,7 +3,6 @@ import { queries } from '../../../../zero/queries';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { UserList } from '../UserList/UserList';
 import type { User } from '@xyne/shared';
-import { UserResponsibility } from '@xyne/shared';
 import { useUsers } from '../../../../hooks/useUsers';
 
 interface UserManagementProps {
@@ -11,7 +10,7 @@ interface UserManagementProps {
   selectedUsers: User[] | undefined;
   onUsersChange: ((users: User[]) => void) | undefined;
   disabled: boolean | undefined;
-  responsibilities: Map<string, UserResponsibility>;
+  roleIds: Map<string, string>;
 }
 
 export const UserManagement = ({
@@ -19,7 +18,7 @@ export const UserManagement = ({
   selectedUsers,
   onUsersChange,
   disabled = false,
-  responsibilities,
+  roleIds,
 }: UserManagementProps): ReactElement => {
   const isCreateMode = !userGroupId;
 
@@ -47,14 +46,13 @@ export const UserManagement = ({
 
   const handleAddUser = (user: User): void => {
     if (isCreateMode) {
-      responsibilities.set(user.id, UserResponsibility.MEMBER);
       onUsersChange?.([...currentUsers, user]);
     }
   };
 
   const handleRemoveUser = (userId: string): void => {
     if (isCreateMode) {
-      responsibilities.delete(userId);
+      roleIds.delete(userId);
       onUsersChange?.(currentUsers.filter(u => u.id !== userId));
     }
   };
@@ -70,7 +68,7 @@ export const UserManagement = ({
         <UserList
           userGroupId={userGroupId}
           users={currentUsers}
-          responsibilities={responsibilities}
+          roleIds={roleIds}
           onAddUser={handleAddUser}
           onRemoveUser={handleRemoveUser}
           disabled={disabled}

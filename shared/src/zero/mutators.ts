@@ -83,6 +83,7 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
+import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
 
@@ -3956,13 +3957,14 @@ export const mutators = defineMutators({
         userResponsibilityUpdates: z
           .record(z.string(), z.nativeEnum(UserResponsibility))
           .optional(),
+        userRoleUpdates: z.record(z.string(), z.string()).optional(),
         timestamp: z.number(),
       }),
       async ({
         tx,
-        args: { userGroupId, name, alias, description, userResponsibilityUpdates, timestamp },
+        ctx,
+        args: { userGroupId, name, alias, description, userResponsibilityUpdates, userRoleUpdates, timestamp },
       }) => {
-        // Update user group - backend validates existence and uniqueness
         await tx.mutate.user_groups.update({
           id: userGroupId,
           ...(name !== undefined && { name }),
@@ -3971,9 +3973,36 @@ export const mutators = defineMutators({
           updatedAt: timestamp,
         });
 
-        // Update user responsibilities if provided
+        if (userRoleUpdates) {
+          const roleIdsToUpdate = [...new Set(Object.values(userRoleUpdates))];
+          const roles = await tx.run(
+            zql.roles.where('id', 'IN', roleIdsToUpdate).where('workspaceId', ctx.workspaceId),
+          );
+          for (const [userId, roleId] of Object.entries(userRoleUpdates)) {
+            const mapping = await tx.run(
+              zql.user_group_mappings
+                .where('userGroupId', userGroupId)
+                .where('userId', userId)
+                .one(),
+            );
+            if (mapping) {
+              const role = roles.find(r => r.id === roleId);
+              const responsibility = role ? DEFAULT_ROLE_NAME_TO_ENUM[role.name] : undefined;
+              await tx.mutate.user_group_mappings.update({
+                id: mapping.id,
+                roleId,
+                ...(responsibility ? { responsibility } : {}),
+                updatedAt: timestamp,
+              });
+            }
+          }
+        }
+
         if (userResponsibilityUpdates) {
-          // Apply updates
+          const roleNames = [...new Set(Object.values(userResponsibilityUpdates).map(r => r as string))];
+          const roles = await tx.run(
+            zql.roles.where('name', 'IN', roleNames).where('workspaceId', ctx.workspaceId),
+          );
           for (const [userId, responsibility] of Object.entries(userResponsibilityUpdates)) {
             const mapping = await tx.run(
               zql.user_group_mappings
@@ -3982,26 +4011,14 @@ export const mutators = defineMutators({
                 .one(),
             );
             if (mapping) {
+              const role = roles.find(r => r.name === (responsibility as string));
               await tx.mutate.user_group_mappings.update({
                 id: mapping.id,
                 responsibility,
+                ...(role ? { roleId: role.id } : {}),
                 updatedAt: timestamp,
               });
             }
-          }
-
-          // Verify at least one MANAGER or TEAM_LEAD remains after updates
-          const updatedMappings = await tx.run(
-            zql.user_group_mappings.where('userGroupId', userGroupId),
-          );
-          const hasLeadership = updatedMappings.some(
-            m =>
-              m.responsibility === UserResponsibility.MANAGER ||
-              m.responsibility === UserResponsibility.TEAM_LEAD,
-          );
-
-          if (!hasLeadership) {
-            throw new Error('User group must have at least one MANAGER or TEAM_LEAD');
           }
         }
       },
@@ -4064,9 +4081,9 @@ export const mutators = defineMutators({
         userIds: z.array(z.string()),
         timestamp: z.number(),
         mappingIds: z.record(z.string(), z.string()), // Map userId -> mappingId
+        roleIds: z.array(z.string()).optional(), // Parallel to userIds: roleIds[i] is the role for userIds[i]
       }),
-      async ({ tx, args: { userGroupId, userIds, timestamp, mappingIds = {} } }) => {
-        // Bulk check for existing mappings to avoid duplicates
+      async ({ tx, ctx, args: { userGroupId, userIds, timestamp, mappingIds = {}, roleIds } }) => {
         const existingMappings = await Promise.all(
           userIds.map(userId =>
             tx.run(
@@ -4083,20 +4100,31 @@ export const mutators = defineMutators({
             .map(m => m.userId),
         );
 
-        // Add only users who are not already in the group
         const userIdsToAdd = userIds.filter(userId => !existingUserIds.has(userId));
 
-        // Add new users
+        const distinctRoleIds = roleIds
+          ? [...new Set(roleIds.filter((r): r is string => Boolean(r)))]
+          : [];
+        const roles = distinctRoleIds.length
+          ? await tx.run(zql.roles.where('id', 'IN', distinctRoleIds).where('workspaceId', ctx.workspaceId))
+          : [];
+
         for (const userId of userIdsToAdd) {
           const mappingId = mappingIds[userId];
           if (!mappingId) {
             throw new Error(`mappingId is required for user ${userId}`);
           }
+          const index = userIds.indexOf(userId);
+          const roleId = roleIds?.[index];
+          const role = roleId ? roles.find(r => r.id === roleId) : undefined;
+          const responsibility = role ? DEFAULT_ROLE_NAME_TO_ENUM[role.name] : undefined;
           await tx.mutate.user_group_mappings.insert({
             id: mappingId,
             userGroupId,
             userId,
-            responsibility: UserResponsibility.MEMBER, // New users added get MEMBER role by default
+            ...(roleId
+              ? { roleId, ...(responsibility ? { responsibility } : {}) }
+              : { responsibility: UserResponsibility.MEMBER }),
             onCallSetNumbers: [],
             createdAt: timestamp,
             updatedAt: timestamp,
@@ -4150,6 +4178,14 @@ export const mutators = defineMutators({
               defaultTicketStatusV2: z.string().optional(),
               prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
               approverIds: z.array(z.string()).optional(),
+              approvers: z
+                .array(
+                  z.object({
+                    approverId: z.string(),
+                    approverType: z.enum(['USER', 'ROLE']),
+                  }),
+                )
+                .optional(),
               formId: z.string().optional(),
             }),
           )
@@ -4369,7 +4405,19 @@ export const mutators = defineMutators({
             }
 
             // Handle stage approvers (optional)
+            const normalizedApprovers = (stage.approvers ?? []).map(entry => ({
+              approverId: entry.approverId,
+              approverType: entry.approverType === 'ROLE' ? ApproverType.ROLE : ApproverType.USER,
+            }));
             if (stage.approverIds && stage.approverIds.length > 0) {
+              for (const approverId of stage.approverIds) {
+                normalizedApprovers.push({
+                  approverId,
+                  approverType: ApproverType.USER,
+                });
+              }
+            }
+            if (normalizedApprovers.length > 0) {
               // Delete all existing approvers for this stage
               const existingApprovers = await tx.run(zql.stage_approvers.where('stageId', stageId));
               for (const existing of existingApprovers) {
@@ -4379,11 +4427,13 @@ export const mutators = defineMutators({
               }
 
               // Insert new approvers for this stage
-              for (const approverId of stage.approverIds) {
+              for (const entry of normalizedApprovers) {
                 await tx.mutate.stage_approvers.insert({
-                  id: `${stageId}-${approverId}`,
-                  userId: approverId,
-                  approverType: ApproverType.USER,
+                  id: `${stageId}-${entry.approverType}-${entry.approverId}`,
+                  ...(entry.approverType === ApproverType.ROLE
+                    ? { roleId: entry.approverId }
+                    : { userId: entry.approverId }),
+                  approverType: entry.approverType,
                   stageId: stageId,
                   createdAt: timestamp,
                 });
@@ -10121,6 +10171,121 @@ export const mutators = defineMutators({
             });
           }
         }
+      },
+    ),
+  },
+  role: {
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, name, description, timestamp } }) => {
+        const trimmedName = name.trim();
+        if (!trimmedName) {
+          throw new Error('Role name cannot be empty');
+        }
+        if (!/^[A-Z]+(_[A-Z]+)*$/.test(trimmedName)) {
+          throw new Error('Role name can only contain uppercase letters and single underscores between words (e.g. XYNE_PM, APPROVER)');
+        }
+
+        const existing = await tx.run(
+          zql.roles
+            .where('name', trimmedName)
+            .where('workspaceId', ctx.workspaceId)
+            .where('isActive', true)
+            .one(),
+        );
+        if (existing) {
+          throw new Error(`Role with name '${trimmedName}' already exists`);
+        }
+
+        await tx.mutate.roles.insert({
+          id,
+          workspaceId: ctx.workspaceId,
+          name: trimmedName,
+          description: description ?? null,
+          createdBy: ctx.userID,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          isActive: true,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, name, description, timestamp } }) => {
+        if (name !== undefined) {
+          const trimmedName = name.trim();
+          if (!trimmedName) {
+            throw new Error('Role name cannot be empty');
+          }
+          if (!/^[A-Z]+(_[A-Z]+)*$/.test(trimmedName)) {
+            throw new Error('Role name can only contain uppercase letters and single underscores between words (e.g. XYNE_PM, APPROVER)');
+          }
+          if (trimmedName !== name) {
+            const existing = await tx.run(
+              zql.roles
+                .where('name', trimmedName)
+                .where('workspaceId', ctx.workspaceId)
+                .where('isActive', true)
+                .one(),
+            );
+            if (existing && existing.id !== id) {
+              throw new Error(`Role with name '${trimmedName}' already exists`);
+            }
+          }
+        }
+        await tx.mutate.roles.update({
+          id,
+          ...(name !== undefined && { name: name.trim() }),
+          ...(description !== undefined && { description }),
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    addMembers: defineMutator(
+      z.object({
+        roleId: z.string(),
+        userIds: z.array(z.string()),
+        mappingIds: z.record(z.string(), z.string()),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { roleId, userIds, mappingIds, timestamp } }) => {
+        if (userIds.length === 0) return;
+        await Promise.all(
+          userIds.map(userId => {
+            const mappingId = mappingIds[userId];
+            if (!mappingId) {
+              throw new Error(`mappingId is required for user ${userId}`);
+            }
+            return tx.mutate.user_role_mappings.insert({
+              id: mappingId,
+              roleId,
+              userId,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }),
+        );
+      },
+    ),
+    removeMembers: defineMutator(
+      z.object({
+        mappingIds: z.array(z.string()),
+      }),
+      async ({ tx, args: { mappingIds } }) => {
+        if (mappingIds.length === 0) return;
+        await Promise.all(
+          mappingIds.map(mappingId => tx.mutate.user_role_mappings.delete({ id: mappingId })),
+        );
       },
     ),
   },

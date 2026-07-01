@@ -6,6 +6,7 @@ import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import type { BoardType } from '@xyne/shared';
 
 import type { TicketStatusV2, PRStatusEvent } from '@xyne/shared';
+import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 
 // Export types for external use
 export interface BoardStageData {
@@ -15,7 +16,7 @@ export interface BoardStageData {
   sequenceNumber: number;
   defaultTicketStatusV2?: TicketStatusV2;
   prStatuses?: PRStatusEvent[];
-  approverIds?: string[];
+  approvers?: ApproverEntry[];
   formId?: string; // Optional form for approval
 }
 
@@ -42,7 +43,7 @@ export interface UpdateBoardFormData {
   }>;
   stageApprovers?: Array<{
     stageId: string;
-    approverIds: string[];
+    approvers: ApproverEntry[];
   }>;
 }
 

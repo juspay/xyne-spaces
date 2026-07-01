@@ -20,7 +20,7 @@ import {
 } from '../types/ticket';
 import { evaluateAssignmentRule } from '../utils/assignmentEngine';
 import { syncUserWorkload } from '../utils/workloadUtils';
-import { ticketAssignmentService, type RoleAssignment } from '../services/ticketAssignmentService';
+import { ticketAssignmentService, primaryUserIdOf, secondaryAssignmentsOf } from '../services/ticketAssignmentService';
 import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '../utils/ticketMd';
 import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
@@ -631,7 +631,10 @@ export class TicketController {
           const boardMetaRow = await prisma.board.findUnique({ where: { id: boardId }, select: { metadata: true } });
           const boardMeta = boardMetaRow?.metadata as BoardMetadata | undefined;
 
-          if (boardMeta?.fullRoleAssignment === true) {
+          if (
+            (Array.isArray(boardMeta?.assignmentRoles) && boardMeta!.assignmentRoles!.length > 0)
+            || boardMeta?.fullRoleAssignment === true
+          ) {
             // Full role assignment will be done after ticket creation
             pendingFullRoleAssignment = true;
           } else {
@@ -1086,21 +1089,22 @@ export class TicketController {
             createdBy: userId,
             projectId: ticket.projectId,
           });
-          if (fullRoles.member) {
+          const primaryUserId = primaryUserIdOf(fullRoles);
+          if (primaryUserId) {
             const prevAssignedTo = ticket.assignedTo;
             const updatedTicket = await prisma.ticket.update({
               where: { id: ticket.id },
-              data: { assignedTo: fullRoles.member },
+              data: { assignedTo: primaryUserId },
             });
             await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
-            fraAssignedUserId = fullRoles.member;
+            fraAssignedUserId = primaryUserId;
 
             const ticketsHandler = new TicketsSideEffectHandler(queryContext);
             ticketsHandler.onUpdate({
               entityId: ticket.id,
               entityType: 'tickets',
               operation: 'update',
-              args: { assignedTo: fullRoles.member },
+              args: { assignedTo: primaryUserId },
               previousValue: {
                 assignedTo: prevAssignedTo,
                 stageName: ticket.stageName,
@@ -1114,7 +1118,7 @@ export class TicketController {
           }
 
           const assignmentsHandler = new TicketAssignmentsSideEffectHandler(queryContext);
-          const fraAssignments = [fullRoles.manager, fullRoles.teamLead, fullRoles.prReviewer, fullRoles.qa].filter((a): a is RoleAssignment => Boolean(a));
+          const fraAssignments = secondaryAssignmentsOf(fullRoles);
           for (const assignment of fraAssignments) {
             assignmentsHandler.onInsert({
               entityId: assignment.assignmentId,

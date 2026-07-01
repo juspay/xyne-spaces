@@ -19,6 +19,8 @@ import { OrgMembersACL } from '../tables/org-members-acl';
 import { OrganizationsACL } from '../tables/organizations-acl';
 import { ReactionCountsACL } from '../tables/reaction-counts-acl';
 import { ReactionsACL } from '../tables/reactions-acl';
+import { RolesACL } from '../tables/roles-acl';
+import { UserRoleMappingsACL } from '../tables/user-role-mappings-acl';
 import { UserGroupMappingsACL } from '../tables/user-group-mappings-acl';
 import { UserGroupsACL } from '../tables/user-groups-acl';
 import { UserPresenceACL } from '../tables/user-presence-acl';
@@ -149,6 +151,10 @@ export class ACLFactory {
         return new ResourcesACL(ctx);
       case 'resource_access':
         return new ResourceAccessACL(ctx);
+      case 'roles':
+        return new RolesACL(ctx);
+      case 'user_role_mappings':
+        return new UserRoleMappingsACL(ctx);
       case 'stages':
         return new StageAcl(ctx);
       case 'stage_pr_status_mappings':
