@@ -93,6 +93,7 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
   '/projects',
   '/support',
   '/chat/activity',
+  '/guide',
 ];
 
 // Paths shown in the toolbar by default (before any user customization).

@@ -99,6 +99,9 @@ const OnboardingScreen: React.FC = () => {
   const handleCompleteOnboarding = (): void => {
     setIsCompleting(true);
 
+    // Capture new-user status before COMPLETE_ONBOARDING flips isNewUser to false.
+    const isNewUser = Cookies.get('is_new_user') === 'true';
+
     // Mark AI onboarding as pending so AppRoot can auto-trigger it
     setAIOnboardingPending();
 
@@ -107,7 +110,10 @@ const OnboardingScreen: React.FC = () => {
 
     const workspaceId = currentUser?.workspaceId;
     if (workspaceId) {
-      void navigate(`/${workspaceId}/chat/dir`);
+      // First-time users land on the user guide for an oriented walkthrough before
+      // dropping into an empty inbox; returning users go straight to chat.
+      const landing = isNewUser ? 'guide' : 'chat/dir';
+      void navigate(`/${workspaceId}/${landing}`);
     }
   };
 

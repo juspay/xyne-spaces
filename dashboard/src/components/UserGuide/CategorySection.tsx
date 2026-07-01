@@ -40,6 +40,7 @@ export const CategorySection = ({ category, features }: CategorySectionProps): R
             animationDelay={index * 0.05}
             {...(feature.tip ? { tip: feature.tip } : {})}
             {...(feature.shortcut ? { shortcut: feature.shortcut } : {})}
+            {...(feature.videoUrl ? { videoUrl: feature.videoUrl } : {})}
           />
         ))}
       </div>
