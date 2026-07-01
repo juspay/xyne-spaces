@@ -15,7 +15,7 @@
  *     There is no ZeroProvider in this app; data mutations must go through callLobbyService.
  *
  *  2. no-unapproved-dashboard-entry-points — dashboard-external/src may only
- *     DIRECTLY import the three approved entry points from dashboard/src.
+ *     DIRECTLY import the approved entry points from dashboard/src.
  *     Adding new ones requires updating both this rule and adding a review.
  *
  * Stubs: ThreadPannel is replaced with a lightweight stub in vite.config.ts.
@@ -45,7 +45,7 @@ module.exports = {
       comment:
         'dashboard-external/src directly imported a dashboard/src module that is not ' +
         'on the approved entry-point list. ' +
-        'Approved entry points: roomMachine, FullCallView, callLobbyService. ' +
+        'Approved entry points: roomMachine, FullCallView, callLobbyService, useHandRaise. ' +
         'To add a new one, update this rule and get a code-review.',
       severity: 'error',
       from: {
@@ -54,11 +54,12 @@ module.exports = {
       to: {
         // Any dashboard/src import …
         path: 'dashboard/src/',
-        // … except the three approved ones
+        // … except the approved ones
         pathNot: [
           'dashboard/src/machines/roomMachine\\.ts$',
           'dashboard/src/components/Call/CallViews/FullCallView\\.tsx$',
           'dashboard/src/services/Call/callLobbyService\\.ts$',
+          'dashboard/src/components/Call/hooks/useHandRaise\\.ts$',
         ],
       },
     },

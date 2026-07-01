@@ -6,6 +6,7 @@ import { RoomAudioRenderer } from '@livekit/components-react';
 import { CallType } from '@xyne/shared';
 import { roomActor } from '@/machines/roomMachine';
 import { FullCallView } from '@/components/Call/CallViews/FullCallView';
+import { useHandRaise } from '@/components/Call/hooks/useHandRaise';
 import { callLobbyService } from '@/services/Call/callLobbyService';
 
 interface ExternalCallViewProps {
@@ -108,6 +109,9 @@ export function ExternalCallView({
     }));
   }, [participantsQuery.data, externalId]);
 
+  // Hand raise state synced over the data channel
+  const { raisedHands, toggleHandRaise } = useHandRaise(room ?? null);
+
   // Derive local participant from the LiveKit room object
   const localParticipant = room?.localParticipant;
   const isMicEnabled = localParticipant?.isMicrophoneEnabled ?? false;
@@ -179,6 +183,8 @@ export function ExternalCallView({
         onToggleCallChat={handleToggleCallChat}
         unreadCallChatCount={unreadCallChatCount}
         onCallChatNewMessage={handleCallChatNewMessage}
+        raisedHands={raisedHands}
+        onToggleHandRaise={toggleHandRaise}
       />
     </>
   );

@@ -14,6 +14,8 @@ interface ParticipantGridProps {
   compact?: boolean | undefined;
   aiController?: { id: string; name: string } | null;
   requestedAiController?: boolean;
+  raisedHands?: string[];
+  onToggleHandRaise?: (() => void) | undefined;
 }
 
 export function ParticipantGrid({
@@ -22,6 +24,8 @@ export function ParticipantGrid({
   compact = false,
   aiController,
   requestedAiController,
+  raisedHands = [],
+  onToggleHandRaise,
 }: ParticipantGridProps): React.ReactElement {
   // Derive AI enablement from aiController presence — same pattern as Lotus ParticipantsGrid
   const isAIAssistantEnabled = aiController !== null;
@@ -67,6 +71,8 @@ export function ParticipantGrid({
             compact={compact}
             aiController={aiController ?? null}
             requestedAiController={requestedAiController ?? false}
+            isHandRaised={raisedHands.includes(participant.identity)}
+            onToggleHandRaise={onToggleHandRaise}
           />
         ))}
       </div>

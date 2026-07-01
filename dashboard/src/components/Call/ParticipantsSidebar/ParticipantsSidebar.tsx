@@ -10,6 +10,7 @@ import {
   Mic,
   Check,
   XIcon,
+  Hand,
 } from 'lucide-react';
 import { useIsSpeaking } from '@livekit/components-react';
 import type { Participant } from 'livekit-client';
@@ -21,6 +22,7 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { InviteToCallModal } from '../CallModals/InviteToCallModal';
 import { callService } from '../../../services/Call/callService';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
+import { cn } from '../../../utils/classNames';
 
 // Speaking indicator component (animated bars like Google Meet)
 function SpeakingIndicator(): React.ReactElement {
@@ -48,6 +50,8 @@ interface ParticipantsSidebarProps {
   onRejectLobbyRequest?: ((participantId: string) => void) | undefined;
   /** Hide "Add People" button and invite modal (e.g. for external users) */
   hideInvite?: boolean | undefined;
+  /** Identities (userIds) of participants with hand raised */
+  raisedHands?: string[] | undefined;
 }
 
 interface CallParticipant {
@@ -80,6 +84,7 @@ export function ParticipantsSidebar({
   onApproveLobbyRequest,
   onRejectLobbyRequest,
   hideInvite,
+  raisedHands = [],
 }: ParticipantsSidebarProps): React.ReactElement {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [isAttendeesExpanded, setIsAttendeesExpanded] = useState(true);
@@ -249,8 +254,15 @@ export function ParticipantsSidebar({
     // Get initials for external users fallback
     const fallbackInitial = participantName.charAt(0).toUpperCase();
 
+    const isRaised = raisedHands.includes(userId);
+
     return (
-      <div className='flex items-center gap-3 py-2 px-3 hover:bg-muted rounded-lg transition-colors'>
+      <div
+        className={cn(
+          'flex items-center gap-3 py-2 px-3 rounded-lg transition-colors',
+          isRaised ? 'bg-amber-50 ring-1 ring-amber-300' : 'hover:bg-muted',
+        )}
+      >
         <div className='relative'>
           {isExternal ? (
             <div className='flex items-center justify-center w-5 h-5 bg-orange-400 text-white text-xs font-medium rounded-sm'>
@@ -294,6 +306,12 @@ export function ParticipantsSidebar({
             <p className='text-xs text-orange-500'>Requesting to join</p>
           )}
         </div>
+        {/* Hand raise indicator */}
+        {isRaised && (
+          <div className='p-1.5 text-amber-500' title='Hand raised'>
+            <Hand size={16} className='fill-amber-400/30' />
+          </div>
+        )}
         {/* Speaking indicator - only show when mic is enabled */}
         {isInCall && livekitParticipantObj && isMicrophoneEnabled && (
           <SpeakingStatus livekitParticipant={livekitParticipantObj} />
