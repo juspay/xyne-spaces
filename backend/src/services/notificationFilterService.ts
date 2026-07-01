@@ -46,8 +46,8 @@ type ChannelStatusRow = {
 };
 
 type UserPreferenceRow = {
-  globalDesktopNotificationLevel: NotificationLevel;
-  globalMobileNotificationLevel: NotificationLevel;
+  globalDesktopNotificationLevel: NotificationLevel | null;
+  globalMobileNotificationLevel: NotificationLevel | null;
   threadReplyNotificationsEnabled: boolean;
   channelWideMentionsEnabled: boolean;
   notificationKeywords?: string[];
@@ -87,10 +87,16 @@ export async function prefetchFilterData(
         threadReplyNotificationsEnabled: true,
         channelWideMentionsEnabled: true,
       },
+    }).catch(e => {
+      logger.error('[NotificationFilter] Failed to prefetch channelUserStatus', { error: e instanceof Error ? e.message : String(e) });
+      return [];
     }),
     prisma.userPresence.findMany({
       where: { userId: { in: userIds } },
       select: { userId: true, notificationsPausedUntil: true },
+    }).catch(e => {
+      logger.error('[NotificationFilter] Failed to prefetch userPresence', { error: e instanceof Error ? e.message : String(e) });
+      return [];
     }),
     prisma.userPreference.findMany({
       where: { userId: { in: userIds } },
@@ -102,6 +108,9 @@ export async function prefetchFilterData(
         channelWideMentionsEnabled: true,
         notificationKeywords: true,
       },
+    }).catch(e => {
+      logger.error('[NotificationFilter] Failed to prefetch userPreference', { error: e instanceof Error ? e.message : String(e) });
+      return [];
     }),
   ]);
 
@@ -335,10 +344,16 @@ export async function filterUsers(
           threadReplyNotificationsEnabled: true,
           channelWideMentionsEnabled: true,
         },
+      }).catch(e => {
+        logger.error('[NotificationFilter] Failed to fetch channelUserStatus', { error: e instanceof Error ? e.message : String(e) });
+        return [];
       }),
       prisma.userPresence.findMany({
         where: { userId: { in: userIds } },
         select: { userId: true, notificationsPausedUntil: true },
+      }).catch(e => {
+        logger.error('[NotificationFilter] Failed to fetch userPresence', { error: e instanceof Error ? e.message : String(e) });
+        return [];
       }),
       prisma.userPreference.findMany({
         where: { userId: { in: userIds } },
@@ -349,6 +364,9 @@ export async function filterUsers(
           threadReplyNotificationsEnabled: true,
           channelWideMentionsEnabled: true,
         },
+      }).catch(e => {
+        logger.error('[NotificationFilter] Failed to fetch userPreference', { error: e instanceof Error ? e.message : String(e) });
+        return [];
       }),
     ]);
 
@@ -527,6 +545,9 @@ export async function filterGlobalUsers(
   const userPresences = await prisma.userPresence.findMany({
     where: { userId: { in: userIds } },
     select: { userId: true, notificationsPausedUntil: true },
+  }).catch(e => {
+    logger.error('[NotificationFilter] Failed to fetch userPresence', { error: e instanceof Error ? e.message : String(e) });
+    return [];
   });
 
   // ── Batch fetch 2: Global notification preferences ───────────────────────
@@ -538,6 +559,9 @@ export async function filterGlobalUsers(
       globalMobileNotificationLevel: true,
       threadReplyNotificationsEnabled: true,
     },
+  }).catch(e => {
+    logger.error('[NotificationFilter] Failed to fetch userPreference', { error: e instanceof Error ? e.message : String(e) });
+    return [];
   });
 
   const globalPauseMap = new Map(

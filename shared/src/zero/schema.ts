@@ -1335,8 +1335,8 @@ export const userPreferenceTable = table('user_preferences')
     enterSendsMessage: boolean(), // true: Enter sends, false: Shift+Enter sends
     allowThreadBroadcastMentions: boolean(), // Allow @channel/@here in thread replies
     // Global notification settings
-    globalDesktopNotificationLevel: enumeration<NotificationLevel>(), // Default desktop level across all channels
-    globalMobileNotificationLevel: enumeration<NotificationLevel>(),  // Default mobile level across all channels
+    globalDesktopNotificationLevel: enumeration<NotificationLevel>().optional(), // Default desktop level across all channels
+    globalMobileNotificationLevel: enumeration<NotificationLevel>().optional(),  // Default mobile level across all channels
     threadReplyNotificationsEnabled: boolean(), // Receive thread reply notifications globally
     channelWideMentionsEnabled: boolean(),      // Receive @channel and @here notifications
     notificationKeywords: json().optional(), // Global keyword-notification list (max 50, each <= 80 chars)

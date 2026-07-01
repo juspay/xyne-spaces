@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { db } from '../database/client';
 import { logger } from '../utils/logger';
+import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '../constants/userPreferenceDefaults';
 
 /**
  * Get custom instruction for the authenticated user
@@ -60,6 +61,7 @@ export async function saveCustomInstruction(req: Request, res: Response) {
         askai_custom_instruction: instruction ?? null,
       },
       create: {
+        ...USER_PREFERENCE_NOTIFICATION_DEFAULTS,
         userId,
         askai_custom_instruction: instruction ?? null,
       },

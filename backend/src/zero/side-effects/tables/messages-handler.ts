@@ -393,7 +393,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       const dmChannelName = formatDmChannelName(memberNames);
 
       const dmPrefetchedData = channelParticipants.length > 0
-        ? await prefetchFilterData(channelParticipants.map(p => p.userId), channelId)
+        ? await prefetchFilterData(channelParticipants.map(p => p.userId), channelId).catch(e => {
+            logger.error('[MessagesSideEffect] Failed to prefetch filter data for DM', { error: e instanceof Error ? e.message : String(e) });
+            return undefined;
+          })
         : undefined;
 
       await this.handleDMChannelMessage(
@@ -531,7 +534,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // channel participants. All notification calls below operate on disjoint subsets
     // of channelParticipants, so this single round-trip replaces N×3 sequential fetches.
     const prefetchedData = channelParticipants.length > 0
-      ? await prefetchFilterData(channelParticipants.map(p => p.userId), channelId)
+      ? await prefetchFilterData(channelParticipants.map(p => p.userId), channelId).catch(e => {
+          logger.error('[MessagesSideEffect] Failed to prefetch filter data for channel', { error: e instanceof Error ? e.message : String(e) });
+          return undefined;
+        })
       : undefined;
 
     // Keyword-notification matching: scan the message's plain text against
