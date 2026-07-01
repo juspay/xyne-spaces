@@ -9,6 +9,7 @@ import {
   type AIComposerHandle,
   type AIComposerAttachment,
 } from '../../components/AIScreen/AIComposer';
+import type { ComposerContext } from '../../components/AIScreen/composerContext';
 import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen/AIChatThread';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
@@ -28,6 +29,7 @@ const AIScreen = (): ReactElement => {
   const [initialAttachments, setInitialAttachments] = useState<AIComposerAttachment[] | undefined>(
     undefined,
   );
+  const [initialExtras, setInitialExtras] = useState<ComposerContext | undefined>(undefined);
   const [chatKey, setChatKey] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
@@ -35,6 +37,10 @@ const AIScreen = (): ReactElement => {
   const chatThreadRef = useRef<AIChatThreadHandle | null>(null);
   const dragCounterRef = useRef(0);
   const showChatViewRef = useRef(showChatView);
+  // Latest composer context reported by whichever composer is mounted. Lets us
+  // carry the user's selections (channels, KB, web search, …) into a recent
+  // chat instead of clearing them — matching XyneAISidebar.
+  const lastContextRef = useRef<ComposerContext | undefined>(undefined);
   const navigate = useNavigate();
   const { invalidateSessions } = useV2SessionInvalidator();
 
@@ -131,6 +137,7 @@ const AIScreen = (): ReactElement => {
     setActiveSessionId('');
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialExtras(undefined);
     setChatKey(prev => prev + 1);
     setShowChatView(false); // Return to landing page
   }, []);
@@ -141,22 +148,44 @@ const AIScreen = (): ReactElement => {
       setActiveSessionId(sessionId);
       setInitialQuery('');
       setInitialAttachments(undefined);
+      // Preserve the composer's current selections when opening a recent chat
+      // (mirrors XyneAISidebar, where composer state lives in the parent and is
+      // not reset on conversation load).
+      setInitialExtras(lastContextRef.current);
       setChatKey(prev => prev + 1);
       setShowChatView(true);
     },
     [activeSessionId],
   );
 
+  const handleContextChange = useCallback((context: ComposerContext): void => {
+    lastContextRef.current = context;
+  }, []);
+
   const handleComposerSubmit = useCallback(
-    (text: string, attachments?: AIComposerAttachment[]): void => {
+    (text: string, attachments?: AIComposerAttachment[], context?: ComposerContext): void => {
       setInitialQuery(text);
       setInitialAttachments(attachments);
+      setInitialExtras(context);
       setActiveSessionId('');
       setChatKey(prev => prev + 1);
       setShowChatView(true);
     },
     [],
   );
+
+  // Switching agents opens a fresh conversation scoped to that agent but
+  // PRESERVES the user's composer selections (channels, KB, web search, …),
+  // matching the XyneAISidebar behaviour. Seeding initialExtras carries the
+  // selections into the remounted chat composer; the landing composer keeps its
+  // own state (it isn't remounted).
+  const handleAgentChange = useCallback((_slug: string | null, context: ComposerContext): void => {
+    setInitialQuery('');
+    setInitialAttachments(undefined);
+    setInitialExtras(context);
+    setActiveSessionId('');
+    setChatKey(prev => prev + 1);
+  }, []);
 
   const handleConversationChange = useCallback(
     (sessionId: string): void => {
@@ -209,9 +238,11 @@ const AIScreen = (): ReactElement => {
             sessionId={activeSessionId || undefined}
             initialQuery={initialQuery}
             initialAttachments={initialAttachments}
+            initialExtras={initialExtras}
             onSetMobileSidebarOpen={setMobileSidebarOpen}
             onConversationChange={handleConversationChange}
-            onAgentChange={handleCreateChat}
+            onAgentChange={handleAgentChange}
+            onContextChange={handleContextChange}
           />
         ) : (
           /* Landing page – centred greeting + composer */
@@ -223,7 +254,8 @@ const AIScreen = (): ReactElement => {
                   ref={landingComposerRef}
                   autoFocus
                   onSubmit={handleComposerSubmit}
-                  onAgentChange={handleCreateChat}
+                  onAgentChange={handleAgentChange}
+                  onContextChange={handleContextChange}
                   hideDisclaimer
                 />
               </div>

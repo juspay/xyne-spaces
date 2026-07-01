@@ -15,6 +15,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useTheme, type Theme } from '../../hooks/useTheme';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { deleteV2Conversation } from '../../services/XyneAI/XyneAISessionsV2Service';
+import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { Popover } from '../ui/Popover';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { cn } from '../../utils/classNames';
@@ -550,7 +551,11 @@ export function AISidebar({
     expand: toggle,
   });
 
-  const { data: sessions = [] } = useV2SessionsList();
+  // Scope the conversation history to the currently-selected agent. Without
+  // the slug the list (and delete proxy) default to 'ask-ai' on the backend,
+  // so history for any other agent never loads.
+  const { selectedAgentSlug } = useSelectedAgent();
+  const { data: sessions = [] } = useV2SessionsList(selectedAgentSlug);
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
   const handleCreateChat = (): void => {
@@ -568,7 +573,7 @@ export function AISidebar({
   // fields for them.
   const handleDeleteSession = async (sessionId: string): Promise<void> => {
     try {
-      await deleteV2Conversation(sessionId);
+      await deleteV2Conversation(sessionId, selectedAgentSlug);
       // If the user just deleted the conversation they're viewing, bounce
       // back to the new-chat landing so the thread pane isn't stuck on a
       // stale session id.
@@ -576,7 +581,7 @@ export function AISidebar({
         onCreateChat();
       }
     } finally {
-      invalidateV2Sessions();
+      invalidateV2Sessions(selectedAgentSlug);
     }
   };
 

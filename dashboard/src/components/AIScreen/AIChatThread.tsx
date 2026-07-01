@@ -15,11 +15,14 @@ import {
   Copy,
   ThumbsUp,
   ThumbsDown,
+  ChevronLeft,
   ChevronRight,
   Link2,
   ArrowDown,
   Bug,
   Upload,
+  Pencil,
+  RefreshCw,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -37,6 +40,7 @@ import type {
 import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
+import { type ComposerContext, toStreamOverrides } from './composerContext';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
@@ -68,6 +72,11 @@ import {
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
+import {
+  resolveActivePath,
+  getSiblings,
+  BRANCH_ROOT_KEY,
+} from '../Chat/XyneAISidebar/utils/XyneAIUtils';
 
 type FeedbackValue = 'LIKE' | 'DISLIKE' | null;
 
@@ -79,12 +88,19 @@ interface AIChatThreadProps {
   sessionId?: string | undefined;
   initialQuery?: string | undefined;
   initialAttachments?: AIComposerAttachment[] | undefined;
+  /** Context/toggles chosen on the landing composer — applied to the first
+   *  auto-submitted turn and used to seed the chat composer. */
+  initialExtras?: ComposerContext | undefined;
   onSetMobileSidebarOpen?: ((open: boolean) => void) | undefined;
   onConversationChange?: ((sessionId: string) => void) | undefined;
   /** Forwarded to the composer's AIAgentSelector — fires when the user picks
    *  a different agent from inside an active chat, so the parent can open a
-   *  fresh conversation scoped to that agent. */
-  onAgentChange?: ((slug: string | null) => void) | undefined;
+   *  fresh conversation scoped to that agent. Carries the current composer
+   *  context so the parent can preserve the user's selections across the switch. */
+  onAgentChange?: ((slug: string | null, context: ComposerContext) => void) | undefined;
+  /** Bubbled up from the composer so the parent can preserve the user's
+   *  selections when switching to a recent chat. */
+  onContextChange?: ((context: ComposerContext) => void) | undefined;
 }
 
 export interface AIChatThreadHandle {
@@ -331,11 +347,15 @@ function ClawCitationChip({
   chunkIndex,
   toolNumber,
   toolInvocations,
+  onOpenToolDebug,
 }: {
   toolCallId: string;
   chunkIndex: number;
   toolNumber: number;
   toolInvocations: ToolInvocationType[] | undefined;
+  /** Generic auto-citations carry no link — clicking opens the originating tool
+   *  call in the debug panel instead. Absent for normal (linkable) citations. */
+  onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
 }): ReactElement {
   // Prefer the conversation-wide pool (cross-turn lookup); fall back to the
   // per-message prop so the chip still resolves if the provider is absent.
@@ -378,6 +398,18 @@ function ClawCitationChip({
     >
       {chipInner}
     </CitationLink>
+  ) : onOpenToolDebug ? (
+    // No link (generic auto-citation) — open the source tool call in the debug panel.
+    <button
+      type='button'
+      className={chipClass}
+      aria-label={`${tooltip} — open in debugger`}
+      onClick={() => onOpenToolDebug(toolCallId)}
+      data-track-category='XyneAI'
+      data-track-name='DEBUG_CITATION_OPEN'
+    >
+      {chipInner}
+    </button>
   ) : (
     <span className={chipClass} aria-label={tooltip}>
       {chipInner}
@@ -451,6 +483,46 @@ function InlineCitations({ citations }: { citations: InlineCitation[] }): ReactE
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Branch Navigator (`< 2/3 >` version switcher) — mirrors the sidebar's MessageItem
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function BranchNavigator({
+  index,
+  total,
+  onNavigate,
+}: {
+  index: number;
+  total: number;
+  onNavigate: (direction: 'prev' | 'next') => void;
+}): ReactElement {
+  return (
+    <div className='flex items-center gap-0.5 text-xs text-muted-foreground'>
+      <button
+        type='button'
+        onClick={() => onNavigate('prev')}
+        className='rounded p-0.5 transition-colors hover:bg-muted'
+        data-track-category='XyneAI'
+        data-track-name='BRANCH_NAVIGATE_PREV'
+      >
+        <ChevronLeft size={14} />
+      </button>
+      <span className='min-w-[2rem] text-center tabular-nums'>
+        {index + 1}/{total}
+      </span>
+      <button
+        type='button'
+        onClick={() => onNavigate('next')}
+        className='rounded p-0.5 transition-colors hover:bg-muted'
+        data-track-category='XyneAI'
+        data-track-name='BRANCH_NAVIGATE_NEXT'
+      >
+        <ChevronRight size={14} />
+      </button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Message Bubble (xyne-search style matching reference image)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -460,24 +532,53 @@ function ChatMessageBubble({
   onFeedback,
   feedbackValue,
   onDebug,
+  onOpenToolDebug,
+  onEditSubmit,
+  onRegenerate,
+  branchInfo,
+  onBranchNavigate,
 }: {
   message: Message;
   onCopy?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   feedbackValue?: FeedbackValue;
   onDebug?: (() => void) | undefined;
+  /** Open the debug panel focused on a specific tool call — for clicking a
+   *  generic auto-citation chip (which has no link target). */
+  onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
+  /** Fork a new sibling branch from an edited user message. Absent → no edit UI. */
+  onEditSubmit?: ((newContent: string) => void) | undefined;
+  /** Re-run the last user query as a new bot sibling. Set only on the latest bot. */
+  onRegenerate?: (() => void) | undefined;
+  /** Sibling position for the branch switcher; absent when there's only one version. */
+  branchInfo?: { index: number; total: number } | undefined;
+  onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
 }): ReactElement {
   const isUser = message.type === 'user';
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Set of every toolCallId AND toolName that actually ran for this message,
-  // including nested tools (subagent calls). `message.toolInvocations` is a
-  // flat array storing both top-level and nested invocations — the
-  // `parentToolCallId` field marks nesting. We add toolName too because the
-  // model often emits the function-path form `functions.<toolName>:<idx>`
-  // instead of the real toolCallId (see normalizeCitedToolId below).
+  // Session-wide tool-invocation pool (flat union of every turn's invocations),
+  // matching what ClawCitationChip uses to resolve citations. Citation validity
+  // must be checked against the whole session — a later turn frequently cites a
+  // chunk produced by a tool call in an earlier turn — not just this message's
+  // own invocations. Fall back to the per-message list if the provider is absent.
+  const conversationTools = useContext(ConversationToolInvocationsContext);
+  const lookupTools =
+    conversationTools && conversationTools.length > 0
+      ? conversationTools
+      : (message.toolInvocations ?? []);
+
+  // Set of every toolCallId AND toolName that actually ran across the session,
+  // including nested tools (subagent calls). The invocation list is a flat array
+  // storing both top-level and nested invocations — the `parentToolCallId` field
+  // marks nesting. We add toolName too because the model often emits the
+  // function-path form `functions.<toolName>:<idx>` instead of the real
+  // toolCallId (see normalizeCitedToolId below).
   const knownToolCallIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const inv of message.toolInvocations ?? []) {
+    for (const inv of lookupTools) {
       if (inv.toolCallId) {
         const id = inv.toolCallId.startsWith('clf-') ? inv.toolCallId.slice(4) : inv.toolCallId;
         ids.add(id);
@@ -487,7 +588,7 @@ function ChatMessageBubble({
       }
     }
     return ids;
-  }, [message.toolInvocations]);
+  }, [lookupTools]);
 
   // Per-(toolId, chunkIndex) validity set. A citation is real only if some
   // invocation has the cited chunkIndex in its `citations[]` array. We index
@@ -498,7 +599,7 @@ function ChatMessageBubble({
   // keys matches.
   const validCitationKeys = useMemo(() => {
     const set = new Set<string>();
-    const invocations = message.toolInvocations ?? [];
+    const invocations = lookupTools;
     for (const inv of invocations) {
       if (!inv.citations || inv.citations.length === 0) continue;
       const aliases: string[] = [];
@@ -530,7 +631,7 @@ function ChatMessageBubble({
       }
     }
     return set;
-  }, [message.toolInvocations]);
+  }, [lookupTools]);
 
   // Build a stable `toolCallId → display number` map from the raw content and
   // rewrite `[clf-…#N]` tokens into markdown links pointing at synthetic
@@ -601,24 +702,118 @@ function ChatMessageBubble({
       )}
     >
       {isUser ? (
-        <div className='ai-user-bubble max-w-[78%] rounded-3xl bg-[#ececec] px-4 py-2.5 text-[14.5px] leading-relaxed text-gray-900'>
-          {hasUserAttachments && (
-            <div className={cn('flex flex-col gap-2', hasUserContent && 'mb-2')}>
-              {message.attachments!.map((attachment, index) => (
-                <AttachmentPreview key={index} attachment={attachment} />
-              ))}
-            </div>
+        <div
+          className={cn(
+            'flex flex-col items-end gap-1',
+            isEditing ? 'w-full max-w-[90%]' : 'max-w-[78%]',
           )}
-          {hasUserContent && (
-            <div className='whitespace-pre-wrap'>
-              {processNodeForUserTags(
-                stripUnknownCiteLinks(
-                  stripNonClfCitationTokens(stripCitationMarks(message.content)),
-                  validCitationKeys,
-                ),
-                resolveMention,
+        >
+          <div className='flex w-full items-start justify-end gap-1'>
+            {/* Edit button — appears on hover to the left of the bubble, forks a
+                new sibling branch from the same parent (mirrors the sidebar). */}
+            {onEditSubmit && !isEditing && (
+              <button
+                type='button'
+                onClick={() => {
+                  setEditText(message.content);
+                  setIsEditing(true);
+                  setTimeout(() => editTextareaRef.current?.focus(), 0);
+                }}
+                className='mt-2 flex-shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100'
+                title='Edit message'
+                data-track-category='XyneAI'
+                data-track-name='EDIT_MESSAGE'
+              >
+                <Pencil size={14} className='text-muted-foreground' />
+              </button>
+            )}
+            <div
+              className={cn(
+                'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-[14.5px] leading-relaxed text-gray-900',
+                isEditing ? 'w-full' : 'max-w-full',
+              )}
+            >
+              {isEditing ? (
+                <div className='flex flex-col gap-2'>
+                  <textarea
+                    ref={editTextareaRef}
+                    value={editText}
+                    onChange={e => setEditText(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (editText.trim()) {
+                          onEditSubmit?.(editText.trim());
+                          setIsEditing(false);
+                        }
+                      }
+                      if (e.key === 'Escape') {
+                        setIsEditing(false);
+                      }
+                    }}
+                    className='min-h-[60px] w-full resize-none bg-transparent text-[14.5px] leading-relaxed text-gray-900 outline-none'
+                    rows={Math.max(2, editText.split('\n').length)}
+                    data-track-category='XyneAI'
+                    data-track-name='EDIT_TEXTAREA'
+                  />
+                  <div className='flex justify-end gap-2'>
+                    <button
+                      type='button'
+                      onClick={() => setIsEditing(false)}
+                      className='rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent'
+                      data-track-category='XyneAI'
+                      data-track-name='EDIT_CANCEL'
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        if (editText.trim()) {
+                          onEditSubmit?.(editText.trim());
+                          setIsEditing(false);
+                        }
+                      }}
+                      disabled={!editText.trim()}
+                      className='rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50'
+                      data-track-category='XyneAI'
+                      data-track-name='EDIT_SUBMIT'
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {hasUserAttachments && (
+                    <div className={cn('flex flex-col gap-2', hasUserContent && 'mb-2')}>
+                      {message.attachments!.map((attachment, index) => (
+                        <AttachmentPreview key={index} attachment={attachment} />
+                      ))}
+                    </div>
+                  )}
+                  {hasUserContent && (
+                    <div className='whitespace-pre-wrap'>
+                      {processNodeForUserTags(
+                        stripUnknownCiteLinks(
+                          stripNonClfCitationTokens(stripCitationMarks(message.content)),
+                          validCitationKeys,
+                        ),
+                        resolveMention,
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
+          </div>
+          {/* Branch switcher for user-message versions (created via edit). */}
+          {branchInfo && onBranchNavigate && !isEditing && (
+            <BranchNavigator
+              index={branchInfo.index}
+              total={branchInfo.total}
+              onNavigate={onBranchNavigate}
+            />
           )}
         </div>
       ) : (
@@ -666,7 +861,8 @@ function ChatMessageBubble({
                         return (
                           <ClawCitationGroup
                             refs={groupRefs}
-                            toolInvocations={message.toolInvocations}
+                            toolInvocations={lookupTools}
+                            onOpenToolDebug={onOpenToolDebug}
                           />
                         );
                       }
@@ -691,9 +887,7 @@ function ChatMessageBubble({
                           // form to the real toolCallId via toolName match — so
                           // clicking the chip opens the right source.
                           const normalized = normalizeCitedToolId(citedId);
-                          const matchByName = message.toolInvocations?.find(
-                            inv => inv.toolName === normalized,
-                          );
+                          const matchByName = lookupTools.find(inv => inv.toolName === normalized);
                           const resolvedToolCallId = matchByName?.toolCallId
                             ? matchByName.toolCallId.startsWith('clf-')
                               ? matchByName.toolCallId.slice(4)
@@ -704,7 +898,8 @@ function ChatMessageBubble({
                               toolCallId={resolvedToolCallId}
                               chunkIndex={chunkIndex}
                               toolNumber={toolNumber}
-                              toolInvocations={message.toolInvocations}
+                              toolInvocations={lookupTools}
+                              onOpenToolDebug={onOpenToolDebug}
                             />
                           );
                         }
@@ -807,6 +1002,28 @@ function ChatMessageBubble({
                   fillOpacity={feedbackValue === 'DISLIKE' ? 0.3 : 1}
                 />
               </button>
+              {/* Regenerate — re-runs the last user query as a new bot sibling.
+                  Only wired on the latest bot message. */}
+              {onRegenerate && (
+                <button
+                  type='button'
+                  onClick={onRegenerate}
+                  title='Regenerate response'
+                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                  data-track-category='XyneAI'
+                  data-track-name='REGENERATE_MESSAGE'
+                >
+                  <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                </button>
+              )}
+              {/* Branch switcher for bot-response versions (created via regenerate). */}
+              {branchInfo && onBranchNavigate && (
+                <BranchNavigator
+                  index={branchInfo.index}
+                  total={branchInfo.total}
+                  onNavigate={onBranchNavigate}
+                />
+              )}
             </div>
           )}
         </div>
@@ -824,9 +1041,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     sessionId,
     initialQuery,
     initialAttachments,
+    initialExtras,
     onSetMobileSidebarOpen,
     onConversationChange,
     onAgentChange,
+    onContextChange,
   },
   ref,
 ): ReactElement {
@@ -905,12 +1124,36 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   }, []);
 
   const [messages, setMessages] = useState<Message[]>([]);
+  // Branch selection: parentId → chosen child id. Drives which sibling version
+  // is shown at each fork. In-memory only — for v2 (claw) the backend persists
+  // the tree via each message's parentId, so resolveActivePath defaults to the
+  // latest branch on reload (no metadata save needed, matching the sidebar).
+  const [branchSelections, setBranchSelections] = useState<Record<string, string>>({});
   const [conversationId, setConversationId] = useState<string>('');
-  const [streamThreadKey] = useState<string>(() => sessionId ?? newStreamSlotKey());
+  const [streamThreadKey, setStreamThreadKey] = useState<string>(
+    () => sessionId ?? newStreamSlotKey(),
+  );
+  // True while this thread is on a draft (client-generated) stream slot — i.e. a
+  // brand-new chat that hasn't acquired a server session yet. While draft, a
+  // normal submit does NOT chain a parentId, so the first turn isn't linked as a
+  // branch of another session. Flipped to false once the session is established
+  // (see the draft→session migration effect below). Mirrors XyneAISidebar.
+  const usesDraftStreamKeyRef = useRef<boolean>(!sessionId);
   const [debugEvents, setDebugEvents] = useState<DebugEventRecord[]>([]);
   const [debugArtifactsReadyVersion, setDebugArtifactsReadyVersion] = useState(0);
   const [showDebugger, setShowDebugger] = useState(false);
   const [debugTurnIndex, setDebugTurnIndex] = useState<number | null>(null);
+  // Branching-safe debug pin: the AgentRun sessionId for the message being
+  // debugged (carried on Message.debugSessionId from /messages runByMsgId). When
+  // set, the panel filters runs by sessionId instead of the ambiguous turn index
+  // — turn indices don't map cleanly once branches exist. Falls back to null
+  // (turn-index path) for live streams whose run isn't linked yet. Mirrors the
+  // sidebar.
+  const [debugSessionId, setDebugSessionId] = useState<string | null>(null);
+  // When opening the debugger from a citation chip, focus the panel on that
+  // specific tool call; null means show the whole turn (opened via the toolbar
+  // debug button).
+  const [debugFocusToolCallId, setDebugFocusToolCallId] = useState<string | null>(null);
   const hasAutoSubmitted = useRef(false);
   const isLoadingSession = useRef(false);
   // Captures whether this thread instance was opened on an existing session
@@ -953,6 +1196,161 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     agentSlug: selectedAgentSlug,
   });
 
+  // ── Branching: resolve the visible path from the full message tree ────────────
+  // Mirrors XyneAISidebar. `messages` is the full tree (siblings share a
+  // parentId); `displayMessages` is the single active path chosen by
+  // `branchSelections`, defaulting to the most recent child at each fork.
+  const displayMessages = useMemo(
+    () => resolveActivePath(messages, branchSelections),
+    [messages, branchSelections],
+  );
+
+  const isActiveSessionStreaming = useMemo(() => messages.some(m => m.isStreaming), [messages]);
+
+  // Precompute the latest bot/user index in the active path plus each message's
+  // sibling index/count, so the render pass doesn't re-scan on every delta.
+  const { lastBotIndex, lastUserIndex, siblingIndexById, siblingCountById } = useMemo(() => {
+    let botIdx = -1;
+    let userIdx = -1;
+    for (let i = displayMessages.length - 1; i >= 0; i--) {
+      if (botIdx === -1 && displayMessages[i]?.type === 'bot') botIdx = i;
+      if (userIdx === -1 && displayMessages[i]?.type === 'user') userIdx = i;
+      if (botIdx !== -1 && userIdx !== -1) break;
+    }
+    const indexById = new Map<string, number>();
+    const countById = new Map<string, number>();
+    const groups = new Map<string, string[]>();
+    for (const m of messages) {
+      const key = m.parentId ?? BRANCH_ROOT_KEY;
+      const group = groups.get(key);
+      if (group) group.push(m.id);
+      else groups.set(key, [m.id]);
+    }
+    for (const [, group] of groups) {
+      group.forEach((id, i) => {
+        indexById.set(id, i);
+        countById.set(id, group.length);
+      });
+    }
+    return {
+      lastBotIndex: botIdx,
+      lastUserIndex: userIdx,
+      siblingIndexById: indexById,
+      siblingCountById: countById,
+    };
+  }, [messages, displayMessages]);
+
+  // Legacy conversation: no message has a parentId — branching features disabled
+  // (older sessions predate the tree; edit/regenerate/nav are hidden for them).
+  const isLegacyConversation = useMemo(
+    () =>
+      messages.length > 0 && messages.every(m => m.parentId === null || m.parentId === undefined),
+    [messages],
+  );
+
+  // Regenerate: re-submit the last user query, forking a sibling bot branch.
+  const handleRegenerate = useCallback(async (): Promise<void> => {
+    if (isActiveSessionStreaming) return;
+
+    let lastUserMessage: Message | undefined;
+    for (let i = displayMessages.length - 1; i >= 0; i--) {
+      if (displayMessages[i]?.type === 'user') {
+        lastUserMessage = displayMessages[i];
+        break;
+      }
+    }
+    if (!lastUserMessage) return;
+
+    abortCurrentRequest();
+
+    // parentId = the user message itself → the new bot response branches from it.
+    await submitQuery(
+      lastUserMessage.content,
+      lastUserMessage.attachments ?? [],
+      lastUserMessage.selectionContexts,
+      lastUserMessage.content,
+      undefined, // userTags
+      lastUserMessage.id, // parentMessageId
+      true, // isRegenerate
+    );
+  }, [isActiveSessionStreaming, displayMessages, abortCurrentRequest, submitQuery]);
+
+  // Edit: fork a sibling branch with new content under the same parent. For v2
+  // (claw) we pass `isEditUserMessage` + `editedUserMessageId` so claw-auth
+  // clones the PI session BEFORE the original user message, keeping the pre-edit
+  // assistant reply out of the new turn's context.
+  const handleEditMessage = useCallback(
+    async (messageId: string, newContent: string): Promise<void> => {
+      if (isActiveSessionStreaming) return;
+
+      const messageToEdit = messages.find(m => m.id === messageId);
+      if (!messageToEdit || messageToEdit.type !== 'user') return;
+
+      abortCurrentRequest();
+
+      const editedParentAssistant = messageToEdit.parentId ?? undefined;
+
+      await submitQuery(
+        newContent,
+        messageToEdit.attachments ?? [],
+        messageToEdit.selectionContexts,
+        newContent,
+        undefined, // userTags
+        editedParentAssistant, // parentMessageId → sibling under same parent
+        undefined, // isRegenerate
+        true, // isEditUserMessage
+        messageToEdit.id, // editedUserMessageId
+        editedParentAssistant, // parentAssistantMessageId
+      );
+    },
+    [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery],
+  );
+
+  // Navigate between sibling branches at a given message.
+  const handleBranchNavigate = useCallback(
+    (messageId: string, direction: 'prev' | 'next'): void => {
+      const { siblings, currentIndex } = getSiblings(messages, messageId);
+      if (siblings.length <= 1 || currentIndex === -1) return;
+
+      const newIndex =
+        direction === 'prev'
+          ? (currentIndex - 1 + siblings.length) % siblings.length
+          : (currentIndex + 1) % siblings.length;
+      const newSibling = siblings[newIndex];
+      if (!newSibling) return;
+
+      const parentKey = newSibling.parentId ?? BRANCH_ROOT_KEY;
+      setBranchSelections(prev => ({ ...prev, [parentKey]: newSibling.id }));
+    },
+    [messages],
+  );
+
+  // Promote the draft stream slot key → server session id once the first turn
+  // completes. Keeps the threadId stable mid-stream, then re-homes the manager's
+  // stream under the real session so follow-ups chain to it. After this flips
+  // `usesDraftStreamKeyRef` to false, handleSubmit starts passing a parentId so
+  // subsequent turns extend the thread instead of forking new root branches.
+  useEffect(() => {
+    if (!usesDraftStreamKeyRef.current || !conversationId) return;
+    if (messages.some(m => m.isStreaming)) return;
+
+    const oldTid = buildXyneAIStreamThreadId({
+      channelId: null,
+      threadConversationId: null,
+      streamSessionKey: streamThreadKey,
+    });
+    const newTid = buildXyneAIStreamThreadId({
+      channelId: null,
+      threadConversationId: null,
+      streamSessionKey: conversationId,
+    });
+    if (oldTid === newTid) return;
+
+    xyneAIStreamManager.migrateThreadId(oldTid, newTid);
+    setStreamThreadKey(conversationId);
+    usesDraftStreamKeyRef.current = false;
+  }, [messages, conversationId, streamThreadKey]);
+
   // Load existing session messages when sessionId is provided
   useEffect(() => {
     if (!sessionId || isLoadingSession.current) return;
@@ -962,6 +1360,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
 
     const loadSession = async (): Promise<void> => {
       isLoadingSession.current = true;
+      // Clear stale branch selections from any previously-viewed session; the
+      // freshly-loaded tree defaults to its latest branch via resolveActivePath.
+      setBranchSelections({});
       try {
         // Prefer the in-memory stream manager when it has a live or
         // recently-completed stream for this session (5-min TTL). The manager
@@ -990,8 +1391,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         // previously-loaded session shouldn't leak in.
         setDebugEvents([]);
         setDebugArtifactsReadyVersion(0);
+        setDebugSessionId(null);
 
-        const messages = await fetchV2ConversationMessages(sessionId);
+        const messages = await fetchV2ConversationMessages(sessionId, selectedAgentSlug);
         const loadedMessages = messages.map(msg => ({
           ...msg,
           isStreaming: false,
@@ -1024,15 +1426,28 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     };
 
     void loadSession();
-  }, [sessionId, threadId, onConversationChange]);
+  }, [sessionId, threadId, onConversationChange, selectedAgentSlug]);
 
-  // Auto-submit initialQuery once on mount
+  // Auto-submit initialQuery once on mount, applying the landing composer's
+  // chosen context/toggles to this first turn.
   useEffect(() => {
     if (initialQuery && !hasAutoSubmitted.current) {
       hasAutoSubmitted.current = true;
-      void submitQuery(initialQuery, toMessageAttachments(initialAttachments ?? []));
+      void submitQuery(
+        initialQuery,
+        toMessageAttachments(initialAttachments ?? []),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        initialExtras ? toStreamOverrides(initialExtras) : undefined,
+      );
     }
-  }, [initialQuery, initialAttachments, submitQuery]);
+  }, [initialQuery, initialAttachments, initialExtras, submitQuery]);
 
   // Notify parent when conversationId changes (draft -> real session)
   useEffect(() => {
@@ -1135,16 +1550,43 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   }, []);
 
   const handleSubmit = useCallback(
-    async (text: string, attachments?: AIComposerAttachment[]): Promise<void> => {
+    async (
+      text: string,
+      attachments?: AIComposerAttachment[],
+      context?: ComposerContext,
+    ): Promise<void> => {
       const hasAttachments = (attachments?.length ?? 0) > 0;
       if (!text.trim() && !hasAttachments) return;
       // Re-pin to the latest on submit so the new exchange is in view, matching
       // the xyne-search /ai composer behaviour.
       isAtBottomRef.current = true;
       setShowJumpPill(false);
-      await submitQuery(text, toMessageAttachments(attachments ?? []));
+
+      // Chain a normal follow-up from the last message in the active path so the
+      // turn extends the current branch instead of forking a new root. Skipped
+      // for legacy conversations (no tree — resolveActivePath shows them flat)
+      // and while still on a draft stream slot (first turn of a new chat, before
+      // a server session exists). Mirrors XyneAISidebar.handleSubmit.
+      let parentMessageId: string | undefined;
+      if (!isLegacyConversation && !usesDraftStreamKeyRef.current) {
+        parentMessageId = displayMessages[displayMessages.length - 1]?.id;
+      }
+
+      await submitQuery(
+        text,
+        toMessageAttachments(attachments ?? []),
+        undefined,
+        undefined,
+        undefined,
+        parentMessageId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        context ? toStreamOverrides(context) : undefined,
+      );
     },
-    [submitQuery],
+    [submitQuery, isLegacyConversation, displayMessages],
   );
 
   const handleStop = useCallback((): void => {
@@ -1203,23 +1645,24 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   const isAnyMessageStreaming = messages.some(m => m.isStreaming);
 
   const streamingBotTurnIndex = useMemo(() => {
-    const idx = messages.findIndex(m => m.type === 'bot' && m.isStreaming);
+    const idx = displayMessages.findIndex(m => m.type === 'bot' && m.isStreaming);
     if (idx < 0) return -1;
-    return messages.slice(0, idx + 1).filter(m => m.type === 'bot').length - 1;
-  }, [messages]);
+    return displayMessages.slice(0, idx + 1).filter(m => m.type === 'bot').length - 1;
+  }, [displayMessages]);
 
   // Flat union of every visible message's toolInvocations. Powers the
   // ConversationToolInvocationsContext so a citation chip rendered in turn N
   // can resolve to a ClawCitation that was produced by a tool call in turn 1.
+  // Built from the active path so citations resolve against the shown branch.
   const conversationToolInvocations = useMemo<ToolInvocationType[]>(() => {
     const all: ToolInvocationType[] = [];
-    for (const m of messages) {
+    for (const m of displayMessages) {
       if (m.toolInvocations && m.toolInvocations.length > 0) {
         all.push(...m.toolInvocations);
       }
     }
     return all;
-  }, [messages]);
+  }, [displayMessages]);
 
   const title =
     messages.length > 0
@@ -1259,13 +1702,22 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         >
           <div ref={contentRef} className='mx-auto flex max-w-3xl flex-col'>
             <ConversationToolInvocationsContext.Provider value={conversationToolInvocations}>
-              {messages.map((message, idx) => {
+              {displayMessages.map((message, idx) => {
                 const feedbackValue: FeedbackValue =
                   message.feedback === 1 ? 'LIKE' : message.feedback === 2 ? 'DISLIKE' : null;
                 const botTurnIndex =
                   message.type === 'bot'
-                    ? messages.slice(0, idx + 1).filter(m => m.type === 'bot').length - 1
+                    ? displayMessages.slice(0, idx + 1).filter(m => m.type === 'bot').length - 1
                     : -1;
+                // Branching is disabled for legacy conversations (no parentId).
+                const branchEnabled = !isLegacyConversation;
+                const isLatestUserMessage = idx === lastUserIndex;
+                const isLatestBotMessage = idx === lastBotIndex;
+                const siblingCount = siblingCountById.get(message.id) ?? 1;
+                const branchInfo =
+                  branchEnabled && siblingCount > 1
+                    ? { index: siblingIndexById.get(message.id) ?? 0, total: siblingCount }
+                    : undefined;
                 return (
                   <ChatMessageBubble
                     key={message.id}
@@ -1283,8 +1735,39 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                       message.type === 'bot'
                         ? () => {
                             setDebugTurnIndex(botTurnIndex);
+                            // Pin to this message's run when known (branching-safe);
+                            // null falls back to turn-index for unlinked live runs.
+                            setDebugSessionId(message.debugSessionId ?? null);
+                            setDebugFocusToolCallId(null);
                             setShowDebugger(true);
                           }
+                        : undefined
+                    }
+                    onOpenToolDebug={
+                      message.type === 'bot'
+                        ? (toolCallId: string) => {
+                            setDebugTurnIndex(botTurnIndex);
+                            setDebugSessionId(message.debugSessionId ?? null);
+                            setDebugFocusToolCallId(toolCallId);
+                            setShowDebugger(true);
+                          }
+                        : undefined
+                    }
+                    onEditSubmit={
+                      branchEnabled && isLatestUserMessage
+                        ? (newContent: string) => void handleEditMessage(message.id, newContent)
+                        : undefined
+                    }
+                    onRegenerate={
+                      branchEnabled && isLatestBotMessage && !message.isStreaming
+                        ? () => void handleRegenerate()
+                        : undefined
+                    }
+                    branchInfo={branchInfo}
+                    onBranchNavigate={
+                      branchInfo
+                        ? (direction: 'prev' | 'next') =>
+                            handleBranchNavigate(message.id, direction)
                         : undefined
                     }
                   />
@@ -1316,10 +1799,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             <AIComposer
               ref={composerRef}
               autoFocus
-              onSubmit={(text, attachments): void => {
-                void handleSubmit(text, attachments);
+              onSubmit={(text, attachments, context): void => {
+                void handleSubmit(text, attachments, context);
               }}
               onAgentChange={onAgentChange}
+              initialExtras={initialExtras}
+              onContextChange={onContextChange}
               pending={isAnyMessageStreaming}
               onStop={handleStop}
               placeholder='Write a message...'
@@ -1333,12 +1818,14 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           inline
           open={showDebugger}
           conversationId={conversationId}
-          agentSlug='ask-ai'
+          agentSlug={selectedAgentSlug || 'ask-ai'}
           liveEvents={debugEvents}
           running={isAnyMessageStreaming}
           artifactsReadyVersion={debugArtifactsReadyVersion}
           selectedTurnIndex={debugTurnIndex}
           selectedTurnLive={debugTurnIndex !== null && debugTurnIndex === streamingBotTurnIndex}
+          selectedSessionId={debugSessionId}
+          focusToolCallId={debugFocusToolCallId}
           onClose={() => setShowDebugger(false)}
         />
       )}

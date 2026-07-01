@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
   useCallback,
+  useMemo,
   forwardRef,
   useImperativeHandle,
   type FormEvent,
@@ -11,11 +12,38 @@ import {
   type ChangeEvent,
   type ReactElement,
 } from 'react';
-import { ArrowUp, Paperclip, Square, X, FileText } from 'lucide-react';
+import {
+  ArrowUp,
+  Paperclip,
+  Square,
+  X,
+  FileText,
+  Globe,
+  Microscope,
+  File as FileIcon,
+  BookOpen,
+  Ticket,
+  Phone,
+  Mic,
+  Hash,
+  Lock,
+  Package,
+  Code2,
+} from 'lucide-react';
 import { toast } from 'sonner';
+import { useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
+import { ComposerCollectionPicker } from './ComposerCollectionPicker';
+import { ComposerResearchPicker } from './ComposerResearchPicker';
+import { ComposerVoiceButton } from './ComposerVoiceButton';
 import { cn } from '../../utils/classNames';
+import { apiInstance } from '../../services/clients/apiClient';
+import {
+  ContextPickerPanel,
+  type ContextSelections,
+} from '../Chat/XyneAISidebar/components/ContextPickerPanel';
+import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
 
 export interface AIComposerAttachment {
   id: string;
@@ -36,21 +64,39 @@ export interface AIComposerHandle {
 
 interface AIComposerProps {
   autoFocus?: boolean;
-  onSubmit?: (text: string, attachments?: AIComposerAttachment[]) => void;
+  onSubmit?: (
+    text: string,
+    attachments?: AIComposerAttachment[],
+    context?: ComposerContext,
+  ) => void;
   placeholder?: string;
   hideDisclaimer?: boolean;
   pending?: boolean;
   onStop?: () => void;
   /** Forwarded to AIAgentSelector — fires when the user picks a different
-   *  agent, so the parent can open a fresh chat for that agent. */
-  onAgentChange?: ((slug: string | null) => void) | undefined;
+   *  agent, so the parent can open a fresh chat for that agent. The current
+   *  composer context is passed along so the parent can preserve the user's
+   *  selections (channels, KB, web search, …) across the agent switch, matching
+   *  the XyneAISidebar behaviour. */
+  onAgentChange?: ((slug: string | null, context: ComposerContext) => void) | undefined;
+  /** Seeds the extra context/toggles (web search, deep research, collections,
+   *  etc.) — used for the landing → chat handoff so the chat composer starts
+   *  with whatever the user selected on the landing page. */
+  initialExtras?: ComposerContext | undefined;
+  /** Fires whenever the composer's context/toggles change. The parent tracks
+   *  the latest snapshot so selections survive switching to a recent chat,
+   *  matching XyneAISidebar (where composer state lives in the parent). */
+  onContextChange?: ((context: ComposerContext) => void) | undefined;
+}
+
+interface XyneAIConfigResponse {
+  webSearchAccessible: boolean;
+  deepResearchAccessible: boolean;
+  v2Enabled?: boolean;
 }
 
 // File attachment limits — kept in sync with claw-auth's run-stream
 // rehydration caps (xyne-claw-auth/backend/src/routes/run-stream.ts).
-// Without alignment, a user can attach a file that exceeds the backend
-// caps and have it silently dropped from the agent's context in a
-// follow-up turn.
 const MAX_INDIVIDUAL_FILE_SIZE = 10 * 1024 * 1024; // 10 MiB
 const MAX_TOTAL_SIZE = 25 * 1024 * 1024; // 25 MiB
 const MAX_ATTACHMENTS = 20;
@@ -66,6 +112,84 @@ const isValidBase64 = (str: string): boolean => {
   return true;
 };
 
+// Small pill used for every attached-context chip in the toolbar row.
+function ContextPill({
+  icon,
+  label,
+  onRemove,
+  accent,
+}: {
+  icon: ReactElement;
+  label: string;
+  onRemove: () => void;
+  accent?: boolean;
+}): ReactElement {
+  return (
+    <div className='flex h-7 flex-shrink-0 items-center gap-1.5 rounded-lg border border-border bg-muted/60 px-2'>
+      {icon}
+      <span
+        className={cn(
+          'max-w-[140px] truncate text-[12.5px] font-medium',
+          accent ? 'text-[#7C3AED]' : 'text-foreground',
+        )}
+      >
+        {label}
+      </span>
+      <button
+        type='button'
+        onClick={onRemove}
+        aria-label={`Remove ${label}`}
+        className='ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+        data-track-category='XyneAI'
+        data-track-name='REMOVE_CONTEXT_PILL'
+      >
+        <X className='h-3 w-3' aria-hidden strokeWidth={2} />
+      </button>
+    </div>
+  );
+}
+
+// Ghost toolbar button matching the /ai composer's look.
+function ToolbarButton({
+  icon,
+  label,
+  onClick,
+  active,
+  activeClass,
+  disabled,
+  trackName,
+}: {
+  icon: ReactElement;
+  label: string;
+  onClick: () => void;
+  active?: boolean;
+  activeClass?: string;
+  disabled?: boolean;
+  trackName: string;
+}): ReactElement {
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      className={cn(
+        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition',
+        active
+          ? (activeClass ?? 'bg-secondary text-foreground')
+          : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+        disabled && 'cursor-not-allowed opacity-50',
+      )}
+      data-track-category='XyneAI'
+      data-track-name={trackName}
+    >
+      {icon}
+    </button>
+  );
+}
+
 export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function AIComposer(
   {
     autoFocus,
@@ -75,13 +199,82 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     onStop,
     hideDisclaimer,
     onAgentChange,
+    initialExtras,
+    onContextChange,
   },
   ref,
 ): ReactElement {
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AIComposerAttachment[]>([]);
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // ── Extra composer context/toggles (seeded from initialExtras once) ──────────
+  const seed = initialExtras ?? EMPTY_COMPOSER_CONTEXT;
+  const [showContextModal, setShowContextModal] = useState(false);
+  const [selections, setSelections] = useState<ContextSelections>(() => ({
+    channels: seed.channels,
+    tickets: seed.tickets,
+    canvases: seed.canvases,
+    transcripts: seed.transcripts,
+    recordings: seed.recordings,
+  }));
+  const [collections, setCollections] = useState(() => seed.collections);
+  const [fileScope, setFileScope] = useState(() => seed.fileScope);
+  const [research, setResearch] = useState(() => seed.research);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
+  const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
+
+  const { data: configData } = useQuery<XyneAIConfigResponse>({
+    queryKey: ['xyne-ai-config'],
+    queryFn: async (): Promise<XyneAIConfigResponse> => {
+      const response = await apiInstance.get<XyneAIConfigResponse>('/xyne-ai/config');
+      return response.data;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const webSearchAccessible = configData?.webSearchAccessible ?? false;
+  const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
+
+  const buildContext = useCallback(
+    (): ComposerContext => ({
+      channels: selections.channels,
+      tickets: selections.tickets,
+      canvases: selections.canvases,
+      transcripts: selections.transcripts,
+      recordings: selections.recordings,
+      collections,
+      fileScope,
+      research,
+      webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
+      deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
+      createCanvasEnabled,
+    }),
+    [
+      selections,
+      collections,
+      fileScope,
+      research,
+      webSearchEnabled,
+      deepResearchEnabled,
+      createCanvasEnabled,
+      webSearchAccessible,
+      deepResearchAccessible,
+    ],
+  );
+
+  // Report the latest context up to the parent (via a ref so an inline
+  // onContextChange doesn't refire this every render). Lets AIScreen preserve
+  // the user's selections when switching to a recent chat.
+  const onContextChangeRef = useRef(onContextChange);
+  useEffect(() => {
+    onContextChangeRef.current = onContextChange;
+  });
+  useEffect(() => {
+    onContextChangeRef.current?.(buildContext());
+  }, [buildContext]);
 
   useEffect((): void => {
     const el = textareaRef.current;
@@ -218,9 +411,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     if (pending) return;
     const trimmed = value.trim();
     if (!trimmed) return;
-    onSubmit?.(trimmed, attachments.length > 0 ? attachments : undefined);
+    onSubmit?.(trimmed, attachments.length > 0 ? attachments : undefined, buildContext());
     setValue('');
     setAttachments([]);
+    // Toggles/context persist across turns (mirrors the sidebar), so they are
+    // intentionally NOT reset here.
   };
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>): void => {
@@ -285,10 +480,70 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     setAttachments(prev => prev.filter(att => att.id !== attachmentId));
   };
 
+  // Append a voice transcript to the current textarea value.
+  const handleTranscript = useCallback((text: string): void => {
+    setValue(prev => (prev.trim().length > 0 ? `${prev.trimEnd()} ${text}` : text));
+    textareaRef.current?.focus();
+  }, []);
+
+  const closeContextModal = useCallback((): void => {
+    setShowContextModal(false);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, []);
+
+  const removeChannel = (id: string): void =>
+    setSelections(s => ({ ...s, channels: s.channels.filter(c => c.id !== id) }));
+  const removeTicket = (id: string): void =>
+    setSelections(s => ({ ...s, tickets: s.tickets.filter(t => t.id !== id) }));
+  const removeCanvas = (id: string): void =>
+    setSelections(s => ({ ...s, canvases: s.canvases.filter(c => c.id !== id) }));
+  const removeTranscript = (id: string): void =>
+    setSelections(s => ({ ...s, transcripts: s.transcripts.filter(t => t.id !== id) }));
+  const removeRecording = (id: string): void =>
+    setSelections(s => ({ ...s, recordings: s.recordings.filter(r => r.id !== id) }));
+
+  const hasPills = useMemo(
+    () =>
+      attachments.length > 0 ||
+      selections.channels.length > 0 ||
+      selections.tickets.length > 0 ||
+      selections.canvases.length > 0 ||
+      selections.transcripts.length > 0 ||
+      selections.recordings.length > 0 ||
+      collections.length > 0 ||
+      fileScope !== null ||
+      research !== null,
+    [attachments, selections, collections, fileScope, research],
+  );
+
   const canSend = value.trim().length > 0;
 
   return (
     <form onSubmit={handleSubmit} className='relative'>
+      {/* "/" context picker overlay */}
+      {showContextModal && (
+        <>
+          <button
+            type='button'
+            className='fixed inset-0 z-10 cursor-default border-none bg-transparent p-0'
+            onClick={closeContextModal}
+            onKeyDown={e => {
+              if (e.key === 'Escape') closeContextModal();
+            }}
+            aria-label='Close context modal'
+            data-track-category='XyneAI'
+            data-track-name='CLOSE_CONTEXT_MODAL_BACKDROP'
+          />
+          <div className='absolute bottom-full left-0 right-0 z-20 px-2 pb-2'>
+            <ContextPickerPanel
+              onClose={closeContextModal}
+              onConfirm={setSelections}
+              initialSelections={selections}
+            />
+          </div>
+        </>
+      )}
+
       <input
         ref={fileInputRef}
         type='file'
@@ -298,90 +553,260 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         aria-label='Upload files'
       />
       <div
-        className={cn(
-          'ai-composer-wrapper group flex flex-col gap-1 rounded-3xl border border-[#c0bcb4] bg-[#f5f4f0] px-3 pb-2 pt-3 transition shadow-[0_1px_0_rgba(0,0,0,0.05),0_8px_24px_-12px_rgba(0,0,0,0.08)] focus-within:border-[#a09c94] focus-within:shadow-[0_1px_0_rgba(0,0,0,0.1),0_12px_30px_-12px_rgba(0,0,0,0.12)]',
-        )}
+        className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
+        style={isVoiceRecording ? { borderRadius: '1.6rem' } : undefined}
       >
-        {attachments.length > 0 && (
-          <div className='flex flex-wrap items-center gap-1.5 px-1 pb-1'>
-            {attachments.map(attachment => (
-              <div
-                key={attachment.id}
-                className='flex h-7 items-center gap-1.5 rounded-lg border border-border bg-muted/60 px-2 py-1'
-              >
-                <FileText className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
-                <span className='max-w-[140px] truncate text-[12.5px] font-medium text-foreground'>
-                  {attachment.name}
-                </span>
+        <div
+          className={cn(
+            'ai-composer-wrapper group flex flex-col gap-1 rounded-3xl border border-[#c0bcb4] bg-[#f5f4f0] px-3 pb-2 pt-3 transition shadow-[0_1px_0_rgba(0,0,0,0.05),0_8px_24px_-12px_rgba(0,0,0,0.08)] focus-within:border-[#a09c94] focus-within:shadow-[0_1px_0_rgba(0,0,0,0.1),0_12px_30px_-12px_rgba(0,0,0,0.12)]',
+          )}
+        >
+          {hasPills && (
+            <div
+              className='flex flex-nowrap items-center gap-1.5 overflow-x-auto px-1 pb-1'
+              style={{ scrollbarWidth: 'thin', scrollbarColor: 'hsl(var(--border)) transparent' }}
+            >
+              {selections.channels.map(channel => (
+                <ContextPill
+                  key={`ch-${channel.id}`}
+                  icon={
+                    channel.isPrivate ? (
+                      <Lock className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                    ) : (
+                      <Hash className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                    )
+                  }
+                  label={channel.name}
+                  onRemove={() => removeChannel(channel.id)}
+                />
+              ))}
+              {selections.tickets.map(ticket => (
+                <ContextPill
+                  key={`tk-${ticket.id}`}
+                  icon={
+                    <Ticket className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                  }
+                  label={ticket.xyneId ? ticket.xyneId : ticket.title}
+                  onRemove={() => removeTicket(ticket.id)}
+                />
+              ))}
+              {selections.canvases.map(canvas => (
+                <ContextPill
+                  key={`cv-${canvas.id}`}
+                  icon={
+                    <FileText className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                  }
+                  label={canvas.title}
+                  onRemove={() => removeCanvas(canvas.id)}
+                />
+              ))}
+              {selections.transcripts.map(transcript => (
+                <ContextPill
+                  key={`ts-${transcript.id}`}
+                  icon={
+                    <Phone className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                  }
+                  label={transcript.title}
+                  onRemove={() => removeTranscript(transcript.id)}
+                />
+              ))}
+              {selections.recordings.map(recording => (
+                <ContextPill
+                  key={`rc-${recording.id}`}
+                  icon={<Mic className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />}
+                  label={recording.title}
+                  onRemove={() => removeRecording(recording.id)}
+                />
+              ))}
+              {collections.map(collection => (
+                <ContextPill
+                  key={`co-${collection.id}`}
+                  icon={<BookOpen className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  label={collection.name}
+                  accent
+                  onRemove={() => {
+                    setCollections(prev => prev.filter(c => c.id !== collection.id));
+                    if (fileScope) setFileScope(null);
+                  }}
+                />
+              ))}
+              {fileScope && (
+                <ContextPill
+                  icon={<FileText className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  label={fileScope.name}
+                  accent
+                  onRemove={() => setFileScope(null)}
+                />
+              )}
+              {research && (
+                <ContextPill
+                  icon={
+                    research.type === 'product' ? (
+                      <Package className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                    ) : (
+                      <Code2 className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                    )
+                  }
+                  label={research.name}
+                  onRemove={() => setResearch(null)}
+                />
+              )}
+              {attachments.map(attachment => (
+                <ContextPill
+                  key={attachment.id}
+                  icon={
+                    <FileText className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                  }
+                  label={attachment.name}
+                  onRemove={() => handleRemoveAttachment(attachment.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          <div className='relative'>
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={e => setValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder={placeholder}
+              rows={1}
+              className={cn(
+                'block w-full min-h-[60px] resize-none bg-transparent px-2 py-1 text-[15px] leading-6 placeholder:text-muted-foreground/80 focus:outline-none',
+                isVoiceRecording && !value && 'invisible',
+              )}
+              data-track-category='XyneAI'
+              data-track-name='ComposerInput'
+            />
+            {isVoiceRecording && !value && (
+              <div className='pointer-events-none absolute inset-0 flex select-none items-center gap-3 px-2 py-1'>
+                <div className='flex items-end gap-[3px]' style={{ height: 18 }}>
+                  {([0, 120, 60, 180, 90] as const).map((delay, i) => (
+                    <div
+                      key={i}
+                      className='voice-wave-bar'
+                      style={{ height: [10, 18, 14, 18, 10][i], animationDelay: `${delay}ms` }}
+                    />
+                  ))}
+                </div>
+                <span className='text-[13px] text-muted-foreground'>Listening...</span>
+              </div>
+            )}
+          </div>
+
+          <div className='flex items-center justify-between gap-2'>
+            {/* Left cluster: attach + all context / mode buttons. Kept on one row
+              (no wrap) so the toolbar never grows vertically; the fixed button
+              set fits within the composer width. Not scroll-clipped, so the
+              collection / research dropdowns can overflow upward freely. */}
+            <div className='flex flex-nowrap items-center gap-0.5'>
+              <ToolbarButton
+                icon={<Paperclip className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
+                label='Attach'
+                onClick={handleAttachClick}
+                trackName='ATTACH_FILE'
+              />
+              <ToolbarButton
+                icon={<span className='text-[15px] font-semibold leading-none'>/</span>}
+                label='Add context'
+                onClick={() => setShowContextModal(v => !v)}
+                active={showContextModal}
+                trackName='OPEN_CONTEXT_MODAL'
+              />
+              <ComposerCollectionPicker
+                collections={collections}
+                fileScope={fileScope}
+                onCollectionsChange={setCollections}
+                onFileScopeChange={setFileScope}
+              />
+              <ComposerResearchPicker research={research} onResearchChange={setResearch} />
+
+              <div className='mx-0.5 h-4 w-px bg-border' />
+
+              <ToolbarButton
+                icon={<Globe className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
+                label={
+                  webSearchAccessible
+                    ? webSearchEnabled
+                      ? 'Web search enabled'
+                      : 'Enable web search'
+                    : "You don't have access to web search."
+                }
+                onClick={() => {
+                  if (webSearchAccessible) setWebSearchEnabled(v => !v);
+                }}
+                active={webSearchEnabled}
+                activeClass='bg-secondary text-status-success'
+                disabled={!webSearchAccessible}
+                trackName='TOGGLE_WEB_SEARCH'
+              />
+              <ToolbarButton
+                icon={<Microscope className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
+                label={
+                  deepResearchAccessible
+                    ? deepResearchEnabled
+                      ? 'Deep research enabled'
+                      : 'Enable deep research'
+                    : "You don't have access to deep research."
+                }
+                onClick={() => {
+                  if (deepResearchAccessible) setDeepResearchEnabled(v => !v);
+                }}
+                active={deepResearchEnabled}
+                activeClass='bg-secondary text-status-pending'
+                disabled={!deepResearchAccessible}
+                trackName='TOGGLE_DEEP_RESEARCH'
+              />
+              <ToolbarButton
+                icon={<FileIcon className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
+                label={createCanvasEnabled ? 'Create canvas enabled' : 'Create canvas'}
+                onClick={() => setCreateCanvasEnabled(v => !v)}
+                active={createCanvasEnabled}
+                activeClass='bg-secondary text-primary'
+                trackName='TOGGLE_CREATE_CANVAS'
+              />
+            </div>
+
+            {/* Right cluster: agent selector + mic + send */}
+            <div className='flex shrink-0 items-center gap-1.5'>
+              <AIAgentSelector
+                disabled={pending}
+                onAgentChange={slug => onAgentChange?.(slug, buildContext())}
+              />
+              <ComposerVoiceButton
+                onTranscript={handleTranscript}
+                onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
+                disabled={pending}
+              />
+
+              {pending ? (
                 <button
                   type='button'
-                  onClick={() => handleRemoveAttachment(attachment.id)}
-                  aria-label={`Remove ${attachment.name}`}
-                  className='ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+                  onClick={onStop}
+                  aria-label='Stop generating'
+                  title='Stop'
+                  className='inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:opacity-90'
                   data-track-category='XyneAI'
-                  data-track-name='REMOVE_ATTACHMENT'
+                  data-track-name='STOP_GENERATION'
                 >
-                  <X className='h-3 w-3' aria-hidden strokeWidth={2} />
+                  <Square className='h-2.5 w-2.5 fill-current' aria-hidden strokeWidth={0} />
                 </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={e => setValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder={placeholder}
-          rows={1}
-          className='min-h-[60px] resize-none bg-transparent px-2 py-1 text-[15px] leading-6 placeholder:text-muted-foreground/80 focus:outline-none'
-          data-track-category='XyneAI'
-          data-track-name='ComposerInput'
-        />
-
-        <div className='flex items-center justify-between gap-2'>
-          <button
-            type='button'
-            onClick={handleAttachClick}
-            aria-label='Attach file'
-            title='Attach'
-            className='inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-foreground'
-            data-track-category='XyneAI'
-            data-track-name='ATTACH_FILE'
-          >
-            <Paperclip className='h-4 w-4' aria-hidden strokeWidth={1.75} />
-          </button>
-
-          <div className='flex items-center gap-3'>
-            <AIAgentSelector disabled={pending} onAgentChange={onAgentChange} />
-
-            {pending ? (
-              <button
-                type='button'
-                onClick={onStop}
-                aria-label='Stop generating'
-                title='Stop'
-                className='inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:opacity-90'
-                data-track-category='XyneAI'
-                data-track-name='STOP_GENERATION'
-              >
-                <Square className='h-2.5 w-2.5 fill-current' aria-hidden strokeWidth={0} />
-              </button>
-            ) : (
-              <button
-                type='submit'
-                disabled={!canSend}
-                aria-label='Send'
-                title='Send'
-                className={cn(
-                  'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
-                )}
-              >
-                <ArrowUp className='h-4 w-4' aria-hidden strokeWidth={2.25} />
-              </button>
-            )}
+              ) : (
+                <button
+                  type='submit'
+                  disabled={!canSend}
+                  aria-label='Send'
+                  title='Send'
+                  className={cn(
+                    'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
+                  )}
+                >
+                  <ArrowUp className='h-4 w-4' aria-hidden strokeWidth={2.25} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

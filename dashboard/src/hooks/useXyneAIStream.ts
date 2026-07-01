@@ -12,6 +12,26 @@ import type { UserActivity } from '../hooks/useUserActivity';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
 
+/**
+ * Per-submit overrides for the stream options. When provided, each field takes
+ * precedence over the hook-level config for that single submitQuery call. Used
+ * by the /ai composer, which owns its own context/toggle state and passes a
+ * snapshot at submit time instead of feeding the hook config on every render.
+ */
+export interface StreamOverrides {
+  channelIds?: string[];
+  collectionIds?: string[];
+  fileIds?: string[];
+  webSearchEnabled?: boolean;
+  deepResearchEnabled?: boolean;
+  createCanvasEnabled?: boolean;
+  researchContext?: ResearchContext | null;
+  ticketIds?: string[];
+  canvasIds?: string[];
+  callIds?: string[];
+  attachedContext?: AttachedContextItem[];
+}
+
 interface UseXyneAIStreamParams {
   channelIds: string[];
   conversationId: string;
@@ -234,9 +254,29 @@ export const useXyneAIStream = ({
       isEditUserMessage?: boolean,
       editedUserMessageId?: string,
       parentAssistantMessageId?: string,
+      streamOverrides?: StreamOverrides,
     ): Promise<void> => {
       // Allow empty query if there are selection contexts
       if (!query.trim() && (!selectionContexts || selectionContexts.length === 0)) return;
+
+      // Per-submit overrides take precedence over hook-level config. `in`
+      // checks let an explicit override of null/[] win over the closure value.
+      const ov = streamOverrides;
+      const eWebSearchEnabled =
+        ov && 'webSearchEnabled' in ov ? !!ov.webSearchEnabled : webSearchEnabled;
+      const eDeepResearchEnabled =
+        ov && 'deepResearchEnabled' in ov ? !!ov.deepResearchEnabled : deepResearchEnabled;
+      const eCreateCanvasEnabled =
+        ov && 'createCanvasEnabled' in ov ? !!ov.createCanvasEnabled : createCanvasEnabled;
+      const eResearchContext =
+        ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
+      const eChannelIds = ov?.channelIds ?? channelIds;
+      const eCollectionIds = ov?.collectionIds ?? collectionIds ?? [];
+      const eFileIds = ov?.fileIds ?? fileIds ?? [];
+      const eTicketIds = ov?.ticketIds ?? ticketIds;
+      const eCanvasIds = ov?.canvasIds ?? canvasIds;
+      const eCallIds = ov?.callIds ?? callIds;
+      const eAttachedContext = ov?.attachedContext ?? attachedContext;
 
       // Build internal query with selection context format
       // Format: from canvas(canvas_view_access_id) ```selected_text```
@@ -259,7 +299,7 @@ export const useXyneAIStream = ({
 
       // Append hidden canvas instruction when create canvas is enabled (v1 only)
       // For v2, canvas creation is handled via additionalInstructions in the backend
-      if (createCanvasEnabled && !isV2) {
+      if (eCreateCanvasEnabled && !isV2) {
         internalQuery = internalQuery + '\n\n' + CANVAS_CREATION_INSTRUCTION;
       }
 
@@ -328,8 +368,8 @@ export const useXyneAIStream = ({
 
       // Merge with existing attachedContext
       const combinedAttachedContext = activityContext
-        ? [...(attachedContext ?? []), ...activityContext]
-        : attachedContext;
+        ? [...(eAttachedContext ?? []), ...activityContext]
+        : eAttachedContext;
 
       // Start stream via the global stream manager
       // The stream manager will notify subscribers which will update messages with the streaming content
@@ -338,17 +378,17 @@ export const useXyneAIStream = ({
         {
           query: internalQuery,
           displayQuery: displayContent ?? query,
-          channelIds,
-          collectionIds: collectionIds ?? [],
-          fileIds: fileIds ?? [],
+          channelIds: eChannelIds,
+          collectionIds: eCollectionIds,
+          fileIds: eFileIds,
           conversationId,
           threadConversationId,
           attachmentIds,
           canvasViewAccessId,
-          webSearchEnabled,
-          deepResearchEnabled,
-          createCanvasEnabled,
-          researchContext,
+          webSearchEnabled: eWebSearchEnabled,
+          deepResearchEnabled: eDeepResearchEnabled,
+          createCanvasEnabled: eCreateCanvasEnabled,
+          researchContext: eResearchContext,
           attachments,
           parentMessageId,
           isRegenerate,
@@ -356,9 +396,9 @@ export const useXyneAIStream = ({
           ...(editedUserMessageId ? { editedUserMessageId } : {}),
           ...(parentAssistantMessageId ? { parentAssistantMessageId } : {}),
           localUserMessageId,
-          ticketIds,
-          canvasIds,
-          callIds,
+          ticketIds: eTicketIds,
+          canvasIds: eCanvasIds,
+          callIds: eCallIds,
           attachedContext: combinedAttachedContext,
           agentSlug: agentSlug ?? undefined,
         },
