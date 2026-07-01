@@ -11,7 +11,7 @@ import type { Stage } from '../routes/KanbanBoardScreen/KanbanBoardScreen.types'
 import { sortByKanbanPosition } from '../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { useAuth } from './useAuth';
 import { v4 as uuidv4 } from 'uuid';
-import { isCurrentStageRestricted, findMatchingTransition } from '../utils/stageTransitionUtils';
+import { findMatchingTransition } from '../utils/stageTransitionUtils';
 
 export interface StageTransitionInfo {
   id: string;
@@ -184,19 +184,22 @@ export const useDragAndDrop = ({
               const hasTransitions = transitions.length > 0;
 
               if (hasTransitions) {
-                const restricted = isCurrentStageRestricted(transitions, currentStage.id);
-                const matchingTransition = restricted
-                  ? findMatchingTransition(transitions, currentStage.id, targetStage.id)
-                  : undefined;
+                const matchingTransition = findMatchingTransition(
+                  transitions,
+                  currentStage.id,
+                  targetStage.id,
+                );
 
-                if (restricted && !matchingTransition) {
-                  if (isNonLinearBoard) {
-                    toast.error('This stage transition is not allowed');
-                    return;
-                  }
-                  // Linear board: no explicit transition defined — fall through to legacy gate
-                } else if (matchingTransition) {
-                  // NON_LINEAR: use edge formId only (not stageFormMap) to avoid form on every move.
+                // NON_LINEAR is edge-gated: a move must match an edge. A terminal stage (no
+                // outgoing edges) matches none and is blocked. Linear boards fall through.
+                if (isNonLinearBoard && !matchingTransition) {
+                  toast.error('This stage transition is not allowed');
+                  return;
+                }
+
+                if (matchingTransition) {
+                  // NON_LINEAR: use edge formId only (not stageFormMap) to avoid a form firing
+                  // on every move into a stage. Linear boards also consult stageFormMap.
                   const formId: string | null = isNonLinearBoard
                     ? (matchingTransition.formId ?? null)
                     : (matchingTransition.formId ?? stageFormMap?.get(targetStage.id) ?? null);
@@ -243,14 +246,9 @@ export const useDragAndDrop = ({
                     // Approver falls through to nonLinear.transition (self-approval)
                   }
 
-                  // Valid transition (with or without form/approval handled above)
-                  // Fall through to nonLinear.transition call
+                  // Valid transition (form/approval handled above) — fall through to the move.
                 }
-                // Unrestricted source / no matching edge on a NON_LINEAR board: forms are
-                // edge-specific, so with no matching transition there is no form gate. Fall
-                // through to the transition mutator. (Previously this opened a form via
-                // stageFormMap keyed by target stage, which fired the form on every move into
-                // the stage.)
+                // Linear board with no matching edge: fall through to the legacy gate below.
               }
             }
 

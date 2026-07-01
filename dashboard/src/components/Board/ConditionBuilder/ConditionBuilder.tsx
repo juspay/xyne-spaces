@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
+import { ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { X, ChevronDown, Plus } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { type User, FormContextType } from '@xyne/shared';
@@ -251,7 +251,8 @@ export const ConditionBuilder = ({
     return 'Condition';
   }, [whenField, whenValue, whenCondition, thenField, thenValue, formMap, allStages]);
 
-  // Reset form when modal opens/closes or condition changes
+  // Reset form on open / condition change. allUsers is deliberately excluded —
+  // it re-emits on any users-table sync and would wipe in-progress edits.
   useEffect(() => {
     if (isOpen && condition) {
       setWhenField((condition.whenField as WhenFieldType) || '');
@@ -260,14 +261,7 @@ export const ConditionBuilder = ({
       setThenField((condition.thenField as ThenFieldType) || '');
       setThenCondition(condition.thenCondition || '');
       setThenValue(condition.thenValue || '');
-
-      // Load approvers if they exist
-      if (condition.approverIds && condition.approverIds.length > 0 && allUsers) {
-        const approvers = allUsers.filter(user => condition.approverIds?.includes(user.id));
-        setSelectedApprovers(approvers);
-      } else {
-        setSelectedApprovers([]);
-      }
+      setSelectedApprovers([]);
     } else if (isOpen) {
       // New condition - set defaults
       setWhenField('');
@@ -278,7 +272,18 @@ export const ConditionBuilder = ({
       setThenValue('');
       setSelectedApprovers([]);
     }
-  }, [isOpen, condition, allUsers]);
+  }, [isOpen, condition]);
+
+  // Backfill approvers once per condition (guarded) so allUsers churn can't
+  // clobber manual edits. length===0, not !allUsers — an empty array is truthy.
+  const approversFilledForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!condition?.approverIds || condition.approverIds.length === 0) return;
+    if (allUsers.length === 0) return;
+    if (approversFilledForRef.current === condition.id) return;
+    approversFilledForRef.current = condition.id;
+    setSelectedApprovers(allUsers.filter(user => condition.approverIds!.includes(user.id)));
+  }, [condition, allUsers]);
 
   // Reset dependent fields when whenField changes
   const handleWhenFieldChange = (value: WhenFieldType | ''): void => {

@@ -12,11 +12,7 @@ import { cn } from '../../../utils/classNames';
 import { useAuth } from '../../../hooks/useAuth';
 import { TicketStageRequestStatus, BoardType, ApproverType, FormContextType } from '@xyne/shared';
 import type { Ticket, TicketStageRequest } from '@xyne/shared';
-import {
-  getReachableStageIds,
-  findMatchingTransition,
-  isCurrentStageRestricted,
-} from '../../../utils/stageTransitionUtils';
+import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
 import { StageFormModal } from '../StageFormModal/StageFormModal';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 
@@ -117,22 +113,26 @@ export function StagePicker({
     return map;
   }, [stages, stageTransitions]);
 
-  // Show only reachable stages for NON_LINEAR boards.
-  // A stage is restricted only when it has outgoing transitions.
-  // Stages with no outgoing transitions remain unrestricted.
+  // Show only reachable stages for NON_LINEAR boards. getReachableStageIds returns null
+  // only when the board has no graph (legacy → unrestricted); otherwise it returns the
+  // current stage's outgoing targets, which may be empty for a terminal stage.
   const reachableStages = useMemo(() => {
     const availableStages: ReadonlyArray<string> = boardId
       ? (stages?.map(s => s.name) ?? [])
       : SUPPORT_STAGES;
-    if (!isNonLinear || !stages || stageTransitions.length === 0) return availableStages;
+    if (!isNonLinear || !stages) return availableStages;
     const currentStageObj = stages.find(s => s.name === currentStage);
     if (!currentStageObj) return availableStages;
     const reachableIds = getReachableStageIds(stageTransitions, currentStageObj.id);
-    if (!reachableIds) return availableStages;
-    return availableStages.filter(name => {
+    if (reachableIds === null) return availableStages;
+    // Reachable targets, plus the current stage (kept so the selected value still renders;
+    // selecting it is a no-op in setStage). For a terminal stage this is the only row shown.
+    const filtered = availableStages.filter(name => {
       const obj = stages.find(s => s.name === name);
       return obj && reachableIds.has(obj.id);
     });
+    if (currentStage && !filtered.includes(currentStage)) filtered.push(currentStage);
+    return filtered;
   }, [boardId, stageTransitions, stages, currentStage, isNonLinear]);
 
   // Always-current refs for the async .server.then() recovery handler.
@@ -164,93 +164,86 @@ export function StagePicker({
     const targetStageObj = stages?.find(s => s.name === next);
 
     if (hasTransitions && currentStageObj) {
-      const restricted = isCurrentStageRestricted(stageTransitions, currentStageObj.id);
+      if (!targetStageObj) {
+        toast.error('Stage not found');
+        setOpen(false);
+        return;
+      }
 
-      if (restricted) {
-        if (!targetStageObj) {
-          toast.error('Stage not found');
+      const matchingTransition = findMatchingTransition(
+        stageTransitions,
+        currentStageObj.id,
+        targetStageObj.id,
+      );
+
+      // NON_LINEAR is edge-gated: a move must match an edge. A terminal stage (no outgoing
+      // edges) matches none and is blocked. Linear boards fall through to the direct move.
+      if (!matchingTransition) {
+        if (isNonLinear) {
+          toast.error('This stage transition is not allowed');
+          setOpen(false);
+          return;
+        }
+        // Linear board without explicit transition — fall through to direct move
+      } else {
+        // NON_LINEAR: use edge formId only (not stageFormMap) to avoid form on every move.
+        const transitionFormId: string | null = isNonLinear
+          ? (matchingTransition.formId ?? null)
+          : (matchingTransition.formId ?? stageFormMap.get(targetStageObj.id) ?? null);
+
+        if (transitionFormId) {
+          if (onStageChange) {
+            onStageChange(ticketId, next, stageName);
+          } else {
+            // Edge-specific: only the matched edge's approvers count.
+            const hasApproversForTarget = (matchingTransition.transitionApprovers?.length ?? 0) > 0;
+            openFormModal(
+              {
+                id: targetStageObj.id,
+                name: next,
+                color: getStageColor(next),
+                sequenceNumber: targetStageObj.sequenceNumber ?? undefined,
+              },
+              transitionFormId,
+              hasApproversForTarget,
+            );
+          }
           setOpen(false);
           return;
         }
 
-        const matchingTransition = findMatchingTransition(
-          stageTransitions,
-          currentStageObj.id,
-          targetStageObj.id,
-        );
+        // Approval gate
+        if (matchingTransition.requiresApproval) {
+          const approvers = matchingTransition.transitionApprovers ?? [];
+          const isApprover = approvers.some(
+            a =>
+              (a.approverType ?? ApproverType.USER) === ApproverType.USER &&
+              a.userId === currentUser?.id,
+          );
 
-        if (!matchingTransition) {
-          if (isNonLinear) {
-            toast.error('This stage transition is not allowed');
-            setOpen(false);
-            return;
-          }
-          // Linear board without explicit transition — fall through to direct move
-        } else {
-          // NON_LINEAR: use edge formId only (not stageFormMap) to avoid form on every move.
-          const transitionFormId: string | null = isNonLinear
-            ? (matchingTransition.formId ?? null)
-            : (matchingTransition.formId ?? stageFormMap.get(targetStageObj.id) ?? null);
-
-          if (transitionFormId) {
-            if (onStageChange) {
-              onStageChange(ticketId, next, stageName);
-            } else {
-              // Edge-specific: only the matched edge's approvers count.
-              const hasApproversForTarget =
-                (matchingTransition.transitionApprovers?.length ?? 0) > 0;
-              openFormModal(
-                {
-                  id: targetStageObj.id,
-                  name: next,
-                  color: getStageColor(next),
-                  sequenceNumber: targetStageObj.sequenceNumber ?? undefined,
-                },
-                transitionFormId,
-                hasApproversForTarget,
-              );
-            }
-            setOpen(false);
-            return;
-          }
-
-          // Approval gate
-          if (matchingTransition.requiresApproval) {
-            const approvers = matchingTransition.transitionApprovers ?? [];
-            const isApprover = approvers.some(
-              a =>
-                (a.approverType ?? ApproverType.USER) === ApproverType.USER &&
-                a.userId === currentUser?.id,
+          if (!isApprover) {
+            // Reuse the existing record's ID for revisits (unique constraint on ticketId+stageId)
+            const existingForTargetStage = (
+              ticketData?.ticketStageRequests as TicketStageRequest[] | undefined
+            )?.find((r: TicketStageRequest) => r.stageId === targetStageObj.id);
+            void zero.mutate(
+              mutators.ticketStageRequest.upsert({
+                id: existingForTargetStage?.id ?? uuidv4(),
+                ticketId,
+                stageId: targetStageObj.id,
+                status: TicketStageRequestStatus.SUBMITTED,
+                updatedBy: currentUser?.id || '',
+                updatedAt: Date.now(),
+                requestActivityId: uuidv4(),
+              }),
             );
-
-            if (!isApprover) {
-              // Reuse the existing record's ID for revisits (unique constraint on ticketId+stageId)
-              const existingForTargetStage = (
-                ticketData?.ticketStageRequests as TicketStageRequest[] | undefined
-              )?.find((r: TicketStageRequest) => r.stageId === targetStageObj.id);
-              void zero.mutate(
-                mutators.ticketStageRequest.upsert({
-                  id: existingForTargetStage?.id ?? uuidv4(),
-                  ticketId,
-                  stageId: targetStageObj.id,
-                  status: TicketStageRequestStatus.SUBMITTED,
-                  updatedBy: currentUser?.id || '',
-                  updatedAt: Date.now(),
-                  requestActivityId: uuidv4(),
-                }),
-              );
-              toast.success('Stage change request submitted for approval');
-              setOpen(false);
-              return;
-            }
-            // Approver falls through to direct move (self-approval via nonLinear.transition)
+            toast.success('Stage change request submitted for approval');
+            setOpen(false);
+            return;
           }
+          // Approver falls through to direct move (self-approval via nonLinear.transition)
         }
       }
-      // Unrestricted source / no matching edge on a NON_LINEAR board: forms are edge-specific,
-      // so with no matching transition there is no form gate — fall through to the move.
-      // (Previously this opened a form via stageFormMap keyed by target stage, which fired the
-      // form on every move into the stage.)
     }
 
     // Execute move

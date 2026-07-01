@@ -15,17 +15,6 @@ interface TransitionLike {
 }
 
 /**
- * Returns true when the current stage has outgoing transitions configured.
- * A stage with no configured paths is unrestricted (unrestricted stages should not be blocked).
- */
-export function isCurrentStageRestricted(
-  transitions: ReadonlyArray<TransitionLike>,
-  currentStageId: string,
-): boolean {
-  return transitions.some(t => t.fromStageId === currentStageId);
-}
-
-/**
  * Returns the matching transition from currentStageId → targetStageId.
  */
 export function findMatchingTransition<T extends TransitionLike>(
@@ -38,17 +27,19 @@ export function findMatchingTransition<T extends TransitionLike>(
 
 /**
  * Returns the set of stage IDs reachable from currentStageId.
- * Returns null when the current stage is unrestricted (no transitions configured from it).
+ *
+ * Returns `null` when the board has no transitions at all (no edge graph → unrestricted,
+ * legacy). Otherwise returns the current stage's outgoing target IDs — which may be EMPTY
+ * for a terminal stage. Callers must NOT treat an empty set as "unrestricted": only `null`
+ * means unrestricted. An empty set means a stage that cannot move anywhere.
  */
 export function getReachableStageIds(
   transitions: ReadonlyArray<TransitionLike>,
   currentStageId: string,
 ): Set<string> | null {
-  if (!isCurrentStageRestricted(transitions, currentStageId)) return null;
+  // No transitions on the board → no edge graph → unrestricted.
+  if (transitions.length === 0) return null;
 
-  const ids = new Set(
-    transitions.filter(t => t.fromStageId === currentStageId).map(t => t.toStageId),
-  );
-
-  return ids.size > 0 ? ids : null;
+  // Collect THIS stage's outgoing targets. Empty set = terminal stage.
+  return new Set(transitions.filter(t => t.fromStageId === currentStageId).map(t => t.toStageId));
 }
