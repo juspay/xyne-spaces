@@ -1,3 +1,25 @@
+## [1.183.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.182.1...v1.183.0) (2026-07-01)
+
+
+### Features
+
+* add hand raise to web video calls ([801b1f4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/801b1f432b470fcb7d4bad61e11474bb8d9fac99)), closes [#8138](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8138)
+* Keyword Notifications ([7c29a49](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7c29a493f486e1d2c887a09d296c559166721faa)), closes [#8265](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8265)
+* redirect new users to guide, pin guide in nav, add flow videos ([77a256f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/77a256f403c5b510c5fc9d3e86bddf58d38e9083)), closes [#8192](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8192)
+* role framework ([f52786d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f52786d1971ded8dd5f3830335dd5cb0752aec64)), closes [#7975](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7975)
+* Show citations session-level, added web-search etc. in ai launch page + branching of chats ([2a27041](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2a2704150eee86ea32a13b66ff650f4da3570892)), closes [#8282](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8282)
+* Split screen for canvas while recording audio ([30ddf4d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/30ddf4dac0d92d76a457c24dba70dfc984a14dc5)), closes [#8013](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8013)
+
+
+### Bug Fixes
+
+* added static values due to dropped defaults ([8f83431](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8f83431a41e03863ab514ecffb6573c2c336812f)), closes [#8233](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8233)
+* Allow pre-typing in compose dm ([3ef6e43](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3ef6e43e9a98bee666fd5f723b46599e7024effc)), closes [#8269](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8269)
+* Fix call thread message height ([2e127d4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2e127d43e95bcfd5a6273f10b33147050c8a9159))
+* fixed issues in non linear board ([176906f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/176906ff7135359e880adce92615e159e2f3f68c))
+* jiraCompat serve manifest at mount root + 404 probes (fixes Application Link STATUS UNAVAILABLE) ([733017a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/733017ae05d8d0d0aa25c94333bdd6ef0d0ee534))
+* oauth fix for electron in desk ([8bd79d9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8bd79d94fc4d903a1839a7d4198895ff02cef499))
+
 ## [1.182.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.182.0...v1.182.1) (2026-07-01)
 
 
