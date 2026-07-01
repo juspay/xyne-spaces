@@ -79,8 +79,8 @@ export function RecordingControlBar({
       style={{ paddingBottom: isMobileWeb ? `${MOBILE_NAV_H + 16}px` : '1rem' }}
     >
       <div className='max-w-4xl mx-auto flex items-center justify-center gap-4'>
-        {/* Waveform bars (left side, visible when recording) */}
-        {isRecording && (
+        {/* Waveform bars (left side, visible when actively recording) */}
+        {isRecording && !isPaused && (
           <div className='flex items-center gap-[3px] h-8'>
             {[0, 1, 2].map(i => (
               <div
@@ -149,8 +149,8 @@ export function RecordingControlBar({
           </button>
         )}
 
-        {/* Waveform bars (right side, visible when recording) */}
-        {isRecording && (
+        {/* Waveform bars (right side, visible when actively recording) */}
+        {isRecording && !isPaused && (
           <div className='flex items-center gap-[3px] h-8'>
             {[0, 1, 2].map(i => (
               <div

@@ -4,15 +4,10 @@
  * Mirrors the native recording view: header with time + status, scrollable transcript area.
  */
 
-import { ReactElement, useEffect, useRef, useMemo } from 'react';
-import { Mic, User } from 'lucide-react';
+import { ReactElement, useEffect, useRef } from 'react';
+import { Mic } from 'lucide-react';
 import { TranscriptEntry } from '../../../stores/recordingStore';
-import {
-  formatTime12Hour,
-  formatTimestamp,
-  getSpeakerColor,
-  getInitials,
-} from '../../../utils/recordingUtils';
+import { formatTime12Hour, formatElapsedTime } from '../../../utils/recordingUtils';
 
 interface ActiveRecordingViewProps {
   transcripts: TranscriptEntry[];
@@ -22,11 +17,6 @@ interface ActiveRecordingViewProps {
 
 // Re-export utility functions for local use
 const formatTime = formatTime12Hour;
-
-interface GroupedTranscript {
-  speaker: string;
-  entries: TranscriptEntry[];
-}
 
 export function ActiveRecordingView({
   transcripts,
@@ -40,23 +30,6 @@ export function ActiveRecordingView({
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [transcripts]);
-
-  // Group consecutive messages from the same speaker
-  const groupedTranscripts = useMemo<GroupedTranscript[]>(() => {
-    const groups: GroupedTranscript[] = [];
-    let currentGroup: GroupedTranscript | null = null;
-
-    for (const entry of transcripts) {
-      if (!currentGroup || currentGroup.speaker !== entry.speaker) {
-        currentGroup = { speaker: entry.speaker, entries: [entry] };
-        groups.push(currentGroup);
-      } else {
-        currentGroup.entries.push(entry);
-      }
-    }
-
-    return groups;
   }, [transcripts]);
 
   return (
@@ -95,51 +68,18 @@ export function ActiveRecordingView({
       {/* Transcript Area */}
       <div ref={scrollRef} className='flex-1 overflow-auto px-6 py-6'>
         {transcripts.length > 0 ? (
-          <div className='space-y-6'>
-            {groupedTranscripts.map((group, groupIndex) => {
-              const colorClass = getSpeakerColor(group.speaker);
-              return (
-                <div key={groupIndex} className='flex gap-3'>
-                  {/* Avatar */}
-                  <div className='flex-shrink-0'>
-                    <div
-                      className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold border ${colorClass}`}
-                    >
-                      {group.speaker !== 'Unknown' ? (
-                        getInitials(group.speaker)
-                      ) : (
-                        <User className='w-4 h-4' />
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Message Bubble */}
-                  <div className='flex-1 min-w-0'>
-                    {/* Speaker Name & Time */}
-                    <div className='flex items-center gap-2 mb-1.5'>
-                      <span className='text-sm font-semibold text-foreground dark:text-gray-100'>
-                        {group.speaker}
-                      </span>
-                      <span className='text-xs text-muted-foreground dark:text-muted-foreground'>
-                        {group.entries[0] && formatTimestamp(group.entries[0].timestamp)}
-                      </span>
-                    </div>
-
-                    {/* Messages */}
-                    <div className='space-y-2'>
-                      {group.entries.map(entry => (
-                        <div
-                          key={entry.id}
-                          className='text-[15px] text-foreground dark:text-gray-200 leading-relaxed'
-                        >
-                          {entry.text}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+          <div className='space-y-2'>
+            {transcripts.map(entry => (
+              <div key={entry.id} className='flex gap-1'>
+                <span className='shrink-0 text-[15px] tabular-nums whitespace-nowrap text-foreground dark:text-gray-200 leading-snug'>
+                  {startTime !== null &&
+                    `[${formatElapsedTime(Math.max(0, entry.timestamp - startTime))}]:`}
+                </span>
+                <div className='flex-1 min-w-0 text-[15px] text-foreground dark:text-gray-200 leading-snug'>
+                  {entry.text}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         ) : (
           <div className='flex items-center justify-center h-full'>

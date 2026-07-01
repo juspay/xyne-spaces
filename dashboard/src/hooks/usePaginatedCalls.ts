@@ -20,6 +20,7 @@ interface UsePaginatedCallsReturn {
   loadMoreCalls: () => void;
   onVisibleRangeChanged: (startIndex: number) => void;
   isLoading: boolean;
+  queryDetails: ReturnType<typeof useCachedQuery>[1];
 }
 
 export function usePaginatedCalls(options: UsePaginatedCallsOptions = {}): UsePaginatedCallsReturn {
@@ -100,5 +101,12 @@ export function usePaginatedCalls(options: UsePaginatedCallsOptions = {}): UsePa
 
   const isLoading = queryDetails.type !== 'complete' && accumulatedCalls.length === 0;
 
-  return { calls: accumulatedCalls, hasMoreCalls, loadMoreCalls, onVisibleRangeChanged, isLoading };
+  return {
+    calls: accumulatedCalls,
+    hasMoreCalls,
+    loadMoreCalls,
+    onVisibleRangeChanged,
+    isLoading,
+    queryDetails,
+  };
 }

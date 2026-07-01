@@ -13,6 +13,18 @@ import { formatDuration } from '../utils/dateUtils';
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
 
+/**
+ * Normalize backend Unix timestamps to JS millisecond timestamps.
+ * The Python agent sends seconds since epoch, while the rest of the
+ * dashboard (and Date.now()) uses milliseconds.
+ */
+const normalizeTimestamp = (value: unknown): number => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return Date.now();
+  // Seconds-since-epoch values are roughly 1e9; JS ms values are 1e12+.
+  if (value < 1e12) return value * 1000;
+  return value;
+};
+
 export interface TranscriptEntry {
   id: number;
   speaker: string;
@@ -172,9 +184,9 @@ export const recordingStore = createStore({
             id: transcriptIdCounter,
             speaker: data.user || 'Unknown',
             text: data.text,
-            timestamp: data.timestamp || Date.now(),
+            timestamp: normalizeTimestamp(data.timestamp),
             participantIdentity: data.participantIdentity || '',
-            spokenAt: data.spokenAt || Date.now(),
+            spokenAt: normalizeTimestamp(data.spokenAt),
           };
 
           recordingStore.send({ type: 'addTranscript', entry });
