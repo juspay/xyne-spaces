@@ -1517,6 +1517,27 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .jp-message-html code:not(pre code) strong {
   @apply font-bold;
 }
+.jp-message-html code:not(pre code):has(+ :is(strong, em, s) code:not(pre code)) {
+  @apply border-r-0 rounded-r-none pr-0;
+}
+.jp-message-html
+  code:not(pre code)
+  + :is(strong, em, s):has(+ code:not(pre code))
+  code:not(pre code) {
+  @apply border-x-0 rounded-none px-0;
+}
+.jp-message-html
+  code:not(pre code)
+  + :is(strong, em, s):not(:has(+ code:not(pre code)))
+  code:not(pre code) {
+  @apply border-l-0 rounded-l-none pl-0;
+}
+.jp-message-html :is(strong, em, s):has(code:not(pre code)) + code:not(pre code) {
+  @apply border-l-0 rounded-l-none pl-0;
+}
+.jp-message-html :is(strong, em, s):has(+ code:not(pre code)) code:not(pre code) {
+  @apply border-r-0 rounded-r-none pr-0;
+}
 
 /* ----------------------------
    Code Blocks
