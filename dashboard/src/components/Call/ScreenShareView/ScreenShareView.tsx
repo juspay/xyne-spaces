@@ -25,6 +25,8 @@ interface ScreenShareViewProps {
   showDrawingTools?: boolean | undefined;
   aiController?: { id: string; name: string } | null;
   requestedAiController?: boolean;
+  raisedHands?: string[];
+  onToggleHandRaise?: (() => void) | undefined;
 }
 
 export function ScreenShareView({
@@ -38,6 +40,8 @@ export function ScreenShareView({
   showDrawingTools = false,
   aiController,
   requestedAiController,
+  raisedHands = [],
+  onToggleHandRaise,
 }: ScreenShareViewProps): React.ReactElement {
   // Derive AI enablement from aiController presence — same pattern as ParticipantGrid
   const isAIAssistantEnabled = aiController !== null;
@@ -209,6 +213,8 @@ export function ScreenShareView({
                 participant={participant}
                 isScreenShare={shouldShowScreenShareInSidebar}
                 isFocused={!!isFocusedShare}
+                isHandRaised={raisedHands.includes(participant.identity)}
+                onToggleHandRaise={onToggleHandRaise}
                 onClick={
                   isSharing
                     ? (): void => {

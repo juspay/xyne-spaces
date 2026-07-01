@@ -93,6 +93,10 @@ interface FullCallViewProps {
   unreadCallChatCount?: number | undefined;
   /** Called when a new remote call chat message arrives (for unread tracking) */
   onCallChatNewMessage?: (() => void) | undefined;
+  /** Identities of participants with hand raised (synced via data channel) */
+  raisedHands?: string[] | undefined;
+  /** Toggle the local participant's raised hand */
+  onToggleHandRaise?: (() => void) | undefined;
   /** Whether screen recording is currently active (synced from Zero) */
   isRecording?: boolean | undefined;
 }
@@ -136,6 +140,8 @@ export function FullCallView({
   onToggleCallChat,
   unreadCallChatCount = 0,
   onCallChatNewMessage,
+  raisedHands = [],
+  onToggleHandRaise,
   isRecording: isRecordingProp = false,
 }: FullCallViewProps): React.ReactElement {
   // ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS
@@ -396,6 +402,8 @@ export function FullCallView({
               showDrawingTools={true}
               aiController={aiController}
               requestedAiController={requestedAiController}
+              raisedHands={raisedHands}
+              onToggleHandRaise={onToggleHandRaise}
             />
           </div>
         ) : (
@@ -411,6 +419,8 @@ export function FullCallView({
               participants={participants}
               aiController={aiController}
               requestedAiController={requestedAiController}
+              raisedHands={raisedHands}
+              onToggleHandRaise={onToggleHandRaise}
             />
           </div>
         )}
@@ -505,6 +515,7 @@ export function FullCallView({
             onApproveLobbyRequest={onApproveLobbyRequest}
             onRejectLobbyRequest={onRejectLobbyRequest}
             hideInvite={hideInvite}
+            raisedHands={raisedHands}
           />
         </div>
       )}

@@ -1,23 +1,36 @@
 /**
  * Utility function to play audio files
  */
+import { logger, Event } from './logger';
+
 // Singleton per sound path: a fresh Audio element per play leaks native
 // listener registrations and media elements over long sessions.
 const audioCache = new Map<string, HTMLAudioElement>();
 
-export const playAudio = (audioPath: string): void => {
+export const playAudio = (audioPath: string, volume = 1): void => {
   try {
     let audio = audioCache.get(audioPath);
     if (!audio) {
       audio = new Audio(audioPath);
       audioCache.set(audioPath, audio);
     }
+    audio.volume = Math.max(0, Math.min(1, volume));
     audio.currentTime = 0;
-    audio.play().catch(() => {
-      // Silently handle audio play failures (e.g., user hasn't interacted with the page yet)
+    audio.play().catch((err: unknown) => {
+      // Often benign (e.g. user hasn't interacted with the page yet) — log to
+      // telemetry only (consoleLog=false) so it doesn't spam the console.
+      logger.warn(
+        Event.FRONTEND_ERROR,
+        { context: 'playAudio.play', audioPath, message: String(err) },
+        false,
+      );
     });
-  } catch {
-    // Silently handle audio creation failures
+  } catch (err) {
+    logger.warn(
+      Event.FRONTEND_ERROR,
+      { context: 'playAudio.create', audioPath, message: String(err) },
+      false,
+    );
   }
 };
 

@@ -33,7 +33,7 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
 
-      // Enforce that dashboard-external/src only directly imports the three
+      // Enforce that dashboard-external/src only directly imports the
       // approved entry points from dashboard/src. The full transitive graph is
       // validated by dependency-cruiser (npm run lint:deps).
       'import/no-restricted-paths': ['error', {
@@ -44,10 +44,11 @@ export default tseslint.config(
             '../dashboard/src/machines/roomMachine.ts',
             '../dashboard/src/components/Call/CallViews/FullCallView.tsx',
             '../dashboard/src/services/Call/callLobbyService.ts',
+            '../dashboard/src/components/Call/hooks/useHandRaise.ts',
           ],
           message:
-            'dashboard-external may only import the three approved entry points from dashboard/src ' +
-            '(roomMachine, FullCallView, callLobbyService). ' +
+            'dashboard-external may only import the approved entry points from dashboard/src ' +
+            '(roomMachine, FullCallView, callLobbyService, useHandRaise). ' +
             'To add a new one update .dependency-cruiser.cjs and get a review.',
         }],
       }],

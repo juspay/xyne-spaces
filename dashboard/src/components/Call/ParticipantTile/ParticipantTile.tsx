@@ -1,6 +1,6 @@
 import { ConnectionQuality, Track } from 'livekit-client';
 import { useParticipantNetworkQuality } from '../hooks/useParticipantNetworkQuality';
-import { MicOff, Monitor } from 'lucide-react';
+import { Hand, MicOff, Monitor } from 'lucide-react';
 import { SignalBars } from '../components/SignalBars';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { ParticipantAvatar } from '../ParticipantAvatar/ParticipantAvatar';
@@ -25,6 +25,8 @@ interface ParticipantTileProps {
   compact?: boolean | undefined;
   aiController?: { id: string; name: string } | null;
   requestedAiController?: boolean;
+  isHandRaised?: boolean | undefined;
+  onToggleHandRaise?: (() => void) | undefined;
 }
 
 export function ParticipantTile({
@@ -39,6 +41,8 @@ export function ParticipantTile({
   compact = false,
   aiController,
   requestedAiController,
+  isHandRaised = false,
+  onToggleHandRaise,
 }: ParticipantTileProps): React.ReactElement {
   // Get track publications - these are observables that update automatically
   const cameraPublication = participant.participant?.getTrackPublication(Track.Source.Camera);
@@ -115,6 +119,13 @@ export function ParticipantTile({
     }
     if (isScreenShare) {
       return 'border-blue-400 border-2 cursor-pointer hover:border-blue-300';
+    }
+    // Hand raised — amber glow to draw attention (a raised hand usually means
+    // the person is waiting to speak, so it takes precedence over the speaking ring).
+    if (isHandRaised) {
+      return compact
+        ? 'border-[2px] border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.6)]'
+        : 'border-amber-400 border-[3px] shadow-[0_0_15px_rgba(251,191,36,0.6)]';
     }
     if (isSpeaking && participant.isMicrophoneEnabled) {
       return compact
@@ -210,6 +221,56 @@ export function ParticipantTile({
       >
         {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
       </div>
+
+      {/* Raised-hand indicator — prominent, shown on EVERY participant's tile so
+          all members clearly see who has their hand up (driven by data channel). */}
+      {isHandRaised && (
+        <div
+          className={cn(
+            'absolute left-0 top-0 z-20 flex items-center gap-1 rounded-br-lg bg-amber-500 font-semibold text-white shadow-md',
+            compact ? 'px-1 py-0.5 text-[9px]' : 'px-2 py-1 text-[10px] sm:text-xs',
+          )}
+        >
+          <Hand
+            className={cn('animate-bounce', compact ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5 sm:h-4 sm:w-4')}
+          />
+          {!compact && <span className='hidden sm:inline'>Raised</span>}
+        </div>
+      )}
+
+      {/* Hand Raise Toggle - local tile only, always available (no camera needed).
+          Owns the bottom-right corner; when the camera is on the background-blur
+          button takes the corner, so step left to sit beside it. */}
+      {participant.isLocal && !isScreenShare && onToggleHandRaise && (
+        <button
+          onClick={e => {
+            e.stopPropagation();
+            onToggleHandRaise();
+          }}
+          title={isHandRaised ? 'Lower hand' : 'Raise hand'}
+          aria-label={isHandRaised ? 'Lower hand' : 'Raise hand'}
+          data-track-category='CALLS'
+          data-track-name='TOGGLE_HAND_RAISE_TILE'
+          data-track-metadata={JSON.stringify({ raised: !isHandRaised })}
+          className={cn(
+            'absolute z-10 flex items-center justify-center rounded-full shadow-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/60',
+            compact ? 'bottom-1 p-1' : 'bottom-1 p-1.5 sm:bottom-2 sm:p-2',
+            // Camera on → blur button holds the corner, so offset left; else take the corner.
+            hasVideo
+              ? compact
+                ? 'right-7'
+                : 'right-10 sm:right-12'
+              : compact
+                ? 'right-1'
+                : 'right-1 sm:right-2',
+            isHandRaised
+              ? 'bg-amber-500 text-white hover:bg-amber-400'
+              : 'bg-black/55 text-white hover:bg-black/75',
+          )}
+        >
+          <Hand className={cn(compact ? 'h-3 w-3' : 'h-4 w-4 sm:h-5 sm:w-5')} />
+        </button>
+      )}
 
       {/* AI Controller Badge - Show "Acquired by [UserName]" when AI is controlled */}
       {isControlled && (

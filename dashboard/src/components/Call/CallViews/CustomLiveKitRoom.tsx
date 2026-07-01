@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { roomActor } from '../../../machines/roomMachine';
 import { MiniCallView } from './MiniCallView';
 import { FullCallView } from './FullCallView';
+import { useHandRaise } from '../hooks/useHandRaise';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { AIInviteDialog } from '../CallModals/AIInviteDialog';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -75,6 +76,10 @@ export function CustomLiveKitRoom({
     isCallChatOpen,
     unreadCallChatCount,
   } = snapshot.context;
+
+  // Hand raise state, synced over the data channel. Lifted here (always mounted for
+  // the call) so it persists and keeps receiving across mini/PIP <-> full view switches.
+  const { raisedHands, toggleHandRaise } = useHandRaise(room);
 
   // Compute state from LiveKit instead of storing in context
   const localParticipant = isNativeMode
@@ -368,6 +373,8 @@ export function CustomLiveKitRoom({
           onApproveLobbyRequest={handleApproveLobbyRequest}
           onRejectLobbyRequest={handleRejectLobbyRequest}
           onCallChatNewMessage={handleCallChatNewMessage}
+          raisedHands={raisedHands}
+          onToggleHandRaise={toggleHandRaise}
         />
         <EndCallModal
           isOpen={showEndCallModal}
@@ -442,6 +449,8 @@ export function CustomLiveKitRoom({
         onToggleCallChat={handleToggleCallChat}
         unreadCallChatCount={unreadCallChatCount}
         onCallChatNewMessage={handleCallChatNewMessage}
+        raisedHands={raisedHands}
+        onToggleHandRaise={toggleHandRaise}
       />
       <EndCallModal
         isOpen={showEndCallModal}

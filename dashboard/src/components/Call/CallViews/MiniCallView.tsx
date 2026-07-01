@@ -62,6 +62,10 @@ interface MiniCallViewProps {
   onRejectLobbyRequest?: ((participantId: string) => void) | undefined;
   /** Called when a new remote call chat message arrives (for unread tracking) */
   onCallChatNewMessage?: (() => void) | undefined;
+  /** Identities of participants with hand raised (synced via data channel) */
+  raisedHands?: string[] | undefined;
+  /** Toggle the local participant's raised hand */
+  onToggleHandRaise?: (() => void) | undefined;
 }
 
 export function MiniCallView({
@@ -95,6 +99,8 @@ export function MiniCallView({
   onApproveLobbyRequest,
   onRejectLobbyRequest,
   onCallChatNewMessage,
+  raisedHands = [],
+  onToggleHandRaise,
 }: MiniCallViewProps): React.ReactElement {
   const participantCount = participants.length;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -326,6 +332,8 @@ export function MiniCallView({
                         className='h-full'
                         compact={true}
                         showSidebar={true}
+                        raisedHands={raisedHands}
+                        onToggleHandRaise={onToggleHandRaise}
                       />
                     </div>
                   ) : (
@@ -336,6 +344,8 @@ export function MiniCallView({
                         compact={true}
                         aiController={aiController}
                         requestedAiController={requestedAiController}
+                        raisedHands={raisedHands}
+                        onToggleHandRaise={onToggleHandRaise}
                       />
                     </div>
                   )}
@@ -417,6 +427,7 @@ export function MiniCallView({
                 currentUserId={currentUserId}
                 onApproveLobbyRequest={onApproveLobbyRequest}
                 onRejectLobbyRequest={onRejectLobbyRequest}
+                raisedHands={raisedHands}
               />
 
               <ResizeHandles showCorner={true} />
