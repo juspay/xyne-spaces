@@ -82,11 +82,16 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
     const values = Array.isArray(formEntityValues) ? formEntityValues : [];
     const fields = Array.isArray(formFields) ? formFields : [];
 
-    // Non-linear: only pre-fill if there is an active pending request (SUBMITTED status);
-    // APPROVED/REJECTED/null all mean a fresh visit — start with a blank form.
-    // Linear: keep the legacy behaviour — pre-fill whenever saved values exist.
+    // Decide whether to pre-fill the form from previously saved values.
+    // Linear: pre-fill whenever saved values exist (legacy behaviour).
+    // Non-linear: pre-fill on an active pending (SUBMITTED) request OR on a fresh revisit —
+    // the prior visit's values are already fetched (formEntityValues), keyed by (ticket, stage),
+    // so "same form / same from / same to on another visit" resolves to the last submission.
     const hasActiveRequest = existingRequest?.status === TicketStageRequestStatus.SUBMITTED;
-    const shouldPrefill = isNonLinearBoard ? hasActiveRequest : true;
+    const hasPriorValuesForStage = values.some(
+      (fev: FormEntityValues) => fev.contextId === targetStage.id,
+    );
+    const shouldPrefill = isNonLinearBoard ? hasActiveRequest || hasPriorValuesForStage : true;
 
     if (shouldPrefill && values.length > 0 && fields.length > 0) {
       const preFilled: Record<string, string[]> = {};

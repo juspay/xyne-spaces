@@ -63,11 +63,7 @@ import { Selector } from './Selector';
 import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
 import { mutators } from '../../../zero/mutators';
 import { apiInstance } from '../../../services/clients/apiClient';
-import {
-  getReachableStageIds,
-  findMatchingTransition,
-  isCurrentStageRestricted,
-} from '../../../utils/stageTransitionUtils';
+import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
@@ -648,7 +644,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   // Compute the set of stage names reachable from the current stage.
   // Used to grey out unreachable options in the stage selector.
-  // Returns null (no restriction) for linear boards or NON_LINEAR with 0 transitions configured.
+  // Returns null (no restriction) for linear boards, or NON_LINEAR boards with no graph at
+  // all (legacy → unrestricted). On a NON_LINEAR board with a graph, returns the current
+  // stage's reachable targets — an EMPTY set for a terminal stage (not "unrestricted").
   const reachableStageNamesForSelector = useMemo<Set<string> | null>(() => {
     if (!stages || !ticket?.stageName) return null;
 
@@ -661,7 +659,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (!currentStageObj) return null;
 
     const reachableIds = getReachableStageIds(stageTransitions, currentStageObj.id);
-    if (!reachableIds) return null;
+    if (reachableIds === null) return null;
 
     return new Set(stages.filter(s => reachableIds.has(s.id)).map(s => s.name));
   }, [isNonLinearBoard, stageTransitions, stages, ticket?.stageName]);
@@ -1494,6 +1492,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const handleStageChange = (stageName: string): void => {
     if (!ticket) return;
+    // Re-selecting the current stage has no edge to itself — skip the edge gate below.
+    // Scoped to NON_LINEAR so the linear flow is untouched.
+    if (isNonLinearBoard && stageName === ticket.stageName) return;
 
     const hasTransitionsDefined = stageTransitions.length > 0;
 
@@ -1672,23 +1673,22 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         const targetStageObj = stages?.find(s => s.name === stageName);
         // If stages haven't finished loading, fall through to the direct nonLinear.transition call.
         if (currentStageObj && targetStageObj) {
-          const restricted = isCurrentStageRestricted(stageTransitions, currentStageObj.id);
-          if (restricted) {
-            const matchingTransition = findMatchingTransition(
-              stageTransitions,
-              currentStageObj.id,
-              targetStageObj.id,
-            );
-            if (!matchingTransition) {
-              toast.error('This stage transition is not allowed');
-              return;
-            }
-            execTransition(matchingTransition, currentStageObj, targetStageObj);
+          // NON_LINEAR is edge-gated: a move must match an edge. A terminal stage (no outgoing
+          // edges) matches none and is blocked here (mirrors the backend mutator).
+          const matchingTransition = findMatchingTransition(
+            stageTransitions,
+            currentStageObj.id,
+            targetStageObj.id,
+          );
+          if (!matchingTransition) {
+            toast.error('This stage transition is not allowed');
             return;
           }
+          execTransition(matchingTransition, currentStageObj, targetStageObj);
+          return;
         }
       }
-      // No matching transition edge — no form gate, perform the move directly.
+      // No transition graph on the board, or stages still loading — perform the move directly.
       const currentStageObj = stages?.find(s => s.name === ticket.stageName);
       const targetStageObj = stages?.find(s => s.name === stageName);
       if (currentStageObj && targetStageObj) {

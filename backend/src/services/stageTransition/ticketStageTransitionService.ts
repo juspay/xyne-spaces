@@ -12,6 +12,7 @@ import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { FormEntityType } from '@xyne/shared';
+import { decideVisitVersion, foldFormRowsToValues } from './visitVersioning';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -278,29 +279,68 @@ export class TicketStageTransitionService {
       });
 
       const maxVisitIndex = maxVisitAgg._max.version ?? 0;
-      const hasPriorVisit = maxVisitIndex > 0;
-
-      // Decide re-enter behaviour
       const reenterMode = transition?.onReenter ?? ReenterMode.RESET;
-      let newVisitIndex: number;
-      let existingEtaToReopen: { id: string; version: number } | null = null;
 
-      if (!hasPriorVisit) {
+      let newVisitIndex: number;
+      // `existingEtaToReopen` is set only when we are REUSING an existing visit version
+      // (form unchanged). `rebaseEta` controls the ETA clock on that reused row.
+      let existingEtaToReopen: { id: string } | null = null;
+      let rebaseEta = true; // default: (re)start the clock
+
+      if (ticket.board.boardType !== BoardType.NON_LINEAR) {
+        // Linear (DEFAULT/RELEASE) boards move strictly forward one stage — there are no
+        // revisits, so every transition is visit 1 with a fresh clock. No form comparison
+        // is needed (and `formValues` may legitimately be absent for an automation move).
         newVisitIndex = 1;
-      } else if (reenterMode === ReenterMode.CONTINUE) {
-        // Re-use the most recent version and reopen that entry
-        newVisitIndex = maxVisitIndex;
-        const mostRecent = await tx.ticketStageEta.findFirst({
-          where: { ticketId, stageId: targetStage.id, version: maxVisitIndex },
-          orderBy: { createdAt: 'desc' },
-        });
-        if (mostRecent) {
-          // NULL version (legacy rows predate the column) is treated as visit 1.
-          existingEtaToReopen = { id: mostRecent.id, version: mostRecent.version ?? 1 };
-        }
       } else {
-        // RESET (default) – always increment
-        newVisitIndex = maxVisitIndex + 1;
+        // NON_LINEAR: data-driven versioning (see visitVersioning.ts). A new version is
+        // created ONLY when the submitted form differs from the prior visit's; otherwise
+        // the existing version/row is reused. reset/continue governs only the ETA clock.
+        let existingEtaIdAtMaxVersion: string | null = null;
+        let submittedValues: Record<string, unknown> = {};
+        let latestValues: Record<string, unknown> = {};
+
+        if (maxVisitIndex > 0) {
+          // The ETA row to reopen when reusing (most recent at maxVisitIndex). NULL version
+          // (legacy rows predate the column) is treated as visit 1.
+          const mostRecent = await tx.ticketStageEta.findFirst({
+            where: { ticketId, stageId: targetStage.id, version: maxVisitIndex },
+            orderBy: { createdAt: 'desc' },
+          });
+          existingEtaIdAtMaxVersion = mostRecent?.id ?? null;
+
+          // Compare submitted form values to the prior visit's stored values, keyed by
+          // fieldName. Only run when this edge has a form; an edge with no form has no
+          // values to compare (both maps stay empty → equality → reuse path), which is the
+          // safe default. submittedValues comes straight from TransitionOptions.formValues
+          // (fieldName → value), as the UI/automation sends it.
+          if (transition?.formId) {
+            const priorRows = await tx.formEntityValues.findMany({
+              where: { entityId: ticketId, contextId: targetStage.id },
+            });
+            const formFieldsForVersioning = await tx.formFields.findMany({
+              where: { formId: transition.formId },
+            });
+            const fieldIdToName = new Map(
+              formFieldsForVersioning.map(f => [f.id, f.fieldName]),
+            );
+            // latestValues = the prior visit's submission, at version === maxVisitIndex.
+            const atMax = priorRows.filter(r => (r.version ?? 1) === maxVisitIndex);
+            latestValues = foldFormRowsToValues(atMax, fieldIdToName);
+            submittedValues = formValues ?? {};
+          }
+        }
+
+        const decision = decideVisitVersion({
+          maxVersion: maxVisitIndex,
+          existingEtaIdAtMaxVersion,
+          submittedValues,
+          latestValues,
+          reenterMode,
+        });
+        newVisitIndex = decision.newVersion;
+        rebaseEta = decision.rebaseEta;
+        existingEtaToReopen = decision.existingEtaId ? { id: decision.existingEtaId } : null;
       }
 
       // 8c. Compute stage ETA
@@ -308,17 +348,26 @@ export class TicketStageTransitionService {
 
       // 8d. Create or reopen TicketStageEta
       if (existingEtaToReopen) {
+        // REUSE (form unchanged): rebaseEta (RESET) restarts the clock; CONTINUE keeps it
+        // (only clears stageLeftAt — do NOT touch stageEnteredAt/stageEta).
         await tx.ticketStageEta.update({
           where: { id: existingEtaToReopen.id },
-          data: {
-            stageEnteredAt: now,
-            stageLeftAt: null,
-            stageEta,
-            updatedAt: now,
-            updatedBy: userId,
-          },
+          data: rebaseEta
+            ? {
+                stageEnteredAt: now,
+                stageLeftAt: null,
+                stageEta,
+                updatedAt: now,
+                updatedBy: userId,
+              }
+            : {
+                stageLeftAt: null,
+                updatedAt: now,
+                updatedBy: userId,
+              },
         });
       } else {
+        // NEW visit version (first visit, or form changed): fresh ETA row at newVisitIndex.
         await tx.ticketStageEta.create({
           data: {
             ticketId,

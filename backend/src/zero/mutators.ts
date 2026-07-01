@@ -114,6 +114,8 @@ import {
   deleteDelayedMessageEntityAttachments,
 } from '@/zero/utils/attachmentEntityCleanup';
 import { deliverDraftServerMessage } from '@/services/messageDeliveryService';
+// Data-driven visit versioning + ETA reset/continue decision for NON_LINEAR transitions.
+import { decideVisitVersion, foldFormRowsToValues } from '@/services/stageTransition/visitVersioning';
 import {
   executionOrchestrator,
   unifiedDMService,
@@ -145,24 +147,10 @@ export type AuthData = {
 
 export type ParticipantOperationType = 'participants_added' | 'participants_removed' | 'participants_joined';
 
-// Shared helpers for NON_LINEAR stage transitions (version tracking + ETA deadline).
-function computeStageVisitVersion(
-  targetETAs: ReadonlyArray<{ id: string; version: number | null; stageEnteredAt: number }>,
-  reenterMode: ReenterMode,
-): { newVersion: number; existingEtaId: string | null } {
-  const maxVersion = targetETAs.length > 0 ? Math.max(...targetETAs.map(e => e.version ?? 1)) : 0;
-  if (maxVersion === 0) {
-    return { newVersion: 1, existingEtaId: null };
-  }
-  if (reenterMode === ReenterMode.CONTINUE) {
-    const mostRecent = targetETAs
-      .filter(e => (e.version ?? 1) === maxVersion)
-      .sort((a, b) => b.stageEnteredAt - a.stageEnteredAt)[0];
-    return { newVersion: maxVersion, existingEtaId: mostRecent?.id ?? null };
-  }
-  return { newVersion: maxVersion + 1, existingEtaId: null };
-}
-
+// Shared helper for NON_LINEAR stage transitions: compute the ETA deadline from the visit's
+// SLA mode (NONE / FIXED_HOURS / STAGE_DEFAULT). Visit-versioning logic (the new-version vs
+// reuse decision and reset/continue clock control) now lives in visitVersioning.ts and is
+// invoked by decideVisitVersion at each transition entry point.
 function computeStageEtaDeadline(
   now: number,
   slaMode: VisitSlaMode,
@@ -10661,10 +10649,61 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               const reenterMode = (transition?.onReenter as ReenterMode | undefined) ?? ReenterMode.RESET;
               const maxVisitIndex =
                 targetETAs.length > 0 ? Math.max(...targetETAs.map(e => e.version ?? 1)) : 0;
-              const { newVersion: newVisitIndex, existingEtaId } = computeStageVisitVersion(
-                targetETAs,
-                reenterMode,
+
+              // Data-driven visit versioning (see visitVersioning.ts). In this approval path the
+              // "submission" is the frontend's guessed rows (version > maxVisitIndex, created
+              // before this visit's ETA exists); the "prior visit" is the rows at maxVisitIndex.
+              const existingEtaIdAtMaxVersion =
+                maxVisitIndex === 0
+                  ? null
+                  : (targetETAs
+                      .filter(e => (e.version ?? 1) === maxVisitIndex)
+                      .sort((a, b) => b.stageEnteredAt - a.stageEnteredAt)[0]?.id ?? null);
+
+              // Build a fieldId → fieldName map from the transition's form so the stored rows
+              // (keyed by fieldId) can be folded to the fieldName → value shape the comparison
+              // helper expects. When the transition has no formId there is nothing to compare →
+              // empty maps → equality → reuse path (safe default).
+              let fieldIdToName = new Map<string, string>();
+              if (transition?.formId) {
+                const transitionFormFields = await tx.run(
+                  zql.form_fields.where('formId', transition.formId),
+                );
+                fieldIdToName = new Map(transitionFormFields.map(f => [f.id, f.fieldName]));
+              }
+
+              // Read all form values for (ticket, stage) once; both the guessed submission and
+              // the prior visit's values come from this single read (also reused by the
+              // normalize step below, so no extra query is introduced).
+              const allFormValuesForVersioning = await tx.run(
+                zql.form_entity_values
+                  .where('entityId', ticket.id)
+                  .where('contextId', stage.id),
               );
+              // submittedValues = the frontend's guessed submission (version > maxVisitIndex).
+              const guessedRows = allFormValuesForVersioning.filter(
+                r => (r.version ?? 1) > maxVisitIndex,
+              );
+              const submittedValues = foldFormRowsToValues(guessedRows, fieldIdToName);
+              // latestValues = the prior visit's values (version === maxVisitIndex). Empty when
+              // there is no prior visit (maxVisitIndex === 0).
+              const priorRows = allFormValuesForVersioning.filter(
+                r => (r.version ?? 1) === maxVisitIndex,
+              );
+              const latestValues = foldFormRowsToValues(priorRows, fieldIdToName);
+
+              const {
+                newVersion: newVisitIndex,
+                existingEtaId,
+                isNewVersion,
+                rebaseEta,
+              } = decideVisitVersion({
+                maxVersion: maxVisitIndex,
+                existingEtaIdAtMaxVersion,
+                submittedValues,
+                latestValues,
+                reenterMode,
+              });
 
               const stageEtaDeadline = computeStageEtaDeadline(
                 now,
@@ -10674,15 +10713,28 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               );
 
               if (existingEtaId) {
-                await tx.mutate.ticket_stage_eta.update({
-                  id: existingEtaId,
-                  stageEnteredAt: now,
-                  stageLeftAt: null,
-                  stageEta: stageEtaDeadline,
-                  updatedAt: now,
-                  updatedBy: authData.sub,
-                });
+                // REUSE (form unchanged): rebaseEta (RESET) restarts the clock; CONTINUE keeps it.
+                if (rebaseEta) {
+                  await tx.mutate.ticket_stage_eta.update({
+                    id: existingEtaId,
+                    stageEnteredAt: now,
+                    stageLeftAt: null,
+                    stageEta: stageEtaDeadline,
+                    updatedAt: now,
+                    updatedBy: authData.sub,
+                  });
+                } else {
+                  // CONTINUE: only clear stageLeftAt (do NOT touch stageEnteredAt/stageEta).
+                  await tx.mutate.ticket_stage_eta.update({
+                    id: existingEtaId,
+                    stageLeftAt: null,
+                    updatedAt: now,
+                    updatedBy: authData.sub,
+                  });
+                }
               } else {
+                // NEW visit version (first visit, or form changed): insert a fresh ETA row at
+                // newVisitIndex with a clock started from now.
                 await tx.mutate.ticket_stage_eta.insert({
                   id: uuidv4(),
                   ticketId: ticket.id,
@@ -10696,16 +10748,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 });
               }
 
-              // Normalize this submission's form-value versions to the authoritative
-              // newVisitIndex. The frontend creates values at a guessed version
-              // (maxStageVersion+1) before the ETA exists, so they must be re-stamped here.
-              //
-              // Runs for BOTH RESET and CONTINUE (the old `newVisitIndex > 1` guard left
-              // CONTINUE re-entries orphaned, since CONTINUE keeps newVisitIndex == maxVisitIndex).
-              // When a record already exists at newVisitIndex for the same field (the CONTINUE
-              // case — we're continuing the same logical visit), merge into it and delete the
-              // duplicate to respect the UNIQUE(entityId,entityType,fieldId,contextId,version)
-              // constraint. Otherwise (RESET — a brand-new version) simply re-stamp the version.
+              // Reconcile the frontend's guessed form-value versions (version > maxVisitIndex,
+              // created before the ETA exists) to the authoritative newVisitIndex. NEW version:
+              // re-stamp them up to newVisitIndex. REUSE: the guessed rows are identical to the
+              // prior visit's rows at maxVisitIndex, so collapse them (delete + bump surviving row).
               const normalizeFormValueVersions = async () => {
                 const allFormValues = await tx.run(
                   zql.form_entity_values
@@ -10734,12 +10780,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       other.fieldId === fv.fieldId &&
                       (other.version ?? 1) === newVisitIndex,
                   );
-                  // If newVisitIndex is already occupied for this field, a prior visit's
-                  // submission lives there. NEVER merge-then-delete onto it — that destroys
-                  // the earlier visit's form (the data loss seen on revisits). Leave this
-                  // value at its own distinct version; the UI groups form values by version,
-                  // so both visits render as separate forms.
-                  if (existingAtTarget) continue;
+                  if (existingAtTarget) {
+                    // newVisitIndex is already occupied for this field. NEW version: the
+                    // occupant is a DIFFERENT visit's form — never overwrite it (leave this
+                    // guessed row at its own version). REUSE: the occupant is the identical
+                    // prior-visit row — delete the redundant guess and bump the survivor.
+                    if (!isNewVersion) {
+                      await tx.mutate.form_entity_values.delete({ id: fv.id });
+                      await tx.mutate.form_entity_values.update({
+                        id: existingAtTarget.id,
+                        updatedAt: now,
+                      });
+                    }
+                    continue;
+                  }
                   await tx.mutate.form_entity_values.update({
                     id: fv.id,
                     version: newVisitIndex,
@@ -10747,16 +10801,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   });
                 }
               };
-              // Only re-stamp the client's guessed versions when this approval opens a
-              // genuinely NEW visit version (RESET: newVisitIndex > maxVisitIndex). On
-              // CONTINUE the visit index is unchanged, so the prior visit's values already
-              // occupy it — re-stamping there would collapse both visits onto one version
-              // (old form overwritten / lost). Form-value versions are independent of the
-              // ETA visit index (the UI never joins them), so leaving a CONTINUE submission
-              // at its own higher version is correct and keeps each submission visible.
-              if (newVisitIndex > maxVisitIndex) {
-                await normalizeFormValueVersions();
-              }
+              // Always run: leftover guessed rows (version > maxVisitIndex) would otherwise
+              // orphan at a version above the reused one, violating the unique constraint on
+              // re-entry and polluting the next version decision.
+              await normalizeFormValueVersions();
 
               await tx.mutate.tickets.update({
                 id: ticket.id,
@@ -14072,20 +14120,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one(),
           );
 
-          // Only the current stage's outgoing edges matter: a stage is "restricted" when it
-          // has at least one outgoing transition, in which case a move must match one of them.
+          // A NON_LINEAR board is edge-gated. Fetch the board's full transition set to tell
+          // "no transitions anywhere" (legacy → unrestricted) from "board has edges but this
+          // stage has zero outgoing edges" (terminal stage → block).
+          const boardTransitions = await tx.run(
+            zql.stage_transitions.where('boardId', ticket.boardId),
+          );
+          const boardHasTransitions = boardTransitions.length > 0;
           const outgoingTransitions = currentStage
-            ? await tx.run(
-                zql.stage_transitions
-                  .where('boardId', ticket.boardId)
-                  .where('fromStageId', currentStage.id),
-              )
+            ? boardTransitions.filter(t => t.fromStageId === currentStage.id)
             : [];
           const transition = outgoingTransitions.find(t => t.toStageId === targetStage.id) ?? null;
 
-          // If the current stage has outgoing edges, block moves that match none of them.
-          // Mirrors frontend isCurrentStageRestricted.
-          if (currentStage && outgoingTransitions.length > 0 && !transition) {
+          // Block moves that match no edge — but only when the board has a graph. A stage with
+          // zero outgoing edges on a graphed board is terminal; with no graph at all, unrestricted.
+          if (currentStage && boardHasTransitions && !transition) {
             throw new Error('This stage transition is not allowed');
           }
 
@@ -14110,10 +14159,58 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .where('ticketId', ticketId)
               .where('stageId', targetStage.id),
           );
-          const { newVersion: newVisitIndex, existingEtaId } = computeStageVisitVersion(
-            targetETAs,
-            (transition?.onReenter as ReenterMode | undefined) ?? ReenterMode.RESET,
-          );
+
+          // effectiveFormId is needed both for the form gate AND for building the fieldId→name
+          // map used to read the prior visit's form values, so compute it here (earlier than the
+          // gate) rather than after the version decision.
+          // NOTE: null ?? X = X in JS, so we must NOT use ?. shorthand here — use explicit
+          // transition === null check to avoid treating "transition found, formId=null" the
+          // same as "no transition found".
+          const effectiveFormId: string | null =
+            transition === null ? null : (transition?.formId ?? null);
+
+          // Data-driven visit versioning (see visitVersioning.ts): new version only when the
+          // submitted form differs from the prior visit's; reset/continue governs only the clock.
+          const maxVersion =
+            targetETAs.length > 0 ? Math.max(...targetETAs.map(e => e.version ?? 1)) : 0;
+          // The most recent ETA row at maxVersion (to reopen when reusing), or null if first visit.
+          const existingEtaIdAtMaxVersion =
+            maxVersion === 0
+              ? null
+              : (targetETAs
+                  .filter(e => (e.version ?? 1) === maxVersion)
+                  .sort((a, b) => b.stageEnteredAt - a.stageEnteredAt)[0]?.id ?? null);
+
+          // submittedValues is fieldName → value (the UI sends it keyed by fieldName).
+          const submittedValues: Record<string, unknown> = formValues ?? {};
+          // latestValues is the prior visit's stored form at maxVersion, folded to fieldName →
+          // value. Empty (no prior visit / no form on this edge) → equality → reuse path.
+          let latestValues: Record<string, unknown> = {};
+          if (maxVersion > 0 && effectiveFormId) {
+            const priorFormFields = await tx.run(
+              zql.form_fields.where('formId', effectiveFormId),
+            );
+            const fieldIdToName = new Map(priorFormFields.map(f => [f.id, f.fieldName]));
+            const priorRows = await tx.run(
+              zql.form_entity_values
+                .where('entityId', ticketId)
+                .where('contextId', targetStage.id),
+            );
+            const rowsAtMaxVersion = priorRows.filter(r => (r.version ?? 1) === maxVersion);
+            latestValues = foldFormRowsToValues(rowsAtMaxVersion, fieldIdToName);
+          }
+
+          const {
+            newVersion: newVisitIndex,
+            existingEtaId,
+            rebaseEta,
+          } = decideVisitVersion({
+            maxVersion,
+            existingEtaIdAtMaxVersion,
+            submittedValues,
+            latestValues,
+            reenterMode: (transition?.onReenter as ReenterMode | undefined) ?? ReenterMode.RESET,
+          });
 
           // Form gate: the form is configured on the EDGE, so every traversal of an edge
           // that has a formId must prompt the form — regardless of reenter mode or whether
@@ -14133,12 +14230,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // edge-specific — only the configured edge's formId should gate the transition.
           // When transition === null (unrestricted source, no matched edge), there is no
           // specific edge to enforce a form on, so effectiveFormId = null.
-          // NOTE: null ?? X = X in JS, so we must NOT use ?. shorthand here — use explicit
-          // transition === null check to avoid treating "transition found, formId=null" the
-          // same as "no transition found".
-          const effectiveFormId: string | null =
-            transition === null ? null : (transition?.formId ?? null);
-
           if (effectiveFormId && formValues === undefined) {
             throw new ApplicationError('This transition requires a form to be submitted', {
               details: { formId: effectiveFormId },
@@ -14155,15 +14246,28 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
 
           if (existingEtaId) {
-            await tx.mutate.ticket_stage_eta.update({
-              id: existingEtaId,
-              stageEnteredAt: now,
-              stageLeftAt: null,
-              stageEta: stageEtaDeadline,
-              updatedAt: now,
-              updatedBy: authData.sub,
-            });
+            // REUSE (form unchanged): rebaseEta (RESET) restarts the clock; CONTINUE keeps it.
+            if (rebaseEta) {
+              await tx.mutate.ticket_stage_eta.update({
+                id: existingEtaId,
+                stageEnteredAt: now,
+                stageLeftAt: null,
+                stageEta: stageEtaDeadline,
+                updatedAt: now,
+                updatedBy: authData.sub,
+              });
+            } else {
+              // CONTINUE: only clear stageLeftAt (do NOT touch stageEnteredAt/stageEta).
+              await tx.mutate.ticket_stage_eta.update({
+                id: existingEtaId,
+                stageLeftAt: null,
+                updatedAt: now,
+                updatedBy: authData.sub,
+              });
+            }
           } else {
+            // NEW visit version (first visit, or form changed): insert a fresh ETA row at
+            // newVisitIndex with a clock started from now.
             await tx.mutate.ticket_stage_eta.insert({
               id: uuidv4(),
               ticketId,
@@ -14190,7 +14294,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // matched transition's formId and the fallback for an unrestricted-source move.
           // Must stay inline: form_entity_values' side-effect handler (app events, custom-field
           // activity, Vespa feed) only fires for mutations drained during the main transaction —
-          // deferring it would skip those side-effects entirely.
+          // deferring it would skip those side-effects entirely. (On reuse the row at
+          // newVisitIndex already holds identical values, so the update below is a no-op.)
           if (formValues && effectiveFormId) {
             const formFields = await tx.run(
               zql.form_fields.where('formId', effectiveFormId),
