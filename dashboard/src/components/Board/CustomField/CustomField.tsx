@@ -1,8 +1,22 @@
-import { ReactElement, useState, useCallback, useRef, useEffect } from 'react';
+import { ReactElement, useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { GripVertical, Trash2, CornerDownLeft, Check, ChevronDown } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import type { TicketField } from '../BoardEditScreen/BoardEditScreen.types';
 import { type FieldType, type CustomFieldProps } from './CustomField.types';
+import {
+  MAX_FIELD_OPTIONS,
+  mergeFieldOptions,
+  normalizeFieldOptions,
+  parseBulkOptions,
+  createBulkOptionInputHandlers,
+} from '../../../utils/board';
+
+type OptionsEditMode = 'individual' | 'bulk';
+
+interface BulkOptionsFeedback {
+  duplicatesRemoved: number;
+  truncated: boolean;
+}
 
 const fieldTypeOptions = [
   { value: 'text', label: 'String' },
@@ -19,6 +33,9 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
   const [fieldRequired, setFieldRequired] = useState(field?.required || false);
   const [fieldOptions, setFieldOptions] = useState<string[]>(field?.options || []);
   const [optionInput, setOptionInput] = useState('');
+  const [optionsEditMode, setOptionsEditMode] = useState<OptionsEditMode>('individual');
+  const [bulkDraft, setBulkDraft] = useState('');
+  const [bulkFeedback, setBulkFeedback] = useState<BulkOptionsFeedback | null>(null);
   const [draggingOptionIndex, setDraggingOptionIndex] = useState<number | null>(null);
   const [fieldTypeDropdownOpen, setFieldTypeDropdownOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -41,8 +58,14 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
       return;
     }
 
+    let optionsToSave = fieldOptions;
+    if ((fieldType === 'select' || fieldType === 'multiselect') && optionsEditMode === 'bulk') {
+      const { options } = normalizeFieldOptions(parseBulkOptions(bulkDraft));
+      optionsToSave = options;
+    }
+
     // Don't save select/multiselect if no options added
-    if ((fieldType === 'select' || fieldType === 'multiselect') && fieldOptions.length === 0) {
+    if ((fieldType === 'select' || fieldType === 'multiselect') && optionsToSave.length === 0) {
       onCancel();
       return;
     }
@@ -57,12 +80,22 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
     };
 
     // Only add options for select/multiselect types
-    if ((fieldType === 'select' || fieldType === 'multiselect') && fieldOptions.length > 0) {
-      updatedField['options'] = fieldOptions;
+    if ((fieldType === 'select' || fieldType === 'multiselect') && optionsToSave.length > 0) {
+      updatedField['options'] = optionsToSave;
     }
 
     onSave(updatedField);
-  }, [fieldName, fieldType, fieldRequired, fieldOptions, field?.id, onCancel, onSave]);
+  }, [
+    bulkDraft,
+    fieldName,
+    fieldType,
+    fieldRequired,
+    fieldOptions,
+    field?.id,
+    onCancel,
+    onSave,
+    optionsEditMode,
+  ]);
 
   // Click outside to save
   useEffect(() => {
@@ -94,11 +127,49 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
   }, [fieldTypeDropdownOpen]);
 
   const handleAddOption = useCallback(() => {
-    if (optionInput.trim() && !fieldOptions.includes(optionInput.trim())) {
-      setFieldOptions(prev => [...prev, optionInput.trim()]);
-      setOptionInput('');
-    }
+    if (!optionInput.trim()) return;
+
+    const { options, duplicatesRemoved, truncated } = mergeFieldOptions(fieldOptions, [
+      optionInput.trim(),
+    ]);
+    setFieldOptions(options);
+    setBulkFeedback({ duplicatesRemoved, truncated });
+    setOptionInput('');
   }, [optionInput, fieldOptions]);
+
+  const addBulkOptions = useCallback(
+    (incoming: string[]) => {
+      const { options, duplicatesRemoved, truncated } = mergeFieldOptions(fieldOptions, incoming);
+      setFieldOptions(options);
+      setBulkFeedback({ duplicatesRemoved, truncated });
+    },
+    [fieldOptions],
+  );
+
+  const bulkOptionInputHandlers = useMemo(
+    () => createBulkOptionInputHandlers(addBulkOptions, () => setOptionInput('')),
+    [addBulkOptions],
+  );
+
+  const applyBulkDraft = useCallback(() => {
+    const parsed = parseBulkOptions(bulkDraft);
+    const { options, duplicatesRemoved, truncated } = normalizeFieldOptions(parsed);
+    setFieldOptions(options);
+    setBulkDraft(options.join('\n'));
+    setBulkFeedback({ duplicatesRemoved, truncated });
+  }, [bulkDraft]);
+
+  const toggleOptionsEditMode = useCallback(() => {
+    if (optionsEditMode === 'individual') {
+      setOptionsEditMode('bulk');
+      setBulkDraft(fieldOptions.join('\n'));
+      setBulkFeedback(null);
+      return;
+    }
+
+    applyBulkDraft();
+    setOptionsEditMode('individual');
+  }, [applyBulkDraft, fieldOptions, optionsEditMode]);
 
   const handleRemoveOption = useCallback((optionToRemove: string) => {
     setFieldOptions(prev => prev.filter(opt => opt !== optionToRemove));
@@ -188,6 +259,11 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
                       e.stopPropagation();
                       setFieldType(option.value as FieldType);
                       setFieldTypeDropdownOpen(false);
+                      if (option.value !== 'select' && option.value !== 'multiselect') {
+                        setOptionsEditMode('individual');
+                        setBulkDraft('');
+                        setBulkFeedback(null);
+                      }
                     }}
                     className='w-full px-3 py-2 text-left text-[13px] hover:bg-muted flex items-center justify-between'
                     data-track-category='form'
@@ -245,75 +321,133 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
             <p className='text-[13px] font-semibold text-foreground'>
               {mode === 'create' ? 'Enter Options' : 'Options'}
             </p>
+            <button
+              type='button'
+              onClick={toggleOptionsEditMode}
+              className='text-[12px] text-[#6276be] font-medium hover:underline'
+              data-track-category='form'
+              data-track-name={
+                optionsEditMode === 'bulk'
+                  ? 'switch_to_individual_options'
+                  : 'switch_to_bulk_options'
+              }
+            >
+              {optionsEditMode === 'bulk' ? 'Edit one at a time' : 'Bulk add'}
+            </button>
           </div>
-          <div className='space-y-[6px]'>
-            {fieldOptions.map((option, idx) => (
-              <div
-                key={idx}
-                draggable
-                onDragStart={() => handleOptionDragStart(idx)}
-                onDragOver={e => handleOptionDragOver(e, idx)}
-                onDragEnd={handleOptionDragEnd}
-                className={`group flex items-center gap-2 px-2 py-2 hover:bg-muted rounded-[10px] border border-border cursor-move ${
-                  draggingOptionIndex === idx ? 'opacity-50' : ''
-                }`}
-              >
-                <GripVertical
-                  size={16}
-                  className='text-muted-foreground flex-shrink-0 cursor-grab'
-                />
-                <input
-                  type='text'
-                  value={option}
-                  onChange={e => {
-                    const newValue = e.target.value;
-                    setFieldOptions(prev => prev.map((opt, i) => (i === idx ? newValue : opt)));
-                  }}
-                  className='flex-1 bg-transparent text-[13px] text-foreground focus:outline-none'
-                  data-track-category='form'
-                  data-track-name='edit-option'
-                />
-                <Button
-                  onClick={() => handleRemoveOption(option)}
-                  variant='ghost'
-                  size='iconSm'
-                  className='w-6 h-6 text-muted-foreground hover:text-xyne-red-500 opacity-0 group-hover:opacity-100'
-                  data-track-category='form'
-                  data-track-name='remove-option'
-                >
-                  <Trash2 size={14} />
-                </Button>
-              </div>
-            ))}
-            <div className='flex items-center gap-2 px-2 py-2'>
-              <input
-                type='text'
-                value={optionInput}
-                onChange={e => setOptionInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddOption();
-                  }
-                }}
-                placeholder='Add Option'
-                className='flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none'
+
+          {optionsEditMode === 'bulk' ? (
+            <div className='flex flex-col gap-[6px]'>
+              <textarea
+                value={bulkDraft}
+                onChange={e => setBulkDraft(e.target.value)}
+                onBlur={applyBulkDraft}
+                placeholder='One option per line. Paste from a spreadsheet, comma-separated list, etc.'
+                rows={8}
+                className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-none focus:ring-1 focus:ring-[#6276be]/40'
                 data-track-category='form'
-                data-track-name='option-input'
+                data-track-name='bulk_options_textarea'
               />
-              <Button
-                onClick={handleAddOption}
-                disabled={!optionInput.trim()}
-                variant='ghost'
-                size='iconSm'
-                className='w-6 h-6 text-muted-foreground hover:text-xyne-gray-600 disabled:opacity-50'
-                data-track-category='form'
-                data-track-name='add-option'
-              >
-                <CornerDownLeft size={14} />
-              </Button>
+              <div className='flex flex-col gap-[2px]'>
+                <span className='text-[11px] text-muted-foreground'>
+                  {fieldOptions.length > 0
+                    ? `${fieldOptions.length} option${fieldOptions.length === 1 ? '' : 's'}`
+                    : 'No options yet'}
+                  {bulkFeedback?.duplicatesRemoved
+                    ? ` · ${bulkFeedback.duplicatesRemoved} duplicate${
+                        bulkFeedback.duplicatesRemoved === 1 ? '' : 's'
+                      } removed`
+                    : ''}
+                </span>
+                {bulkFeedback?.truncated && (
+                  <span className='text-[11px] text-amber-600'>
+                    Maximum {MAX_FIELD_OPTIONS} options. Extra entries were removed.
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className='space-y-[6px]'>
+              {fieldOptions.map((option, idx) => (
+                <div
+                  key={idx}
+                  draggable
+                  onDragStart={() => handleOptionDragStart(idx)}
+                  onDragOver={e => handleOptionDragOver(e, idx)}
+                  onDragEnd={handleOptionDragEnd}
+                  className={`group flex items-center gap-2 px-2 py-2 hover:bg-muted rounded-[10px] border border-border cursor-move ${
+                    draggingOptionIndex === idx ? 'opacity-50' : ''
+                  }`}
+                >
+                  <GripVertical
+                    size={16}
+                    className='text-muted-foreground flex-shrink-0 cursor-grab'
+                  />
+                  <input
+                    type='text'
+                    value={option}
+                    onChange={e => {
+                      const newValue = e.target.value;
+                      setFieldOptions(prev => prev.map((opt, i) => (i === idx ? newValue : opt)));
+                    }}
+                    className='flex-1 bg-transparent text-[13px] text-foreground focus:outline-none'
+                    data-track-category='form'
+                    data-track-name='edit-option'
+                  />
+                  <Button
+                    onClick={() => handleRemoveOption(option)}
+                    variant='ghost'
+                    size='iconSm'
+                    className='w-6 h-6 text-muted-foreground hover:text-xyne-red-500 opacity-0 group-hover:opacity-100'
+                    data-track-category='form'
+                    data-track-name='remove-option'
+                  >
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
+              ))}
+              <div className='flex flex-col gap-[4px]'>
+                <div className='flex items-center gap-2 px-2 py-2'>
+                  <input
+                    type='text'
+                    value={optionInput}
+                    onChange={e => setOptionInput(e.target.value)}
+                    onKeyDown={bulkOptionInputHandlers.onKeyDown}
+                    onPaste={bulkOptionInputHandlers.onPaste}
+                    placeholder={
+                      fieldOptions.length
+                        ? 'Add another option (paste multiple at once)'
+                        : 'Add option (paste multiple at once)'
+                    }
+                    className='flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none'
+                    data-track-category='form'
+                    data-track-name='option-input'
+                  />
+                  <Button
+                    onClick={handleAddOption}
+                    disabled={!optionInput.trim()}
+                    variant='ghost'
+                    size='iconSm'
+                    className='w-6 h-6 text-muted-foreground hover:text-xyne-gray-600 disabled:opacity-50'
+                    data-track-category='form'
+                    data-track-name='add-option'
+                  >
+                    <CornerDownLeft size={14} />
+                  </Button>
+                </div>
+                {bulkFeedback && (bulkFeedback.duplicatesRemoved > 0 || bulkFeedback.truncated) && (
+                  <span className='text-[11px] text-muted-foreground px-2'>
+                    {bulkFeedback.duplicatesRemoved > 0 &&
+                      `${bulkFeedback.duplicatesRemoved} duplicate${
+                        bulkFeedback.duplicatesRemoved === 1 ? '' : 's'
+                      } skipped`}
+                    {bulkFeedback.duplicatesRemoved > 0 && bulkFeedback.truncated && ' · '}
+                    {bulkFeedback.truncated && `Maximum ${MAX_FIELD_OPTIONS} options`}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

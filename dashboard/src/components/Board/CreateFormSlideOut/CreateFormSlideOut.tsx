@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useRef } from 'react';
+import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
 import { X, Plus, GripVertical, Trash2, ChevronDown } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { FormFieldType } from '@xyne/shared';
@@ -9,12 +9,26 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '../../ui/dropdown-menu';
-import { FIELD_TYPE_OPTIONS } from '../../../utils/board';
+import {
+  FIELD_TYPE_OPTIONS,
+  MAX_FIELD_OPTIONS,
+  mergeFieldOptions,
+  normalizeFieldOptions,
+  parseBulkOptions,
+  createBulkOptionInputHandlers,
+} from '../../../utils/board';
 import {
   type FormField,
   type CreateFormSlideOutProps,
   type SelectDropdownProps,
 } from './CreateFormSlideOut.types';
+
+type OptionsEditMode = 'individual' | 'bulk';
+
+interface BulkOptionsFeedback {
+  duplicatesRemoved: number;
+  truncated: boolean;
+}
 
 const isSelectField = (fieldType: FormFieldType): boolean =>
   fieldType === FormFieldType.SINGLE_SELECT || fieldType === FormFieldType.MULTI_SELECT;
@@ -61,6 +75,7 @@ interface FieldEditorProps {
   field: FormField;
   isExpanded: boolean;
   registerInputRef: (fieldId: string, el: HTMLInputElement | null) => void;
+  registerFieldOptionsResolver: (fieldId: string, resolver: (() => string[]) | null) => void;
   onExpand: (fieldId: string) => void;
   onCollapse: () => void;
   onToggleExpand: (fieldId: string) => void;
@@ -73,6 +88,7 @@ const FieldEditor = ({
   field,
   isExpanded,
   registerInputRef,
+  registerFieldOptionsResolver,
   onExpand,
   onCollapse,
   onToggleExpand,
@@ -90,6 +106,17 @@ const FieldEditor = ({
     optionKeysRef.current = next;
   }
 
+  const [editMode, setEditMode] = useState<OptionsEditMode>('individual');
+  const [bulkDraft, setBulkDraft] = useState('');
+  const [feedback, setFeedback] = useState<BulkOptionsFeedback | null>(null);
+
+  const setOptions = (next: string[], nextFeedback?: BulkOptionsFeedback): void => {
+    onUpdate(field.id, { fieldEnum: next });
+    if (nextFeedback) {
+      setFeedback(nextFeedback);
+    }
+  };
+
   const editOption = (index: number, value: string): void => {
     const next = [...options];
     next[index] = value;
@@ -101,9 +128,48 @@ const FieldEditor = ({
     onUpdate(field.id, { fieldEnum: options.filter((_, i) => i !== index) });
   };
 
-  const addOption = (value: string): void => {
-    optionKeysRef.current = [...optionKeysRef.current, uuidv4()];
-    onUpdate(field.id, { fieldEnum: [...options, value] });
+  // Adds one or more options at once (typed Enter or pasted list), de-duping and
+  // capping at MAX_FIELD_OPTIONS via mergeFieldOptions.
+  const addOptions = (incoming: string[]): void => {
+    const { options: merged, duplicatesRemoved, truncated } = mergeFieldOptions(options, incoming);
+    setOptions(merged, { duplicatesRemoved, truncated });
+  };
+
+  const bulkOptionInputHandlers = createBulkOptionInputHandlers(addOptions);
+
+  useEffect(() => {
+    if (!showOptions) {
+      registerFieldOptionsResolver(field.id, null);
+      return;
+    }
+
+    registerFieldOptionsResolver(field.id, () => {
+      if (editMode === 'bulk') {
+        return normalizeFieldOptions(parseBulkOptions(bulkDraft)).options;
+      }
+      return options;
+    });
+
+    return () => registerFieldOptionsResolver(field.id, null);
+  }, [bulkDraft, editMode, field.id, options, registerFieldOptionsResolver, showOptions]);
+
+  const applyBulkDraft = (): void => {
+    const parsed = parseBulkOptions(bulkDraft);
+    const { options: next, duplicatesRemoved, truncated } = normalizeFieldOptions(parsed);
+    setBulkDraft(next.join('\n'));
+    setOptions(next, { duplicatesRemoved, truncated });
+  };
+
+  const toggleEditMode = (): void => {
+    if (editMode === 'individual') {
+      setEditMode('bulk');
+      setBulkDraft(options.join('\n'));
+      setFeedback(null);
+      return;
+    }
+
+    applyBulkDraft();
+    setEditMode('individual');
   };
 
   return (
@@ -244,60 +310,114 @@ const FieldEditor = ({
           {/* Options for Select Fields */}
           {showOptions && (
             <div className='flex flex-col gap-[8px] mt-2 px-[12px]'>
-              <label className='text-[12px] font-semibold' htmlFor={`options-${field.id}`}>
-                Enter Options
-              </label>
-              <div className='flex flex-col gap-[8px]'>
-                {options.map((option, optionIndex) => (
-                  <div
-                    key={optionKeysRef.current[optionIndex]}
-                    className='flex items-center gap-[8px] border border-border rounded-[8px] px-[8px] h-[34px]'
-                  >
-                    <GripVertical size={14} className='text-muted-foreground' />
-                    <input
-                      type='text'
-                      value={option}
-                      onChange={e => editOption(optionIndex, e.target.value)}
-                      placeholder={`Option ${optionIndex + 1}`}
-                      className='flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
-                      data-track-category='board_config'
-                      data-track-name='edit_option'
-                    />
-                    <Button
-                      onClick={() => removeOption(optionIndex)}
-                      variant='ghost'
-                      size='iconSm'
-                      className='text-muted-foreground hover:text-red-500'
-                      data-track-category='board_config'
-                      data-track-name='delete_form_field_option'
-                    >
-                      <X size={14} />
-                    </Button>
-                  </div>
-                ))}
-                {/* Add Option Input */}
-                <div className='flex items-center gap-[8px] px-[6px] py-[4px]'>
-                  <input
-                    type='text'
-                    placeholder={options.length ? 'Add another option' : 'Add option'}
-                    className='flex-1 text-[13px] bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const target = e.target as HTMLInputElement;
-                        const value = target.value;
-                        if (value.trim()) {
-                          addOption(value.trim());
-                          target.value = '';
-                        }
-                      }
-                    }}
-                    data-track-category='board_config'
-                    data-track-name='add_option'
-                  />
-                  <span className='text-[14px] text-muted-foreground font-medium'>⏎</span>
-                </div>
+              <div className='flex items-center justify-between gap-2'>
+                <label className='text-[12px] font-semibold' htmlFor={`options-${field.id}`}>
+                  Enter Options
+                </label>
+                <button
+                  type='button'
+                  onClick={toggleEditMode}
+                  className='text-[12px] text-[#6276be] font-medium hover:underline'
+                  data-track-category='board_config'
+                  data-track-name={
+                    editMode === 'bulk' ? 'switch_to_individual_options' : 'switch_to_bulk_options'
+                  }
+                >
+                  {editMode === 'bulk' ? 'Edit one at a time' : 'Bulk add'}
+                </button>
               </div>
+
+              {editMode === 'bulk' ? (
+                <div className='flex flex-col gap-[6px]'>
+                  <textarea
+                    id={`options-${field.id}`}
+                    value={bulkDraft}
+                    onChange={e => setBulkDraft(e.target.value)}
+                    onBlur={applyBulkDraft}
+                    placeholder='One option per line. Paste from a spreadsheet, comma-separated list, etc.'
+                    rows={8}
+                    className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-none focus:ring-1 focus:ring-[#6276be]/40'
+                    data-track-category='board_config'
+                    data-track-name='bulk_options_textarea'
+                  />
+                  <div className='flex flex-col gap-[2px]'>
+                    <span className='text-[11px] text-muted-foreground'>
+                      {options.length > 0
+                        ? `${options.length} option${options.length === 1 ? '' : 's'}`
+                        : 'No options yet'}
+                      {feedback?.duplicatesRemoved
+                        ? ` · ${feedback.duplicatesRemoved} duplicate${
+                            feedback.duplicatesRemoved === 1 ? '' : 's'
+                          } removed`
+                        : ''}
+                    </span>
+                    {feedback?.truncated && (
+                      <span className='text-[11px] text-amber-600'>
+                        Maximum {MAX_FIELD_OPTIONS} options. Extra entries were removed.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className='flex flex-col gap-[8px]'>
+                  {options.map((option, optionIndex) => (
+                    <div
+                      key={optionKeysRef.current[optionIndex]}
+                      className='flex items-center gap-[8px] border border-border rounded-[8px] px-[8px] h-[34px]'
+                    >
+                      <GripVertical size={14} className='text-muted-foreground' />
+                      <input
+                        type='text'
+                        value={option}
+                        onChange={e => editOption(optionIndex, e.target.value)}
+                        placeholder={`Option ${optionIndex + 1}`}
+                        className='flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
+                        data-track-category='board_config'
+                        data-track-name='edit_option'
+                      />
+                      <Button
+                        onClick={() => removeOption(optionIndex)}
+                        variant='ghost'
+                        size='iconSm'
+                        className='text-muted-foreground hover:text-red-500'
+                        data-track-category='board_config'
+                        data-track-name='delete_form_field_option'
+                      >
+                        <X size={14} />
+                      </Button>
+                    </div>
+                  ))}
+                  {/* Add Option Input */}
+                  <div className='flex flex-col gap-[4px]'>
+                    <div className='flex items-center gap-[8px] px-[6px] py-[4px]'>
+                      <input
+                        type='text'
+                        placeholder={
+                          options.length
+                            ? 'Add another option (paste multiple at once)'
+                            : 'Add option (paste multiple at once)'
+                        }
+                        className='flex-1 text-[13px] bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
+                        onKeyDown={bulkOptionInputHandlers.onKeyDown}
+                        onPaste={bulkOptionInputHandlers.onPaste}
+                        data-track-category='board_config'
+                        data-track-name='add_option'
+                      />
+                      <span className='text-[14px] text-muted-foreground font-medium'>⏎</span>
+                    </div>
+                    {feedback && (feedback.duplicatesRemoved > 0 || feedback.truncated) && (
+                      <span className='text-[11px] text-muted-foreground px-[6px]'>
+                        {feedback.duplicatesRemoved > 0 &&
+                          `${feedback.duplicatesRemoved} duplicate${
+                            feedback.duplicatesRemoved === 1 ? '' : 's'
+                          } skipped`}
+                        {feedback.duplicatesRemoved > 0 && feedback.truncated && ' · '}
+                        {feedback.truncated && `Maximum ${MAX_FIELD_OPTIONS} options`}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -322,6 +442,7 @@ export const CreateFormSlideOut = ({
   const [expandedFieldId, setExpandedFieldId] = useState<string | null>(null);
   const fieldInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   const fieldsContainerRef = useRef<HTMLDivElement>(null);
+  const fieldOptionsResolversRef = useRef<Map<string, () => string[]>>(new Map());
   // Track whether we've already seeded the form with initialData for this open session
   const hasSeededRef = useRef(false);
 
@@ -396,6 +517,17 @@ export const CreateFormSlideOut = ({
     fieldInputRefs.current[fieldId] = el;
   };
 
+  const registerFieldOptionsResolver = useCallback(
+    (fieldId: string, resolver: (() => string[]) | null): void => {
+      if (resolver) {
+        fieldOptionsResolversRef.current.set(fieldId, resolver);
+      } else {
+        fieldOptionsResolversRef.current.delete(fieldId);
+      }
+    },
+    [],
+  );
+
   // Add a new field
   const handleAddField = (): void => {
     const newField: FormField = {
@@ -443,10 +575,16 @@ export const CreateFormSlideOut = ({
   const handleSave = (): void => {
     if (!formName.trim() || fields.length === 0) return;
 
+    const resolvedFields = fields.map(field => {
+      const resolver = fieldOptionsResolversRef.current.get(field.id);
+      if (!resolver) return field;
+      return { ...field, fieldEnum: resolver() };
+    });
+
     const formData = {
       formName: formName.trim(),
       formDescription: formDescription.trim(),
-      fields,
+      fields: resolvedFields,
     };
 
     // If formId is provided, we're in edit mode
@@ -531,6 +669,7 @@ export const CreateFormSlideOut = ({
                 field={field}
                 isExpanded={expandedFieldId === field.id}
                 registerInputRef={registerInputRef}
+                registerFieldOptionsResolver={registerFieldOptionsResolver}
                 onExpand={expandField}
                 onCollapse={() => setExpandedFieldId(null)}
                 onToggleExpand={handleToggleExpand}

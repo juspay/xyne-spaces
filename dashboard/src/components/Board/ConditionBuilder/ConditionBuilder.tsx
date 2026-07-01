@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
-import { X, ChevronDown, Plus } from 'lucide-react';
+import { X, ChevronDown } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { FormContextType } from '@xyne/shared';
 import { ApproverSelector } from '../ApproverSelector/ApproverSelector';
@@ -7,14 +7,10 @@ import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { Button } from '../../ui/Button';
+import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import type { StageCondition } from '../BoardStageConfigScreen/BoardStageConfigScreen.types';
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from '../../ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from '../../ui/dropdown-menu';
 import {
   type WhenFieldType,
   type ThenFieldType,
@@ -24,10 +20,10 @@ import {
   THEN_CONDITION_OPTIONS,
   PR_STATUS_OPTIONS,
 } from '../../../utils/board';
+import { TransitionFormPicker } from '../TransitionFormPicker/TransitionFormPicker';
 import {
   type SelectDropdownProps,
   type ConditionBuilderProps,
-  type FormDropdownProps,
   type ApproverDropdownProps,
 } from './ConditionBuilder.types';
 
@@ -39,10 +35,18 @@ const SelectDropdown = ({
   placeholder,
   variant,
 }: SelectDropdownProps): ReactElement => {
-  const selectedLabel =
-    options.find(opt => opt.value === value)?.label || placeholder || 'Select...';
+  const entityOptions = useMemo<SelectorOption[]>(
+    () =>
+      options
+        .filter(opt => opt.value !== '')
+        .map(opt => ({
+          value: opt.value,
+          label: opt.label,
+          icon: null,
+        })),
+    [options],
+  );
 
-  // Determine text color and font based on variant - only apply variant colors when a value is selected
   const hasValue = !!value;
   const textColorClass =
     hasValue && variant === 'when'
@@ -55,105 +59,19 @@ const SelectDropdown = ({
   const fontClass = hasValue && variant ? 'font-mono' : '';
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={disabled}>
-        <button
-          type='button'
-          className='w-[160px] h-auto min-h-[32px] px-[8px] py-[7px] bg-background border border-border rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed flex items-start justify-between'
-        >
-          <span className={`${textColorClass} ${fontClass} break-words`}>{selectedLabel}</span>
-          <ChevronDown size={14} className='text-muted-foreground shrink-0 ml-1 mt-[2px]' />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className='w-[160px] max-h-[200px] overflow-y-auto'>
-        {options.map(option => (
-          <DropdownMenuItem
-            key={option.value}
-            onClick={() => onChange(option.value)}
-            className={value === option.value ? 'bg-muted font-medium' : ''}
-          >
-            {option.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-};
-
-// ─── Form Dropdown Component ────────────────────────────────────────────────
-const FormDropdown = ({
-  value,
-  onChange,
-  disabled,
-  onCreateFormClick,
-  showStageNameInsteadOfForm,
-  allStages,
-  allForms,
-}: FormDropdownProps): ReactElement => {
-  // Get display text
-  let displayText = 'Choose form';
-  if (value) {
-    if (showStageNameInsteadOfForm && allStages) {
-      // Find the stage that has this form
-      const targetStage = allStages.find(s => s.formId === value);
-      displayText = targetStage?.name || value;
-    } else {
-      // Show form name
-      const selectedForm = allForms?.find(f => f.id === value);
-      displayText = selectedForm?.formName || value;
-    }
-  }
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={disabled}>
-        <button
-          type='button'
-          className='w-[160px] h-auto min-h-[32px] px-[8px] py-[7px] bg-background border border-border rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed flex items-start justify-between'
-        >
-          <span
-            className={`${value ? 'text-foreground' : 'text-muted-foreground/50'} break-words whitespace-normal leading-tight`}
-          >
-            {displayText}
-          </span>
-          <ChevronDown size={14} className='text-muted-foreground shrink-0 ml-1' />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className='w-[160px] max-h-[200px] overflow-y-auto'>
-        {/* Create Form Option */}
-        <DropdownMenuItem
-          onClick={() => onCreateFormClick?.()}
-          className='text-[#6276be] font-medium cursor-pointer flex items-center gap-2'
-        >
-          <Plus size={14} />
-          Create form
-        </DropdownMenuItem>
-
-        {/* Divider */}
-        {allForms && allForms.length > 0 && <DropdownMenuSeparator />}
-
-        {/* Form Options - show stage names if in approver mode */}
-        {allForms?.map(form => {
-          let itemLabel = form.formName;
-          if (showStageNameInsteadOfForm && allStages) {
-            const targetStage = allStages.find(s => s.formId === form.id);
-            itemLabel = targetStage?.name || form.formName;
-          }
-
-          return (
-            <DropdownMenuItem
-              key={form.id}
-              onClick={() => onChange(form.id)}
-              className={
-                value === form.id ? 'text-[#6276be] font-medium bg-muted' : 'text-foreground'
-              }
-            >
-              {itemLabel}
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <div className={disabled ? 'pointer-events-none opacity-50' : undefined}>
+      <EntitySelector
+        options={entityOptions}
+        selectedValue={value || null}
+        onSelect={selected => onChange(selected ?? '')}
+        placeholder={placeholder || 'Select...'}
+        searchPlaceholder='Search...'
+        showSearch
+        width='100%'
+        inputClassName={`w-full min-h-[32px] h-auto px-[8px] py-[7px] rounded-[8px] text-[13px] ${textColorClass} ${fontClass}`}
+        testId='condition_select'
+      />
+    </div>
   );
 };
 
@@ -527,11 +445,11 @@ export const ConditionBuilder = ({
             {/* Then Value - Different components based on field type */}
             {thenField === 'form' ? (
               <div className='flex-1'>
-                <FormDropdown
+                <TransitionFormPicker
                   value={thenValue}
-                  onChange={setThenValue}
+                  onSelectForm={setThenValue}
                   disabled={!thenCondition}
-                  onCreateFormClick={onOpenCreateForm}
+                  onCreateForm={() => onOpenCreateForm?.()}
                   allForms={allForms}
                 />
               </div>

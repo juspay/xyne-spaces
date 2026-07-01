@@ -22,16 +22,6 @@ export interface ConditionBuilderProps {
   allStages?: Array<{ name: string; sequenceNumber: number; formId?: string }>;
 }
 
-export interface FormDropdownProps {
-  value: string;
-  onChange: (value: string) => void;
-  disabled?: boolean;
-  onCreateFormClick?: (() => void) | undefined;
-  showStageNameInsteadOfForm?: boolean;
-  allStages?: Array<{ name: string; sequenceNumber: number; formId?: string }>;
-  allForms?: Array<{ id: string; formName: string }>;
-}
-
 export interface ApproverDropdownProps {
   selectedApprovers: ApproverEntry[];
   onApproversChange: (approvers: ApproverEntry[]) => void;

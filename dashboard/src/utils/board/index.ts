@@ -32,3 +32,11 @@ export {
   mapToCreateModalFields,
   getFieldConfigKey,
 } from './boardEditUtils';
+
+export {
+  MAX_FIELD_OPTIONS,
+  parseBulkOptions,
+  normalizeFieldOptions,
+  mergeFieldOptions,
+  createBulkOptionInputHandlers,
+} from './formFieldOptionsUtils';

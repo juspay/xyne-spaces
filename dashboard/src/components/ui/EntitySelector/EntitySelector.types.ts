@@ -109,4 +109,13 @@ export interface EntitySelectorProps {
 
   /** Label for the unassign option. Default: 'Unassign' */
   unassignLabel?: string;
+
+  /** Optional action rendered at the top of the dropdown (e.g. "Create form") */
+  headerAction?: {
+    label: string;
+    icon?: ReactNode;
+    onClick: () => void;
+    trackCategory?: string;
+    trackName?: string;
+  };
 }
