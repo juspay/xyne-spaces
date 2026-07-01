@@ -51,12 +51,12 @@ class AppDeskService {
     }
     const installedApp = await this.prisma.installedApps.findUnique({
       where: { id: installedAppId },
-      select: { webhookUrl: true, signingSecret: true, user: { select: { workspaceId: true } } },
+      select: { webhookUrl: true, app: { select: { signingSecret: true } }, user: { select: { workspaceId: true } } },
     });
-    if (!installedApp?.webhookUrl || !installedApp.signingSecret) {
+    if (!installedApp?.webhookUrl || !installedApp.app?.signingSecret) {
       throw new Error('The app backing this desk is not fully configured (missing webhook URL or signing secret)');
     }
-    const signingSecret = installedApp.signingSecret;
+    const signingSecret = installedApp.app.signingSecret;
 
     const replier = await this.prisma.user.findUnique({
       where: { id: userId },

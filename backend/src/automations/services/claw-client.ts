@@ -1,10 +1,8 @@
 import { config } from '@/config/env';
-import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
+import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import crypto from 'crypto';
-
-const installedAppsRepository = new InstalledAppsRepository();
 
 function signWebhookPayload(payload: string, signingSecret: string): string {
   return crypto.createHmac('sha256', signingSecret).update(payload).digest('hex');
@@ -165,16 +163,18 @@ async function resolveAgentSigningSecret(agent: ClawAgent): Promise<string> {
     );
   }
 
-  const installedApp = await installedAppsRepository.findFirst({
+  // Signing secret is app-level now (apps.signingSecret); the per-install column is deprecated.
+  const installedApp = await db.installedApps.findFirst({
     where: { userId: agent.spacesAppUserId },
+    select: { app: { select: { signingSecret: true } } },
   });
-  if (!installedApp?.signingSecret) {
+  if (!installedApp?.app?.signingSecret) {
     throw new Error(
-      `[claw-client] runAgent: no installed app signing secret for agent "${agent.slug}" app user ${agent.spacesAppUserId}`,
+      `[claw-client] runAgent: no app signing secret for agent "${agent.slug}" app user ${agent.spacesAppUserId}`,
     );
   }
 
-  return decrypt(installedApp.signingSecret);
+  return decrypt(installedApp.app.signingSecret);
 }
 
 async function safeReadText(res: Response): Promise<string> {
