@@ -1,4 +1,5 @@
 import Fuse from 'fuse.js';
+import { UserStatus } from '../zero/schema.js';
 
 interface Searchable {
   name: string;
@@ -7,14 +8,23 @@ interface Searchable {
 
 interface UserLike extends Searchable {
   email: string;
+  status?: string | null;
 }
+
+const isDeactivated = (user: UserLike): boolean => user.status === UserStatus.INACTIVE;
 
 export function searchUsers<T extends UserLike>(
   users: T[],
   query: string,
   limit = 10,
 ): T[] {
-  if (!query.trim()) return users.slice(0, limit);
+  // No query: keep the incoming order but float active users above deactivated
+  // ones. Array.sort is stable (ES2019+), so order within each group is intact.
+  if (!query.trim()) {
+    return [...users]
+      .sort((a, b) => Number(isDeactivated(a)) - Number(isDeactivated(b)))
+      .slice(0, limit);
+  }
 
   const q = query.toLowerCase();
 
@@ -45,6 +55,10 @@ export function searchUsers<T extends UserLike>(
     } else if (email.startsWith(q)) {
       finalScore -= 2;
     }
+
+    // Soft-demote deactivated users: +1 stays below the gap between relevance tiers,
+    // so a relevant deactivated match still outranks a slightly-relevant active one.
+    if (isDeactivated(r.item)) finalScore += 1;
 
     return {
       item: r.item,

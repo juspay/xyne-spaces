@@ -409,9 +409,9 @@ const ChannelCommandMenu = ({
   // shown and non-empty) — filter-chip ordering otherwise wins.
   //
   // The full-name-prefix test is intentionally the SAME rule `rankUsers` uses
-  // for its top tier (rank 0/1 via `name.startsWith(q)`); gating on rankUsers'
+  // for its top tier (key 1, `name.startsWith(q)`); gating on rankUsers'
   // own top-tier signal keeps ranking and the Enter target from drifting
-  // apart. A user surfaced to #0 only by DM recency (rank 2, no name match)
+  // apart. A user surfaced to #0 only by DM recency (keys 3–4, no name match)
   // therefore does NOT steal the default Enter target — Enter targets the user
   // only when the query is clearly naming them.
   const hasStrongUserMatch = useMemo(() => {
