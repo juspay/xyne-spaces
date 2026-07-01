@@ -25,7 +25,6 @@ import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { normalizeStoragePath } from '@/services/storage/pathUtils';
 import { callRecordingService } from '@/services/callRecordingService';
-import { config } from '@/config/env';
 import { callDocumentService } from '@/services/callDocumentService';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '@xyne/shared';
 
