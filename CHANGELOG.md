@@ -1,3 +1,12 @@
+## [1.182.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.182.0...v1.182.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* Fix recording functionality ([7eeb5a5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7eeb5a5cfbc1ef1003dbb0a0f1568ac9e60cc55e))
+* signing secret to app level ([dab3c41](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dab3c41886c0c1814852b1d78f664be9d5a30e2c)), closes [#8255](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8255)
+* soft-demote deactivated users in user search ranking ([24c2bfe](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/24c2bfec1715baeab6061b5a0ab7304162d5b535)), closes [#8261](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8261)
+
 ## [1.182.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.181.1...v1.182.0) (2026-07-01)
 
 
