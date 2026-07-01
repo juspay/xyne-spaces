@@ -50,6 +50,7 @@ type UserPreferenceRow = {
   globalMobileNotificationLevel: NotificationLevel;
   threadReplyNotificationsEnabled: boolean;
   channelWideMentionsEnabled: boolean;
+  notificationKeywords?: string[];
 };
 
 /**
@@ -99,6 +100,7 @@ export async function prefetchFilterData(
         globalMobileNotificationLevel: true,
         threadReplyNotificationsEnabled: true,
         channelWideMentionsEnabled: true,
+        notificationKeywords: true,
       },
     }),
   ]);
@@ -106,7 +108,17 @@ export async function prefetchFilterData(
   return {
     channelStatuses: new Map(statuses.map(({ userId, ...rest }) => [userId, rest])),
     presences:       new Map(presences.map(p => [p.userId, p.notificationsPausedUntil])),
-    preferences:     new Map(prefs.map(({ userId, ...rest }) => [userId, rest])),
+    // notificationKeywords is a JSON column (string[] | null at rest); coerce to
+    // string[] | undefined so downstream keyword matching stays typed and safe.
+    preferences:     new Map(prefs.map(({ userId, notificationKeywords, ...rest }) => [
+      userId,
+      {
+        ...rest,
+        notificationKeywords: Array.isArray(notificationKeywords)
+          ? (notificationKeywords as string[])
+          : undefined,
+      },
+    ])),
   };
 }
 
