@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, ChannelScopeType, NotificationDeliveryMethod, NotificationType, UserType } from '@prisma/client';
+import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, ChannelScopeType, NotificationDeliveryMethod, NotificationType, UserStatus, UserType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
 import { db } from '@/database/client';
@@ -33,6 +33,7 @@ import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
 import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
 import { getSlackRecipientEmails } from '@/utils/notificationHelper';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { matchKeywordsForUsers } from '@/utils/keywordMatchUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { prefetchFilterData, type PrefetchedFilterData } from '@/services/notificationFilterService';
@@ -158,6 +159,14 @@ function getPlainTextNotificationContent(content: string): string {
   return extractPlainTextFromHtml(content).replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Plain text to scan for keyword notifications.
+ */
+function getKeywordScanText(content: string): string {
+  const flowText = getFlowJsonContentForNotification(content);
+  return flowText ?? getPlainTextNotificationContent(content);
+}
+
 function formatDmChannelName(names: string[], maxVisible: number = 2): string {
   const visible = names.slice(0, maxVisible);
   const remainder = names.length - visible.length;
@@ -266,9 +275,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const participantUserIds = channelParticipantsRaw.map(p => p.userId);
     const users = await db.user.findMany({
       where: { id: { in: participantUserIds } },
-      select: { id: true, email: true, name: true, userType: true }
+      select: { id: true, email: true, name: true, userType: true, status: true }
     });
     const appUserIds = users.filter(u => u.userType === UserType.APP).map(u => u.id);
+    const inactiveUserIds = new Set(users.filter(u => u.status !== UserStatus.ACTIVE).map(u => u.id));
 
     const userMap = new Map(users.map(u => [u.id, u]));
     const channelParticipants = channelParticipantsRaw.map(p => ({
@@ -524,10 +534,37 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       ? await prefetchFilterData(channelParticipants.map(p => p.userId), channelId)
       : undefined;
 
+    // Keyword-notification matching: scan the message's plain text against
+    // every participant's configured keywords (already loaded by
+    // prefetchFilterData). Mentioned users are excluded so a mention+keyword
+    // overlap produces exactly one (mention) notification; the sender, bots,
+    // and deactivated users never match. Runs for top-level messages AND
+    // thread replies — keyword recipients are notified regardless of thread
+    // subscription. DM channels never reach this point (early return above).
+    const keywordScanText = getKeywordScanText(content);
+    let keywordMatchesByUser = new Map<string, string[]>();
+    if (keywordScanText && prefetchedData) {
+      const candidateKeywords = new Map<string, string[]>();
+      for (const participant of channelParticipants) {
+        const userId = participant.userId;
+        if (userId === senderId) continue;
+        if (mentionedUserIdSet.has(userId)) continue;
+        if (appUserIds.includes(userId)) continue;
+        if (inactiveUserIds.has(userId)) continue;
+        const keywords = prefetchedData.preferences.get(userId)?.notificationKeywords;
+        if (keywords?.length) candidateKeywords.set(userId, keywords);
+      }
+      keywordMatchesByUser = matchKeywordsForUsers(keywordScanText, candidateKeywords);
+    }
+    const keywordUserIds = [...keywordMatchesByUser.keys()];
+    const keywordUserIdSet = new Set(keywordUserIds);
+
     if (!isReply) {
       const channelMessageRecipientIds = channelParticipants
         .map(participant => participant.userId)
-        .filter(userId => userId !== senderId && !mentionedUserIdSet.has(userId));
+        // Keyword-matched users get the stronger mention-style notification
+        // instead of the channel-message one.
+        .filter(userId => userId !== senderId && !mentionedUserIdSet.has(userId) && !keywordUserIdSet.has(userId));
 
       if (channelMessageRecipientIds.length > 0) {
         try {
@@ -606,6 +643,67 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       );
     }
 
+    // Keyword-match notifications: delivered like a mention (activity feed +
+    // push + Slack) for users whose configured keywords appear in the message.
+    let deliveredKeywordUserIds: string[] = [];
+    if (keywordUserIds.length > 0) {
+      const isThreadActivity = conversation.initialMessageId !== messageId;
+
+      await activityService.createActivities(keywordUserIds.map(userId => ({
+        id: uuidv4(),
+        userId,
+        actorId: senderId,
+        actorAction: 'keyword_match' as const,
+        actionSource: 'message' as const,
+        actionSourceId: messageId,
+        messageId: messageId,
+        channelId,
+        isThreadActivity,
+        classification: ActivityClassification.PENDING,
+      })));
+
+      const keywordEmailMap = new Map(
+        keywordUserIds
+          .map(id => userMap.get(id))
+          .filter(u => u?.email)
+          .map(u => [u!.id, u!.email])
+      );
+
+      let keywordSlackEmails = Array.from(keywordEmailMap.values());
+      try {
+        const { deliveredUserIds } = await notificationService.createKeywordNotifications(
+          keywordUserIds,
+          messageId,
+          conversationId,
+          channelId,
+          channelName,
+          senderId,
+          senderName,
+          cleanContent,
+          this.ctx.workspaceId,
+          keywordMatchesByUser,
+          !!isReply,
+          sender?.picture ?? '',
+          prefetchedData,
+        );
+
+        deliveredKeywordUserIds = deliveredUserIds;
+        keywordSlackEmails = getSlackRecipientEmails(keywordSlackEmails, deliveredUserIds, keywordEmailMap);
+      } catch (error) {
+        logger.error('[SIDE-EFFECT] Keyword-match notifications failed — sending Slack to all recipients', { error });
+      }
+
+      await slackService.sendMentionNotifications(
+        keywordSlackEmails,
+        senderName,
+        channelName,
+        channelId,
+        conversationId,
+        messageId,
+        undefined
+      );
+    }
+
     await this.handleSpecialMentionActivities(
       channelId,
       messageId,
@@ -627,7 +725,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     if (isReply && conversationId) {
       // Exclude already-notified mention recipients from thread replies.
       const replyExcludedUserIds = [
-        ...new Set([...finalMentionedUserIds, ...deliveredMentionUserIds]),
+        ...new Set([
+          ...finalMentionedUserIds,
+          ...deliveredMentionUserIds,
+          ...keywordUserIds,
+          ...deliveredKeywordUserIds,
+        ]),
       ];
       await this.createReplyActivity(
         conversationId,
