@@ -476,7 +476,7 @@ async function createChannel(adminUser: StoredUser): Promise<BaselineChannel> {
     await projectTrigger.click();
     await page
       .locator(
-        `[data-testid='project-select-trigger-options'] button:has-text("${baselineProject.name}")`,
+        `[data-testid='project-select-trigger-options'] button:has-text("${baselineProject.name}")`
       )
       .first()
       .click();
@@ -560,22 +560,19 @@ async function sendSeedChannelMessage(channelId: string): Promise<BaselineSeedMe
   const baseText = 'baseline-channel-seed';
   const text = `${baseText}-${buildRandomSuffix()}`;
 
-  const response = await page.request.post(
-    `${config.dashboard.baseUrl}/api/zero/push-fallback`,
-    {
-      data: {
-        name: 'conversations.send',
-        args: {
-          channelId,
-          content: text,
-          conversationId: randomUUID(),
-          messageId: randomUUID(),
-          timestamp: Date.now(),
-          type: 'USER',
-        },
+  const response = await page.request.post(`${config.dashboard.baseUrl}/api/zero/push-fallback`, {
+    data: {
+      name: 'conversations.send',
+      args: {
+        channelId,
+        content: text,
+        conversationId: randomUUID(),
+        messageId: randomUUID(),
+        timestamp: Date.now(),
+        type: 'USER',
       },
-    }
-  );
+    },
+  });
   assert.equal(
     response.ok(),
     true,
@@ -594,15 +591,12 @@ async function createBaselineDmWithSeedMessage(
   const baseText = 'baseline-dm-seed';
   const text = `${baseText}-${buildRandomSuffix()}`;
 
-  const response = await page.request.post(
-    `${config.dashboard.baseUrl}/api/users/me/dms`,
-    {
-      data: {
-        participantIds: [partnerUser.id],
-        message: text,
-      },
-    }
-  );
+  const response = await page.request.post(`${config.dashboard.baseUrl}/api/users/me/dms`, {
+    data: {
+      participantIds: [partnerUser.id],
+      message: text,
+    },
+  });
   assert.equal(
     response.ok(),
     true,

@@ -27,5 +27,5 @@
 * clicking button with text "->"
 * clicking button with text "->"
 * clicking button with text "Open My Workspace"
-* verifying user is redirected to "/chat/dir/*"
+* verifying user is redirected to "/guide"
 * skipping xyne-ai-onboarding overlay

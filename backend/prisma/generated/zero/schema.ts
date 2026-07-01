@@ -91,6 +91,7 @@ export enum DeskType {
   EMAIL = "EMAIL",
   DL = "DL",
   SLACK = "SLACK",
+  APP = "APP",
 }
 
 export enum UserResponsibility {
@@ -159,6 +160,8 @@ export enum ActivityType {
   IS_ARCHIVED = "IS_ARCHIVED",
   MERGED = "MERGED",
   UNMERGED = "UNMERGED",
+  RCA_CREATED = "RCA_CREATED",
+  RCA_UPDATED = "RCA_UPDATED",
 }
 
 export enum AttachmentEntityType {
@@ -171,6 +174,7 @@ export enum AttachmentEntityType {
   WORKFLOW_STEPS = "WORKFLOW_STEPS",
   IMPACT = "IMPACT",
   COLLECTION = "COLLECTION",
+  FORM_ENTITY_VALUE = "FORM_ENTITY_VALUE",
 }
 
 export enum AttachmentUploadStatus {
@@ -204,6 +208,7 @@ export enum ChannelType {
   EMAIL = "EMAIL",
   SUPPORT = "SUPPORT",
   SLACK = "SLACK",
+  APP = "APP",
 }
 
 export enum ChannelRole {
@@ -254,6 +259,24 @@ export enum OrgRole {
   ADMIN = "ADMIN",
   MEMBER = "MEMBER",
   VIEWER = "VIEWER",
+}
+
+export enum RecordingType {
+  AUDIO_ONLY = "AUDIO_ONLY",
+  AUDIO_SCREEN = "AUDIO_SCREEN",
+  AUDIO_VIDEO = "AUDIO_VIDEO",
+}
+
+export enum RecordingStatus {
+  RECORDING_ACTIVE = "RECORDING_ACTIVE",
+  RECORDING_STOPPED = "RECORDING_STOPPED",
+  PROCESSING_RECORDING = "PROCESSING_RECORDING",
+  RECORDING_UPLOADED = "RECORDING_UPLOADED",
+  RECORDING_FAILED = "RECORDING_FAILED",
+  RECORDING_UPLOAD_FAILED = "RECORDING_UPLOAD_FAILED",
+  PROCESSING_FAILED = "PROCESSING_FAILED",
+  RECORDING_EXPIRED = "RECORDING_EXPIRED",
+  RECORDING_DELETED = "RECORDING_DELETED",
 }
 
 export enum CallType {
@@ -449,10 +472,16 @@ export enum TeamIntelligenceBulletCategory {
   MILESTONE = "MILESTONE",
 }
 
+export enum ApproverType {
+  USER = "USER",
+  ROLE = "ROLE",
+}
+
 export enum EmailType {
   DEFAULT = "DEFAULT",
   REPLY = "REPLY",
   REPLY_ALL = "REPLY_ALL",
+  COMPOSE = "COMPOSE",
 }
 
 export enum ExternalEntityType {
@@ -513,6 +542,16 @@ export enum NotificationType {
   TICKET_STATUS_CHANGE = "TICKET_STATUS_CHANGE",
   TICKET_ASSIGNMENT = "TICKET_ASSIGNMENT",
   TICKET_REASSIGNMENT = "TICKET_REASSIGNMENT",
+  TICKET_DUE_DATE_CHANGED = "TICKET_DUE_DATE_CHANGED",
+  TICKET_PRIORITY_CHANGED = "TICKET_PRIORITY_CHANGED",
+  TICKET_USER_GROUP_CHANGED = "TICKET_USER_GROUP_CHANGED",
+  TICKET_TITLE_CHANGED = "TICKET_TITLE_CHANGED",
+  TICKET_DESCRIPTION_CHANGED = "TICKET_DESCRIPTION_CHANGED",
+  TICKET_RCA_CREATED = "TICKET_RCA_CREATED",
+  TICKET_RCA_UPDATED = "TICKET_RCA_UPDATED",
+  TICKET_SUBTICKET_ADDED = "TICKET_SUBTICKET_ADDED",
+  TICKET_RELATED_TICKET_ADDED = "TICKET_RELATED_TICKET_ADDED",
+  TICKET_RELATED_TICKET_REMOVED = "TICKET_RELATED_TICKET_REMOVED",
   CHANNEL_READ = "CHANNEL_READ",
   THREAD_READ = "THREAD_READ",
   CHANNEL_MESSAGE = "CHANNEL_MESSAGE",
@@ -533,6 +572,9 @@ export enum NotificationType {
   EMAIL_REPLY_RECEIVED = "EMAIL_REPLY_RECEIVED",
   MESSAGE_DELETED = "MESSAGE_DELETED",
   MESSAGE_EDITED = "MESSAGE_EDITED",
+  STAGE_APPROVAL_REQUESTED = "STAGE_APPROVAL_REQUESTED",
+  STAGE_APPROVAL_APPROVED = "STAGE_APPROVAL_APPROVED",
+  STAGE_APPROVAL_REJECTED = "STAGE_APPROVAL_REJECTED",
 }
 
 export enum NotificationStatus {
@@ -608,6 +650,7 @@ export enum FormFieldType {
   SINGLE_SELECT = "SINGLE_SELECT",
   MULTI_SELECT = "MULTI_SELECT",
   USER = "USER",
+  DOC = "DOC",
 }
 
 export enum FormContextType {
@@ -619,6 +662,18 @@ export enum FormContextType {
 export enum BoardType {
   DEFAULT = "DEFAULT",
   RELEASE = "RELEASE",
+  NON_LINEAR = "NON_LINEAR",
+}
+
+export enum VisitSlaMode {
+  STAGE_DEFAULT = "STAGE_DEFAULT",
+  NONE = "NONE",
+  FIXED_HOURS = "FIXED_HOURS",
+}
+
+export enum ReenterMode {
+  RESET = "RESET",
+  CONTINUE = "CONTINUE",
 }
 
 export enum FormEntityType {
@@ -789,6 +844,12 @@ export enum AppPermissionStatus {
   UNAPPROVED = "UNAPPROVED",
   APPROVED = "APPROVED",
   PENDINGDELETE = "PENDINGDELETE",
+}
+
+export enum TagMethod {
+  MANUAL = "MANUAL",
+  LLM = "LLM",
+  AUTOMATED = "AUTOMATED",
 }
 
 // Define tables
@@ -990,6 +1051,7 @@ export const ticketStageEtaTable = table("ticket_stage_eta")
     id: string(),
     ticketId: string(),
     stageId: string(),
+    version: number().optional(),
     stageEnteredAt: number(),
     stageLeftAt: number().optional(),
     stageEta: number(),
@@ -1678,6 +1740,23 @@ export const stagePrStatusMappingTable = table("stage_pr_status_mappings")
   })
   .primaryKey("id");
 
+export const stageTransitionTable = table("stage_transitions")
+  .columns({
+    id: string(),
+    boardId: string(),
+    fromStageId: string().optional(),
+    toStageId: string(),
+    formId: string().optional(),
+    requiresApproval: boolean().optional(),
+    bypassApprovalForAutomation: boolean().optional(),
+    visitSlaMode: enumeration<VisitSlaMode>().optional(),
+    fixedEtaHours: number().optional(),
+    onReenter: enumeration<ReenterMode>().optional(),
+    createdAt: number().optional(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const channelTable = table("channels")
   .columns({
     id: string(),
@@ -1762,6 +1841,7 @@ export const channelSectionTable = table("channel_sections")
     position: string(),
     isCollapsed: boolean(),
     isDeleted: boolean(),
+    sortOrder: enumeration<ChannelSortOrder>().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -1819,6 +1899,7 @@ export const emailTable = table("emails")
     channelId: string(),
     externalThreadId: string(),
     externalMessageId: string(),
+    sentByUserId: string().optional(),
     rfcMessageId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
@@ -1876,6 +1957,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     categoryField: string().optional(),
     subCategoryField: string().optional(),
     emailMergeMode: enumeration<EmailMergeMode>(),
+    twoStepSendEnabled: boolean(),
     priorityClassificationEnabled: boolean(),
     priorityClassificationPrompt: string().optional(),
     priorityClassificationThreshold: number(),
@@ -2231,6 +2313,25 @@ export const callParticipantTable = table("call_participants")
   })
   .primaryKey("id");
 
+export const callRecordingTable = table("call_recordings")
+  .columns({
+    id: string(),
+    callId: string(),
+    egressId: string().optional(),
+    startedBy: string(),
+    name: string().optional(),
+    recordingType: enumeration<RecordingType>(),
+    status: enumeration<RecordingStatus>(),
+    storagePath: string().optional(),
+    segmentPrefix: string().optional(),
+    messageId: string().optional(),
+    startedAt: number(),
+    endedAt: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const recurringCallSeriesTable = table("recurring_call_series")
   .columns({
     id: string(),
@@ -2452,6 +2553,7 @@ export const formEntityValuesTable = table("form_entity_values")
     formId: string(),
     fieldId: string(),
     contextId: string().optional(),
+    version: number().optional(),
     fieldValue: string(),
     actualFieldValue: json().optional(),
     createdAt: number(),
@@ -2598,8 +2700,11 @@ export const collectionPermissionTable = table("collection_permissions")
 export const stageApproversTable = table("stage_approvers")
   .columns({
     id: string(),
-    userId: string(),
-    stageId: string(),
+    userId: string().optional(),
+    roleId: string().optional(),
+    approverType: enumeration<ApproverType>().optional(),
+    stageId: string().optional(),
+    transitionId: string().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -2622,7 +2727,7 @@ export const applicationTable = table("applications")
     envPaths: json<string[]>(),
     migrationPaths: json<string[]>(),
     createdAt: number(),
-    updatedAt: number(),
+    updatedAt: number().optional(),
   })
   .primaryKey("id");
 
@@ -2636,7 +2741,7 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
     testedAt: number().optional(),
     failureReason: string().optional(),
     createdAt: number(),
-    updatedAt: number(),
+    updatedAt: number().optional(),
   })
   .primaryKey("id");
 
@@ -2679,7 +2784,7 @@ export const releaseChangeTypeTable = table("release_change_types")
     devTicketXyneId: string().optional(),
     commitId: string().optional(),
     filePath: string().optional(),
-    createdAt: number(),
+    createdAt: number().optional(),
   })
   .primaryKey("id");
 
@@ -2692,6 +2797,7 @@ export const ticketStageRequestTable = table("ticket_stage_requests")
     status: enumeration<TicketStageRequestStatus>(),
     submittedBy: string(),
     reviewedBy: string().optional(),
+    reviewerCommentMessageId: string().optional(),
     updatedBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -2816,6 +2922,11 @@ export const appsTable = table("apps")
     name: string(),
     description: string().optional(),
     createdBy: string(),
+    orgId: string(),
+    scope: string(),
+    version: number(),
+    webhookUrl: string().optional(),
+    signingSecret: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2827,7 +2938,22 @@ export const installedAppsTable = table("installed_apps")
     appId: string(),
     userId: string(),
     webhookUrl: string().optional(),
-    signingSecret: string(),
+    signingSecret: string().optional(),
+    version: number(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const installedAppCommandTable = table("installed_app_commands")
+  .columns({
+    id: string(),
+    installedAppId: string(),
+    sourceCommandId: string(),
+    commandName: string(),
+    description: string(),
+    commandType: enumeration<CommandType>(),
+    commandAccessibility: enumeration<CommandAccessibility>(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2874,6 +3000,7 @@ export const savedUserConfigurationTable = table("saved_user_configurations")
     contextType: enumeration<SavedConfigContextType>(),
     contextId: string(),
     visibility: enumeration<SavedConfigVisibility>(),
+    isStarred: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -3062,6 +3189,96 @@ export const installedAppPermissionTable = table("installed_app_permissions")
     createdAt: number(),
   })
   .primaryKey("id");
+
+export const tagTable = table("tags")
+  .columns({
+    id: string(),
+    sourceId: string(),
+    sourceType: string(),
+    workspaceId: string(),
+    configKey: string().optional(),
+    tagCategory: string(),
+    tag: string(),
+    method: enumeration<TagMethod>(),
+    reason: string().optional(),
+    createdBy: string().optional(),
+    updatedBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+    isDeleted: boolean(),
+  })
+  .primaryKey("id");
+
+export const tagsConfigTable = table("tags_config")
+  .columns({
+    id: string(),
+    configKey: string(),
+    sourceType: string(),
+    workspaceId: string(),
+    config: json(),
+    createdBy: string().optional(),
+    updatedBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+    isDeleted: boolean(),
+  })
+  .primaryKey("id");
+
+export const doclingAsyncFileTable = table("docling_async_files")
+  .columns({
+    fileId: string().from('file_id'),
+    collectionId: string().from('collection_id'),
+    sourcePath: string().from('source_path'),
+    sourceStorageKey: string().from('source_storage_key').optional(),
+    stageDir: string().from('stage_dir').optional(),
+    resultsDir: string().from('results_dir').optional(),
+    basePriority: number().from('base_priority'),
+    priorityOverride: number().from('priority_override').optional(),
+    status: string(),
+    totalPages: number().from('total_pages'),
+    totalParts: number().from('total_parts'),
+    pageChunkSize: number().from('page_chunk_size'),
+    readyPartsCount: number().from('ready_parts_count'),
+    writeAttemptCount: number().from('write_attempt_count'),
+    splitAttemptCount: number().from('split_attempt_count'),
+    availableAt: number().from('available_at'),
+    leaseOwner: string().from('lease_owner').optional(),
+    leaseToken: string().from('lease_token').optional(),
+    leaseUntil: number().from('lease_until').optional(),
+    ocrActivatedAt: number().from('ocr_activated_at').optional(),
+    completedAt: number().from('completed_at').optional(),
+    errorMessage: string().from('error_message').optional(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey("fileId");
+
+export const doclingAsyncPartTable = table("docling_async_parts")
+  .columns({
+    fileId: string().from('file_id'),
+    partIndex: number().from('part_index'),
+    docId: string().from('doc_id'),
+    currentJobId: string().from('current_job_id').optional(),
+    partPath: string().from('part_path'),
+    resultPath: string().from('result_path').optional(),
+    startPage: number().from('start_page'),
+    endPage: number().from('end_page'),
+    partSizeBytes: number().from('part_size_bytes'),
+    pageCount: number().from('page_count'),
+    status: string(),
+    attemptCount: number().from('attempt_count'),
+    availableAt: number().from('available_at'),
+    submittedAt: number().from('submitted_at').optional(),
+    readyAt: number().from('ready_at').optional(),
+    writtenAt: number().from('written_at').optional(),
+    leaseOwner: string().from('lease_owner').optional(),
+    leaseUntil: number().from('lease_until').optional(),
+    submitPermitId: string().from('submit_permit_id').optional(),
+    errorMessage: string().from('error_message').optional(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey("fileId", "partIndex");
 
 
 // Define relationships
@@ -3628,6 +3845,11 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     destField: ["userId"],
     destSchema: userExternalTokenTable,
   }),
+  recordings: many({
+    sourceField: ["id"],
+    destField: ["startedBy"],
+    destSchema: callRecordingTable,
+  }),
   permissions: many({
     sourceField: ["id"],
     destField: ["userId"],
@@ -4006,6 +4228,14 @@ export const stageTableRelationships = relationships(stageTable, ({ one, many })
   })
 }));
 
+export const stageTransitionTableRelationships = relationships(stageTransitionTable, ({ many }) => ({
+  transitionApprovers: many({
+    sourceField: ["id"],
+    destField: ["transitionId"],
+    destSchema: stageApproversTable,
+  })
+}));
+
 export const channelTableRelationships = relationships(channelTable, ({ one, many }) => ({
   conversations: many({
     sourceField: ["id"],
@@ -4249,6 +4479,11 @@ export const callTableRelationships = relationships(callTable, ({ one, many }) =
     destField: ["callId"],
     destSchema: callParticipantTable,
   }),
+  recordings: many({
+    sourceField: ["id"],
+    destField: ["callId"],
+    destSchema: callRecordingTable,
+  }),
   recurringSeries: one({
     sourceField: ["recurringSeriesId"],
     destField: ["id"],
@@ -4261,6 +4496,19 @@ export const callParticipantTableRelationships = relationships(callParticipantTa
     sourceField: ["callId"],
     destField: ["id"],
     destSchema: callTable,
+  })
+}));
+
+export const callRecordingTableRelationships = relationships(callRecordingTable, ({ one }) => ({
+  call: one({
+    sourceField: ["callId"],
+    destField: ["id"],
+    destSchema: callTable,
+  }),
+  starter: one({
+    sourceField: ["startedBy"],
+    destField: ["id"],
+    destSchema: userTable,
   })
 }));
 
@@ -4412,6 +4660,14 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
   })
 }));
 
+export const stageApproversTableRelationships = relationships(stageApproversTable, ({ one }) => ({
+  transition: one({
+    sourceField: ["transitionId"],
+    destField: ["id"],
+    destSchema: stageTransitionTable,
+  })
+}));
+
 export const applicationTableRelationships = relationships(applicationTable, ({ one }) => ({
   applicationBoard: one({
     sourceField: ["boardId"],
@@ -4468,6 +4724,19 @@ export const installedAppsTableRelationships = relationships(installedAppsTable,
     sourceField: ["id"],
     destField: ["installedAppId"],
     destSchema: installedAppPermissionTable,
+  }),
+  installedAppCommands: many({
+    sourceField: ["id"],
+    destField: ["installedAppId"],
+    destSchema: installedAppCommandTable,
+  })
+}));
+
+export const installedAppCommandTableRelationships = relationships(installedAppCommandTable, ({ one }) => ({
+  installedApp: one({
+    sourceField: ["installedAppId"],
+    destField: ["id"],
+    destSchema: installedAppsTable,
   })
 }));
 
@@ -4666,6 +4935,22 @@ export const installedAppPermissionTableRelationships = relationships(installedA
   })
 }));
 
+export const doclingAsyncFileTableRelationships = relationships(doclingAsyncFileTable, ({ many }) => ({
+  parts: many({
+    sourceField: ["fileId"],
+    destField: ["fileId"],
+    destSchema: doclingAsyncPartTable,
+  })
+}));
+
+export const doclingAsyncPartTableRelationships = relationships(doclingAsyncPartTable, ({ one }) => ({
+  file: one({
+    sourceField: ["fileId"],
+    destField: ["fileId"],
+    destSchema: doclingAsyncFileTable,
+  })
+}));
+
 // Define schema
 
 export const schema = createSchema(
@@ -4729,6 +5014,7 @@ export const schema = createSchema(
       boardTable,
       stageTable,
       stagePrStatusMappingTable,
+      stageTransitionTable,
       channelTable,
       channelStatsTable,
       channelParticipantTable,
@@ -4761,6 +5047,7 @@ export const schema = createSchema(
       browserNotificationSubscriptionTable,
       callTable,
       callParticipantTable,
+      callRecordingTable,
       recurringCallSeriesTable,
       canvasFolderTable,
       canvasTable,
@@ -4805,6 +5092,7 @@ export const schema = createSchema(
       surfaceLinkTable,
       appsTable,
       installedAppsTable,
+      installedAppCommandTable,
       appIncomingWebhookTable,
       appCommandTable,
       savedUserConfigurationTable,
@@ -4822,6 +5110,10 @@ export const schema = createSchema(
       availableAppPermissionTable,
       appPermissionTable,
       installedAppPermissionTable,
+      tagTable,
+      tagsConfigTable,
+      doclingAsyncFileTable,
+      doclingAsyncPartTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -4869,6 +5161,7 @@ export const schema = createSchema(
       projectTableRelationships,
       boardTableRelationships,
       stageTableRelationships,
+      stageTransitionTableRelationships,
       channelTableRelationships,
       channelStatsTableRelationships,
       channelParticipantTableRelationships,
@@ -4885,6 +5178,7 @@ export const schema = createSchema(
       externalMessageTableRelationships,
       callTableRelationships,
       callParticipantTableRelationships,
+      callRecordingTableRelationships,
       recurringCallSeriesTableRelationships,
       canvasFolderTableRelationships,
       canvasTableRelationships,
@@ -4896,9 +5190,11 @@ export const schema = createSchema(
       collectionTableRelationships,
       collectionItemTableRelationships,
       collectionPermissionTableRelationships,
+      stageApproversTableRelationships,
       applicationTableRelationships,
       appsTableRelationships,
       installedAppsTableRelationships,
+      installedAppCommandTableRelationships,
       appIncomingWebhookTableRelationships,
       appCommandTableRelationships,
       savedUserConfigurationTableRelationships,
@@ -4914,6 +5210,8 @@ export const schema = createSchema(
       availableAppPermissionTableRelationships,
       appPermissionTableRelationships,
       installedAppPermissionTableRelationships,
+      doclingAsyncFileTableRelationships,
+      doclingAsyncPartTableRelationships,
     ],
   }
 );
@@ -4978,6 +5276,7 @@ export type Project = Row<typeof schema.tables.projects>;
 export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
+export type StageTransition = Row<typeof schema.tables.stage_transitions>;
 export type Channel = Row<typeof schema.tables.channels>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
@@ -5010,6 +5309,7 @@ export type NotificationPreference = Row<typeof schema.tables.notification_prefe
 export type BrowserNotificationSubscription = Row<typeof schema.tables.browser_notification_subscriptions>;
 export type Call = Row<typeof schema.tables.calls>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
+export type CallRecording = Row<typeof schema.tables.call_recordings>;
 export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series>;
 export type CanvasFolder = Row<typeof schema.tables.canvas_folders>;
 export type Canvas = Row<typeof schema.tables.canvases>;
@@ -5054,6 +5354,7 @@ export type SessionRecordingFile = Row<typeof schema.tables.session_recording_fi
 export type SurfaceLink = Row<typeof schema.tables.surface_links>;
 export type Apps = Row<typeof schema.tables.apps>;
 export type InstalledApps = Row<typeof schema.tables.installed_apps>;
+export type InstalledAppCommand = Row<typeof schema.tables.installed_app_commands>;
 export type AppIncomingWebhook = Row<typeof schema.tables.app_incoming_webhooks>;
 export type AppCommand = Row<typeof schema.tables.app_commands>;
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
@@ -5071,3 +5372,7 @@ export type DynamicDashboardQueryMapping = Row<typeof schema.tables.dynamic_dash
 export type AvailableAppPermission = Row<typeof schema.tables.available_app_permissions>;
 export type AppPermission = Row<typeof schema.tables.app_permission>;
 export type InstalledAppPermission = Row<typeof schema.tables.installed_app_permissions>;
+export type Tag = Row<typeof schema.tables.tags>;
+export type TagsConfig = Row<typeof schema.tables.tags_config>;
+export type DoclingAsyncFile = Row<typeof schema.tables.docling_async_files>;
+export type DoclingAsyncPart = Row<typeof schema.tables.docling_async_parts>;

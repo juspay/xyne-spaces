@@ -72,6 +72,8 @@ export interface UserGuideFeature {
   icon: LucideIcon | ComponentType<{ size?: number; className?: string }>;
   visualKey: string;
   screenshots?: Array<string | undefined>;
+  /** Optional walkthrough video; opens in a new tab from the feature card. */
+  videoUrl?: string;
 }
 
 export interface GuideCategoryInfo {
@@ -155,6 +157,8 @@ export const USER_GUIDE_FEATURES: UserGuideFeature[] = [
     icon: MessagesSquare,
     visualKey: 'chat',
     screenshots: [],
+    videoUrl:
+      'https://next.frame.io/share/4820d565-1c8a-41e9-afe4-5d452c7a0b78/view/ef722fdb-a9c7-4acd-9288-a90fa8d33303',
   },
   {
     id: 'dms',
@@ -383,6 +387,8 @@ export const USER_GUIDE_FEATURES: UserGuideFeature[] = [
     category: 'calls',
     icon: Phone,
     visualKey: 'calls',
+    videoUrl:
+      'https://next.frame.io/share/4820d565-1c8a-41e9-afe4-5d452c7a0b78/view/356f6713-241f-4c3c-8e6b-a33ceaf4206a',
   },
   {
     id: 'recordings',
@@ -469,6 +475,8 @@ export const USER_GUIDE_FEATURES: UserGuideFeature[] = [
     category: 'work-tracking',
     icon: Ticket,
     visualKey: 'tickets',
+    videoUrl:
+      'https://next.frame.io/share/4820d565-1c8a-41e9-afe4-5d452c7a0b78/view/af01fd39-f693-4f14-a706-14ac114465d6',
   },
   {
     id: 'support',

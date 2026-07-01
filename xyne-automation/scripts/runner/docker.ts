@@ -17,9 +17,11 @@ const ANSI_REGEX = /\x1B\[[0-9;]*[A-Za-z]/g;
 
 function composeArgs(opts: DockerOpts): string[] {
   return [
-    '--profile', 'gauge',
+    '--profile',
+    'gauge',
     ...opts.composeFiles.flatMap((f) => ['-f', f]),
-    '-p', opts.composeProjectName,
+    '-p',
+    opts.composeProjectName,
   ];
 }
 

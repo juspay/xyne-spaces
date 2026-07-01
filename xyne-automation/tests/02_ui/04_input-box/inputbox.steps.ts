@@ -282,9 +282,7 @@ export default class InputBoxSteps {
   public async verifyBoldAndItalicAppliedInEditor(): Promise<void> {
     const page = testContext.activePage;
     const boldItalicElement = page
-      .locator(
-        "[data-testid='message-input'] strong em, [data-testid='message-input'] em strong"
-      )
+      .locator("[data-testid='message-input'] strong em, [data-testid='message-input'] em strong")
       .first();
     await expect(boldItalicElement).toBeVisible();
   }
@@ -317,9 +315,7 @@ export default class InputBoxSteps {
   @Step('verifying blockquote is created in editor')
   public async verifyBlockquoteCreatedInEditor(): Promise<void> {
     const page = testContext.activePage;
-    const blockquote = page
-      .locator("[data-testid='message-input'] blockquote")
-      .first();
+    const blockquote = page.locator("[data-testid='message-input'] blockquote").first();
     await expect(blockquote).toBeVisible();
   }
 
@@ -403,9 +399,7 @@ export default class InputBoxSteps {
   public async verifyNestedListItemExists(): Promise<void> {
     const page = testContext.activePage;
     const nestedList = page
-      .locator(
-        "[data-testid='message-input'] ul ul, [data-testid='message-input'] ol ol"
-      )
+      .locator("[data-testid='message-input'] ul ul, [data-testid='message-input'] ol ol")
       .first();
     await expect(nestedList).toBeVisible();
   }
@@ -575,9 +569,7 @@ export default class InputBoxSteps {
     try {
       await link.click({ timeout: 5000 });
     } catch (_error) {
-      const overlays = page.locator(
-        '[role="dialog"], .backdrop, [data-radix-focus-guard]'
-      );
+      const overlays = page.locator('[role="dialog"], .backdrop, [data-radix-focus-guard]');
       if ((await overlays.count()) > 0) {
         await overlays
           .first()
@@ -709,9 +701,7 @@ export default class InputBoxSteps {
   @Step('verifying mention selector is not visible')
   public async verifyMentionSelectorIsNotVisible(): Promise<void> {
     const page = testContext.activePage;
-    const selector = page
-      .locator('[role="dialog"][data-state="open"].animate-slide-in-up')
-      .first();
+    const selector = page.locator('[role="dialog"][data-state="open"].animate-slide-in-up').first();
     await expect(selector).not.toBeVisible();
   }
 

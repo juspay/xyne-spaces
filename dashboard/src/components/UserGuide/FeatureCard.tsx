@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { Lightbulb } from 'lucide-react';
+import { Lightbulb, PlayCircle } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { StepGuide, parseStep } from './StepPlayer';
 
@@ -13,6 +13,7 @@ interface FeatureCardProps {
   findIn: string;
   visualKey: string;
   featureId: string;
+  videoUrl?: string;
   animationDelay?: number;
 }
 
@@ -24,6 +25,7 @@ export const FeatureCard = ({
   tip,
   findIn,
   featureId,
+  videoUrl,
   animationDelay = 0,
 }: FeatureCardProps): ReactElement => {
   const shouldReduceMotion = useReducedMotion();
@@ -77,6 +79,22 @@ export const FeatureCard = ({
           </span>
         ))}
       </div>
+
+      {/* Watch video — opens walkthrough in a new tab */}
+      {videoUrl && (
+        <a
+          href={videoUrl}
+          target='_blank'
+          rel='noopener noreferrer'
+          data-track-category='User_Guide'
+          data-track-name='Watch_Video'
+          data-track-metadata={JSON.stringify({ featureId })}
+          className='mb-3.5 inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted'
+        >
+          <PlayCircle size={16} className='text-primary' />
+          Watch video
+        </a>
+      )}
 
       {/* Steps */}
       {steps.length > 0 && <StepGuide steps={steps} />}
