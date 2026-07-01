@@ -23,6 +23,7 @@ import { useUserSearch } from './useUsers';
 import { searchChannelsWithScores } from './useChannels';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
 import { isDMChannel } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
+import { isUserDeactivated } from '../utils/userDisplayName';
 import {
   parseSearchFilters,
   parseTypeFilter,
@@ -100,8 +101,9 @@ export const CMDK_USER_LIMIT = 25;
 /**
  * Rank Cmd+K user candidates:
  *   1. name-prefix matches first
- *   2. DM-contact users within each tier
- *   3. tie-break by DM recency (smaller index = more recent activity), so
+ *   2. within a tier, active before deactivated (soft, not a global demotion)
+ *   3. DM-contact users within each tier
+ *   4. tie-break by DM recency (smaller index = more recent activity), so
  *      `from:` with no text shows the same people-you-talk-to-most order
  *      that the plain-search empty state shows in the DIRECT MESSAGES
  *      section.
@@ -110,7 +112,7 @@ export const CMDK_USER_LIMIT = 25;
  * 1:1 DM list (0 = most recent). Users not in the map fall through to the
  * incoming alphabetical order from `searchUsers`.
  */
-export function rankUsers<T extends { id: string; name: string }>(
+export function rankUsers<T extends { id: string; name: string; status?: string | null }>(
   users: T[],
   query: string,
   dmContactRecency: Map<string, number>,
@@ -118,20 +120,26 @@ export function rankUsers<T extends { id: string; name: string }>(
   const q = query.toLowerCase().trim();
   const isPrefixMatch = (name: string): boolean => !!q && name.toLowerCase().startsWith(q);
 
-  const rank = (user: T): number => {
-    const primary = isPrefixMatch(user.name);
-    const hasDM = dmContactRecency.has(user.id);
-    if (primary && hasDM) return 0;
-    if (primary) return 1;
-    if (hasDM) return 2;
-    return 3;
-  };
-
   // Stable sort (ES2019+) preserves the incoming `searchUsers` order
-  // (alphabetical for non-DM users) when both rank and recency are equal.
+  // (alphabetical for non-DM users) when all keys tie.
   return [...users].sort((a, b) => {
-    const diff = rank(a) - rank(b);
-    if (diff !== 0) return diff;
+    // 1. name-prefix matches (the relevance signal) first
+    const aPrefix = isPrefixMatch(a.name);
+    const bPrefix = isPrefixMatch(b.name);
+    if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
+
+    // 2. within a tier, active before deactivated. Soft/per-tier: key 1 already
+    //    let a relevant deactivated user beat a slightly-relevant active one.
+    const aDeactivated = isUserDeactivated(a);
+    const bDeactivated = isUserDeactivated(b);
+    if (aDeactivated !== bDeactivated) return aDeactivated ? 1 : -1;
+
+    // 3. DM contacts before non-contacts, but only after activation
+    const aDM = dmContactRecency.has(a.id);
+    const bDM = dmContactRecency.has(b.id);
+    if (aDM !== bDM) return aDM ? -1 : 1;
+
+    // 4. more-recent DM first (0 = most recent)
     const aRecency = dmContactRecency.get(a.id);
     const bRecency = dmContactRecency.get(b.id);
     if (aRecency !== undefined && bRecency !== undefined) return aRecency - bRecency;
