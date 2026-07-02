@@ -72,10 +72,14 @@ import Textarea from '../../ui/Textarea';
 import Tooltip from '../../ui/Tooltip';
 import { getFilesDimensions } from '../../ui/utils/files';
 import {
+  buildCreateTicketShareLink,
   getMissingMandatoryFieldMessage,
   getPriorityOptions,
+  hasCreateTicketFlag,
   parseAssignee,
+  readCreateTicketPrefillFromUrl,
   TAG_COLORS,
+  writeCreateTicketFields,
 } from './createTicket.utils';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from './ShimmerText';
@@ -96,6 +100,7 @@ interface CreateTicketModalProps {
     workflowType?: string;
     excludedChatAttachmentIds?: string[];
   };
+  enableUrlSync?: boolean;
   channelId: string;
   projectId: string;
   defaultStageId?: string | undefined;
@@ -202,6 +207,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   onTicketCreated,
   standalone = false,
   standaloneSeed,
+  enableUrlSync = false,
 }) => {
   const zero = useZero();
   const shareableOrigin = useShareableOrigin();
@@ -213,7 +219,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     getDroppedFilesForEntity,
   } = useDraftAttachments();
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
+  const setSearchParamsRef = useRef(setSearchParams);
+  setSearchParamsRef.current = setSearchParams;
 
   const tab = searchParams.get('tab');
 
@@ -581,6 +591,40 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     return new Map(allUsers.map(user => [user.id, user]));
   }, [allUsers]);
 
+  useEffect(() => {
+    const assignee = formValues.assignee;
+    if (!assignee?.value) return;
+    const expectedValue =
+      assignee.type === 'assigneeTo' ? `user:${assignee.value}` : `userGroup:${assignee.value}`;
+    if (selectedAssigneeOption?.value === expectedValue) return;
+    if (assignee.type === 'assigneeTo') {
+      const u = userMap.get(assignee.value);
+      if (u) {
+        setSelectedAssigneeOption({
+          value: expectedValue,
+          label: u.name || u.email,
+          icon: (
+            <Avatar
+              userId={u.id}
+              size='sm'
+              showActiveStatus={false}
+              className='rounded-md size-4 flex items-center justify-center'
+            />
+          ),
+        });
+      }
+    } else {
+      const group = userGroupOptions?.find(g => g.id === assignee.value);
+      if (group) {
+        setSelectedAssigneeOption({
+          value: expectedValue,
+          label: group.name,
+          icon: <Users className='size-3.5' />,
+        });
+      }
+    }
+  }, [formValues.assignee, userMap, userGroupOptions, selectedAssigneeOption]);
+
   // Combine chat attachments and newly uploaded files for display
   const allAttachments = useMemo(() => {
     const result: Array<{
@@ -678,11 +722,24 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       if (selectedBoardId) {
         form.setFieldValue('boardId', selectedBoardId);
       }
+      if (enableUrlSync && hasCreateTicketFlag(searchParamsRef.current)) {
+        const prefill = readCreateTicketPrefillFromUrl(searchParamsRef.current);
+        if (prefill.priority !== undefined) form.setFieldValue('priority', prefill.priority);
+        if (prefill.status !== undefined) form.setFieldValue('status', prefill.status);
+        if (prefill.boardId !== undefined) form.setFieldValue('boardId', prefill.boardId);
+        if (prefill.assignee !== undefined) form.setFieldValue('assignee', prefill.assignee);
+        if (prefill.eta !== undefined) form.setFieldValue('eta', prefill.eta);
+        if (prefill.tags !== undefined) form.setFieldValue('tags', prefill.tags);
+        if (prefill.workflowType !== undefined) {
+          form.setFieldValue('workflowType', prefill.workflowType);
+        }
+      }
       resetDuplicateState();
     }
   }, [
     isOpen,
     form,
+    enableUrlSync,
     initialTitle,
     initialDescription,
     initialPriority,
@@ -692,6 +749,26 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     resetDuplicateState,
     selectedBoardId,
   ]);
+
+  useEffect(() => {
+    if (!enableUrlSync || !isOpen) return;
+    const handle = setTimeout(() => {
+      setSearchParamsRef.current(
+        prev =>
+          writeCreateTicketFields(new URLSearchParams(prev), {
+            priority: formValues.priority,
+            status: formValues.status,
+            boardId: formValues.boardId,
+            assignee: formValues.assignee,
+            eta: formValues.eta,
+            tags: formValues.tags,
+            workflowType: formValues.workflowType,
+          }),
+        { replace: true },
+      );
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [enableUrlSync, isOpen, formValues]);
 
   // If a board is currently set but no longer exists in the list, clear it so AI can re-suggest
   useEffect(() => {
@@ -1234,6 +1311,43 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   };
 
+  const hasShareableContent = Boolean(
+    formValues.boardId ||
+    formValues.assignee?.value ||
+    formValues.priority ||
+    formValues.eta ||
+    (formValues.tags && formValues.tags.length > 0) ||
+    formValues.workflowType ||
+    (formValues.status && formValues.status !== TicketStatusV2.TODO),
+  );
+
+  const handleShareCreateTicketLink = (): void => {
+    const link = buildCreateTicketShareLink(searchParams, {
+      priority: formValues.priority,
+      status: formValues.status,
+      boardId: formValues.boardId,
+      assignee: formValues.assignee,
+      eta: formValues.eta,
+      tags: formValues.tags,
+      workflowType: formValues.workflowType,
+    });
+
+    navigator.clipboard
+      .writeText(link)
+      .then(() => {
+        toast.success('Link Copied', {
+          description: 'A prefilled create-ticket link was copied to your clipboard.',
+          duration: 2000,
+        });
+      })
+      .catch(() => {
+        toast.error('Link Copy Failed', {
+          description: 'Failed to copy the link to your clipboard.',
+          duration: 2000,
+        });
+      });
+  };
+
   // Handle duplicate ticket copy link
   const handleDuplicateTicketCopyLink = (link: string): void => {
     const ticketUrl = `${shareableOrigin}${link}`;
@@ -1464,6 +1578,25 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             : 'New Ticket'}
         </h2>
         <div className='flex items-center gap-1'>
+          {enableUrlSync && (
+            <Button
+              variant='ghost'
+              size='icon'
+              onClick={handleShareCreateTicketLink}
+              disabled={form.state.isSubmitting || !hasShareableContent}
+              className='size-6'
+              aria-label='Copy shareable link'
+              title={
+                hasShareableContent
+                  ? 'Copy shareable link'
+                  : 'Fill in a field to share a prefilled link'
+              }
+              data-track-category='Tickets'
+              data-track-name='ShareCreateTicketModal'
+            >
+              <LinkIcon strokeWidth={2.33} className='size-3.5' />
+            </Button>
+          )}
           {canPopOut && (
             <Button
               variant='ghost'

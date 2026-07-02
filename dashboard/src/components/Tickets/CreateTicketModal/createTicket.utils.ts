@@ -1,6 +1,11 @@
-import { TicketPriority } from '@xyne/shared';
+import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { CreateTicketFormData } from './CreateTicketModal';
+import {
+  CREATE_TICKET_FIELD_PARAM_KEYS,
+  CREATE_TICKET_PARAM_KEYS,
+  CREATE_TICKET_URL_FLAG,
+} from './constants';
 export const TAG_COLORS = [
   'bg-cyan-600',
   'bg-yellow-600',
@@ -106,4 +111,117 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
   }
 
   return null;
+}
+
+export interface CreateTicketUrlPrefill {
+  priority?: TicketPriority | null;
+  status?: TicketStatusV2;
+  boardId?: string;
+  assignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
+  eta?: Date | null;
+  tags?: string[];
+  workflowType?: string;
+}
+
+export function hasCreateTicketFlag(params: URLSearchParams): boolean {
+  return params.get(CREATE_TICKET_URL_FLAG) === '1';
+}
+
+export function readCreateTicketPrefillFromUrl(params: URLSearchParams): CreateTicketUrlPrefill {
+  const prefill: CreateTicketUrlPrefill = {};
+
+  const priority = params.get(CREATE_TICKET_PARAM_KEYS.priority);
+  if (priority && Object.values(TicketPriority).includes(priority as TicketPriority)) {
+    prefill.priority = priority as TicketPriority;
+  }
+
+  const status = params.get(CREATE_TICKET_PARAM_KEYS.status);
+  if (status && Object.values(TicketStatusV2).includes(status as TicketStatusV2)) {
+    prefill.status = status as TicketStatusV2;
+  }
+
+  const boardId = params.get(CREATE_TICKET_PARAM_KEYS.boardId);
+  if (boardId) prefill.boardId = boardId;
+
+  const assignee = params.get(CREATE_TICKET_PARAM_KEYS.assignee);
+  if (assignee) {
+    const sep = assignee.indexOf(':');
+    const type = sep >= 0 ? assignee.slice(0, sep) : '';
+    const value = sep >= 0 ? assignee.slice(sep + 1) : '';
+    if ((type === 'assigneeTo' || type === 'userGroup') && value) {
+      prefill.assignee = { type, value };
+    }
+  }
+
+  const eta = params.get(CREATE_TICKET_PARAM_KEYS.eta);
+  if (eta) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(eta);
+    if (m) {
+      const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      if (!isNaN(date.getTime())) prefill.eta = date;
+    }
+  }
+
+  const tags = params.getAll(CREATE_TICKET_PARAM_KEYS.tag).filter(Boolean);
+  if (tags.length) prefill.tags = tags;
+
+  const workflowType = params.get(CREATE_TICKET_PARAM_KEYS.workflowType);
+  if (workflowType) prefill.workflowType = workflowType;
+
+  return prefill;
+}
+
+function clearCreateTicketFields(params: URLSearchParams): URLSearchParams {
+  CREATE_TICKET_FIELD_PARAM_KEYS.forEach(key => params.delete(key));
+  return params;
+}
+
+export function clearCreateTicketParams(params: URLSearchParams): URLSearchParams {
+  params.delete(CREATE_TICKET_URL_FLAG);
+  return clearCreateTicketFields(params);
+}
+
+export function writeCreateTicketFields(
+  params: URLSearchParams,
+  prefill: CreateTicketUrlPrefill,
+): URLSearchParams {
+  clearCreateTicketFields(params);
+
+  if (prefill.priority) params.set(CREATE_TICKET_PARAM_KEYS.priority, prefill.priority);
+  if (prefill.status && prefill.status !== TicketStatusV2.TODO) {
+    params.set(CREATE_TICKET_PARAM_KEYS.status, prefill.status);
+  }
+  if (prefill.boardId) params.set(CREATE_TICKET_PARAM_KEYS.boardId, prefill.boardId);
+  if (prefill.assignee?.value) {
+    params.set(
+      CREATE_TICKET_PARAM_KEYS.assignee,
+      `${prefill.assignee.type}:${prefill.assignee.value}`,
+    );
+  }
+  if (prefill.eta) {
+    const d = prefill.eta;
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+      d.getDate(),
+    ).padStart(2, '0')}`;
+    params.set(CREATE_TICKET_PARAM_KEYS.eta, dateStr);
+  }
+  if (prefill.tags?.length) {
+    prefill.tags.filter(Boolean).forEach(tag => params.append(CREATE_TICKET_PARAM_KEYS.tag, tag));
+  }
+  if (prefill.workflowType) {
+    params.set(CREATE_TICKET_PARAM_KEYS.workflowType, prefill.workflowType);
+  }
+
+  return params;
+}
+
+export function buildCreateTicketShareLink(
+  currentParams: URLSearchParams,
+  prefill: CreateTicketUrlPrefill,
+): string {
+  const params = new URLSearchParams(currentParams);
+  clearCreateTicketParams(params);
+  params.set(CREATE_TICKET_URL_FLAG, '1');
+  writeCreateTicketFields(params, prefill);
+  return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
 }
