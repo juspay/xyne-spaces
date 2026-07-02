@@ -6,6 +6,7 @@
 import { ReactElement, useEffect, useState, useRef } from 'react';
 import { Loader2, Pause, Play } from 'lucide-react';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
+import { Waveform } from '../../../utils/recordingWaveform';
 
 /**
  * Returns true when the dashboard is running inside a mobile browser or
@@ -75,29 +76,16 @@ export function RecordingControlBar({
 
   return (
     <div
-      className='sticky bottom-0 z-10 border-t border-border dark:border-gray-700 dark:bg-gray-900 px-6 pt-4'
+      className='sticky bottom-0 z-10 border-t border-border bg-card px-6 pt-4'
       style={{ paddingBottom: isMobileWeb ? `${MOBILE_NAV_H + 16}px` : '1rem' }}
     >
       <div className='max-w-4xl mx-auto flex items-center justify-center gap-4'>
         {/* Waveform bars (left side, visible when actively recording) */}
-        {isRecording && !isPaused && (
-          <div className='flex items-center gap-[3px] h-8'>
-            {[0, 1, 2].map(i => (
-              <div
-                key={i}
-                className='w-[3px] rounded-full bg-emerald-500'
-                style={{
-                  animation: `controlBarWave 0.5s ease-in-out ${i * 0.1}s infinite alternate`,
-                  height: '40%',
-                }}
-              />
-            ))}
-          </div>
-        )}
+        {isRecording && !isPaused && <Waveform variant='bar' durationSec={0.5} staggerSec={0.1} />}
 
         {/* Elapsed time */}
         {isRecording && (
-          <span className='text-sm font-mono text-muted-foreground dark:text-muted-foreground min-w-[52px] text-center'>
+          <span className='text-sm font-mono text-muted-foreground min-w-[52px] text-center'>
             {formatElapsedTime(elapsed)}
           </span>
         )}
@@ -108,34 +96,34 @@ export function RecordingControlBar({
             <button
               onClick={isPaused ? onResume : onPause}
               disabled={isStarting}
-              className='flex items-center justify-center w-10 h-10 rounded-full bg-muted dark:bg-gray-700 hover:bg-border dark:hover:bg-gray-600 transition-colors disabled:opacity-50'
+              className='flex items-center justify-center w-10 h-10 rounded-full border border-border bg-foreground/15 hover:bg-foreground/25 transition-colors disabled:opacity-50'
               title={isPaused ? 'Resume recording' : 'Pause recording'}
               data-track-category='RecordingControlBar'
               data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
             >
               {isPaused ? (
-                <Play className='w-5 h-5 text-foreground dark:text-gray-200' />
+                <Play className='w-5 h-5 text-foreground' />
               ) : (
-                <Pause className='w-5 h-5 text-foreground dark:text-gray-200' />
+                <Pause className='w-5 h-5 text-foreground' />
               )}
             </button>
 
             <button
               onClick={onStop}
-              className='flex items-center justify-center w-12 h-12 rounded-xl bg-border dark:bg-gray-700 hover:bg-muted-foreground/50 dark:hover:bg-gray-600 transition-colors'
+              className='flex items-center justify-center w-12 h-12 rounded-xl bg-foreground/15 hover:bg-foreground/25 transition-colors'
               title='Stop recording'
               data-track-category='RecordingControlBar'
               data-track-name='stop_recording'
             >
               {/* Square stop icon */}
-              <div className='w-5 h-5 rounded-sm bg-gray-600 dark:bg-muted-foreground/50' />
+              <div className='w-5 h-5 rounded-sm bg-destructive' />
             </button>
           </>
         ) : (
           <button
             onClick={onStart}
             disabled={isStarting}
-            className='flex items-center justify-center w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg'
+            className='flex items-center justify-center w-14 h-14 rounded-full bg-destructive hover:bg-destructive/85 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg'
             title='Start recording'
             data-track-category='RecordingControlBar'
             data-track-name='start_recording'
@@ -150,29 +138,8 @@ export function RecordingControlBar({
         )}
 
         {/* Waveform bars (right side, visible when actively recording) */}
-        {isRecording && !isPaused && (
-          <div className='flex items-center gap-[3px] h-8'>
-            {[0, 1, 2].map(i => (
-              <div
-                key={i}
-                className='w-[3px] rounded-full bg-emerald-500'
-                style={{
-                  animation: `controlBarWave 0.6s ease-in-out ${i * 0.15}s infinite alternate`,
-                  height: '40%',
-                }}
-              />
-            ))}
-          </div>
-        )}
+        {isRecording && !isPaused && <Waveform variant='bar' durationSec={0.6} staggerSec={0.15} />}
       </div>
-
-      {/* Waveform keyframes */}
-      <style>{`
-        @keyframes controlBarWave {
-          from { height: 25%; }
-          to { height: 100%; }
-        }
-      `}</style>
     </div>
   );
 }
