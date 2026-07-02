@@ -1,3 +1,18 @@
+## [1.184.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.183.0...v1.184.0) (2026-07-02)
+
+
+### Features
+
+* added support for mention in codeblocks and fixed render issues ([dc7378d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dc7378d8815d3ffe81594e7b20b78def92fca8bf))
+* sharable tickets ([bcc9a2c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bcc9a2c62c0ba82e9e1455ce6f8212b2d08169dd)), closes [#8268](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8268)
+
+
+### Bug Fixes
+
+* add chunk splitting on fixed char length ([26c8ec0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/26c8ec09347f561c350fa177613f2ea85ccd64b0))
+* fixed targetUserIds query when selectiveParticipants isn't passed ([5e58415](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5e58415cc34857b36bf952aad0974926c3721a62)), closes [#8038](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8038) [#7737](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7737)
+* Unknown Channel ([ba65f5f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ba65f5f678b0bd2af086304b3113fbc4f5c55601)), closes [#8218](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/8218)
+
 ## [1.183.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.182.1...v1.183.0) (2026-07-01)
 
 
