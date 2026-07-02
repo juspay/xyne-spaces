@@ -19,6 +19,7 @@ import {
   Bot,
   Pencil,
   SmilePlus,
+  ImagePlus,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
@@ -139,6 +140,10 @@ export function CallControls({
   const cameraMenuRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const room = useSelector(roomActor, state => state.context.room);
+  const isBackgroundBlurEnabled = useSelector(
+    roomActor,
+    state => state.context.isBackgroundBlurEnabled,
+  );
   const isDrawingEnabled = useDrawStore(s => s.isDrawingEnabled);
 
   // Keyboard shortcuts: ⌘D toggles mute, ⌘E toggles video
@@ -483,17 +488,40 @@ export function CallControls({
                   : 'absolute bottom-full mb-2 left-0 rounded-full',
               )}
             >
-              <DeviceSelector
-                devices={videoDevices}
-                currentDeviceId={activeCameraId}
-                onDeviceChange={deviceId => {
-                  void handleCameraDeviceChange(deviceId);
-                }}
-                icon={Video}
-                label='Camera'
-                iconSize={iconSize}
-                buttonPadding={buttonPadding}
-              />
+              <div className={cn('flex', isMobile ? 'flex-col gap-1' : 'p-1.5 gap-2 rounded-3xl')}>
+                <DeviceSelector
+                  devices={videoDevices}
+                  currentDeviceId={activeCameraId}
+                  onDeviceChange={deviceId => {
+                    void handleCameraDeviceChange(deviceId);
+                  }}
+                  icon={Video}
+                  label='Camera'
+                  iconSize={iconSize}
+                  buttonPadding={buttonPadding}
+                />
+                {isMobile && <div className={cn('w-full h-px', midnightSeparatorClass)} />}
+                <button
+                  onClick={() => roomActor.send({ type: 'TOGGLE_BACKGROUND_BLUR' })}
+                  title={isBackgroundBlurEnabled ? 'Turn off background blur' : 'Blur background'}
+                  data-track-category='CALLS'
+                  data-track-name='TOGGLE_BACKGROUND_BLUR'
+                  data-track-metadata={JSON.stringify({
+                    enabled: !isBackgroundBlurEnabled,
+                    callId,
+                  })}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-2 text-sm whitespace-nowrap transition-colors',
+                    isMobile ? 'w-full rounded-lg' : 'rounded-full',
+                    isBackgroundBlurEnabled
+                      ? 'bg-blue-600 text-white hover:bg-blue-500'
+                      : midnightControlClass,
+                  )}
+                >
+                  <ImagePlus size={iconSize ?? 16} />
+                  <span>Blur background</span>
+                </button>
+              </div>
             </div>
           )}
         </div>

@@ -1,8 +1,11 @@
+import { useMemo } from 'react';
 import { ConnectionQuality, Track } from 'livekit-client';
+import { useSelector } from '@xstate/react';
 import { useParticipantNetworkQuality } from '../hooks/useParticipantNetworkQuality';
-import { Hand, MicOff, Monitor } from 'lucide-react';
+import { Hand, MicOff, Monitor, ImagePlus } from 'lucide-react';
 import { SignalBars } from '../components/SignalBars';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
+import { roomActor } from '../../../machines/roomMachine';
 import { ParticipantAvatar } from '../ParticipantAvatar/ParticipantAvatar';
 import { getAvatarColors } from '../ParticipantAvatar/avatarColors';
 import { cn } from '../../../utils/classNames';
@@ -60,6 +63,18 @@ export function ParticipantTile({
 
   const isClickable = isScreenShare && onClick;
 
+  // Background blur state (web only) — surfaced as a toggle on the local tile.
+  const isBackgroundBlurEnabled = useSelector(
+    roomActor,
+    state => state.context.isBackgroundBlurEnabled,
+  );
+  const showBlurToggle = participant.isLocal && !isScreenShare && !!hasVideo;
+  // Bottom-right corner holds a control button on the local tile: the blur toggle
+  // when the camera is on, otherwise the hand-raise button. Used to lift the
+  // network-quality badge clear of whichever control owns the corner.
+  const cornerHasControl =
+    showBlurToggle || (participant.isLocal && !isScreenShare && !!onToggleHandRaise);
+
   // Check if this is the AI agent participant
   const isAIAgent = participant.identity.startsWith('agent-');
   const isControlled = isAIAgent && aiController;
@@ -87,30 +102,40 @@ export function ParticipantTile({
 
   const { url: pictureUrl } = useProfilePictureUrl(participant.identity, picturePath);
 
-  // Create track references for LiveKit components only if publication exists
-  const videoTrackRef =
-    isScreenShare && screenSharePublication && participant.participant
-      ? {
-          participant: participant.participant,
-          source: Track.Source.ScreenShare,
-          publication: screenSharePublication,
-        }
-      : cameraPublication && participant.participant
+  // Create track references for LiveKit components only if publication exists.
+  // Memoized so the trackRef keeps a stable identity across unrelated re-renders
+  // (e.g. active-speaker / audio-level updates). Without this, VideoTrack
+  // re-attaches the <video> element on every render, which flickers when a
+  // processor (background blur) has swapped the underlying MediaStreamTrack.
+  const videoTrackRef = useMemo(
+    () =>
+      isScreenShare && screenSharePublication && participant.participant
         ? {
             participant: participant.participant,
-            source: Track.Source.Camera,
-            publication: cameraPublication,
+            source: Track.Source.ScreenShare,
+            publication: screenSharePublication,
           }
-        : undefined;
+        : cameraPublication && participant.participant
+          ? {
+              participant: participant.participant,
+              source: Track.Source.Camera,
+              publication: cameraPublication,
+            }
+          : undefined,
+    [isScreenShare, screenSharePublication, cameraPublication, participant.participant],
+  );
 
-  const audioTrackRef =
-    microphonePublication && participant.participant
-      ? {
-          participant: participant.participant,
-          source: Track.Source.Microphone,
-          publication: microphonePublication,
-        }
-      : undefined;
+  const audioTrackRef = useMemo(
+    () =>
+      microphonePublication && participant.participant
+        ? {
+            participant: participant.participant,
+            source: Track.Source.Microphone,
+            publication: microphonePublication,
+          }
+        : undefined,
+    [microphonePublication, participant.participant],
+  );
 
   // Border styling based on state
   const getBorderClass = (): string => {
@@ -222,6 +247,32 @@ export function ParticipantTile({
         {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
       </div>
 
+      {/* Background Blur Toggle - local tile only, when camera is on */}
+      {showBlurToggle && (
+        <button
+          onClick={e => {
+            e.stopPropagation();
+            roomActor.send({ type: 'TOGGLE_BACKGROUND_BLUR' });
+          }}
+          title={isBackgroundBlurEnabled ? 'Turn off background blur' : 'Blur background'}
+          aria-label={isBackgroundBlurEnabled ? 'Turn off background blur' : 'Blur background'}
+          data-track-category='CALLS'
+          data-track-name='TOGGLE_BACKGROUND_BLUR_TILE'
+          data-track-metadata={JSON.stringify({ enabled: !isBackgroundBlurEnabled })}
+          className={cn(
+            'absolute z-10 flex items-center justify-center rounded-full shadow-md transition-colors',
+            compact
+              ? 'bottom-1 right-1 p-1'
+              : 'bottom-1 right-1 p-1.5 sm:bottom-2 sm:right-2 sm:p-2',
+            isBackgroundBlurEnabled
+              ? 'bg-blue-600 text-white hover:bg-blue-500'
+              : 'bg-black/50 text-white hover:bg-black/70',
+          )}
+        >
+          <ImagePlus className={cn(compact ? 'w-3 h-3' : 'w-4 h-4 sm:w-5 sm:h-5')} />
+        </button>
+      )}
+
       {/* Raised-hand indicator — prominent, shown on EVERY participant's tile so
           all members clearly see who has their hand up (driven by data channel). */}
       {isHandRaised && (
@@ -258,7 +309,7 @@ export function ParticipantTile({
             // Camera on → blur button holds the corner, so offset left; else take the corner.
             hasVideo
               ? compact
-                ? 'right-7'
+                ? 'right-[1.625rem]'
                 : 'right-10 sm:right-12'
               : compact
                 ? 'right-1'
@@ -288,12 +339,22 @@ export function ParticipantTile({
         </div>
       )}
 
-      {/* Network quality indicator */}
+      {/* Network quality indicator.
+          Bottom-right corner is shared with the local tile's control button (blur
+          when camera on, hand-raise when off). When a control holds the corner,
+          lift the badge above it so the signal indicator stays visible on
+          poor/lost connections. */}
       {(networkQuality === ConnectionQuality.Poor || networkQuality === ConnectionQuality.Lost) && (
         <div
           className={cn(
             'absolute rounded-full visual-regression-hide',
-            compact ? 'bottom-0.5 right-0.5 p-0.5' : 'bottom-1 right-1 sm:bottom-2 sm:right-2 p-1',
+            compact
+              ? cornerHasControl
+                ? 'bottom-6 right-0.5 p-0.5'
+                : 'bottom-0.5 right-0.5 p-0.5'
+              : cornerHasControl
+                ? 'bottom-10 right-1 sm:bottom-12 sm:right-2 p-1'
+                : 'bottom-1 right-1 sm:bottom-2 sm:right-2 p-1',
             networkQuality === ConnectionQuality.Lost
               ? 'bg-black/40 text-red-400'
               : 'bg-black/40 text-amber-400',
