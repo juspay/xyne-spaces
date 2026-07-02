@@ -1604,13 +1604,13 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     setShowCollectionDropdown(true);
                     setCollectionSearchQuery('');
                   }}
-                  className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-[#E4E6E7] hover:bg-[#E8EAED] transition-all duration-200 ease-in-out flex-shrink-0`}
+                  className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0`}
                   aria-label='Select collections'
                   title='Select collections'
                   data-track-category='XyneAI'
                   data-track-name='OPEN_COLLECTION_SELECTOR'
                 >
-                  <BookOpen className='w-4 h-4 text-[#7C3AED]' />
+                  <BookOpen className='w-4 h-4 text-muted-foreground' />
                 </button>
 
                 {/* Research Agent Button - only show if no research is selected */}
@@ -1809,20 +1809,20 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 {/* File Scope Pill — narrows Ask AI to a single file (opened from file viewer) */}
                 {fileScope && (
                   <div
-                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
                   >
                     <div className='flex items-center gap-1'>
                       <div className='flex-shrink-0'>
                         <FileText className='w-3.5 h-3.5 text-[#7C3AED]' />
                       </div>
-                      <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[160px] truncate">
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[160px] truncate">
                         {fileScope.name}
                       </span>
                     </div>
                     {onRemoveFileScope && (
                       <button
                         onClick={onRemoveFileScope}
-                        className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                        className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
                         aria-label={`Remove file scope ${fileScope.name}`}
                         data-track-category='XyneAI'
                         data-track-name='REMOVE_FILE_SCOPE'
@@ -1837,19 +1837,19 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 {selectedCollections.map(collection => (
                   <div
                     key={collection.id}
-                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
                   >
                     <div className='flex items-center gap-1'>
                       <div className='flex-shrink-0'>
                         <BookOpen className='w-3.5 h-3.5 text-[#7C3AED]' />
                       </div>
-                      <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap">
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
                         {collection.name}
                       </span>
                     </div>
                     <button
                       onClick={() => handleRemoveCollection(collection.id)}
-                      className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                      className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
                       aria-label={`Remove ${collection.name}`}
                       data-track-category='XyneAI'
                       data-track-name='REMOVE_COLLECTION'

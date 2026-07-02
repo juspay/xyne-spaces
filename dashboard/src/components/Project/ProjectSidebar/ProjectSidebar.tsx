@@ -37,9 +37,9 @@ const ProjectSidebar = ({
   const effectiveBoardId = boardFromFilter ?? activeBoardId ?? undefined;
 
   // Section expansion states
-  const [isProjectsExpanded, setIsProjectsExpanded] = useState(true);
-  const [isGroupsExpanded, setIsGroupsExpanded] = useState(true);
-  const [isPersonsExpanded, setIsPersonsExpanded] = useState(true);
+  const [isProjectsExpanded, setIsProjectsExpanded] = useState(false);
+  const [isGroupsExpanded, setIsGroupsExpanded] = useState(false);
+  const [isPersonsExpanded, setIsPersonsExpanded] = useState(false);
 
   // Track how many persons to display (load more pagination)
   const [visiblePersonsCount, setVisiblePersonsCount] = useState(5);

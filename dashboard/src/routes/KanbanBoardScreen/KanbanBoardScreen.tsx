@@ -2761,7 +2761,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             onDragEnd={event => void handleDragEnd(event)}
             sensors={sensors}
           >
-            <div className='h-full flex flex-col space-y-5 mb-12'>
+            <div className={`h-full flex flex-col space-y-5 ${groupBy !== 'none' ? 'mb-12' : ''}`}>
               {processedGroups.map(group => {
                 const isExpanded = expandedGroups.has(group.key);
                 const showGroupHeader = groupBy !== 'none';
