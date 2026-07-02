@@ -3410,3 +3410,22 @@ img.inline-emoji,
   color: #000;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
 }
+
+/* Recording waveform keyframes — shared by RecordingOverlay + RecordingControlBar
+   (see utils/recordingWaveform.tsx) */
+@keyframes recWaveOverlay {
+  from {
+    height: 20%;
+  }
+  to {
+    height: 100%;
+  }
+}
+@keyframes recWaveBar {
+  from {
+    height: 25%;
+  }
+  to {
+    height: 100%;
+  }
+}

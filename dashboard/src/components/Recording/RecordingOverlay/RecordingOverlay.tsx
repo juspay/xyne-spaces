@@ -18,6 +18,7 @@ import { formatRecordingDuration, generateRecordingTitle } from '../../../utils/
 import { recordingService } from '../../../services/Recording/recordingService';
 import { SaveTitleModal } from '../../../routes/RecordingsScreen/components/SaveTitleModal';
 import { toast } from 'sonner';
+import { Waveform } from '../../../utils/recordingWaveform';
 
 interface DragState {
   startX: number;
@@ -242,13 +243,13 @@ export function RecordingOverlay(): React.ReactElement | null {
           data-track-category='RecordingOverlay'
           data-track-name='drag_handle'
         >
-          <div className='bg-muted-foreground/50 dark:bg-gray-600 rounded-full px-3 py-0.5 shadow-sm pointer-events-none'>
-            <GripVertical className='w-3 h-3 text-muted-foreground dark:text-muted' />
+          <div className='bg-muted rounded-full px-3 py-0.5 shadow-sm pointer-events-none'>
+            <GripVertical className='w-3 h-3 text-muted-foreground' />
           </div>
         </button>
 
         {/* Card */}
-        <div className='bg-background dark:bg-gray-800 rounded-2xl shadow-2xl border border-border dark:border-gray-700 p-4 w-[280px]'>
+        <div className='bg-card rounded-2xl shadow-2xl border border-border p-4 w-[280px]'>
           {/* Top row: status/time + controls */}
           <div className='flex items-start justify-between gap-4 mb-4'>
             <div className='flex items-center gap-3 min-w-0'>
@@ -260,7 +261,7 @@ export function RecordingOverlay(): React.ReactElement | null {
                   </span>
                 )}
                 {isPaused && (
-                  <span className='relative inline-flex rounded-full h-3 w-3 bg-yellow-500' />
+                  <span className='relative inline-flex rounded-full h-3 w-3 bg-amber-500' />
                 )}
                 {isStarting && (
                   <span className='animate-pulse relative inline-flex rounded-full h-3 w-3 bg-blue-500' />
@@ -268,10 +269,10 @@ export function RecordingOverlay(): React.ReactElement | null {
               </div>
 
               <div className='min-w-0'>
-                <div className='font-semibold text-sm text-foreground dark:text-gray-100 leading-tight'>
+                <div className='font-semibold text-sm text-foreground leading-tight'>
                   {isStarting ? 'Starting...' : isPaused ? 'Paused' : 'Recording'}
                 </div>
-                <div className='text-xs text-muted-foreground dark:text-muted-foreground tabular-nums'>
+                <div className='text-xs text-muted-foreground tabular-nums'>
                   {isStarting ? 'Connecting...' : formatRecordingDuration(elapsedTime)}
                 </div>
               </div>
@@ -281,45 +282,38 @@ export function RecordingOverlay(): React.ReactElement | null {
               <button
                 onClick={handlePauseResume}
                 disabled={isStarting}
-                className='flex items-center justify-center w-9 h-9 rounded-full bg-muted dark:bg-gray-700 hover:bg-muted-foreground/20 transition-colors'
+                className='flex items-center justify-center w-9 h-9 rounded-full border border-border bg-foreground/15 hover:bg-foreground/25 transition-colors'
                 data-track-category='RecordingOverlay'
                 data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
               >
-                {isPaused ? <Play className='w-4 h-4' /> : <Pause className='w-4 h-4' />}
+                {isPaused ? (
+                  <Play className='w-4 h-4 text-foreground' />
+                ) : (
+                  <Pause className='w-4 h-4 text-foreground' />
+                )}
               </button>
 
               <button
                 onClick={handleStop}
                 disabled={isStarting}
-                className='flex items-center justify-center w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 transition-colors'
+                className='flex items-center justify-center w-10 h-10 rounded-full bg-destructive hover:bg-destructive/85 transition-colors'
                 data-track-category='RecordingOverlay'
                 data-track-name='stop_recording'
               >
-                <Square className='w-4 h-4 text-white fill-current' />
+                <Square className='w-4 h-4 text-destructive-foreground fill-current' />
               </button>
             </div>
           </div>
 
           {/* Waveform */}
           {(isRecording || isPaused) && (
-            <div className='flex items-center justify-between gap-[3px] h-8 mb-4'>
-              {Array.from({ length: 16 }, (_, i) => (
-                <div
-                  key={i}
-                  className='flex-1 bg-emerald-500 rounded-full'
-                  style={{
-                    animation: `waveform 0.6s ease-in-out ${i * 0.04}s infinite alternate`,
-                    animationPlayState: isPaused ? 'paused' : 'running',
-                  }}
-                />
-              ))}
-            </div>
+            <Waveform variant='overlay' paused={isPaused} className='mb-4' />
           )}
 
           {/* Link */}
           <button
             onClick={() => void navigate('/recordings')}
-            className='w-full flex items-center justify-center gap-1.5 text-xs text-blue-600 hover:underline'
+            className='w-full flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors'
             data-track-category='RecordingOverlay'
             data-track-name='go_to_recordings'
           >
@@ -327,14 +321,6 @@ export function RecordingOverlay(): React.ReactElement | null {
             Go to Recording
           </button>
         </div>
-
-        {/* Keyframes */}
-        <style>{`
-        @keyframes waveform {
-          from { height: 20%; }
-          to { height: 100%; }
-        }
-      `}</style>
       </div>
     </>,
     document.body,
