@@ -7,7 +7,7 @@ export class TextStrategy extends BaseStrategy {
     constructor(config?: StrategyConfig) {
         super()
         this.config = {
-            chunkSize: config?.chunkSize ?? 1000,
+            chunkSize: config?.chunkSize ?? 2000,
             chunkOverlap: config?.chunkOverlap ?? 200,
         }
     }
@@ -54,18 +54,61 @@ export class TextStrategy extends BaseStrategy {
         let currentChunk = ""
         const { chunkSize } = this.config
 
+        const flush = () => {
+            if (currentChunk.trim().length > 0) chunks.push(currentChunk.trim())
+            currentChunk = ""
+        }
+
         for (const para of paragraphs) {
+            // A single paragraph larger than chunkSize (e.g. minified JSON, a
+            // single-line CSV/HTML) would otherwise become one unbounded chunk.
+            // Split it on word boundaries so no chunk exceeds chunkSize.
+            if (para.length > chunkSize) {
+                flush()
+                chunks.push(...this.splitLongParagraph(para))
+                continue
+            }
+
             if (currentChunk.length + para.length + 2 > chunkSize && currentChunk.length > 0) {
-                chunks.push(currentChunk.trim())
-                currentChunk = ""
+                flush()
             }
             currentChunk += (currentChunk ? "\n\n" : "") + para
         }
 
-        if (currentChunk.trim().length > 0) {
-            chunks.push(currentChunk.trim())
+        flush()
+        return chunks
+    }
+
+    /**
+     * Split an oversized paragraph into <= chunkSize pieces, breaking on word
+     * boundaries. A single word longer than chunkSize (e.g. minified JSON with
+     * no whitespace) is hard-cut on char boundaries as an unavoidable fallback.
+     */
+    private splitLongParagraph(para: string): string[] {
+        const chunks: string[] = []
+        const { chunkSize } = this.config
+        let buf = ""
+
+        for (const word of para.split(/\s+/)) {
+            if (!word) continue
+
+            if (word.length > chunkSize) {
+                if (buf) { chunks.push(buf); buf = "" }
+                for (let i = 0; i < word.length; i += chunkSize) {
+                    chunks.push(word.slice(i, i + chunkSize))
+                }
+                continue
+            }
+
+            // +1 for the joining space
+            if (buf && buf.length + 1 + word.length > chunkSize) {
+                chunks.push(buf)
+                buf = ""
+            }
+            buf = buf ? `${buf} ${word}` : word
         }
 
+        if (buf) chunks.push(buf)
         return chunks
     }
 
