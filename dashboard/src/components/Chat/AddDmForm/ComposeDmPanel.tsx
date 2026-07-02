@@ -46,6 +46,7 @@ export const ComposeDmPanel: React.FC = () => {
   const [searchValue, setSearchValue] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isSearchUserOpen, setIsSearchUserOpen] = useState(false);
+  const [mentionSearchQuery, setMentionSearchQuery] = useState('');
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [preselectedInitialized, setPreselectedInitialized] = useState(false);
   const [createdChannelId, setCreatedChannelId] = useState<string | undefined>(undefined);
@@ -183,6 +184,7 @@ export const ComposeDmPanel: React.FC = () => {
 
   const handleMentionSearch = useCallback(
     (query: string) => {
+      setMentionSearchQuery(query);
       searchMentions(query);
     },
     [searchMentions],
@@ -206,6 +208,34 @@ export const ComposeDmPanel: React.FC = () => {
         hasAccess: true,
       }));
   }, [channelResults]);
+
+  const composeMentionItems = useMemo(() => {
+    if (selectedUsers.length <= 1) return mentionResults;
+
+    const query = mentionSearchQuery.trim().toLowerCase();
+    // Offer @channel and @here for group DMs, matching useMentionSearch's special
+    // mentions. The backend (sendInitialMessage) handles both in the initial message.
+    const specialMentions = [
+      {
+        id: 'special-channel',
+        name: 'channel',
+        type: 'channel' as const,
+        isSpecial: true,
+        description: 'Notify everyone in this group DM',
+      },
+      {
+        id: 'special-here',
+        name: 'here',
+        type: 'here' as const,
+        isSpecial: true,
+        description: 'Notify online members of this group DM',
+      },
+    ].filter(mention => !query || mention.name.includes(query));
+
+    if (specialMentions.length === 0) return mentionResults;
+
+    return [...specialMentions, ...mentionResults];
+  }, [mentionResults, mentionSearchQuery, selectedUsers.length]);
 
   const channelParticipation = useGetChannelUserStatus(existingDmChannel?.id || '');
   const [latestMessage] = useCachedQuery(
@@ -522,7 +552,7 @@ export const ComposeDmPanel: React.FC = () => {
                     value={field.state.value}
                     placeholder='Say something to start the conversation...'
                     showTypingIndicator={false}
-                    mentionItems={mentionResults}
+                    mentionItems={composeMentionItems}
                     onMentionSearch={handleMentionSearch}
                     channelItems={channelItems}
                     onChannelSearch={handleChannelSearch}
