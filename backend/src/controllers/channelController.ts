@@ -13,7 +13,8 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma, DeskType, EmailMergeMode, AppPermissionStatus, AppPermissionType } from '@prisma/client';
+import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma, DeskType, EmailMergeMode, AppPermissionStatus, AppPermissionType, ActivityClassification, ActivityClassificationJobType } from '@prisma/client';
+import { v4 as uuidv4 } from 'uuid';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
@@ -36,6 +37,8 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
+import { activityService } from '@/services/activity/activityService';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
@@ -254,17 +257,75 @@ export class ChannelController {
 
       // Send notifications to recipients (skip for self-DMs)
       if (recipientIds.length > 0) {
-        await notificationService.createDirectMessageNotifications(
-          recipientIds,
-          createdMessage.messageId,
-          conversation.conversationId,
-          channelId,
-          senderId,
-          senderInfo.name,
-          cleanContent,
-          workspaceId,
-          channelParticipants.length === 2 ? ChannelScopeType.DM : ChannelScopeType.GROUP_DM
-        );
+        const isGroupDm = channelParticipants.length > 2;
+
+        // @channel / @here in a group DM's first message must fire the explicit
+        // channel-wide mention notification. This REST path bypasses the Zero
+        // mutator pipeline, so the MessagesSideEffectHandler (which normally
+        // handles special mentions) never runs — replicate its GROUP_DM branch here.
+        const { hasChannel, hasHere } = extractSpecialMentions(messageContent);
+        const mentionType = hasChannel ? '@channel' : hasHere ? '@here' : undefined;
+
+        if (isGroupDm && mentionType) {
+          const channel = await this.channelRepository.findById(channelId);
+          await notificationService.createMentionNotifications(
+            recipientIds,
+            createdMessage.messageId,
+            conversation.conversationId,
+            channelId,
+            channel?.name ?? channelId,
+            senderId,
+            senderInfo.name,
+            cleanContent,
+            workspaceId,
+            mentionType,
+            false, // isDMChannel
+            false, // isThreadMessage
+            senderInfo.picture ?? '',
+            undefined, // prefetchedData
+            true, // isGroupDM
+          );
+
+          // Mirror MessagesSideEffectHandler.handleSpecialMentionActivities: create
+          // the activity-feed records for the @channel/@here audience so the mention
+          // shows up in recipients' Activity, not just as a push notification.
+          const audience =
+            mentionType === '@channel'
+              ? await getChannelParticipantsForMention(channelId)
+              : await getOnlineChannelParticipants(channelId);
+          const audienceUserIds = [
+            ...new Set(audience.map(u => u.userId).filter(id => id && id !== senderId)),
+          ];
+          if (audienceUserIds.length > 0) {
+            await activityService.createActivities(
+              audienceUserIds.map(userId => ({
+                id: uuidv4(),
+                userId,
+                actorId: senderId,
+                actorAction: 'group_mention' as const,
+                actionSource: 'message' as const,
+                actionSourceId: createdMessage.messageId,
+                messageId: createdMessage.messageId,
+                channelId,
+                isThreadActivity: false,
+                classification: ActivityClassification.PENDING,
+                classificationJobType: ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE,
+              })),
+            );
+          }
+        } else {
+          await notificationService.createDirectMessageNotifications(
+            recipientIds,
+            createdMessage.messageId,
+            conversation.conversationId,
+            channelId,
+            senderId,
+            senderInfo.name,
+            cleanContent,
+            workspaceId,
+            channelParticipants.length === 2 ? ChannelScopeType.DM : ChannelScopeType.GROUP_DM
+          );
+        }
 
         // Update unread counts for recipients (skip for self-DMs)
         await handleUnreadCount(
