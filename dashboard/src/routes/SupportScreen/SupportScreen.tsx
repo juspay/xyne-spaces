@@ -2400,6 +2400,7 @@ const TicketMetaRow = ({
         stageName?: string | null;
         assignedTo?: string | null;
         aiCategory?: string | null;
+        channelId?: string | null;
       }
     | undefined
     | null;
@@ -2423,7 +2424,12 @@ const TicketMetaRow = ({
         stageLabel={stage}
         boardId={boardId}
       />
-      <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} label={assigneeName} />
+      <AssigneePicker
+        ticketId={ticket.id}
+        assignedTo={ticket.assignedTo}
+        channelId={ticket.channelId ?? undefined}
+        label={assigneeName}
+      />
       {ticket.aiCategory && (
         <span
           className='inline-flex items-center justify-center h-[18px] px-2 rounded-sm bg-blue-100 dark:bg-blue-950/50 text-[10px] font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap'

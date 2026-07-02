@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Calendar, User, Tag, Timer } from 'lucide-react';
 import {
   BaseTicketType,
@@ -20,6 +20,8 @@ import { TagSelector } from '../TicketTable/TagSelector';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
+import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { PriorityOptions, useAssigneeOptions } from '../TicketTable/TicketTableHelper';
 import { v4 as uuidv4 } from 'uuid';
 import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
@@ -123,16 +125,36 @@ const AssigneeEditor: React.FC<{
   selectedValue: string | null;
   onSelect: (value: string | null) => void;
   onOpenChange: (open: boolean) => void;
-}> = ({ selectedValue, onSelect, onOpenChange }) => {
+  channelId: string | undefined;
+}> = ({ selectedValue, onSelect, onOpenChange, channelId }) => {
   const users = useUsers();
   const userGroups = useUserGroups();
   const assigneeOptions = useAssigneeOptions(users, userGroups || []);
+  const { shouldGate, memberIds, gatedAssign } = useChannelAssignGate(channelId);
+  const options = useMemo<SelectorOption[]>(() => {
+    if (!shouldGate) return assigneeOptions;
+    return assigneeOptions.map(o => {
+      if (!o.value.startsWith('user:')) return o;
+      const uid = o.value.slice('user:'.length);
+      return memberIds.has(uid) ? o : { ...o, badge: 'Not in channel' };
+    });
+  }, [assigneeOptions, shouldGate, memberIds]);
+
+  const handleSelect = (value: string | null): void => {
+    if (value && value.startsWith('user:')) {
+      const uid = value.slice('user:'.length);
+      const name = assigneeOptions.find(o => o.value === value)?.label ?? 'This user';
+      gatedAssign({ userId: uid, userName: name, assign: () => onSelect(value) });
+    } else {
+      onSelect(value);
+    }
+  };
 
   return (
     <EntitySelector
-      options={assigneeOptions}
+      options={options}
       selectedValue={selectedValue}
-      onSelect={onSelect}
+      onSelect={handleSelect}
       placeholder='Select assignee'
       searchPlaceholder='Search...'
       variant='inline'
@@ -319,6 +341,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
             selectedValue={ticket.assignedTo || null}
             onSelect={handleAssigneeChange}
             onOpenChange={handleAssigneeEditorOpenChange}
+            channelId={ticket.channelId ?? undefined}
           />
         </button>
       );

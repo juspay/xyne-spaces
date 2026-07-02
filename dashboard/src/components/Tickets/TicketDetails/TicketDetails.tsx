@@ -2556,6 +2556,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <UserSelector
                   selectedUserId={ticket.assignedTo ?? null}
                   onUserSelect={handleAssigneeChange}
+                  channelId={ticket.channelId ?? undefined}
                   noBorder={true}
                 />
               }

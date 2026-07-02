@@ -12,6 +12,7 @@ import { useWorkflowControl } from '../../services/Workflow/workflowGraphService
 import { ExecutionMetadata } from '../../services/Workflow/workflowGraphService.types';
 import ExecutionAttemptDropdown from './ExecutionAttemptDropdown';
 import { useUser } from '../../hooks/useUsers';
+import { useChannelAssignGate } from '../../hooks/useChannelAssignGate';
 
 interface WorkflowDetailsHeaderProps {
   ticket: Ticket;
@@ -56,6 +57,7 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignLoading, setAssignLoading] = useState(false);
   const [selectedAssignUser, setSelectedAssignUser] = useState<User[]>([]);
+  const assignGate = useChannelAssignGate(ticket?.channelId ?? undefined);
 
   const workflowTitle = ticket?.title ?? 'Loading…';
   const runId = ticket?.xyneId ?? ticket?.id ?? 'UNKNOWN';
@@ -107,28 +109,41 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
 
     const userToAssign = selectedAssignUser?.[0] ?? null;
 
-    setAssignLoading(true);
+    const doAssign = (): void => {
+      setAssignLoading(true);
 
-    try {
-      void zero.mutate(
-        mutators.ticket.updateAssignment({
-          ticketId: ticket.id,
-          assignedTo: userToAssign?.id ?? null,
-          timestamp: Date.now(),
-        }),
-      );
+      try {
+        void zero.mutate(
+          mutators.ticket.updateAssignment({
+            ticketId: ticket.id,
+            assignedTo: userToAssign?.id ?? null,
+            timestamp: Date.now(),
+          }),
+        );
 
-      setAssignModalOpen(false);
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Error assigning user to ticket:', error);
-      toast.error('Assignment Failed', {
-        description: 'There was an error assigning the user. Please try again.',
-        duration: 5000,
-      });
-    } finally {
-      setAssignLoading(false);
+        setAssignModalOpen(false);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('Error assigning user to ticket:', error);
+        toast.error('Assignment Failed', {
+          description: 'There was an error assigning the user. Please try again.',
+          duration: 5000,
+        });
+      } finally {
+        setAssignLoading(false);
+      }
+    };
+
+    if (!userToAssign) {
+      doAssign();
+      return;
     }
+
+    assignGate.gatedAssign({
+      userId: userToAssign.id,
+      userName: userToAssign.name ?? 'This user',
+      assign: doAssign,
+    });
   };
 
   // Description truncation and modal handling

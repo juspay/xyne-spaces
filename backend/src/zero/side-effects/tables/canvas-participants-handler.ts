@@ -61,8 +61,9 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
     role: string;
     actorAction: 'canvas_shared' | 'canvas_role_changed' | 'canvas_access_revoked';
     actionSourceId: string;
+    channelId: string | null;
   }): Promise<void> {
-    const { recipientUserIds, canvasId, role, actorAction, actionSourceId } = params;
+    const { recipientUserIds, canvasId, role, actorAction, actionSourceId, channelId } = params;
     const filteredRecipientIds = recipientUserIds.filter(id => id !== this.ctx.userID);
     if (filteredRecipientIds.length === 0) return;
 
@@ -75,9 +76,10 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
     const canvas = await db.canvas.findUnique({
       where: { id: canvasId },
-      select: { title: true },
+      select: { title: true, channelId: true },
     });
     const canvasTitle = canvas?.title || 'Untitled Canvas';
+    const effectiveChannelId = channelId ?? canvas?.channelId ?? null;
 
     await notificationService.createCanvasSharedNotifications(
       filteredRecipientIds,
@@ -98,6 +100,7 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
         canvasId,
         actorId: this.ctx.userID,
         classification: ActivityClassification.ACTIONABLE,
+        ...(effectiveChannelId ? { channelId: effectiveChannelId } : {}),
       })),
     );
   }
@@ -113,7 +116,7 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
         return;
       }
 
-      const { canvasId, userId, role } = participant;
+      const { canvasId, userId, role, channelId } = participant;
 
       if (userId && this.ctx.userID === userId) {
         logger.info(`[CanvasParticipantsHandler] User ${userId} added themselves to canvas ${canvasId} - skipping notification`);
@@ -127,6 +130,7 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
         role,
         actorAction: 'canvas_shared',
         actionSourceId: job.entityId,
+        channelId,
       });
 
     } catch (error) {
@@ -145,7 +149,7 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
         return;
       }
 
-      const { canvasId, userId, role } = participant;
+      const { canvasId, userId, role, channelId } = participant;
 
       if (userId && this.ctx.userID === userId) {
         logger.info(`[CanvasParticipantsHandler] User ${userId} changed their own role on canvas ${canvasId} - skipping notification`);
@@ -159,6 +163,7 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
         role,
         actorAction: 'canvas_role_changed',
         actionSourceId: job.entityId,
+        channelId,
       });
 
     } catch (error) {
@@ -195,6 +200,7 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
         role,
         actorAction: 'canvas_access_revoked',
         actionSourceId: job.entityId,
+        channelId: channelId ?? null,
       });
 
     } catch (error) {

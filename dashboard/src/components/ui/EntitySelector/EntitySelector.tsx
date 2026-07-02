@@ -477,9 +477,16 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                           )}
                         </div>
 
+                        {/* Trailing badge (e.g. "Not in channel") */}
+                        {option.badge && (
+                          <span className='shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded border border-border bg-muted text-muted-foreground whitespace-nowrap'>
+                            {option.badge}
+                          </span>
+                        )}
+
                         {/* Check mark if selected */}
                         <Check
-                          className={`w-4 h-4 text-action-primary flex-shrink-0 
+                          className={`w-4 h-4 text-action-primary flex-shrink-0
                             ${isSelected ? 'opacity-100' : 'opacity-0'}`}
                         />
                       </button>

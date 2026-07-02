@@ -18,8 +18,8 @@ export const TicketAssignmentActivity = ({
   const actor = useUser(actorId);
   const actorName = actor?.name || 'Xyne';
 
-  // Get the assigned user's name - always call the hook before early return
-  const assignedUser = useUser(ticket?.assignedTo || '');
+  const assignedUserId = ticket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
+  const assignedUser = useUser(assignedUserId);
   const assignedUserName = assignedUser?.name || 'Unknown';
 
   if (!ticket) {

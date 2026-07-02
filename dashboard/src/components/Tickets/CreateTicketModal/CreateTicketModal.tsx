@@ -47,6 +47,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
+import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { useActiveUserSearch, useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useWorkflowTypes } from '../../../hooks/useWorkflowTypes';
@@ -402,6 +403,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   const formValues = useStore(form.store, state => state.values);
   const selectedChannelId = formValues?.channelId;
+
+  // Channel-membership gate for assignee selection (badge + add-to-channel snackbar).
+  const {
+    shouldGate: assigneeShouldGate,
+    memberIds: assigneeMemberIds,
+    gatedAssign: gatedAssignUser,
+  } = useChannelAssignGate(selectedChannelId);
 
   // Find selected channel to get its projectId
   const selectedChannel = useMemo(
@@ -1350,6 +1358,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           />
         ),
         type: 'user' as const,
+        badge: assigneeShouldGate && !assigneeMemberIds.has(user.id) ? 'Not in channel' : undefined,
       })) || [];
 
     const filteredGroups = assigneeSearchValue.trim()
@@ -1377,7 +1386,15 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       return [selectedAssigneeOption as (typeof options)[number], ...options];
     }
     return options;
-  }, [users, userGroupOptions, assigneeSearchValue, showUserGroupsOnly, selectedAssigneeOption]);
+  }, [
+    users,
+    userGroupOptions,
+    assigneeSearchValue,
+    showUserGroupsOnly,
+    selectedAssigneeOption,
+    assigneeShouldGate,
+    assigneeMemberIds,
+  ]);
 
   // Get tag options
   const tagOptions = useMemo(() => {
@@ -2238,16 +2255,30 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     : null
                 }
                 onSelect={(value: string | null) => {
-                  field.handleChange(parseAssignee(value));
-                  if (value) {
-                    const picked = assigneeOptions.find(o => o.value === value);
-                    setSelectedAssigneeOption(
-                      picked
-                        ? { value: picked.value, label: picked.label, icon: picked.icon }
-                        : null,
-                    );
+                  const applyAssignee = (val: string | null): void => {
+                    field.handleChange(parseAssignee(val));
+                    if (val) {
+                      const picked = assigneeOptions.find(o => o.value === val);
+                      setSelectedAssigneeOption(
+                        picked
+                          ? { value: picked.value, label: picked.label, icon: picked.icon }
+                          : null,
+                      );
+                    } else {
+                      setSelectedAssigneeOption(null);
+                    }
+                  };
+                  // Gate individual users by channel membership; groups pass through.
+                  if (value && value.startsWith('user:')) {
+                    const uid = value.slice('user:'.length);
+                    const name = assigneeOptions.find(o => o.value === value)?.label ?? 'This user';
+                    gatedAssignUser({
+                      userId: uid,
+                      userName: name,
+                      assign: () => applyAssignee(value),
+                    });
                   } else {
-                    setSelectedAssigneeOption(null);
+                    applyAssignee(value);
                   }
                 }}
                 onSearchChange={setAssigneeSearchValue}

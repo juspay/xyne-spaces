@@ -289,6 +289,7 @@ export const ActivityItemCard = ({
             {actorAction !== 'paused_from_assignment' &&
               actorAction !== 'resumed_from_assignment' &&
               actorAction !== 'workflow_question' &&
+              channelId &&
               (isMobile ? (
                 <span className='font-semibold text-foreground'>
                   {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
