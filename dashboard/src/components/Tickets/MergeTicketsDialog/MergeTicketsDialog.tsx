@@ -2,12 +2,17 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import { RadioGroup, Radio } from '../../ui/RadioGroup';
-import type { Ticket } from '@xyne/shared';
+interface MergeTicket {
+  id: string;
+  createdAt?: number | null;
+  title?: string | null;
+  xyneId?: string | null;
+}
 
 interface MergeTicketsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  tickets: Ticket[];
+  tickets: MergeTicket[];
   onMerge: (parentTicketId: string) => void | Promise<void>;
 }
 
@@ -71,7 +76,7 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
                     {ticket.xyneId || ticket.id.slice(0, 8)}
                   </span>
                   <span className='text-muted-foreground ml-2'>
-                    {new Date(ticket.createdAt).toLocaleDateString(undefined, {
+                    {new Date(ticket.createdAt ?? 0).toLocaleDateString(undefined, {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',

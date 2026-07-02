@@ -80,6 +80,7 @@ const GlobalCommandMenu = ({
   );
   const [internalHideTabs, setInternalHideTabs] = useState(false);
   const [internalEnabledTabs, setInternalEnabledTabs] = useState<TabType[] | undefined>(undefined);
+  const [deskMergeEnabled, setDeskMergeEnabled] = useState(false);
 
   // External props take priority over internal state (e.g. when opened from SupportScreen)
   const initialMention =
@@ -111,134 +112,148 @@ const GlobalCommandMenu = ({
         setInternalContextualTab(undefined);
         setInternalHideTabs(false);
         setInternalEnabledTabs(undefined);
+        setDeskMergeEnabled(false);
       }
     },
     [onOpenChange, internalContextualTab, externalInitialTab, location.pathname],
   );
 
-  const handleFindInChannel = useCallback(() => {
-    const pathParts = location.pathname.split('/').filter(Boolean);
+  const handleFindInChannel = useCallback(
+    (event: KeyboardEvent) => {
+      // Only enable desk merge when opened via a UI element (e.g. the support screen search button),
+      // not from a real keyboard shortcut
+      const fromUI = event.__fromInvokeShortcut === true;
+      setDeskMergeEnabled(fromUI);
 
-    const buildChannelMention = (channel: (typeof channelData)[number]): MentionData => {
-      const channelName = resolveDMChannelName(channel, context.userID ?? '', allUsers);
-      return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
-    };
+      const pathParts = location.pathname.split('/').filter(Boolean);
 
-    // Screen mode: open the same full-page search bar that Cmd+K screen mode opens
-    // (GlobalTopBar listens for this event), pre-scoped with the in:<channel> chip
-    // so the cursor lands ready to type. No mention → just opens the empty bar.
-    const openSearchBar = (mention: MentionData | null): void => {
-      window.dispatchEvent(
-        new CustomEvent('xyne:activate-search-bar', mention ? { detail: { mention } } : undefined),
-      );
-    };
+      const buildChannelMention = (channel: (typeof channelData)[number]): MentionData => {
+        const channelName = resolveDMChannelName(channel, context.userID ?? '', allUsers);
+        return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
+      };
 
-    if (pathParts.includes('tickets') || pathParts.includes('projects')) {
-      if (searchMode === 'screen') {
-        openSearchBar(null);
-        return;
-      }
-      setInternalInitialMention(null);
-      setInternalContextualTab(TabType.TICKETS);
-      setInternalHideTabs(false);
-      setInternalEnabledTabs(undefined);
-      onOpenChange(true);
-      return;
-    }
+      // Screen mode: open the same full-page search bar that Cmd+K screen mode opens
+      // (GlobalTopBar listens for this event), pre-scoped with the in:<channel> chip
+      // so the cursor lands ready to type. No mention → just opens the empty bar.
+      const openSearchBar = (mention: MentionData | null): void => {
+        window.dispatchEvent(
+          new CustomEvent(
+            'xyne:activate-search-bar',
+            mention ? { detail: { mention } } : undefined,
+          ),
+        );
+      };
 
-    const supportIndex = pathParts.indexOf('support');
-    if (supportIndex !== -1) {
-      const deskChannelId = pathParts[supportIndex + 1] || null;
-      const deskChannel = deskChannelId ? channelData.find(c => c.id === deskChannelId) : undefined;
-      if (searchMode === 'screen') {
-        openSearchBar(deskChannel ? buildChannelMention(deskChannel) : null);
-        return;
-      }
-      setInternalInitialMention(deskChannel ? buildChannelMention(deskChannel) : null);
-      setInternalContextualTab(TabType.DESK);
-      setInternalHideTabs(true);
-      setInternalEnabledTabs([TabType.DESK]);
-      onOpenChange(true);
-      return;
-    }
-
-    const chatIndex = pathParts.indexOf('chat');
-    let channelId: string | null = null;
-    if (chatIndex !== -1) {
-      const nextSegment = pathParts[chatIndex + 1];
-      if (
-        nextSegment === 'dir' ||
-        nextSegment === 'dm' ||
-        nextSegment === 'bookmarks' ||
-        nextSegment === 'activity'
-      ) {
-        channelId = pathParts[chatIndex + 2] || null;
-      }
-    }
-
-    if (channelId) {
-      const channel = channelData.find(c => c.id === channelId);
-      if (channel) {
-        // Desk (support) channel → open with Desk tab + in:<channel> scope
-        if (channel.type === ChannelType.SUPPORT) {
-          if (searchMode === 'screen') {
-            openSearchBar(buildChannelMention(channel));
-            return;
-          }
-          setInternalInitialMention(buildChannelMention(channel));
-          setInternalContextualTab(TabType.DESK);
-          setInternalHideTabs(false);
-          setInternalEnabledTabs(undefined);
-          onOpenChange(true);
-          return;
-        }
-        // Inside a channel but viewing its Tickets sub-tab (URL carries
-        // `?tab=tickets`) → open with the Tickets tab + in:<channel> scope.
-        const activeChannelTab = new URLSearchParams(location.search).get('tab');
-        if (activeChannelTab === 'tickets') {
-          if (searchMode === 'screen') {
-            openSearchBar(buildChannelMention(channel));
-            return;
-          }
-          setInternalContextualTab(TabType.TICKETS);
-          setInternalInitialMention(buildChannelMention(channel));
-          setInternalHideTabs(false);
-          setInternalEnabledTabs(undefined);
-          onOpenChange(true);
-          return;
-        }
+      if (pathParts.includes('tickets') || pathParts.includes('projects')) {
         if (searchMode === 'screen') {
-          openSearchBar(buildChannelMention(channel));
+          openSearchBar(null);
           return;
         }
-        setInternalContextualTab(TabType.MESSAGES);
-        setInternalInitialMention(buildChannelMention(channel));
+        setInternalInitialMention(null);
+        setInternalContextualTab(TabType.TICKETS);
         setInternalHideTabs(false);
         setInternalEnabledTabs(undefined);
         onOpenChange(true);
         return;
       }
-    }
 
-    // Fallback — open normally (ALL tab)
-    if (searchMode === 'screen') {
-      openSearchBar(null);
-      return;
-    }
-    setInternalContextualTab(undefined);
-    setInternalInitialMention(null);
-    setInternalHideTabs(false);
-    setInternalEnabledTabs(undefined);
-    onOpenChange(true);
-  }, [
-    location.pathname,
-    location.search,
-    channelData,
-    allUsers,
-    onOpenChange,
-    context.userID,
-    searchMode,
-  ]);
+      const supportIndex = pathParts.indexOf('support');
+      if (supportIndex !== -1) {
+        const deskChannelId = pathParts[supportIndex + 1] || null;
+        const deskChannel = deskChannelId
+          ? channelData.find(c => c.id === deskChannelId)
+          : undefined;
+        if (searchMode === 'screen') {
+          openSearchBar(deskChannel ? buildChannelMention(deskChannel) : null);
+          return;
+        }
+        setInternalInitialMention(deskChannel ? buildChannelMention(deskChannel) : null);
+        setInternalContextualTab(TabType.DESK);
+        setInternalHideTabs(true);
+        setInternalEnabledTabs([TabType.DESK]);
+        onOpenChange(true);
+        return;
+      }
+
+      const chatIndex = pathParts.indexOf('chat');
+      let channelId: string | null = null;
+      if (chatIndex !== -1) {
+        const nextSegment = pathParts[chatIndex + 1];
+        if (
+          nextSegment === 'dir' ||
+          nextSegment === 'dm' ||
+          nextSegment === 'bookmarks' ||
+          nextSegment === 'activity'
+        ) {
+          channelId = pathParts[chatIndex + 2] || null;
+        }
+      }
+
+      if (channelId) {
+        const channel = channelData.find(c => c.id === channelId);
+        if (channel) {
+          // Desk (support) channel → open with Desk tab + in:<channel> scope
+          if (channel.type === ChannelType.SUPPORT) {
+            if (searchMode === 'screen') {
+              openSearchBar(buildChannelMention(channel));
+              return;
+            }
+            setInternalInitialMention(buildChannelMention(channel));
+            setInternalContextualTab(TabType.DESK);
+            setInternalHideTabs(false);
+            setInternalEnabledTabs(undefined);
+            onOpenChange(true);
+            return;
+          }
+          // Inside a channel but viewing its Tickets sub-tab (URL carries
+          // `?tab=tickets`) → open with the Tickets tab + in:<channel> scope.
+          const activeChannelTab = new URLSearchParams(location.search).get('tab');
+          if (activeChannelTab === 'tickets') {
+            if (searchMode === 'screen') {
+              openSearchBar(buildChannelMention(channel));
+              return;
+            }
+            setInternalContextualTab(TabType.TICKETS);
+            setInternalInitialMention(buildChannelMention(channel));
+            setInternalHideTabs(false);
+            setInternalEnabledTabs(undefined);
+            onOpenChange(true);
+            return;
+          }
+          if (searchMode === 'screen') {
+            openSearchBar(buildChannelMention(channel));
+            return;
+          }
+          setInternalContextualTab(TabType.MESSAGES);
+          setInternalInitialMention(buildChannelMention(channel));
+          setInternalHideTabs(false);
+          setInternalEnabledTabs(undefined);
+          onOpenChange(true);
+          return;
+        }
+      }
+
+      // Fallback — open normally (ALL tab)
+      if (searchMode === 'screen') {
+        openSearchBar(null);
+        return;
+      }
+      setInternalContextualTab(undefined);
+      setInternalInitialMention(null);
+      setInternalHideTabs(false);
+      setInternalEnabledTabs(undefined);
+      onOpenChange(true);
+    },
+    [
+      location.pathname,
+      location.search,
+      channelData,
+      allUsers,
+      onOpenChange,
+      context.userID,
+      searchMode,
+    ],
+  );
 
   // Only the search-mode instance owns Cmd+F; the context-picker copy mounted in
   // ThreadPannel would otherwise win the tiebreak and hijack the shortcut.
@@ -335,6 +350,7 @@ const GlobalCommandMenu = ({
       {...(contextualTab !== undefined ? { initialTab: contextualTab } : {})}
       {...(disableAutoFocus !== undefined ? { disableAutoFocus } : {})}
       {...(effectiveHideTabs ? { hideTabs: effectiveHideTabs } : {})}
+      deskMergeEnabled={deskMergeEnabled}
     />
   );
 };

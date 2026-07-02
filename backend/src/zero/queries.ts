@@ -28,6 +28,7 @@ import {
   ProjectType,
   TicketPriority,
   TicketStatusV2,
+  TicketReferenceRelation,
   DelayedMessageStatus,
   RecapEntityType,
 } from '@xyne/shared';
@@ -981,6 +982,7 @@ export const queries = defineQueries({
     }),
     ({ args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft } }) => {
       let query = zql.tickets.where('channelId', channelId);
+      query = query.where('isArchived', false);
 
       if (merchantMid) {
         query = query.where('merchantId', merchantMid);
@@ -1194,7 +1196,10 @@ export const queries = defineQueries({
         ? zql.tickets.where('id', id)
         : zql.tickets.where('xyneId', xyneId ?? '').where('workspaceId', workspaceId);
       return base
-        .related('emails', q => q.related('attachments'))
+        .related('referencesIn', ref =>
+          ref.where('relationType', TicketReferenceRelation.MERGED_INTO)
+            .related('sourceTicket'),
+        )
         .related('emailDrafts', q =>
           q.where(({ or, cmp }) =>
             or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
@@ -1317,6 +1322,7 @@ export const queries = defineQueries({
     }),
     ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
+      query = query.where('isArchived', false);
 
       if (assignedTo && assignedTo.length > 0) {
         query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
@@ -1423,6 +1429,23 @@ export const queries = defineQueries({
     z.object({ conversationId: z.string() }),
     ({ args: { conversationId } }) => {
       return zql.emails.where('conversationId', conversationId);
+    }
+  ),
+  getEmailsForConversations: defineQuery(
+    z.object({ conversationIds: z.array(z.string()) }),
+    ({ args: { conversationIds } }) => {
+      // An empty `IN []` predicate is invalid in Zero/SQL, and this query body
+      // runs during hash construction (before the caller's `enabled` flag can
+      // suppress it). When there are no conversation IDs, return a query that
+      // matches nothing instead — mirrors the vespaTicketIds guard above.
+      if (conversationIds.length === 0) {
+        return zql.emails
+          .where('conversationId', '__no_match__')
+          .related('attachments');
+      }
+      return zql.emails
+        .where('conversationId', 'IN', conversationIds)
+        .related('attachments');
     }
   ),
 

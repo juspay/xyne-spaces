@@ -1426,10 +1426,29 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     return refTicket?.title || refTicket?.xyneId || refTicket?.id || 'Unknown ticket';
   };
 
-  const handleUnmerge = async (sourceTicketId: string): Promise<void> => {
+  const handleUnmerge = async (
+    sourceTicketId: string,
+    sourceTicketXyneId?: string | null,
+  ): Promise<void> => {
+    // Guard against a missing/empty source ticket id — without this the request
+    // URL collapses to `/tickets//unmerge` (empty path segment). The call site
+    // also avoids invoking us without an id, but this keeps the API boundary safe.
+    if (!sourceTicketId) return;
     try {
       await apiInstance.post(`/tickets/${sourceTicketId}/unmerge`);
       toast.success('Ticket unmerged successfully');
+
+      // Navigate to the unmerged ticket
+      if (sourceTicketXyneId) {
+        const channelId = ticket.channelId || ticket.conversation?.channelId;
+        if (channelId) {
+          const pathParts = location.pathname.split('/').filter(Boolean);
+          const supportIdx = pathParts.indexOf('support');
+          const basePath =
+            supportIdx >= 0 ? '/' + pathParts.slice(0, supportIdx + 1).join('/') : '/support';
+          void navigate(`${basePath}/${channelId}/${sourceTicketXyneId}`);
+        }
+      }
     } catch {
       toast.error('Failed to unmerge ticket');
     }
@@ -3808,19 +3827,24 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       reference.relationType !== TicketReferenceRelation.MERGED_INTO,
                     ),
                   )}
-                  {referencesIn.map(reference =>
-                    renderRelatedTicketRow(
+                  {referencesIn.map(reference => {
+                    const unmergeSourceTicketId = reference.sourceTicket?.id;
+                    return renderRelatedTicketRow(
                       reference,
                       reference.sourceTicket,
                       formatIncomingReferenceLabel(reference.relationType),
                       false,
-                      reference.relationType === TicketReferenceRelation.MERGED_INTO
-                        ? (): void => {
-                            void handleUnmerge(reference.sourceTicket?.id || '');
+                      reference.relationType === TicketReferenceRelation.MERGED_INTO &&
+                        unmergeSourceTicketId
+                        ? () => {
+                            void handleUnmerge(
+                              unmergeSourceTicketId,
+                              reference.sourceTicket?.xyneId,
+                            );
                           }
                         : undefined,
-                    ),
-                  )}
+                    );
+                  })}
                 </>
               )}
 
