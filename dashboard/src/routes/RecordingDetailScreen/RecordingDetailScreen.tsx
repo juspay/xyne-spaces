@@ -31,9 +31,96 @@ import Dialog from '../../components/ui/Dialog';
 import { formatRecordingDuration, logRecordingError } from '../../utils/recordingUtils';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import { usePlatform } from '../../hooks/usePlatform';
+import { CanvasEditor } from '../../components/Canvas/CanvasEditor/CanvasEditor';
+import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
+import type { Canvas } from '../../components/Canvas/Canvas.types';
 
 interface RecordingNavState {
   recordingIds?: string[];
+}
+
+function isCanvas(value: unknown): value is Canvas {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate['id'] !== 'string' || typeof candidate['title'] !== 'string') {
+    return false;
+  }
+
+  const isCollaborative = candidate['isCollaborative'];
+  const channelId = candidate['channelId'];
+  const viewAccessId = candidate['viewAccessId'];
+  const editAccessId = candidate['editAccessId'];
+  const content = candidate['content'];
+
+  if (channelId !== undefined && channelId !== null && typeof channelId !== 'string') {
+    return false;
+  }
+  if (editAccessId !== undefined && typeof editAccessId !== 'string') {
+    return false;
+  }
+  if (isCollaborative !== undefined && typeof isCollaborative !== 'boolean') {
+    return false;
+  }
+  if (isCollaborative === true && typeof viewAccessId !== 'string') {
+    return false;
+  }
+
+  return content === undefined || Array.isArray(content);
+}
+
+function RecordingNotesSection({
+  notesCanvasViewAccessId,
+}: {
+  notesCanvasViewAccessId: string;
+}): ReactElement {
+  const [canvasData, canvasDetails] = useCachedQuery(
+    queries.getCanvas({ canvasId: notesCanvasViewAccessId }),
+    {
+      enabled: !!notesCanvasViewAccessId,
+    },
+  );
+  const canvas = isCanvas(canvasData) ? canvasData : null;
+  const hasCanvasError =
+    canvasDetails.type === 'error' || (canvasDetails.type === 'complete' && !canvas);
+
+  return (
+    <div className='mb-6 bg-background rounded-lg border border-border p-6'>
+      <div className='flex items-center gap-2 mb-4'>
+        <FileText className='w-4 h-4 text-muted-foreground' />
+        <h2 className='text-lg font-semibold text-foreground'>Notes</h2>
+      </div>
+
+      {hasCanvasError ? (
+        <div className='flex items-center gap-2 text-sm text-destructive'>
+          <AlertCircle className='size-4' />
+          <span>Failed to load notes.</span>
+        </div>
+      ) : !canvas ? (
+        <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+          <Loader2 className='size-4 animate-spin' />
+          <span>Loading notes...</span>
+        </div>
+      ) : canvas.isCollaborative ? (
+        <div className='min-h-[360px] overflow-hidden rounded-md border border-border'>
+          <CollaborativeCanvasEditor
+            key={canvas.id}
+            canvasId={canvas.id}
+            channelId={canvas.channelId || undefined}
+            title={canvas.title}
+            viewAccessId={canvas.viewAccessId}
+            editAccessId={canvas.editAccessId}
+            editable={false}
+            placeholder='Recording notes...'
+            autoFocus={false}
+          />
+        </div>
+      ) : (
+        <div className='min-h-[240px] overflow-hidden rounded-md border border-border p-4'>
+          <CanvasEditor content={canvas.content} editable={false} canvasId={canvas.id} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function RecordingDetailScreen(): ReactElement {
@@ -385,12 +472,19 @@ export default function RecordingDetailScreen(): ReactElement {
           </div>
         )}
 
-        {/* No content message */}
-        {!recording.hasTranscript && !recording.hasSummary && (
-          <div className='bg-background rounded-lg border border-border p-12 text-center'>
-            <p className='text-muted-foreground'>Transcript and summary are being processed...</p>
-          </div>
+        {/* Notes */}
+        {recording.notesCanvasViewAccessId && (
+          <RecordingNotesSection notesCanvasViewAccessId={recording.notesCanvasViewAccessId} />
         )}
+
+        {/* No content message */}
+        {!recording.hasTranscript &&
+          !recording.hasSummary &&
+          !recording.notesCanvasViewAccessId && (
+            <div className='bg-background rounded-lg border border-border p-12 text-center'>
+              <p className='text-muted-foreground'>Transcript and summary are being processed...</p>
+            </div>
+          )}
       </div>
 
       {/* Share Recording Dialog */}

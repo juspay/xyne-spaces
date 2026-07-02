@@ -34,6 +34,7 @@ import {
   generateRecordingTitle,
   STT_MODEL_LABELS,
 } from '../../utils/recordingUtils';
+import { logger, Event as LoggerEvent } from '../../utils/logger';
 import { usePaginatedRecordings, type RecordingEntry } from '../../hooks/usePaginatedRecordings';
 import { useRecordingConnectionState } from './hooks/useRecordingConnectionState';
 import {
@@ -65,6 +66,8 @@ export default function RecordingsScreen(): ReactElement {
   const room = useRecordingStore(ctx => ctx.room);
 
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
+  const [isCanvasPaneOpen, setIsCanvasPaneOpen] = useState(true);
+  const [notesCanvasTitle, setNotesCanvasTitle] = useState('Recording Notes');
 
   const hasCanvas = !!notesCanvasId && !!notesCanvasViewAccessId;
 
@@ -119,22 +122,40 @@ export default function RecordingsScreen(): ReactElement {
       const viewAccessId = uuidv4();
       await canvasService.createCollaborativeCanvas({
         id: canvasId,
-        title: 'Recording Notes',
+        title: notesCanvasTitle,
         ...(channelId ? { channelId } : {}),
         viewAccessId,
       });
       sendRecordingEvent({ type: 'setNotesCanvas', canvasId, viewAccessId });
+      setIsCanvasPaneOpen(true);
       // Persist the link on the call now; the thread post happens in the summary pipeline
       if (externalId) {
-        await zero.mutate(
-          mutators.calls.linkNotesCanvas({
+        try {
+          const linkResult = await zero.mutate(
+            mutators.calls.linkNotesCanvas({
+              callId: externalId,
+              notesCanvasViewAccessId: viewAccessId,
+            }),
+          ).server;
+          if (linkResult.type === 'error') {
+            throw new Error(linkResult.error?.message ?? 'Failed to link notes canvas');
+          }
+        } catch (linkError) {
+          logger.warn(LoggerEvent.API_CALL_FAILED, {
+            message: 'Failed to link notes canvas to recording',
             callId: externalId,
-            notesCanvasViewAccessId: viewAccessId,
-          }),
-        ).server;
+            canvasId,
+            error: linkError instanceof Error ? linkError.message : String(linkError),
+          });
+          toast.warning('Notes were created, but may not appear on the recording detail page yet.');
+        }
       }
-    } catch {
-      toast.error('Failed to create notes canvas');
+    } catch (err) {
+      logger.error(LoggerEvent.API_CALL_FAILED, {
+        message: 'Failed to create notes canvas',
+        error: err instanceof Error ? err.message : String(err),
+      });
+      toast.error('Failed to create notes canvas. Please try again.');
     } finally {
       setIsCreatingCanvas(false);
     }
@@ -446,7 +467,7 @@ export default function RecordingsScreen(): ReactElement {
           inset: isActive ? undefined : '0',
         }}
       >
-        {notesCanvasId && notesCanvasViewAccessId ? (
+        {notesCanvasId && notesCanvasViewAccessId && isCanvasPaneOpen ? (
           /* Split view — only after a notes canvas is created */
           <PanelGroup direction='horizontal' autoSaveId='recording-split-view'>
             <Panel defaultSize={50} minSize={30}>
@@ -455,14 +476,21 @@ export default function RecordingsScreen(): ReactElement {
                 startTime={startTime}
                 isPaused={recordingStatus === 'paused'}
                 hasCanvas
+                isCanvasPaneOpen
               />
             </Panel>
-            <PanelResizeHandle className='w-px bg-border hover:bg-blue-400 transition-colors' />
+            <PanelResizeHandle className='group relative w-3 flex-shrink-0 bg-muted/40 transition-colors hover:bg-muted dark:bg-gray-800/60 dark:hover:bg-gray-700'>
+              <div className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-blue-400 dark:bg-gray-700 dark:group-hover:bg-blue-400' />
+              <div className='absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/30 opacity-80 transition-colors group-hover:bg-blue-400 dark:bg-gray-500' />
+            </PanelResizeHandle>
             <Panel defaultSize={50} minSize={25}>
               <RecordingCanvasPane
                 channelId={channelId}
                 notesCanvasId={notesCanvasId}
                 notesCanvasViewAccessId={notesCanvasViewAccessId}
+                title={notesCanvasTitle}
+                onTitleChange={setNotesCanvasTitle}
+                onClose={() => setIsCanvasPaneOpen(false)}
               />
             </Panel>
           </PanelGroup>
@@ -472,8 +500,11 @@ export default function RecordingsScreen(): ReactElement {
             transcripts={transcripts}
             startTime={startTime}
             isPaused={recordingStatus === 'paused'}
+            hasCanvas={hasCanvas}
+            isCanvasPaneOpen={false}
             isCreatingCanvas={isCreatingCanvas}
             onCreateCanvas={() => void handleCreateCanvas()}
+            onOpenCanvas={() => setIsCanvasPaneOpen(true)}
           />
         )}
 

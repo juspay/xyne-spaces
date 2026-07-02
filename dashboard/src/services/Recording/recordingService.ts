@@ -37,6 +37,7 @@ export interface RecordingDetail extends Recording {
   conversationId: string | null;
   channelId: string | null;
   messageId: string | null;
+  notesCanvasViewAccessId: string | null;
   hasRecording?: boolean;
 }
 
