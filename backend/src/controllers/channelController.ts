@@ -1465,6 +1465,51 @@ export class ChannelController {
     }
   };
 
+  // POST /api/channels/member-counts - Participant counts for a set of channels
+  getChannelMemberCounts = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const { channelIds } = req.body as { channelIds?: unknown };
+      if (!Array.isArray(channelIds) || channelIds.some(id => typeof id !== 'string')) {
+        res.status(400).json({ success: false, error: 'channelIds must be an array of strings' });
+        return;
+      }
+
+      // Bound the input so a single request can't issue an unbounded IN query.
+      const MAX_CHANNEL_IDS = 10000;
+      if (channelIds.length > MAX_CHANNEL_IDS) {
+        res.status(400).json({
+          success: false,
+          error: `channelIds exceeds the maximum of ${MAX_CHANNEL_IDS}`,
+        });
+        return;
+      }
+
+      const counts: Record<string, number> = {};
+      if (channelIds.length === 0) {
+        res.status(200).json({ success: true, data: { counts } });
+        return;
+      }
+
+      const stats = await db.channelStats.findMany({
+        where: { channelId: { in: channelIds as string[] } },
+        select: { channelId: true, participantCount: true },
+      });
+
+      for (const stat of stats) counts[stat.channelId] = stat.participantCount;
+
+      res.status(200).json({ success: true, data: { counts } });
+    } catch (error) {
+      logger.error('Error in getChannelMemberCounts:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  };
+
   // GET /api/channels/:channelId/vespa-participants - Channel participants (user IDs) from Vespa chat_container.permissions
   getVespaParticipants = async (req: Request, res: Response): Promise<void> => {
     try {

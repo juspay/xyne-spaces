@@ -1,11 +1,21 @@
 import { ReactElement, useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Hash, Lock, Users, Search, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
+import {
+  Hash,
+  Lock,
+  Users,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  ArrowLeft,
+  ArrowUpDown,
+} from 'lucide-react';
 import Input from '../../ui/Input';
 import { ChannelVisibility, User } from '@xyne/shared';
 import { useBrowsableChannels } from '../../../hooks/useChannels';
 import { useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { channelService } from '../../../services/Chat/channelService';
 import {
   mixpanelService,
   EVENTS,
@@ -14,14 +24,45 @@ import {
 
 const PAGE_SIZE = 10;
 
+type SortMode = 'alphabetical' | 'memberCount';
+
 const BrowseChannels = (): ReactElement => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [sortBy, setSortBy] = useState<SortMode>('alphabetical');
 
   const { isMobile } = usePlatform();
 
   const channels = useBrowsableChannels();
+
+  // Fetch member counts for the browsable list via the API, re-fetches whenever the set of channels changes.
+  const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
+  const channelIds = useMemo(() => channels.map(c => c.id), [channels]);
+  const channelIdsKey = channelIds.join(',');
+
+  useEffect(() => {
+    if (channelIds.length === 0) {
+      setMemberCounts({});
+      return;
+    }
+
+    let cancelled = false;
+    channelService
+      .getChannelMemberCounts(channelIds)
+      .then(counts => {
+        if (!cancelled) setMemberCounts(counts);
+      })
+      .catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error('Failed to fetch channel member counts:', err);
+      });
+    return (): void => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelIdsKey]);
+
   const users = useUsers();
   const userMap = useMemo(() => {
     const map = new Map<string, User>();
@@ -29,32 +70,50 @@ const BrowseChannels = (): ReactElement => {
     return map;
   }, [users]);
 
-  // Filter and sort channels - prioritize channels starting with search query
+  // Filter channels by the search query, then sort by the selected mode.
   const filteredChannels = useMemo(() => {
     if (!channels) return [];
 
     const query = searchQuery.toLowerCase();
 
-    if (!query) return channels;
+    const filtered = query
+      ? channels.filter(channel => {
+          const matchesName = channel.name.toLowerCase().includes(query);
+          const matchesDesc = channel.description?.toLowerCase().includes(query);
+          return matchesName || matchesDesc;
+        })
+      : [...channels];
 
-    const filtered = channels.filter(channel => {
-      const matchesName = channel.name.toLowerCase().includes(query);
-      const matchesDesc = channel.description?.toLowerCase().includes(query);
-      return matchesName || matchesDesc;
-    });
+    // Member count: most members first, ties broken alphabetically.
+    if (sortBy === 'memberCount') {
+      return filtered.sort((a, b) => {
+        const countDiff = (memberCounts[b.id] ?? 0) - (memberCounts[a.id] ?? 0);
+        if (countDiff !== 0) return countDiff;
+        return a.name.localeCompare(b.name);
+      });
+    }
 
-    // Sort: channels starting with query first, then channels containing query
-    return filtered.sort((a, b) => {
-      const aStartsWith = a.name.toLowerCase().startsWith(query);
-      const bStartsWith = b.name.toLowerCase().startsWith(query);
+    // Alphabetical with an active query: prioritize names starting with the query.
+    if (query) {
+      return filtered.sort((a, b) => {
+        const aStartsWith = a.name.toLowerCase().startsWith(query);
+        const bStartsWith = b.name.toLowerCase().startsWith(query);
 
-      if (aStartsWith && !bStartsWith) return -1;
-      if (!aStartsWith && bStartsWith) return 1;
+        if (aStartsWith && !bStartsWith) return -1;
+        if (!aStartsWith && bStartsWith) return 1;
 
-      // If both start with or both don't start with, sort alphabetically
-      return a.name.localeCompare(b.name);
-    });
-  }, [channels, searchQuery]);
+        return a.name.localeCompare(b.name);
+      });
+    }
+
+    // Alphabetical
+    return filtered.sort((a, b) => a.name.localeCompare(b.name));
+  }, [channels, searchQuery, sortBy, memberCounts]);
+
+  const handleSortChange = (mode: SortMode): void => {
+    setSortBy(mode);
+    setCurrentPage(1);
+  };
 
   // Track search execution (no sensitive data - only metadata)
   useEffect(() => {
@@ -105,19 +164,35 @@ const BrowseChannels = (): ReactElement => {
 
       <div className='flex-1 overflow-y-auto p-4'>
         <div className='space-y-4 max-w-4xl mx-auto'>
-          {/* Search Input */}
-          <div className='relative'>
-            <Search
-              size={16}
-              className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground'
-            />
-            <Input
-              placeholder='Search channels...'
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className='pl-9'
-              autoFocus={!isMobile}
-            />
+          {/* Search Input + Sort Toggle */}
+          <div className='flex items-center gap-2'>
+            <div className='relative flex-1'>
+              <Search
+                size={16}
+                className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground'
+              />
+              <Input
+                placeholder='Search channels...'
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className='pl-9'
+                autoFocus={!isMobile}
+              />
+            </div>
+            <button
+              type='button'
+              onClick={() =>
+                handleSortChange(sortBy === 'alphabetical' ? 'memberCount' : 'alphabetical')
+              }
+              className='inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs text-foreground hover:bg-accent transition-colors'
+              aria-label={`Sort by ${sortBy === 'alphabetical' ? 'alphabetical' : 'member count'}, click to change`}
+              data-track-category='CHANNEL_SEARCH'
+              data-track-name='TOGGLE_CHANNEL_SORT'
+              data-track-metadata={JSON.stringify({ sortBy })}
+            >
+              <ArrowUpDown size={12} className='text-muted-foreground' />
+              {sortBy === 'alphabetical' ? 'Alphabetical' : 'Member count'}
+            </button>
           </div>
 
           {/* Channel List */}
@@ -130,6 +205,7 @@ const BrowseChannels = (): ReactElement => {
               paginatedChannels.map(channel => {
                 const isPrivate = channel.visibility === ChannelVisibility.PRIVATE;
                 const createdByUser = userMap.get(channel.createdBy);
+                const memberCount = memberCounts[channel.id];
                 return (
                   <button
                     key={channel.id}
@@ -167,6 +243,12 @@ const BrowseChannels = (): ReactElement => {
                         </div>
                       </div>
                     </div>
+                    {memberCount !== undefined && (
+                      <span className='flex items-center gap-1 shrink-0 pl-3 text-xs text-muted-foreground'>
+                        <Users size={12} />
+                        {memberCount}
+                      </span>
+                    )}
                   </button>
                 );
               })

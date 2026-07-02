@@ -185,6 +185,15 @@ export class ChannelService {
     }>(`/channels/${channelId}/members`);
     return response.data.data?.members ?? [];
   }
+
+  async getChannelMemberCounts(channelIds: string[]): Promise<Record<string, number>> {
+    if (channelIds.length === 0) return {};
+    const response = await apiInstance.post<{
+      success: boolean;
+      data?: { counts: Record<string, number> };
+    }>('/channels/member-counts', { channelIds });
+    return response.data.data?.counts ?? {};
+  }
 }
 
 export const channelService = new ChannelService();
