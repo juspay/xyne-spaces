@@ -19,7 +19,7 @@ function setSessionCookie(
   res: Response,
   participantId: string,
   callId: string,
-  externalId: string,
+  externalId: string
 ): void {
   const token = externalCallTokenService.sign({ participantId, callId, externalId });
   res.cookie(extCallCookieName(externalId), token, extCallCookieOptions(isProduction));
@@ -75,7 +75,7 @@ export const callLobbyController = {
         });
 
         logger.info(
-          `[call-lobby] requestToJoin: session valid, skipping approval | participantId=${callSession.participantId}`,
+          `[call-lobby] requestToJoin: session valid, skipping approval | participantId=${callSession.participantId}`
         );
         res.status(200).json({ skipApproval: true });
         return;
@@ -204,7 +204,7 @@ export const callLobbyController = {
       });
 
       logger.info(
-        `[call-lobby] rejoinLobby: session valid, skipping approval | participantId=${callSession.participantId}`,
+        `[call-lobby] rejoinLobby: session valid, skipping approval | participantId=${callSession.participantId}`
       );
       res.json({ skipApproval: true });
     } catch (err) {
@@ -254,7 +254,9 @@ export const callLobbyController = {
         message: message.trim(),
       });
 
-      res.status(201).json({ ...created, displayName, isExternal: participant?.isExternal ?? false });
+      res
+        .status(201)
+        .json({ ...created, displayName, isExternal: participant?.isExternal ?? false });
     } catch (err) {
       logger.error(`[call-lobby] sendMessage failed | error=${err}`);
       res.status(500).json({ error: 'Internal server error' });
@@ -289,6 +291,46 @@ export const callLobbyController = {
       res.json({ participants });
     } catch (err) {
       logger.error(`[call-lobby] getParticipants failed | error=${err}`);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  /**
+   * GET /api/call-lobby/:externalId/recording-state
+   * Returns the active in-call recording state for an authenticated external participant.
+   */
+  getRecordingState: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { call, callSession } = req as CallLobbyRequest;
+
+      if (callSession?.response !== InvitationResponse.ACCEPTED) {
+        res.status(403).json({ error: 'Not admitted for this call' });
+        return;
+      }
+
+      const recording = await repositories.callRecordings.findActiveByCallId(call.callId);
+
+      if (!recording) {
+        res.json({ activeRecording: null });
+        return;
+      }
+
+      const starter = await db.user.findUnique({
+        where: { id: recording.startedBy },
+        select: { displayName: true, name: true },
+      });
+
+      res.json({
+        activeRecording: {
+          recordingId: recording.id,
+          startedBy: recording.startedBy,
+          startedByName: starter?.displayName || starter?.name || null,
+          startedAt: recording.startedAt.getTime(),
+          recordingType: recording.recordingType,
+        },
+      });
+    } catch (err) {
+      logger.error(`[call-lobby] getRecordingState failed | error=${err}`);
       res.status(500).json({ error: 'Internal server error' });
     }
   },

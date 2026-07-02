@@ -30,18 +30,18 @@ export function RecordingButton({
   midnightControlClass,
   midnightPopoverClass,
   callId,
-}: RecordingButtonProps) {
+}: RecordingButtonProps): React.ReactElement {
   const [showPicker, setShowPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
+    const handleClickOutside = (e: MouseEvent): void => {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
         setShowPicker(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return (): void => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Only the starter can stop; for everyone else the button is a non-interactive
@@ -86,7 +86,7 @@ export function RecordingButton({
             ? stopDisabled
               ? 'Recording in progress — only the person who started it can stop it'
               : 'Stop recording'
-            : 'Start recording'
+            : 'Start AI recording'
         }
         data-track-event='BUTTON_CLICK'
         data-track-category='CALLS'
@@ -118,7 +118,7 @@ export function RecordingButton({
           )}
         >
           <div className='px-4 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-gray-500'>
-            Start recording
+            Start AI recording
           </div>
           <button
             onClick={() => handlePick(RecordingType.AUDIO_ONLY)}
@@ -128,8 +128,8 @@ export function RecordingButton({
           >
             <Mic className='w-4 h-4 text-blue-400 flex-shrink-0' />
             <div>
-              <div className='font-medium'>Audio only</div>
-              <div className='text-xs text-gray-400'>Record audio from all participants</div>
+              <div className='font-medium'>Voice only</div>
+              <div className='text-xs text-gray-400'>Record participant audio and transcript</div>
             </div>
           </button>
           <div className='h-px bg-gray-600 mx-3' />
@@ -141,8 +141,10 @@ export function RecordingButton({
           >
             <Monitor className='w-4 h-4 text-purple-400 flex-shrink-0' />
             <div>
-              <div className='font-medium'>Screen + audio</div>
-              <div className='text-xs text-gray-400'>Record screen share and audio</div>
+              <div className='font-medium'>Screen + voice</div>
+              <div className='text-xs text-gray-400'>
+                Record screen share, audio, and transcript
+              </div>
             </div>
           </button>
         </div>

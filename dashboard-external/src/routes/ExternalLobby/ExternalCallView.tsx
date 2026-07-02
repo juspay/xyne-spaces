@@ -90,6 +90,14 @@ export function ExternalCallView({
     staleTime: 0,
   });
 
+  const recordingStateQuery = useQuery({
+    queryKey: ['call-lobby-recording-state', externalId],
+    queryFn: () => callLobbyService.getRecordingState(externalId),
+    enabled: isConnected,
+    refetchInterval: 2000,
+    staleTime: 0,
+  });
+
   // Map API participants to the CallParticipant format expected by ParticipantsSidebar
   const callParticipants = useMemo(() => {
     if (!participantsQuery.data) return [];
@@ -185,6 +193,8 @@ export function ExternalCallView({
         onCallChatNewMessage={handleCallChatNewMessage}
         raisedHands={raisedHands}
         onToggleHandRaise={toggleHandRaise}
+        externalActiveRecording={recordingStateQuery.data?.activeRecording}
+        privacyReminderEnabled={recordingStateQuery.isFetched || recordingStateQuery.isError}
       />
     </>
   );
