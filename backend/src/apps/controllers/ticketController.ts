@@ -126,6 +126,7 @@ const AppDeskInboundBodySchema = z.object({
   body: z.string().trim().optional(),
   senderName: z.string().trim().optional(),
   senderEmail: z.string().email('senderEmail must be a valid email when provided').trim().optional(),
+  additionalFormFields: z.record(z.unknown()).optional(),
 });
 
 const ListBySenderQuerySchema = z.object({
@@ -1952,9 +1953,11 @@ export class TicketController {
       const {
         channelId, threadId, externalId: bodyExternalId, subject, body,
         senderEmail, senderName,
+        additionalFormFields,
       } = bodyResult.data;
 
       const userId = req.user!.id;
+      const workspaceId = req.user!.workspaceId!;
 
       const reqFiles = (req.files && !Array.isArray(req.files))
         ? (req.files as Record<string, Express.Multer.File[]>)
@@ -1993,6 +1996,7 @@ export class TicketController {
 
       const externalThreadId = threadId;
       const externalMessageId = bodyExternalId || randomUUID();
+      let customFieldValues: CustomFieldWritePayload | undefined;
       let emailFrom =
         (senderName && senderEmail && `${senderName} <${senderEmail}>`) ||
         senderName ||
@@ -2042,8 +2046,38 @@ export class TicketController {
         await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, email.id);
         const existingTicket = await prismaClient.ticket.findFirst({
           where: { conversationId: threadEmail.conversationId },
-          select: { id: true, xyneId: true },
+          select: { id: true, xyneId: true, boardId: true },
         });
+
+        if (additionalFormFields && existingTicket?.id) {
+          if (!existingTicket.boardId) {
+            res.status(503).json({
+              error: 'Ticket board is not configured for additional form fields',
+              code: 'MISCONFIGURED',
+            });
+            return;
+          }
+
+          try {
+            customFieldValues = await buildCustomFieldWritePayload(
+              existingTicket.boardId,
+              workspaceId,
+              additionalFormFields,
+              { requireAllRequiredFields: false },
+            );
+          } catch (error) {
+            res.status(400).json({
+              error: error instanceof Error ? error.message : 'Invalid custom field values',
+              code: 'VALIDATION_ERROR',
+            });
+            return;
+          }
+
+          if (customFieldValues && customFieldValues.fieldValues.length > 0) {
+            await syncCustomFieldValues(existingTicket.id, customFieldValues, userId);
+          }
+        }
+
         logger.info('[AppDeskInbound] appended message to existing thread', {
           threadId: externalThreadId,
           conversationId: threadEmail.conversationId,
@@ -2051,6 +2085,7 @@ export class TicketController {
           ticketId: existingTicket?.id,
           xyneId: existingTicket?.xyneId,
           fileCount: uploadedFiles.length,
+          additionalFormFieldsCount: additionalFormFields ? Object.keys(additionalFormFields).length : 0,
         });
         res.status(200).json({
           ticketId: existingTicket?.id,
@@ -2064,6 +2099,20 @@ export class TicketController {
       const effectiveBoardId = channelPref.boardId || undefined;
       if (!effectiveBoardId) {
         res.status(503).json({ error: 'App desk board is not configured', code: 'MISCONFIGURED' });
+        return;
+      }
+
+      try {
+        customFieldValues = await buildCustomFieldWritePayload(
+          effectiveBoardId,
+          workspaceId,
+          additionalFormFields,
+        );
+      } catch (error) {
+        res.status(400).json({
+          error: error instanceof Error ? error.message : 'Invalid custom field values',
+          code: 'VALIDATION_ERROR',
+        });
         return;
       }
 
@@ -2097,6 +2146,11 @@ export class TicketController {
       }
 
       const { ticket, conversation, email: initialEmail } = result as { ticket: any; conversation: any; email: any };
+
+      if (customFieldValues && customFieldValues.fieldValues.length > 0 && ticket?.id) {
+        await syncCustomFieldValues(ticket.id, customFieldValues, userId);
+      }
+
       await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, initialEmail.id);
 
       logger.info('[AppDeskInbound] created new ticket', {
@@ -2107,6 +2161,7 @@ export class TicketController {
         emailId: initialEmail?.id,
         boardId: effectiveBoardId,
         fileCount: uploadedFiles.length,
+        additionalFormFieldsCount: additionalFormFields ? Object.keys(additionalFormFields).length : 0,
       });
 
       res.status(201).json({
