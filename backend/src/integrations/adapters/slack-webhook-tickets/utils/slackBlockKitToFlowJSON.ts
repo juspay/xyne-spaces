@@ -358,6 +358,31 @@ function parseMarkdownTable(content: string): FlowComponent | null {
 
 function mrkdwnWithBlocksToFlowComponent(content: string, checkTables = false): FlowComponent | null {
   const trimmed = content.trim();
+
+  const gtRun = /^>+/.exec(trimmed);
+  if (gtRun) {
+    const runLen = gtRun[0].length;
+    const consumed = runLen >= 3 ? 3 : 1; // Slack matches `>>>` or `>`
+    const rest = trimmed.slice(consumed);
+    const leftover = (/^[>\t ]*/.exec(rest) as RegExpExecArray)[0];
+    const body = rest.slice(leftover.length);
+
+    if (runLen >= 3 || /^```/.test(body)) {
+      const children: FlowComponent[] = [];
+      const leftoverText = leftover.trim();
+      if (leftoverText) {
+        children.push({ id: crypto.randomUUID(), type: 'text', props: { content: '​' + leftoverText } });
+      }
+      const inner = body.trim() ? mrkdwnWithBlocksToFlowComponent(body, checkTables) : null;
+      if (inner) {
+        children.push(inner);
+      } else if (body.trim()) {
+        children.push({ id: crypto.randomUUID(), type: 'text', props: { content: body } });
+      }
+      if (children.length) return withChatQuoteStyle(children);
+    }
+  }
+
   const lines = trimmed.split('\n');
 
   // GFM table detection — only enabled for block types that emit raw markdown
@@ -405,8 +430,14 @@ function mrkdwnWithBlocksToFlowComponent(content: string, checkTables = false): 
       type: 'text',
       props: { content: lines.join('\n'), variant: 'muted', codeBlock: true },
     }),
+  }).filter((c) => {
+    // Defensive: drop empty code blocks so a stray trailing ``` never renders an
+    // empty gray box.
+    const p = c.props as { codeBlock?: boolean; content?: string } | undefined;
+    return !(p?.codeBlock && !p.content?.trim());
   });
 
+  if (!components.length) return null;
   if (components.length === 1) return components[0];
   return { id: crypto.randomUUID(), type: 'column', children: components };
 }

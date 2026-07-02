@@ -24,6 +24,72 @@ const FlowGroupMention: React.FC<{ groupId: string; tokenName: string; tokenAlia
   return <GroupMentionRenderer groupId={groupId} groupName={displayName} alias={displayName} />;
 };
 
+// Mention token rendering
+//
+// Renders the 4 Xyne mention tokens as their interactive chips — clickable,
+// with a hover popover — matching how Slack renders mentions everywhere,
+// including inside code blocks.
+
+function renderMention(
+  kind: 'userid' | 'channelid' | 'groupid' | 'broadcast',
+  id: string,
+  alias: string,
+  key: number,
+): React.ReactNode {
+  switch (kind) {
+    case 'userid':
+      return <MentionRenderer key={key} userId={id} />;
+    case 'channelid':
+      return <FlowChannelMention key={key} channelId={id} />;
+    case 'groupid':
+      return <FlowGroupMention key={key} groupId={id} tokenName={alias} tokenAlias={alias} />;
+    case 'broadcast': {
+      const broadcastData =
+        id === 'here'
+          ? { icon: '👋', title: 'Here Mention', subtitle: 'Notifies all online members' }
+          : {
+              icon: '📢',
+              title: 'Channel Mention',
+              subtitle: 'Notifies all members in this channel',
+            };
+      return (
+        <GenericMentionHoverPopover key={key} data={broadcastData}>
+          <span data-mention='' data-mention-type={id} className='chat-input-special-mention'>
+            @{id}
+          </span>
+        </GenericMentionHoverPopover>
+      );
+    }
+  }
+}
+
+// Inside verbatim code spans/blocks Slack renders text literally EXCEPT
+// mentions, which still resolve to interactive chips. Only the 4 mention
+// tokens are recognised here — every other character (including <, >, *, _, ~,
+// `) is preserved verbatim.
+const CODE_MENTION_RE = /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>/g;
+
+function renderCodeMentions(content: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  CODE_MENTION_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = CODE_MENTION_RE.exec(content)) !== null) {
+    if (m.index > lastIndex) {
+      nodes.push(<React.Fragment key={key++}>{content.slice(lastIndex, m.index)}</React.Fragment>);
+    }
+    const kind = m[1] as 'userid' | 'channelid' | 'groupid' | 'broadcast';
+    const id = m[2] ?? '';
+    nodes.push(renderMention(kind, id, m[3] ?? id, key++));
+    lastIndex = CODE_MENTION_RE.lastIndex;
+  }
+  if (lastIndex < content.length) {
+    nodes.push(<React.Fragment key={key++}>{content.slice(lastIndex)}</React.Fragment>);
+  }
+  return nodes;
+}
+
 // ---------------------------------------------------------------------------
 // Inline content parser
 //
@@ -69,8 +135,9 @@ type InlinePart =
 //  11    → bare slack link (<url>)
 //  12    → plain bare URL (https?://...)
 //  13    → emoji shortcode
+//
 const INLINE_RE =
-  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|(?:^|(?<=[\s({[]))\*([^*\n]+)\*(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))_([^_\n]+)_(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))~([^~\n]+)~(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))`([^`\n]+)`(?=[\s)}\].,;:!?/-]|$)|<u>([^<]+)<\/u>|<(https?:[^|>]+)\|([^>]+)>|<(https?:[^>\s]+)>|(https?:\/\/[^\s<>,"]+)|:([a-zA-Z0-9_+-]{1,50}):/g;
+  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|\*([^*\n\s](?:[^*\n]*[^*\n\s])?)\*|(?:^|(?<=[\s({[]))_([^\s\n](?:[^\n]*?[^\s\n])??)_(?=[\s)}\].,;:!?/-]|$)|~([^~\n\s](?:[^~\n]*[^~\n\s])?)~|`([^`\n\s](?:[^`\n]*[^`\n\s])?)`|<u>([^<]+)<\/u>|<(https?:[^|>]+)\|([^>]+)>|<(https?:[^>\s]+)>|(https?:\/\/[^\s<>,"]+)|:([a-zA-Z0-9_+-]{1,50}):/g;
 function parseInlineContent(content: string): InlinePart[] {
   const parts: InlinePart[] = [];
   let lastIndex = 0;
@@ -292,11 +359,11 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
       <pre
         className={cn(
           sizeClasses[props.size ?? 'base'],
-          'my-1 overflow-x-auto rounded bg-muted px-3 py-2 font-mono leading-relaxed text-foreground whitespace-pre-wrap [font-variant-ligatures:none]',
+          'code-mention my-1 overflow-x-auto rounded bg-muted px-3 py-2 font-mono leading-relaxed text-foreground whitespace-pre-wrap [font-variant-ligatures:none]',
         )}
         style={node.style}
       >
-        {props.content}
+        {renderCodeMentions(props.content)}
       </pre>
     );
   }
@@ -304,39 +371,13 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
   const renderPart = (part: InlinePart, key: number): React.ReactNode => {
     switch (part.type) {
       case 'user':
-        return <MentionRenderer key={key} userId={part.value} />;
+        return renderMention('userid', part.value, '', key);
       case 'channel':
-        return <FlowChannelMention key={key} channelId={part.value} />;
-      case 'broadcast': {
-        const broadcastData =
-          part.range === 'here'
-            ? { icon: '👋', title: 'Here Mention', subtitle: 'Notifies all online members' }
-            : {
-                icon: '📢',
-                title: 'Channel Mention',
-                subtitle: 'Notifies all members in this channel',
-              };
-        return (
-          <GenericMentionHoverPopover key={key} data={broadcastData}>
-            <span
-              data-mention=''
-              data-mention-type={part.range}
-              className='chat-input-special-mention'
-            >
-              @{part.range}
-            </span>
-          </GenericMentionHoverPopover>
-        );
-      }
+        return renderMention('channelid', part.value, '', key);
+      case 'broadcast':
+        return renderMention('broadcast', part.range, '', key);
       case 'group':
-        return (
-          <FlowGroupMention
-            key={key}
-            groupId={part.value}
-            tokenName={part.name}
-            tokenAlias={part.alias}
-          />
-        );
+        return renderMention('groupid', part.value, part.alias || part.name, key);
       case 'bold':
         return (
           <strong key={key}>
@@ -353,9 +394,9 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
         return (
           <code
             key={key}
-            className='bg-muted text-muted-foreground px-1 py-0.5 rounded text-xs font-mono'
+            className='code-mention bg-muted text-muted-foreground px-1 py-0.5 rounded text-xs font-mono'
           >
-            {part.value}
+            {renderCodeMentions(part.value)}
           </code>
         );
       case 'link':
@@ -430,9 +471,9 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
           return (
             <pre
               key={segIdx}
-              className='bg-muted text-foreground rounded p-2 text-xs font-mono overflow-x-auto whitespace-pre-wrap [font-variant-ligatures:none]'
+              className='code-mention bg-muted text-foreground rounded p-2 text-xs font-mono overflow-x-auto whitespace-pre-wrap [font-variant-ligatures:none]'
             >
-              <code>{seg.code}</code>
+              <code>{renderCodeMentions(seg.code)}</code>
             </pre>
           );
         }

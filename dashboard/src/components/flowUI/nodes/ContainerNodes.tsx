@@ -24,7 +24,7 @@ export const ColumnNode: React.FC<ContainerNodeProps> = ({ node, children }) => 
 
 export const RowNode: React.FC<ContainerNodeProps> = ({ node, children }) => {
   return (
-    <div className='flex flex-row gap-3 items-stretch' style={node.style}>
+    <div className='flex flex-row gap-3 items-start' style={node.style}>
       {children}
     </div>
   );
