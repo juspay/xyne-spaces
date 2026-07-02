@@ -5,6 +5,7 @@ import { Request, Response } from 'express';
 import { docsService } from '@/services/docsService.js';
 import { bitbucketManager } from '@/bitbucket/apis.js';
 import { logger } from '@/utils/logger.js';
+import { getTrustedOriginalHostBaseUrl } from '@/utils/publicUrls.js';
 
 
 // XYNE-1287: Parse userRepo path from URL
@@ -85,12 +86,11 @@ export class DocsController {
                 return;
             }
 
-            // Build base URL from x-original-host header (set by reverse proxy) or FRONTEND_URL
+            // Build base URL from trusted x-original-host header (set by reverse proxy) or FRONTEND_URL
             let baseUrl: string;
-            const originalHost = req.headers['x-original-host'];
-            if (originalHost && typeof originalHost === 'string') {
-                const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-                baseUrl = `${protocol}://${originalHost}`;
+            const originalHostBaseUrl = getTrustedOriginalHostBaseUrl(req);
+            if (originalHostBaseUrl) {
+                baseUrl = originalHostBaseUrl;
             } else {
                 baseUrl = process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`;
             }

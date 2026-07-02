@@ -35,6 +35,7 @@ import { extractEmailAddress } from '@/utils/email';
 import {
   GMAIL_SCOPES,
   createOAuth2Client as createGoogleOAuth2Client,
+  getGoogleIntegrationRedirectUri,
   setOAuthState as setGoogleOAuthState,
 } from './google-auth';
 import { getBackendUrl } from '@/utils/publicUrls';
@@ -272,7 +273,7 @@ router.post(
           timestamp: Date.now(),
         });
 
-        const authUrl = createGoogleOAuth2Client().generateAuthUrl({
+        const authUrl = createGoogleOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
           access_type: 'offline',
           scope: GMAIL_SCOPES,
           prompt: 'consent',
@@ -302,7 +303,7 @@ router.post(
           platform,
         });
 
-        const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
+        const redirectUri = `${getBackendUrl(req)}/api/integrations/microsoft/callback`;
         const authUrl = oauthClient.authorizeURL({
           redirect_uri: redirectUri,
           scope: MICROSOFT_OAUTH_SCOPES,
@@ -406,7 +407,7 @@ router.post(
           timestamp: Date.now(),
         });
 
-        const authUrl = createGoogleOAuth2Client().generateAuthUrl({
+        const authUrl = createGoogleOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
           access_type: 'offline',
           scope: GMAIL_SCOPES,
           prompt: 'consent',
@@ -433,7 +434,7 @@ router.post(
         platform,
       });
 
-      const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
+      const redirectUri = `${getBackendUrl(req)}/api/integrations/microsoft/callback`;
       const authUrl = oauthClient.authorizeURL({
         redirect_uri: redirectUri,
         scope: MICROSOFT_OAUTH_SCOPES,

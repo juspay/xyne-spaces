@@ -187,12 +187,13 @@ export class AuthV2Controller {
     return this.exchangeElectronCode(req, res);
   };
 
-  private getGoogleRedirectUri(): string {
+  private getGoogleRedirectUri(req: Request): string {
     return resolveConfiguredOAuthRedirectUrl(
       config.googleAuthRedirectUri,
       config.backendUrl,
       '/api/auth/exchange',
       'GOOGLE_AUTH_REDIRECT_URI',
+      req,
     );
   }
 
@@ -251,7 +252,7 @@ export class AuthV2Controller {
 
       await pkceServiceV2.storeVerifier(state, codeVerifier);
 
-      const redirectUri = this.getGoogleRedirectUri();
+      const redirectUri = this.getGoogleRedirectUri(req);
 
       logger.info('[OAuth] Redirect URI:', redirectUri);
 
@@ -275,7 +276,7 @@ export class AuthV2Controller {
     } catch (error) {
       logger.error(`[${requestId}] Error initiating login:`, error);
 
-      const frontendUrl = getFrontendUrl();
+      const frontendUrl = getFrontendUrl(req);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       res.redirect(
         `${frontendUrl}?error=oauth_init_failed&message=${encodeURIComponent(errorMessage)}`
@@ -293,7 +294,7 @@ export class AuthV2Controller {
 
       if (error) {
         logger.error(`[${requestId}] OAuth error: ${error}`);
-        const frontendUrl = getFrontendUrl();
+        const frontendUrl = getFrontendUrl(req);
         res.redirect(
           `${frontendUrl}?error=oauth_error&message=${encodeURIComponent(error as string)}`
         );
@@ -302,7 +303,7 @@ export class AuthV2Controller {
 
       if (!code || !state) {
         logger.error(`[${requestId}] Missing code or state`);
-        const frontendUrl = getFrontendUrl();
+        const frontendUrl = getFrontendUrl(req);
         res.redirect(
           `${frontendUrl}?error=missing_params&message=${encodeURIComponent('Missing authorization code or state')}`
         );
@@ -312,7 +313,7 @@ export class AuthV2Controller {
       const isCodeUsed = await oauthStateServiceV2.isCodeUsed(code as string);
       if (isCodeUsed) {
         logger.error(`[${requestId}] Authorization code already used`);
-        const frontendUrl = getFrontendUrl();
+        const frontendUrl = getFrontendUrl(req);
         res.redirect(
           `${frontendUrl}?error=code_reused&message=${encodeURIComponent('Authorization code already used')}`
         );
@@ -322,7 +323,7 @@ export class AuthV2Controller {
       const stateData = await oauthStateServiceV2.validateState(state as string, false);
       if (!stateData) {
         logger.error(`[${requestId}] Invalid or expired state`);
-        const frontendUrl = getFrontendUrl();
+        const frontendUrl = getFrontendUrl(req);
         res.redirect(
           `${frontendUrl}?error=invalid_state&message=${encodeURIComponent('Invalid or expired state')}`
         );
@@ -333,7 +334,7 @@ export class AuthV2Controller {
       // PKCE verifier, or auth code. The actual token exchange (and invitation handling) happens
       // in exchangeElectronCode so the accept-invitation UI runs inside Electron, not the browser.
       if (stateData.platform === 'electron') {
-        const frontendUrl = stateData.redirectTo ?? getFrontendUrl();
+        const frontendUrl = stateData.redirectTo ?? getFrontendUrl(req);
         const launchParams = new URLSearchParams({
           code: code as string,
           state: state as string,
@@ -352,7 +353,7 @@ export class AuthV2Controller {
       const codeVerifier = await pkceServiceV2.getAndDeleteVerifier(state as string);
       if (!codeVerifier) {
         logger.error(`[${requestId}] PKCE verifier not found`);
-        const frontendUrl = getFrontendUrl();
+        const frontendUrl = getFrontendUrl(req);
         res.redirect(
           `${frontendUrl}?error=pkce_failed&message=${encodeURIComponent('PKCE verification failed')}`
         );
@@ -361,7 +362,7 @@ export class AuthV2Controller {
 
       await oauthStateServiceV2.markCodeAsUsed(code as string);
 
-      const redirectUri = this.getGoogleRedirectUri();
+      const redirectUri = this.getGoogleRedirectUri(req);
 
       logger.info('[OAuth] Redirect URI:', redirectUri);
 
@@ -376,7 +377,7 @@ export class AuthV2Controller {
 
       if (!id_token) {
         logger.error(`[${requestId}] No ID token received`);
-        const frontendUrl = getFrontendUrl();
+        const frontendUrl = getFrontendUrl(req);
         res.redirect(
           `${frontendUrl}?error=no_id_token&message=${encodeURIComponent('No ID token received')}`
         );
@@ -392,7 +393,7 @@ export class AuthV2Controller {
       const payload = ticket.getPayload();
       if (!payload) {
         logger.error(`[${requestId}] Invalid token payload`);
-        const frontendUrl = getFrontendUrl();
+        const frontendUrl = getFrontendUrl(req);
         res.redirect(
           `${frontendUrl}?error=invalid_token&message=${encodeURIComponent('Invalid token payload')}`
         );
@@ -439,7 +440,7 @@ export class AuthV2Controller {
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
       });
 
-      const frontendUrl = stateData.redirectTo ?? getFrontendUrl();
+      const frontendUrl = stateData.redirectTo ?? getFrontendUrl(req);
 
       // If an invitation is pending, redirect back to the invite page for explicit acceptance.
       // The google_access_token cookie (set above) carries identity for acceptInvitation + loginWorkspace.
@@ -509,7 +510,7 @@ export class AuthV2Controller {
 
         // If this was a "connect calendar" re-auth, redirect straight to the calls page
         if (stateData.connectCalendar) {
-          res.redirect(`${getFrontendUrl()}/${workspaceId}/calls?tab=upcoming&syncCalendar=true`);
+          res.redirect(`${getFrontendUrl(req)}/${workspaceId}/calls?tab=upcoming&syncCalendar=true`);
           return;
         }
 
@@ -544,7 +545,7 @@ export class AuthV2Controller {
     } catch (error) {
       logger.error(`[${requestId}] Callback error:`, error);
 
-      const frontendUrl = getFrontendUrl();
+      const frontendUrl = getFrontendUrl(req);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       res.redirect(
         `${frontendUrl}?error=callback_failed&message=${encodeURIComponent(errorMessage)}`
@@ -698,7 +699,7 @@ export class AuthV2Controller {
 
       await oauthStateServiceV2.markCodeAsUsed(code);
 
-      const redirectUri = this.getGoogleRedirectUri();
+      const redirectUri = this.getGoogleRedirectUri(req);
 
       logger.info('[OAuth] Redirect URI:', redirectUri);
 
@@ -876,7 +877,7 @@ export class AuthV2Controller {
 
   exchangeMobileCode = async (req: Request, res: Response): Promise<void> => {
     const requestId = `EXCHANGE_CODE_${Date.now()}`;
-    const frontendUrl = getFrontendUrl();
+    const frontendUrl = getFrontendUrl(req);
 
     const isMobileNative =
       req.headers['x-platform'] === 'mobile' || req.query.platform === 'mobile';
@@ -924,7 +925,7 @@ export class AuthV2Controller {
 
       // For mobile native apps using serverAuthCode, use empty string as redirect_uri
       // For web OAuth flow, use the backend callback URL
-      const redirectUri = isMobileNative ? '' : this.getGoogleRedirectUri();
+      const redirectUri = isMobileNative ? '' : this.getGoogleRedirectUri(req);
 
       logger.info('[OAuth] Redirect URI:', redirectUri);
 
@@ -1128,7 +1129,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const frontendUrl = getFrontendUrl();
+      const frontendUrl = getFrontendUrl(req);
       logger.info(`[${requestId}] Redirecting to frontend`);
       res.redirect(frontendUrl);
     } catch (error) {
@@ -1140,7 +1141,7 @@ export class AuthV2Controller {
           message: error instanceof Error ? error.message : 'Unknown error',
         });
       } else {
-        const frontendUrl = getFrontendUrl();
+        const frontendUrl = getFrontendUrl(req);
         res.redirect(`${frontendUrl}?error=logout_failed`);
       }
     }

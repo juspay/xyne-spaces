@@ -79,6 +79,7 @@ function redirectError(
 
 async function createMicrosoftChannelConnectAuthUrl(
   params: MicrosoftChannelConnectInitParams,
+  req: Request,
 ): Promise<string> {
   const oauthClient = microsoftDeskService.getOAuthClient();
   if (!oauthClient) {
@@ -104,7 +105,7 @@ async function createMicrosoftChannelConnectAuthUrl(
     platform: params.platform,
   });
 
-  const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
+  const redirectUri = `${getBackendUrl(req)}/api/integrations/microsoft/callback`;
   return oauthClient.authorizeURL({
     redirect_uri: redirectUri,
     scope: MICROSOFT_OAUTH_SCOPES,
@@ -118,6 +119,7 @@ async function createMicrosoftWorkspaceConnectAuthUrl(
   workspaceId: string,
   role: WorkspaceRole,
   platform: ProviderPlatform,
+  req: Request,
 ): Promise<string> {
   if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
     throw new MicrosoftDeskRouteError('Workspace admin/owner role required to set up the desk email', 403);
@@ -141,7 +143,7 @@ async function createMicrosoftWorkspaceConnectAuthUrl(
     platform,
   });
 
-  const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
+  const redirectUri = `${getBackendUrl(req)}/api/integrations/microsoft/callback`;
   return oauthClient.authorizeURL({
     redirect_uri: redirectUri,
     scope: MICROSOFT_OAUTH_SCOPES,
@@ -156,6 +158,7 @@ async function createMicrosoftChannelEmailWorkspaceAuthUrl(
   role: WorkspaceRole,
   returnPath: string | undefined,
   platform: ProviderPlatform,
+  req: Request,
 ): Promise<string> {
   if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
     throw new MicrosoftDeskRouteError('Workspace admin/owner role required to set up channel email', 403);
@@ -175,7 +178,7 @@ async function createMicrosoftChannelEmailWorkspaceAuthUrl(
     platform,
   });
 
-  const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
+  const redirectUri = `${getBackendUrl(req)}/api/integrations/microsoft/callback`;
   return oauthClient.authorizeURL({
     redirect_uri: redirectUri,
     scope: MICROSOFT_OAUTH_SCOPES,
@@ -208,7 +211,7 @@ router.post('/connect/init', authV2Middleware.authenticate, async (req: Request,
       userId: req.user!.id,
       workspaceId: req.user!.workspaceId,
       platform,
-    });
+    }, req);
 
     logger.info(`[${requestId}] Prepared Microsoft OAuth URL for email channel`);
     res.json({ authUrl });
@@ -236,7 +239,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
     const { name, description, visibility, projectId, assigneeUserGroupId, boardId } = req.query;
 
     if (!name || !projectId) {
-      redirectError(res, getFrontendUrl(), 'name and projectId are required', platform, workspaceId);
+      redirectError(res, getFrontendUrl(req), 'name and projectId are required', platform, workspaceId);
       return;
     }
 
@@ -250,7 +253,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
       userId: req.user!.id,
       workspaceId,
       platform,
-    });
+    }, req);
 
     logger.info(`[${requestId}] Redirecting to Microsoft OAuth for email channel`);
     res.redirect(authorizationUri);
@@ -258,13 +261,13 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
     logger.error(`[${requestId}] Error initiating Microsoft email connect:`, error);
     if (error instanceof MicrosoftDeskRouteError) {
       if (error.message === 'microsoft_not_configured') {
-        redirectError(res, getFrontendUrl(), error.message, platform, workspaceId);
+        redirectError(res, getFrontendUrl(req), error.message, platform, workspaceId);
         return;
       }
       res.status(error.status).json({ error: error.message });
       return;
     }
-    redirectError(res, getFrontendUrl(), 'microsoft_connect_failed', platform, workspaceId);
+    redirectError(res, getFrontendUrl(req), 'microsoft_connect_failed', platform, workspaceId);
   }
 });
 
@@ -281,6 +284,7 @@ router.post('/connect/workspace/init', authV2Middleware.authenticate, async (req
       req.user!.workspaceId,
       req.user!.role as WorkspaceRole,
       platform,
+      req,
     );
     logger.info(`[${requestId}] Prepared Microsoft OAuth URL for workspace shared mailbox`);
     res.json({ authUrl });
@@ -311,6 +315,7 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
       workspaceId,
       req.user!.role as WorkspaceRole,
       platform,
+      req,
     );
 
     logger.info(`[${requestId}] Redirecting to Microsoft OAuth for workspace shared mailbox`, { workspaceId });
@@ -319,13 +324,13 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
     logger.error(`[${requestId}] Error initiating Microsoft workspace connect:`, error);
     if (error instanceof MicrosoftDeskRouteError) {
       if (error.message === 'microsoft_not_configured') {
-        redirectError(res, getFrontendUrl(), error.message, platform, workspaceId);
+        redirectError(res, getFrontendUrl(req), error.message, platform, workspaceId);
         return;
       }
       res.status(error.status).json({ error: error.message });
       return;
     }
-    redirectError(res, getFrontendUrl(), 'microsoft_workspace_connect_failed', platform, workspaceId);
+    redirectError(res, getFrontendUrl(req), 'microsoft_workspace_connect_failed', platform, workspaceId);
   }
 });
 
@@ -340,6 +345,7 @@ router.post('/connect/channel-email-workspace/init', authV2Middleware.authentica
       req.user!.role as WorkspaceRole,
       returnPath,
       platform,
+      req,
     );
     logger.info(`[${requestId}] Prepared Microsoft OAuth URL for channel-email workspace mailbox`);
     res.json({ authUrl });
@@ -367,6 +373,7 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
       req.user!.role as WorkspaceRole,
       returnPath,
       platform,
+      req,
     );
 
     logger.info(`[${requestId}] Redirecting to Microsoft OAuth for channel-email workspace mailbox`, { workspaceId });
@@ -375,7 +382,7 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
     logger.error(`[${requestId}] Error initiating Microsoft channel-email workspace connect:`, error);
     if (error instanceof MicrosoftDeskRouteError) {
       if (error.message === 'microsoft_not_configured') {
-        redirectError(res, getFrontendUrl(), error.message, platform, workspaceId);
+        redirectError(res, getFrontendUrl(req), error.message, platform, workspaceId);
         return;
       }
       res.status(error.status).json({ error: error.message });
@@ -386,7 +393,7 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
     });
     res.redirect(
       buildPostOAuthRedirect(
-        getFrontendUrl(),
+        getFrontendUrl(req),
         buildReturnPathOrSupportPath(returnPath, workspaceId, undefined, params),
         platform,
       ),
@@ -400,7 +407,7 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
  */
 router.get('/callback', async (req: Request, res: Response) => {
   const requestId = `MS_DESK_CALLBACK_${Date.now()}`;
-  const frontendUrl = getFrontendUrl();
+  const frontendUrl = getFrontendUrl(req);
   const { code, state, error } = req.query;
   const channelData = state
     ? await microsoftDeskService.getPendingChannel(state as string)
@@ -441,7 +448,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       return;
     }
 
-    const redirectUri = `${getBackendUrl()}/api/integrations/microsoft/callback`;
+    const redirectUri = `${getBackendUrl(req)}/api/integrations/microsoft/callback`;
     let tokenResult;
     try {
       tokenResult = await oauthClient.getToken({
@@ -537,7 +544,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       });
 
       try {
-        const webhookUrl = `${getBackendUrl()}/api/external-source-sync/${source.name}/ingest`;
+        const webhookUrl = `${getBackendUrl(req)}/api/external-source-sync/${source.name}/ingest`;
         await microsoftDeskService.registerGraphWebhook(accessToken, webhookUrl);
       } catch (err) {
         logger.warn(`[${requestId}] Failed to re-register webhook on reconnect`, err);
@@ -568,7 +575,7 @@ router.get('/callback', async (req: Request, res: Response) => {
             email,
             expiresAt: token.expires_at ? new Date(token.expires_at as string).toISOString() : undefined,
           },
-          getBackendUrl(),
+          getBackendUrl(req),
         );
       } catch (err) {
         const errCode = (err as Error & { code?: string })?.code;
@@ -678,7 +685,7 @@ router.get('/callback', async (req: Request, res: Response) => {
             email,
             expiresAt: token.expires_at ? new Date(token.expires_at as string).toISOString() : undefined,
           },
-          getBackendUrl(),
+          getBackendUrl(req),
         );
       } catch (err) {
         const errCode = (err as Error & { code?: string })?.code;
@@ -751,7 +758,7 @@ router.get('/callback', async (req: Request, res: Response) => {
       refreshToken: (token.refresh_token as string) ?? undefined,
       email,
       expiresAt: token.expires_at ? new Date(token.expires_at as string).toISOString() : undefined,
-    }, getBackendUrl());
+    }, getBackendUrl(req));
 
     logger.info(`[${requestId}] Microsoft email channel created: ${channelId}`);
 

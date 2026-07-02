@@ -3,6 +3,7 @@ import { DocumentManager } from '@y-sweet/sdk';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { getTrustedOriginalHost } from '@/utils/publicUrls';
 
 const TOKEN_VALID_SECONDS = 3600;
 
@@ -53,10 +54,10 @@ export class YSweetController {
       return;
     }
 
-    const originalHost = req.headers['x-original-host'];
+    const originalHost = getTrustedOriginalHost(req);
 
-    if (!originalHost || typeof originalHost !== 'string') {
-      logger.warn('[YSweet] No x-original-host header found, adding /ysweet path only');
+    if (!originalHost) {
+      logger.warn('[YSweet] No trusted x-original-host header found, adding /ysweet path only');
       
       if (clientToken.baseUrl) {
         clientToken.baseUrl = this.addYSweetPathIfNeeded(clientToken.baseUrl);

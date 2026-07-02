@@ -78,6 +78,8 @@ const envSchema = Joi.object({
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default(''),
   FRONTEND_URL: Joi.string().default(''),
+  FOLLOW_HEADER_REDIRECTION: Joi.boolean().default(true),
+  TRUSTED_ORIGINAL_HOST_DOMAINS: Joi.string().default(''),
   GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default(''),
@@ -487,6 +489,10 @@ export const config = {
   slackBotToken: envVars.SLACK_BOT_TOKEN,
   slackFrontendUrl: envVars.SLACK_FRONTEND_URL,
   frontendUrl: envVars.FRONTEND_URL,
+  followHeaderRedirection: envVars.FOLLOW_HEADER_REDIRECTION,
+  trustedOriginalHostDomains: envVars.TRUSTED_ORIGINAL_HOST_DOMAINS.split(',')
+    .map((domain: string) => domain.trim().toLowerCase())
+    .filter(Boolean),
   googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
   microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
