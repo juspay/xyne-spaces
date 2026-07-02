@@ -41,6 +41,10 @@ import {
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { TicketFiltersDropdown } from '../../components/Tickets/TicketFilters';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
+import {
+  clearCreateTicketParams,
+  hasCreateTicketFlag,
+} from '../../components/Tickets/CreateTicketModal/createTicket.utils';
 import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
@@ -426,6 +430,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Use XState machine for filter persistence
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const createTicketLinkConsumedRef = useRef(false);
+  useEffect(() => {
+    if (!hasCreateTicketFlag(searchParams)) {
+      createTicketLinkConsumedRef.current = false;
+      return;
+    }
+    if (createTicketLinkConsumedRef.current) return;
+    createTicketLinkConsumedRef.current = true;
+    setIsCreateModalOpen(true);
+  }, [searchParams]);
   const [state, send] = useMachine(ticketFiltersMachine);
   const layoutView = searchParams.get('layout') ?? 'kanban';
   const isKanbanLayout = layoutView === 'kanban';
@@ -2885,9 +2900,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       {effectiveProjectId && channel && isCreateModalOpen && (
         <CreateTicketModal
           isOpen={isCreateModalOpen}
+          enableUrlSync
           onClose={() => {
             setIsCreateModalOpen(false);
             setCreateTicketSeed(null);
+            setSearchParams(prev => clearCreateTicketParams(new URLSearchParams(prev)), {
+              replace: true,
+            });
           }}
           channelId={channel.id}
           projectId={effectiveProjectId}
