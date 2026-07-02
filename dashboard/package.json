@@ -44,6 +44,7 @@
     "@lexical/react": "^0.39.0",
     "@livekit/components-react": "^2.9.15",
     "@livekit/components-styles": "^1.1.6",
+    "@livekit/track-processors": "^0.7.2",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.208.0",
     "@opentelemetry/resources": "^2.2.0",

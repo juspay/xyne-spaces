@@ -15,7 +15,10 @@ import {
   DisconnectReason,
   SubscriptionError,
   MediaDeviceFailure,
+  Track,
+  LocalVideoTrack,
 } from 'livekit-client';
+import { BackgroundBlur } from '@livekit/track-processors';
 import type { Zero } from '@rocicorp/zero';
 import type { Call } from '@xyne/shared';
 import {
@@ -72,6 +75,50 @@ export interface ChatMessage {
 export type PermissionErrorType = 'microphone' | 'camera' | 'screen' | null;
 
 // Context for Room state management
+// Background blur strength (px). Fixed — no user config (YAGNI).
+const BACKGROUND_BLUR_RADIUS = 10;
+
+// Reconcile the camera processor to the latest desired state, one op at a time.
+// `setProcessor` is async (awaits WASM/model init) and not registered until it
+// resolves; serializing through this chain — and re-reading `desiredBlur` when
+// each op actually runs — prevents a rapid toggle from desyncing the flag from
+// the real processor state.
+let blurReconcileChain: Promise<void> = Promise.resolve();
+let desiredBlur = false;
+
+/**
+ * Drive the background-blur processor on the local camera track toward `enabled`.
+ * Idempotent and serialized, so it can be called on every LOCAL_TRACK_PUBLISHED
+ * (join, camera re-enable, device switch) and on rapid toggles without races.
+ * Web only: native mode bridges the camera and has no web track to process.
+ * `onEnableError` fires if turning blur ON fails, so the caller can revert state.
+ */
+function syncBackgroundBlur(
+  room: Room | null,
+  enabled: boolean,
+  onEnableError?: () => void,
+): Promise<void> {
+  desiredBlur = enabled;
+  blurReconcileChain = blurReconcileChain.then(async () => {
+    const track = room?.localParticipant.getTrackPublication(Track.Source.Camera)?.track as
+      | LocalVideoTrack
+      | undefined;
+    if (!track) return;
+    const hasProcessor = !!track.getProcessor();
+    try {
+      if (desiredBlur && !hasProcessor) {
+        await track.setProcessor(BackgroundBlur(BACKGROUND_BLUR_RADIUS));
+      } else if (!desiredBlur && hasProcessor) {
+        await track.stopProcessor();
+      }
+    } catch {
+      // Only an enable failure leaves a lying "on" state to correct.
+      if (desiredBlur) onEnableError?.();
+    }
+  });
+  return blurReconcileChain;
+}
+
 export interface RoomContext {
   room: Room | null;
   token: string | null;
@@ -120,6 +167,8 @@ export interface RoomContext {
   pushToTalkState: 'idle' | 'active';
   isCallChatOpen: boolean;
   unreadCallChatCount: number;
+  // Background blur on the local camera feed (web only). Off by default.
+  isBackgroundBlurEnabled: boolean;
 }
 
 // Events for Room operations
@@ -153,6 +202,8 @@ export type RoomMachineEvent =
   | { type: 'PUSH_TO_TALK_START' }
   | { type: 'PUSH_TO_TALK_END' }
   | { type: 'TOGGLE_CAMERA' }
+  | { type: 'TOGGLE_BACKGROUND_BLUR' }
+  | { type: 'SET_BACKGROUND_BLUR'; enabled: boolean }
   | { type: 'TOGGLE_SCREEN_SHARE' }
   | { type: 'SCREEN_SHARE_FAILED' }
   | { type: 'TOGGLE_VIEW' }
@@ -1065,6 +1116,7 @@ export const roomMachine = setup({
       permissionError: () => ({ type: null as PermissionErrorType, dismissed: false }),
       isCallChatOpen: () => false,
       unreadCallChatCount: () => 0,
+      isBackgroundBlurEnabled: () => false,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1103,6 +1155,17 @@ export const roomMachine = setup({
       toast.error('Failed to join call', {
         description: 'Unable to connect to the room. Please try again.',
         duration: 4000,
+      });
+    },
+
+    // Sync the background-blur processor with context flag (web only).
+    // If enabling fails (e.g. WASM/model load), revert the flag so the toggle
+    // doesn't lie, and tell the user.
+    applyBackgroundBlur: ({ context, self }) => {
+      if (context.isNativeMode) return;
+      void syncBackgroundBlur(context.room, context.isBackgroundBlurEnabled, () => {
+        self.send({ type: 'SET_BACKGROUND_BLUR', enabled: false });
+        toast.error('Could not enable background blur');
       });
     },
   },
@@ -1156,6 +1219,7 @@ export const roomMachine = setup({
     pushToTalkState: 'idle',
     isCallChatOpen: false,
     unreadCallChatCount: 0,
+    isBackgroundBlurEnabled: false,
   },
   id: 'roomMachine',
   on: {
@@ -1544,6 +1608,23 @@ export const roomMachine = setup({
             }
           },
         },
+        TOGGLE_BACKGROUND_BLUR: {
+          // Flip flag first, then apply — assign runs before the action sees context.
+          actions: [
+            assign({ isBackgroundBlurEnabled: ({ context }) => !context.isBackgroundBlurEnabled }),
+            'applyBackgroundBlur',
+          ],
+        },
+        SET_BACKGROUND_BLUR: {
+          // Explicit set (used to revert the flag when enabling fails).
+          actions: [
+            assign({
+              isBackgroundBlurEnabled: ({ event }) =>
+                event.type === 'SET_BACKGROUND_BLUR' ? event.enabled : false,
+            }),
+            'applyBackgroundBlur',
+          ],
+        },
         TOGGLE_SCREEN_SHARE: {
           actions: ({ context }): void => {
             if (context.isNativeMode) {
@@ -1823,7 +1904,9 @@ export const roomMachine = setup({
           actions: 'updateParticipants',
         },
         LOCAL_TRACK_PUBLISHED: {
-          actions: 'updateParticipants',
+          // Re-apply blur when the camera track (re)publishes: join, re-enable,
+          // or device switch (which republishes a fresh track, dropping the processor).
+          actions: ['updateParticipants', 'applyBackgroundBlur'],
         },
         LOCAL_TRACK_UNPUBLISHED: {
           actions: 'updateParticipants',
