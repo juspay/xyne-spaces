@@ -120,11 +120,15 @@ export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/contacts.other.readonly',
 ];
 
+export function getGoogleIntegrationRedirectUri(req: Request | null = null): string {
+  return `${getBackendUrl(req)}/api/integrations/google/auth/callback`;
+}
+
 export function createOAuth2Client(redirectUri?: string) {
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    redirectUri || process.env.GOOGLE_REDIRECT_URI || `${getBackendUrl()}/api/integrations/google/auth/callback`
+    redirectUri || process.env.GOOGLE_REDIRECT_URI || getGoogleIntegrationRedirectUri()
   );
 }
 
@@ -169,6 +173,7 @@ function htmlPage(title: string, body: string, status: 'success' | 'error' = 'su
 
 async function createGoogleChannelConnectAuthUrl(
   params: GoogleChannelConnectInitParams,
+  req: Request,
 ): Promise<string> {
   const project = await db.project.findUnique({ where: { id: params.projectId } });
   if (!project) {
@@ -191,7 +196,7 @@ async function createGoogleChannelConnectAuthUrl(
     timestamp: Date.now(),
   });
 
-  return createOAuth2Client().generateAuthUrl({
+  return createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
     access_type: 'offline',
     scope: GMAIL_SCOPES,
     prompt: 'consent',
@@ -203,6 +208,7 @@ async function createGoogleWorkspaceConnectAuthUrl(
   workspaceId: string,
   role: WorkspaceRole,
   platform: ProviderPlatform,
+  req: Request,
 ): Promise<string> {
   if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
     throw new GoogleAuthRouteError('Workspace admin/owner role required to set up the desk email', 403);
@@ -223,7 +229,7 @@ async function createGoogleWorkspaceConnectAuthUrl(
     timestamp: Date.now(),
   });
 
-  return createOAuth2Client().generateAuthUrl({
+  return createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
     access_type: 'offline',
     scope: GMAIL_SCOPES,
     prompt: 'consent',
@@ -236,6 +242,7 @@ async function createGoogleChannelEmailWorkspaceAuthUrl(
   role: WorkspaceRole,
   returnPath: string | undefined,
   platform: ProviderPlatform,
+  req: Request,
 ): Promise<string> {
   if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
     throw new GoogleAuthRouteError('Workspace admin/owner role required to set up channel email', 403);
@@ -252,7 +259,7 @@ async function createGoogleChannelEmailWorkspaceAuthUrl(
     timestamp: Date.now(),
   });
 
-  return createOAuth2Client().generateAuthUrl({
+  return createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
     access_type: 'offline',
     scope: GMAIL_SCOPES,
     prompt: 'consent',
@@ -279,7 +286,7 @@ router.post('/connect/init', authV2Middleware.authenticate, async (req: Request,
       userId: req.user!.id,
       workspaceId: req.user!.workspaceId,
       platform,
-    });
+    }, req);
 
     logger.info(`${TAG} Prepared Google OAuth URL for email channel creation`);
     res.json({ authUrl });
@@ -316,7 +323,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
       userId: req.user!.id,
       workspaceId: req.user!.workspaceId,
       platform,
-    });
+    }, req);
 
     logger.info(`${TAG} Redirecting to Google OAuth for email channel creation`);
     res.redirect(authUrl);
@@ -328,7 +335,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
     }
     redirectError(
       res,
-      getFrontendUrl(),
+      getFrontendUrl(req),
       'google_connect_failed',
       platform,
       req.user!.workspaceId,
@@ -343,6 +350,7 @@ router.post('/connect/workspace/init', authV2Middleware.authenticate, async (req
       req.user!.workspaceId,
       req.user!.role as WorkspaceRole,
       platform,
+      req,
     );
     res.json({ authUrl });
   } catch (error: any) {
@@ -369,6 +377,7 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
       workspaceId,
       req.user!.role as WorkspaceRole,
       platform,
+      req,
     );
 
     logger.info(`${TAG} Redirecting to Google OAuth for workspace shared mailbox`, { workspaceId });
@@ -381,7 +390,7 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
     }
     redirectError(
       res,
-      getFrontendUrl(),
+      getFrontendUrl(req),
       'workspace_google_connect_failed',
       platform,
       req.user!.workspaceId,
@@ -398,6 +407,7 @@ router.post('/connect/channel-email-workspace/init', authV2Middleware.authentica
       req.user!.role as WorkspaceRole,
       returnPath,
       platform,
+      req,
     );
     res.json({ authUrl });
   } catch (error: any) {
@@ -421,6 +431,7 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
       req.user!.role as WorkspaceRole,
       returnPath,
       platform,
+      req,
     );
 
     logger.info(`${TAG} Redirecting to Google OAuth for channel-email workspace mailbox`, {
@@ -438,7 +449,7 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
     });
     res.redirect(
       buildPostOAuthRedirect(
-        getFrontendUrl(),
+        getFrontendUrl(req),
         buildReturnPathOrSupportPath(
           returnPath,
           req.user!.workspaceId,
@@ -466,7 +477,7 @@ router.post('/auth/start', async (req: Request, res: Response): Promise<void> =>
     const state = Math.random().toString(36).substring(7);
     await setOAuthState(state, { channelId, timestamp: Date.now() });
 
-    const authUrl = createOAuth2Client().generateAuthUrl({
+    const authUrl = createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
       access_type: 'offline',
       scope: GMAIL_SCOPES,
       prompt: 'consent',
@@ -483,7 +494,7 @@ router.post('/auth/start', async (req: Request, res: Response): Promise<void> =>
 
 // GET /api/integrations/google/auth/callback
 router.get('/auth/callback', async (req: Request, res: Response): Promise<void> => {
-  const frontendUrl = getFrontendUrl();
+  const frontendUrl = getFrontendUrl(req);
   const { code, state, error } = req.query;
   const stateData = state ? await getOAuthState(state as string) : null;
   const platform = stateData?.platform;
@@ -514,7 +525,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
 
     // Exchange code for tokens
     logger.info(`${TAG} Exchanging code for tokens`);
-    const oauth2Client = createOAuth2Client();
+    const oauth2Client = createOAuth2Client(getGoogleIntegrationRedirectUri(req));
     const { tokens } = await oauth2Client.getToken(code as string);
 
     if (!tokens.access_token || !tokens.refresh_token) {
