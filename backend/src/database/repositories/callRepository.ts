@@ -337,9 +337,14 @@ export class CallRepository {
     params: CreateCallWithParticipantsInput,
     tx: Prisma.TransactionClient,
   ): Promise<{ callId: string; participantUserIds: string[] }> {
-    const participantUserIds = params.targetUserIds?.length
+    const baseParticipantUserIds = params.targetUserIds?.length
       ? params.targetUserIds
       : (await repositories.channelParticipants.getChannelParticipants(params.channelId)).map(p => p.userId);
+
+    // Always include the creator/organizer — they may not appear in a hand-picked targetUserIds list.
+    const participantUserIds = baseParticipantUserIds.includes(params.createdByUserId)
+      ? baseParticipantUserIds
+      : [params.createdByUserId, ...baseParticipantUserIds];
 
     await tx.call.create({
       data: {

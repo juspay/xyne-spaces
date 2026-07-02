@@ -24,6 +24,7 @@ export const ScheduleCallSchema = z.object({
   endsAt: z.number(),
   channelId: z.string().optional(),
   targetUserIds: z.array(z.string()).optional(),
+  callUpdatesChannel: z.string().optional(), // Explicit broadcast channel for summaries/action items
   conversationId: z.string().optional(), // Optional: for thread-initiated scheduled calls
   externalInvitees: z.array(z.string().email()).optional(),
   invitation: z.object({
@@ -71,6 +72,7 @@ export const RecurringScheduleCallSchema = z
     description: z.string().max(1000).optional(),
     channelId: z.string().optional(),
     targetUserIds: z.array(z.string()).optional(),
+    callUpdatesChannel: z.string().optional(), // Explicit broadcast channel for summaries/action items
     timezone: z.string().min(1, 'Timezone is required'),
     recurrenceRule: z
       .string()
@@ -118,6 +120,7 @@ export const UpdateScheduleCallSchema = z
     endsAt: z.number().optional(),
     targetUserIds: z.array(z.string()).optional(),
     channelId: z.string().optional(),
+    callUpdatesChannel: z.string().optional(),
   })
   .refine(
     (data) => !data.startsAt || !data.endsAt || data.startsAt < data.endsAt,
@@ -147,6 +150,7 @@ export const UpdateRecurringSeriesSchema = z
     timezone: z.string().optional(),
     targetUserIds: z.array(z.string()).optional(),
     channelId: z.string().optional(),
+    callUpdatesChannel: z.string().optional(),
   })
   .refine(
     (data) => !data.startTime || !data.endTime || data.startTime !== data.endTime,

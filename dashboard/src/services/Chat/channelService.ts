@@ -102,6 +102,11 @@ export interface PromoteGroupDmRequest {
   topicTags: string[];
 }
 
+export interface ChannelMember {
+  id: string;
+  name: string;
+}
+
 export class ChannelService {
   async checkDuplicateChannel(
     title: string,
@@ -171,6 +176,14 @@ export class ChannelService {
       data?: { userIds: string[] };
     }>(`/channels/${channelId}/vespa-participants`);
     return response.data.data?.userIds ?? [];
+  }
+
+  async getChannelMembers(channelId: string): Promise<ChannelMember[]> {
+    const response = await apiInstance.get<{
+      success: boolean;
+      data?: { members: ChannelMember[] };
+    }>(`/channels/${channelId}/members`);
+    return response.data.data?.members ?? [];
   }
 }
 

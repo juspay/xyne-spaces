@@ -15,6 +15,7 @@ router.get('/publish-targets', channelController.getChannelsForDocs); // Get cha
 router.get('/:channelId/connected-email', channelController.getConnectedEmail); // OAuth-connected inbox email for an email channel
 router.get('/:channelId/email-alias', channelController.getEmailAlias); // Derived inbound email alias for channel routing
 router.get('/:channelId/vespa-participants', channelController.getVespaParticipants); // Channel participant user IDs from Vespa chat_container.permissions
+router.get('/:channelId/members', channelController.getChannelMembers); // Active channel members as { id, name } (for participant pickers)
 
 // Conversation Routes (nested under channels)
 router.post('/:channelId/conversations', uploadMultiple, conversationController.createConversation);
