@@ -45,6 +45,7 @@ import {
   ChannelType,
   EmailType,
   DeskType,
+  TicketReferenceRelation,
   NotificationLevel,
   AutoDraftStatus,
 } from '@xyne/shared';
@@ -329,9 +330,7 @@ const clearInstanceStorage = (userId: string, instanceId: string, channelId: str
     /* ignore */
   }
 };
-type Email = NonNullable<
-  NonNullable<QueryResultType<typeof queries.supportTicketDetail>>['emails']
->[number];
+type Email = NonNullable<QueryResultType<typeof queries.getEmailsForConversations>>[number];
 
 /**
  * Image thumbnail: authenticated blob fetch via `createPreviewUrl` (same path
@@ -1045,6 +1044,11 @@ const SupportScreen = (): ReactElement => {
     id: string;
     lastEmailAt: number;
     emailReads: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
+    title: string;
+    xyneId: string;
+    createdAt: number;
+    channelId: string;
+    conversationId: string;
   };
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
@@ -1058,6 +1062,11 @@ const SupportScreen = (): ReactElement => {
       id: string;
       lastEmailAt: number;
       emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
+      title: string;
+      xyneId: string;
+      createdAt: number;
+      channelId: string;
+      conversationId: string;
     }): void => {
       setSelectedTickets(prev => {
         const next = new Map(prev);
@@ -1068,6 +1077,11 @@ const SupportScreen = (): ReactElement => {
             id: row.id,
             lastEmailAt: row.lastEmailAt,
             emailReads: row.emailReads ?? [],
+            title: row.title,
+            xyneId: row.xyneId,
+            createdAt: row.createdAt,
+            channelId: row.channelId,
+            conversationId: row.conversationId,
           });
         }
         return next;
@@ -1098,6 +1112,11 @@ const SupportScreen = (): ReactElement => {
         id: string;
         lastEmailAt: number;
         emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
+        title: string;
+        xyneId: string;
+        createdAt: number;
+        channelId: string;
+        conversationId: string;
       }>,
       select: boolean,
     ): void => {
@@ -1109,6 +1128,11 @@ const SupportScreen = (): ReactElement => {
               id: row.id,
               lastEmailAt: row.lastEmailAt,
               emailReads: row.emailReads ?? [],
+              title: row.title,
+              xyneId: row.xyneId,
+              createdAt: row.createdAt,
+              channelId: row.channelId,
+              conversationId: row.conversationId,
             });
           } else {
             next.delete(row.id);
@@ -1133,8 +1157,14 @@ const SupportScreen = (): ReactElement => {
             ),
         );
         toast.success('Tickets merged');
+        const parentTicket = selectedTickets.get(parentTicketId);
         clearTicketSelection();
         setShowMergeDialog(false);
+        if (parentTicket) {
+          void navigate(`${supportBase}/${parentTicket.channelId}/${parentTicket.xyneId}`, {
+            state: { conversationId: parentTicket.conversationId, ticketId: parentTicket.id },
+          });
+        }
       } catch (error: unknown) {
         const err = error as {
           response?: { data?: { error?: string; message?: string } };
@@ -1149,7 +1179,7 @@ const SupportScreen = (): ReactElement => {
         });
       }
     },
-    [selectedTickets, clearTicketSelection],
+    [selectedTickets, clearTicketSelection, navigate, supportBase],
   );
 
   const selectedChannelFull = useMemo(
@@ -1157,14 +1187,22 @@ const SupportScreen = (): ReactElement => {
     [sortedEmailChannels, selectedChannelId],
   );
 
-  const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
+  // Only the setter is read (onTicketsLoaded callbacks below); the loaded ticket
+  // array itself is not consumed here since the merge dialog is built from the
+  // selection map. See mergeDialogTickets for the rationale.
+  const [, setKanbanTickets] = useState<Ticket[]>([]);
 
   const [showMergeDialog, setShowMergeDialog] = useState(false);
 
   const mergeDialogTickets = useMemo(() => {
-    const selected = kanbanTickets.filter(t => selectedTickets.has(t.id));
+    // Build the parent-candidate list from the enriched selected-ticket map, which
+    // persists across kanban pages — not from the current-page kanbanTickets. Using
+    // kanbanTickets here would merge every selected ID while omitting off-page
+    // selections as parent candidates, so multi-page selections could never pick an
+    // off-page ticket as the parent.
+    const selected = Array.from(selectedTickets.values());
     return [...selected].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-  }, [selectedTickets, kanbanTickets]);
+  }, [selectedTickets]);
 
   // Mutation for creating email channel
   const createChannelMutation = useMutation({
@@ -2268,6 +2306,7 @@ const SupportScreen = (): ReactElement => {
                         onBoardIdReady={setChannelBoardId}
                         onPageChange={clearTicketSelection}
                         onToggleSelectAll={handleToggleSelectAll}
+                        onTicketsLoaded={setKanbanTickets}
                         onTicketClick={ticket => {
                           void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {
@@ -2602,7 +2641,26 @@ export const SupportTicketDetail = ({
     (composerOpen || ticketEmailDraftCount > 0) &&
     (visibleAutoDraftCitations.length > 0 || visibleInlineCitations.length > 0);
   const hasUserDraftAgentSession = !!userDraftSession?.answered;
-  const emails = useMemo(() => (ticket?.emails as Email[] | undefined) ?? [], [ticket?.emails]);
+
+  // Gather conversation IDs for this ticket AND any tickets merged into it, so
+  // the email thread shows emails from the merged-away tickets too.
+  const allConversationIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (ticket?.conversationId) ids.add(ticket.conversationId);
+    (ticket?.referencesIn ?? [])
+      .filter(ref => ref.relationType === TicketReferenceRelation.MERGED_INTO)
+      .forEach(ref => {
+        if (ref.sourceTicket?.conversationId) ids.add(ref.sourceTicket.conversationId);
+      });
+    return Array.from(ids);
+  }, [ticket?.conversationId, ticket?.referencesIn]);
+
+  const [allEmails] = useCachedQuery(
+    queries.getEmailsForConversations({ conversationIds: allConversationIds }),
+    { enabled: allConversationIds.length > 0 },
+  );
+
+  const emails = useMemo(() => (allEmails as Email[] | undefined) ?? [], [allEmails]);
   const emailCollapseState = useEmailCollapseState(emails);
 
   const initiator = useMemo(() => {
@@ -3556,7 +3614,7 @@ export const SupportTicketDetail = ({
                     >
                       <EmailComposer
                         conversationId={conversationId}
-                        emails={ticket?.emails}
+                        emails={emails}
                         onClose={() => {
                           setComposerOpen(false);
                           setReplyToEmailId(null);
@@ -4218,6 +4276,7 @@ const EmailThreadItem = ({
                   emailId={email.id}
                   attachments={threadAttachments ?? email.attachments}
                   onMailtoClick={onMailtoClick}
+                  autoScroll={!canCollapse}
                 />
               ) : (
                 <span className='text-muted-foreground italic'>No content</span>

@@ -89,6 +89,10 @@ import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import { TYPE_AUTOCOMPLETE_REGEX, parseTypeFilter } from '../../../utils/searchFilterParser';
 import { TicketPreviewPanel } from './TicketPreviewPanel';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
+import { apiInstance } from '../../../services/clients/apiClient';
+import { MergeTicketsDialog } from '../../Tickets/MergeTicketsDialog/MergeTicketsDialog';
+import { toast } from 'sonner';
+import Button from '../../ui/Button';
 
 type SearchResultsDocType = SearchResultsFilters['docType'];
 
@@ -191,6 +195,7 @@ const ChannelCommandMenu = ({
   onTabChange,
   initialTab,
   hideTabs = false,
+  deskMergeEnabled = false,
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
@@ -393,6 +398,11 @@ const ChannelCommandMenu = ({
       m.prefix === 'from:' ||
       m.prefix === 'with:' ||
       (m.prefix === 'in:' && m.type === MentionType.CHANNEL),
+  );
+
+  // Only show merge option when a desk channel is explicitly scoped via in:<channel>
+  const hasDeskChannelFilter = selectedMentions.some(
+    m => m.prefix === 'in:' && m.type === MentionType.CHANNEL,
   );
 
   // Shared Cmd+K user rank for the plain-search USERS section. Hoisted so the
@@ -610,6 +620,46 @@ const ChannelCommandMenu = ({
   const [keyboardSelectedResult, setKeyboardSelectedResult] = useState<DisplaySearchResult | null>(
     null,
   );
+
+  // ── Ticket merge mode (only when opened via support screen search button) ─
+  const [deskMergeMode, setDeskMergeMode] = useState(false);
+  const [selectedMergeTickets, setSelectedMergeTickets] = useState<
+    Map<string, DisplaySearchResult>
+  >(new Map());
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+
+  // Extract ticketId from a desk email result for merge
+  const getDeskTicketId = (result: DisplaySearchResult): string | null => {
+    if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
+      return result.searchContext?.ticketId || null;
+    }
+    return null;
+  };
+
+  const toggleDeskMergeMode = useCallback(() => {
+    setDeskMergeMode(prev => {
+      if (prev) setSelectedMergeTickets(new Map());
+      return !prev;
+    });
+  }, []);
+
+  const handleToggleDeskMergeSelect = useCallback((result: DisplaySearchResult) => {
+    const ticketId = result.searchContext?.ticketId;
+    if (!ticketId) return;
+    setSelectedMergeTickets(prev => {
+      const next = new Map(prev);
+      if (next.has(ticketId)) {
+        next.delete(ticketId);
+      } else {
+        next.set(ticketId, result);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearDeskMergeSelection = useCallback(() => {
+    setSelectedMergeTickets(new Map());
+  }, []);
 
   const DISPLAY_LIMIT = 5;
 
@@ -1097,6 +1147,22 @@ const ChannelCommandMenu = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeEnabledTabs, inline, hideTabs]);
 
+  // Clear desk merge mode when switching away from DESK tab
+  useEffect(() => {
+    if (activeTab !== TabType.DESK) {
+      setDeskMergeMode(false);
+      setSelectedMergeTickets(new Map());
+    }
+  }, [activeTab]);
+
+  // Clear desk merge mode when the desk channel filter is removed
+  useEffect(() => {
+    if (!hasDeskChannelFilter) {
+      setDeskMergeMode(false);
+      setSelectedMergeTickets(new Map());
+    }
+  }, [hasDeskChannelFilter]);
+
   // Reset state when menu closes; also reset tab on open so dialog always starts on ALL
   useEffect(() => {
     if (!open) {
@@ -1112,6 +1178,9 @@ const ChannelCommandMenu = ({
       resetSearchState();
       setExpandedCategories(new Set());
       setPreviewTicket(null);
+      setDeskMergeMode(false);
+      setSelectedMergeTickets(new Map());
+      setShowMergeDialog(false);
 
       // Reset the previous search text refs
       prevSearchTextRef.current = '';
@@ -1187,6 +1256,12 @@ const ChannelCommandMenu = ({
     result: DisplaySearchResult,
     rankPosition: number,
   ): Promise<void> => {
+    // Desk merge mode: clicking a desk email toggles selection instead of navigating
+    if (deskMergeMode && getDeskTicketId(result)) {
+      handleToggleDeskMergeSelect(result);
+      return;
+    }
+
     if (contextSelectionMode && onContextItemToggle) {
       onContextItemToggle(buildContextItemFromResult(result));
       return;
@@ -1544,6 +1619,9 @@ const ChannelCommandMenu = ({
                     onItemMouseEnter={handleTicketMouseEnter}
                     onItemMouseLeave={handleTicketMouseLeave}
                     isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
+                    mergeMode={deskMergeMode && !!getDeskTicketId(result)}
+                    isMergeSelected={selectedMergeTickets.has(result.searchContext?.ticketId || '')}
+                    onToggleSelect={handleToggleDeskMergeSelect}
                   />
                 ))}
                 {isScreenAll && hiddenCount > 0 && sectionTab && (
@@ -3329,6 +3407,44 @@ const ChannelCommandMenu = ({
               </div>
             )}
           </Command.List>
+
+          {/* Desk merge action bar */}
+          {deskMergeMode && (
+            <div className='shrink-0 border-t border-border/40 bg-muted/30 px-4 py-3 flex items-center justify-between'>
+              {selectedMergeTickets.size === 0 ? (
+                <>
+                  <span className='text-sm text-muted-foreground'>
+                    Click tickets to select them for merging
+                  </span>
+                  <Button variant='secondary' size='sm' onClick={toggleDeskMergeMode}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span className='text-sm font-medium'>
+                    {selectedMergeTickets.size} ticket{selectedMergeTickets.size !== 1 ? 's' : ''}{' '}
+                    selected
+                  </span>
+                  <div className='flex items-center gap-2'>
+                    <Button variant='ghost' size='sm' onClick={clearDeskMergeSelection}>
+                      Clear
+                    </Button>
+                    <Button variant='secondary' size='sm' onClick={toggleDeskMergeMode}>
+                      Cancel
+                    </Button>
+                    <Button
+                      size='sm'
+                      disabled={selectedMergeTickets.size < 2}
+                      onClick={() => setShowMergeDialog(true)}
+                    >
+                      Merge {selectedMergeTickets.size > 0 ? `(${selectedMergeTickets.size})` : ''}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Context Panel - shown on right side in context selection mode */}
@@ -3368,6 +3484,19 @@ const ChannelCommandMenu = ({
           </div>
           */}
           <div className='flex items-center gap-6'>
+            {deskMergeEnabled &&
+              activeTab === TabType.DESK &&
+              !deskMergeMode &&
+              hasDeskChannelFilter && (
+                <button
+                  onClick={toggleDeskMergeMode}
+                  className='flex gap-2 items-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer'
+                  data-track-category='COMMAND_MENU'
+                  data-track-name='TOGGLE_DESK_MERGE_MODE'
+                >
+                  <span>Select & Merge</span>
+                </button>
+              )}
             <span className='flex gap-2.5 items-center'>
               <span>Open</span>
               <span className='p-1 bg-background rounded-md border border-border'>
@@ -3422,6 +3551,47 @@ const ChannelCommandMenu = ({
           fileSize={previewFile.fileSize}
         />
       )}
+
+      {/* Desk Ticket Merge Dialog */}
+      <MergeTicketsDialog
+        open={showMergeDialog}
+        onOpenChange={setShowMergeDialog}
+        tickets={Array.from(selectedMergeTickets.entries()).map(([ticketId, result]) => ({
+          id: ticketId,
+          title: result.title,
+          xyneId: result.searchContext?.xyneId ?? null,
+          createdAt: result.metadata?.timestamp
+            ? new Date(result.metadata.timestamp).getTime()
+            : null,
+        }))}
+        onMerge={async parentTicketId => {
+          try {
+            const ticketsToMerge = Array.from(selectedMergeTickets.keys()).filter(
+              id => id !== parentTicketId,
+            );
+            await Promise.all(
+              ticketsToMerge.map(ticketId =>
+                apiInstance.post(`/tickets/${ticketId}/merge`, { targetTicketId: parentTicketId }),
+              ),
+            );
+
+            setShowMergeDialog(false);
+            setDeskMergeMode(false);
+            setSelectedMergeTickets(new Map());
+
+            const parentResult = selectedMergeTickets.get(parentTicketId);
+            if (parentResult) {
+              await navigateToSearchResult(parentResult, navigate, channelData || []);
+            }
+            onOpenChange(false);
+
+            toast.success(`${ticketsToMerge.length + 1} tickets merged successfully`);
+          } catch (err) {
+            console.error('Merge failed:', err);
+            toast.error('Failed to merge tickets. Please try again.');
+          }
+        }}
+      />
     </>
   );
 
@@ -3470,7 +3640,8 @@ const ChannelCommandMenu = ({
         'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
         isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
         contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
-        'md:w-full md:h-auto bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border z-[9999]',
+        'md:w-full md:h-auto bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
+        showMergeDialog ? 'z-40' : 'z-[9999]',
       )}
       onKeyDownCapture={handleCommandKeyDown}
     >

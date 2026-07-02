@@ -1,5 +1,12 @@
 import { shortcutsActor } from '../machines/shortcutsMachine';
 
+declare global {
+  interface KeyboardEvent {
+    /** True when the event was synthesized by `invokeShortcut` rather than a real key press. */
+    __fromInvokeShortcut?: boolean;
+  }
+}
+
 export const KNOWN_SHORTCUT_SCOPES = [
   'global',
   'channel',
@@ -308,6 +315,9 @@ export const invokeShortcut = (key: string): boolean => {
     const entry = resolveShortcut(normalizedKey, syntheticEvent, activeScopes);
     if (!entry) return false;
 
+    // Mark synthetic events so handlers can distinguish UI-triggered shortcuts
+    // from genuine keyboard presses
+    syntheticEvent.__fromInvokeShortcut = true;
     entry.handler(syntheticEvent);
     return true;
   } catch (error) {

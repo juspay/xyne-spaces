@@ -45,12 +45,18 @@ interface TicketListViewProps {
   onBoardIdReady?: (boardId: string) => void;
   onPageChange?: (pageIndex: number) => void;
   onToggleSelectAll?: (rows: SelectableRow[], select: boolean) => void;
+  onTicketsLoaded?: (tickets: SupportTicketRow[]) => void;
 }
 
 export interface SelectableRow {
   id: string;
   lastEmailAt: number;
   emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
+  title: string;
+  xyneId: string;
+  createdAt: number;
+  channelId: string;
+  conversationId: string;
 }
 
 export const TicketListView = function TicketListView({
@@ -67,6 +73,7 @@ export const TicketListView = function TicketListView({
   onBoardIdReady,
   onPageChange,
   onToggleSelectAll,
+  onTicketsLoaded,
 }: TicketListViewProps): React.ReactElement {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { userID } = useAuthContextValues();
@@ -157,6 +164,10 @@ export const TicketListView = function TicketListView({
 
   const hasNextPage = allRows.length > PAGE_SIZE;
   const tickets = useMemo(() => allRows.slice(0, PAGE_SIZE), [allRows]);
+
+  useEffect(() => {
+    onTicketsLoaded?.(tickets);
+  }, [tickets, onTicketsLoaded]);
 
   const complete = firstPageDetails.type === 'complete';
   const rowsEmpty = complete && tickets.length === 0;
@@ -324,6 +335,11 @@ export const TicketListView = function TicketListView({
                     onToggleSelect({
                       id: row.id,
                       lastEmailAt: row.lastEmailAt,
+                      title: row.title ?? '',
+                      xyneId: row.xyneId ?? '',
+                      createdAt: row.createdAt ?? 0,
+                      channelId: row.channelId ?? '',
+                      conversationId: row.conversationId ?? '',
                       ...(emailReads ? { emailReads } : {}),
                     });
                   },
@@ -342,7 +358,15 @@ export const TicketListView = function TicketListView({
   const rangeLabel = `${fromIndex}–${toIndex}`;
 
   const toSelectable = (t: SupportTicketRow): SelectableRow => {
-    const entry: SelectableRow = { id: t.id, lastEmailAt: t.lastEmailAt };
+    const entry: SelectableRow = {
+      id: t.id,
+      lastEmailAt: t.lastEmailAt,
+      title: t.title ?? '',
+      xyneId: t.xyneId ?? '',
+      createdAt: t.createdAt ?? 0,
+      channelId: t.channelId ?? '',
+      conversationId: t.conversationId ?? '',
+    };
     const emailReads = t.emailReads as
       | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>
       | undefined;

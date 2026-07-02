@@ -17,6 +17,8 @@ interface EmailBodyRendererProps {
   /** Email attachments (loaded via Zero relation) — used to resolve cid: refs */
   /** Called when a mailto link inside the email body is clicked */
   onMailtoClick?: ((email: string) => void) | undefined;
+  /** Scroll the parent container to the bottom after the iframe loads. Only true for the latest email. */
+  autoScroll?: boolean;
   attachments?: ReadonlyArray<{
     id: string;
     metadata?: unknown;
@@ -380,6 +382,7 @@ export const EmailBodyRenderer = ({
   emailId,
   attachments,
   onMailtoClick,
+  autoScroll = false,
 }: EmailBodyRendererProps): JSX.Element => {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const onMailtoClickRef = useRef(onMailtoClick);
@@ -494,6 +497,20 @@ export const EmailBodyRenderer = ({
         }
         return window;
       };
+
+      if (autoScroll) {
+        requestAnimationFrame(() => {
+          const container = findScrollContainer(iframe);
+          if (container instanceof HTMLElement) {
+            const nearBottom =
+              container.scrollHeight - container.scrollTop - container.clientHeight < 300;
+            if (container.scrollTop === 0 || nearBottom) {
+              container.scrollTop = container.scrollHeight;
+            }
+          }
+        });
+      }
+
       contentDoc.addEventListener(
         'wheel',
         e => {
@@ -578,7 +595,7 @@ export const EmailBodyRenderer = ({
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
     };
-  }, [srcdoc]);
+  }, [srcdoc, autoScroll]);
 
   return (
     <div className='w-full'>

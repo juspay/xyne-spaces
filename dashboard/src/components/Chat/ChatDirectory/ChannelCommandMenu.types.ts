@@ -198,4 +198,6 @@ export interface ChannelCommandMenuProps {
   disableAutoFocus?: boolean;
   /** When true, hides the tab bar. The search scope is still controlled by initialTab. */
   hideTabs?: boolean;
+  /** When true, enables desk ticket merge UI (only set when opened via the support screen search button) */
+  deskMergeEnabled?: boolean;
 }

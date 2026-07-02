@@ -33,6 +33,12 @@ interface SearchResultItemProps {
   onItemMouseEnter?: (result: DisplaySearchResult) => void;
   // Fires on mouse leave to clear hover state.
   onItemMouseLeave?: () => void;
+  // Merge mode: shows checkboxes on desk email items instead of navigating
+  mergeMode?: boolean | undefined;
+  // Whether this item is selected for merge
+  isMergeSelected?: boolean | undefined;
+  // Called when an item is toggled in merge mode
+  onToggleSelect?: ((result: DisplaySearchResult) => void) | undefined;
 }
 
 const getResultIcon = (result: DisplaySearchResult): ReactElement => {
@@ -150,10 +156,12 @@ const SearchResultItem = ({
   onItemMouseDown,
   onItemMouseEnter,
   onItemMouseLeave,
+  mergeMode = false,
+  isMergeSelected = false,
+  onToggleSelect,
 }: SearchResultItemProps): ReactElement => {
-  const handleMouseDown = onItemMouseDown
-    ? (e: ReactMouseEvent) => onItemMouseDown(e, result)
-    : undefined;
+  const handleMouseDown =
+    onItemMouseDown && !mergeMode ? (e: ReactMouseEvent) => onItemMouseDown(e, result) : undefined;
 
   const handleMouseEnter = onItemMouseEnter ? () => onItemMouseEnter(result) : undefined;
   const handleMouseLeave = onItemMouseLeave || undefined;
@@ -188,10 +196,28 @@ const SearchResultItem = ({
             value={`backend-${result.type}-${result.id}`}
             data-result-id={result.id}
             data-result-type={result.type}
-            onSelect={() => void onSelect(result)}
+            data-ticket-id={result.searchContext?.ticketId || ''}
+            onSelect={() => {
+              if (mergeMode && onToggleSelect) {
+                onToggleSelect(result);
+              } else {
+                void onSelect(result);
+              }
+            }}
             className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
           >
             <div className='flex items-start gap-1.5'>
+              {mergeMode && (
+                <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 mt-0.5'>
+                  {isMergeSelected ? (
+                    <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
+                      <Check size={10} />
+                    </span>
+                  ) : (
+                    <span className='w-4 h-4 rounded border border-muted-foreground/30 flex-shrink-0' />
+                  )}
+                </div>
+              )}
               {getResultIcon(result)}
               <div className='flex-1 min-w-0'>
                 {/* Line 1: subject gets the full row */}
@@ -209,9 +235,9 @@ const SearchResultItem = ({
                   </span>
                 </div>
               </div>
-              {isSelected && <SelectedBadge />}
+              {!mergeMode && isSelected && <SelectedBadge />}
             </div>
-            <div className='pl-6 text-xs text-foreground'>
+            <div className={`text-xs text-foreground ${mergeMode ? 'pl-10' : 'pl-6'}`}>
               <SearchSnippetRenderer message={result.context || ''} wordLimit={40} />
             </div>
           </Command.Item>
