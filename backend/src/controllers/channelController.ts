@@ -1421,6 +1421,29 @@ export class ChannelController {
     }
   };
 
+  // GET /api/channels/:channelId/members - channel members as { id, name }
+  getChannelMembers = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const { channelId } = req.params;
+      if (!channelId) {
+        res.status(400).json({ success: false, error: 'channelId is required' });
+        return;
+      }
+      // Only members of the channel may view its roster.
+      const isMember = await this.channelParticipantRepository.isParticipant(channelId, userId);
+      if (!isMember) {
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
+      const members = await this.channelParticipantRepository.getActiveChannelMembers(channelId);
+      res.status(200).json({ success: true, data: { members } });
+    } catch (error) {
+      logger.error('Error in getChannelMembers:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  };
+
   // GET /api/channels/search - Unified search for users and groups
   searchForMentions = async (req: Request, res: Response): Promise<void> => {
     try {

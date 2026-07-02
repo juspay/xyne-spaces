@@ -543,11 +543,12 @@ export class CallController {
         return;
       }
 
-      // Fetch channel to get scopeType for CallKit filtering
+      // Fetch channel to get scopeType for CallKit filtering and participant gating
       let scopeType = null;
+      let callChannel = null;
       if (call?.channelId) {
-        const channel = await repositories.channels.findById(call.channelId);
-        scopeType = channel?.scopeType || null;
+        callChannel = await repositories.channels.findById(call.channelId);
+        scopeType = callChannel?.scopeType || null;
       }
 
       // Verify room exists in LiveKit
@@ -562,8 +563,8 @@ export class CallController {
 
         logger.info(`Room not found for call ${callId}, creating from call metadata`);
 
-        // Fetch channel to get metadata
-        const channel = await repositories.channels.findById(call.channelId ?? '');
+        // Fetch channel to get metadata (reuse callChannel if already fetched for the same id)
+        const channel = callChannel ?? await repositories.channels.findById(call.channelId ?? '');
         if (!channel) {
           res.status(404).json({ success: false, error: 'Channel not found' });
           return;
@@ -595,6 +596,7 @@ export class CallController {
 
       // Generate access token
       // Participant record will be created/updated by webhook when user actually joins
+
       const joiner = await db.user.findUnique({ where: { id: user.id }, select: { picture: true } });
       const token = await livekitService.generateAccessToken({
         userIdentity: user.id,

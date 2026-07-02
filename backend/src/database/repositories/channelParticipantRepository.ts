@@ -1,5 +1,5 @@
 import { BaseRepository } from './base';
-import { ChannelParticipant, ChannelRole, UserType } from '@prisma/client';
+import { ChannelParticipant, ChannelRole, UserStatus, UserType } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
 
 export interface CreateChannelParticipantInput {
@@ -262,6 +262,28 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       userEmail: u.email,
       userPicture: u.picture,
     }));
+  }
+
+  /**
+   * Return the channel's ACTIVE members as { id, name } — the minimal shape a participant picker
+   * needs. Deactivated members are filtered out in the query, and no other user fields are read.
+   */
+  async getActiveChannelMembers(
+    channelId: string,
+  ): Promise<Array<{ id: string; name: string }>> {
+    const participants = await this.db.channelParticipant.findMany({
+      where: { channelId },
+      select: { userId: true },
+    });
+
+    if (participants.length === 0) return [];
+
+    const userIds = participants.map(p => p.userId);
+
+    return this.db.user.findMany({
+      where: { id: { in: userIds }, status: UserStatus.ACTIVE },
+      select: { id: true, name: true },
+    });
   }
 
   async getBotAppParticipantUserIds(channelId: string): Promise<string[]> {
