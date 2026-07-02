@@ -323,7 +323,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           side='bottom'
           align='start'
           sideOffset={4}
-          className='z-[100] w-auto max-w-64 max-h-96 overflow-auto rounded-lg border border-border bg-background shadow-lg'
+          className='z-[100] w-auto max-w-96 max-h-96 overflow-auto rounded-lg border border-border bg-background shadow-lg'
           style={{
             maxHeight: 360,
             overflowY: 'auto',
@@ -479,7 +479,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
 
                         {/* Trailing badge (e.g. "Not in channel") */}
                         {option.badge && (
-                          <span className='shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded border border-border bg-muted text-muted-foreground whitespace-nowrap'>
+                          <span className='shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded-full border border-border bg-muted text-muted-foreground whitespace-nowrap'>
                             {option.badge}
                           </span>
                         )}
