@@ -8,18 +8,28 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { cn } from '../../../utils/classNames';
+import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 
 interface AssigneePickerProps {
   ticketId: string;
   assignedTo: string | null | undefined;
+  channelId?: string | undefined;
   label?: string;
 }
 
-export function AssigneePicker({ ticketId, assignedTo, label }: AssigneePickerProps): ReactElement {
+type PickerUser = NonNullable<ReturnType<typeof useActiveUsers>>[number];
+
+export function AssigneePicker({
+  ticketId,
+  assignedTo,
+  channelId,
+  label,
+}: AssigneePickerProps): ReactElement {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const users = useActiveUsers();
   const zero = useZero();
+  const gate = useChannelAssignGate(channelId);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -46,6 +56,14 @@ export function AssigneePicker({ ticketId, assignedTo, label }: AssigneePickerPr
     );
     setOpen(false);
     setSearch('');
+  };
+
+  const handleSelectUser = (user: PickerUser): void => {
+    gate.gatedAssign({
+      userId: user.id,
+      userName: getUserDisplayName(user),
+      assign: () => assign(user.id),
+    });
   };
 
   const avatar = resolvedAssigneeId ? (
@@ -142,7 +160,7 @@ export function AssigneePicker({ ticketId, assignedTo, label }: AssigneePickerPr
               type='button'
               onClick={e => {
                 e.stopPropagation();
-                assign(user.id);
+                handleSelectUser(user);
               }}
               className={cn(
                 'w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors flex items-center gap-2',
@@ -158,6 +176,11 @@ export function AssigneePicker({ ticketId, assignedTo, label }: AssigneePickerPr
                   <div className='text-[10px] text-muted-foreground truncate'>{user.email}</div>
                 ) : null}
               </div>
+              {gate.shouldGate && !gate.memberIds.has(user.id) && (
+                <span className='shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded border border-border bg-muted text-muted-foreground whitespace-nowrap'>
+                  Not in channel
+                </span>
+              )}
             </button>
           ))}
           {filteredUsers.length === 0 && (

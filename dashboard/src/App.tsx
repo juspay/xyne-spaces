@@ -125,6 +125,7 @@ const App = (): ReactElement => {
                           background: '#000000',
                           color: '#ffffff',
                           border: '1px solid #27272a',
+                          pointerEvents: 'auto',
                         },
                         classNames: {
                           toast: 'relative items-start group !pt-3 !pr-3 !pb-3 !pl-4',

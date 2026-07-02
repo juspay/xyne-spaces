@@ -270,7 +270,11 @@ export const TicketListRow = ({
             {statusLabel}
           </span>
         </div>
-        <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} />
+        <AssigneePicker
+          ticketId={ticket.id}
+          assignedTo={ticket.assignedTo}
+          channelId={ticket.channelId ?? undefined}
+        />
         <Tooltip delayDuration={300} content={formatDateTime(dueDate)} side='top'>
           <span
             className={cn(

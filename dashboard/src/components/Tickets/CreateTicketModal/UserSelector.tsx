@@ -5,6 +5,7 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { useActiveUserSearch, useUser } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 
 /**
  * Props for UserSelector component
@@ -15,6 +16,7 @@ interface UserSelectorProps {
 
   /** Callback when user selection changes */
   onUserSelect: (userId: string | null) => void;
+  channelId?: string | undefined;
 
   noBorder?: boolean;
 }
@@ -36,9 +38,11 @@ interface UserSelectorProps {
 export const UserSelector: React.FC<UserSelectorProps> = ({
   selectedUserId,
   onUserSelect,
+  channelId,
   noBorder,
 }) => {
   const [searchValue, setSearchValue] = useState('');
+  const { shouldGate, memberIds, gatedAssign } = useChannelAssignGate(channelId);
 
   // ==================== DATA FETCHING ====================
 
@@ -69,8 +73,9 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
       label: getUserDisplayName(user),
       subtitle: user.email,
       icon: <UserAvatar userId={user.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
+      badge: shouldGate && !memberIds.has(user.id) ? 'Not in channel' : undefined,
     }));
-  }, [users]);
+  }, [users, shouldGate, memberIds]);
 
   /**
    * If a user is selected but not in the search results,
@@ -103,10 +108,19 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
       icon: (
         <UserAvatar userId={selectedUser.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />
       ),
+      badge: shouldGate && !memberIds.has(selectedUser.id) ? 'Not in channel' : undefined,
     };
 
     return [selectedOption, ...userOptions];
-  }, [selectedUserId, selectedUserData, userOptions]);
+  }, [selectedUserId, selectedUserData, userOptions, shouldGate, memberIds]);
+  const handleSelect = (userId: string | null): void => {
+    if (!userId) {
+      onUserSelect(null);
+      return;
+    }
+    const name = optionsWithSelected.find(o => o.value === userId)?.label ?? 'This user';
+    gatedAssign({ userId, userName: name, assign: () => onUserSelect(userId) });
+  };
 
   // ==================== RENDER ====================
 
@@ -114,7 +128,7 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
     <EntitySelector
       options={optionsWithSelected}
       selectedValue={selectedUserId}
-      onSelect={onUserSelect}
+      onSelect={handleSelect}
       placeholder='Assign User'
       searchPlaceholder='Search users...'
       isLoading={false}

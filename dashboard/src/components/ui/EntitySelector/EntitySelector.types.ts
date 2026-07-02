@@ -38,6 +38,7 @@ export interface SelectorOption {
 
   /** Whether this option represents a deactivated entity (will show gray text + Deactivated badge) */
   isDeactivated?: boolean;
+  badge?: string | undefined;
 }
 
 /**

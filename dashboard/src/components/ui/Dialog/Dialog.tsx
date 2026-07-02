@@ -118,6 +118,12 @@ export const Dialog = ({
                   }
                 },
               })}
+          onInteractOutside={event => {
+            const target = (event.detail?.originalEvent?.target ?? null) as Element | null;
+            if (target?.closest?.('[data-sonner-toast], [data-sonner-toaster]')) {
+              event.preventDefault();
+            }
+          }}
           data-testid={testId ?? 'dialog-content'}
           className={cn(
             'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
