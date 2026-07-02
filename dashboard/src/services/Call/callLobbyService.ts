@@ -27,6 +27,18 @@ export interface LobbyParticipant {
   response: string | null;
 }
 
+export interface CallLobbyActiveRecording {
+  recordingId: string;
+  startedBy: string | null;
+  startedByName?: string | null;
+  startedAt: number;
+  recordingType: string;
+}
+
+export interface CallLobbyRecordingStateResponse {
+  activeRecording: CallLobbyActiveRecording | null;
+}
+
 // Re-export shared type for backward compatibility
 export type { CallChatMessage } from '@xyne/shared';
 
@@ -136,6 +148,17 @@ export const callLobbyService = {
       `${BASE}/${externalId}/participants`,
     );
     return response.data.participants;
+  },
+
+  /**
+   * Get active recording state for an admitted external participant.
+   * Auth is via HTTP-only cookie.
+   */
+  async getRecordingState(externalId: string): Promise<CallLobbyRecordingStateResponse> {
+    const response = await apiInstance.get<CallLobbyRecordingStateResponse>(
+      `${BASE}/${externalId}/recording-state`,
+    );
+    return response.data;
   },
 
   /**

@@ -24,8 +24,15 @@ import { ReactionsOverlay } from '../components/ReactionsOverlay';
 import { CallChatPanel } from '../CallChatPanel/CallChatPanel';
 import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 import { recordingService } from '../../../services/Recording/recordingService';
-import { useActiveRecording } from '../hooks/useActiveRecording';
+import { useActiveRecording, type ActiveRecording } from '../hooks/useActiveRecording';
 import { RecordingStopDialog } from '../CallControls/RecordingStopDialog';
+import { CallPrivacyIndicator } from '../CallPrivacyIndicator/CallPrivacyIndicator';
+import { createCallPrivacyActions } from '../CallPrivacyIndicator/callPrivacyActions';
+
+const CALL_PRIVACY_DESCRIPTION = [
+  'Xyne AI is active in this call. Active actions and saved artifacts are listed below.',
+  'Meeting data, including audio, may be processed and kept temporarily to create the selected artifacts.',
+];
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -99,6 +106,10 @@ interface FullCallViewProps {
   onToggleHandRaise?: (() => void) | undefined;
   /** Whether screen recording is currently active (synced from Zero) */
   isRecording?: boolean | undefined;
+  /** Authoritative active recording state from the external lobby API. */
+  externalActiveRecording?: ActiveRecording | null | undefined;
+  /** Delays reminder sound until external recording state is known. */
+  privacyReminderEnabled?: boolean | undefined;
 }
 
 export function FullCallView({
@@ -143,6 +154,8 @@ export function FullCallView({
   raisedHands = [],
   onToggleHandRaise,
   isRecording: isRecordingProp = false,
+  externalActiveRecording,
+  privacyReminderEnabled = true,
 }: FullCallViewProps): React.ReactElement {
   // ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS
   // UI state
@@ -159,7 +172,9 @@ export function FullCallView({
   // only fallbacks for the brief window before metadata propagates.
   const activeRecording = useActiveRecording(room);
   const [optimisticRecording, setOptimisticRecording] = useState(false);
-  const isRecordingActive = !!activeRecording || optimisticRecording || isRecordingProp;
+  const displayActiveRecording =
+    externalActiveRecording !== undefined ? externalActiveRecording : activeRecording;
+  const isRecordingActive = !!displayActiveRecording || optimisticRecording || isRecordingProp;
 
   // Only the participant who started the recording may stop it (mirrors the
   // backend starter-only authz). When we started it optimistically and metadata
@@ -170,12 +185,11 @@ export function FullCallView({
 
   // Reconcile optimistic flag once authoritative metadata arrives.
   useEffect(() => {
-    if (activeRecording) setOptimisticRecording(true);
-    else setOptimisticRecording(false);
+    setOptimisticRecording(!!activeRecording);
   }, [activeRecording]);
 
   // Elapsed recording timer (MM:SS) from the recording's start time.
-  const recordingStartedAt = activeRecording?.startedAt ?? null;
+  const recordingStartedAt = displayActiveRecording?.startedAt ?? null;
   const [recordingElapsed, setRecordingElapsed] = useState('00:00');
   useEffect(() => {
     if (!recordingStartedAt) {
@@ -198,19 +212,27 @@ export function FullCallView({
     recordingId?: string;
     defaultName: string;
   } | null>(null);
+  const [optimisticRecordingType, setOptimisticRecordingType] = useState<RecordingType | null>(
+    null,
+  );
+  const [privacyReminderTriggerKey, setPrivacyReminderTriggerKey] = useState(0);
 
   const handleStartRecording = useCallback(
     async (type: RecordingType): Promise<void> => {
+      setOptimisticRecordingType(type);
+      setPrivacyReminderTriggerKey(prev => prev + 1);
       setOptimisticRecording(true);
       try {
         const res = await recordingService.startCallRecording(callId, type);
         if (res.alreadyActive) {
           // Someone else already started one — metadata reflects the real state.
           setOptimisticRecording(false);
+          setOptimisticRecordingType(null);
         }
       } catch (err) {
         console.error('[Recording] start error', err);
         setOptimisticRecording(false);
+        setOptimisticRecordingType(null);
       }
     },
     [callId],
@@ -232,6 +254,7 @@ export function FullCallView({
       const recordingId = stopDialog?.recordingId;
       setStopDialog(null);
       setOptimisticRecording(false);
+      setOptimisticRecordingType(null);
       try {
         await recordingService.stopCallRecording(callId, {
           ...(recordingId ? { recordingId } : {}),
@@ -246,6 +269,14 @@ export function FullCallView({
 
   // Reactions
   const { reactions, sendReaction } = useReactions(room);
+  const displayRecordingType =
+    displayActiveRecording?.recordingType ?? (optimisticRecording ? optimisticRecordingType : null);
+  const callPrivacyActions = createCallPrivacyActions({
+    isRecordingActive,
+    recordingType: displayRecordingType,
+    recordingElapsed,
+    recordingStartedByName: displayActiveRecording?.startedByName,
+  });
 
   // Get call title and origin from activeCalls
 
@@ -368,8 +399,8 @@ export function FullCallView({
               <span
                 className='flex items-center gap-1 text-red-400 text-xs font-semibold'
                 title={
-                  activeRecording?.startedByName
-                    ? `Recording started by ${activeRecording.startedByName}`
+                  displayActiveRecording?.startedByName
+                    ? `Recording started by ${displayActiveRecording.startedByName}`
                     : 'This call is being recorded'
                 }
               >
@@ -379,7 +410,21 @@ export function FullCallView({
             </>
           )}
         </div>
-        <ConnectionStatusIndicators room={room} />
+        <div className='flex items-center gap-3'>
+          <CallPrivacyIndicator
+            title='Transcribing'
+            description={CALL_PRIVACY_DESCRIPTION}
+            actions={callPrivacyActions}
+            activeTone={isRecordingActive ? 'recording' : 'ai'}
+            reminderTriggerKey={privacyReminderTriggerKey}
+            reminderEnabled={privacyReminderEnabled}
+            trackMetadata={{
+              isRecordingActive,
+              recordingType: displayRecordingType,
+            }}
+          />
+          <ConnectionStatusIndicators room={room} />
+        </div>
       </div>
 
       <CallStateTransition connectionState={connectionState} machineState={machineState}>

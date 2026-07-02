@@ -68,7 +68,10 @@ async function resolveCallSession(req: Request, res: Response, next: NextFunctio
         });
 
         if (existing) {
-          lobbyReq.callSession = { participantId: existing.id, response: existing.response ?? 'REQUESTED' };
+          lobbyReq.callSession = {
+            participantId: existing.id,
+            response: existing.response ?? 'REQUESTED',
+          };
         } else {
           clearExtCallCookie(res, externalId);
         }
@@ -93,7 +96,11 @@ async function resolveCallSession(req: Request, res: Response, next: NextFunctio
 // Internal (logged-in) users use /api/calls/chat/ endpoints instead.
 // ---------------------------------------------------------------------------
 
-async function requireCallParticipant(req: Request, res: Response, next: NextFunction): Promise<void> {
+async function requireCallParticipant(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     const lobbyReq = req as CallLobbyRequest;
 
@@ -119,9 +126,30 @@ router.post('/:externalId/request', resolveCallSession, callLobbyController.requ
 router.get('/:externalId/status', resolveCallSession, callLobbyController.getLobbyStatus);
 router.post('/:externalId/join', resolveCallSession, callLobbyController.externalJoin);
 router.post('/:externalId/rejoin', resolveCallSession, callLobbyController.rejoinLobby);
-router.post('/:externalId/messages', resolveCallSession, requireCallParticipant, callLobbyController.sendMessage);
-router.get('/:externalId/messages', resolveCallSession, requireCallParticipant, callLobbyController.getMessages);
-router.get('/:externalId/participants', resolveCallSession, requireCallParticipant, callLobbyController.getParticipants);
+router.post(
+  '/:externalId/messages',
+  resolveCallSession,
+  requireCallParticipant,
+  callLobbyController.sendMessage
+);
+router.get(
+  '/:externalId/messages',
+  resolveCallSession,
+  requireCallParticipant,
+  callLobbyController.getMessages
+);
+router.get(
+  '/:externalId/participants',
+  resolveCallSession,
+  requireCallParticipant,
+  callLobbyController.getParticipants
+);
+router.get(
+  '/:externalId/recording-state',
+  resolveCallSession,
+  requireCallParticipant,
+  callLobbyController.getRecordingState
+);
 router.get('/:externalId/invite-url', resolveCallSession, callLobbyController.getInviteUrl);
 
 export default router;
