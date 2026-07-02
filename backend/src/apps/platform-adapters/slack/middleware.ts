@@ -2,6 +2,8 @@ import type { NextFunction, Request, Response } from "express";
 import { authenticateApp } from "@/apps/middelware/authenticator";
 import { repositories } from "@/database/repositories";
 import { logger } from "@/utils/logger";
+import { config } from "@/config/env";
+import { resolveSlackIds } from "@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver";
 import { transformSlackError } from "./error-transformer";
 import { unifiedDMService } from "@/bots/unified/services/unified-dm-service";
 
@@ -44,10 +46,16 @@ export async function resolveSlackChannelForUser(
 	botUserId: string,
 	workspaceId: string,
 ): Promise<{ channelId: string; isDM: boolean }> {
-	const targetUser = await repositories.users.findById(channel);
-	if (targetUser) {
+	const resolved = await resolveSlackIds(
+		[channel],
+		config.slackBotToken,
+		"user",
+		workspaceId,
+	);
+	const dbUserId = resolved?.get(channel)?.dbId;
+	if (dbUserId) {
 		const dmChannel = await unifiedDMService.getOrCreateBotDM(
-			targetUser.id,
+			dbUserId,
 			botUserId,
 			workspaceId,
 		);

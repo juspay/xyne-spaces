@@ -172,4 +172,31 @@ export class PermissionController {
       res.status(status).json({ error: msg });
     }
   };
+
+  /**
+   * POST /apps/installed/:installedAppId/permissions/activate
+   * Activate the INSTALL's pending permission edits (installed_app_permissions) in place, without
+   * resetting to the app template. Promotes UNAPPROVED → APPROVED and drops PENDINGDELETE rows.
+   * Used by the Installed edit screen's "Apply & activate" button (workspace admin).
+   */
+  activateInstalledPermissions = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { installedAppId } = req.params;
+      const workspaceId = req.user?.workspaceId;
+      if (!installedAppId || !workspaceId) {
+        res.status(400).json({ error: 'installedAppId and workspace are required' });
+        return;
+      }
+      const install = await this.findOwnInstall(installedAppId, workspaceId);
+      if (!install) {
+        res.status(404).json({ error: 'Installed app not found in this workspace' });
+        return;
+      }
+      await repositories.appPermissions.activateInstalledPermissions(install.id);
+      res.status(200).json({ ok: true });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Internal server error';
+      res.status(500).json({ error: msg });
+    }
+  };
 }

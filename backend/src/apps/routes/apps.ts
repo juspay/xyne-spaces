@@ -51,6 +51,7 @@ router.post('/org-names', authMiddleware.authenticate, authorize('XYNE-APPS', Ac
 router.patch('/installed/:installedAppId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.updateInstalledApp);
 router.get('/installed/:installedAppId/permissions', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), permissionController.getInstalledGranted);
 router.post('/installed/:installedAppId/permissions', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.setInstalledPermissions);
+router.post('/installed/:installedAppId/permissions/activate', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.activateInstalledPermissions);
 router.get('/installed/:installedAppId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), commandController.getInstalledCommands);
 
 router.post('/incoming-webhooks', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.createWebhook);
