@@ -5,7 +5,7 @@
  */
 
 import { ReactElement, useEffect, useRef } from 'react';
-import { Mic, Plus, Loader2 } from 'lucide-react';
+import { Mic, Plus, Loader2, FileText } from 'lucide-react';
 import { TranscriptEntry } from '../../../stores/recordingStore';
 import { formatTime12Hour, formatElapsedTime } from '../../../utils/recordingUtils';
 
@@ -13,12 +13,16 @@ interface ActiveRecordingViewProps {
   transcripts: TranscriptEntry[];
   startTime: number | null;
   isPaused: boolean;
-  /** Whether a notes canvas already exists for this recording. Hides the create button. */
+  /** Whether a notes canvas already exists for this recording. */
   hasCanvas?: boolean;
+  /** Whether the notes pane is currently visible. */
+  isCanvasPaneOpen?: boolean;
   /** Spinner state while the canvas is being created. */
   isCreatingCanvas?: boolean;
-  /** Triggered by the "Create Canvas" button. Omit (with hasCanvas) to hide the button. */
+  /** Triggered by the "Create Notes" button. */
   onCreateCanvas?: () => void;
+  /** Triggered by the "Open Notes" button once a notes canvas exists. */
+  onOpenCanvas?: () => void;
 }
 
 // Re-export utility functions for local use
@@ -29,10 +33,12 @@ export function ActiveRecordingView({
   startTime,
   isPaused,
   hasCanvas = false,
+  isCanvasPaneOpen = false,
   isCreatingCanvas = false,
   onCreateCanvas,
+  onOpenCanvas,
 }: ActiveRecordingViewProps): ReactElement {
-  const showCreateCanvas = !hasCanvas && !!onCreateCanvas;
+  const showCanvasAction = hasCanvas ? !isCanvasPaneOpen && !!onOpenCanvas : !!onCreateCanvas;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new transcripts arrive
@@ -45,8 +51,8 @@ export function ActiveRecordingView({
   return (
     <div className='flex flex-col h-full'>
       {/* Recording Header */}
-      <div className='px-6 py-4 border-b border-input dark:border-gray-700'>
-        <div className='flex items-center justify-between gap-3'>
+      <div className='h-[72px] px-6 border-b border-input dark:border-gray-700 flex items-center'>
+        <div className='flex w-full items-center justify-between gap-3'>
           <div className='flex items-center gap-3 min-w-0'>
             <div className='w-10 h-10 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center flex-shrink-0'>
               <Mic className='w-5 h-5 text-red-500' />
@@ -75,21 +81,22 @@ export function ActiveRecordingView({
             </div>
           </div>
 
-          {/* Create Canvas — only shown until a notes canvas exists */}
-          {showCreateCanvas && (
+          {showCanvasAction && (
             <button
-              onClick={onCreateCanvas}
-              disabled={isCreatingCanvas}
+              onClick={hasCanvas ? onOpenCanvas : onCreateCanvas}
+              disabled={!hasCanvas && isCreatingCanvas}
               className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-background dark:bg-gray-800 border border-border dark:border-gray-700 rounded-lg hover:bg-muted dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0'
               data-track-category='RecordingsScreen'
-              data-track-name='create_notes_canvas'
+              data-track-name={hasCanvas ? 'open_notes_canvas' : 'create_notes_canvas'}
             >
-              {isCreatingCanvas ? (
+              {!hasCanvas && isCreatingCanvas ? (
                 <Loader2 className='w-3.5 h-3.5 animate-spin' />
+              ) : hasCanvas ? (
+                <FileText className='w-3.5 h-3.5' />
               ) : (
                 <Plus className='w-3.5 h-3.5' />
               )}
-              Create Canvas
+              {hasCanvas ? 'Open Notes' : 'Create Notes'}
             </button>
           )}
         </div>

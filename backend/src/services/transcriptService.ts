@@ -1238,31 +1238,7 @@ Output ONLY the processed transcript, nothing else.`;
       `[postSummaryAsReply] Bot found: ${xyneAutomaticBot.id} (${xyneAutomaticBot.email})`
     );
 
-    // ── 1. Post the notes-canvas link, if the user created one during the recording ──
-    // The viewAccessId is persisted on the call when the canvas is created (see the
-    // calls.linkNotesCanvas Zero mutator). Best-effort: never blocks the summary.
-    // Posted here (before the summary) so the notes reply appears first in the thread;
-    // it still runs after the call-message title swap in processCallWithSummary, so the
-    // notesCanvasUrl stamp on the call message is not clobbered.
-    try {
-      const call = await repositories.calls.findByExternalId(callId);
-      const notesCanvasViewAccessId = (call?.metadata as Record<string, unknown> | null)
-        ?.notesCanvasViewAccessId;
-
-      if (typeof notesCanvasViewAccessId === 'string' && notesCanvasViewAccessId) {
-        const canvasUrl = getCanvasUrl(notesCanvasViewAccessId);
-        await callDocumentService.postNotesCanvasToConversation(
-          conversationId,
-          callId,
-          canvasUrl,
-          channel.workspaceId
-        );
-      }
-    } catch (notesError) {
-      logger.warn(`[postSummaryAsReply] Failed to post notes canvas for callId: ${callId}`, notesError);
-    }
-
-    // ── 2. Post / update the AI summary as its own standalone message ──────────
+    // ── 1. Post / update the AI summary as its own standalone message ──────────
     const existingSummary = await repositories.messages.findSummaryByCallId(conversationId, callId);
 
     if (existingSummary) {
@@ -1410,6 +1386,40 @@ Output ONLY the processed transcript, nothing else.`;
     logger.info(`[postSummaryAsReply] Done for callId: ${callId}`);
   }
 
+  private async postNotesCanvasReplyIfPresent(conversationId: string, callId: string): Promise<void> {
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      const notesCanvasViewAccessId = (call?.metadata as Record<string, unknown> | null)
+        ?.notesCanvasViewAccessId;
+
+      if (typeof notesCanvasViewAccessId !== 'string' || !notesCanvasViewAccessId) {
+        return;
+      }
+
+      const conversation = await repositories.conversations.findById(conversationId);
+      if (!conversation) {
+        throw new Error('Conversation not found');
+      }
+
+      const channel = await db.channel.findUnique({
+        where: { id: conversation.channelId },
+        select: { workspaceId: true },
+      });
+      if (!channel?.workspaceId) {
+        throw new Error('Channel workspace not found');
+      }
+
+      await callDocumentService.postNotesCanvasToConversation(
+        conversationId,
+        callId,
+        getCanvasUrl(notesCanvasViewAccessId),
+        channel.workspaceId,
+      );
+    } catch (notesError) {
+      logger.warn(`[postNotesCanvasReplyIfPresent] Failed to post notes canvas for callId: ${callId}`, notesError);
+    }
+  }
+
   /**
      * Process call transcript and generate AI summary
      * This is the main orchestration method that:
@@ -1425,6 +1435,22 @@ Output ONLY the processed transcript, nothing else.`;
     hasTranscript: boolean = true
   ): Promise<void> {
     try {
+      // Get call details for summary generation and notes posting.
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        logger.error(`[${callId}] call_not_found`, { context: 'summary_generation' });
+        return;
+      }
+
+      // Get the call message to retrieve conversationId for the reply
+      const callMessage = await repositories.messages.findById(messageId);
+      if (!callMessage) {
+        logger.error(`[${callId}] message_not_found`, { message_id: messageId, context: 'summary_generation' });
+        return;
+      }
+
+      await this.postNotesCanvasReplyIfPresent(callMessage.conversationId, callId);
+
       if (!hasTranscript) {
         logger.warn('transcript_processing_skipped', { call_id: callId, reason: 'agent_reported_no_transcript' });
         return;
@@ -1439,20 +1465,6 @@ Output ONLY the processed transcript, nothing else.`;
         logger.error(`[${callId}] post_transcript_failed`, { stage: 'post_call_transcript', error: transcriptError instanceof Error ? transcriptError.message : String(transcriptError), stack: transcriptError instanceof Error ? transcriptError.stack : undefined });
         // Don't rethrow — retrieveTranscript below fetches raw content from GCS directly and
         // may still succeed even if the DB-side attachment step inside postCallTranscript failed.
-      }
-
-      // Get call details for summary generation
-      const call = await repositories.calls.findByExternalId(callId);
-      if (!call) {
-        logger.error(`[${callId}] call_not_found`, { context: 'summary_generation' });
-        return;
-      }
-
-      // Get the call message to retrieve conversationId for the reply
-      const callMessage = await repositories.messages.findById(messageId);
-      if (!callMessage) {
-        logger.error(`[${callId}] message_not_found`, { message_id: messageId, context: 'summary_generation' });
-        return;
       }
 
       // Retrieve and format transcript for AI.
