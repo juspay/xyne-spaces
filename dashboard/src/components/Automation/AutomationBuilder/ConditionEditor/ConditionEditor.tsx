@@ -17,7 +17,8 @@ import { VariablePicker } from '../VariablePicker/VariablePicker';
 import { formatReferenceLabel } from '../VariablePicker/VariablePicker.utils';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import { EntityField } from '../SchemaForm/EntityField';
-import { detectEntityKind } from '../SchemaForm/SchemaForm.utils';
+import { detectEntityKind, isVariableRefValue } from '../SchemaForm/SchemaForm.utils';
+import { ReferenceChip, UseVariableButton } from '../SchemaForm/VariableFieldParts';
 import type { ConditionEditorProps } from './ConditionEditor.types';
 import { isAndGroup, isLeaf, makeEmptyLeaf, resolveLeafSchema } from './ConditionEditor.utils';
 
@@ -174,12 +175,13 @@ function LeafRow({
         </div>
         {showValue && (
           <div className='flex-1 min-w-[160px]'>
-            <ValueInput
+            <ValueOperand
               operator={operator}
               value={leaf.value}
               onChange={next => update({ value: next })}
               enumValues={enumValues}
               entityKind={entityKind}
+              variableSources={variableSources}
             />
           </div>
         )}
@@ -206,6 +208,47 @@ function LeafRow({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ValueOperand({
+  operator,
+  value,
+  onChange,
+  enumValues,
+  entityKind,
+  variableSources,
+}: {
+  operator: { valueType: 'string' | 'number' | 'boolean' | 'none' } | undefined;
+  value: unknown;
+  onChange: (next: unknown) => void;
+  enumValues: string[] | null;
+  entityKind: ReturnType<typeof detectEntityKind>;
+  variableSources: VariablePickerSource[];
+}): React.ReactElement {
+  // The right-hand operand can be a literal constant or a variable reference
+  // (variable-to-variable comparison). When it holds a ref show the shared
+  // ReferenceChip; otherwise show the literal input plus the shared "use
+  // variable" picker — the same pattern as SchemaForm's VariableRefField.
+  if (isVariableRefValue(value)) {
+    return (
+      <ReferenceChip value={value} sources={variableSources} onClear={() => onChange(undefined)} />
+    );
+  }
+
+  return (
+    <div className='flex items-start gap-2'>
+      <div className='min-w-0 flex-1'>
+        <ValueInput
+          operator={operator}
+          value={value}
+          onChange={onChange}
+          enumValues={enumValues}
+          entityKind={entityKind}
+        />
+      </div>
+      <UseVariableButton sources={variableSources} onPick={onChange} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import type { Condition, LeafCondition } from '../types/automation-config';
 import type { AutomationContext } from '../types/context';
 import { ConditionOperator } from '../types/operators';
-import { extractRefPath } from '../util/variable-ref';
+import { extractRefPath, isPureRef } from '../util/variable-ref';
 
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -83,8 +83,20 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled ConditionOperator: ${String(value)}`);
 }
 
+// The right-hand operand may either be a literal constant or, for
+// variable-to-variable comparisons, a pure `{{context.<path>}}` reference that
+// resolves against the automation context just like the left-hand `variable`.
+// Anything that isn't a pure reference (numbers, booleans, plain strings) is
+// treated as a literal — keeping existing variable-to-constant conditions intact.
+function resolveOperand(value: unknown, context: AutomationContext): unknown {
+  if (typeof value === 'string' && isPureRef(value)) {
+    return resolveVariable(value, context);
+  }
+  return value;
+}
+
 function evaluateLeaf(leaf: LeafCondition, context: AutomationContext): boolean {
-  return applyOperator(leaf.operator, resolveVariable(leaf.variable, context), leaf.value);
+  return applyOperator(leaf.operator, resolveVariable(leaf.variable, context), resolveOperand(leaf.value, context));
 }
 
 export class ConditionEvaluator {

@@ -12,7 +12,7 @@ import { ValidationIssueCode } from '../types/validation';
 import type { ValidationIssue, ValidationResult } from '../types/validation';
 import type { TriggerRegistry } from '../triggers/trigger-registry';
 import type { StepRegistry } from '../steps/step-registry';
-import { collectRefs } from '../util/variable-ref';
+import { collectRefs, isPureRef } from '../util/variable-ref';
 import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
 
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
@@ -369,6 +369,12 @@ export class ConfigValidator {
   ): void {
     if ('variable' in condition && 'operator' in condition) {
       this.checkRef(condition.variable, `${path}.variable`, outputSchemas, issues, null);
+      // The value operand may itself be a variable reference (variable-to-variable
+      // comparison). Validate its existence when it's a pure reference; literals
+      // (numbers, booleans, plain strings) are left untouched.
+      if (typeof condition.value === 'string' && isPureRef(condition.value)) {
+        this.checkRef(condition.value, `${path}.value`, outputSchemas, issues, null);
+      }
       return;
     }
     if ('all' in condition) {

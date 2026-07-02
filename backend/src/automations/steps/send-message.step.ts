@@ -19,11 +19,13 @@ const SendMessageConfigSchema = z.object({
 const SendMessageOutputSchema = z.object({
   messageId: z.string(),
   channelId: z.string(),
+  conversationId: z.string(),
 });
 
 interface SendMessageOutput extends Record<string, unknown> {
   messageId: string;
   channelId: string;
+  conversationId: string;
 }
 
 export class SendMessageStep extends BaseActionStep<typeof SendMessageConfigSchema, SendMessageOutput> {
@@ -83,6 +85,7 @@ export class SendMessageStep extends BaseActionStep<typeof SendMessageConfigSche
     return {
       messageId: result.message.messageId,
       channelId: config.channelId as string,
+      conversationId: result.conversation.conversationId,
     };
   }
 }
