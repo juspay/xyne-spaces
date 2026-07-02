@@ -11,5 +11,3 @@ export const KbTxtViewer: React.FC<BaseViewerProps> = props => (
     <TxtViewer {...props} />
   </div>
 );
-
-export default KbTxtViewer;

@@ -9,5 +9,3 @@ export const KbPdfViewer: React.FC<BaseViewerProps> = props => (
     <PdfViewer {...props} />
   </div>
 );
-
-export default KbPdfViewer;

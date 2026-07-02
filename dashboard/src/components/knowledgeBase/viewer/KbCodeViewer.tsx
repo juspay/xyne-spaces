@@ -13,5 +13,3 @@ export const KbCodeViewer: React.FC<BaseViewerProps> = props => (
     <CodeViewer {...props} />
   </div>
 );
-
-export default KbCodeViewer;

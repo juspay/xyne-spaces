@@ -2,7 +2,6 @@ import { apiInstance } from '../clients/apiClient';
 import { IngestionStatus } from '@xyne/shared';
 
 export type { IngestionStatus };
-export type UploadStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'NONE';
 export type NodeType = 'FILE' | 'FOLDER';
 export type CollectionRole = 'VIEWER' | 'EDITOR' | 'OWNER';
 
@@ -344,98 +343,4 @@ export async function uploadFilesInBatches(
     results: allResults,
     ...(allErrors.length > 0 && { errors: allErrors }),
   };
-}
-
-export async function downloadFile(fileId: string, fileName: string): Promise<void> {
-  const response = await apiInstance.get(`/collections/items/${fileId}/download`, {
-    responseType: 'blob',
-  });
-
-  // Create a blob URL and trigger download
-  const blob = new Blob([response.data]);
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  window.URL.revokeObjectURL(url);
-}
-
-export async function downloadFolder(folderId: string, folderName: string): Promise<void> {
-  const response = await apiInstance.get(`/collections/items/${folderId}/download-folder`, {
-    responseType: 'blob',
-  });
-
-  // Create a blob URL and trigger download
-  const blob = new Blob([response.data], { type: 'application/zip' });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${folderName}.zip`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  window.URL.revokeObjectURL(url);
-}
-
-export async function uploadNewVersion(
-  itemId: string,
-  file: File,
-  onProgress?: (percent: number) => void,
-): Promise<{ success: boolean; versionNumber: number }> {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const response = await apiInstance.post<{ success: boolean; versionNumber: number }>(
-    `/collections/items/${itemId}/versions`,
-    formData,
-    {
-      onUploadProgress: progressEvent => {
-        if (onProgress && progressEvent.total) {
-          onProgress(Math.round((progressEvent.loaded / progressEvent.total) * 100));
-        }
-      },
-    },
-  );
-  return response.data;
-}
-
-export async function getItemVersions(itemId: string): Promise<CollectionItemVersion[]> {
-  const response = await apiInstance.get<{ success: boolean; versions: CollectionItemVersion[] }>(
-    `/collections/items/${itemId}/versions`,
-  );
-  return response.data.versions;
-}
-
-export async function restoreItemVersion(
-  itemId: string,
-  versionId: string,
-): Promise<{ success: boolean; versionNumber: number }> {
-  const response = await apiInstance.post<{ success: boolean; versionNumber: number }>(
-    `/collections/items/${itemId}/versions/${versionId}/restore`,
-  );
-  return response.data;
-}
-
-export async function downloadItemVersion(
-  itemId: string,
-  versionId: string,
-  fileName: string,
-): Promise<void> {
-  const response = await apiInstance.get(
-    `/collections/items/${itemId}/versions/${versionId}/download`,
-    { responseType: 'blob' },
-  );
-
-  const blob = new Blob([response.data as BlobPart]);
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  window.URL.revokeObjectURL(url);
 }

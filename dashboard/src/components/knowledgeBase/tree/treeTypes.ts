@@ -14,11 +14,6 @@ export interface TreeNodeData {
 export type SortField = 'name' | 'date' | 'size';
 export type SortOrder = 'asc' | 'desc';
 
-export interface SortOption {
-  field: SortField;
-  order: SortOrder;
-}
-
 export interface CollectionTreeNode {
   id: string;
   /** Stable file UUID (CollectionItem.fileId) — equals the Vespa docId. Only set for FILE nodes. */
