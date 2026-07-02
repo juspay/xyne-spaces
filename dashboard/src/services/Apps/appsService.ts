@@ -424,6 +424,14 @@ export class AppsService {
     await apiInstance.post(`/apps/installed/${installedAppId}/permissions`, { permissions });
   }
 
+  /**
+   * Activate the INSTALL's pending permission edits in place (UNAPPROVED → APPROVED, drop
+   * PENDINGDELETE) without resetting to the app template. Backs "Apply & activate".
+   */
+  async activateInstalledPermissions(installedAppId: string): Promise<void> {
+    await apiInstance.post(`/apps/installed/${installedAppId}/permissions/activate`);
+  }
+
   /** Read-only snapshot of the install's commands/shortcuts. */
   async getInstalledCommands(
     installedAppId: string,

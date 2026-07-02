@@ -587,16 +587,18 @@ const PermissionsSection = ({
   };
 
   // Install-mode permission edits land as UNAPPROVED (or PENDINGDELETE) and only take effect after
-  // a re-install. Update is version-gated, so without this an admin's install-permission change
-  // could never activate. This re-installs (applyReinstall) to apply the pending changes.
+  // activation. This activates the admin's pending install edits in place (UNAPPROVED → APPROVED,
+  // drop PENDINGDELETE) WITHOUT resetting the install to the app template — unlike updateApp, which
+  // re-syncs from the template and would discard the admin's edits.
   const [activating, setActivating] = useState(false);
   const hasPendingChanges = Object.values(statusMap).some(
     s => s === 'UNAPPROVED' || s === 'PENDINGDELETE',
   );
   const handleActivate = async () => {
+    if (!installedAppId) return;
     setActivating(true);
     try {
-      await appsService.updateApp(appId);
+      await appsService.activateInstalledPermissions(installedAppId);
       toast.success('Permission changes applied');
       loadGranted();
     } catch (e) {

@@ -250,6 +250,25 @@ export class AppPermissionRepository extends BaseRepository<
   }
 
 
+  /**
+   * Activate an install's pending permission edits, honoring the admin's selection.
+   * Unlike syncFromAppApproved (which resets the install to the app template), this promotes
+   * exactly what the admin edited on the Installed screen: UNAPPROVED → APPROVED (newly granted)
+   * and hard-deletes PENDINGDELETE rows (revoked). Already-APPROVED rows are left untouched.
+   */
+  async activateInstalledPermissions(installedAppId: string): Promise<void> {
+    await this.db.$transaction(async (tx: Tx) => {
+      await tx.installedAppPermission.deleteMany({
+        where: { installedAppId, status: AppPermissionStatus.PENDINGDELETE },
+      });
+      await tx.installedAppPermission.updateMany({
+        where: { installedAppId, status: AppPermissionStatus.UNAPPROVED },
+        data: { status: AppPermissionStatus.APPROVED },
+      });
+    });
+  }
+
+
   async copyFromApp(appId: string, installedAppId: string): Promise<void> {
     const grants = await this.db.appPermission.findMany({
       where: { appId },
