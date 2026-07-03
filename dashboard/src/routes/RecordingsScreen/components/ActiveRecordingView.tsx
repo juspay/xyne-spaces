@@ -5,7 +5,8 @@
  */
 
 import { ReactElement, useEffect, useRef } from 'react';
-import { Mic, Plus, Loader2, FileText } from 'lucide-react';
+import { Mic, Plus, FileText, Minimize } from 'lucide-react';
+import { Button } from '../../../components/ui/Button';
 import { TranscriptEntry } from '../../../stores/recordingStore';
 import { formatTime12Hour, formatElapsedTime } from '../../../utils/recordingUtils';
 
@@ -23,6 +24,8 @@ interface ActiveRecordingViewProps {
   onCreateCanvas?: () => void;
   /** Triggered by the "Open Notes" button once a notes canvas exists. */
   onOpenCanvas?: () => void;
+  /** Triggered by the minimize button to collapse the transcript view. */
+  onMinimize?: () => void;
 }
 
 // Re-export utility functions for local use
@@ -37,6 +40,7 @@ export function ActiveRecordingView({
   isCreatingCanvas = false,
   onCreateCanvas,
   onOpenCanvas,
+  onMinimize,
 }: ActiveRecordingViewProps): ReactElement {
   const showCanvasAction = hasCanvas ? !isCanvasPaneOpen && !!onOpenCanvas : !!onCreateCanvas;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -81,24 +85,42 @@ export function ActiveRecordingView({
             </div>
           </div>
 
-          {showCanvasAction && (
-            <button
-              onClick={hasCanvas ? onOpenCanvas : onCreateCanvas}
-              disabled={!hasCanvas && isCreatingCanvas}
-              className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-background dark:bg-gray-800 border border-border dark:border-gray-700 rounded-lg hover:bg-muted dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0'
-              data-track-category='RecordingsScreen'
-              data-track-name={hasCanvas ? 'open_notes_canvas' : 'create_notes_canvas'}
-            >
-              {!hasCanvas && isCreatingCanvas ? (
-                <Loader2 className='w-3.5 h-3.5 animate-spin' />
-              ) : hasCanvas ? (
-                <FileText className='w-3.5 h-3.5' />
-              ) : (
-                <Plus className='w-3.5 h-3.5' />
-              )}
-              {hasCanvas ? 'Open Notes' : 'Create Notes'}
-            </button>
-          )}
+          {/* Right-side controls — canvas action + minimize */}
+          <div className='flex items-center gap-2 flex-shrink-0'>
+            {showCanvasAction && (
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={hasCanvas ? onOpenCanvas : onCreateCanvas}
+                disabled={!hasCanvas && isCreatingCanvas}
+                loading={!hasCanvas && isCreatingCanvas}
+                className='h-8 gap-1.5 px-3 text-sm font-medium flex items-center justify-normal'
+                data-track-category='RecordingsScreen'
+                data-track-name={hasCanvas ? 'open_notes_canvas' : 'create_notes_canvas'}
+              >
+                {hasCanvas ? (
+                  <FileText className='size-3.5' />
+                ) : (
+                  <Plus className='size-3' strokeWidth={2.5} />
+                )}
+                {hasCanvas ? 'Open Notes' : 'Create Notes'}
+              </Button>
+            )}
+
+            {onMinimize && (
+              <Button
+                variant='outline'
+                size='iconSm'
+                onClick={onMinimize}
+                title='Minimize transcript'
+                aria-label='Minimize transcript'
+                data-track-category='RecordingsScreen'
+                data-track-name='minimize_transcript'
+              >
+                <Minimize className='size-4' strokeWidth={2.5} />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

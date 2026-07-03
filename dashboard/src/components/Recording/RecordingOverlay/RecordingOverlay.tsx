@@ -7,18 +7,20 @@
 
 import { createPortal } from 'react-dom';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Square, Pause, Play, Mic, GripVertical } from 'lucide-react';
+import { Square, Pause, Play, Mic, ArrowUpRight } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   useRecordingStore,
   sendRecordingEvent,
   useTranscriptStream,
 } from '../../../hooks/useRecordingStore';
+import { useAudioAmplitude } from '../../../hooks/useAudioAmplitude';
 import { formatRecordingDuration, generateRecordingTitle } from '../../../utils/recordingUtils';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { SaveTitleModal } from '../../../routes/RecordingsScreen/components/SaveTitleModal';
+import Button from '../../../components/ui/Button';
 import { toast } from 'sonner';
-import { Waveform } from '../../../utils/recordingWaveform';
+import { cn } from '../../../utils/classNames';
 
 interface DragState {
   startX: number;
@@ -155,15 +157,16 @@ export function RecordingOverlay(): React.ReactElement | null {
   const status = useRecordingStore(ctx => ctx.status);
   const startTime = useRecordingStore(ctx => ctx.startTime);
   const externalId = useRecordingStore(ctx => ctx.externalId);
+  const room = useRecordingStore(ctx => ctx.room);
 
   // Subscribe to transcript stream so transcripts are captured even when overlay is visible
-  useTranscriptStream();
+  const { transcripts } = useTranscriptStream();
 
   const isRecording = status === 'recording';
   const isPaused = status === 'paused';
   const isStarting = status === 'starting';
   const isActive = isRecording || isPaused || isStarting;
-  const isOnRecordingsPage = location.pathname.startsWith('/recordings');
+  const isOnRecordingsPage = location.pathname.split('/').includes('recordings');
 
   // Use custom hooks
   const elapsedTime = useElapsedTime(isActive, isPaused, startTime);
@@ -171,11 +174,14 @@ export function RecordingOverlay(): React.ReactElement | null {
     containerRef,
     { x: 64, y: 32 },
   );
+  const amplitudeBars = useAudioAmplitude(room, isRecording || isPaused, isPaused);
 
   // Title modal state — same pattern as RecordingsScreen
   const [showTitleModal, setShowTitleModal] = useState(false);
   const [savingTitle, setSavingTitle] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
   const lastExternalIdRef = useRef<string | null>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
 
   // Keep ref in sync so it survives the store reset on stopRecording
   useEffect(() => {
@@ -183,6 +189,13 @@ export function RecordingOverlay(): React.ReactElement | null {
       lastExternalIdRef.current = externalId;
     }
   }, [externalId]);
+
+  // Auto-scroll transcript preview to bottom when new transcripts arrive
+  useEffect(() => {
+    if (transcriptScrollRef.current && showTranscript) {
+      transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
+    }
+  }, [transcripts, showTranscript]);
 
   const handleStop = (): void => {
     // Capture externalId before stopRecording resets the store
@@ -226,30 +239,64 @@ export function RecordingOverlay(): React.ReactElement | null {
       />
       <div
         ref={containerRef}
-        className='fixed z-[60] pointer-events-auto'
-        style={{
-          left: `${position.x}px`,
-          bottom: `${position.y}px`,
-          cursor: isDragging ? 'grabbing' : 'default',
-        }}
+        className={cn(
+          'fixed z-[60] pointer-events-auto rec-overlay-container',
+          isDragging && 'is-dragging',
+        )}
+        style={
+          {
+            '--rec-overlay-x': `${position.x}px`,
+            '--rec-overlay-y': `${position.y}px`,
+          } as React.CSSProperties
+        }
       >
-        {/* Drag Handle */}
-        <button
-          type='button'
-          className='absolute -top-6 left-0 right-0 h-6 flex items-center justify-center cursor-grab active:cursor-grabbing bg-transparent border-none'
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleTouchStart}
-          aria-label='Drag recording overlay'
-          data-track-category='RecordingOverlay'
-          data-track-name='drag_handle'
+        {/* Transcript preview — above the card, transparent, slide-down animation */}
+        <div
+          className={cn(
+            'overflow-hidden transition-all duration-300 ease-in-out w-[280px] rec-overlay-transcript-preview',
+            showTranscript && 'is-open',
+          )}
         >
-          <div className='bg-muted rounded-full px-3 py-0.5 shadow-sm pointer-events-none'>
-            <GripVertical className='w-3 h-3 text-muted-foreground' />
+          <div className='relative'>
+            <div
+              ref={transcriptScrollRef}
+              className='no-scrollbar overflow-y-auto h-[96px] text-center flex flex-col justify-end rec-overlay-transcript-mask'
+            >
+              {transcripts.length > 0 ? (
+                <div className='space-y-1 mx-auto flex-shrink-0'>
+                  {transcripts.map(entry => (
+                    <p
+                      key={entry.id}
+                      className='text-sm leading-snug text-foreground text-center break-words'
+                    >
+                      {entry.text}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <div className='flex items-center justify-center h-[60px]'>
+                  <p className='text-xs text-muted-foreground '>Listening...</p>
+                </div>
+              )}
+            </div>
           </div>
-        </button>
+        </div>
 
         {/* Card */}
-        <div className='bg-card rounded-2xl shadow-2xl border border-border p-4 w-[280px]'>
+        <div className='relative bg-background rounded-2xl shadow-2xl border border-border pt-2 pb-4 px-4 w-[280px]'>
+          {/* Drag Handle — top grip bar like a bottom sheet */}
+          <button
+            type='button'
+            className='w-full flex items-center justify-center pb-2 cursor-grab active:cursor-grabbing bg-transparent border-none'
+            onMouseDown={handleMouseDown}
+            onTouchStart={handleTouchStart}
+            aria-label='Drag overlay'
+            data-track-category='RecordingOverlay'
+            data-track-name='drag_handle'
+          >
+            <div className='w-10 h-1 bg-muted-foreground/40 rounded-full' />
+          </button>
+
           {/* Top row: status/time + controls */}
           <div className='flex items-start justify-between gap-4 mb-4'>
             <div className='flex items-center gap-3 min-w-0'>
@@ -305,21 +352,53 @@ export function RecordingOverlay(): React.ReactElement | null {
             </div>
           </div>
 
-          {/* Waveform */}
+          {/* Waveform — scrolling amplitude, newest on right */}
           {(isRecording || isPaused) && (
-            <Waveform variant='overlay' paused={isPaused} className='mb-4' />
+            <div
+              className='flex items-center justify-between gap-[3px] h-10 mb-4'
+              role='img'
+              aria-label={isPaused ? 'Audio paused' : 'Audio waveform visualization'}
+            >
+              {amplitudeBars.map((amplitude, i) => (
+                <div
+                  key={i}
+                  className='flex-1 bg-emerald-500 rounded-full rec-overlay-waveform-bar'
+                  style={
+                    {
+                      '--rec-wave-height': `${Math.max(6, amplitude * 100)}%`,
+                      '--rec-wave-opacity': isPaused ? '0.3' : `${0.4 + amplitude * 0.6}`,
+                    } as React.CSSProperties
+                  }
+                  aria-hidden='true'
+                />
+              ))}
+            </div>
           )}
 
           {/* Link */}
-          <button
-            onClick={() => void navigate('/recordings')}
-            className='w-full flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors'
-            data-track-category='RecordingOverlay'
-            data-track-name='go_to_recordings'
-          >
-            <Mic className='w-3 h-3' />
-            Go to Recording
-          </button>
+          <div className='flex gap-2 w-full'>
+            <Button
+              className='flex-1 gap-1.5 text-xs rounded-lg'
+              variant='outline'
+              size='sm'
+              onClick={() => setShowTranscript(prev => !prev)}
+              data-track-category='RecordingOverlay'
+              data-track-name='toggle_live_transcript'
+            >
+              <Mic className='size-3.5' />
+              {showTranscript ? 'Hide Live Transcript' : 'View Live Transcript'}
+            </Button>
+            <Button
+              className='w-8 bg-action-primary hover:bg-action-primary/80 text-action-primary-foreground hover:text-accent-foreground transition-colors rounded-lg'
+              variant='outline'
+              size='sm'
+              onClick={() => void navigate('/recordings')}
+              data-track-category='RecordingOverlay'
+              data-track-name='go_to_recordings'
+            >
+              <ArrowUpRight />
+            </Button>
+          </div>
         </div>
       </div>
     </>,
