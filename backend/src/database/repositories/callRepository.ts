@@ -6,14 +6,15 @@ import {
   CallType,
   InvitationResponse,
   MeetingStatus,
+  Prisma,
   type Call,
   type CallParticipant,
-  type Prisma,
 } from '@prisma/client';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import type { CallParticipantMetadata } from '@xyne/shared';
 
 export type { Call, CallParticipant };
 
@@ -1402,6 +1403,50 @@ export class CallRepository {
     return row;
   }
 
+  async findExternalParticipantById(params: {
+    participantId: string;
+    callId: string;
+  }): Promise<CallParticipant | null> {
+    return await DatabaseClient.getInstance().callParticipant.findFirst({
+      where: {
+        id: params.participantId,
+        callId: params.callId,
+        isExternal: true,
+      },
+    });
+  }
+
+  async markExternalParticipantRequested(params: {
+    participantId: string;
+    displayName?: string;
+    respondedAt: Date;
+  }): Promise<CallParticipant> {
+    return await DatabaseClient.getInstance().callParticipant.update({
+      where: { id: params.participantId },
+      data: {
+        ...(params.displayName && { displayName: params.displayName }),
+        response: InvitationResponse.REQUESTED,
+        respondedAt: params.respondedAt,
+        joinedAt: null,
+        leftAt: null,
+      },
+    });
+  }
+
+  async acceptExternalParticipantSession(params: {
+    participantId: string;
+    displayName?: string;
+  }): Promise<CallParticipant> {
+    return await DatabaseClient.getInstance().callParticipant.update({
+      where: { id: params.participantId },
+      data: {
+        ...(params.displayName && { displayName: params.displayName }),
+        response: InvitationResponse.ACCEPTED,
+        joinedAt: null,
+      },
+    });
+  }
+
   /**
    * Validate that an external participant is ACCEPTED, set joinedAt, and return
    * the participant record with displayName.
@@ -1424,6 +1469,55 @@ export class CallRepository {
     return await DatabaseClient.getInstance().callParticipant.update({
       where: { id: participantId },
       data: { joinedAt: new Date() },
+    });
+  }
+
+  async updateParticipantMetadata(
+    participantId: string,
+    metadata: Prisma.InputJsonValue,
+  ): Promise<CallParticipant> {
+    return await DatabaseClient.getInstance().callParticipant.update({
+      where: { id: participantId },
+      data: { metadata },
+    });
+  }
+
+  async markParticipantRemovedByHost(params: {
+    callId: string;
+    participantUserId: string;
+    removedAt: Date;
+  }): Promise<CallParticipant | null> {
+    const participant = await this.findParticipant(params.callId, params.participantUserId);
+    if (!participant) return null;
+
+    const metadata =
+      participant.metadata && typeof participant.metadata === 'object' && !Array.isArray(participant.metadata)
+        ? (participant.metadata as CallParticipantMetadata)
+        : {};
+
+    await DatabaseClient.getInstance().callParticipant.update({
+      where: { id: participant.id },
+      data: {
+        response: InvitationResponse.DECLINED,
+        leftAt: params.removedAt,
+        metadata: { ...metadata, removedByHost: true } as Prisma.InputJsonValue,
+      },
+    });
+
+    return participant;
+  }
+
+  async restoreParticipantState(participant: CallParticipant): Promise<CallParticipant> {
+    return await DatabaseClient.getInstance().callParticipant.update({
+      where: { id: participant.id },
+      data: {
+        response: participant.response,
+        leftAt: participant.leftAt,
+        metadata:
+          participant.metadata === null
+            ? Prisma.DbNull
+            : (participant.metadata as Prisma.InputJsonValue),
+      },
     });
   }
 

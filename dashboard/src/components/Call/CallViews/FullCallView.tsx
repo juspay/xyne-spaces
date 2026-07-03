@@ -1,5 +1,5 @@
 import type { Room } from 'livekit-client';
-import { ConnectionQuality, ConnectionState, Track } from 'livekit-client';
+import { ConnectionQuality, ConnectionState } from 'livekit-client';
 import { WifiLow } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -17,6 +17,7 @@ import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
+import { HostControlsPanel } from '../HostControlsPanel/HostControlsPanel';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
 import { useReactions } from '../hooks/useReactions';
@@ -28,6 +29,7 @@ import { useActiveRecording, type ActiveRecording } from '../hooks/useActiveReco
 import { RecordingStopDialog } from '../CallControls/RecordingStopDialog';
 import { CallPrivacyIndicator } from '../CallPrivacyIndicator/CallPrivacyIndicator';
 import { createCallPrivacyActions } from '../CallPrivacyIndicator/callPrivacyActions';
+import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 
 const CALL_PRIVACY_DESCRIPTION = [
   'Xyne AI is active in this call. Active actions and saved artifacts are listed below.',
@@ -161,6 +163,7 @@ export function FullCallView({
   // UI state
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
+  const [isHostControlsOpen, setIsHostControlsOpen] = useState(false);
   // Track local participant's network quality
   const networkQuality = useParticipantNetworkQuality(room?.localParticipant ?? null);
   const showQualityToast = useNetworkQualityToast(networkQuality);
@@ -288,7 +291,7 @@ export function FullCallView({
       return p.isScreenShareEnabled;
     }
     // Web mode: check actual track publication
-    return p.participant.getTrackPublication(Track.Source.ScreenShare)?.isSubscribed;
+    return isScreenShareActive(p.participant);
   });
 
   // Memoize screen sharer identities for dependency
@@ -337,6 +340,24 @@ export function FullCallView({
       if (!prev && isCallChatOpen && onToggleCallChat) {
         onToggleCallChat();
       }
+      if (!prev) {
+        setIsHostControlsOpen(false);
+      }
+      return !prev;
+    });
+  }, [isChatOpen, onToggleThread, isCallChatOpen, onToggleCallChat]);
+
+  const handleToggleHostControls = useCallback((): void => {
+    setIsHostControlsOpen(prev => {
+      if (!prev && isChatOpen) {
+        onToggleThread();
+      }
+      if (!prev && isCallChatOpen && onToggleCallChat) {
+        onToggleCallChat();
+      }
+      if (!prev) {
+        setIsParticipantsSidebarOpen(false);
+      }
       return !prev;
     });
   }, [isChatOpen, onToggleThread, isCallChatOpen, onToggleCallChat]);
@@ -346,13 +367,16 @@ export function FullCallView({
     if (isChatOpen && isParticipantsSidebarOpen) {
       setIsParticipantsSidebarOpen(false);
     }
-  }, [isChatOpen, isParticipantsSidebarOpen]);
+    if (isChatOpen && isHostControlsOpen) {
+      setIsHostControlsOpen(false);
+    }
+  }, [isChatOpen, isParticipantsSidebarOpen, isHostControlsOpen]);
 
   // Show toast for incoming call chat messages
   useCallChatNotifications(room, localParticipantId, onCallChatNewMessage);
 
   // Determine if any right sidebar is open (for layout adjustments)
-  const isRightSidebarOpen = isChatOpen || isParticipantsSidebarOpen;
+  const isRightSidebarOpen = isChatOpen || isParticipantsSidebarOpen || isHostControlsOpen;
 
   return (
     <div
@@ -488,6 +512,8 @@ export function FullCallView({
             isAnySharingScreen={!!focusedScreenShare}
             isChatOpen={isChatOpen}
             isParticipantsSidebarOpen={isParticipantsSidebarOpen}
+            isHostControlsOpen={isHostControlsOpen}
+            onToggleHostControls={handleToggleHostControls}
             isAIAssistantEnabled={isAIAssistantEnabled}
             aiController={aiController}
             localParticipantId={localParticipantId}
@@ -562,6 +588,12 @@ export function FullCallView({
             hideInvite={hideInvite}
             raisedHands={raisedHands}
           />
+        </div>
+      )}
+
+      {isHostControlsOpen && isHostProp && (
+        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-background shadow-xl z-[60]'>
+          <HostControlsPanel callId={callId} onClose={handleToggleHostControls} />
         </div>
       )}
 

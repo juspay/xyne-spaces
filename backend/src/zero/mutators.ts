@@ -79,6 +79,7 @@ import {
   parseRepliesMd,
   addReplyToData,
   serializeRepliesMd,
+  type CallParticipantMetadata,
   SUMMARY_PROMPT_MAX_LENGTH,
   MAX_NOTIFICATION_KEYWORDS,
   MAX_NOTIFICATION_KEYWORD_LENGTH,
@@ -4618,6 +4619,32 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Call not found or not active');
           }
 
+          const activeRequests = await tx.run(
+            zql.call_participants
+              .where('userId', authData.sub)
+              .where('response', InvitationResponse.REQUESTED)
+              .related('call'),
+          );
+
+          for (const request of activeRequests) {
+            if (request.callId === call.id || request.call?.status !== CallStatus.ACTIVE) {
+              continue;
+            }
+
+            const metadata = request.metadata as CallParticipantMetadata | null;
+            if (metadata?.removedByHost) {
+              await tx.mutate.call_participants.update({
+                id: request.id,
+                response: InvitationResponse.DECLINED,
+                respondedAt: timestamp,
+                joinedAt: null,
+                leftAt: timestamp,
+              });
+            } else {
+              await tx.mutate.call_participants.delete({ id: request.id });
+            }
+          }
+
           // Check if participant already exists
           const existingParticipant = await tx.run(
             zql.call_participants.where('callId', call.id).where('userId', authData.sub).one(),
@@ -4658,6 +4685,40 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               isExternal: false,
             });
           }
+        }
+      ),
+      cancelJoinRequest: defineMutator(
+        z.object({
+          callId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { callId, timestamp } }) => {
+          const call = await tx.run(zql.calls.where('externalId', callId).one());
+          if (!call) {
+            throw new Error('Call not found');
+          }
+
+          const participant = await tx.run(
+            zql.call_participants.where('callId', call.id).where('userId', authData.sub).one(),
+          );
+
+          if (!participant || participant.response !== InvitationResponse.REQUESTED) {
+            return;
+          }
+
+          const metadata = participant.metadata as CallParticipantMetadata | null;
+          if (metadata?.removedByHost) {
+            await tx.mutate.call_participants.update({
+              id: participant.id,
+              response: InvitationResponse.DECLINED,
+              respondedAt: timestamp,
+              joinedAt: null,
+              leftAt: timestamp,
+            });
+            return;
+          }
+
+          await tx.mutate.call_participants.delete({ id: participant.id });
         }
       ),
     },

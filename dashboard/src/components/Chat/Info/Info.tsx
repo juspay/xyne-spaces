@@ -98,6 +98,8 @@ const Info = ({
   const isParticipant = participants.some(p => p.userId === context.userID);
   const isSelfDM = isDM && participants.length === 1 && participants[0]?.userId === context.userID;
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
+  const canManageAiPreferences =
+    currentUserParticipant?.role === ChannelRole.ADMIN || channel.createdBy === context.userID;
 
   const addUserPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const showAddPeopleButton =
@@ -502,15 +504,15 @@ const Info = ({
                 <p className='text-[13px] leading-[140%] text-muted-foreground'>
                   Configure how AI handles calls in this channel.
                 </p>
+                <p className='text-[12px] leading-[140%] text-muted-foreground'>
+                  Only channel admins or the owner can edit these preferences.
+                </p>
               </div>
               <div className='rounded-[12px] border border-border bg-card'>
                 <CallSummaryConfig
                   channelId={channel.id}
                   currentPrompt={channel.callSummaryPrompt}
-                  canManage={
-                    currentUserParticipant?.role === ChannelRole.ADMIN ||
-                    channel.createdBy === context.userID
-                  }
+                  canManage={canManageAiPreferences}
                 />
               </div>
             </div>

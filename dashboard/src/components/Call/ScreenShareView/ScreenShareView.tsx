@@ -13,6 +13,7 @@ import { DrawingCanvas, DrawingToolbar } from '../DrawingCanvas';
 import type { DrawingCanvasHandle } from '../DrawingCanvas';
 import { useDrawStore } from '../../../hooks/useDrawStore';
 import { sortParticipants } from '../ParticipantGrid/sortParticipants';
+import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 
 interface ScreenShareViewProps {
   focusedScreenShare: ParticipantInfo;
@@ -58,17 +59,18 @@ export function ScreenShareView({
   const screenSharePublication = focusedScreenShare.participant?.getTrackPublication(
     Track.Source.ScreenShare,
   );
+  const isFocusedScreenShareActive = isScreenShareActive(focusedScreenShare.participant);
 
   const screenShareTrackRef = useMemo(
     () =>
-      screenSharePublication && focusedScreenShare.participant
+      isFocusedScreenShareActive && screenSharePublication && focusedScreenShare.participant
         ? {
             participant: focusedScreenShare.participant,
             source: Track.Source.ScreenShare,
             publication: screenSharePublication,
           }
         : undefined,
-    [screenSharePublication, focusedScreenShare.participant],
+    [isFocusedScreenShareActive, screenSharePublication, focusedScreenShare.participant],
   );
 
   // Handle screen share video click to open fullscreen
@@ -197,7 +199,7 @@ export function ScreenShareView({
           {sortedParticipants.map(participant => {
             // In native mode, use isScreenShareEnabled; in web mode, check actual publication
             const isSharing = participant.participant
-              ? participant.participant.getTrackPublication(Track.Source.ScreenShare)?.isSubscribed
+              ? isScreenShareActive(participant.participant)
               : participant.isScreenShareEnabled;
             const isFocusedShare =
               isSharing && focusedScreenShare.identity === participant.identity;

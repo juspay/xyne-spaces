@@ -51,7 +51,8 @@ export function CallMessageOverlay({
   useAutoJoinOnAccept({ callId, userId: context.userID, isUserInCall: isUserInThisDevice });
 
   // ── Join state ──
-  const { action, requestToJoin, isRequesting } = useCallJoinState(callId, context.userID);
+  const { action, requestToJoin, cancelJoinRequest, isRequesting, isCancellingRequest } =
+    useCallJoinState(callId, context.userID);
 
   // ── Confirmation modal for switching calls ──
   const channel = useChannel(channelId);
@@ -83,11 +84,8 @@ export function CallMessageOverlay({
 
   return (
     <>
-      {/* Reserve right-edge space (pr-28) so the participant text never runs under
-          the absolutely-positioned Join button below. pr-28 covers the widest
-          label ("Request to Join"); `truncate` ellipsises longer participant
-          strings instead of letting them slide under the button. */}
-      <div className={cn('flex items-center gap-2', !isUserInThisDevice && 'pr-28')}>
+      {/* Keep participant text clear of the action button. */}
+      <div className={cn('flex items-center gap-2', !isUserInThisDevice && 'pr-36')}>
         <div className='flex-1 min-w-0'>
           <div className='text-sm text-foreground truncate'>
             {participantCount > 0 ? (
@@ -111,7 +109,9 @@ export function CallMessageOverlay({
             action={action}
             onJoin={handleJoinClick}
             onRequest={requestToJoin}
+            onCancelRequest={cancelJoinRequest}
             isRequesting={isRequesting}
+            isCancellingRequest={isCancellingRequest}
             variant='solid'
             className='call-join-pill'
             joinLabel={userIsActiveInCall ? 'Switch' : 'Join'}

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import {
   X,
@@ -8,6 +8,7 @@ import {
   ChevronDown,
   MicOff,
   Mic,
+  UserX,
   Check,
   XIcon,
   Hand,
@@ -17,7 +18,7 @@ import type { Participant } from 'livekit-client';
 import { roomActor, type ParticipantInfo } from '../../../machines/roomMachine';
 import { useUser } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
-import { InvitationResponse } from '@xyne/shared';
+import { InvitationResponse, type CallParticipantMetadata } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { InviteToCallModal } from '../CallModals/InviteToCallModal';
 import { callService } from '../../../services/Call/callService';
@@ -75,6 +76,17 @@ interface ActiveCall {
   participants?: CallParticipant[];
 }
 
+function isLiveKitExternalParticipant(participantInfo: ParticipantInfo): boolean {
+  const metadata = participantInfo.participant?.metadata;
+  if (!metadata) return false;
+
+  try {
+    return (JSON.parse(metadata) as { isExternal?: boolean }).isExternal === true;
+  } catch {
+    return false;
+  }
+}
+
 export function ParticipantsSidebar({
   callId,
   onClose,
@@ -92,6 +104,8 @@ export function ParticipantsSidebar({
   const [isRequestedExpanded, setIsRequestedExpanded] = useState(true);
   const [isMuting, setIsMuting] = useState(false);
   const [mutingParticipantId, setMutingParticipantId] = useState<string | null>(null);
+  const [removingParticipantId, setRemovingParticipantId] = useState<string | null>(null);
+  const removingParticipantIdRef = useRef<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
 
@@ -120,9 +134,50 @@ export function ParticipantsSidebar({
   const resolvedCurrentUserId =
     currentUserIdProp !== undefined ? currentUserIdProp : (user?.id ?? null);
   const isHost = isHostProp !== undefined ? isHostProp : currentCall?.createdByUserId === user?.id;
+  const hostUserId = currentCall?.createdByUserId;
 
-  // Get participants from props or call
-  const participants = callParticipantsProp ?? currentCall?.participants ?? [];
+  // Merge LiveKit state so joins show before DB sync catches up.
+  const participantsFromDb = callParticipantsProp ?? currentCall?.participants ?? [];
+  const participants = useMemo(() => {
+    const livekitByIdentity = new Map(livekitParticipants.map(p => [p.identity, p]));
+    const seenUserIds = new Set<string>();
+
+    const mergedParticipants = participantsFromDb.map(participant => {
+      seenUserIds.add(participant.userId);
+      const livekitParticipant = livekitByIdentity.get(participant.userId);
+      if (!livekitParticipant) return participant;
+
+      return {
+        ...participant,
+        response: InvitationResponse.ACCEPTED,
+        leftAt: null,
+        displayName: participant.displayName ?? livekitParticipant.name ?? null,
+        isExternal: participant.isExternal ?? isLiveKitExternalParticipant(livekitParticipant),
+      };
+    });
+
+    livekitParticipants.forEach(livekitParticipant => {
+      if (seenUserIds.has(livekitParticipant.identity)) return;
+      if (livekitParticipant.identity.startsWith('agent-')) return;
+
+      mergedParticipants.push({
+        id: `livekit-${livekitParticipant.identity}`,
+        callId,
+        userId: livekitParticipant.identity,
+        invitedBy: livekitParticipant.identity,
+        invitedAt: 0,
+        response: InvitationResponse.ACCEPTED,
+        respondedAt: null,
+        joinedAt: null,
+        leftAt: null,
+        metadata: null,
+        displayName: livekitParticipant.name ?? null,
+        isExternal: isLiveKitExternalParticipant(livekitParticipant),
+      });
+    });
+
+    return mergedParticipants;
+  }, [callId, livekitParticipants, participantsFromDb]);
 
   // Handle mute all participants
   const handleMuteAll = useCallback(async () => {
@@ -153,6 +208,31 @@ export function ParticipantsSidebar({
       }
     },
     [callId, mutingParticipantId],
+  );
+
+  const handleRemoveParticipant = useCallback(
+    async (participantUserId: string, name: string) => {
+      if (removingParticipantIdRef.current) return;
+      if (
+        !window.confirm(
+          `Remove ${name} from the call? They'll need to be admitted again to rejoin.`,
+        )
+      ) {
+        return;
+      }
+
+      removingParticipantIdRef.current = participantUserId;
+      setRemovingParticipantId(participantUserId);
+      try {
+        await callService.removeParticipant(callId, participantUserId);
+      } catch (error) {
+        console.error('[ParticipantsSidebar] Failed to remove participant:', error);
+      } finally {
+        removingParticipantIdRef.current = null;
+        setRemovingParticipantId(null);
+      }
+    },
+    [callId],
   );
 
   // Split participants into Contributors (ACCEPTED), Requested (REQUESTED), Also Invited (others)
@@ -225,6 +305,8 @@ export function ParticipantsSidebar({
     isExternal?: boolean;
   }): React.ReactElement => {
     const { response, userId, displayName } = participant;
+    const wasRemovedByHost =
+      (participant.metadata as CallParticipantMetadata | null)?.removedByHost === true;
     // Only look up user via Zero if we don't have a displayName and it's not external
     const shouldLookupUser = !isExternal && !displayName;
     const participantUser = useUser(shouldLookupUser ? userId : '');
@@ -240,6 +322,8 @@ export function ParticipantsSidebar({
     // Show only if: host, participant is in call, not the current user (self), not an agent
     const canMute =
       showMuteButton && isInCall && userId !== currentUserId && !userId.startsWith('agent-');
+    const canRemove = canMute;
+    const isRemovingThis = removingParticipantId === userId;
 
     // Use displayName when provided (e.g. from API for external view), otherwise look up user
     const participantName = displayName
@@ -282,6 +366,11 @@ export function ParticipantsSidebar({
             >
               {participantName}
             </p>
+            {hostUserId && userId === hostUserId && (
+              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 shrink-0'>
+                Host
+              </span>
+            )}
             {isDeactivated && (
               <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
                 Deactivated
@@ -293,17 +382,23 @@ export function ParticipantsSidebar({
               </span>
             )}
           </div>
-          {response === InvitationResponse.LEFT && (
-            <p className='text-xs text-muted-foreground'>Left the call</p>
-          )}
-          {response === InvitationResponse.INVITED && (
-            <p className='text-xs text-yellow-600'>Invited</p>
-          )}
-          {response === InvitationResponse.DECLINED && (
-            <p className='text-xs text-red-500'>Declined</p>
-          )}
-          {response === InvitationResponse.REQUESTED && (
-            <p className='text-xs text-orange-500'>Requesting to join</p>
+          {wasRemovedByHost ? (
+            <p className='text-xs text-red-500'>Removed by host</p>
+          ) : (
+            <>
+              {response === InvitationResponse.LEFT && (
+                <p className='text-xs text-muted-foreground'>Left the call</p>
+              )}
+              {response === InvitationResponse.INVITED && (
+                <p className='text-xs text-yellow-600'>Invited</p>
+              )}
+              {response === InvitationResponse.DECLINED && (
+                <p className='text-xs text-red-500'>Declined</p>
+              )}
+              {response === InvitationResponse.REQUESTED && (
+                <p className='text-xs text-orange-500'>Requesting to join</p>
+              )}
+            </>
           )}
         </div>
         {/* Hand raise indicator */}
@@ -343,6 +438,23 @@ export function ParticipantsSidebar({
               <MicOff size={16} />
             ) : (
               <Mic size={16} />
+            )}
+          </button>
+        )}
+        {canRemove && (
+          <button
+            onClick={() => void handleRemoveParticipant(userId, participantName)}
+            disabled={isRemovingThis}
+            className='p-1.5 rounded-md transition-colors disabled:cursor-not-allowed text-muted-foreground hover:bg-red-50 hover:text-red-600'
+            data-track-category='CALLS'
+            data-track-name='REMOVE_PARTICIPANT'
+            data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
+            title={`Remove ${participantName} from the call`}
+          >
+            {isRemovingThis ? (
+              <div className='w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
+            ) : (
+              <UserX size={16} />
             )}
           </button>
         )}

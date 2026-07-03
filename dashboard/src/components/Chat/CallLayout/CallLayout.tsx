@@ -68,7 +68,8 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
   // ── Request-to-join + auto-join ──
   useAutoJoinOnAccept({ callId: callExternalId || '', userId: user?.id, isUserInCall });
 
-  const { action, requestToJoin, isRequesting } = useCallJoinState(callExternalId || '', user?.id);
+  const { action, requestToJoin, cancelJoinRequest, isRequesting, isCancellingRequest } =
+    useCallJoinState(callExternalId || '', user?.id);
 
   const handleJoinCall = (): void => {
     if (callExternalId) joinCall({ callId: callExternalId });
@@ -114,7 +115,9 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
               action={action}
               onJoin={handleJoinCall}
               onRequest={requestToJoin}
+              onCancelRequest={cancelJoinRequest}
               isRequesting={isRequesting}
+              isCancellingRequest={isCancellingRequest}
               variant='light'
               joinLabel={userIsActiveInCall ? 'Switch' : 'Join Call'}
               testId={

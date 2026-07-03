@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { callController } from '@/controllers/callController';
+import { callHostControlController } from '@/controllers/callHostControlController';
 import { scheduleCallController } from '@/controllers/scheduleCallController';
 import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
 
@@ -90,5 +91,10 @@ router.post('/:callId/mute-participant', callController.muteParticipant);
 router.post('/:callId/recording/start', callController.startCallRecording);
 router.post('/:callId/recording/stop', callController.stopCallRecording);
 
-export default router;
+// Host controls: lock/unlock mic, camera, screen-share for all non-host participants (host only)
+router.patch('/:callId/host-controls', callHostControlController.setHostControls);
 
+// Remove a participant from the call (host only); rejoin requires re-admission
+router.post('/:callId/remove-participant', callHostControlController.removeCallParticipant);
+
+export default router;

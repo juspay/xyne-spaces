@@ -6,7 +6,9 @@ interface CallJoinButtonProps {
   action: CallJoinAction;
   onJoin: () => void;
   onRequest: () => void;
+  onCancelRequest?: () => void;
   isRequesting: boolean;
+  isCancellingRequest?: boolean;
   /** Visual style variant */
   variant?: 'light' | 'solid' | 'text';
   /** Text to show for the join action (defaults to "Join") */
@@ -19,6 +21,7 @@ interface CallJoinButtonProps {
   trackJoinName?: string;
   /** Tracking name for request action */
   trackRequestName?: string;
+  trackCancelName?: string;
   /** Extra metadata for tracking */
   trackMetadata?: Record<string, unknown>;
   /** Additional CSS classes */
@@ -39,13 +42,16 @@ export function CallJoinButton({
   action,
   onJoin,
   onRequest,
+  onCancelRequest,
   isRequesting,
+  isCancellingRequest = false,
   variant = 'text',
   joinLabel = 'Join',
   testId,
   trackCategory = 'CALL',
   trackJoinName = 'JoinCall',
   trackRequestName = 'RequestToJoinCall',
+  trackCancelName = 'CancelJoinRequest',
   trackMetadata,
   className,
   disabled = false,
@@ -68,6 +74,36 @@ export function CallJoinButton({
   }
 
   if (action === 'requested' || isRequesting) {
+    if (action === 'requested' && onCancelRequest) {
+      const waitingPillClassName = className?.split(/\s+/).includes('call-join-pill')
+        ? 'call-join-pill'
+        : undefined;
+
+      return (
+        <span className={cn(getRequestedGroupStyles(), className)} data-testid={testId}>
+          <span className={cn(getVariantStyles(variant, 'requested'), waitingPillClassName)}>
+            Waiting...
+          </span>
+          <button
+            onClick={event => {
+              event.stopPropagation();
+              onCancelRequest();
+            }}
+            disabled={disabled || isCancellingRequest}
+            className={getCancelButtonStyles(variant)}
+            type='button'
+            title='Stop waiting'
+            data-testid={testId ? `${testId}-stop` : undefined}
+            data-track-category={trackCategory}
+            data-track-name={trackCancelName}
+            {...(trackMetadata && { 'data-track-metadata': JSON.stringify(trackMetadata) })}
+          >
+            {isCancellingRequest ? 'Stopping...' : 'Stop'}
+          </button>
+        </span>
+      );
+    }
+
     return (
       <span
         className={cn(getVariantStyles(variant, 'requested'), 'cursor-default', className)}
@@ -126,5 +162,23 @@ function getVariantStyles(variant: CallJoinButtonProps['variant'], state: CallJo
         state === 'requested' ? 'opacity-50 cursor-default' : '',
         'text-foreground',
       );
+  }
+}
+
+function getRequestedGroupStyles(): string {
+  return 'inline-flex items-center gap-2';
+}
+
+function getCancelButtonStyles(variant: CallJoinButtonProps['variant']): string {
+  const base =
+    'px-3 py-1 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+
+  switch (variant) {
+    case 'light':
+      return cn(base, 'bg-white/15 hover:bg-white/25 text-white');
+    case 'solid':
+    case 'text':
+    default:
+      return cn(base, 'bg-secondary text-secondary-foreground hover:bg-secondary/80');
   }
 }

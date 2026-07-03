@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import { ChannelRole } from '@prisma/client';
-import { livekitService } from '@/services/liveKitService';
+import {
+  livekitService,
+  allowedSourcesFor,
+  hasActiveLock,
+  getHostControls,
+} from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -14,6 +19,7 @@ import {
   MeetingStatus,
   NotificationType,
   RecordingType,
+  Prisma,
 } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
@@ -25,10 +31,68 @@ import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { normalizeStoragePath } from '@/services/storage/pathUtils';
 import { callRecordingService } from '@/services/callRecordingService';
+import { SUMMARY_PROMPT_MAX_LENGTH, type CallParticipantMetadata } from '@xyne/shared';
 import { callDocumentService } from '@/services/callDocumentService';
-import { SUMMARY_PROMPT_MAX_LENGTH } from '@xyne/shared';
 
 export class CallController {
+  private async cancelOtherActiveJoinRequests(
+    userId: string,
+    currentCallDbId: string,
+    timestamp: Date,
+  ): Promise<void> {
+    const activeRequests = await db.callParticipant.findMany({
+      where: {
+        userId,
+        response: InvitationResponse.REQUESTED,
+        callId: { not: currentCallDbId },
+        call: { status: CallStatus.ACTIVE },
+      },
+      select: {
+        id: true,
+        metadata: true,
+      },
+    });
+
+    const removedRequestIds: string[] = [];
+    const staleRequestIds: string[] = [];
+
+    for (const request of activeRequests) {
+      const metadata = (request.metadata as CallParticipantMetadata | null) ?? null;
+      if (metadata?.removedByHost) {
+        removedRequestIds.push(request.id);
+      } else {
+        staleRequestIds.push(request.id);
+      }
+    }
+
+    if (removedRequestIds.length === 0 && staleRequestIds.length === 0) {
+      return;
+    }
+
+    await db.$transaction([
+      ...(removedRequestIds.length > 0
+        ? [
+            db.callParticipant.updateMany({
+              where: { id: { in: removedRequestIds } },
+              data: {
+                response: InvitationResponse.DECLINED,
+                respondedAt: timestamp,
+                joinedAt: null,
+                leftAt: timestamp,
+              },
+            }),
+          ]
+        : []),
+      ...(staleRequestIds.length > 0
+        ? [
+            db.callParticipant.deleteMany({
+              where: { id: { in: staleRequestIds } },
+            }),
+          ]
+        : []),
+    ]);
+  }
+
   updateMeetingStatus = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
     const { callId } = req.params;
@@ -362,15 +426,58 @@ export class CallController {
         const roomInfo = await livekitService.getRoomInfo(existingCall.externalId);
 
         if (roomInfo) {
+          stage = 'existing_call_removed_participant_gate';
+          const participant = await repositories.calls.findParticipant(existingCall.id, userId);
+          const pMeta = (participant?.metadata as CallParticipantMetadata | null) ?? null;
+
+          if (participant?.response === InvitationResponse.REQUESTED) {
+            await this.cancelOtherActiveJoinRequests(userId, existingCall.id, new Date());
+            res.json({ success: true, pending: true });
+            return;
+          }
+
+          if (participant && pMeta?.removedByHost && participant.response !== InvitationResponse.ACCEPTED) {
+            const requestedAt = new Date();
+            await this.cancelOtherActiveJoinRequests(userId, existingCall.id, requestedAt);
+            await db.callParticipant.update({
+              where: { id: participant.id },
+              data: {
+                response: InvitationResponse.REQUESTED,
+                respondedAt: requestedAt,
+                joinedAt: null,
+                leftAt: null,
+              },
+            });
+            logger.info(`[${existingCall.externalId}] removed user initiated existing call, set REQUESTED | user_id=${userId}, correlation_id=${correlationId}`);
+            res.json({ success: true, pending: true });
+            return;
+          }
+
+          if (participant && pMeta?.removedByHost && participant.response === InvitationResponse.ACCEPTED) {
+            const { removedByHost: _removed, ...restMeta } = pMeta;
+            await db.callParticipant.update({
+              where: { id: participant.id },
+              data: { metadata: restMeta as Prisma.InputJsonValue },
+            });
+          }
+
           // Room exists, generate token to join the existing call
           stage = 'user_lookup_existing_call';
           const user = await db.user.findUnique({ where: { id: userId }, select: { picture: true } });
           stage = 'token_generation_existing_call';
+
+          const existingHostControls = getHostControls(existingCall);
+          const lockedSources =
+            existingCall.createdByUserId !== userId && hasActiveLock(existingHostControls)
+              ? allowedSourcesFor(existingHostControls)
+              : undefined;
+
           const token = await livekitService.generateAccessToken({
             userIdentity: userId,
             roomName: existingCall.externalId,
             userName: userName || userEmail || 'Unknown',
             metadata: JSON.stringify({ picture: user?.picture || null }),
+            canPublishSources: lockedSources,
           });
 
           logger.info(`[${existingCall.externalId}] joining_existing_call | user_id=${userId}, channel_id=${finalChannelId}, correlation_id=${correlationId}`);
@@ -594,15 +701,61 @@ export class CallController {
 
       }
 
+      // Removed users re-enter through the admit queue.
+      if (call) {
+        const participant = await repositories.calls.findParticipant(call.id, user.id);
+        const pMeta = (participant?.metadata as CallParticipantMetadata | null) ?? null;
+
+        if (participant?.response === InvitationResponse.REQUESTED) {
+          await this.cancelOtherActiveJoinRequests(user.id, call.id, new Date());
+          res.json({ success: true, pending: true });
+          return;
+        }
+
+        if (participant && pMeta?.removedByHost && participant.response !== InvitationResponse.ACCEPTED) {
+          const requestedAt = new Date();
+          await this.cancelOtherActiveJoinRequests(user.id, call.id, requestedAt);
+          await db.callParticipant.update({
+            where: { id: participant.id },
+            data: {
+              response: InvitationResponse.REQUESTED,
+              respondedAt: requestedAt,
+              joinedAt: null,
+              leftAt: null,
+            },
+          });
+          logger.info(`[CallController] removed user re-knocked, set REQUESTED | callId=${callId}, userId=${user.id}`);
+          res.json({ success: true, pending: true });
+          return;
+        }
+
+        if (participant && pMeta?.removedByHost && participant.response === InvitationResponse.ACCEPTED) {
+          const { removedByHost: _removed, ...restMeta } = pMeta;
+          await db.callParticipant.update({
+            where: { id: participant.id },
+            data: { metadata: restMeta as Prisma.InputJsonValue },
+          });
+        }
+      }
+
       // Generate access token
       // Participant record will be created/updated by webhook when user actually joins
 
       const joiner = await db.user.findUnique({ where: { id: user.id }, select: { picture: true } });
+
+      const hostControls = getHostControls(call);
+      const isHostJoining = call?.createdByUserId === user.id;
+      const lockedSources =
+        !isHostJoining && hasActiveLock(hostControls)
+          ? allowedSourcesFor(hostControls)
+          : undefined;
+
       const token = await livekitService.generateAccessToken({
         userIdentity: user.id,
         roomName: callId,
         userName: user.name || user.email || 'Unknown',
         metadata: JSON.stringify({ picture: joiner?.picture || null }),
+        canPublishSources: lockedSources,
       });
 
       logger.info(`LiveKit credentials generated for user ${user.id} to join call ${callId}`);
@@ -1610,7 +1763,7 @@ export class CallController {
     const participants = await livekitService.listParticipants(roomName);
     const identitySet = new Set(identities);
 
-    let mutedCount = 0;
+    const muteRequests: Promise<void>[] = [];
     for (const participant of participants) {
       if (!identitySet.has(participant.identity)) {
         logger.info(
@@ -1623,10 +1776,18 @@ export class CallController {
       for (const track of participant.tracks || []) {
         if (track.source === TrackSource.MICROPHONE && !track.muted) {
           logger.info(`[CallController] muteParticipantMicrophones MUTING track | roomName=${roomName}, identity=${participant.identity}, trackSid=${track.sid}`);
-          await livekitService.muteTrack(roomName, participant.identity, track.sid, true);
-          mutedCount++;
+          muteRequests.push(livekitService.muteTrack(roomName, participant.identity, track.sid, true));
         }
       }
+    }
+
+    const results = await Promise.allSettled(muteRequests);
+    const mutedCount = results.filter(({ status }) => status === 'fulfilled').length;
+    const failedCount = results.length - mutedCount;
+    if (failedCount > 0) {
+      logger.warn(
+        `[CallController] muteParticipantMicrophones partial failure | roomName=${roomName}, failedCount=${failedCount}, attempted=${muteRequests.length}`,
+      );
     }
 
     return mutedCount;
@@ -1680,6 +1841,7 @@ export class CallController {
       const mutedCount = await this.muteParticipantMicrophones(callId, identitiesToMute);
 
       logger.info(`[CallController] mute-all completed | callId=${callId}, mutedCount=${mutedCount}`);
+      void livekitService.sendParticipantsChanged(callId);
 
       res.json({ success: true, mutedCount });
     } catch (error) {
@@ -1762,6 +1924,7 @@ export class CallController {
       }
 
       logger.info(`[CallController] mute-participant completed | callId=${callId}, targetUserId=${participantUserId}, mutedCount=${mutedCount}`);
+      void livekitService.sendParticipantsChanged(callId);
 
       res.json({ success: true });
     } catch (error) {

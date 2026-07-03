@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { InvitationResponse } from '@xyne/shared';
 import { roomActor } from '../machines/roomMachine';
@@ -19,8 +19,10 @@ interface CallJoinState {
   action: CallJoinAction;
   /** Fire to request access to the call */
   requestToJoin: () => void;
+  cancelJoinRequest: () => void;
   /** True while the mutation is in flight */
   isRequesting: boolean;
+  isCancellingRequest: boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -30,6 +32,8 @@ interface CallJoinState {
 interface ParticipantLike {
   userId: string;
   response?: string | null;
+  invitedAt?: number | null;
+  respondedAt?: number | null;
 }
 
 interface CallLike {
@@ -47,6 +51,78 @@ function findCall(activeCalls: unknown, callId: string): CallLike | null {
 function resolveUserResponse(call: CallLike | null, userId: string | undefined): string | null {
   if (!call || !userId) return null;
   return call.participants?.find(p => p.userId === userId)?.response ?? null;
+}
+
+function resolveUserParticipant(
+  call: CallLike | null,
+  userId: string | undefined,
+): ParticipantLike | null {
+  if (!call || !userId) return null;
+  return call.participants?.find(p => p.userId === userId) ?? null;
+}
+
+const CONSUMED_AUTO_JOIN_REQUEST_TTL_MS = 10 * 60 * 1000;
+const MAX_CONSUMED_AUTO_JOIN_REQUEST_KEYS = 200;
+const consumedAutoJoinRequestKeys = new Map<string, number>();
+
+function pruneConsumedAutoJoinRequestKeys(now = Date.now()): void {
+  for (const [key, consumedAt] of consumedAutoJoinRequestKeys) {
+    if (now - consumedAt > CONSUMED_AUTO_JOIN_REQUEST_TTL_MS) {
+      consumedAutoJoinRequestKeys.delete(key);
+    }
+  }
+
+  while (consumedAutoJoinRequestKeys.size > MAX_CONSUMED_AUTO_JOIN_REQUEST_KEYS) {
+    const oldestKey = consumedAutoJoinRequestKeys.keys().next().value;
+    if (!oldestKey) return;
+    consumedAutoJoinRequestKeys.delete(oldestKey);
+  }
+}
+
+function hasConsumedAutoJoinRequestKey(key: string): boolean {
+  pruneConsumedAutoJoinRequestKeys();
+  return consumedAutoJoinRequestKeys.has(key);
+}
+
+function markAutoJoinRequestKeyConsumed(key: string): void {
+  consumedAutoJoinRequestKeys.set(key, Date.now());
+  pruneConsumedAutoJoinRequestKeys();
+}
+
+function getAutoJoinRequestKey(
+  callId: string,
+  userId: string | undefined,
+  participant: ParticipantLike | null,
+): string | null {
+  const requestedAt = participant?.respondedAt ?? participant?.invitedAt ?? null;
+  return callId && userId && requestedAt ? `${callId}:${userId}:${requestedAt}` : null;
+}
+
+function getAcceptedAutoJoinRequestKey(
+  previousResponse: string | null,
+  currentResponse: string | null,
+  pendingRequestKey: string | undefined | null,
+): string | null {
+  return previousResponse === InvitationResponse.REQUESTED &&
+    currentResponse === InvitationResponse.ACCEPTED &&
+    pendingRequestKey
+    ? pendingRequestKey
+    : null;
+}
+
+function consumeAutoJoinRequestKey(requestKey: string): boolean {
+  if (hasConsumedAutoJoinRequestKey(requestKey)) return false;
+  markAutoJoinRequestKeyConsumed(requestKey);
+  return true;
+}
+
+function sendJoinCall(callId: string, zero: ReturnType<typeof useZero>, isMobile: boolean): void {
+  roomActor.send({
+    type: 'JOIN_CALL',
+    callId,
+    zero,
+    viewMode: isMobile ? 'full' : 'mini',
+  });
 }
 
 // ─────────────────────────────────────────────
@@ -74,23 +150,113 @@ export function useAutoJoinOnAccept({
 
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
   const call = findCall(activeCalls, callId);
-  const currentResponse = resolveUserResponse(call, userId);
+  const participant = resolveUserParticipant(call, userId);
+  const currentResponse = participant?.response ?? null;
+  const requestKey = getAutoJoinRequestKey(callId, userId, participant);
+  const pendingRequestKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const wasRequested = prevResponseRef.current === InvitationResponse.REQUESTED;
-    const isAccepted = currentResponse === InvitationResponse.ACCEPTED;
+    if (currentResponse === InvitationResponse.REQUESTED) {
+      pendingRequestKeyRef.current = requestKey;
+    }
 
-    if (wasRequested && isAccepted && !isUserInCall && callId) {
-      roomActor.send({
-        type: 'JOIN_CALL',
-        callId,
-        zero,
-        viewMode: isMobile ? 'full' : 'mini',
-      });
+    const approvalRequestKey = pendingRequestKeyRef.current;
+    const acceptedRequestKey = getAcceptedAutoJoinRequestKey(
+      prevResponseRef.current,
+      currentResponse,
+      approvalRequestKey,
+    );
+
+    if (
+      acceptedRequestKey &&
+      !isUserInCall &&
+      callId &&
+      consumeAutoJoinRequestKey(acceptedRequestKey)
+    ) {
+      pendingRequestKeyRef.current = null;
+      sendJoinCall(callId, zero, isMobile);
     }
 
     prevResponseRef.current = currentResponse;
-  }, [currentResponse, callId, isUserInCall, zero, isMobile]);
+  }, [currentResponse, requestKey, callId, isUserInCall, zero, isMobile]);
+}
+
+export function useGlobalAutoJoinOnAccept(userId: string | undefined): void {
+  const zero = useZero();
+  const { isMobile } = usePlatform();
+  const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
+  const currentCallId = useSelector(roomActor, state => state.context.externalId);
+  const isRoomBusy = useSelector(
+    roomActor,
+    state =>
+      state.matches('initiating') ||
+      state.matches('joining') ||
+      state.matches('connecting') ||
+      state.matches('connected') ||
+      state.matches('disconnecting'),
+  );
+
+  const prevResponsesRef = useRef<Map<string, string | null>>(new Map());
+  const pendingRequestKeysRef = useRef<Map<string, string>>(new Map());
+  const pendingAutoJoinCallIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const pendingCallId = pendingAutoJoinCallIdRef.current;
+    if (!pendingCallId || isRoomBusy) return;
+
+    pendingAutoJoinCallIdRef.current = null;
+    sendJoinCall(pendingCallId, zero, isMobile);
+  }, [isRoomBusy, zero, isMobile]);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const activeCallIds = new Set<string>();
+
+    (activeCalls as CallLike[]).forEach(call => {
+      const callId = call.externalId;
+      if (!callId) return;
+      activeCallIds.add(callId);
+
+      const participant = resolveUserParticipant(call, userId);
+      const currentResponse = participant?.response ?? null;
+      const previousResponse = prevResponsesRef.current.get(callId) ?? null;
+      const requestKey = getAutoJoinRequestKey(callId, userId, participant);
+
+      if (currentResponse === InvitationResponse.REQUESTED && requestKey) {
+        pendingRequestKeysRef.current.set(callId, requestKey);
+      }
+
+      const acceptedRequestKey = getAcceptedAutoJoinRequestKey(
+        previousResponse,
+        currentResponse,
+        pendingRequestKeysRef.current.get(callId),
+      );
+      if (acceptedRequestKey && consumeAutoJoinRequestKey(acceptedRequestKey)) {
+        pendingRequestKeysRef.current.delete(callId);
+
+        if (currentCallId !== callId) {
+          if (isRoomBusy) {
+            pendingAutoJoinCallIdRef.current = callId;
+            roomActor.send({ type: 'DISCONNECT' });
+          } else {
+            sendJoinCall(callId, zero, isMobile);
+          }
+        }
+      } else if (currentResponse !== InvitationResponse.REQUESTED) {
+        pendingRequestKeysRef.current.delete(callId);
+      }
+
+      prevResponsesRef.current.set(callId, currentResponse);
+    });
+
+    for (const callId of prevResponsesRef.current.keys()) {
+      if (!activeCallIds.has(callId)) {
+        prevResponsesRef.current.delete(callId);
+        pendingRequestKeysRef.current.delete(callId);
+      }
+    }
+  }, [activeCalls, currentCallId, isRoomBusy, userId, zero, isMobile]);
 }
 
 // ─────────────────────────────────────────────
@@ -106,6 +272,7 @@ export function useAutoJoinOnAccept({
  */
 export function useCallJoinState(callId: string, userId: string | undefined): CallJoinState {
   const zero = useZero();
+  const [isCancellingRequest, setIsCancellingRequest] = useState(false);
 
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
   const call = findCall(activeCalls, callId);
@@ -116,6 +283,19 @@ export function useCallJoinState(callId: string, userId: string | undefined): Ca
   // We track isRequesting locally for optimistic UI feedback.
   // Once the mutation lands, the Zero query will update action → 'requested'.
   const isRequestingRef = useRef(false);
+  const requestTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (requestTimeoutRef.current) {
+        clearTimeout(requestTimeoutRef.current);
+      }
+      if (cancelTimeoutRef.current) {
+        clearTimeout(cancelTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const requestToJoin = useCallback(() => {
     if (!callId || !userId || !zero) return;
@@ -134,15 +314,46 @@ export function useCallJoinState(callId: string, userId: string | undefined): Ca
       console.error('[useCallJoinState] Failed to request to join:', error);
     } finally {
       // Short timeout to allow the mutation to optimistically update before clearing
-      setTimeout(() => {
+      if (requestTimeoutRef.current) {
+        clearTimeout(requestTimeoutRef.current);
+      }
+      requestTimeoutRef.current = setTimeout(() => {
         isRequestingRef.current = false;
+        requestTimeoutRef.current = null;
       }, 500);
     }
   }, [callId, userId, zero, action]);
 
+  const cancelJoinRequest = useCallback(() => {
+    if (!callId || !userId || !zero) return;
+    if (userResponse !== InvitationResponse.REQUESTED) return;
+
+    setIsCancellingRequest(true);
+    try {
+      zero.mutate(
+        mutators.calls.cancelJoinRequest({
+          callId,
+          timestamp: Date.now(),
+        }),
+      );
+    } catch (error) {
+      console.error('[useCallJoinState] Failed to cancel join request:', error);
+    } finally {
+      if (cancelTimeoutRef.current) {
+        clearTimeout(cancelTimeoutRef.current);
+      }
+      cancelTimeoutRef.current = setTimeout(() => {
+        setIsCancellingRequest(false);
+        cancelTimeoutRef.current = null;
+      }, 500);
+    }
+  }, [callId, userId, zero, userResponse]);
+
   return {
     action,
     requestToJoin,
+    cancelJoinRequest,
     isRequesting: isRequestingRef.current || userResponse === InvitationResponse.REQUESTED,
+    isCancellingRequest,
   };
 }

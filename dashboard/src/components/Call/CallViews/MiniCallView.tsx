@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import type { Room } from 'livekit-client';
-import { ConnectionState, Track } from 'livekit-client';
+import { ConnectionState } from 'livekit-client';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import ThreadMessages from '../../Chat/ThreadPannel';
@@ -13,6 +13,7 @@ import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
+import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 
 interface MiniCallViewProps {
   participants: ParticipantInfo[];
@@ -143,7 +144,7 @@ export function MiniCallView({
       return p.isScreenShareEnabled;
     }
     // Web mode: check actual track publication
-    return p.participant.getTrackPublication(Track.Source.ScreenShare)?.isSubscribed;
+    return isScreenShareActive(p.participant);
   });
 
   // Memoize screen sharer identities for dependency

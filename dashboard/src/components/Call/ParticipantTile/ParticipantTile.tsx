@@ -10,6 +10,7 @@ import { ParticipantAvatar } from '../ParticipantAvatar/ParticipantAvatar';
 import { getAvatarColors } from '../ParticipantAvatar/avatarColors';
 import { cn } from '../../../utils/classNames';
 import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
+import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 
 // Import LiveKit's built-in hooks that handle track management with observables
 import { VideoTrack } from '@livekit/components-react';
@@ -57,9 +58,9 @@ export function ParticipantTile({
   );
 
   // Determine if video should be shown
+  const hasScreenShareVideo = isScreenShare && isScreenShareActive(participant.participant);
   const hasVideo =
-    (participant.isCameraEnabled && cameraPublication?.isSubscribed) ||
-    (isScreenShare && screenSharePublication?.isSubscribed);
+    (participant.isCameraEnabled && cameraPublication?.isSubscribed) || hasScreenShareVideo;
 
   const isClickable = isScreenShare && onClick;
 
@@ -109,7 +110,7 @@ export function ParticipantTile({
   // processor (background blur) has swapped the underlying MediaStreamTrack.
   const videoTrackRef = useMemo(
     () =>
-      isScreenShare && screenSharePublication && participant.participant
+      hasScreenShareVideo && screenSharePublication && participant.participant
         ? {
             participant: participant.participant,
             source: Track.Source.ScreenShare,
@@ -122,7 +123,7 @@ export function ParticipantTile({
               publication: cameraPublication,
             }
           : undefined,
-    [isScreenShare, screenSharePublication, cameraPublication, participant.participant],
+    [hasScreenShareVideo, screenSharePublication, cameraPublication, participant.participant],
   );
 
   const audioTrackRef = useMemo(
