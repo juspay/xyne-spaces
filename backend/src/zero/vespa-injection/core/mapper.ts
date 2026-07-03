@@ -1,12 +1,12 @@
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
-import { channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
+import { appSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaAppDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import { CanvasVisibility, ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
 import { FormFieldType } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem } from '@prisma/client';
+import { Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem, Apps } from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import vespaClient from '@/vespa/client';
@@ -442,6 +442,44 @@ export const mapProject = async (args: InsertValue<ProjectsSchema>, workspaceId?
     orgId: effectiveOrgId,
   };
 }
+
+/**
+ * Map an `apps` row to its Vespa document. orgId/scope/version come straight off
+ * the app row and drive the view filters (Org = orgId+scope ORG, Marketplace =
+ * scope GLOBAL). orgName is the owning org's display name — it mirrors the UI's
+ * "Created by" fallback for cross-org marketplace apps and is lexically searchable.
+ * creator identity + workspaceId are denormalized from the creator's user record.
+ * name + description are embedded inside Vespa at feed time; creator/org fields are
+ * lexical-only.
+ */
+export const mapApp = async (args: Apps): Promise<VespaAppDocument> => {
+  const [creator, org] = await Promise.all([
+    db.user.findUnique({
+      where: { id: args.createdBy },
+      select: { name: true, email: true, workspaceId: true },
+    }),
+    db.organization.findUnique({
+      where: { orgId: args.orgId },
+      select: { name: true },
+    }),
+  ]);
+  return {
+    docId: args.id,
+    docType: VespaDocType.APP,
+    workspaceId: creator?.workspaceId ?? '',
+    orgId: args.orgId,
+    scope: args.scope,
+    version: args.version,
+    name: args.name,
+    description: args.description ?? '',
+    createdBy: args.createdBy,
+    creatorName: creator?.name ?? '',
+    creatorEmail: creator?.email ?? '',
+    orgName: org?.name ?? '',
+    createdAt: toTimestamp(args.createdAt),
+    updatedAt: toTimestamp(args.updatedAt),
+  };
+};
 
 
 export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<VespaTicketDocument> => {
@@ -1285,6 +1323,8 @@ export const mapBySchema = async (
         }
       case mailSchema:
         return mapEmail(args as unknown as Email, workspaceId, orgId);
+      case appSchema:
+        return mapApp(args as Apps);
       case samTranscriptSchema:
         throw new Error(`${schemaName}: SAM transcripts must be queued with pre-transformed data. Pass the document via vespaQueue.addJob({ data: vespaDocument }).`);
       default:
@@ -1312,7 +1352,7 @@ export const fetchDataBySchema = async (
   schema: VespaSchema,
   docId: string,
   app?: SubApp
-): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | CollectionItem | null> => {
+): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | CollectionItem | Apps | null> => {
   switch (schema) {
     case channelSchema:
       return await db.channel.findUnique({
@@ -1366,6 +1406,11 @@ export const fetchDataBySchema = async (
 
     case mailSchema:
       return await db.email.findUnique({
+        where: { id: docId },
+      });
+
+    case appSchema:
+      return await db.apps.findUnique({
         where: { id: docId },
       });
 

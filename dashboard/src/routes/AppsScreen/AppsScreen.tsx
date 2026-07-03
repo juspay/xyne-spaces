@@ -1,4 +1,4 @@
-import { ReactElement, useState, useRef, useEffect, useMemo } from 'react';
+import { ReactElement, useState, useRef, useEffect, useMemo, type ComponentProps } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '../../components/ui/Button/Button';
 import { AppsTable } from '../../components/Apps/AppsTable/AppsTable';
@@ -9,7 +9,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { useZero } from '../../hooks/useZero';
-import { useUserSearch } from '../../hooks/useUsers';
+import { useVespaAppSearch } from '../../hooks/useVespaAppSearch';
 import { useMutation } from '@tanstack/react-query';
 import { appsService } from '../../services/Apps/appsService';
 import { mutators } from '../../zero/mutators';
@@ -144,24 +144,76 @@ const AppsScreen = (): ReactElement => {
       .catch(() => {});
   }, [appOrgIds]);
 
-  const matchedUsers = useUserSearch(searchQuery, 50);
+  // Full-corpus search via Vespa (name, description, creator — hybrid lexical+semantic).
+  // Empty query → falls back to the paginated Zero list below.
+  const isSearchMode = searchQuery.trim().length > 0;
+  const {
+    hits,
+    total: searchTotal,
+    hasMore,
+    loadMore,
+    isSearching,
+    reload: reloadSearch,
+  } = useVespaAppSearch(searchQuery, view);
 
+  // Render search results from the Vespa response. Install state + owning-org name
+  // are resolved server-side, scoped to the caller's workspace (see searchApps) — so
+  // no bulk client fetch of installed_apps. orgId/scope/version drive the status,
+  // org-name attribution, and the version-gated Update button, exactly like the Zero
+  // rows. The signing secret is never here — it's fetched on demand.
   const filteredApps = useMemo(() => {
-    if (!apps) return [];
-    if (!searchQuery.trim()) return apps;
-    const query = searchQuery.toLowerCase().trim();
-    const matchedUserIds = new Set(matchedUsers.map(u => u.id));
-    return apps.filter((app: Record<string, unknown>) => {
-      const name = typeof app['name'] === 'string' ? app['name'] : '';
-      const description = typeof app['description'] === 'string' ? app['description'] : '';
-      const createdBy = typeof app['createdBy'] === 'string' ? app['createdBy'] : '';
-      return (
-        name.toLowerCase().includes(query) ||
-        description.toLowerCase().includes(query) ||
-        matchedUserIds.has(createdBy)
-      );
-    });
-  }, [apps, searchQuery, matchedUsers]);
+    if (!isSearchMode) return apps ?? [];
+    return hits.map(h => ({
+      id: h.docId,
+      name: h.name,
+      description: h.description,
+      createdBy: h.createdBy,
+      orgId: h.orgId,
+      scope: h.scope,
+      version: h.version,
+      webhookUrl: h.webhookUrl ?? undefined,
+      createdAt: h.createdAt,
+      updatedAt: h.createdAt,
+      // Installed view: the row IS the install (status/webhook/botUser/version read here).
+      // Org/Marketplace: install state comes from installedVersionByAppId below instead.
+      installations: h.installed
+        ? [
+            {
+              id: h.installedAppId ?? '',
+              appId: h.docId,
+              userId: h.botUserId ?? '',
+              webhookUrl: h.webhookUrl ?? undefined,
+              signingSecret: '',
+              version: h.installedVersion ?? undefined,
+              createdAt: 0,
+              updatedAt: 0,
+            },
+          ]
+        : [],
+    }));
+  }, [isSearchMode, apps, hits]);
+
+  // Org/Marketplace status + Update-gating look install state up by appId. In search
+  // mode that comes from the hits (server-resolved); otherwise from the Zero query.
+  const effectiveInstalledVersionByAppId = useMemo(() => {
+    if (!isSearchMode) return installedVersionByAppId;
+    const map: Record<string, number> = {};
+    for (const h of hits) {
+      if (h.installed && h.installedVersion !== null) map[h.docId] = h.installedVersion;
+    }
+    return map;
+  }, [isSearchMode, hits, installedVersionByAppId]);
+
+  // "Created by" org-name attribution. Search hits already carry orgName (no extra
+  // getOrgNames round-trip); the non-search path uses the REST-resolved map above.
+  const effectiveOrgNamesById = useMemo(() => {
+    if (!isSearchMode) return orgNamesById;
+    const map: Record<string, string> = { ...orgNamesById };
+    for (const h of hits) {
+      if (h.orgId && h.orgName) map[h.orgId] = h.orgName;
+    }
+    return map;
+  }, [isSearchMode, hits, orgNamesById]);
 
   const hasNextPage = (rawRows?.length ?? 0) === ITEMS_PER_PAGE;
   const hasPreviousPage = currentPage > 1;
@@ -210,7 +262,12 @@ const AppsScreen = (): ReactElement => {
   // Install / Update both hit the install endpoint (Update = re-install latest snapshot).
   const installAppMutation = useMutation({
     mutationFn: async (appId: string) => appsService.installApp(appId),
-    onSuccess: () => toast.success('App installed successfully'),
+    onSuccess: () => {
+      toast.success('App installed successfully');
+      // Refresh search results so the row flips to "Installed" (install state is
+      // resolved server-side per page, so re-fetch the current search).
+      reloadSearch();
+    },
     onError: (error: Error) => toast.error('Failed to install app', { description: error.message }),
   });
 
@@ -389,7 +446,7 @@ const AppsScreen = (): ReactElement => {
               </div>
             ) : filteredApps && filteredApps.length > 0 ? (
               <AppsTable
-                apps={filteredApps as never}
+                apps={filteredApps as ComponentProps<typeof AppsTable>['apps']}
                 currentUserId={user?.id ?? ''}
                 onInstall={handleInstallApp}
                 onReinstall={handleInstallApp}
@@ -401,8 +458,8 @@ const AppsScreen = (): ReactElement => {
                 userPermissions={permissions}
                 isInstalling={installAppMutation.isPending}
                 dataSource={view === 'installed' ? 'install' : 'app'}
-                installedVersionByAppId={installedVersionByAppId}
-                orgNamesById={orgNamesById}
+                installedVersionByAppId={effectiveInstalledVersionByAppId}
+                orgNamesById={effectiveOrgNamesById}
                 {...(view === 'org' ? { onPromote: handlePromoteApp } : {})}
                 canPromote={isXyneAppsAdmin}
                 isPromoting={isPromoting}
@@ -421,6 +478,20 @@ const AppsScreen = (): ReactElement => {
               </div>
             )}
           </div>
+
+          {/* Search results count + load more */}
+          {isSearchMode && filteredApps.length > 0 && (
+            <div className='flex items-center justify-between px-6 py-3 border-t border-border bg-muted'>
+              <span className='text-sm text-muted-foreground'>
+                Showing {filteredApps.length} of {searchTotal}
+              </span>
+              {hasMore && (
+                <Button variant='outline' size='sm' onClick={loadMore} disabled={isSearching}>
+                  {isSearching ? 'Loading…' : 'Load more'}
+                </Button>
+              )}
+            </div>
+          )}
 
           {/* Pagination Controls */}
           {(hasPreviousPage || hasNextPage) && !searchQuery && (

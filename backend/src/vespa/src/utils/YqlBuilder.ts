@@ -9,10 +9,11 @@ import {
   fileSchema,
   samTranscriptSchema,
   mailSchema,
+  appSchema,
 } from '../types';
 import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
-type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail';
+type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail' | 'xyneapp';
 
 const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
 
@@ -1019,6 +1020,63 @@ export class YqlBuilder {
   }
 
   /**
+   * Build the YQL for searching the xyne-apps catalog (`app` schema).
+   *
+   * Standalone from the universal multi-source builder: apps have no per-user ACL
+   * (visibility is gated by the XYNE-APPS resource permission at the route), so there
+   * is no permGuard. Retrieval is purely lexical via userInput over the `default`
+   * fieldset (name, description, name_fuzzy, description_fuzzy, creatorName,
+   * creatorEmail) — this keeps the match set exact, fully paginatable, and noise-free
+   * (so a "slack" search returns only apps that actually contain "slack").
+   *
+   * Embeddings are NOT used to expand the match set here (an `OR nearestNeighbor`
+   * makes Vespa's totalCount unreliable and pads results with non-matching docs).
+   * Instead the query embedding (input.query(e)) feeds `closeness` in the
+   * default_native rank-profile, so semantics still RE-RANK the lexical matches.
+   * Workspace isolation (`workspaceId contains @ws`) is applied when supplied.
+   */
+  /**
+   * Build YQL for the xyne-apps catalog, scoped to one of the three Apps views:
+   *   - 'org'         → ORG-scoped apps for the caller's org (orgId + scope=ORG).
+   *   - 'marketplace' → GLOBAL apps across all orgs (scope=GLOBAL).
+   *   - 'installed'   → apps installed in the caller's workspace (docId in installedAppIds).
+   * View scoping is always applied (not flag-gated): Org isolation is a security
+   * requirement, and Installed/Marketplace define distinct corpora.
+   */
+  buildAppYql(opts: {
+    view: 'installed' | 'org' | 'marketplace';
+    orgId?: string;
+    installedAppIds?: string[];
+  }): {
+    yql: string;
+    params: Record<string, string>;
+  } {
+    const params = new VespaQueryParams();
+    const conditions: string[] = ['(userInput(@query))'];
+
+    if (opts.view === 'org') {
+      if (opts.orgId) {
+        conditions.push(`orgId contains ${params.bind('orgId', opts.orgId)}`);
+      }
+      conditions.push(`scope contains ${params.bind('scope', 'ORG')}`);
+    } else if (opts.view === 'marketplace') {
+      conditions.push(`scope contains ${params.bind('scope', 'GLOBAL')}`);
+    } else {
+      // installed: restrict to the caller's workspace installs (resolved from the DB).
+      // Vespa `in` operator — one bound param (comma-joined) instead of N OR terms.
+      // Keeps the YQL constant-size and Vespa's cost flat regardless of install count
+      // (vs an OR-chain whose parse/eval cost grows linearly). App ids are cuids/
+      // slugs with no commas, so comma-joining is safe. An empty installed set is
+      // short-circuited by the caller (searchApps) before we get here.
+      const ids = opts.installedAppIds ?? [];
+      conditions.push(`docId in (${params.bind('installedIds', ids.join(','))})`);
+    }
+
+    const yql = `select * from sources ${appSchema} where ${conditions.join(' and ')}`;
+    return { yql, params: params.toRequestProperties() };
+  }
+
+  /**
    * Maps app names to their schemas and returns a mapping
    * @param apps - Array of app names
    * @returns Object mapping app names to their schemas
@@ -1032,6 +1090,7 @@ export class YqlBuilder {
       collection: [fileSchema],
       transcript: [samTranscriptSchema],
       mail: [mailSchema],
+      xyneapp: [appSchema],
     };
 
     const result: Record<string, VespaSchema[]> = {};
