@@ -2,7 +2,11 @@ import { useSelector } from '@xstate/react';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
 import { stateMachineActor } from '../machines/stateMachine';
-import { MAX_NOTIFICATION_KEYWORDS, MAX_NOTIFICATION_KEYWORD_LENGTH } from '@xyne/shared';
+import {
+  MAX_NOTIFICATION_KEYWORDS,
+  MAX_NOTIFICATION_KEYWORD_LENGTH,
+  parseNotificationKeywords,
+} from '@xyne/shared';
 
 export type AddKeywordResult =
   | { ok: true }
@@ -23,8 +27,8 @@ export const useNotificationKeywords = (): NotificationKeywords => {
   const zero = useZero();
   const userPreference = useSelector(stateMachineActor, state => state.context.userPreference);
 
-  const keywords: string[] =
-    (userPreference?.notificationKeywords as string[] | null | undefined) ?? [];
+  // Stored as stringified JSON (TEXT column); parse back to string[].
+  const keywords: string[] = parseNotificationKeywords(userPreference?.notificationKeywords);
 
   const save = (next: string[]): void => {
     void zero.mutate(
