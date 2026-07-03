@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { expect } from '@playwright/test';
 import { Step } from 'gauge-ts';
 import { BASELINE_DM_KEY } from '@/fixtures/baseline';
 import { buildRandomSuffix, getStoredUser } from '@/fixtures/fixture-helpers';
@@ -24,6 +25,39 @@ function ensureChannelContext(userAlias: string, channelAlias: string): void {
       `No registered channel context for alias "${channelAlias}" for user "${userAlias}". Channel context must be populated by either baseline fixture rehydration or an explicit channel creation step before messaging steps can use it.`
     );
   }
+}
+
+function getStoredChannelMessageText(
+  userAlias: string,
+  channelAlias: string,
+  messageAlias: string
+): string {
+  assertValidUserAlias(userAlias);
+  assertValidChannelAlias(channelAlias);
+  assertValidMessageAlias(messageAlias);
+  const user = getStoredUser(userAlias);
+  const message = user.channels[channelAlias]?.messages[messageAlias];
+  assert.ok(
+    message?.text,
+    `No stored channel message "${messageAlias}" found for user "${userAlias}" in channel "${channelAlias}".`
+  );
+  return message.text;
+}
+
+async function clickHoverActionOnMessage(
+  hoverActionSelector: string,
+  messageText: string
+): Promise<void> {
+  const page = testContext.activePage;
+  const message = page.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`).last();
+
+  await message.waitFor({ state: 'visible' });
+  await message.scrollIntoViewIfNeeded();
+  await message.hover({ force: true });
+
+  const actionButton = page.locator(hoverActionSelector).first();
+  await actionButton.waitFor({ state: 'visible', timeout: 10000 });
+  await actionButton.click({ force: true });
 }
 
 export default class MessagingSteps {
@@ -112,5 +146,214 @@ export default class MessagingSteps {
       baseText,
       text,
     };
+  }
+
+  @Step(
+    'opening more actions for stored user <userAlias> channel <channelAlias> message <messageAlias>'
+  )
+  public async openMoreActionsForStoredChannelMessage(
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    await clickHoverActionOnMessage(
+      "[data-testid='hover-action-more']",
+      getStoredChannelMessageText(userAlias, channelAlias, messageAlias)
+    );
+  }
+
+  @Step(
+    'verifying message menu action <selector> is visible for stored user <userAlias> channel <channelAlias> message <messageAlias>'
+  )
+  public async verifyChannelMessageMenuActionVisible(
+    selector: string,
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    await this.openMoreActionsForStoredChannelMessage(userAlias, channelAlias, messageAlias);
+    await testContext.activePage.locator(selector).first().waitFor({ state: 'visible' });
+  }
+
+  @Step(
+    'forwarding stored user <userAlias> channel <channelAlias> message <messageAlias> to user <targetUserAlias>'
+  )
+  public async forwardStoredChannelMessageToUser(
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    targetUserAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    assertValidUserAlias(targetUserAlias);
+
+    await this.openMoreActionsForStoredChannelMessage(userAlias, channelAlias, messageAlias);
+    await testContext.activePage.locator("[data-testid='hover-action-forward-message']").click();
+    await this.pickForwardTargetUser(targetUserAlias);
+  }
+
+  @Step(
+    'verifying stored user <userAlias> channel <channelAlias> message <messageAlias> is deleted'
+  )
+  public async verifyStoredChannelMessageDeleted(
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+
+    const messageText = getStoredChannelMessageText(userAlias, channelAlias, messageAlias);
+    await expect(
+      testContext.activePage.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`)
+    ).toHaveCount(0, { timeout: 15000 });
+  }
+
+  @Step(
+    'verifying clipboard contains stored channel message <messageAlias> for user <userAlias> channel <channelAlias>'
+  )
+  public async verifyClipboardContainsStoredChannelMessage(
+    messageAlias: string,
+    userAlias: string,
+    channelAlias: string
+  ): Promise<void> {
+    assertValidMessageAlias(messageAlias);
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+
+    const messageText = getStoredChannelMessageText(userAlias, channelAlias, messageAlias);
+    const clipboardText = await testContext.activePage.evaluate(() => {
+      const clipboardNavigator = navigator as Navigator & {
+        clipboard: { readText: () => Promise<string> };
+      };
+      return clipboardNavigator.clipboard.readText();
+    });
+    assert.ok(
+      clipboardText.includes(messageText),
+      `Expected clipboard text to include "${messageText}" but got "${clipboardText}".`
+    );
+  }
+
+  @Step(
+    'verifying clipboard contains copied channel message link for user <userAlias> channel <channelAlias>'
+  )
+  public async verifyClipboardContainsCopiedChannelMessageLink(
+    userAlias: string,
+    channelAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+
+    const channel = getStoredUser(userAlias).channels[channelAlias];
+    assert.ok(channel?.id, `No stored channel "${channelAlias}" found for user "${userAlias}".`);
+
+    await expect
+      .poll(
+        async () => {
+          const clipboardText = await testContext.activePage.evaluate(() => {
+            const clipboardNavigator = navigator as Navigator & {
+              clipboard: { readText: () => Promise<string> };
+            };
+            return clipboardNavigator.clipboard.readText();
+          });
+          return clipboardText;
+        },
+        {
+          timeout: 10000,
+          message: `Expected clipboard to contain copied link for channel "${channelAlias}".`,
+        }
+      )
+      .toContain(`/chat/dir/${channel.id}`);
+  }
+
+  @Step(
+    'sending clipboard text as stored channel message <messageAlias> in channel <channelAlias> for user <userAlias>'
+  )
+  public async sendClipboardTextAsStoredChannelMessage(
+    messageAlias: string,
+    channelAlias: string,
+    userAlias: string
+  ): Promise<void> {
+    assertValidMessageAlias(messageAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidUserAlias(userAlias);
+    ensureChannelContext(userAlias, channelAlias);
+
+    const clipboardText = await testContext.activePage.evaluate(() => {
+      const clipboardNavigator = navigator as Navigator & {
+        clipboard: { readText: () => Promise<string> };
+      };
+      return clipboardNavigator.clipboard.readText();
+    });
+    assert.ok(clipboardText.trim(), 'Expected clipboard text to be non-empty.');
+
+    const user = getStoredUser(userAlias);
+    user.channels[channelAlias].messages[messageAlias] = {
+      alias: messageAlias,
+      baseText: clipboardText,
+      text: clipboardText,
+    };
+
+    await testContext.activePage.locator("[data-testid='message-input']").fill(clipboardText);
+    await testContext.activePage.locator("[data-testid='send-message-button']").click();
+  }
+
+  @Step('sending clipboard text in message input')
+  public async sendClipboardTextInMessageInput(): Promise<void> {
+    const clipboardText = await testContext.activePage.evaluate(() => {
+      const clipboardNavigator = navigator as Navigator & {
+        clipboard: { readText: () => Promise<string> };
+      };
+      return clipboardNavigator.clipboard.readText();
+    });
+    assert.ok(clipboardText.trim(), 'Expected clipboard text to be non-empty.');
+
+    await testContext.activePage.locator("[data-testid='message-input']").fill(clipboardText);
+    await testContext.activePage.locator("[data-testid='send-message-button']").click();
+  }
+
+  @Step(
+    'verifying copied channel message link preview is visible for user <userAlias> channel <channelAlias>'
+  )
+  public async verifyCopiedChannelMessageLinkPreviewVisible(
+    userAlias: string,
+    channelAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+
+    const channel = getStoredUser(userAlias).channels[channelAlias];
+    assert.ok(channel?.name, `No stored channel "${channelAlias}" found for user "${userAlias}".`);
+    await expect(
+      testContext.activePage.getByText(`Message in #${channel.name}`).last()
+    ).toBeVisible({
+      timeout: 15000,
+    });
+  }
+
+  private async pickForwardTargetUser(targetUserAlias: string): Promise<void> {
+    assertValidUserAlias(targetUserAlias);
+    const targetUser = getStoredUser(targetUserAlias);
+    const page = testContext.activePage;
+
+    await page.locator("[data-testid='forward-message-form']").waitFor({ state: 'visible' });
+    await page.locator("input[placeholder='Search channels or users...']").fill(targetUser.email);
+    await page.locator('[data-combobox-popup]').getByText(targetUser.email).first().click();
+
+    const forwardButton = page
+      .locator("[data-testid='forward-message-form']")
+      .getByRole('button', { name: 'Forward' });
+    await expect(forwardButton).toBeEnabled({ timeout: 10000 });
+    await forwardButton.click();
+    await page.locator("[data-testid='forward-message-form']").waitFor({ state: 'hidden' });
   }
 }

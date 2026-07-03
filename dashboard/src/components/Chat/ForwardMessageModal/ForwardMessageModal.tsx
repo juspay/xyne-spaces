@@ -641,6 +641,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   return (
     <form
       data-id='forward-message-form'
+      data-testid='forward-message-form'
       onSubmit={e => {
         e.preventDefault();
         e.stopPropagation();

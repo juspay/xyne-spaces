@@ -30,6 +30,33 @@ const browserTypes: Record<SupportedBrowser, BrowserType> = {
 };
 const browserPool: BrowserPoolEntry[] = [];
 const MAIN_BROWSER_NAME = 'default-browser-1';
+const TEST_CLIPBOARD_SCRIPT = `(() => {
+  if (navigator.clipboard) {
+    return;
+  }
+
+  let clipboardText = '';
+
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      readText: async () => clipboardText,
+      writeText: async (text) => {
+        clipboardText = String(text);
+      },
+      read: async () => [],
+      write: async (items) => {
+        clipboardText = '';
+        for (const item of items || []) {
+          if (item.types?.includes('text/plain')) {
+            clipboardText = await (await item.getType('text/plain')).text();
+            break;
+          }
+        }
+      },
+    },
+  });
+})();`;
 
 export function isMainSession(sessionName: string): boolean {
   return sessionName === MAIN_BROWSER_NAME;
@@ -109,7 +136,9 @@ async function buildSession(
       height,
     },
     baseURL: config.dashboard.baseUrl,
-    ...(isChromium ? { permissions: ['microphone', 'camera'] } : {}),
+    ...(isChromium
+      ? { permissions: ['microphone', 'camera', 'clipboard-read', 'clipboard-write'] }
+      : {}),
   });
 
   context.setDefaultTimeout(config.timeout);
@@ -118,6 +147,7 @@ async function buildSession(
   // This monitors WebSocket activity so tests can deterministically
   // wait for Zero to finish syncing mutations to the backend.
   await context.addInitScript(ZERO_SYNC_BRIDGE_SCRIPT);
+  await context.addInitScript(TEST_CLIPBOARD_SCRIPT);
 
   const page: Page = await context.newPage();
 

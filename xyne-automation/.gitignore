@@ -1,4 +1,5 @@
 node_modules/
 .gauge/
-reports/
+**/reports/
+**/playwright-report/
 dist/
