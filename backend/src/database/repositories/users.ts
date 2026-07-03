@@ -51,6 +51,15 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     });
   }
 
+  async findByIdWithWorkspace(id: string): Promise<
+    (User & { workspace: { id: string; name: string } }) | null
+  > {
+    return (await this.db.user.findUnique({
+      where: { id },
+      include: { workspace: { select: { id: true, name: true } } },
+    })) as (User & { workspace: { id: string; name: string } }) | null;
+  }
+
   async findByEmail(email: string, workspaceId: string): Promise<User | null> {
     return await this.db.user.findUnique({
       where: { email_workspaceId: { email, workspaceId } },

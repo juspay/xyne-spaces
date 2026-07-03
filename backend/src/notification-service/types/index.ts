@@ -7,6 +7,8 @@ export interface NotificationEvent {
   actionUrl?: string;
   data?: Record<string, any>;
   createdAt: Date;
+  workspaceId?: string;
+  workspaceName?: string;
 }
 
 export enum NotificationStatus {

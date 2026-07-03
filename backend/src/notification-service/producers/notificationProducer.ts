@@ -32,6 +32,31 @@ export class NotificationProducer {
   ): Promise<string> {
     try {
       const eventId = uuidv4();
+
+      // workspace context — clients always render workspace at the top.
+      let workspaceId: string | undefined;
+      let workspaceName: string | undefined;
+      let orgMemberId: string | undefined;
+      try {
+        let ctx = await redisService.getWorkspaceContext(userId);
+        if (!ctx) {
+          const user = await repositories.users.findByIdWithWorkspace(userId);
+          if (user?.orgMemberId && user?.workspaceId) {
+            ctx = {
+              workspaceId: user.workspaceId,
+              workspaceName: user.workspace?.name ?? '',
+              orgMemberId: user.orgMemberId,
+            };
+            await redisService.setWorkspaceContext(userId, ctx);
+          }
+        }
+        workspaceId = ctx?.workspaceId;
+        workspaceName = ctx?.workspaceName;
+        orgMemberId = ctx?.orgMemberId;
+      } catch (lookupError) {
+        this.logger.error('Failed to resolve workspace context for notification', { userId, error: lookupError });
+      }
+
       const event: NotificationEvent = {
         id: eventId,
         userId,
@@ -41,9 +66,23 @@ export class NotificationProducer {
         actionUrl,
         data,
         createdAt: new Date(),
+        ...(workspaceId && { workspaceId }),
+        ...(workspaceName && { workspaceName }),
       };
 
       await redisService.broadcastNotificationEvent(userId, event);
+
+      // Broadcast to the person's connections in other workspaces
+      if (orgMemberId) {
+        try {
+          await redisService.broadcastOrgMemberNotificationEvent(orgMemberId, {
+            ...event,
+            sourceUserId: userId,
+          });
+        } catch (broadcastError) {
+          this.logger.error('Failed cross-workspace notification broadcast', { userId, error: broadcastError });
+        }
+      }
 
       this.logger.info('Notification broadcasted via Redis', {
         eventId: event.id,

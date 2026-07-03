@@ -182,6 +182,55 @@ class RedisService {
     return await this.redis.smembers(key);
   }
 
+  // Cross-workspace broadcast registry. Keyed on orgMemberId — the person-level
+  // identity that stays constant across per-workspace User rows.
+  async addOrgMemberConnection(orgMemberId: string, socketId: string): Promise<void> {
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const key = `orgmember:${orgMemberId}:connections`;
+    await this.redis.sadd(key, socketId);
+    await this.redis.expire(key, 3600);
+  }
+
+  async removeOrgMemberConnection(orgMemberId: string, socketId: string): Promise<void> {
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const key = `orgmember:${orgMemberId}:connections`;
+    await this.redis.srem(key, socketId);
+  }
+
+  async getOrgMemberConnections(orgMemberId: string): Promise<string[]> {
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const key = `orgmember:${orgMemberId}:connections`;
+    return await this.redis.smembers(key);
+  }
+
+  // Workspace context cache for notification producer (user:wsctx:{userId}).
+  // workspaceId and orgMemberId are immutable per User row; workspaceName is
+  async getWorkspaceContext(userId: string): Promise<{
+    workspaceId: string;
+    workspaceName: string;
+    orgMemberId: string;
+  } | null> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    const raw = await this.redis.get(`user:wsctx:${userId}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  async setWorkspaceContext(
+    userId: string,
+    ctx: { workspaceId: string; workspaceName: string; orgMemberId: string }
+  ): Promise<void> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    await this.redis.set(`user:wsctx:${userId}`, JSON.stringify(ctx), 'EX', 3600);
+  }
+
   // Session subscription management
   async subscribeToSession(sessionId: string, socketId: string): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');
@@ -262,6 +311,24 @@ class RedisService {
       data: notification,
       timestamp: new Date()
     } as any);
+  }
+
+  // Cross-workspace broadcast publisher. Delivery is scoped to matching orgMemberId
+  // by WebSocketService.handleOrgMemberEvent.
+  async broadcastOrgMemberNotificationEvent(
+    orgMemberId: string,
+    notification: any
+  ): Promise<void> {
+    if (!this.publisher) throw new Error('Redis publisher not initialized');
+
+    const channel = `orgmember:${orgMemberId}:events`;
+    const event = {
+      type: 'notification_received',
+      orgMemberId,
+      data: notification,
+      timestamp: new Date(),
+    };
+    await this.publisher.publish(channel, JSON.stringify(event));
   }
 
   // Workflow event broadcasting (cross-process communication for worker -> API server)
@@ -422,6 +489,38 @@ class RedisService {
       await this.subscriber.subscribe(channel);
       this.activeSubscriptions.add(channel);
     }
+  }
+
+  async subscribeToOrgMemberEvents(
+    orgMemberId: string,
+    callback: (event: any) => void
+  ): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+
+    const channel = `orgmember:${orgMemberId}:events`;
+
+    if (!this.subscriptionCallbacks.has(channel)) {
+      this.subscriptionCallbacks.set(channel, []);
+    }
+    this.subscriptionCallbacks.get(channel)!.push(callback);
+
+    this.setupGlobalMessageHandler();
+
+    if (!this.activeSubscriptions.has(channel)) {
+      await this.subscriber.subscribe(channel);
+      this.activeSubscriptions.add(channel);
+    }
+  }
+
+  async unsubscribeFromOrgMemberEvents(orgMemberId: string): Promise<void> {
+    const channel = `orgmember:${orgMemberId}:events`;
+    const callbacks = this.subscriptionCallbacks.get(channel);
+    if (!callbacks || callbacks.length === 0) {
+      await this.unsubscribeFromChannel(channel);
+      return;
+    }
+    // Remove all callbacks and unsubscribe
+    await this.unsubscribeFromChannel(channel);
   }
 
   // Subscribe to workflow events (for real-time step updates)

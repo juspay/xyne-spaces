@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('set-badge-count', count);
   },
 
-  showNotification: (data: { title: string; body: string; actionUrl?: string }) => {
+  showNotification: (data: { title: string; body: string; subtitle?: string; actionUrl?: string; workspaceId?: string }) => {
     ipcRenderer.send('show-notification', data);
   },
 
@@ -64,8 +64,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('call-action', listener);
   },
 
-  onNavigateTo: (callback: (url: string) => void) => {
-    const listener = (_event: unknown, url: string) => callback(url);
+  onNavigateTo: (callback: (url: string, workspaceId?: string) => void) => {
+    const listener = (_event: unknown, url: string, workspaceId?: string) => callback(url, workspaceId);
     ipcRenderer.on('navigate-to', listener);
     return () => ipcRenderer.removeListener('navigate-to', listener);
   },
