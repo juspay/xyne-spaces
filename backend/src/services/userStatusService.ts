@@ -29,6 +29,9 @@ export class UserStatusService {
     try {
       const onlineUsersKey = this.getOnlineUsersKey();
 
+      const currentStatus = await this.getUserStatus(userId);
+      const hasChanged = !currentStatus || currentStatus.status !== status;
+
       if (status === 'OFFLINE') {
         // Remove from Redis hash
         await redisService.hdel(onlineUsersKey, userId);
@@ -38,11 +41,14 @@ export class UserStatusService {
         await redisService.hset(onlineUsersKey, userId, JSON.stringify(onlineUser));
       }
 
-      // Broadcast presence change via Redis Pub/Sub (for multi-server support)
-      const presenceEvent: PresenceEvent = { userId, status };
-      await redisService.broadcastPresenceEvent(presenceEvent);
-
-      logger.info(`👤 [USER-STATUS] User ${userId} status updated to ${status}`);
+      if (hasChanged) {
+        // Broadcast presence change via Redis Pub/Sub (for multi-server support)
+        const presenceEvent: PresenceEvent = { userId, status };
+        await redisService.broadcastPresenceEvent(presenceEvent);
+        logger.info(`👤 [USER-STATUS] User ${userId} status updated to ${status}`);
+      } else {
+        logger.debug(`👤 [USER-STATUS] User ${userId} status remained ${status}, skipping broadcast`);
+      }
 
       return await this.getOnlineUsers();
     } catch (error) {
@@ -108,6 +114,11 @@ export class UserStatusService {
       // If user is AWAY, don't change their status - AWAY persists until manually changed
       if (currentStatus?.status === 'AWAY') {
         logger.info(`👤 [USER-STATUS] User ${userId} is AWAY, not marking offline`);
+        return;
+      }
+
+      if (!currentStatus) {
+        logger.debug(`👤 [USER-STATUS] User ${userId} is already OFFLINE, skipping broadcast`);
         return;
       }
 

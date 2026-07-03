@@ -554,6 +554,7 @@ const AppSidebar = (): ReactElement => {
           }
           open={isSettingsPopoverOpen}
           onOpenChange={setIsSettingsPopoverOpen}
+          onOpenAutoFocus={e => e.preventDefault()}
           side='right'
           sideOffset={8}
           align='end'

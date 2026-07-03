@@ -268,9 +268,7 @@ class WebSocketService {
             'ONLINE'
           );
           // Send initial state directly to connecting socket (broadcast may race with socket setup)
-          socket.emit('user_status_updated', {
-            userId,
-            status: 'ONLINE',
+          socket.emit('user_status_sync', {
             onlineUsers,
           });
 
@@ -278,9 +276,7 @@ class WebSocketService {
         } else {
           // User is AWAY - don't change status, but still send them the current state
           const onlineUsers = await userStatusService.getOnlineUsers();
-          socket.emit('user_status_updated', {
-            userId,
-            status: currentStatus.status,
+          socket.emit('user_status_sync', {
             onlineUsers,
           });
           logger.info(`👤 [USER-STATUS] User ${userName || userEmail} remains AWAY on connect, sent current state`);
@@ -365,9 +361,7 @@ class WebSocketService {
     socket.on('request_presence_state', async () => {
       try {
         const onlineUsers = await userStatusService.getOnlineUsers();
-        socket.emit('user_status_updated', {
-          userId: socket.userId,
-          status: 'ONLINE',
+        socket.emit('user_status_sync', {
           onlineUsers,
         });
       } catch (error) {
@@ -613,18 +607,18 @@ class WebSocketService {
       logger.info(`[UPDATE-STATUS] User ${userName || userEmail} requested status change to ${status}`);
       
       // Update status in Redis and broadcast to all clients
-      const onlineUsers = await userStatusService.setUserStatus(userId, status);
+      await userStatusService.setUserStatus(userId, status);
       
       // Send confirmation directly to the user who changed their status
       socket.emit('user_status_updated', {
         userId,
         status,
-        onlineUsers,
+        onlineUsers: [], // Fallback for backwards compatibility with old frontend clients
       });
       
       logger.info(`[UPDATE-STATUS] User ${userName || userEmail} status updated to ${status}`);
     } catch (error) {
-      logger.error('UPDATE-STATUS] Error updating user status:', error);
+      logger.error('[UPDATE-STATUS] Error updating user status:', error);
       socket.emit('error', { message: 'Failed to update status' });
     }
   }
@@ -658,17 +652,6 @@ class WebSocketService {
       // Remove user connection from Redis
       await redisService.removeUserConnection(userId, socket.id);
 
-      // Clean up stale connections (socket IDs that are no longer actually connected)
-      const allStoredConnections = await redisService.getUserConnections(userId);
-      const actuallyConnectedSockets = this.io?.sockets.sockets || new Map();
-
-      for (const storedSocketId of allStoredConnections) {
-        // If the stored socket ID doesn't exist in the actual connected sockets, remove it
-        if (!actuallyConnectedSockets.has(storedSocketId)) {
-          logger.debug(`[DISCONNECT] Cleaning up stale socket ID: ${storedSocketId}`);
-          await redisService.removeUserConnection(userId, storedSocketId);
-        }
-      }
 
       // Unsubscribe from the org-member Redis channel when this pod has no
       // remaining sockets for the org member.
@@ -690,11 +673,31 @@ class WebSocketService {
       // Check if user has other active connections
       const remainingConnections = await redisService.getUserConnections(userId);
       
-      if (remainingConnections.length > 0) {
+      let activeConnections = 0;
+      
+      if (this.io && remainingConnections.length > 0) {
+        // Verify each remaining connection is actually active across the cluster
+        for (const sockId of remainingConnections) {
+          try {
+            const sockets = await this.io.in(sockId).fetchSockets();
+            if (sockets && sockets.length > 0) {
+              activeConnections++;
+            } else {
+              // It's a ghost connection, clean it up!
+              logger.info(`🧹 [DISCONNECT-DEBUG] Removing ghost connection ${sockId} for user ${userId}`);
+              await redisService.removeUserConnection(userId, sockId);
+            }
+          } catch (error) {
+            logger.error(`Error verifying connection ${sockId} for user ${userId}:`, error);
+          }
+        }
+      }
+      
+      if (activeConnections > 0) {
         // User has other tabs/devices open - do nothing, they're still connected
-        logger.info(`👤 [USER-STATUS] User ${userName || userEmail} still has ${remainingConnections.length} other connection(s), staying ONLINE`);
+        logger.info(`👤 [USER-STATUS] User ${userName || userEmail} still has ${activeConnections} active connection(s), staying ONLINE`);
       } else {
-        // No remaining connections - schedule offline with grace period
+        // No remaining active connections - schedule offline with grace period
         // This allows the user to reconnect (e.g., page refresh) without flickering offline
         logger.info(`👤 [DISCONNECT-DEBUG] Scheduling offline job for user ${userName || userEmail} (${userId}) with grace period`);
         await presenceCleanupQueue.scheduleOfflineJob(userId);
@@ -856,10 +859,6 @@ class WebSocketService {
       logger.info(`[PRESENCE] Received presence event: user=${userId}, status=${status}`);
       logger.info(`[PRESENCE-DEBUG] Full event: ${JSON.stringify(event)}`);
 
-      // Get current list of online users for broadcast
-      const onlineUsers = await userStatusService.getOnlineUsers();
-      logger.info(`[PRESENCE-DEBUG] Current online users count: ${onlineUsers.length}`);
-
       // Broadcast to all connected clients on this server
       const connectedSocketsCount = this.io.sockets.sockets.size;
       logger.debug(`[PRESENCE] Broadcasting user_status_updated to ${connectedSocketsCount} connected sockets`);
@@ -867,7 +866,7 @@ class WebSocketService {
       const broadcastPayload = {
         userId,
         status,
-        onlineUsers,
+        onlineUsers: [], // Fallback for backwards compatibility with old frontend clients
       };
 
       this.io.emit('user_status_updated', broadcastPayload);
