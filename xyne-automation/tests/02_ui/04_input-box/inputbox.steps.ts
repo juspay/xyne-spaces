@@ -20,7 +20,8 @@ export default class InputBoxSteps {
     const page = testContext.activePage;
     await page.goto(dm.url);
     await page.waitForLoadState('networkidle');
-    await page.locator("[data-testid='message-input']").first().waitFor({ state: 'visible' });
+    const inputbox = page.locator("[data-testid='message-input']").first();
+    await inputbox.waitFor({ state: 'visible' });
     await page
       .locator("[data-testid='chat-list-loading']")
       .first()
@@ -28,7 +29,26 @@ export default class InputBoxSteps {
       .catch(() => {
         // chat-list-loading may not render at all; safe to continue
       });
+
+    // Second call absorbs drafts arriving just after the first clear (Zero sync race).
+    await page.evaluate(InputBoxSteps.clearProseMirrorScript);
+    await page.waitForTimeout(150);
+    await page.evaluate(InputBoxSteps.clearProseMirrorScript);
   }
+
+  private static readonly clearProseMirrorScript = `() => {
+    const dom = document.querySelector("[data-testid='message-input']");
+    if (!dom) return;
+    let view;
+    let cur = dom;
+    while (cur) {
+      if (cur.pmViewDesc && cur.pmViewDesc.view) { view = cur.pmViewDesc.view; break; }
+      cur = cur.parentElement;
+    }
+    if (!view) return;
+    const { state, dispatch } = view;
+    dispatch(state.tr.delete(0, state.doc.content.size));
+  }`;
 
   // ===========================================
   // ACTION - Buttons
@@ -186,6 +206,38 @@ export default class InputBoxSteps {
     await inputbox.press('Home');
     await inputbox.press('Backspace');
   }
+
+  // Splitting into a dedicated step: back-to-back `pressing Enter` races with
+  // TipTap committing the first split, so the second Enter can land on the wrong <li>.
+  @Step('exiting current list via double Enter')
+  public async exitCurrentListViaDoubleEnter(): Promise<void> {
+    const page = testContext.activePage;
+    const inputbox = page.locator("[data-testid='message-input']").first();
+
+    await inputbox.press('Enter');
+    await page.waitForFunction(InputBoxSteps.lastListItemIsEmptyPredicate, undefined, {
+      timeout: 3000,
+    });
+
+    await inputbox.press('Enter');
+    await page.waitForFunction(InputBoxSteps.cursorOutsideListPredicate, undefined, {
+      timeout: 3000,
+    });
+  }
+
+  private static readonly lastListItemIsEmptyPredicate = `() => {
+    const editor = document.querySelector("[data-testid='message-input']");
+    if (!editor) return false;
+    const lis = editor.querySelectorAll('li');
+    const lastLi = lis[lis.length - 1];
+    if (!lastLi) return false;
+    return (lastLi.textContent || '').trim() === '';
+  }`;
+
+  private static readonly cursorOutsideListPredicate = `() => {
+    const editor = document.querySelector("[data-testid='message-input']");
+    return editor ? editor.querySelector(':scope > p') !== null : false;
+  }`;
 
   @Step('pressing Escape key')
   public async pressEscapeKey(): Promise<void> {

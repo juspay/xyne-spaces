@@ -44,8 +44,7 @@
 * pressing Backspace at start of list item
 * verifying list item was outdented
 * pressing End in inputbox
-* pressing Enter in inputbox
-* pressing Enter in inputbox
+* exiting current list via double Enter
 * appending text "Normal text" in "[data-testid='message-input']"
 * verifying cursor is outside list
 * pressing Shift+Enter in inputbox
