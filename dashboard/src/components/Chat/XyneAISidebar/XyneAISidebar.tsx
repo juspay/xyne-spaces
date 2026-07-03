@@ -1,4 +1,12 @@
-import { ReactElement, useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import {
+  ReactElement,
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useQuery as useZeroQuery } from '../../../hooks/useQuery';
@@ -163,11 +171,39 @@ const XyneAISidebar = ({
   // When the debugger is opened by clicking a generic auto-citation chip, this
   // holds the tool call to expand + scroll to. Cleared when opened any other way.
   const [debugFocusToolCallId, setDebugFocusToolCallId] = useState<string | null>(null);
-  const [debuggerWidth] = useState(() => {
+  const [debuggerWidth, setDebuggerWidth] = useState(() => {
     if (typeof window === 'undefined') return 460;
     const persisted = Number(window.localStorage.getItem(DEBUGGER_WIDTH_STORAGE_KEY));
     return Number.isFinite(persisted) ? Math.max(460, Math.min(900, persisted)) : 460;
   });
+  // Drag-to-resize the inline debugger panel. It is right-anchored, so dragging
+  // the handle LEFT widens it. Clamped 460–900px and persisted to localStorage.
+  const handleDebuggerResizeStart = useCallback(
+    (e: ReactMouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = debuggerWidth;
+      let latest = startWidth;
+      const onMove = (ev: MouseEvent) => {
+        latest = Math.max(460, Math.min(900, startWidth + (startX - ev.clientX)));
+        setDebuggerWidth(latest);
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.userSelect = '';
+        try {
+          window.localStorage.setItem(DEBUGGER_WIDTH_STORAGE_KEY, String(latest));
+        } catch {
+          /* ignore persistence failures */
+        }
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      document.body.style.userSelect = 'none';
+    },
+    [debuggerWidth],
+  );
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
   const [showUserActivityPanel, setShowUserActivityPanel] = useState(false);
   const [showMemoriesPanel, setShowMemoriesPanel] = useState(false);
@@ -275,6 +311,19 @@ const XyneAISidebar = ({
     if (index < 0) return -1;
     return displayMessages.slice(0, index + 1).filter(message => message.type === 'bot').length - 1;
   }, [displayMessages]);
+
+  // Keep the debugger pinned to the turn that is CURRENTLY streaming, so the
+  // live trace never stays bound to a prior turn. Without this, on turns 2+ the
+  // pin (debugTurnIndex/debugSessionId) lags on turn 1, `selectedTurnLive` goes
+  // false, and the live block is gated out entirely. Fires only while a turn is
+  // live (streamingBotTurnIndex >= 0); it's -1 when idle, so a manual selection
+  // of an older turn after a run finishes is left intact.
+  useEffect(() => {
+    if (streamingBotTurnIndex >= 0) {
+      setDebugTurnIndex(streamingBotTurnIndex);
+      setDebugSessionId(null);
+    }
+  }, [streamingBotTurnIndex]);
 
   // Flat union of every visible message's toolInvocations. Powers
   // ConversationToolInvocationsContext so an inline citation chip rendered in
@@ -760,6 +809,19 @@ const XyneAISidebar = ({
 
         // Global / channel-only / channel+thread: load session list first, then match active stream by session id
         if (isV2) {
+          // Open a FRESH session by default instead of auto-loading the most
+          // recent past conversation. Any in-flight stream was already resumed
+          // above (findLatestSidebarStream), and past conversations remain
+          // reachable via the history panel. A desk-ticket context
+          // (threadConversationId) still loads its scoped chat.
+          if (!threadConversationId) {
+            hasLoadedInitialConversationRef.current = true;
+            setStreamThreadKey(newStreamSlotKey());
+            usesDraftStreamKeyRef.current = true;
+            setIsLoadingConversation(false);
+            return;
+          }
+
           let v2Sessions = v2SessionsData;
           if (!v2Sessions) {
             const result = await refetchV2Sessions();
@@ -2254,7 +2316,7 @@ const XyneAISidebar = ({
 
       {showInlineDebugger && (
         <>
-          {/* <button
+          <button
             type='button'
             aria-label='Resize debugger panel'
             className='group relative z-10 w-2 shrink-0 cursor-col-resize bg-border/60 transition-colors hover:bg-primary/40'
@@ -2263,7 +2325,7 @@ const XyneAISidebar = ({
             data-track-name='DEBUG_PANEL_RESIZE'
           >
             <span className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/80 group-hover:bg-primary/60' />
-          </button> */}
+          </button>
           <AskAIDebugPanel
             open={showDebugger && isV2}
             inline

@@ -61,6 +61,9 @@ import {
   FormEntityValuesACL,
   WorkspacesACL,
   InvitationsACL,
+  DraftMessagesACL,
+  ScheduledMessagesACL,
+  EmailDraftsACL,
 } from './tables'
 import { UserActivityEventsAcl } from './tables/user_activity_acl'
 
@@ -115,6 +118,15 @@ export class ACLFactory {
 
       case 'messageAttachment':
         return new MessageAttachmentsACL(ctx, prisma)
+
+      case 'draftMessage':
+        return new DraftMessagesACL(ctx, prisma)
+
+      case 'scheduledMessage':
+        return new ScheduledMessagesACL(ctx, prisma)
+
+      case 'emailDraft':
+        return new EmailDraftsACL(ctx, prisma)
 
       case 'email':
         return new EmailsACL(ctx, prisma)

@@ -32,6 +32,11 @@ export interface ClawRunRequest {
   canvasIds?: string[];
   ticketIds?: string[];
   callIds?: string[];
+  // The canvas the assistant was opened from / a selection was made in, keyed
+  // by its viewAccessId (the id in the /chat/canvas/<viewAccessId> URL — the
+  // same id spaces-read-canvas takes). Forwarded so claw-auth can explain it as
+  // attached context; separate from `canvasIds` (picker canvases, keyed by cuid).
+  canvasViewAccessId?: string;
   attachedContext?: Array<{
     // 'collection' + 'file' carry KB picks from the ask-ai v2 picker.
     // claw-auth's resolveSection emits a prompt block that points the agent
@@ -371,6 +376,12 @@ function normalizeAttachmentsForRun(
 /**
  * Build the additional instructions block for the claw agent based on feature flags.
  */
+// NOTE: Attached context (channels/tickets/canvases/calls/KB items the user
+// picks via the "@" menu) is intentionally NOT described here. claw-auth
+// resolves those items to fresh data and injects a dedicated "# Attached
+// context" block into `context` (see agentChatContextService.buildAttachedContextPayload).
+// Routing them through additionalInstructions instead would bury them under a
+// "## Additional Instructions" heading and duplicate that block.
 function buildAdditionalInstructions(req: ClawRunRequest): string | undefined {
   const parts: string[] = [];
 
@@ -475,6 +486,7 @@ export async function runClawAgentStream(
       deepResearchEnabled: String(request.deepResearchEnabled),
       ...(config.xyneAiExtended.url && { XYNE_AI_EXTENDED_URL: config.xyneAiExtended.url }),
       ...(request.conversationId && { SPACES_CONVERSATION_ID: request.conversationId }),
+      ...(request.canvasViewAccessId && { SPACES_CANVAS_VIEW_ACCESS_ID: request.canvasViewAccessId }),
     },
     ...(additionalInstructions && { additionalInstructions }),
     ...(request.isRegenerate && { isRegenerate: true }),
