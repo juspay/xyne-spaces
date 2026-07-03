@@ -313,6 +313,118 @@ const buildCustomFieldWritePayload = async (
   };
 };
 
+const buildPartialCustomFieldWritePayload = async (
+  boardId: string,
+  workspaceId: string,
+  dynamicFields: Record<string, unknown> | undefined,
+  options?: { requireAllRequiredFields?: boolean },
+): Promise<{
+  customFieldValues?: CustomFieldWritePayload;
+  validationErrors: Array<{ error: string; code: 'VALIDATION_ERROR' }>;
+}> => {
+  const normalizedInput = dynamicFields ?? {};
+  const validationErrors: Array<{ error: string; code: 'VALIDATION_ERROR' }> = [];
+  const requireAllRequiredFields = options?.requireAllRequiredFields ?? true;
+
+  const formMapping = await prismaClient.formContextMapping.findFirst({
+    where: {
+      contextId: boardId,
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    },
+    select: { formId: true },
+  });
+
+  if (!formMapping) {
+    if (Object.keys(normalizedInput).length > 0) {
+      validationErrors.push({
+        error: `No form configured for board ${boardId}`,
+        code: 'VALIDATION_ERROR',
+      });
+    }
+    return { validationErrors };
+  }
+
+  const formFields = await prismaClient.formFields.findMany({
+    where: { formId: formMapping.formId },
+    select: {
+      id: true,
+      fieldName: true,
+      fieldType: true,
+      fieldEnum: true,
+      isOptional: true,
+    },
+  });
+
+  const fieldByName = new Map(formFields.map(field => [field.fieldName, field]));
+
+  if (requireAllRequiredFields) {
+    const requiredFields = formFields
+      .filter(field => !field.isOptional)
+      .map(field => field.fieldName)
+      .filter(fieldName => normalizedInput[fieldName] === undefined || normalizedInput[fieldName] === null);
+
+    if (requiredFields.length > 0) {
+      validationErrors.push({
+        error: `Missing required custom fields: ${requiredFields.join(', ')}`,
+        code: 'VALIDATION_ERROR',
+      });
+    }
+  }
+
+  const fieldValues: CustomFieldWritePayload['fieldValues'] = [];
+
+  for (const [fieldName, rawValue] of Object.entries(normalizedInput)) {
+    const field = fieldByName.get(fieldName);
+    if (!field) {
+      validationErrors.push({
+        error: `Unknown custom field: ${fieldName}`,
+        code: 'VALIDATION_ERROR',
+      });
+      continue;
+    }
+
+    try {
+      const normalized = normalizeCustomFieldValue(field, rawValue);
+      const fieldValue = {
+        fieldName,
+        fieldId: field.id,
+        fieldValue: normalized.fieldValue,
+        actualFieldValue: normalized.actualFieldValue,
+      };
+
+      await validateUserCustomFieldReferences(
+        [{
+          fieldName,
+          fieldType: field.fieldType,
+          actualFieldValue: fieldValue.actualFieldValue,
+        }],
+        workspaceId,
+      );
+
+      fieldValues.push(fieldValue);
+    } catch (error) {
+      validationErrors.push({
+        error: error instanceof Error ? error.message : `Invalid value for field "${fieldName}"`,
+        code: 'VALIDATION_ERROR',
+      });
+    }
+  }
+
+  if (fieldValues.length === 0) {
+    return { validationErrors };
+  }
+
+  return {
+    customFieldValues: {
+      formId: formMapping.formId,
+      contextId: boardId,
+      fieldValues,
+    },
+    validationErrors,
+  };
+};
+
 const syncCustomFieldValues = async (
   ticketId: string,
   customFieldValues: CustomFieldWritePayload,
@@ -1944,6 +2056,20 @@ export class TicketController {
 
   appDeskInbound = async (req: Request, res: Response): Promise<void> => {
     try {
+      const additionalFormFieldValidationErrors: Array<{ error: string; code: 'VALIDATION_ERROR' }> = [];
+
+      if (typeof req.body.additionalFormFields === 'string') {
+        try {
+          req.body.additionalFormFields = JSON.parse(req.body.additionalFormFields);
+        } catch {
+          additionalFormFieldValidationErrors.push({
+            error: 'additionalFormFields must be valid JSON',
+            code: 'VALIDATION_ERROR',
+          });
+          delete req.body.additionalFormFields;
+        }
+      }
+
       const bodyResult = AppDeskInboundBodySchema.safeParse(req.body);
       if (!bodyResult.success) {
         res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
@@ -2051,30 +2177,23 @@ export class TicketController {
 
         if (additionalFormFields && existingTicket?.id) {
           if (!existingTicket.boardId) {
-            res.status(503).json({
+            additionalFormFieldValidationErrors.push({
               error: 'Ticket board is not configured for additional form fields',
-              code: 'MISCONFIGURED',
-            });
-            return;
-          }
-
-          try {
-            customFieldValues = await buildCustomFieldWritePayload(
-              existingTicket.boardId,
-              workspaceId,
-              additionalFormFields,
-              { requireAllRequiredFields: false },
-            );
-          } catch (error) {
-            res.status(400).json({
-              error: error instanceof Error ? error.message : 'Invalid custom field values',
               code: 'VALIDATION_ERROR',
             });
-            return;
-          }
+          } else {
+            const partialResult = await buildPartialCustomFieldWritePayload(
+                existingTicket.boardId,
+                workspaceId,
+                additionalFormFields,
+                { requireAllRequiredFields: false },
+              );
+            customFieldValues = partialResult.customFieldValues;
+            additionalFormFieldValidationErrors.push(...partialResult.validationErrors);
 
-          if (customFieldValues && customFieldValues.fieldValues.length > 0) {
-            await syncCustomFieldValues(existingTicket.id, customFieldValues, userId);
+            if (customFieldValues && customFieldValues.fieldValues.length > 0) {
+              await syncCustomFieldValues(existingTicket.id, customFieldValues, userId);
+            }
           }
         }
 
@@ -2092,6 +2211,9 @@ export class TicketController {
           xyneId: existingTicket?.xyneId,
           conversationId: threadEmail.conversationId,
           isNew: false,
+          ...(additionalFormFieldValidationErrors.length > 0 && {
+            validationErrors: additionalFormFieldValidationErrors,
+          }),
         });
         return;
       }
@@ -2102,18 +2224,14 @@ export class TicketController {
         return;
       }
 
-      try {
-        customFieldValues = await buildCustomFieldWritePayload(
+      if (additionalFormFields) {
+        const partialResult = await buildPartialCustomFieldWritePayload(
           effectiveBoardId,
           workspaceId,
           additionalFormFields,
         );
-      } catch (error) {
-        res.status(400).json({
-          error: error instanceof Error ? error.message : 'Invalid custom field values',
-          code: 'VALIDATION_ERROR',
-        });
-        return;
+        customFieldValues = partialResult.customFieldValues;
+        additionalFormFieldValidationErrors.push(...partialResult.validationErrors);
       }
 
       const result = await emailService.createConversationWithEmail({
@@ -2169,6 +2287,9 @@ export class TicketController {
         xyneId: ticket?.xyneId,
         conversationId: conversation?.conversationId,
         isNew: true,
+        ...(additionalFormFieldValidationErrors.length > 0 && {
+          validationErrors: additionalFormFieldValidationErrors,
+        }),
       });
     } catch (error) {
       logger.error('[TicketController] appDeskInbound error:', error);
