@@ -172,7 +172,12 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Popover
           key={`emoji-picker-${messageId}`}
           trigger={
-            <Button variant='ghost' className='size-7 text-muted-foreground' title='Add reaction'>
+            <Button
+              variant='ghost'
+              className='size-7 text-muted-foreground'
+              title='Add reaction'
+              data-testid='hover-action-add-reaction'
+            >
               <SmilePlus className='w-4 h-4' />
             </Button>
           }
@@ -344,6 +349,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {showEditAction && onEditMessage && !isChannelArchived && (
                     <DropdownMenuItem
                       onClick={onEditMessage}
+                      data-testid='hover-action-edit-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='EDIT_MESSAGE'
                       data-track-metadata={JSON.stringify({ messageId })}
@@ -390,6 +396,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {onMarkAsUnread && (
                     <DropdownMenuItem
                       onClick={onMarkAsUnread}
+                      data-testid='hover-action-mark-unread'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='MARK_AS_UNREAD'
                       data-track-metadata={JSON.stringify({ messageId })}
@@ -454,6 +461,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {onPinMessage && (
                     <DropdownMenuItem
                       onClick={onPinMessage}
+                      data-testid={
+                        isPinned ? 'hover-action-unpin-message' : 'hover-action-pin-message'
+                      }
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='TOGGLE_PIN_MESSAGE'
                       data-track-metadata={JSON.stringify({ isPinned, messageId })}
@@ -472,6 +482,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {onCopyLink && (
                     <DropdownMenuItem
                       onClick={onCopyLink}
+                      data-testid='hover-action-copy-link'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='COPY_LINK'
                       data-track-metadata={JSON.stringify({ messageId })}
@@ -487,6 +498,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {onCopyMessage && (
                     <DropdownMenuItem
                       onClick={onCopyMessage}
+                      data-testid='hover-action-copy-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='COPY_MESSAGE'
                       data-track-metadata={JSON.stringify({ messageId })}
@@ -502,6 +514,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {onForwardMessage && (
                     <DropdownMenuItem
                       onClick={onForwardMessage}
+                      data-testid='hover-action-forward-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='FORWARD_MESSAGE'
                       data-track-metadata={JSON.stringify({ messageId })}
@@ -568,6 +581,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                     <DropdownMenuItem
                       onClick={onDeleteMessage}
                       className='text-destructive focus:text-destructive'
+                      data-testid='hover-action-delete-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='DELETE_MESSAGE'
                       data-track-metadata={JSON.stringify({ messageId })}

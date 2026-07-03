@@ -1558,6 +1558,7 @@ export const ReactionView = ({
             <Tooltip key={reaction.emojiName} content={tooltipContent} side='top'>
               <button
                 type='button'
+                data-testid='message-reaction-chip'
                 className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${
                   reaction.userHasReacted
                     ? 'bg-accent border border-action-primary hover:bg-accent/80'

@@ -1601,6 +1601,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                   }}
                   loading={isDeleting}
                   disabled={isDeleting}
+                  data-testid='confirm-delete-message'
                   data-track-category='CHAT_BUBBLE'
                   data-track-name='CONFIRM_DELETE_MESSAGE'
                   data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
