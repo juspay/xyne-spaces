@@ -166,6 +166,9 @@ export interface OnlineUser {
 export interface UserStatusUpdatedEvent {
   userId: string;
   status: PresenceStatus;
+}
+
+export interface UserStatusSyncEvent {
   onlineUsers: OnlineUser[];
 }
 
@@ -237,6 +240,7 @@ type StateMachineEvent =
     }
   | { type: 'SET_FILTERED_TICKET_IDS'; ids: string[] }
   | { type: 'SET_ONLINE_USERS'; onlineUsers: OnlineUser[] }
+  | { type: 'UPDATE_USER_STATUS'; userId: string; status: PresenceStatus }
   | { type: 'PUSH_OVERLAY' }
   | { type: 'POP_OVERLAY' }
   | { type: 'ARCHIVE_CHANNEL'; channelId: string }
@@ -553,6 +557,24 @@ export const stateMachine = setup({
         return [];
       },
     }),
+    updateUserStatus: assign({
+      onlineUsers: ({ context, event }) => {
+        if (event.type === 'UPDATE_USER_STATUS') {
+          if (event.status === 'OFFLINE') {
+            return context.onlineUsers.filter(u => u.userId !== event.userId);
+          }
+          const existing = context.onlineUsers.find(u => u.userId === event.userId);
+          if (existing) {
+            return context.onlineUsers.map(u => 
+              u.userId === event.userId ? { ...u, status: event.status } : u
+            );
+          } else {
+            return [...context.onlineUsers, { userId: event.userId, status: event.status }];
+          }
+        }
+        return context.onlineUsers;
+      }
+    }),
     pushOverlay: assign({
       overlayDepth: ({ context }) => context.overlayDepth + 1,
     }),
@@ -782,6 +804,9 @@ export const stateMachine = setup({
         SET_ONLINE_USERS: {
           actions: 'setOnlineUsers',
         },
+        UPDATE_USER_STATUS: {
+          actions: 'updateUserStatus',
+        },
         PUSH_OVERLAY: {
           actions: 'pushOverlay',
         },
@@ -852,8 +877,12 @@ export function setupPresenceListeners(
 
   // Listen for status updates - backend sends fresh onlineUsers list
   // This is sent on connect (for connecting user) and on any status change
-  websocketService.on<UserStatusUpdatedEvent>('user_status_updated', data => {
+  websocketService.on<UserStatusSyncEvent>('user_status_sync', data => {
     stateMachineActor.send({ type: 'SET_ONLINE_USERS', onlineUsers: data.onlineUsers });
+  });
+
+  websocketService.on<UserStatusUpdatedEvent>('user_status_updated', data => {
+    stateMachineActor.send({ type: 'UPDATE_USER_STATUS', userId: data.userId, status: data.status });
   });
 
   presenceListenersSetup = true;
@@ -868,6 +897,7 @@ export function cleanupPresenceListeners(websocketService: {
   if (!presenceListenersSetup) return;
 
   websocketService.removeListener('user_status_updated');
+  websocketService.removeListener('user_status_sync');
 
   stateMachineActor.send({ type: 'SET_ONLINE_USERS', onlineUsers: [] });
   presenceListenersSetup = false;
