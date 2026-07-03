@@ -634,12 +634,16 @@ function transformCollection(
      const assignee = doc.assignedTo ? userMap[doc.assignedTo] : null;
      const assigneeName = assignee?.name || assignee?.email || null;
    
+      // Strip <hi> tags from xyneId for navigation/URLs — keep the original (with tags)
+      // for subtitle display so the UI can render query-match highlights.
+      const xyneIdPlain = doc.xyneId?.replace(/<\/?hi>/gi, '') ?? doc.xyneId;
+
       // Build subtitle with all required info
       const subtitleParts = [doc.xyneId, `${doc.status} - ${doc.stage || 'No Stage'}`];
       if (assigneeName) {
         subtitleParts.push(`Assigned to: ${assigneeName}`);
       }
-   
+
      return {
        id: doc.docId,
        type: 'ticket',
@@ -667,7 +671,7 @@ function transformCollection(
          closedBy: doc.closedBy,
          closedByName: doc.closedByName || undefined,
          conversationId: doc.convId,
-         xyneId: doc.xyneId,
+         xyneId: xyneIdPlain,
          priority: doc.priority,
          stageName: doc.stage,
          projectId: doc.projectRef,

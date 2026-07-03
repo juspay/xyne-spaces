@@ -36,6 +36,8 @@ import {
   isOneToOneDMChannel,
   getDMParticipantIdsToFetch,
   parseDMParticipantIds,
+  getDMSearchableNames,
+  formatChannelLabel,
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -249,38 +251,12 @@ const ChannelCommandMenu = ({
       searchableNames?: string[];
     }> = [];
 
-    const getSearchableNames = (channel: Channel): string[] => {
-      if (!isDMChannel(channel.scopeType)) {
-        return [channel.name];
-      }
-
-      const userIds = parseDMParticipantIds(channel);
-
-      // Check if this is a self-DM (only current user)
-      const isSelfDM = userIds.length === 1 && userIds[0] === currentUserID;
-
-      if (isSelfDM) {
-        // For self-DMs, include current user's name so it's searchable
-        const currentUserName = usersById.get(currentUserID)?.name;
-        return currentUserName ? [currentUserName, 'You'] : ['You'];
-      }
-
-      // Exclude current user from regular DM names - only show other participants
-      const otherUserIds = userIds.filter(id => id !== currentUserID);
-
-      const participantNames = otherUserIds
-        .map(userId => usersById.get(userId)?.name)
-        .filter((name): name is string => !!name);
-
-      return participantNames;
-    };
-
     // Add starred channels
     starred.forEach(channel => {
       result.push({
         channel,
         category: ChannelCategory.STARRED,
-        searchableNames: getSearchableNames(channel),
+        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
       });
     });
 
@@ -298,7 +274,7 @@ const ChannelCommandMenu = ({
       result.push({
         channel,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getSearchableNames(channel),
+        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
       });
     });
 
@@ -565,7 +541,8 @@ const ChannelCommandMenu = ({
       const names = inMentions
         .map(m => {
           const ch = channels.find(c => c.channel.id === m.id);
-          return ch ? `#${ch.channel.name}` : '';
+          if (!ch) return '';
+          return formatChannelLabel(ch);
         })
         .filter(Boolean);
       if (names.length > 0) displayParts.push(`in:${names.join(' ')}`);
@@ -2797,7 +2774,11 @@ const ChannelCommandMenu = ({
                           ? getUserDisplayName(
                               usersById.get(m.id) ?? { displayName: m.id, email: '' },
                             )
-                          : (allChannels.find(c => c.channel.id === m.id)?.channel.name ?? m.id);
+                          : (() => {
+                              const ch = allChannels.find(c => c.channel.id === m.id);
+                              if (!ch) return m.id;
+                              return formatChannelLabel(ch);
+                            })();
                       const prefix =
                         m.prefix ?? (isPriority ? 'priority:' : isUser ? 'from:' : 'in:');
                       return (

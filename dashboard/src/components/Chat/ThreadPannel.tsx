@@ -96,6 +96,12 @@ interface ThreadMessagesProps {
   previewCardMode?: boolean;
   conversationParticipant?: { lastReadAt?: number | null };
   hideTabBar?: boolean;
+  /** Scroll to and highlight this specific message on mount. Used by search screen sidebar to bypass URL-hash navigation. */
+  matchedMessageId?: string | null;
+  /** Show a clickable channel name badge next to the heading. Used by the search results sidebar. */
+  showChannelLink?: boolean;
+  /** Custom click handler for the channel name badge. Defaults to opening the thread in-channel. */
+  onChannelLinkClick?: () => void;
 }
 
 export const ThreadMessages = ({
@@ -112,6 +118,9 @@ export const ThreadMessages = ({
   previewCardMode = false,
   conversationParticipant: propConversationParticipant,
   hideTabBar = false,
+  matchedMessageId,
+  showChannelLink = false,
+  onChannelLinkClick,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -706,26 +715,26 @@ export const ThreadMessages = ({
     );
   };
 
-  const focusedChannelBreadcrumb =
-    isFocusedThread && !isStandaloneWindow() && channel ? (
-      <Tooltip content={`Open ${isDmThread ? '' : '#'}${channelDisplayName}`}>
-        <button
-          type='button'
-          onClick={handleOpenInChannel}
-          aria-label={`Open ${channelDisplayName}`}
-          data-track-category='THREAD_PANEL'
-          data-track-name='OPEN_IN_CHANNEL_FROM_FOCUS'
-          className='group/chan flex shrink-0 items-center gap-1 max-w-[180px] rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-        >
-          {!isDmThread && (
-            <Hash className='size-3.5 shrink-0 opacity-60 transition-opacity group-hover/chan:opacity-100' />
-          )}
-          <span className='truncate text-sm font-medium group-hover/chan:underline'>
-            {channelDisplayName}
-          </span>
-        </button>
-      </Tooltip>
-    ) : null;
+  const showBreadcrumb = (isFocusedThread || showChannelLink) && !isStandaloneWindow() && !!channel;
+  const focusedChannelBreadcrumb = showBreadcrumb ? (
+    <Tooltip content={`Open ${isDmThread ? '' : '#'}${channelDisplayName}`}>
+      <button
+        type='button'
+        onClick={onChannelLinkClick ?? handleOpenInChannel}
+        aria-label={`Open ${channelDisplayName}`}
+        data-track-category='THREAD_PANEL'
+        data-track-name='OPEN_IN_CHANNEL_FROM_FOCUS'
+        className='group/chan flex shrink-0 items-center gap-1 max-w-[180px] rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+      >
+        {!isDmThread && (
+          <Hash className='size-3.5 shrink-0 opacity-60 transition-opacity group-hover/chan:opacity-100' />
+        )}
+        <span className='truncate text-sm font-medium group-hover/chan:underline'>
+          {channelDisplayName}
+        </span>
+      </button>
+    </Tooltip>
+  ) : null;
 
   const openTicketDetailsExpandedView = (): void => {
     if (!ticket) return;
@@ -1809,6 +1818,7 @@ export const ThreadMessages = ({
                   isMessagesLoaded={isMessagesLoaded}
                   {...(disableAskAI !== undefined && { disableAskAI })}
                   conversationParticipant={conversationParticipant}
+                  matchedMessageId={matchedMessageId ?? null}
                 />
 
                 {/* ChatInput at the bottom - only show if user is a member */}

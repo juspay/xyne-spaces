@@ -165,6 +165,51 @@ export const parseDMParticipantIds = (channel: {
 };
 
 /**
+ * Format a channel entry for display in filter chips and typeahead labels.
+ * DMs show participant names; regular channels show `#name`.
+ */
+export const formatChannelLabel = (ch: {
+  channel: { name: string; scopeType: ChannelScopeType };
+  searchableNames?: string[];
+}): string => {
+  if (isDMChannel(ch.channel.scopeType) && ch.searchableNames?.length) {
+    return ch.searchableNames.join(', ');
+  }
+  return `#${ch.channel.name}`;
+};
+
+/**
+ * Resolve human-readable searchable names for a channel.
+ *
+ * - Regular channels: returns `[channel.name]`
+ * - Self-DMs: returns `[currentUserName, 'You']` so the channel is findable by name
+ * - Regular DMs / Group DMs: returns the other participants' display names
+ *
+ * Canonical implementation — use this everywhere DM names need to be resolved for
+ * search/display so self-DM and multi-participant logic stays consistent.
+ */
+export const getDMSearchableNames = (
+  channel: { name: string; scopeType: ChannelScopeType },
+  currentUserId: string,
+  usersById: Map<string, { name: string }>,
+): string[] => {
+  if (!isDMChannel(channel.scopeType)) {
+    return [channel.name];
+  }
+
+  const userIds = parseDMParticipantIds(channel);
+  const isSelfDM = userIds.length === 1 && userIds[0] === currentUserId;
+
+  if (isSelfDM) {
+    const currentUserName = usersById.get(currentUserId)?.name;
+    return currentUserName ? [currentUserName, 'You'] : ['You'];
+  }
+
+  const otherUserIds = userIds.filter(id => id !== currentUserId);
+  return otherUserIds.map(id => usersById.get(id)?.name).filter((n): n is string => !!n);
+};
+
+/**
  * Get participant IDs for querying (excluding current user)
  * Limits to 4 users for GROUP_DM (enough to show "Alice, Bob, Charlie and X others")
  */
