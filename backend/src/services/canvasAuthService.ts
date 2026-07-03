@@ -3,7 +3,6 @@ import { CanvasRole } from '@prisma/client';
 import { resolveCanvasHierarchy } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
-import { websocketService } from '@/services/websocketService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 
@@ -309,10 +308,6 @@ class CanvasAuthService {
           },
         }),
       ]);
-
-      // Track user activity using Redis Set - O(1) operation, no DB query
-      websocketService.trackUserActivity(userId)
-        .catch(err => logger.error('Failed to track user activity after auto canvas creation:', err));
 
       logger.info(`Auto-created canvas ${canvasId} for user ${userId}`);
 

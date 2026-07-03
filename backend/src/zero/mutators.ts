@@ -96,7 +96,6 @@ import { notificationService } from '@/services/notificationService';
 import { sendAddAndRemoveParticipantsSystemMessage, sendCallSystemMessage, updateCallSystemMessageOnEnd } from '@/zero/utils/systemMessagesUtils';
 import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/channelParticipantUtils';
 import { convert } from 'html-to-text';
-import { websocketService } from '@/services/websocketService';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -2287,24 +2286,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (type === MessageType.USER) {
             const userProfile = await tx.run(zql.user_profiles.where('userId', authData.sub).one());
-            logger.info(`📊 [MUTATOR-CREATE-MESSAGE] Scheduling message count increment for USER message ${message.messageId}`);
-            asyncTasks.push(async () => {
-              try {
-                logger.info(`⬆️ [MUTATOR-CREATE-MESSAGE] Executing message count increment for message ${message.messageId}`);
-                await websocketService.incrementTodayMessageCount();
-                logger.info(`✅ [MUTATOR-CREATE-MESSAGE] Message count incremented successfully for message ${message.messageId}`);
-              } catch (error) {
-                logger.error(`❌ [MUTATOR-CREATE-MESSAGE] Failed to increment today message count for message ${message.messageId}:`, error);
-              }
-            });
-            // Track user activity using Redis Set - O(1) operation, no DB query
-            asyncTasks.push(async () => {
-              try {
-                await websocketService.trackUserActivity(authData.sub);
-              } catch (error) {
-                logger.error(`❌ [MUTATOR-CREATE-MESSAGE] Failed to track user activity for message ${message.messageId}:`, error);
-              }
-            });
             asyncTasks.push(async () => {
               try {
                 logger.info('analytics_event', {
@@ -2983,24 +2964,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           logger.info(`💬 [MUTATOR-CREATE-REPLY] Reply message ${message.messageId} created in conversation ${conversationId}, type: ${type}`);
 
           if (type === MessageType.USER) {
-            logger.info(`📊 [MUTATOR-CREATE-REPLY] Scheduling message count increment for USER reply message ${message.messageId}`);
-            asyncTasks.push(async () => {
-              try {
-                logger.info(`⬆️ [MUTATOR-CREATE-REPLY] Executing message count increment for reply message ${message.messageId}`);
-                await websocketService.incrementTodayMessageCount();
-                logger.info(`✅ [MUTATOR-CREATE-REPLY] Message count incremented successfully for reply message ${message.messageId}`);
-              } catch (error) {
-                logger.error(`❌ [MUTATOR-CREATE-REPLY] Failed to increment today message count for reply message ${message.messageId}:`, error);
-              }
-            });
-            // Track user activity using Redis Set - O(1) operation, no DB query
-            asyncTasks.push(async () => {
-              try {
-                await websocketService.trackUserActivity(authData.sub);
-              } catch (error) {
-                logger.error(`❌ [MUTATOR-CREATE-REPLY] Failed to track user activity for reply message ${message.messageId}:`, error);
-              }
-            });
             asyncTasks.push(async () => {
               try {
                 const userProfile = await db.userProfile.findFirst({
@@ -3542,14 +3505,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             }
 
-            // Track user activity using Redis Set - O(1) operation, no DB query
-            asyncTasks.push(async () => {
-              try {
-                await websocketService.trackUserActivity(authData.sub);
-              } catch (error) {
-                logger.error(`❌ [MUTATOR-REACT] Failed to track user activity for reaction add:`, error);
-              }
-            });
             asyncTasks.push(async () => {
               try {
                 logger.info('analytics_event', {
@@ -4427,26 +4382,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 });
               }
             }
-
-            // Increment call count and add duration only for calls lasting > 60 seconds
-            const callDurationSeconds = (endedAt - call.startedAt) / 1000;
-            if (callDurationSeconds > 60) {
-              // Convert duration to minutes (rounded to 1 decimal place)
-              const callDurationMinutes = Math.round((callDurationSeconds / 60) * 10) / 10;
-
-              asyncTasks.push(async () => {
-                try {
-                  await Promise.all([
-                    websocketService.incrementTodayCallCount(),
-                    websocketService.addCallDuration(callDurationMinutes)
-                  ]);
-                  logger.info(`Successfully updated call metrics (duration: ${callDurationMinutes}m)`);
-                } catch (error) {
-                  logger.error('Failed to update call metrics in Zero mutator:', error);
-                }
-              });
-            }
-
           }
         },
       ),
@@ -5937,15 +5872,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               }
             });
           }
-
-          // Track user activity using Redis Set - O(1) operation, no DB query
-          asyncTasks.push(async () => {
-            try {
-              await websocketService.trackUserActivity(authData.sub);
-            } catch (error) {
-              logger.error(`❌ [MUTATOR-TICKET-UPDATE] Failed to track user activity:`, error);
-            }
-          });
           for (const activity of activities) {
             await tx.mutate.ticket_activities.insert({
               id: uuidv4(),
@@ -6073,15 +5999,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             }
           }
-
-          // Track user activity using Redis Set - O(1) operation, no DB query
-          asyncTasks.push(async () => {
-            try {
-              await websocketService.trackUserActivity(authData.sub);
-            } catch (error) {
-              logger.error(`❌ [MUTATOR-TICKET-ASSIGNMENT] Failed to track user activity:`, error);
-            }
-          });
         },
       ),
     },
@@ -7855,15 +7772,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             joinedAt: now,
             updatedAt: now,
           });
-
-          // Track user activity using Redis Set - O(1) operation, no DB query
-          asyncTasks.push(async () => {
-            try {
-              await websocketService.trackUserActivity(authData.sub);
-            } catch (error) {
-              logger.error(`❌ [MUTATOR-CANVAS-CREATE] Failed to track user activity:`, error);
-            }
-          });
           asyncTasks.push(async () => {
             try {
               logger.info('analytics_event', {
@@ -8498,15 +8406,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(params.folderId !== undefined && { folderId: params.folderId }),
             ...(resolvedProjectId !== undefined && { projectId: resolvedProjectId }),
             ...(resolvedChannelId !== undefined && { channelId: resolvedChannelId }),
-          });
-
-          // Track user activity using Redis Set - O(1) operation, no DB query
-          asyncTasks.push(async () => {
-            try {
-              await websocketService.trackUserActivity(authData.sub);
-            } catch (error) {
-              logger.error(`❌ [MUTATOR-CANVAS-UPDATE] Failed to track user activity:`, error);
-            }
           });
           if (isEnablingCollaboration) {
             asyncTasks.push(async () => {

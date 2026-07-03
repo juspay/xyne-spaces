@@ -382,7 +382,7 @@ export class ConversationService {
 
     // Update message with real conversation ID
     messageData.conversationId = conversation.conversationId;
-    const message = await this.messageRepository.create(messageData, true);
+    const message = await this.messageRepository.create(messageData);
 
     if (await this.userRepository.findById(userId)) {
       await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
@@ -608,7 +608,7 @@ export class ConversationService {
       ...(createdAt && { createdAt }),
     };
 
-    const message = await this.messageRepository.create(messageData, true);
+    const message = await this.messageRepository.create(messageData);
     if (await this.userRepository.findById(userId)) {
       await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
         conversationId,

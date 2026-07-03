@@ -1,12 +1,26 @@
 import { Request, Response } from 'express';
 import { AnalyticsRepository, AnalyticsFilters } from '@/database/repositories/analyticsRepository';
-import { messageCountService } from '@/services/messageCountService';
-import { userCountService } from '@/services/userCountService';
-import { callCountService } from '@/services/callCountService';
 import { logger } from '@/utils/logger';
 
 export class AnalyticsController {
   private analyticsRepository = new AnalyticsRepository();
+
+  private buildWorkspaceFilters(
+    req: Request,
+    extraFilters: Partial<AnalyticsFilters> = {}
+  ): AnalyticsFilters {
+    return {
+      timeRange: req.query.timeRange as string,
+      startDate: req.query.startDate as string,
+      endDate: req.query.endDate as string,
+      ...extraFilters,
+      workspaceId: req.user!.workspaceId!
+    };
+  }
+
+  private getWorkspaceId(req: Request): string {
+    return req.user!.workspaceId!;
+  }
 
   /**
    * Get overview statistics
@@ -14,12 +28,9 @@ export class AnalyticsController {
    */
   getOverview = async (req: Request, res: Response): Promise<void> => {
     try {
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        workflowType: req.query.workflowType as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string
-      };
+      const filters = this.buildWorkspaceFilters(req, {
+        workflowType: req.query.workflowType as string
+      });
 
       const overview = await this.analyticsRepository.getOverviewStats(filters);
 
@@ -44,12 +55,9 @@ export class AnalyticsController {
    */
   getWorkflowTypes = async (req: Request, res: Response): Promise<void> => {
     try {
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        workflowType: req.query.workflowType as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string
-      };
+      const filters = this.buildWorkspaceFilters(req, {
+        workflowType: req.query.workflowType as string
+      });
 
       const workflowTypes = await this.analyticsRepository.getWorkflowTypeStats(filters);
 
@@ -74,12 +82,9 @@ export class AnalyticsController {
    */
   getExecutionStatus = async (req: Request, res: Response): Promise<void> => {
     try {
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        workflowType: req.query.workflowType as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string
-      };
+      const filters = this.buildWorkspaceFilters(req, {
+        workflowType: req.query.workflowType as string
+      });
 
       const executionStatus = await this.analyticsRepository.getExecutionStatusStats(filters);
 
@@ -104,12 +109,9 @@ export class AnalyticsController {
    */
   getStepFailures = async (req: Request, res: Response): Promise<void> => {
     try {
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        workflowType: req.query.workflowType as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string
-      };
+      const filters = this.buildWorkspaceFilters(req, {
+        workflowType: req.query.workflowType as string
+      });
 
       const stepFailures = await this.analyticsRepository.getStepFailureStats(filters);
 
@@ -134,12 +136,9 @@ export class AnalyticsController {
    */
   getRecentActivity = async (req: Request, res: Response): Promise<void> => {
     try {
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        workflowType: req.query.workflowType as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string
-      };
+      const filters = this.buildWorkspaceFilters(req, {
+        workflowType: req.query.workflowType as string
+      });
 
       const recentActivity = await this.analyticsRepository.getRecentActivity(filters);
 
@@ -164,12 +163,9 @@ export class AnalyticsController {
    */
   getStepFunnel = async (req: Request, res: Response): Promise<void> => {
     try {
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        workflowType: req.query.workflowType as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string
-      };
+      const filters = this.buildWorkspaceFilters(req, {
+        workflowType: req.query.workflowType as string
+      });
 
       const stepFunnel = await this.analyticsRepository.getStepFunnelStats(filters);
 
@@ -194,14 +190,11 @@ export class AnalyticsController {
    */
   getDashboard = async (req: Request, res: Response): Promise<void> => {
     try {
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
+      const filters = this.buildWorkspaceFilters(req, {
         workflowType: req.query.workflowType as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
         repoName: req.query.repoName as string,
         userId: req.query.userId as string
-      };
+      });
 
       // Fetch optimized analytics data in parallel
       const [
@@ -237,11 +230,7 @@ export class AnalyticsController {
    */
   getWorkflowMetrics = async (req: Request, res: Response): Promise<void> => {
     try {
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       const workflowMetrics = await this.analyticsRepository.getWorkflowMetrics(filters);
 
@@ -287,9 +276,11 @@ export class AnalyticsController {
    * Get available repositories for filter dropdown
    * GET /api/analytics/repository-options
    */
-  getRepositoryOptions = async (_req: Request, res: Response): Promise<void> => {
+  getRepositoryOptions = async (req: Request, res: Response): Promise<void> => {
     try {
-      const repositories = await this.analyticsRepository.getAvailableRepositories();
+      const workspaceId = this.getWorkspaceId(req);
+
+      const repositories = await this.analyticsRepository.getAvailableRepositories(workspaceId);
 
       res.json({
         success: true,
@@ -310,9 +301,11 @@ export class AnalyticsController {
    * Get available users for filter dropdown
    * GET /api/analytics/user-options
    */
-  getUserOptions = async (_req: Request, res: Response): Promise<void> => {
+  getUserOptions = async (req: Request, res: Response): Promise<void> => {
     try {
-      const users = await this.analyticsRepository.getAvailableUsers();
+      const workspaceId = this.getWorkspaceId(req);
+
+      const users = await this.analyticsRepository.getAvailableUsers(workspaceId);
 
       res.json({
         success: true,
@@ -337,11 +330,7 @@ export class AnalyticsController {
     try {
       const groupBy = (req.query.groupBy as 'day' | 'hour' | undefined) ?? 'day';
       
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       // Always return time-series data for consistency
       const messagesExchanged = await this.analyticsRepository.getMessagesExchanged(filters, groupBy);
@@ -369,11 +358,7 @@ export class AnalyticsController {
     try {
       const groupBy = (req.query.groupBy as 'day' | 'hour' | undefined) ?? 'day';
       
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       // Always return both unique count and time-series data in a single response
       const result = await this.analyticsRepository.getActiveUsersWithChart(filters, groupBy);
@@ -398,9 +383,11 @@ export class AnalyticsController {
    * Get current active users grouped by presence status
    * GET /api/analytics/current-active-users
    */
-  getCurrentActiveUsers = async (_req: Request, res: Response): Promise<void> => {
+  getCurrentActiveUsers = async (req: Request, res: Response): Promise<void> => {
     try {
-      const currentActiveUsers = await this.analyticsRepository.getCurrentActiveUsers();
+      const workspaceId = this.getWorkspaceId(req);
+
+      const currentActiveUsers = await this.analyticsRepository.getCurrentActiveUsers(workspaceId);
 
       res.json({
         success: true,
@@ -425,11 +412,7 @@ export class AnalyticsController {
     try {
       const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       // If groupBy is specified, return time-series data for charts
       if (groupBy === 'day' || groupBy === 'hour') {
@@ -468,11 +451,7 @@ export class AnalyticsController {
     try {
       const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       // If groupBy is specified, return time-series data for charts
       if (groupBy === 'day' || groupBy === 'hour') {
@@ -510,10 +489,11 @@ export class AnalyticsController {
   getMessagesToday = async (req: Request, res: Response): Promise<void> => {
     try {
       const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
+      const workspaceId = this.getWorkspaceId(req);
 
       // If groupBy is specified, return time-series data (hourly breakdown)
       if (groupBy === 'day' || groupBy === 'hour') {
-        const messagesTodayTimeSeries = await this.analyticsRepository.getMessagesTodayTimeSeries();
+        const messagesTodayTimeSeries = await this.analyticsRepository.getMessagesTodayTimeSeries(workspaceId);
         
         res.json({
           success: true,
@@ -521,8 +501,8 @@ export class AnalyticsController {
           timestamp: new Date().toISOString(),
         });
       } else {
-        // Otherwise, return aggregate count from Redis cache
-        const messagesToday = await messageCountService.getTodayCount();
+        // Otherwise, return aggregate count scoped to the caller's current workspace.
+        const messagesToday = await this.analyticsRepository.getMessagesToday(workspaceId);
         
         res.json({
           success: true,
@@ -548,11 +528,7 @@ export class AnalyticsController {
     try {
       const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       // If groupBy is specified, return time-series data for charts
       if (groupBy === 'day' || groupBy === 'hour') {
@@ -591,11 +567,7 @@ export class AnalyticsController {
     try {
       const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       // If groupBy is specified, return time-series data for charts
       if (groupBy === 'day' || groupBy === 'hour') {
@@ -634,11 +606,7 @@ export class AnalyticsController {
     try {
       const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       // If groupBy is specified, return time-series data for charts
       if (groupBy === 'day' || groupBy === 'hour') {
@@ -677,11 +645,7 @@ export class AnalyticsController {
     try {
       const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       // If groupBy is specified, return time-series data for charts
       if (groupBy === 'day' || groupBy === 'hour') {
@@ -720,11 +684,7 @@ export class AnalyticsController {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
       
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       const topUsers = await this.analyticsRepository.getTopUsersByMessages(filters, limit);
       
@@ -751,11 +711,7 @@ export class AnalyticsController {
     try {
       const groupBy = req.query.groupBy as 'day' | undefined;
       
-      const filters: AnalyticsFilters = {
-        timeRange: req.query.timeRange as string,
-        startDate: req.query.startDate as string,
-        endDate: req.query.endDate as string,
-      };
+      const filters = this.buildWorkspaceFilters(req);
 
       // If groupBy is specified, return time-series data for charts
       if (groupBy === 'day') {
@@ -786,63 +742,4 @@ export class AnalyticsController {
     }
   };
 
-  /**
-   * Get all metrics bar data in a single endpoint
-   * GET /api/analytics/metrics-bar
-   * Returns: messages (today/allTime), users (today/allTime), calls (today/allTime), callDuration (today/allTime)
-   */
-  getMetricsBar = async (_req: Request, res: Response): Promise<void> => {
-    try {
-      // Fetch all metrics in parallel for better performance
-      const [
-        messagesToday,
-        messagesAllTime,
-        usersToday,
-        usersAllTime,
-        callsToday,
-        callsAllTime,
-        callsDurationToday,
-        callsDurationAllTime,
-      ] = await Promise.all([
-        messageCountService.getTodayCount(),
-        messageCountService.getAllTimeCount(),
-        userCountService.getTodayCount(),
-        userCountService.getAllTimeCount(),
-        callCountService.getTodayCount(),
-        callCountService.getAllTimeCount(),
-        callCountService.getTodayDuration(),
-        callCountService.getAllTimeDuration(),
-      ]);
-
-      res.json({
-        success: true,
-        data: {
-          messages: {
-            today: messagesToday,
-            allTime: messagesAllTime,
-          },
-          users: {
-            today: usersToday,
-            allTime: usersAllTime,
-          },
-          calls: {
-            today: callsToday,
-            allTime: callsAllTime,
-          },
-          callsDuration: {
-            today: callsDurationToday,
-            allTime: callsDurationAllTime,
-          },
-        },
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      logger.error('Error fetching metrics bar analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch metrics bar analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
-  };
 }

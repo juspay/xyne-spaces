@@ -205,10 +205,6 @@ export class TicketRepository {
       await dualWriteTicketTag(ticket.id, 'hotfix');
       logger.info(`Hotfix tag added to ticket ${ticket.id}`);
     }
-    // Track user activity using Redis Set - O(1) operation, no DB query
-    websocketService.trackUserActivity(data.createdBy)
-      .catch(err => logger.error('Failed to track user activity after ticket creation:', err));
-
     const createdSnapshot = (await buildKanbanCountsSnapshot(ticket.id)) ?? makeFallbackCountsSnapshot(ticket);
     websocketService.broadcastTicketCountsUpdate({
       operation: 'insert',
@@ -595,11 +591,6 @@ export class TicketRepository {
         );
       }
     }
-
-    // Track user activity using Redis Set - O(1) operation, no DB query
-    websocketService.trackUserActivity(updatedBy)
-      .catch(err => logger.error('Failed to track user activity after ticket stage update:', err));
-
 
     return updatedTicket;
   }

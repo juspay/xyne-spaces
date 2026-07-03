@@ -1,9 +1,6 @@
 import { BaseRepository } from './base';
 import { Message, MessageType } from '@prisma/client';
-//import { logger } from '@/utils/logger';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
-import { websocketService } from '@/services/websocketService';
-import {logger} from '@/utils/logger';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH } from '@xyne/shared';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
@@ -131,7 +128,7 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     });
   }
 
-  async create(data: CreateMessageInput, disableMessageCountIncrement: boolean = false): Promise<Message> {
+  async create(data: CreateMessageInput): Promise<Message> {
 
       await this.validateString(data.conversationId, 'conversationId');
     await this.validateString(data.senderId, 'senderId');
@@ -168,16 +165,6 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
           ...(data.createdAt && { createdAt: data.createdAt }),
         }
       });
-
-   if (result.msgType === MessageType.USER && !disableMessageCountIncrement) {
-    websocketService.incrementTodayMessageCount()
-      .catch(err => logger.error('Failed to increment message count:', err));
-    
-    // Track the sender as an active user (optimized - no DB query)
-    websocketService.trackUserActivity(result.senderId)
-      .catch(err => logger.error('Failed to track user activity:', err));
-  }
-
 
       return result;
   }
@@ -479,16 +466,6 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
         metadata: data.metadata,
       }
     });
-
-    // Refresh user counts for active users tracking (message via execution)
-    if (result.msgType === MessageType.USER) {
-      websocketService.incrementTodayMessageCount()
-        .catch(err => logger.error('Failed to increment message count:', err));
-      
-      // Track user activity using Redis Set - O(1) operation, no DB query
-      websocketService.trackUserActivity(result.senderId)
-        .catch(err => logger.error('Failed to track user activity:', err));
-    }
 
     return result;
   }

@@ -5,7 +5,6 @@ import { notificationService } from '@/services/notificationService';
 import { livekitService } from '@/services/liveKitService';
 import { activityService } from '@/services/activity/activityService';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
-import { websocketService } from '@/services/websocketService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { InvitationResponse, NotificationType, ChannelScopeType, CallType, CallOrigin } from '@prisma/client';
@@ -250,33 +249,6 @@ class CallSideEffectService {
                     stack: error instanceof Error ? error.stack : undefined,
                 }
             );
-        }
-    }
-
-    /**
-     * Handles call metrics when a call ends:
-     * - Increments today's call count in Redis
-     * - Adds call duration to Redis
-     * Only tracks calls lasting more than 60 seconds.
-     */
-    async handleCallMetrics(startedAt: Date, endedAt: Date): Promise<void> {
-        const callDurationSeconds = (endedAt.getTime() - startedAt.getTime()) / 1000;
-
-        if (callDurationSeconds <= 60) {
-            this.logger.info(`Skipping call metrics: duration ${callDurationSeconds}s is <= 60s`);
-            return;
-        }
-
-        const callDurationMinutes = Math.round((callDurationSeconds / 60) * 10) / 10;
-
-        try {
-            await Promise.all([
-                websocketService.incrementTodayCallCount(),
-                websocketService.addCallDuration(callDurationMinutes),
-            ]);
-            this.logger.info(`Call metrics updated: duration ${callDurationMinutes}m`);
-        } catch (error) {
-            this.logger.error('Failed to update call metrics:', error);
         }
     }
 

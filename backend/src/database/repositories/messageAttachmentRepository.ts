@@ -1,7 +1,5 @@
 import { DatabaseClient } from '../client';
 import { MessageAttachment, AttachmentEntityType } from '@prisma/client';
-import { websocketService } from '@/services/websocketService';
-import { logger } from '@/utils/logger';
 
 export interface CreateMessageAttachmentInput {
   entityId: string; // Message ID or Ticket ID
@@ -46,10 +44,6 @@ export class MessageAttachmentRepository {
         ...(data.createdAt && { createdAt: data.createdAt })
       }
     });
-
-    // Track user activity using Redis Set - O(1) operation, no DB query
-    websocketService.trackUserActivity(data.createdBy)
-      .catch(err => logger.error('Failed to track user activity after attachment creation:', err));
 
     return attachment;
   }
@@ -166,14 +160,6 @@ export class MessageAttachmentRepository {
       data: attachments
     });
 
-    // Track user activity for all unique users using Redis Set - O(1) per user
-    if (attachments.length > 0) {
-      const uniqueUserIds = [...new Set(attachments.map(a => a.createdBy))];
-      for (const userId of uniqueUserIds) {
-        websocketService.trackUserActivity(userId)
-          .catch(err => logger.error('Failed to track user activity after bulk attachment creation:', err));
-      }
-    }
   }
 
   async deleteByMessageId(messageId: string): Promise<void> {

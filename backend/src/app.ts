@@ -158,7 +158,6 @@ import memoryRoutes from '@/routes/memory';
 import queueManagementRoutes from '@/routes/clearqueueManagement';
 import { initializeBotRegistry } from '@/bots/registry';
 import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
-import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
 import { modelSyncQueue } from '@/queues/modelSyncQueue';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
@@ -735,11 +734,6 @@ export class App {
       logger.info('[TEST MODE] Initializing queues in parallel...');
       await Promise.all([
         (async () => {
-          logger.info('Initializing metrics sync queue...');
-          await metricsSyncQueue.initialize();
-          await metricsSyncQueue.runInitialSync();
-        })(),
-        (async () => {
           logger.info('Initializing presence cleanup queue...');
           await presenceCleanupQueue.initialize();
         })(),
@@ -785,10 +779,6 @@ export class App {
       await redisService.connect();
 
       await initStorage();
-
-      logger.info('Initializing metrics sync queue...');
-      await metricsSyncQueue.initialize();
-      await metricsSyncQueue.runInitialSync();
 
       logger.info('Initializing presence cleanup queue...');
       await presenceCleanupQueue.initialize();
@@ -949,9 +939,6 @@ export class App {
 
       // Close superposition client
       await superpositionClient.close();
-
-      // Close metrics sync queue
-      await metricsSyncQueue.close();
 
       // Close calendar sync queues
       await microsoftCalendarSyncQueue.close();

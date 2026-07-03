@@ -6,7 +6,6 @@ import { AttachmentEntityType } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { canvasAuthService } from '../services/canvasAuthService.js';
 import { config } from '../config/env.js';
-import { websocketService } from '../services/websocketService';
 import { notificationService } from '../services/notificationService.js';
 import { slackService } from '../services/slackService.js';
 import { activityService } from '../services/activity/activityService.js';
@@ -194,10 +193,6 @@ export class CanvasController {
         fileName: attachment.originalFilename,
         canvasId,
       });
-
-      // Track user activity using Redis Set - O(1) operation, no DB query
-      websocketService.trackUserActivity(userId)
-        .catch(err => logger.error('Failed to track user activity after canvas file upload:', err));
 
       res.status(200).json({
         attachmentId: attachment.id,

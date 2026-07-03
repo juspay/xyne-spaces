@@ -1,11 +1,12 @@
 import { DatabaseClient, readReplicaDb } from '../client';
 import { Prisma } from '@prisma/client';
 import { WorkflowType, getWorkflowTypeDisplayName } from '@/workflows/types/workflow-enums';
-import { getTodayISTDateRange, IST_OFFSET_MS, HOUR_MS } from '@/utils/dateUtils';
+import { IST_OFFSET_MS, HOUR_MS } from '@/utils/dateUtils';
 import {logger} from '@/utils/logger';
 
 export interface AnalyticsFilters {
   timeRange?: string; // 'today', '7d', '30d', '90d', 'custom'
+  workspaceId?: string; // Current workspace scope for analytics queries
   workflowType?: string; // 'all' or any value from WorkflowType enum
   startDate?: string; // ISO date string for custom range start
   endDate?: string; // ISO date string for custom range end
@@ -197,10 +198,11 @@ export class AnalyticsRepository {
     'cmlpgdr0a09rj11uzf3xql7ad', 'cmkmhn5c803k3skfrc836863n','cmlv7gc0a00mrka9fol3ccjrk'
   ];
 
-  private async getFilteredMessages(dateCondition: { gte: Date; lte?: Date }): Promise<FilteredMessage[]> {
+  private async getFilteredMessages(dateCondition: { gte?: Date; lte?: Date }, workspaceId: string): Promise<FilteredMessage[]> {
     const excludedChannels = AnalyticsRepository.EXCLUDED_CHANNEL_IDS;
-    const gte = dateCondition.gte.toISOString();
+    const gte = dateCondition.gte ? dateCondition.gte.toISOString() : null;
     const lte = dateCondition.lte ? dateCondition.lte.toISOString() : null;
+    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
 
     const messages = await this.prisma.$queryRaw<FilteredMessage[]>(Prisma.sql`
       SELECT 
@@ -216,8 +218,9 @@ export class AnalyticsRepository {
         ON ch."id" = c."channelId"
       WHERE 
         m."msgType" = 'USER'
-        AND m."createdAt" >= ${gte}::timestamp
+        AND (${gte}::timestamp IS NULL OR m."createdAt" >= ${gte}::timestamp)
         AND (${lte}::timestamp IS NULL OR m."createdAt" <= ${lte}::timestamp)
+        AND ch."workspaceId" = ${scopedWorkspaceId}
         AND c."channelId" NOT IN (${Prisma.join(excludedChannels)})
         AND NOT EXISTS (
           SELECT 1 
@@ -238,9 +241,30 @@ export class AnalyticsRepository {
   /**
    * Get IDs of real users (userType: 'USER'), excludes bots
    */
-  private async getUsersId(): Promise<string[]> {
+  private requireWorkspaceId(workspaceId?: string): string {
+    if (!workspaceId) {
+      throw new Error('Workspace ID is required for analytics queries');
+    }
+
+    return workspaceId;
+  }
+
+  private getWorkspaceFilter(filters: AnalyticsFilters): { workspaceId: string } {
+    return { workspaceId: this.requireWorkspaceId(filters.workspaceId) };
+  }
+
+  private getCallWorkspaceFilter(workspaceId: string, userIds: string[]): Prisma.CallWhereInput {
+    return {
+      OR: [
+        { channel: { workspaceId } },
+        { channelId: null, createdByUserId: { in: userIds } }
+      ]
+    };
+  }
+
+  private async getUsersId(workspaceId: string): Promise<string[]> {
     const users = await this.prisma.user.findMany({
-      where: { userType: 'USER' },
+      where: { userType: 'USER', workspaceId: this.requireWorkspaceId(workspaceId) },
       select: { id: true }
     });
     return users.map(u => u.id);
@@ -341,9 +365,10 @@ export class AnalyticsRepository {
    */
   private async calculateRawPRStats(filters: AnalyticsFilters, startDate: Date, endDate: Date): Promise<PRStatsLegacy> {
     const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+    const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build base where clause for pull requests
-    let prWhereClause: any = {
+    const prWhereClause: any = {
       date: {
         gte: startDate,
         lte: endDate
@@ -351,13 +376,13 @@ export class AnalyticsRepository {
       ...(filters.repoName && filters.repoName !== 'all' ? {repoName: filters.repoName} : {})
     };
 
-    // If workflow type filter is specified, we need to filter by workflow execution IDs
-    if (workflowTypeFilter.workflowType) {
-      // First, get all workflow execution IDs for the specified workflow type
+    // Pull requests are scoped through their linked workflow executions.
+    if (workflowTypeFilter.workflowType || workspaceFilter.workspaceId) {
       const workflowExecutions = await this.prisma.workflowExecution.findMany({
         where: {
           workflow: {
-            workflowType: workflowTypeFilter.workflowType as any
+            ...workspaceFilter,
+            ...(workflowTypeFilter.workflowType ? { workflowType: workflowTypeFilter.workflowType as any } : {})
           }
         },
         select: {
@@ -473,6 +498,7 @@ export class AnalyticsRepository {
   async getOverviewStats(filters: AnalyticsFilters): Promise<any> {
     const dateFilter = getDateFilter(filters);
     const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+    const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -483,7 +509,8 @@ export class AnalyticsRepository {
     const totalWorkflows = await this.prisma.workflow.count({
       where: {
         createdAt: dateCondition,
-        ...workflowTypeFilter
+        ...workflowTypeFilter,
+        ...workspaceFilter
       }
     });
 
@@ -491,7 +518,10 @@ export class AnalyticsRepository {
     const runningExecutions = await this.prisma.workflowExecution.count({
       where: {
         status: { in: ['NEW', 'PENDING', 'RUNNING'] },
-        workflow: workflowTypeFilter
+        workflow: {
+          ...workflowTypeFilter,
+          ...workspaceFilter
+        }
       }
     });
 
@@ -499,7 +529,10 @@ export class AnalyticsRepository {
     const executions = await this.prisma.workflowExecution.findMany({
       where: {
         createdAt: dateCondition,
-        workflow: workflowTypeFilter
+        workflow: {
+          ...workflowTypeFilter,
+          ...workspaceFilter
+        }
       },
       select: {
         status: true,
@@ -534,6 +567,7 @@ export class AnalyticsRepository {
      */
   async getPRMetrics(filters: AnalyticsFilters): Promise<any> {
     const dateFilter = getDateFilter(filters);
+    const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -570,18 +604,18 @@ export class AnalyticsRepository {
     const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
 
     // Build base where clause for pull requests
-    let prWhereClause: any = {
+    const prWhereClause: any = {
       date: dateCondition,
       ...(filters.repoName && filters.repoName !== 'all' ? {repoName: filters.repoName} : {})
     };
 
-    // If workflow type filter is specified, we need to filter by workflow execution IDs
-    if (workflowTypeFilter.workflowType) {
-      // First, get all workflow execution IDs for the specified workflow type
+    // Pull requests are scoped through their linked workflow executions.
+    if (workflowTypeFilter.workflowType || workspaceFilter.workspaceId) {
       const workflowExecutions = await this.prisma.workflowExecution.findMany({
         where: {
           workflow: {
-            workflowType: workflowTypeFilter.workflowType as any
+            ...workspaceFilter,
+            ...(workflowTypeFilter.workflowType ? { workflowType: workflowTypeFilter.workflowType as any } : {})
           }
         },
         select: {
@@ -601,7 +635,7 @@ export class AnalyticsRepository {
       where: prWhereClause
     });
 
-    let initialStats: PRStatsLegacy = {
+    const initialStats: PRStatsLegacy = {
       xyneOpen: 0,
       xyneDeclined: 0,
       xyneMerged: 0,
@@ -724,6 +758,7 @@ export class AnalyticsRepository {
    */
   async getWorkflowMetrics(filters: AnalyticsFilters) {
     const dateFilter = getDateFilter(filters);
+    const workspaceFilter = this.getWorkspaceFilter(filters);
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
       ? dateFilter
       : { gte: dateFilter };
@@ -733,6 +768,7 @@ export class AnalyticsRepository {
       where: {
         createdAt: dateCondition,
         NOT: { workflowType: 'Automations' },
+        ...workspaceFilter
       },
       _count: {
         id: true
@@ -749,6 +785,7 @@ export class AnalyticsRepository {
     const dateFilter = getDateFilter(filters);
     const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
     const userFilter = this.getUserFilter(filters.userId);
+    const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -760,6 +797,7 @@ export class AnalyticsRepository {
       where: {
         createdAt: dateCondition,
         ...workflowTypeFilter,
+        ...workspaceFilter,
         ...userFilter
         // Note: repoName filter not applicable to workflows (only to PRs)
       },
@@ -906,6 +944,7 @@ export class AnalyticsRepository {
   async getExecutionStatusStats(filters: AnalyticsFilters): Promise<ExecutionStatusStats[]> {
     const dateFilter = getDateFilter(filters);
     const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+    const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -915,7 +954,10 @@ export class AnalyticsRepository {
     const executions = await this.prisma.workflowExecution.findMany({
       where: {
         createdAt: dateCondition,
-        workflow: workflowTypeFilter
+        workflow: {
+          ...workflowTypeFilter,
+          ...workspaceFilter
+        }
       },
       select: {
         status: true
@@ -948,6 +990,7 @@ export class AnalyticsRepository {
   async getStepFailureStats(filters: AnalyticsFilters): Promise<StepFailureStats[]> {
     const dateFilter = getDateFilter(filters);
     const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+    const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -959,7 +1002,10 @@ export class AnalyticsRepository {
         createdAt: dateCondition,
         stepName: { not: null },
         workflowExecution: {
-          workflow: workflowTypeFilter
+          workflow: {
+            ...workflowTypeFilter,
+            ...workspaceFilter
+          }
         }
       },
       select: {
@@ -1009,6 +1055,7 @@ export class AnalyticsRepository {
     try {
       const dateFilter = getDateFilter(filters);
       const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+      const workspaceFilter = this.getWorkspaceFilter(filters);
 
       // Build date condition for Prisma query
       const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -1019,7 +1066,10 @@ export class AnalyticsRepository {
       const executions = await this.prisma.workflowExecution.findMany({
         where: {
           createdAt: dateCondition,
-          workflow: workflowTypeFilter
+          workflow: {
+            ...workflowTypeFilter,
+            ...workspaceFilter
+          }
         },
         include: {
           workflowSteps: {
@@ -1147,6 +1197,7 @@ export class AnalyticsRepository {
   async getRecentActivity(filters: AnalyticsFilters): Promise<RecentActivityItem[]> {
     const dateFilter = getDateFilter(filters);
     const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+    const workspaceFilter = this.getWorkspaceFilter(filters);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -1156,7 +1207,10 @@ export class AnalyticsRepository {
     const executions = await this.prisma.workflowExecution.findMany({
       where: {
         updatedAt: dateCondition,
-        workflow: workflowTypeFilter
+        workflow: {
+          ...workflowTypeFilter,
+          ...workspaceFilter
+        }
       },
       include: {
         workflow: {
@@ -1205,10 +1259,15 @@ export class AnalyticsRepository {
   /**
    * Get available users for filter dropdown
    */
-  async getAvailableUsers(): Promise<{ value: string; label: string; email: string; count: number }[]> {
+  async getAvailableUsers(workspaceId: string): Promise<{ value: string; label: string; email: string; count: number }[]> {
+    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
+
     // 1. Get distinct user IDs from tickets with their counts
     const ticketCreators = await this.prisma.ticket.groupBy({
       by: ['createdBy'],
+      where: {
+        workspaceId: scopedWorkspaceId
+      },
       _count: {
         createdBy: true
       }
@@ -1234,7 +1293,8 @@ export class AnalyticsRepository {
     // 2. Fetch only the relevant users
     const users = await this.prisma.user.findMany({
       where: {
-        id: { in: userIds }
+        id: { in: userIds },
+        workspaceId: scopedWorkspaceId
       },
       select: {
         id: true,
@@ -1284,10 +1344,26 @@ export class AnalyticsRepository {
   /**
    * Get available repositories for filter dropdown
    */
-  async getAvailableRepositories(): Promise<{ value: string; label: string; count: number }[]> {
+  async getAvailableRepositories(workspaceId: string): Promise<{ value: string; label: string; count: number }[]> {
+    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
+    const workflowExecutions = await this.prisma.workflowExecution.findMany({
+      where: {
+        workflow: {
+          workspaceId: scopedWorkspaceId
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+    const workflowExecutionIds = workflowExecutions.map(we => we.id);
+
     // Get distinct repository names with their PR counts
     const repositories = await this.prisma.pullRequests.groupBy({
       by: ['repoName'],
+      where: {
+        workflowExecutionId: { in: workflowExecutionIds }
+      },
       _count: {
         repoName: true
       },
@@ -1384,6 +1460,8 @@ export class AnalyticsRepository {
    */
   async getActiveUsers(filters: AnalyticsFilters): Promise<number> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const userIds = await this.getUsersId(workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -1391,48 +1469,48 @@ export class AnalyticsRepository {
       : { gte: dateFilter };
 
     // Use getFilteredMessages for robust message filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
 
     // Get all user IDs from different activity types using Promise.all for parallel execution
-    const [reactionUsers, attachmentUsers] = await Promise.all([
+    const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
       // Users who posted reactions
       this.prisma.reaction.findMany({
-        where: { createdAt: dateCondition },
+        where: { createdAt: dateCondition, userId: { in: userIds } },
         select: { userId: true },
         distinct: ['userId'],
       }),
 
       // Users who uploaded files
       this.prisma.messageAttachment.findMany({
-        where: { createdAt: dateCondition },
+        where: { createdAt: dateCondition, workspaceId },
         select: { createdBy: true },
         distinct: ['createdBy'],
       }),
 
       // Users who created tickets
       this.prisma.ticket.findMany({
-        where: { createdAt: dateCondition},
+        where: { createdAt: dateCondition, workspaceId },
         select: { createdBy: true},
         distinct: ['createdBy'],
       }),
 
       // Users who update ticket_activities
       this.prisma.ticketActivity.findMany({
-        where: { timestamp: dateCondition},
+        where: { timestamp: dateCondition, ticket: { workspaceId } },
         select: { updatedBy: true},
         distinct: ['updatedBy'],
       }),
 
       // Users who created canvas
       this.prisma.canvas.findMany({
-        where: { createdAt: dateCondition},
+        where: { createdAt: dateCondition, createdBy: { in: userIds } },
         select: { createdBy: true},
         distinct: ['createdBy'],
       }),
 
       // Users who edited canvas
       this.prisma.canvasParticipant.findMany({
-        where: { updatedAt: dateCondition},
+        where: { updatedAt: dateCondition, userId: { in: userIds } },
         select: { userId: true},
         distinct: ['userId'],
       })
@@ -1461,6 +1539,30 @@ export class AnalyticsRepository {
       }
     });
 
+    ticketCreators.forEach(user => {
+      if (user.createdBy) {
+        allActiveUserIds.add(user.createdBy);
+      }
+    });
+
+    ticketActivityUsers.forEach(user => {
+      if (user.updatedBy) {
+        allActiveUserIds.add(user.updatedBy);
+      }
+    });
+
+    canvasCreators.forEach(user => {
+      if (user.createdBy) {
+        allActiveUserIds.add(user.createdBy);
+      }
+    });
+
+    canvasParticipants.forEach(user => {
+      if (user.userId) {
+        allActiveUserIds.add(user.userId);
+      }
+    });
+
     return allActiveUserIds.size;
   }
 
@@ -1472,7 +1574,7 @@ export class AnalyticsRepository {
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
       ? dateFilter
       : { gte: dateFilter };
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages(dateCondition, this.requireWorkspaceId(filters.workspaceId));
 
     const totalMessages = validMessages.length;
     const uniqueUserCount = new Set(validMessages.map(m => m.senderId).filter(id => !!id)).size;
@@ -1485,17 +1587,30 @@ export class AnalyticsRepository {
   /**
    * Get current active users grouped by presence status
    */
-  async getCurrentActiveUsers(): Promise<{ userStatus: string; userCount: number; percentage: number }[]> {
+  async getCurrentActiveUsers(workspaceId: string): Promise<{ userStatus: string; userCount: number; percentage: number }[]> {
+    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
+
     // Get users grouped by their presence status
     const userPresenceStats = await this.prisma.userPresence.groupBy({
       by: ['status'],
+      where: {
+        user: {
+          workspaceId: scopedWorkspaceId
+        }
+      },
       _count: {
         status: true,
       },
     });
 
     // Get total user count
-    const totalUsers = await this.prisma.userPresence.count();
+    const totalUsers = await this.prisma.userPresence.count({
+      where: {
+        user: {
+          workspaceId: scopedWorkspaceId
+        }
+      }
+    });
 
     // Transform the data and calculate percentages
     const results = userPresenceStats.map(stat => ({
@@ -1519,7 +1634,8 @@ export class AnalyticsRepository {
       ? dateFilter
       : { gte: dateFilter };
 
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
     const validMessageIds = validMessages.map(m => m.messageId);
 
     if (validMessageIds.length === 0) return 0;
@@ -1528,6 +1644,7 @@ export class AnalyticsRepository {
       where: {
         entityId: { in: validMessageIds },
         entityType: 'CHAT',
+        workspaceId,
         createdBy: { notIn: ['Unified Alerts', 'system'] }
       }
     });
@@ -1541,11 +1658,12 @@ export class AnalyticsRepository {
    */
   async getMessagesExchangedTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter ? dateFilter : { gte: dateFilter };
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Use centralized helper for filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
 
     // Get all channelIds from valid messages
     const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
@@ -1556,7 +1674,7 @@ export class AnalyticsRepository {
   
     const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
     const channels = await this.prisma.channel.findMany({
-      where: { id: { in: channelIds } },
+      where: { id: { in: channelIds }, workspaceId },
       select: { id: true, scopeType: true }
     });
 
@@ -1654,140 +1772,6 @@ export class AnalyticsRepository {
     return buckets;
   }
 
-
-  /**
-   * Get all-time active user IDs as an array
-   * Used for Redis Set initialization
-   */
-  async getAllTimeActiveUserIds(): Promise<string[]> {
-    // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
-    // IST midnight = UTC 18:30 previous day
-    const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
-
-    // Use getFilteredMessages for robust filtering
-    const validMessages = await this.getFilteredMessages({ gte: allTimeStartDate });
-
-    const allActiveUserIds = new Set<string>();
-
-    // Add valid message senders
-    validMessages.forEach(message => {
-      if (message.senderId) {
-        allActiveUserIds.add(message.senderId);
-      }
-    });
-
-    // Add other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
-    const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      this.prisma.reaction.findMany({
-        where: { createdAt: { gte: allTimeStartDate } },
-        select: { userId: true },
-        distinct: ['userId'],
-      }),
-      this.prisma.messageAttachment.findMany({
-        where: { createdAt: { gte: allTimeStartDate } },
-        select: { createdBy: true },
-        distinct: ['createdBy'],
-      }),
-      this.prisma.ticket.findMany({
-        where: { createdAt: { gte: allTimeStartDate } },
-        select: { createdBy: true },
-        distinct: ['createdBy'],
-      }),
-      this.prisma.ticketActivity.findMany({
-        where: { timestamp: { gte: allTimeStartDate } },
-        select: { updatedBy: true },
-        distinct: ['updatedBy'],
-      }),
-      this.prisma.canvas.findMany({
-        where: { createdAt: { gte: allTimeStartDate } },
-        select: { createdBy: true },
-        distinct: ['createdBy'],
-      }),
-      this.prisma.canvasParticipant.findMany({
-        where: { updatedAt: { gte: allTimeStartDate } },
-        select: { userId: true },
-        distinct: ['userId'],
-      })
-    ]);
-
-    reactionUsers.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
-    attachmentUsers.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
-    ticketCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
-    ticketActivityUsers.forEach(user => { if (user.updatedBy) allActiveUserIds.add(user.updatedBy); });
-    canvasCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
-    canvasParticipants.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
-
-    return Array.from(allActiveUserIds);
-  }
-
-  /**
-   * Get active user IDs for a given time period
-   * Used for Redis Set initialization
-   */
-  async getActiveUserIds(filters: AnalyticsFilters): Promise<string[]> {
-    const dateFilter = getDateFilter(filters);
-
-    // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
-
-    // Use getFilteredMessages for robust filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
-
-    const allActiveUserIds = new Set<string>();
-
-    // Add valid message senders
-    validMessages.forEach(message => {
-      if (message.senderId) {
-        allActiveUserIds.add(message.senderId);
-      }
-    });
-
-    // Add other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
-    const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      this.prisma.reaction.findMany({
-        where: { createdAt: dateCondition },
-        select: { userId: true },
-        distinct: ['userId'],
-      }),
-      this.prisma.messageAttachment.findMany({
-        where: { createdAt: dateCondition },
-        select: { createdBy: true },
-        distinct: ['createdBy'],
-      }),
-      this.prisma.ticket.findMany({
-        where: { createdAt: dateCondition },
-        select: { createdBy: true },
-        distinct: ['createdBy'],
-      }),
-      this.prisma.ticketActivity.findMany({
-        where: { timestamp: dateCondition },
-        select: { updatedBy: true },
-        distinct: ['updatedBy'],
-      }),
-      this.prisma.canvas.findMany({
-        where: { createdAt: dateCondition },
-        select: { createdBy: true },
-        distinct: ['createdBy'],
-      }),
-      this.prisma.canvasParticipant.findMany({
-        where: { updatedAt: dateCondition },
-        select: { userId: true },
-        distinct: ['userId'],
-      })
-    ]);
-
-    reactionUsers.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
-    attachmentUsers.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
-    ticketCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
-    ticketActivityUsers.forEach(user => { if (user.updatedBy) allActiveUserIds.add(user.updatedBy); });
-    canvasCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
-    canvasParticipants.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
-
-    return Array.from(allActiveUserIds);
-  }
-
   /**
    * Get active users with both aggregate and time-series data in single call
    */
@@ -1796,6 +1780,8 @@ export class AnalyticsRepository {
     timeSeries: { date: string; value: number }[];
   }> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const userIds = await this.getUsersId(workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -1806,40 +1792,40 @@ export class AnalyticsRepository {
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Use getFilteredMessages for robust filtering
-    const validMessageActivities = await this.getFilteredMessages(dateCondition);
+    const validMessageActivities = await this.getFilteredMessages(dateCondition, workspaceId);
 
     // Get other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
     const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
       this.prisma.reaction.findMany({
-        where: { createdAt: dateCondition },
+        where: { createdAt: dateCondition, userId: { in: userIds } },
         select: { userId: true, createdAt: true },
       }),
       this.prisma.messageAttachment.findMany({
-        where: { createdAt: dateCondition },
+        where: { createdAt: dateCondition, workspaceId },
         select: { createdBy: true, createdAt: true },
       }),
 
       // Users who created tickets
       this.prisma.ticket.findMany({
-        where: { createdAt: dateCondition},
+        where: { createdAt: dateCondition, workspaceId },
         select: { createdBy: true, createdAt: true },
       }),
 
       // Users who update ticket_activities
       this.prisma.ticketActivity.findMany({
-        where: { timestamp: dateCondition},
+        where: { timestamp: dateCondition, ticket: { workspaceId } },
         select: { updatedBy: true, timestamp: true },
       }),
 
       // Users who created canvas
       this.prisma.canvas.findMany({
-        where: { createdAt: dateCondition},
+        where: { createdAt: dateCondition, createdBy: { in: userIds } },
         select: { createdBy: true, createdAt: true },
       }),
 
       // Users who edited canvas
       this.prisma.canvasParticipant.findMany({
-        where: { updatedAt: dateCondition},
+        where: { updatedAt: dateCondition, userId: { in: userIds } },
         select: { userId: true, updatedAt: true },
       })
     ]);
@@ -1920,6 +1906,7 @@ export class AnalyticsRepository {
    */
   async getMessagesPerUserTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -1929,7 +1916,7 @@ export class AnalyticsRepository {
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
     // Use centralized helper for filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
 
     // Generate time buckets
     const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
@@ -1974,10 +1961,11 @@ export class AnalyticsRepository {
    */
   async getActiveChannels(filters: AnalyticsFilters): Promise<number> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
       ? dateFilter
       : { gte: dateFilter };
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
     if (validMessages.length === 0) {
       return 0;
     }
@@ -1999,7 +1987,8 @@ export class AnalyticsRepository {
     const channels = await this.prisma.channel.findMany({
       where: {
         id: { in: channelIds },
-        scopeType: 'DEFAULT'
+        scopeType: 'DEFAULT',
+        workspaceId
       },
       select: {
         id: true
@@ -2014,6 +2003,7 @@ export class AnalyticsRepository {
    */
   async getActiveChannelsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -2024,7 +2014,7 @@ export class AnalyticsRepository {
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Use centralized helper for filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
 
     // Get all channelIds from valid messages
     const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
@@ -2035,7 +2025,7 @@ export class AnalyticsRepository {
     const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
     const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
     const channels = await this.prisma.channel.findMany({
-      where: { id: { in: channelIds }, scopeType: 'DEFAULT' },
+      where: { id: { in: channelIds }, scopeType: 'DEFAULT', workspaceId },
       select: { id: true }
     });
     const defaultChannelIds = new Set(channels.map(c => c.id));
@@ -2074,6 +2064,7 @@ export class AnalyticsRepository {
    */
   async getUsersOnboarded(filters: AnalyticsFilters): Promise<number> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -2083,7 +2074,10 @@ export class AnalyticsRepository {
     // Count users onboarded in the selected time period
     const usersOnboardedCount = await this.prisma.userPresence.count({
       where: {
-        createdAt: dateCondition
+        createdAt: dateCondition,
+        user: {
+          workspaceId
+        }
       }
     });
 
@@ -2095,6 +2089,7 @@ export class AnalyticsRepository {
    */
   async getUsersOnboardedTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -2106,7 +2101,7 @@ export class AnalyticsRepository {
 
     // Get user presence records
     const userPresenceRecords = await this.prisma.userPresence.findMany({
-      where: { createdAt: dateCondition },
+      where: { createdAt: dateCondition, user: { workspaceId } },
       select: { createdAt: true },
     });
 
@@ -2140,7 +2135,8 @@ export class AnalyticsRepository {
    * Get messages today count
    * Counts the number of messages sent today (in IST timezone)
    */
-  async getMessagesToday(): Promise<number> {
+  async getMessagesToday(workspaceId?: string): Promise<number> {
+    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
     // Get current time in IST (UTC+5:30)
     const now = new Date();
     const istTime = new Date(now.getTime() + IST_OFFSET_MS);
@@ -2155,20 +2151,7 @@ export class AnalyticsRepository {
     // Subtract IST offset to get UTC time for start of today IST
     const startOfTodayUTC = new Date(startOfTodayIST.getTime() - IST_OFFSET_MS);
 
-    const validMessages = await this.getFilteredMessages({ gte: startOfTodayUTC, lte: now });
-
-    return validMessages.length;
-  }
-
-  /**
-   * Get all-time message count
-   * Counts all user messages since Dec 15, 2025
-   */
-  async getAllTimeMessageCount(): Promise<number> {
-    // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
-    const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
-
-    const validMessages = await this.getFilteredMessages({ gte: allTimeStartDate });
+    const validMessages = await this.getFilteredMessages({ gte: startOfTodayUTC, lte: now }, scopedWorkspaceId);
 
     return validMessages.length;
   }
@@ -2176,7 +2159,8 @@ export class AnalyticsRepository {
   /**
    * Get messages today time-series data (hourly breakdown for today)
    */
-  async getMessagesTodayTimeSeries(): Promise<{ date: string; value: number }[]> {
+  async getMessagesTodayTimeSeries(workspaceId?: string): Promise<{ date: string; value: number }[]> {
+    const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
     // Get current time in IST (UTC+5:30)
     const now = new Date();
     const istTime = new Date(now.getTime() + IST_OFFSET_MS);
@@ -2191,7 +2175,7 @@ export class AnalyticsRepository {
     // Subtract IST offset to get UTC time for start of today IST
     const startOfTodayUTC = new Date(startOfTodayIST.getTime() - IST_OFFSET_MS);
 
-    const messages = await this.getFilteredMessages({ gte: startOfTodayUTC, lte: now });
+    const messages = await this.getFilteredMessages({ gte: startOfTodayUTC, lte: now }, scopedWorkspaceId);
 
     // Generate hourly buckets for today
     const timeBuckets = this.generateHourlyTimeBuckets(startOfTodayUTC, now);
@@ -2224,18 +2208,20 @@ export class AnalyticsRepository {
    */
   async getNumberOfTickets(filters: AnalyticsFilters): Promise<number> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
       ? dateFilter
       : { gte: dateFilter };
 
-    const userIds = await this.getUsersId();
+    const userIds = await this.getUsersId(workspaceId);
 
     // Count tickets created in the selected time period by users only
     const ticketsCount = await this.prisma.ticket.count({
       where: {
         createdAt: dateCondition,
+        workspaceId,
         createdBy: { in: userIds }
       }
     });
@@ -2249,6 +2235,7 @@ export class AnalyticsRepository {
    */
   async getNumberOfTicketsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -2258,12 +2245,13 @@ export class AnalyticsRepository {
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    const userIds = await this.getUsersId();
+    const userIds = await this.getUsersId(workspaceId);
 
     // Get tickets created by real users only
     const tickets = await this.prisma.ticket.findMany({
       where: {
         createdAt: dateCondition,
+        workspaceId,
         createdBy: { in: userIds }
       },
       select: { createdAt: true },
@@ -2302,13 +2290,14 @@ export class AnalyticsRepository {
    */
   async getNumberOfCanvases(filters: AnalyticsFilters): Promise<number> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
       ? dateFilter
       : { gte: dateFilter };
 
-    const userIds = await this.getUsersId();
+    const userIds = await this.getUsersId(workspaceId);
 
     // Count canvases edited in the selected time period by real users only
     const canvasesCount = await this.prisma.canvas.count({
@@ -2327,6 +2316,7 @@ export class AnalyticsRepository {
    */
   async getNumberOfCanvasesTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -2336,7 +2326,7 @@ export class AnalyticsRepository {
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    const userIds = await this.getUsersId();
+    const userIds = await this.getUsersId(workspaceId);
 
     // Get canvases created by real users only
     const canvases = await this.prisma.canvas.findMany({
@@ -2381,6 +2371,8 @@ export class AnalyticsRepository {
    */
   async getNumberOfCalls(filters: AnalyticsFilters): Promise<number> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const userIds = await this.getUsersId(workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -2390,7 +2382,8 @@ export class AnalyticsRepository {
     // Get all calls in the date range
     const calls = await this.prisma.call.findMany({
       where: {
-        startedAt: dateCondition
+        startedAt: dateCondition,
+        ...this.getCallWorkspaceFilter(workspaceId, userIds)
       },
       select: {
         startedAt: true,
@@ -2413,6 +2406,8 @@ export class AnalyticsRepository {
    */
   async getNumberOfCallsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const userIds = await this.getUsersId(workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -2425,7 +2420,8 @@ export class AnalyticsRepository {
     // Get calls
     const calls = await this.prisma.call.findMany({
       where: {
-        startedAt: dateCondition
+        startedAt: dateCondition,
+        ...this.getCallWorkspaceFilter(workspaceId, userIds)
       },
       select: {
         startedAt: true,
@@ -2472,6 +2468,8 @@ export class AnalyticsRepository {
    */
   async getTotalCallsDuration(filters: AnalyticsFilters): Promise<number> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const userIds = await this.getUsersId(workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -2482,7 +2480,8 @@ export class AnalyticsRepository {
     const calls = await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
-        endedAt: { not: null } 
+        endedAt: { not: null },
+        ...this.getCallWorkspaceFilter(workspaceId, userIds)
       },
       select: {
         startedAt: true,
@@ -2510,6 +2509,8 @@ export class AnalyticsRepository {
    */
   async getTotalCallsDurationTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
+    const userIds = await this.getUsersId(workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -2523,7 +2524,8 @@ export class AnalyticsRepository {
     const calls = await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
-        endedAt: { not: null } 
+        endedAt: { not: null },
+        ...this.getCallWorkspaceFilter(workspaceId, userIds)
       },
       select: {
         startedAt: true,
@@ -2568,12 +2570,13 @@ export class AnalyticsRepository {
    */
   async getTopUsersByMessages(filters: AnalyticsFilters, limit: number = 10): Promise<{ userId: string; userName: string; messageCount: number }[]> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
       ? dateFilter
       : { gte: dateFilter };
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
     // userType : USER ensures we only count messages from real users, excluding bots
-    const userIds = new Set(await this.getUsersId());
+    const userIds = new Set(await this.getUsersId(workspaceId));
 
     // Aggregate message counts by senderId
     const userMessageCount = new Map<string, number>();
@@ -2595,7 +2598,8 @@ export class AnalyticsRepository {
     // Fetch user details for the top senders
     const users = await this.prisma.user.findMany({
       where: {
-        id: { in: topUserIds }
+        id: { in: topUserIds },
+        workspaceId
       },
       select: {
         id: true,
@@ -2619,6 +2623,7 @@ export class AnalyticsRepository {
    */
   async getFilesSharedTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
+    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
 
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
@@ -2628,7 +2633,7 @@ export class AnalyticsRepository {
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
     const validMessageIds = validMessages.map(m => m.messageId);
 
     // Get file attachments for valid (non-migrated) messages only
@@ -2636,6 +2641,7 @@ export class AnalyticsRepository {
       where: {
         entityId: { in: validMessageIds },
         entityType: 'CHAT',
+        workspaceId,
         createdBy: { notIn: ['Unified Alerts', 'system'] }
       },
       select: { createdAt: true },
@@ -2665,66 +2671,6 @@ export class AnalyticsRepository {
       date: bucketKey,
       value: bucketData.get(bucketKey) || 0
     })).sort((a, b) => a.date.localeCompare(b.date));
-  }
-
-  /**
-   * Get calls count for today (IST)
-   * Only counts calls that lasted more than 60 seconds
-   * Uses IST-based date range to match frontend/analytics section behavior
-   */
-  async getCallsToday(): Promise<number> {
-    const { startDate, endDate } = getTodayISTDateRange();
-    return this.getNumberOfCalls({ 
-      timeRange: 'custom',
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString()
-    });
-  }
-
-  /**
-   * Get all-time call count
-   * Counts all calls since Dec 15, 2025 that lasted more than 60 seconds
-   * Reuses getNumberOfCalls with custom date range
-   */
-  async getAllTimeCallCount(): Promise<number> {
-    // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
-    // IST midnight = UTC 18:30 previous day
-    const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
-    return this.getNumberOfCalls({
-      timeRange: 'custom',
-      startDate: allTimeStartDate.toISOString(),
-      endDate: new Date().toISOString()
-    });
-  }
-
-  /**
-   * Get total call duration for today (IST) in minutes
-   * Only counts calls that lasted more than 60 seconds
-   * Uses IST-based date range to match frontend/analytics section behavior
-   */
-  async getCallDurationToday(): Promise<number> {
-    const { startDate, endDate } = getTodayISTDateRange();
-    return this.getTotalCallsDuration({ 
-      timeRange: 'custom',
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString()
-    });
-  }
-
-  /**
-   * Get all-time total call duration in minutes
-   * Counts all calls since Dec 15, 2025 that lasted more than 60 seconds
-   * Reuses getTotalCallsDuration with custom date range
-   */
-  async getAllTimeCallDuration(): Promise<number> {
-    // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
-    // IST midnight = UTC 18:30 previous day
-    const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
-    return this.getTotalCallsDuration({
-      timeRange: 'custom',
-      startDate: allTimeStartDate.toISOString(),
-      endDate: new Date().toISOString()
-    });
   }
 
 }
