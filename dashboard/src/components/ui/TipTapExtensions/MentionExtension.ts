@@ -416,41 +416,43 @@ export const MentionExtension = Node.create<MentionOptions>({
 
           // Handle typing when cursor intersects a mention
           if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-            // Check if cursor is touching a mention node
-            let foundNode: ProseMirrorNode | undefined;
-            let foundPos: number | undefined;
+            if (!selection.empty) {
+              let foundNode: ProseMirrorNode | undefined;
+              let foundPos: number | undefined;
 
-            state.doc.nodesBetween(
-              $from.pos - 1,
-              $from.pos + 1,
-              (node: ProseMirrorNode, pos: number): boolean => {
-                if (node.type.name === extensionName) {
-                  foundNode = node;
-                  foundPos = pos;
-                  return false;
-                }
-                return true;
-              },
-            );
-
-            if (foundNode && foundPos !== undefined) {
-              // Unwrap mention to plain text, then insert the character
-              const username =
-                (foundNode.attrs['username'] as string) || (foundNode.attrs['groupName'] as string);
-              const tr = state.tr;
-
-              // Replace mention with plain text
-              tr.replaceWith(
-                foundPos,
-                foundPos + foundNode.nodeSize,
-                state.schema.text(`@${username}`),
+              state.doc.nodesBetween(
+                selection.from,
+                selection.to,
+                (node: ProseMirrorNode, pos: number): boolean => {
+                  if (node.type.name === extensionName) {
+                    foundNode = node;
+                    foundPos = pos;
+                    return false;
+                  }
+                  return true;
+                },
               );
 
-              // Insert the typed character
-              tr.insertText(event.key, foundPos + username.length + 1);
+              if (foundNode && foundPos !== undefined) {
+                // Unwrap mention to plain text, then insert the character
+                const username =
+                  (foundNode.attrs['username'] as string) ||
+                  (foundNode.attrs['groupName'] as string);
+                const tr = state.tr;
 
-              dispatch(tr);
-              return true;
+                // Replace mention with plain text
+                tr.replaceWith(
+                  foundPos,
+                  foundPos + foundNode.nodeSize,
+                  state.schema.text(`@${username}`),
+                );
+
+                // Insert the typed character
+                tr.insertText(event.key, foundPos + username.length + 1);
+
+                dispatch(tr);
+                return true;
+              }
             }
 
             // Check if we're right after ZWSP guard (typing immediately after mention)
