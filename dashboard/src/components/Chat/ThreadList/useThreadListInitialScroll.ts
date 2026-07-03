@@ -20,6 +20,7 @@ export function deriveThreadScrollIntent(params: {
   firstUnreadIndex: number | null;
   savedScrollPosition: number | null;
   initialScrollOffset: number | undefined;
+  matchedMessageId?: string | null;
 }): ThreadScrollIntent {
   const {
     hash,
@@ -29,7 +30,14 @@ export function deriveThreadScrollIntent(params: {
     firstUnreadIndex,
     savedScrollPosition,
     initialScrollOffset,
+    matchedMessageId,
   } = params;
+
+  // When a specific matched message is provided (e.g. from search results sidebar),
+  // scroll directly to it instead of relying on the URL hash.
+  if (matchedMessageId) {
+    return { type: 'hash', messageId: matchedMessageId };
+  }
 
   if (enableCollapsing && typeof initialScrollOffset !== 'number' && !hash) {
     return { type: 'noop' };
@@ -103,6 +111,7 @@ export type UseThreadListInitialScrollArgs = {
   isTrackingHydrated: boolean;
   hasAppliedInitialScrollRef: MutableRefObject<boolean>;
   setIsNearBottom: (value: boolean) => void;
+  matchedMessageId?: string | null;
 };
 
 export function useThreadListInitialScroll({
@@ -118,6 +127,7 @@ export function useThreadListInitialScroll({
   isTrackingHydrated,
   hasAppliedInitialScrollRef,
   setIsNearBottom,
+  matchedMessageId,
 }: UseThreadListInitialScrollArgs): void {
   const scrollIntent = useMemo(
     () =>
@@ -129,6 +139,7 @@ export function useThreadListInitialScroll({
         firstUnreadIndex,
         savedScrollPosition,
         initialScrollOffset,
+        matchedMessageId: matchedMessageId ?? null,
       }),
     [
       conversationId,
@@ -139,6 +150,7 @@ export function useThreadListInitialScroll({
       location.hash,
       savedScrollPosition,
       isMessagesLoaded,
+      matchedMessageId,
     ],
   );
 

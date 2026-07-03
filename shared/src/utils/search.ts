@@ -104,7 +104,10 @@ export function searchChannelsWithScores<T extends Searchable>(
 ): { item: T; score: number }[] {
   if (!query.trim()) return channels.slice(0, limit).map(item => ({ item, score: 0 }));
 
-  const q = query.toLowerCase();
+  // Normalize hyphens to spaces in both query and channel names so that
+  // "xyne feedback" matches "xyne-spaces-feedback".
+  const normalizedQuery = query.replace(/-/g, ' ');
+  const q = normalizedQuery.toLowerCase();
 
   const fuse = new Fuse(channels, {
     keys: ['name'],
@@ -119,29 +122,57 @@ export function searchChannelsWithScores<T extends Searchable>(
     includeScore: true,
     minMatchCharLength: 2,
     isCaseSensitive: false,
+    getFn: (obj) => {
+      // keys is always ['name'] — access the typed property directly
+      // instead of dynamic property access, which is both safer and avoids
+      // relying on internal Fuse.js APIs.
+      return obj.name.replace(/-/g, ' ');
+    },
   });
 
-  const results = fuse.search(query);
+  const results = fuse.search(normalizedQuery);
 
-  return results
-    .map(r => {
-      const name = r.item.name.toLowerCase();
-      let score = r.score ?? 1;
+  const rescored = results.map(r => {
+    const name = r.item.name.toLowerCase().replace(/-/g, ' ');
+    let finalScore = r.score ?? 1;
 
-      // Prefix boost: a channel whose name starts with the query is almost
-      // certainly what the user wants. The -10 shift is intentionally large
-      // so prefix matches always rank above fuzzy matches regardless of
-      // affinity or other signals applied downstream.
-      if (name.startsWith(q)) {
-        score -= 10;
-      } else if (name.includes(' ' + q)) {
-        // Word-boundary boost: "eng" in "backend eng" is a stronger signal
-        // than "eng" appearing mid-word (e.g. "length").
-        score -= 5;
-      }
+    // Prefix boost: a channel whose name starts with the query is almost
+    // certainly what the user wants. The -10 shift is intentionally large
+    // so prefix matches always rank above fuzzy matches regardless of
+    // affinity or other signals applied downstream.
+    if (name.startsWith(q)) {
+      finalScore -= 10;
+    } else if (name.includes(' ' + q)) {
+      // Word-boundary boost: "eng" in "backend eng" is a stronger signal
+      // than "eng" appearing mid-word (e.g. "length").
+      finalScore -= 5;
+    }
 
-      return { item: r.item, score };
-    })
+    return {
+      item: r.item,
+      score: finalScore,
+    };
+  });
+
+  // Fuse.js bitap requires contiguous characters, so multi-word queries like
+  // "xyne feedback" fail to match "xyne spaces feedback" (extra word breaks
+  // contiguity). Add a token-based AND-contains pass to catch these cases.
+  const fuseMatchedNames = new Set(rescored.map(r => r.item.name));
+  const queryTokens = q.split(/\s+/).filter(Boolean);
+  if (queryTokens.length > 1) {
+    const tokenMatched = channels
+      .filter(c => {
+        if (fuseMatchedNames.has(c.name)) return false; // already included
+        const name = c.name.toLowerCase().replace(/-/g, ' ');
+        return queryTokens.every(t => name.includes(t));
+      })
+      // Score 0 intentionally ranks these between prefix/substring matches (score < 0)
+      // and fuzzy-only matches (score 0.01–0.3): all-tokens-present > fuzzy, but prefix > all-tokens.
+      .map(c => ({ item: c, score: 0 }));
+    rescored.push(...tokenMatched);
+  }
+
+  return rescored
     .sort((a, b) => {
       if (a.score !== b.score) {
         return a.score - b.score; // ascending — lower score = better rank

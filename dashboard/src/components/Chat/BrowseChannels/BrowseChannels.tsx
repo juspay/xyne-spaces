@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import Input from '../../ui/Input';
 import { ChannelVisibility, User } from '@xyne/shared';
-import { useBrowsableChannels } from '../../../hooks/useChannels';
+import { useBrowsableChannels, searchChannels } from '../../../hooks/useChannels';
 import { useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { channelService } from '../../../services/Chat/channelService';
@@ -70,44 +70,43 @@ const BrowseChannels = (): ReactElement => {
     return map;
   }, [users]);
 
-  // Filter channels by the search query, then sort by the selected mode.
+  // Filter and sort channels. When a query is present, use the shared searchChannels
+  // function (fuzzy + hyphen-normalisation) for name matches, then append
+  // description-only matches (sorted alphabetically within that group).
+  // The combined result is then re-sorted by member count if that mode is active.
+  // When no query, apply the selected sort mode directly.
   const filteredChannels = useMemo(() => {
     if (!channels) return [];
 
-    const query = searchQuery.toLowerCase();
+    if (!searchQuery.trim()) {
+      const all = [...channels];
+      if (sortBy === 'memberCount') {
+        return all.sort((a, b) => {
+          const countDiff = (memberCounts[b.id] ?? 0) - (memberCounts[a.id] ?? 0);
+          if (countDiff !== 0) return countDiff;
+          return a.name.localeCompare(b.name);
+        });
+      }
+      return all.sort((a, b) => a.name.localeCompare(b.name));
+    }
 
-    const filtered = query
-      ? channels.filter(channel => {
-          const matchesName = channel.name.toLowerCase().includes(query);
-          const matchesDesc = channel.description?.toLowerCase().includes(query);
-          return matchesName || matchesDesc;
-        })
-      : [...channels];
+    const nameMatches = searchChannels(channels, searchQuery, channels.length);
+    const nameMatchIds = new Set(nameMatches.map(c => c.id));
+    const q = searchQuery.toLowerCase().trim();
+    const descOnlyMatches = channels
+      .filter(c => !nameMatchIds.has(c.id) && c.description?.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const merged = [...nameMatches, ...descOnlyMatches];
 
-    // Member count: most members first, ties broken alphabetically.
     if (sortBy === 'memberCount') {
-      return filtered.sort((a, b) => {
+      return merged.sort((a, b) => {
         const countDiff = (memberCounts[b.id] ?? 0) - (memberCounts[a.id] ?? 0);
         if (countDiff !== 0) return countDiff;
         return a.name.localeCompare(b.name);
       });
     }
 
-    // Alphabetical with an active query: prioritize names starting with the query.
-    if (query) {
-      return filtered.sort((a, b) => {
-        const aStartsWith = a.name.toLowerCase().startsWith(query);
-        const bStartsWith = b.name.toLowerCase().startsWith(query);
-
-        if (aStartsWith && !bStartsWith) return -1;
-        if (!aStartsWith && bStartsWith) return 1;
-
-        return a.name.localeCompare(b.name);
-      });
-    }
-
-    // Alphabetical
-    return filtered.sort((a, b) => a.name.localeCompare(b.name));
+    return merged;
   }, [channels, searchQuery, sortBy, memberCounts]);
 
   const handleSortChange = (mode: SortMode): void => {

@@ -39,13 +39,14 @@ const TYPE_LABELS: Record<SearchResultsFilters['docType'], string> = {
 };
 
 const CHIP_BASE =
-  'rounded-lg h-6 px-2 text-xs font-medium gap-1.5 border-border hover:bg-muted whitespace-nowrap';
+  'rounded-lg h-6 px-2 text-xs font-medium gap-1.5 border-border hover:bg-muted whitespace-nowrap data-[state=open]:ring-0 data-[state=open]:outline-none';
 const CHIP_ACTIVE =
   'border-primary bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground';
 
 const POPOVER_CONTENT = 'z-[60] bg-popover border border-border rounded-lg shadow-md';
 
-const MENU_ITEM = 'flex w-full items-center gap-2 px-3 py-1.5 text-sm rounded text-left';
+const MENU_ITEM =
+  'flex w-full items-center gap-2 px-3 py-1.5 text-sm rounded text-left focus:outline-none';
 
 function ChannelFilterItem({
   channel,
@@ -158,14 +159,18 @@ function useListKeyNav(
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown') {
+      if (e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey)) {
+        // Arrow keys wrap; Tab stops at the last item so focus can escape naturally.
+        if (e.key === 'Tab' && activeIndex >= length - 1) return;
         e.preventDefault();
         setActiveIndex(i => {
           const next = i < length - 1 ? i + 1 : 0;
           scrollActiveIntoView(next);
           return next;
         });
-      } else if (e.key === 'ArrowUp') {
+      } else if (e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey)) {
+        // Shift+Tab stops at the first item so focus can escape backwards.
+        if (e.key === 'Tab' && activeIndex <= 0) return;
         e.preventDefault();
         setActiveIndex(i => {
           const next = i > 0 ? i - 1 : length - 1;

@@ -35,6 +35,8 @@ type ThreadListProps = {
   /** When false, hash deep-link scroll waits until Zero reports the thread query complete (avoids scroll before prepends). */
   isMessagesLoaded?: boolean;
   conversationParticipant?: { lastReadAt?: number | null };
+  /** Scroll to and highlight this specific message on mount. Overrides URL-hash-based scroll. */
+  matchedMessageId?: string | null;
 };
 
 const ThreadList = ({
@@ -53,6 +55,7 @@ const ThreadList = ({
   enableJumpFab = true,
   isMessagesLoaded = true,
   conversationParticipant,
+  matchedMessageId,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
   const { editingMessageId, requestEdit } = useEditContext();
@@ -179,7 +182,7 @@ const ThreadList = ({
     setIsNearTop(true);
     setHasOverflow(false);
     setIsScrolling(false);
-  }, [conversationId, location.key, location.hash, activityNavigationNonce]);
+  }, [conversationId, location.key, location.hash, activityNavigationNonce, matchedMessageId]);
 
   useThreadListInitialScroll({
     scrollContainerRef,
@@ -194,6 +197,7 @@ const ThreadList = ({
     isTrackingHydrated,
     hasAppliedInitialScrollRef,
     setIsNearBottom,
+    matchedMessageId: matchedMessageId ?? null,
   });
   const isThreadsRoute =
     location.pathname.includes('/chat/threads') || location.pathname.includes('/chat/dir/threads');
@@ -462,6 +466,7 @@ const ThreadList = ({
                       isNextActivity={isNextRenderedItemAnActivity}
                       {...(disableAskAI !== undefined && { disableAskAI })}
                       {...(conversation && { conversation })}
+                      highlightMessageId={matchedMessageId ?? null}
                     />
                   </div>
                   {messageIndex === 0 && threadMessages.length > 1 && (
@@ -555,6 +560,7 @@ const ThreadList = ({
                     workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
                     {...(disableAskAI !== undefined && { disableAskAI })}
                     {...(conversation && { conversation })}
+                    highlightMessageId={matchedMessageId ?? null}
                   />
                 </div>
                 {!enableCollapsing &&

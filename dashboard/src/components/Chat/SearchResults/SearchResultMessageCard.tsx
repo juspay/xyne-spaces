@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { getSmartSnippet } from '../RenderMessageWithHTML/searchSnippetRender';
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink, Loader2 } from 'lucide-react';
+import { Home, Loader2 } from 'lucide-react';
 import { ChatBubble } from '../ChatBubble/ChatBubble';
 import ReplyLayoutV2 from '../ReplyLayout/ReplyLayoutV2';
 import { useChannel } from '../../../hooks/useChannels';
@@ -118,15 +118,15 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
     const blocked =
       e.target instanceof HTMLElement ? e.target.closest('a, [data-prevent-thread]') : null;
     if (blocked && blocked !== e.currentTarget) return;
-    if (isMatchRoot) {
+    if (replyCount > 0) {
+      onSelectThread?.({ channelId, conversationId, matchedMessageId });
+    } else {
       onSelectChannelContext?.(
         channelId,
         conversationId,
         conversation?.createdAt,
         matchedMessageId,
       );
-    } else {
-      onSelectThread?.({ channelId, conversationId, matchedMessageId });
     }
   };
 
@@ -134,15 +134,15 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
     if (e.key !== 'Enter' && e.key !== ' ') return;
     if (e.target !== e.currentTarget) return;
     e.preventDefault();
-    if (isMatchRoot) {
+    if (replyCount > 0) {
+      onSelectThread?.({ channelId, conversationId, matchedMessageId });
+    } else {
       onSelectChannelContext?.(
         channelId,
         conversationId,
         conversation?.createdAt,
         matchedMessageId,
       );
-    } else {
-      onSelectThread?.({ channelId, conversationId, matchedMessageId });
     }
   };
 
@@ -171,13 +171,13 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
             e.stopPropagation();
             navigateToMessage();
           }}
-          className='absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-muted text-muted-foreground transition-opacity'
-          title='Jump to message'
-          aria-label='Jump to message'
+          className='absolute top-1 right-2 z-20 opacity-0 group-hover:opacity-100 p-1.5 rounded-md bg-card border border-border shadow-sm text-muted-foreground hover:bg-muted transition-opacity'
+          title='Open in home'
+          aria-label='Open in home'
           data-track-category='SEARCH_RESULTS'
           data-track-name='JUMP_TO_MESSAGE'
         >
-          <ExternalLink size={14} />
+          <Home size={14} />
         </button>
         {!isMessagesLoaded ? (
           <div className='flex justify-center py-6'>

@@ -19,18 +19,21 @@ const utcToIst = (utcString?: string): string => {
 import ThreadMessages from '../ThreadPannel';
 import { UserProfile } from '../../ui/UserProfile/UserProfile';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useAuth } from '../../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import {
   DEFAULT_SEARCH_FILTERS,
   type SearchResultsFilters,
 } from '../../../hooks/useSearchResultsScreen';
 import { DisplaySearchResult } from '../../../types/search';
 import { SearchResultMessageCard } from './SearchResultMessageCard';
+import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
 import { SearchFilterBar } from './SearchFilterBar';
 import { useAllVisibleChannels, useAllChannels } from '../../../hooks/useChannels';
 import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
-import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
+import { useSearchMetrics, filterChannelsBySearchableNames } from '../../../hooks/useSearchMetrics';
+import { useUser, useUsers } from '../../../hooks/useUsers';
+import { getDMSearchableNames, isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import {
   TabType,
   MentionType,
@@ -45,6 +48,7 @@ import { CompareSelectRow } from './compare/CompareSelectRow';
 import { SearchCompareDialog } from './compare/SearchCompareDialog';
 import { hasRankingData } from './compare/rankingFeatures';
 import { TicketPriority } from '@xyne/shared';
+import { isUserDeactivated } from '../../../utils/userDisplayName';
 
 type SidePanelState =
   | { kind: 'thread'; thread: SearchResultsThread }
@@ -73,6 +77,18 @@ type ResultsMention = {
   type: MentionType;
   prefix: 'from:' | 'to:' | 'in:' | 'assignee:' | 'priority:';
 };
+
+// Returns true when any sender/channel/assignee filter is active.
+// Centralised here so adding a new filter type only requires one update.
+function hasActiveFilters(
+  filters: Pick<SearchResultsFilters, 'fromUserIds' | 'inChannelIds' | 'assigneeIds'>,
+): boolean {
+  return (
+    filters.fromUserIds.length > 0 ||
+    filters.inChannelIds.length > 0 ||
+    filters.assigneeIds.length > 0
+  );
+}
 
 // Build the hook's selectedMentions from resolved filter ids. Priority is appended from
 // the URL — it has no results-screen UI, so it's pinned rather than read from `filters`.
@@ -211,13 +227,19 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromParam, fromEmailParam, toEmailParam, inParam, assigneeParam, tabParam]);
 
-  // Sync docType filter → hook active tab
+  // Sync docType filter → hook active tab.
+  // When from: is active with "all" tab, the Vespa from: filter is message-schema-only,
+  // so restrict the hook to messages to get results. The UI still shows "All types".
   useEffect(() => {
     if (filters.docType !== 'channels') {
-      setActiveTab(docTypeToTabType(filters.docType));
+      const effectiveTab =
+        filters.docType === 'all' && filters.fromUserIds.length > 0
+          ? TabType.MESSAGES
+          : docTypeToTabType(filters.docType);
+      setActiveTab(effectiveTab);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.docType]);
+  }, [filters.docType, filters.fromUserIds]);
 
   // Sync includeBotMessages filter → hook
   useEffect(() => {
@@ -255,6 +277,22 @@ const SearchResults = (): ReactElement => {
   const isChannelsMode = filters.docType === 'channels';
   const allChannels = useAllVisibleChannels();
   const allChannelsForNav = useAllChannels();
+  const allUsers = useUsers();
+  const authContext = useAuthContextValues();
+  const currentUserId = authContext.userID;
+
+  const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
+
+  // Build searchableNames for each channel using the canonical getDMSearchableNames
+  // so self-DM handling matches the Cmd-K popup exactly.
+  const channelsWithSearchableNames = useMemo(
+    () =>
+      allChannels.map(channel => ({
+        channel,
+        searchableNames: getDMSearchableNames(channel, currentUserId, usersById),
+      })),
+    [allChannels, currentUserId, usersById],
+  );
 
   // Only explicit in: chips are passed as channel mentions; "only my channels" is
   // applied server-side via the onlyMyChannels flag synced above.
@@ -287,7 +325,11 @@ const SearchResults = (): ReactElement => {
       setFilters(newFilters);
       // Immediately sync tab, member-scope flag, and mentions to hook
       if (newFilters.docType !== 'channels') {
-        setActiveTab(docTypeToTabType(newFilters.docType));
+        const effectiveTab =
+          newFilters.docType === 'all' && newFilters.fromUserIds.length > 0
+            ? TabType.MESSAGES
+            : docTypeToTabType(newFilters.docType);
+        setActiveTab(effectiveTab);
       }
       setOnlyMyChannels(newFilters.onlyMyChannels);
       // priorityFilter re-pinned from the URL (not in newFilters) so toggling another
@@ -308,24 +350,44 @@ const SearchResults = (): ReactElement => {
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
     if (!isChannelsMode && filters.docType !== 'all') return [];
     if (!query.trim()) return [];
-    const q = query.trim().toLowerCase().replace(/^#/, '');
-    return allChannels
-      .filter(c => c.name.toLowerCase().includes(q))
-      .map(c => ({
-        type: 'channel' as const,
-        id: c.id,
-        title: `#${c.name}`,
-        subtitle: '',
-        relevanceScore: 1,
-        metadata: {},
-      }));
-  }, [isChannelsMode, filters.docType, query, allChannels]);
+    const q = query.trim().replace(/^#/, '');
+    return filterChannelsBySearchableNames(channelsWithSearchableNames, q).map(
+      ({ channel: c, searchableNames }) => {
+        const isDm = isDMChannel(c.scopeType);
+        const title = isDm ? searchableNames.join(', ') || c.name : c.name;
+        return {
+          type: 'channel' as const,
+          id: c.id,
+          title,
+          subtitle: '',
+          relevanceScore: 1,
+          metadata: {},
+        };
+      },
+    );
+  }, [isChannelsMode, filters.docType, query, channelsWithSearchableNames]);
 
   const baseResults = useMemo(() => {
     if (isChannelsMode) return localChannelResults;
-    if (filters.docType === 'all') return [...backendResults, ...localChannelResults];
+    if (filters.docType === 'all') {
+      // When a from:/in:/assignee: filter is active, the hook prepends local users to
+      // backendResults even though we're filtering by sender — suppress them so only
+      // message/file/ticket results appear.
+      const filteredBackend = hasActiveFilters(filters)
+        ? backendResults.filter(r => r.type !== 'user')
+        : backendResults;
+      return [...filteredBackend, ...localChannelResults];
+    }
     return backendResults;
-  }, [isChannelsMode, localChannelResults, filters.docType, backendResults]);
+  }, [
+    isChannelsMode,
+    localChannelResults,
+    filters.docType,
+    filters.fromUserIds,
+    filters.inChannelIds,
+    filters.assigneeIds,
+    backendResults,
+  ]);
 
   const results = useMemo(() => {
     if (filters.sortBy === 'relevance' || isChannelsMode) return baseResults;
@@ -381,7 +443,7 @@ const SearchResults = (): ReactElement => {
         channelId,
         conversationId,
         ...(conversationCreatedAt !== undefined && { conversationCreatedAt }),
-        ...(matchedMessageId !== undefined && { matchedMessageId }),
+        matchedMessageId: matchedMessageId ?? null,
       });
     },
     [],
@@ -397,12 +459,23 @@ const SearchResults = (): ReactElement => {
     const ctx = first.searchContext;
     if (!ctx?.channelId || !ctx?.conversationId) return;
     autoOpenedRef.current = true;
-    handleSelectThread({
-      channelId: ctx.channelId,
-      conversationId: ctx.conversationId,
-      matchedMessageId: ctx.messageId ?? null,
-    });
-  }, [results, isMobile, isLoading, handleSelectThread]);
+    // Mirror the click-handler routing: open thread panel for any conversation with
+    // replies (replyCount > 0), channel context for standalone messages.
+    if (ctx.replyCount && ctx.replyCount > 0) {
+      handleSelectThread({
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        matchedMessageId: ctx.messageId ?? null,
+      });
+    } else {
+      handleSelectChannelContext(
+        ctx.channelId,
+        ctx.conversationId,
+        undefined,
+        ctx.messageId ?? null,
+      );
+    }
+  }, [results, isMobile, isLoading, handleSelectThread, handleSelectChannelContext]);
 
   const contextValue = useMemo(
     () => ({
@@ -571,6 +644,60 @@ interface ResultsBodyProps {
   onToggleSelect: (result: DisplaySearchResult) => void;
 }
 
+function UserResultCard({
+  result,
+  onSelectUser,
+}: {
+  result: DisplaySearchResult;
+  onSelectUser: (userId: string) => void;
+}): ReactElement {
+  const user = useUser(result.id);
+  const isDeactivated = isUserDeactivated(user);
+
+  if (!user) {
+    return (
+      <div className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card'>
+        <div className='size-9 rounded-full bg-muted animate-pulse shrink-0' />
+        <div className='min-w-0 flex-1 space-y-1'>
+          <div className='h-3.5 w-32 bg-muted animate-pulse rounded' />
+          <div className='h-3 w-24 bg-muted animate-pulse rounded' />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => onSelectUser(result.id)}
+      className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
+      data-track-category='SEARCH_RESULTS'
+      data-track-name='OPEN_USER'
+    >
+      <Avatar userId={result.id} size='md' showActiveStatus={false} />
+      <div className='min-w-0'>
+        <div className='flex items-center gap-2 min-w-0'>
+          <p
+            className={cn(
+              'text-sm font-medium truncate',
+              isDeactivated ? 'text-muted-foreground' : 'text-foreground',
+            )}
+          >
+            {result.title}
+          </p>
+          {isDeactivated && (
+            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
+              Deactivated
+            </span>
+          )}
+        </div>
+        {result.subtitle && (
+          <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
+        )}
+      </div>
+    </button>
+  );
+}
+
 function ResultsBody({
   query,
   hasActiveFilters,
@@ -627,23 +754,7 @@ function ResultsBody({
         const el = ((): ReactElement | null => {
           // User card — opens profile panel
           if (result.type === 'user') {
-            return (
-              <button
-                key={key}
-                onClick={() => onSelectUser(result.id)}
-                className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
-                data-track-category='SEARCH_RESULTS'
-                data-track-name='OPEN_USER'
-              >
-                <Avatar userId={result.id} size='md' showActiveStatus={false} />
-                <div className='min-w-0'>
-                  <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
-                  {result.subtitle && (
-                    <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
-                  )}
-                </div>
-              </button>
-            );
+            return <UserResultCard key={key} result={result} onSelectUser={onSelectUser} />;
           }
 
           // Channel card
@@ -661,9 +772,13 @@ function ResultsBody({
                   <Hash className='size-4 text-muted-foreground' />
                 </div>
                 <div className='min-w-0'>
-                  <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
+                  <p className='text-sm font-medium text-foreground truncate'>
+                    <RenderMessageWithHTML message={result.title} />
+                  </p>
                   {result.subtitle && result.subtitle !== 'Channel' && (
-                    <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
+                    <p className='text-xs text-muted-foreground truncate'>
+                      <RenderMessageWithHTML message={result.subtitle} />
+                    </p>
                   )}
                 </div>
               </button>
@@ -690,9 +805,15 @@ function ResultsBody({
                   {icon}
                 </div>
                 <div className='min-w-0 flex-1'>
-                  <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
+                  <p className='text-sm font-medium text-foreground truncate'>
+                    <RenderMessageWithHTML message={result.title} />
+                  </p>
                   <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-                    {result.subtitle && <span className='truncate'>{result.subtitle}</span>}
+                    {result.subtitle && (
+                      <span className='truncate'>
+                        <RenderMessageWithHTML message={result.subtitle} />
+                      </span>
+                    )}
                     {result.metadata.timestamp && (
                       <span className='shrink-0 whitespace-nowrap'>
                         {utcToIst(result.metadata.timestamp)}
@@ -719,9 +840,13 @@ function ResultsBody({
                   <Mail className='size-4 text-muted-foreground' />
                 </div>
                 <div className='min-w-0'>
-                  <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
+                  <p className='text-sm font-medium text-foreground truncate'>
+                    <RenderMessageWithHTML message={result.title} />
+                  </p>
                   {result.subtitle && (
-                    <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
+                    <p className='text-xs text-muted-foreground truncate'>
+                      <RenderMessageWithHTML message={result.subtitle} />
+                    </p>
                   )}
                 </div>
               </button>
@@ -851,6 +976,7 @@ function SearchResultsSidePanel({
   onClose: () => void;
 }): ReactElement {
   const { user: currentUser } = useAuth();
+  const navigate = useNavigate();
 
   return (
     <div className='h-full flex flex-col min-h-0 bg-background'>
@@ -866,6 +992,13 @@ function SearchResultsSidePanel({
         <ThreadMessages
           channelId={panel.thread.channelId}
           conversationId={panel.thread.conversationId}
+          matchedMessageId={panel.thread.matchedMessageId ?? null}
+          showChannelLink
+          onChannelLinkClick={() =>
+            void navigate(
+              `/chat/dir/${panel.thread.channelId}#origin=${panel.thread.conversationId}`,
+            )
+          }
           onClose={onClose}
         />
       ) : (

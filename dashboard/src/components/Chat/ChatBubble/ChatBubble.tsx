@@ -129,6 +129,8 @@ interface ChatBubbleProps {
   isPrevActivity?: boolean;
   isNextActivity?: boolean;
   linkedConversationId?: string | null;
+  /** Message ID to highlight when this bubble is rendered in a thread context (e.g. search screen sidebar). */
+  highlightMessageId?: string | null;
   afterTextContent?: React.ReactNode;
 }
 
@@ -155,6 +157,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isPrevActivity = false,
   isNextActivity = false,
   linkedConversationId,
+  highlightMessageId,
   afterTextContent,
 }) => {
   const { user } = useAuthContext();
@@ -206,10 +209,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const highlightedMessageId = extractMessageIdFromHash(location.hash);
 
     let shouldHighlight = false;
-    if (context === 'thread' && highlightedMessageId) {
-      shouldHighlight =
-        message.conversationId === highlightedConversationId &&
-        message.messageId === highlightedMessageId;
+    if (context === 'thread') {
+      if (highlightedMessageId) {
+        // Standard URL-hash navigation (e.g. from popup modal)
+        shouldHighlight =
+          message.conversationId === highlightedConversationId &&
+          message.messageId === highlightedMessageId;
+      } else if (highlightMessageId) {
+        // Prop-only path: search screen sidebar passes the matched message ID explicitly.
+        shouldHighlight = message.messageId === highlightMessageId;
+      }
     } else if (context === 'channel' && highlightedConversationId && conversation !== undefined) {
       shouldHighlight = conversation.conversationId === highlightedConversationId;
     }
@@ -224,6 +233,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     location.key,
     location.hash,
     linkedConversationId,
+    highlightMessageId,
     context,
     message.conversationId,
     message.messageId,
