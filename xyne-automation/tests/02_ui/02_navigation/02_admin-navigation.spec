@@ -28,6 +28,7 @@
 * Ensuring user "admin-1" is logged in
 * ensuring project "project-1" exists in fixture for user "admin-1"
 * navigating via sidebar to "tickets"
+* clicking on "[aria-controls='projects-section']"
 * clicking on text "user:admin-1.projects.project-1.name" in "[data-testid^='project-item-']"
 * waiting for "[data-testid='projects-board-page']" to appear
 
