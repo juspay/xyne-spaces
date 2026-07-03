@@ -3,8 +3,8 @@ import { AnalyticsController } from '../controllers/analyticsController';
 import { MultiPullRequestController } from '../controllers/multiPullRequestController';
 import { authorize } from '../middleware/authorize';
 import { AccessType } from '@prisma/client';
-import { authMiddleware } from '../middleware/auth';
 import { aclMiddleware } from '../middleware/acl';
+import { analyticsAuthMiddleware } from '../middleware/analyticsAuth';
 
 const router = Router();
 const analyticsController = new AnalyticsController();
@@ -12,6 +12,8 @@ const multiPullRequestController = new MultiPullRequestController();
 
 // Apply ANALYTICS authorization to all routes - INDIVIDUAL USER ACCESS ONLY (no group access)
 const analyticsAuth = authorize('ANALYTICS', AccessType.ADMIN, false);
+
+router.use(analyticsAuthMiddleware.requireWorkspaceContext);
 
 // Individual analytics endpoints
 router.get('/overview', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getOverview);
@@ -51,9 +53,6 @@ router.get('/files-shared', aclMiddleware.checkAccess, analyticsAuth, analyticsC
 
 // Messages today endpoint
 router.get('/messages-today', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getMessagesToday);
-
-// Metrics bar consolidated endpoint (Redis cached)
-router.get('/metrics-bar', authMiddleware.authenticate, analyticsController.getMetricsBar);
 
 // Number of tickets endpoint
 router.get('/number-of-tickets', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getNumberOfTickets);

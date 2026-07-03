@@ -3,7 +3,6 @@ import { ReactionRepository } from '../database/repositories/reactionRepository'
 import { MessageRepository } from '../database/repositories/messageRepository';
 
 import { logger } from '../utils/logger';
-import { websocketService } from '../services/websocketService';
 import { redisService } from '../services/redisService';
 import {
   ReactionResponse,
@@ -47,10 +46,6 @@ export class ReactionController {
         userId,
         emojiName: emojiName.trim(),
       });
-
-      // Track user activity using Redis Set - O(1) operation, no DB query
-      websocketService.trackUserActivity(userId)
-        .catch(err => logger.error('Failed to track user activity after reaction:', err));
 
       // Get updated reactions for the message
       const reactions = await reactionRepository.getMessageReactions(messageId, userId);

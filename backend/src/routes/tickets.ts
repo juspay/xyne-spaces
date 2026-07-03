@@ -10,6 +10,7 @@ import { ticketBoardSuggestionSchema } from '../validators/ticketBoardValidator'
 import { ReleaseReportController } from '@/controllers/releaseReportController';
 import { authorize } from '@/middleware/authorize';
 import { AccessType } from '@prisma/client';
+import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
 
 const router = Router();
 const ticketController = new TicketController();
@@ -30,7 +31,7 @@ router.post('/', uploadMultiple, ticketController.createTicket);
 router.patch('/:ticketId', ticketController.updateTicket);
 
 // Workflow metrics for tickets dashboard
-router.get('/workflow-metrics', analyticsController.getWorkflowMetrics);
+router.get('/workflow-metrics', analyticsAuthMiddleware.requireWorkspaceContext, analyticsController.getWorkflowMetrics);
 router.post('/duplicates', validate(ticketDuplicateCheckSchema), ticketController.checkDuplicateTickets);
 router.post('/suggest-board', validate(ticketBoardSuggestionSchema), ticketController.suggestBoard);
 

@@ -4,7 +4,6 @@ import { Call, CallStatus, CallOrigin } from '@prisma/client';
 import { livekitService } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
-import { callCountService } from '@/services/callCountService';
 import { recurringCallService } from '@/services/recurringCallService';
 import { callSideEffectService } from '@/services/callSideEffectService';
 
@@ -194,7 +193,7 @@ export class CallValidationWorker {
   }
 
   private async validateCall(call: Call, roomInfoMap: Map<string, any>): Promise<void> {
-    const { id: callId, externalId, status, startedAt } = call;
+    const { id: callId, externalId, status } = call;
     
     try {
       // Get room info from the pre-fetched map (no API call needed)
@@ -247,25 +246,6 @@ export class CallValidationWorker {
         });
 
         logger.info('[CallValidationWorker] Transcript will be processed when user views the ended call message');
-
-        // Increment call count and add duration only for calls lasting > 60 seconds
-        const callDurationSeconds = (endedAt.getTime() - startedAt.getTime()) / 1000;
-        if (callDurationSeconds > 60) {
-          // Convert duration to minutes (rounded to 1 decimal place)
-          const callDurationMinutes = Math.round((callDurationSeconds / 60) * 10) / 10;
-
-          try {
-            await Promise.all([
-              callCountService.incrementCount(),
-              callCountService.addCallDuration(callDurationMinutes),
-            ]);
-            logger.info(
-              `[CallValidationWorker] Successfully updated metrics for call ${externalId} (duration: ${callDurationSeconds}s / ${callDurationMinutes}m)`,
-            );
-          } catch (err) {
-            logger.error('[CallValidationWorker] Failed to update call metrics for auto-ended call:', err);
-          }
-        }
 
         // Emit analytics events (call_ended + per-participant) for the Calls dashboards
         try {

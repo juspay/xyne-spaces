@@ -16,7 +16,6 @@ import { apiInstance } from '../services/clients/apiClient';
 import { useFallbackHydratedQuery } from '@xyne/shared/hooks';
 import { ReadonlyJSONValue } from '@rocicorp/zero';
 import { websocketService } from '../services/clients/socketClient';
-import { initializeMetrics, cleanupMetrics } from '../services/metricsService';
 import { ZeroConnectionFailureModal } from '../components/ZeroConnectionStatus/ZeroConnectionFailureModal';
 import { DeferredLoader } from '../components/DeferredLoader';
 import axios from 'axios';
@@ -252,17 +251,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
       persistenceSetup.current = true;
     }
   }, [context.userID, schemaVersion, isHydrated]);
-
-  // Initialize metrics once user is authenticated
-  useEffect(() => {
-    if (context.userID && isHydrated) {
-      void initializeMetrics();
-    }
-
-    return () => {
-      cleanupMetrics();
-    };
-  }, [context.userID, isHydrated]);
 
   useEffect(() => {
     const currentState = state.name;

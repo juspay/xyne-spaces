@@ -1178,7 +1178,7 @@ export class EmailService {
       },
     };
 
-    const message = await this.messageRepository.create(messageData, true);
+    const message = await this.messageRepository.create(messageData);
 
     // Update conversation with real initial message ID
     await this.conversationRepository.update(conversation.conversationId, {
@@ -1204,7 +1204,7 @@ export class EmailService {
           }),
         },
       };
-      await this.messageRepository.create(messageDataSys, true);
+      await this.messageRepository.create(messageDataSys);
     }
 
     this.pushVespaJobForMail(email.id, userId, channel.workspaceId).catch(error => {
@@ -1593,7 +1593,7 @@ export class EmailService {
       },
     };
 
-    const message = await this.messageRepository.create(messageData, true);
+    const message = await this.messageRepository.create(messageData);
 
     // Update conversation with real initial message ID
     await this.conversationRepository.update(conversation.conversationId, {
