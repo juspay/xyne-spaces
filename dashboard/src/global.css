@@ -3429,3 +3429,46 @@ img.inline-emoji,
     height: 100%;
   }
 }
+
+/* ============================================================================
+ * RECORDING OVERLAY STYLES
+ * ============================================================================
+*/
+
+/* Container - `cursor` toggles on drag. */
+.rec-overlay-container {
+  left: var(--rec-overlay-x, 0px);
+  bottom: var(--rec-overlay-y, 0px);
+  cursor: default;
+}
+
+.rec-overlay-container.is-dragging {
+  cursor: grabbing;
+}
+
+/* Transcript preview — slide-down animation toggled by .is-open.
+   Transition is provided by Tailwind's `transition-all duration-300`. */
+.rec-overlay-transcript-preview {
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0;
+}
+
+.rec-overlay-transcript-preview.is-open {
+  max-height: 140px;
+  opacity: 1;
+  margin-bottom: 4px;
+}
+
+/* Transcript mask — fade gradient (top transparent → bottom opaque) */
+.rec-overlay-transcript-mask {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.3) 20%, black 55%);
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.3) 20%, black 55%);
+}
+
+/* Waveform bar — height and opacity are per-bar dynamic values set via
+   CSS custom properties from JS. */
+.rec-overlay-waveform-bar {
+  height: var(--rec-wave-height, 6%);
+  opacity: var(--rec-wave-opacity, 0.4);
+}
