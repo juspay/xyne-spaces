@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Plus, Check, Loader2, LogIn, ChevronDown, ChevronRight } from 'lucide-react';
 import { API_BASE_URL } from '../../config';
 import {
+  getLastActiveWorkspaceId,
   getLastActiveWorkspaceName,
   setLastActiveWorkspaceName,
   setLastActiveWorkspaceId,
@@ -106,10 +107,15 @@ export const WorkspaceSwitcher: React.FC = () => {
     }
   };
 
-  // On mount: if name isn't cached yet, do a one-time silent fetch to populate it.
-  // After first load the name lives in localStorage and no API call is needed.
+  // Force fetch when the URL's workspaceId no longer matches the cached one —
+  // handles external redirects (e.g. cross-workspace notification click) that
+  // change the URL without going through the switcher's own update path.
   useEffect(() => {
-    if (localWorkspaceName || !workspaceId) return;
+    if (!workspaceId) return;
+    const email = localStorage.getItem('user_email');
+    const cachedId = email ? getLastActiveWorkspaceId(email) : null;
+    const idMismatch = !!cachedId && cachedId !== workspaceId;
+    if (localWorkspaceName && !idMismatch) return;
     void (async () => {
       try {
         const res = await axios.get<WorkspacesResponse>(`${API_BASE_URL}/auth/workspaces`, {
@@ -118,9 +124,9 @@ export const WorkspaceSwitcher: React.FC = () => {
         const match = res.data.workspaces.find(w => w.id === workspaceId);
         if (match) {
           setLocalWorkspaceName(match.name);
-          const email = localStorage.getItem('user_email');
           if (email) {
             setLastActiveWorkspaceName(email, match.name);
+            setLastActiveWorkspaceId(email, match.id);
           }
           setWorkspaces(res.data.workspaces);
         }

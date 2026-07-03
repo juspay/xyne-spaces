@@ -1,8 +1,11 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
+import axios from 'axios';
 import { websocketService } from '../../services/clients/socketClient';
 import { toast } from 'sonner';
 import { useAuthContext } from '../../providers/AuthProvider';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
+import { API_BASE_URL } from '../../config';
+import { queryClient } from '../../services/clients/queryClient';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useZero } from '../../hooks/useZero';
 import { callActor } from '../../machines/callMachine';
@@ -39,6 +42,9 @@ interface NotificationData {
     title: string;
     message: string;
     actionUrl?: string;
+    // Present only on cross-workspace broadcast from the backend.
+    workspaceId?: string;
+    workspaceName?: string;
     data?: {
       channelId?: string;
       conversationId?: string;
@@ -60,8 +66,20 @@ interface NotificationData {
   timestamp: string;
 }
 
+// Router is /:workspaceId/... so cross-workspace deep links need the prefix.
+const withWorkspacePrefix = (url: string, workspaceId?: string): string => {
+  if (!workspaceId) return url;
+  if (!url.startsWith('/')) return url;
+  if (url.startsWith(`/${workspaceId}/`) || url === `/${workspaceId}`) return url;
+  return `/${workspaceId}${url}`;
+};
+
 const buildChatActionUrl = (notification: NotificationData['notification']): string | undefined => {
-  if (notification.actionUrl) return notification.actionUrl;
+  const workspaceId = notification.workspaceId;
+
+  if (notification.actionUrl) {
+    return withWorkspacePrefix(notification.actionUrl, workspaceId);
+  }
 
   const channelId = notification.data?.channelId;
   const conversationId = notification.data?.conversationId;
@@ -70,26 +88,62 @@ const buildChatActionUrl = (notification: NotificationData['notification']): str
   const routeBase = isDirectMessage ? `/chat/dm/${channelId}` : `/chat/${channelId}`;
 
   if (!channelId) return undefined;
+  let path: string;
   if (conversationId && messageId) {
     if (isDirectMessage) {
-      return `${routeBase}#origin=${conversationId}&messageId=${messageId}`;
+      path = `${routeBase}#origin=${conversationId}&messageId=${messageId}`;
+    } else {
+      path = `${routeBase}/${conversationId}?focusThread=1#origin=${conversationId}&messageId=${messageId}`;
     }
-    return `${routeBase}/${conversationId}?focusThread=1#origin=${conversationId}&messageId=${messageId}`;
+  } else if (conversationId) {
+    path = `${routeBase}#origin=${conversationId}`;
+  } else {
+    path = routeBase;
   }
-  if (conversationId) {
-    return `${routeBase}#origin=${conversationId}`;
-  }
-
-  return routeBase;
+  return withWorkspacePrefix(path, workspaceId);
 };
 
 export const NotificationHandler: React.FC = () => {
   const { user } = useAuthContext();
   const navigate = useNavigate();
+  const { workspaceId: activeWorkspaceId } = useParams<{ workspaceId?: string }>();
+  const activeWorkspaceIdRef = useRef<string | undefined>(activeWorkspaceId);
+  useEffect(() => {
+    activeWorkspaceIdRef.current = activeWorkspaceId;
+  }, [activeWorkspaceId]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
   const [suppressNativeToasts, setSuppressNativeToasts] = useState<boolean>(() =>
     reactNativeBridge.isAvailable(),
+  );
+
+  // Cross-workspace clicks: switch-workspace + hard reload (flips session cookie).
+  // Same-workspace clicks stay in the SPA.
+  const handleNotificationClick = useCallback(
+    async (actionUrl: string | undefined, targetWorkspaceId: string | undefined): Promise<void> => {
+      const resolvedUrl = actionUrl || (targetWorkspaceId ? `/${targetWorkspaceId}/chat` : '/chat');
+      const currentWorkspaceId = activeWorkspaceIdRef.current;
+
+      if (targetWorkspaceId && targetWorkspaceId !== currentWorkspaceId) {
+        try {
+          await axios.post(
+            `${API_BASE_URL}/auth/switch-workspace`,
+            { workspaceId: targetWorkspaceId },
+            { withCredentials: true },
+          );
+          queryClient.clear();
+          window.location.href = resolvedUrl;
+          return;
+        } catch (error) {
+          console.error('[NotificationHandler] Workspace switch failed:', error);
+          toast.error('Failed to switch workspace. Please try again.');
+          return; // Do not navigate — session cookie was not switched.
+        }
+      }
+
+      void navigate(resolvedUrl);
+    },
+    [navigate],
   );
 
   const handleNotification = useCallback(
@@ -120,8 +174,18 @@ export const NotificationHandler: React.FC = () => {
               : `/redirected?type=canvas&canvasId=${encodeURIComponent(data.notification.data.canvasId)}`
             : undefined;
         const fallbackChatActionUrl = buildChatActionUrl(data.notification);
-        const resolvedActionUrl =
+        const notificationWorkspaceId = data.notification.workspaceId;
+        const resolvedRawActionUrl =
           data.notification.actionUrl || canvasRedirectUrl || fallbackChatActionUrl;
+        const resolvedActionUrl = resolvedRawActionUrl
+          ? withWorkspacePrefix(resolvedRawActionUrl, notificationWorkspaceId)
+          : undefined;
+
+        // Always show workspace at the top when available, matching Slack.
+        const bannerTitle = data.notification.workspaceName || data.notification.title;
+        const bannerSubtitle = data.notification.workspaceName
+          ? data.notification.title
+          : undefined;
 
         if (
           isElectron &&
@@ -130,9 +194,13 @@ export const NotificationHandler: React.FC = () => {
         ) {
           playNotificationSound();
           window.electronAPI.showNotification({
-            title: data.notification.title,
+            title: bannerTitle,
+            ...(bannerSubtitle && { subtitle: bannerSubtitle }),
             body: data.notification.message,
-            actionUrl: resolvedActionUrl || '/chat',
+            actionUrl:
+              resolvedActionUrl ||
+              (notificationWorkspaceId ? `/${notificationWorkspaceId}/chat` : '/chat'),
+            ...(notificationWorkspaceId && { workspaceId: notificationWorkspaceId }),
           });
         } else if (!(reactNativeBridge.isAvailable() && suppressNativeToasts)) {
           playNotificationSound();
@@ -141,23 +209,18 @@ export const NotificationHandler: React.FC = () => {
           const notificationType =
             data.notification.metadata?.notificationType || data.notification.type;
           const toastFn = getToastFn(notificationType);
-          toastFn(data.notification.title, {
-            description: data.notification.message,
-            action: resolvedActionUrl
-              ? {
-                  label: 'View',
-                  onClick: (): void => {
-                    if (resolvedActionUrl) {
-                      void navigate(resolvedActionUrl);
-                    }
-                  },
-                }
-              : {
-                  label: 'View',
-                  onClick: (): void => {
-                    void navigate('/chat');
-                  },
-                },
+          // Toast has no subtitle field; fold sender into the description.
+          const toastDescription = bannerSubtitle
+            ? `${bannerSubtitle}\n${data.notification.message}`
+            : data.notification.message;
+          toastFn(bannerTitle, {
+            description: toastDescription,
+            action: {
+              label: 'View',
+              onClick: (): void => {
+                void handleNotificationClick(resolvedActionUrl, notificationWorkspaceId);
+              },
+            },
             duration: 5000,
           });
         }
@@ -173,7 +236,7 @@ export const NotificationHandler: React.FC = () => {
         console.error('Error handling notification:', error);
       }
     },
-    [navigate, isElectron, suppressNativeToasts],
+    [navigate, isElectron, suppressNativeToasts, handleNotificationClick],
   );
 
   const handleNotificationAckConfirmed = useCallback((): void => {}, []);
@@ -357,15 +420,15 @@ export const NotificationHandler: React.FC = () => {
 
   useEffect(() => {
     if (isElectron && window.electronAPI && typeof window.electronAPI.onNavigateTo === 'function') {
-      const handleNavigate = (url: string): void => {
-        void navigate(url);
+      const handleNavigate = (url: string, workspaceId?: string): void => {
+        void handleNotificationClick(url, workspaceId);
       };
 
       const cleanup = window.electronAPI.onNavigateTo(handleNavigate);
       return cleanup;
     }
     return undefined;
-  }, [navigate, isElectron]);
+  }, [isElectron, handleNotificationClick]);
 
   useEffect(() => {
     const meetingDetector = window.electronAPI?.meetingDetector;

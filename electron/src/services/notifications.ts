@@ -4,7 +4,9 @@ import log from 'electron-log/main';
 export interface NotificationData {
   title: string;
   body: string;
+  subtitle?: string;
   actionUrl?: string;
+  workspaceId?: string;
 }
 
 export interface CallNotificationData {
@@ -28,6 +30,7 @@ export function showNotification(data: NotificationData, mainWindow: BrowserWind
   try {
     const notification = new Notification({
       title: data.title,
+      subtitle: data.subtitle,
       body: data.body,
       silent: true,
       urgency: 'critical',
@@ -47,7 +50,7 @@ export function showNotification(data: NotificationData, mainWindow: BrowserWind
         mainWindow.show();
         mainWindow.focus();
         if (data.actionUrl) {
-          mainWindow.webContents.send('navigate-to', data.actionUrl);
+          mainWindow.webContents.send('navigate-to', data.actionUrl, data.workspaceId);
         }
       }
     });

@@ -17,12 +17,16 @@ import { type NotificationData } from './notificationService';
 import { NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
+import { repositories } from '@/database/repositories';
 
 
 interface AuthenticatedSocket extends Socket {
   userId: string;
   userEmail: string;
   userName: string;
+  orgMemberId?: string;
+  workspaceId?: string;
+  workspaceName?: string;
 }
 
 interface JoinSessionData {
@@ -57,6 +61,9 @@ class WebSocketService {
 
   // Track user event subscriptions
   private userEventSubscriptions = new Map<string, boolean>(); // userId -> hasSubscription
+
+  private orgMemberEventSubscriptions = new Map<string, boolean>(); // orgMemberId -> hasSubscription
+  private orgMemberSocketIds = new Map<string, Set<string>>(); // orgMemberId -> Set<socketId>
 
   // Track workflow room membership for Redis subscription cleanup
   private workflowRoomSubscribers = new Map<string, Set<string>>(); // executionId -> Set<socketId>
@@ -241,6 +248,28 @@ class WebSocketService {
 
     // Subscribe to user-specific events (only once per user across all their connections)
     await this.setupUserEventSubscription(userId);
+
+    // Register for cross-workspace broadcast
+    try {
+      const userWithWorkspace = await repositories.users.findByIdWithWorkspace(userId);
+      if (userWithWorkspace?.orgMemberId) {
+        socket.orgMemberId = userWithWorkspace.orgMemberId;
+        socket.workspaceId = userWithWorkspace.workspaceId;
+        socket.workspaceName = userWithWorkspace.workspace?.name;
+
+        await redisService.addOrgMemberConnection(userWithWorkspace.orgMemberId, socket.id);
+        await this.setupOrgMemberEventSubscription(userWithWorkspace.orgMemberId);
+
+        if (!this.orgMemberSocketIds.has(userWithWorkspace.orgMemberId)) {
+          this.orgMemberSocketIds.set(userWithWorkspace.orgMemberId, new Set());
+        }
+        this.orgMemberSocketIds.get(userWithWorkspace.orgMemberId)!.add(socket.id);
+      } else {
+        logger.warn(`🔌 [CONNECT] User ${userId} has no orgMemberId; skipping cross-workspace broadcast registration`);
+      }
+    } catch (error) {
+      logger.error(`🔌 [CONNECT] Failed to register orgMember mapping for user ${userId}:`, error);
+    }
 
       // Set user status to ONLINE automatically on connect (unless status is AWAY)
       try {
@@ -656,6 +685,23 @@ class WebSocketService {
         }
       }
 
+      // Unsubscribe from the org-member Redis channel when this pod has no
+      // remaining sockets for the org member.
+      if (socket.orgMemberId) {
+        await redisService.removeOrgMemberConnection(socket.orgMemberId, socket.id);
+
+        const socketIds = this.orgMemberSocketIds.get(socket.orgMemberId);
+        if (socketIds) {
+          socketIds.delete(socket.id);
+          if (socketIds.size === 0) {
+            this.orgMemberSocketIds.delete(socket.orgMemberId);
+            await redisService.unsubscribeFromOrgMemberEvents(socket.orgMemberId);
+            this.orgMemberEventSubscriptions.delete(socket.orgMemberId);
+            logger.info(`🔌 [DISCONNECT] Unsubscribed org-member ${socket.orgMemberId} — no local sockets remain on this pod`);
+          }
+        }
+      }
+
       // Check if user has other active connections
       const remainingConnections = await redisService.getUserConnections(userId);
       
@@ -866,6 +912,58 @@ class WebSocketService {
       logger.info(`✅ [USER-EVENTS] Successfully subscribed to events for user: ${userId}`);
     } catch (error) {
       logger.error(`❌ [USER-EVENTS] Error setting up user event subscription for ${userId}:`, error);
+    }
+  }
+
+  private async setupOrgMemberEventSubscription(orgMemberId: string): Promise<void> {
+    if (this.orgMemberEventSubscriptions.has(orgMemberId)) return;
+
+    try {
+      await redisService.subscribeToOrgMemberEvents(orgMemberId, (event: any) => {
+        this.handleOrgMemberEvent(orgMemberId, event);
+      });
+      this.orgMemberEventSubscriptions.set(orgMemberId, true);
+      logger.info(`✅ [ORGMEMBER-EVENTS] Subscribed to events for orgMember: ${orgMemberId}`);
+    } catch (error) {
+      logger.error(`❌ [ORGMEMBER-EVENTS] Failed subscribing orgMember ${orgMemberId}:`, error);
+    }
+  }
+
+  // Emits the cross-workspace copy. Same-workspace sockets are skipped since
+  // handleUserEvent already delivered to them, preventing duplicate banners.
+  private async handleOrgMemberEvent(orgMemberId: string, event: any): Promise<void> {
+    try {
+      if (event.type !== 'notification_received') return;
+
+      const eventWorkspaceId: string | undefined = event.data?.workspaceId;
+      if (!eventWorkspaceId) {
+        logger.warn(`[ORGMEMBER-EVENT] Missing workspaceId on event for orgMember ${orgMemberId}; dropping`);
+        return;
+      }
+
+      const sourceUserId: string | undefined = event.data?.sourceUserId;
+      if (!sourceUserId) {
+        logger.warn(`[ORGMEMBER-EVENT] Missing sourceUserId on event for orgMember ${orgMemberId}; dropping`);
+        return;
+      }
+
+      const socketIds = await redisService.getOrgMemberConnections(orgMemberId);
+      if (socketIds.length === 0) return;
+
+      for (const socketId of socketIds) {
+        const socket = this.io?.sockets.sockets.get(socketId) as AuthenticatedSocket | undefined;
+        if (!socket) continue;
+
+        // Enforce strict orgMemberId match — guards against cross-tenant leakage.
+        if (socket.orgMemberId !== orgMemberId) continue;
+
+        // Skip if workspace is unknown or matches source
+        if (!socket.workspaceId || socket.workspaceId === eventWorkspaceId) continue;
+
+        await this.handleNotificationEvent(sourceUserId, socketId, event);
+      }
+    } catch (error) {
+      logger.error(`[ORGMEMBER-EVENT] Error handling event for orgMember ${orgMemberId}:`, error);
     }
   }
 

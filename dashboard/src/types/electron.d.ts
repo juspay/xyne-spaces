@@ -27,7 +27,13 @@ export interface ElectronAPI {
   clearAllCookies: () => void;
   syncXyneCookiesToBrowserPanel?: (url: string) => Promise<void>;
   setBadgeCount: (count: number) => void;
-  showNotification: (data: { title: string; body: string; actionUrl?: string }) => void;
+  showNotification: (data: {
+    title: string;
+    body: string;
+    subtitle?: string;
+    actionUrl?: string;
+    workspaceId?: string;
+  }) => void;
   showCallNotification: (data: {
     callId: string;
     callerName: string;
@@ -40,7 +46,7 @@ export interface ElectronAPI {
   onCallAction: (
     callback: (data: { callId: string; action: 'accept' | 'reject' }) => void,
   ) => () => void;
-  onNavigateTo: (callback: (url: string) => void) => () => void;
+  onNavigateTo: (callback: (url: string, workspaceId?: string) => void) => () => void;
   onBrowserNewTab: (callback: () => void) => () => void;
   onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
