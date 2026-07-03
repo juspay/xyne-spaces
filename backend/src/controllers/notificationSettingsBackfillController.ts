@@ -25,9 +25,7 @@ type ChannelUserStatusRow = {
 /**
  * Backfill controller for XYNE-13792 notification settings migration.
  *
- * Converts deprecated THREADS_ONLY values (old "Default" option in the 3-choice
- * picker) to NULL so channels inherit the new global defaults (MENTIONS_ONLY +
- * threadReplyNotificationsEnabled=true).
+ * Converts legacy 'ALL' notification levels to NULL so channels inherit the global defaults.
  */
 export class NotificationSettingsBackfillController {
   private static sleep(ms: number): Promise<void> {
@@ -57,8 +55,8 @@ export class NotificationSettingsBackfillController {
         where: {
           isDeleted: false,
           OR: [
-            { desktopNotificationLevel: 'THREADS_ONLY' },
-            { mobileNotificationLevel: 'THREADS_ONLY' },
+            { desktopNotificationLevel: { in: ['ALL', 'THREADS_ONLY'] } },
+            { mobileNotificationLevel: { in: ['ALL', 'THREADS_ONLY'] } },
           ],
         },
         select: {
@@ -76,10 +74,10 @@ export class NotificationSettingsBackfillController {
       for (const row of rows) {
         summary.processed += 1;
 
-        const hasThreadOnlyDesktop = row.desktopNotificationLevel === 'THREADS_ONLY';
-        const hasThreadOnlyMobile = row.mobileNotificationLevel === 'THREADS_ONLY';
+        const hasTargetDesktop = row.desktopNotificationLevel === 'ALL' || row.desktopNotificationLevel === 'THREADS_ONLY';
+        const hasTargetMobile = row.mobileNotificationLevel === 'ALL' || row.mobileNotificationLevel === 'THREADS_ONLY';
 
-        if (!hasThreadOnlyDesktop && !hasThreadOnlyMobile) {
+        if (!hasTargetDesktop && !hasTargetMobile) {
           summary.skipped += 1;
           continue;
         }
@@ -89,11 +87,12 @@ export class NotificationSettingsBackfillController {
             await db.channelUserStatus.update({
               where: { id: row.id },
               data: {
-                ...(hasThreadOnlyDesktop && { desktopNotificationLevel: null }),
-                ...(hasThreadOnlyMobile && { mobileNotificationLevel: null }),
+                ...(hasTargetDesktop && { desktopNotificationLevel: null }),
+                ...(hasTargetMobile && { mobileNotificationLevel: null }),
               },
             });
           }
+
           summary.updated += 1;
         } catch (error) {
           summary.errors += 1;
