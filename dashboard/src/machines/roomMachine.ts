@@ -945,7 +945,7 @@ export const roomMachine = setup({
         }
 
         const room = new Room({
-          adaptiveStream: false, // Disable adaptive streaming for consistent screen share quality
+          adaptiveStream: true,
           dynacast: true,
           videoCaptureDefaults: {
             resolution: VideoPresets.h2160.resolution,
