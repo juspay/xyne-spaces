@@ -7583,7 +7583,7 @@ export const mutators = defineMutators({
             globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
-            notificationKeywords: [],
+            notificationKeywords: '[]',
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7617,7 +7617,7 @@ export const mutators = defineMutators({
             globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
-            notificationKeywords: [],
+            notificationKeywords: '[]',
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7651,7 +7651,7 @@ export const mutators = defineMutators({
             globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
-            notificationKeywords: [],
+            notificationKeywords: '[]',
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7702,7 +7702,7 @@ export const mutators = defineMutators({
             globalMobileNotificationLevel: globalMobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY,
             threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
             channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
-            notificationKeywords: [],
+            notificationKeywords: '[]',
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7716,7 +7716,7 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { id, keywords, timestamp } }) => {
-        const notificationKeywords = normalizeNotificationKeywords(keywords);
+        const notificationKeywords = JSON.stringify(normalizeNotificationKeywords(keywords));
         const existing = await tx.run(
           zql.user_preferences.where('userId', ctx.userID).one(),
         );

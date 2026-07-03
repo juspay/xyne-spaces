@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { NotificationLevel, NotificationType } from '@prisma/client';
 import { logger } from '@/utils/logger';
+import { parseNotificationKeywords } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -117,17 +118,18 @@ export async function prefetchFilterData(
   return {
     channelStatuses: new Map(statuses.map(({ userId, ...rest }) => [userId, rest])),
     presences:       new Map(presences.map(p => [p.userId, p.notificationsPausedUntil])),
-    // notificationKeywords is a JSON column (string[] | null at rest); coerce to
+    // notificationKeywords is stringified JSON at rest (TEXT column); parse to
     // string[] | undefined so downstream keyword matching stays typed and safe.
-    preferences:     new Map(prefs.map(({ userId, notificationKeywords, ...rest }) => [
-      userId,
-      {
-        ...rest,
-        notificationKeywords: Array.isArray(notificationKeywords)
-          ? (notificationKeywords as string[])
-          : undefined,
-      },
-    ])),
+    preferences:     new Map(prefs.map(({ userId, notificationKeywords, ...rest }): [string, UserPreferenceRow] => {
+      const parsed = parseNotificationKeywords(notificationKeywords);
+      return [
+        userId,
+        {
+          ...rest,
+          notificationKeywords: parsed.length > 0 ? parsed : undefined,
+        },
+      ];
+    })),
   };
 }
 

@@ -12458,7 +12458,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
-              notificationKeywords: [],
+              notificationKeywords: '[]',
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -12492,7 +12492,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
-              notificationKeywords: [],
+              notificationKeywords: '[]',
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -12526,7 +12526,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
               threadReplyNotificationsEnabled: true,
               channelWideMentionsEnabled: true,
-              notificationKeywords: [],
+              notificationKeywords: '[]',
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -12576,7 +12576,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               globalMobileNotificationLevel: (globalMobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY) as NotificationLevel,
               threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
               channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
-              notificationKeywords: [],
+              notificationKeywords: '[]',
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -12590,7 +12590,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
         }),
         async ({ tx, args: { id, keywords, timestamp } }) => {
-          const notificationKeywords = normalizeNotificationKeywords(keywords);
+          const notificationKeywords = JSON.stringify(normalizeNotificationKeywords(keywords));
           const existing = await tx.run(
             zql.user_preferences.where('userId', authData.sub).one(),
           );

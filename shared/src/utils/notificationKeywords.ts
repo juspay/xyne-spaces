@@ -40,3 +40,23 @@ export function normalizeNotificationKeywords(raw: string[]): string[] {
 
   return normalized;
 }
+
+/**
+ * Parse the stored stringified-JSON keyword list back into a string[].
+ * The column is TEXT at rest (stringified JSON array); this is the single
+ * place that knows that, so read sites stay agnostic of the storage format.
+ * Malformed or non-array values parse to [] rather than throwing.
+ */
+export function parseNotificationKeywords(
+  value: string | null | undefined,
+): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((k): k is string => typeof k === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
