@@ -967,7 +967,7 @@ export const authMachine = createMachine(
         const autoLoginWorkspace = urlParams.get('autoLoginWorkspace');
         const userExistsButRemoved = urlParams.get('userExistsButRemoved') === 'true';
 
-        window.history.replaceState({}, document.title, window.location.pathname);
+        window.history.replaceState(window.history.state, document.title, window.location.pathname);
 
         if (error) {
           return Promise.reject(new Error(`Authentication failed: ${errorMessage || error}`));

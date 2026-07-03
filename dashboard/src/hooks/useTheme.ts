@@ -38,7 +38,7 @@ export const useTheme = (): { theme: Theme; changeTheme: (newTheme: Theme) => vo
     const url = new URL(window.location.href);
     if (url.searchParams.has(THEME_QUERY_PARAM)) {
       url.searchParams.delete(THEME_QUERY_PARAM);
-      window.history.replaceState({}, '', url.toString());
+      window.history.replaceState(window.history.state, '', url.toString());
     }
   }, []);
 

@@ -50,7 +50,7 @@ function writeUrlAgent(slug: string | null): void {
   } else {
     url.searchParams.delete('agent');
   }
-  window.history.replaceState({}, '', url.toString());
+  window.history.replaceState(window.history.state, '', url.toString());
 }
 
 // ── Module-level store ──────────────────────────────────────────────────────
