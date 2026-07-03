@@ -2275,7 +2275,15 @@ export function AskAIDebugPanel({
               selectedSessionId === null &&
               (selectedTurnIndex === null || selectedTurnLive) &&
               (() => {
-                const liveHandedOff = Boolean(bundle && bundleHasCurrentRun);
+                // Never let a stale prior-turn bundle hide an actively-streaming
+                // new run: while the current turn streams live events, force the
+                // handoff off so the live overlay stays visible on every turn
+                // (the prior bundle survives the turn boundary and the
+                // bundleHasCurrentRun reset is deferred/racy). Reverts to the
+                // persisted handoff once the run ends.
+                const liveHandedOff = Boolean(
+                  bundle && bundleHasCurrentRun && !(running && liveEvents.length > 0),
+                );
                 return (
                   <div
                     className={`transition-all duration-300 ease-out ${liveHandedOff ? 'pointer-events-none opacity-0 -translate-y-1' : 'opacity-100 translate-y-0'}`}

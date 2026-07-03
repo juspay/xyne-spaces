@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
      VespaChatMessageDocument,
      VespaTicketDocument,
      VespaChatContainerDocument,
+     VespaUserDocument,
      importedChannelFields,
      User,
      Channel,
@@ -39,6 +40,15 @@ import { PrismaClient } from '@prisma/client';
        replyCount?: number;
        senderId?: string;
        senderName?: string;
+       senderEmail?: string;
+       userId?: string;
+       email?: string;
+       status?: string;
+       memberCount?: number;
+       closedBy?: string;
+       closedByName?: string;
+       boardName?: string;
+       projectName?: string;
        ticketId?: string;
        ticketStatus?: string;
        boardId?: string;
@@ -347,6 +357,15 @@ import { PrismaClient } from '@prisma/client';
          result = transformMail(hit, doc as VespaMailDocument, mailMap);
          break;
 
+       case 'user':
+         result = transformUser(hit, doc as unknown as VespaUserDocument);
+         break;
+
+       case 'channel':
+       case 'chat_container':
+         result = transformChannel(hit, doc as unknown as VespaChatContainerDocument);
+         break;
+
 
        default:
          // Fallback for unknown types - log for debugging
@@ -452,10 +471,11 @@ import { PrismaClient } from '@prisma/client';
          replyCount: doc.replyCount || 0,
          senderId: doc.userId,
          senderName: doc.username,
+         senderEmail: doc.userEmail,
        },
      };
    }
-   
+
    /**
     * Transform file document (non-collection files)
     */
@@ -499,6 +519,8 @@ import { PrismaClient } from '@prisma/client';
          messageId: doc.messageId,
          ticketId: doc.ticketId,
          callType: doc.callType,
+         fileSize: doc.fileSize,
+         mimeType: doc.mimeType,
        },
      };
    }
@@ -628,21 +650,28 @@ function transformCollection(
        metadata: {
          timestamp: timestamp || 'N/A',
          status: doc.status,
+         // Vespa denormalizes the channel name onto the ticket doc; surfacing it
+         // lets formatSearchResult print "#channel" for ticket hits.
+         channelName: doc.channelName,
        },
        searchContext: {
          ticketId: doc.docId,
          ticketStatus: doc.status,
          channelId: doc.channelId,
          boardId: doc.boardId,
+         boardName: doc.boardName,
          createdBy: doc.createdBy,
-         creatorName: creatorName,
+         creatorName: creatorName !== 'Unknown Creator' ? creatorName : (doc.createdByName || creatorName),
          assignedTo: doc.assignedTo,
-         assigneeName: assigneeName || undefined,
+         assigneeName: assigneeName || doc.assignedToName || undefined,
+         closedBy: doc.closedBy,
+         closedByName: doc.closedByName || undefined,
          conversationId: doc.convId,
          xyneId: doc.xyneId,
          priority: doc.priority,
          stageName: doc.stage,
          projectId: doc.projectRef,
+         projectName: doc.projectName,
          createdAtTimestamp: doc.createdAtTimestamp,
          ticketType: doc.ticketType,
          userGroupId: doc.userGroupId,
@@ -683,6 +712,8 @@ function transformCollection(
      const rawFrom = doc.from || '';
      const nameMatch = rawFrom.match(/^\s*"?([^"<]*?)"?\s*<[^>]+>\s*$/);
      const senderName = (nameMatch?.[1]?.trim() || rawFrom).replace(/^"|"$/g, '');
+     const emailMatch = rawFrom.match(/<([^>]+)>/);
+     const senderEmail = (emailMatch?.[1] || (rawFrom.includes('@') ? rawFrom.trim() : '')).trim() || undefined;
 
      const recipientCount =
        (doc.to?.length ?? 0) + (doc.cc?.length ?? 0) + (doc.bcc?.length ?? 0);
@@ -709,6 +740,7 @@ function transformCollection(
          channelId: link?.channelId,
          channelTitle: 'Desk',
          senderName,
+         senderEmail,
          recipientCount,
          subApp: 'DESK',
        },
@@ -716,7 +748,77 @@ function transformCollection(
    }
 
    /**
-    * Transform channel document
+    * Transform user (people-directory) document. Without this case, user hits
+    * fell to the default branch and rendered as "Unknown Document — Type: user"
+    * with the raw record JSON-dumped into the snippet.
     */
+   function transformUser(
+     hit: VespaSearchHit,
+     doc: VespaUserDocument & { docId: string },
+   ): TransformedSearchResult {
+     let timestamp = '';
+     try {
+       if (doc.createdAt) {
+         const date = new Date(doc.createdAt);
+         if (!isNaN(date.getTime())) timestamp = formatTimestamp(date.toISOString());
+       }
+     } catch { /* leave blank */ }
+     return {
+       id: doc.docId,
+       type: 'user',
+       title: doc.name || doc.email || 'Unknown User',
+       subtitle: doc.email || '',
+       context: doc.orgName || '',
+       relevanceScore: hit.relevance,
+       avatar: doc.photoLink || doc.docId,
+       metadata: {
+         timestamp: timestamp || 'N/A',
+         status: doc.status ? String(doc.status) : undefined,
+       },
+       searchContext: {
+         userId: doc.docId,
+         // Also expose as senderId so the agent can drop it straight into
+         // spaces-search from=<id> or a spaces-messages sender filter.
+         senderId: doc.docId,
+         email: doc.email,
+         status: doc.status ? String(doc.status) : undefined,
+         createdAtTimestamp: doc.createdAt,
+       },
+     };
+   }
 
-   
+   /**
+    * Transform channel (chat_container) document. Same class of fix as
+    * transformUser — channel hits also fell to the JSON-dump default.
+    */
+   function transformChannel(
+     hit: VespaSearchHit,
+     doc: VespaChatContainerDocument & { docId: string },
+   ): TransformedSearchResult {
+     let timestamp = '';
+     try {
+       if (doc.createdAt) {
+         const date = new Date(doc.createdAt);
+         if (!isNaN(date.getTime())) timestamp = formatTimestamp(date.toISOString());
+       }
+     } catch { /* leave blank */ }
+     return {
+       id: doc.docId,
+       type: 'channel',
+       title: `#${doc.channelName || 'Unknown Channel'}`,
+       subtitle: doc.description || doc.topic || '',
+       context: doc.description || doc.topic || '',
+       relevanceScore: hit.relevance,
+       metadata: {
+         timestamp: timestamp || 'N/A',
+         channelName: doc.channelName,
+       },
+       searchContext: {
+         channelId: doc.docId,
+         channelTitle: doc.channelName,
+         scopeType: doc.scopeType,
+         memberCount: doc.memberCount,
+       },
+     };
+   }
+

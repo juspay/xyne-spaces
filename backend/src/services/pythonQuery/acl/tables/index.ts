@@ -53,6 +53,7 @@ export { FormFieldsACL } from './form-fields-acl'
 export { FormEntityValuesACL } from './form-entity-values-acl'
 export { WorkspacesACL } from './workspaces-acl'
 export { InvitationsACL } from './invitations-acl'
+export { DraftMessagesACL, ScheduledMessagesACL, EmailDraftsACL } from './drafts-acl'
 
 // Helper utilities
 export {

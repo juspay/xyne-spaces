@@ -1650,6 +1650,15 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     return displayMessages.slice(0, idx + 1).filter(m => m.type === 'bot').length - 1;
   }, [displayMessages]);
 
+  // Keep the debugger pinned to the turn that is CURRENTLY streaming, so the
+  // live trace never stays bound to a prior turn (which would flip
+  // selectedTurnLive false and hide the live block on turns 2+). Fires only
+  // while a turn is live; -1 when idle, leaving a manual older-turn selection
+  // intact.
+  useEffect(() => {
+    if (streamingBotTurnIndex >= 0) setDebugTurnIndex(streamingBotTurnIndex);
+  }, [streamingBotTurnIndex]);
+
   // Flat union of every visible message's toolInvocations. Powers the
   // ConversationToolInvocationsContext so a citation chip rendered in turn N
   // can resolve to a ClawCitation that was produced by a tool call in turn 1.
