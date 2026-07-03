@@ -14,6 +14,7 @@ import {
   Check,
   ChevronDown,
   CornerUpLeft,
+  Eraser,
   Loader2,
   Minimize2,
   Paperclip,
@@ -1595,6 +1596,11 @@ export const EmailComposer = ({
     setBodyEditor(editor);
   }, []);
 
+  // Clear the email body via TipTap's native clearContent
+  const handleClearBody = useCallback((): void => {
+    editorRef.current?.chain().focus().clearContent().run();
+  }, []);
+
   const recipientMentionPicker = (
     <RecipientMentionSelector
       editor={bodyEditor}
@@ -2753,6 +2759,19 @@ export const EmailComposer = ({
               ) : null}
             </div>
             <div className='flex items-center gap-1.5'>
+              <Tooltip content='Clear body (Ctrl+Z to undo)' side='top' delayDuration={300}>
+                <button
+                  type='button'
+                  onClick={handleClearBody}
+                  disabled={isSending || !hasEmailBody || aiDraft.isDraftActive}
+                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
+                  aria-label='Clear email body'
+                  data-track-category='Support'
+                  data-track-name='ClearEmailBody'
+                >
+                  <Eraser size={14} />
+                </button>
+              </Tooltip>
               {features.showAI && (
                 <AIRefineDropdown
                   onQuickRewrite={action => {

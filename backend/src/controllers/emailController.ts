@@ -14,6 +14,7 @@ import { ExternalMessageRepository } from '@/database/repositories/externalMessa
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { UserRepository } from '@/database/repositories/users';
+import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma, DeskType } from '@prisma/client';
 import { db } from '@/database/client';
@@ -904,6 +905,20 @@ export class EmailController {
         }
 
         const { conversation, ticket, email: newEmail } = created;
+
+        // Compose-only: the agent who composes a new email owns the resulting
+        // ticket — assign it to them so it doesn't sit unassigned. Reply/Reply-all
+        // on an existing thread never reaches this path and keeps its assignee.
+        try {
+          await repositories.tickets.updateTicketAssignee(ticket.id, userId, userId);
+        } catch (error) {
+          logger.warn('[EmailController] composeEmail: auto-assign to composer failed', {
+            ticketId: ticket.id,
+            userId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
 
         try {
           await this.externalMessageRepo.create({

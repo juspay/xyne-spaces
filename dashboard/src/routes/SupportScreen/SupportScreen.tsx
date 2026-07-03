@@ -1413,6 +1413,23 @@ const SupportScreen = (): ReactElement => {
     });
   }, []);
 
+  const lastSelectedDeskRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedChannelId || !isSelectedChannelJoined) {
+      lastSelectedDeskRef.current = null;
+      return;
+    }
+    const prev = lastSelectedDeskRef.current;
+    lastSelectedDeskRef.current = selectedChannelId;
+    if (prev === selectedChannelId) return;
+    setExpandedDeskIds(prevSet => {
+      const next = new Set(prevSet);
+      if (prev) next.delete(prev);
+      next.add(selectedChannelId);
+      return next;
+    });
+  }, [selectedChannelId, isSelectedChannelJoined]);
+
   // Plain desk selection: return to the normal ticket list for the channel.
   const selectDesk = useCallback(
     (id: string): void => {
