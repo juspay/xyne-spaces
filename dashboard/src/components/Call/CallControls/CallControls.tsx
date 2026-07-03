@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { REACTION_EMOJIS } from '../hooks/useReactions';
 import {
@@ -19,6 +19,7 @@ import {
   Bot,
   Pencil,
   SmilePlus,
+  UserLock,
   ImagePlus,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
@@ -30,8 +31,14 @@ import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
 import { callLobbyService } from '../../../services/Call/callLobbyService';
-import type { RecordingType } from '@xyne/shared';
+import { InvitationResponse, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
+
+interface ActiveCallForControls {
+  externalId: string;
+  createdByUserId?: string;
+  participants?: Array<{ response?: string | null }>;
+}
 
 interface CallControlsProps {
   isMicEnabled: boolean;
@@ -41,6 +48,8 @@ interface CallControlsProps {
   isAnySharingScreen?: boolean;
   isChatOpen: boolean;
   isParticipantsSidebarOpen: boolean;
+  isHostControlsOpen?: boolean | undefined;
+  onToggleHostControls?: (() => void) | undefined;
   isAIAssistantEnabled: boolean;
   aiController: { id: string; name: string } | null;
   localParticipantId: string | null;
@@ -87,6 +96,8 @@ export function CallControls({
   isAnySharingScreen = false,
   isChatOpen,
   isParticipantsSidebarOpen,
+  isHostControlsOpen = false,
+  onToggleHostControls,
   isAIAssistantEnabled,
   aiController,
   localParticipantId,
@@ -145,6 +156,24 @@ export function CallControls({
     state => state.context.isBackgroundBlurEnabled,
   );
   const isDrawingEnabled = useDrawStore(s => s.isDrawingEnabled);
+
+  const hostControls = useSelector(roomActor, state => state.context.hostControls);
+  const externalId = useSelector(roomActor, state => state.context.externalId);
+  const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
+  const currentCall = useMemo(() => {
+    return (activeCalls as ActiveCallForControls[]).find(c => c.externalId === externalId);
+  }, [activeCalls, externalId]);
+  const isHost = !!localParticipantId && currentCall?.createdByUserId === localParticipantId;
+  const requestedParticipantCount = useMemo(() => {
+    if (!isHost) return 0;
+    return (
+      currentCall?.participants?.filter(p => p.response === InvitationResponse.REQUESTED).length ??
+      0
+    );
+  }, [currentCall?.participants, isHost]);
+  const micLocked = !isHost && hostControls.lockMic;
+  const cameraLocked = !isHost && hostControls.lockCamera;
+  const screenShareLocked = !isHost && hostControls.lockScreenShare;
 
   // Keyboard shortcuts: ⌘D toggles mute, ⌘E toggles video
   useShortcutById('huddle.toggleMute', onToggleMic);
@@ -268,9 +297,14 @@ export function CallControls({
 
   // Determine if custom sizing is being used (for mini view with dynamic sizing)
   const hasCustomSizing = iconSize !== 20 || buttonPadding !== 16;
+  const isCompactControls = viewMode === 'mini' || hasCustomSizing;
   const buttonClasses = cn(
     'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
     !hasCustomSizing && 'p-2.5 sm:p-4',
+  );
+  const requestCountBadgeClasses = cn(
+    'absolute top-[14%] right-[14%] translate-x-1/2 -translate-y-1/2 px-1 flex items-center justify-center bg-red-500 text-white font-bold rounded-full border border-gray-900',
+    isCompactControls ? 'min-w-[16px] h-[16px] text-[9px]' : 'min-w-[22px] h-[22px] text-[11px]',
   );
   const midnightControlClass = 'bg-gray-700 hover:bg-gray-600 text-white';
   const midnightControlGroupClass = 'bg-gray-700 border border-gray-600';
@@ -320,6 +354,7 @@ export function CallControls({
           <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
             <button
               onClick={onToggleMic}
+              disabled={micLocked}
               className={cn(
                 'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
                 !hasCustomSizing && 'p-2.5 sm:p-4',
@@ -328,12 +363,15 @@ export function CallControls({
                   : isMicEnabled
                     ? midnightControlClass
                     : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
+                micLocked && 'opacity-50 cursor-not-allowed hover:scale-100',
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
               title={
-                isMicEnabled
-                  ? `Mute microphone (${modKey}D)`
-                  : `Unmute microphone (${modKey}D, or press spacebar to speak)`
+                micLocked
+                  ? 'The host has locked the microphone'
+                  : isMicEnabled
+                    ? `Mute microphone (${modKey}D)`
+                    : `Unmute microphone (${modKey}D, or press spacebar to speak)`
               }
               data-testid='mic-toggle-button'
               data-track-category='CALLS'
@@ -420,16 +458,22 @@ export function CallControls({
           <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
             <button
               onClick={onToggleCamera}
+              disabled={cameraLocked}
               className={cn(
                 'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
                 !hasCustomSizing && 'p-2.5 sm:p-4',
                 isCameraEnabled
                   ? midnightControlClass
                   : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
+                cameraLocked && 'opacity-50 cursor-not-allowed hover:scale-100',
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
               title={
-                isCameraEnabled ? `Turn off camera (${modKey}E)` : `Turn on camera (${modKey}E)`
+                cameraLocked
+                  ? 'The host has locked the camera'
+                  : isCameraEnabled
+                    ? `Turn off camera (${modKey}E)`
+                    : `Turn on camera (${modKey}E)`
               }
               data-testid='camera-toggle-button'
               data-track-category='CALLS'
@@ -529,18 +573,26 @@ export function CallControls({
         {/* Screen Share Toggle */}
         <button
           onClick={onToggleScreenShare}
+          disabled={screenShareLocked}
           className={cn(
             buttonClasses,
             isScreenSharing
               ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/50'
               : midnightControlClass,
+            screenShareLocked && 'opacity-50 cursor-not-allowed hover:scale-100',
           )}
           data-track-event='BUTTON_CLICK'
           data-track-category='CALLS'
           data-track-name='TOGGLE_SCREEN_SHARE'
           data-track-metadata={JSON.stringify({ callId, enabled: isScreenSharing })}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-          title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
+          title={
+            screenShareLocked
+              ? 'The host has locked screen sharing'
+              : isScreenSharing
+                ? 'Stop sharing'
+                : 'Share screen'
+          }
         >
           {isScreenSharing ? (
             <Monitor
@@ -635,10 +687,37 @@ export function CallControls({
           </button>
         )}
 
+        {isHost && onToggleHostControls && (
+          <button
+            onClick={onToggleHostControls}
+            className={cn(
+              buttonClasses,
+              isHostControlsOpen
+                ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                : midnightControlClass,
+            )}
+            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            title='Host controls'
+            data-testid='host-controls-button'
+            data-track-event='BUTTON_CLICK'
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_HOST_CONTROLS'
+            data-track-metadata={JSON.stringify({ isOpen: isHostControlsOpen })}
+          >
+            <UserLock
+              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+              style={
+                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+              }
+            />
+          </button>
+        )}
+
         <button
           onClick={onToggleParticipantsSidebar}
           className={cn(
             buttonClasses,
+            'relative',
             isParticipantsSidebarOpen
               ? 'bg-blue-600 hover:bg-blue-700 text-white'
               : midnightControlClass,
@@ -657,6 +736,11 @@ export function CallControls({
               hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
             }
           />
+          {requestedParticipantCount > 0 && (
+            <span className={requestCountBadgeClasses} data-testid='participants-request-count'>
+              {requestedParticipantCount > 99 ? '99+' : requestedParticipantCount}
+            </span>
+          )}
         </button>
 
         {/* Share Link Button */}

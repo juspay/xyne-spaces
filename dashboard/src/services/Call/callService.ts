@@ -1,7 +1,7 @@
 import { apiInstance } from '../clients/apiClient';
 import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
-import { CallType, MeetingStatus } from '@xyne/shared';
+import { CallType, MeetingStatus, type HostControls } from '@xyne/shared';
 
 // ============================================================================
 // TYPES
@@ -16,12 +16,14 @@ export interface InitiateCallRequest {
 }
 
 export interface InitiateCallResponse {
-  token: string;
-  livekitUrl: string;
-  externalId: string;
-  roomLink: string;
-  channelId: string;
+  token?: string;
+  livekitUrl?: string;
+  externalId?: string;
+  roomLink?: string;
+  channelId?: string;
   scopeType?: string | null; // Channel scope type for CallKit filtering
+  /** Host admission pending; no token issued. */
+  pending?: boolean;
 }
 
 export interface JoinCallRequest {
@@ -29,12 +31,14 @@ export interface JoinCallRequest {
 }
 
 export interface JoinCallResponse {
-  token: string;
-  livekitUrl: string;
-  externalId: string;
-  roomLink: string;
+  token?: string;
+  livekitUrl?: string;
+  externalId?: string;
+  roomLink?: string;
   channelId?: string;
   scopeType?: string | null; // Channel scope type for CallKit filtering
+  /** Host admission pending; no token issued. */
+  pending?: boolean;
 }
 
 export interface ValidateRoomsRequest {
@@ -357,6 +361,65 @@ export class CallService {
       }
 
       return { success: true };
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  /** Remove a participant from the call. */
+  async removeParticipant(
+    callId: string,
+    participantUserId: string,
+  ): Promise<{ success: boolean }> {
+    try {
+      const response = await apiInstance.post<{ success: boolean }>(
+        `/calls/${callId}/remove-participant`,
+        { participantUserId },
+      );
+
+      if (!response.data.success) {
+        throw new Error('Failed to remove participant');
+      }
+
+      return { success: true };
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  /** Set host-control locks. */
+  async setHostControls(callId: string, controls: Partial<HostControls>): Promise<HostControls> {
+    try {
+      const response = await apiInstance.patch<{
+        success: boolean;
+        hostControls: HostControls;
+      }>(`/calls/${callId}/host-controls`, controls);
+
+      if (!response.data.success) {
+        throw new Error('Failed to update host controls');
+      }
+
+      return response.data.hostControls;
     } catch (error) {
       if (error instanceof AxiosError && error.response?.data) {
         const errorData = error.response.data as unknown;

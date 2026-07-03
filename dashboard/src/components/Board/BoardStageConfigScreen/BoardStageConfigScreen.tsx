@@ -2090,7 +2090,7 @@ const BoardStageConfigScreen = ({
             {boardType !== BoardType.NON_LINEAR && (
               <div className='h-[500px] min-h-[500px] w-full rounded-[16px] bg-muted/50 overflow-x-auto overflow-y-auto'>
                 {/* Stage Cards Row - centered when few, scrollable when many */}
-                <div className='h-full flex items-stretch justify-center min-w-max relative'>
+                <div className='h-full flex items-stretch justify-center min-w-max px-8 relative'>
                   {/* Dotted grid pattern background - at top level */}
                   <div
                     className='absolute inset-0 pointer-events-none z-[20]'

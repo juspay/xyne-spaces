@@ -1,9 +1,9 @@
 import { useEffect, useCallback, useMemo, useState, useRef } from 'react';
-import { playAudio } from '../../../utils/audioPlayer';
 import { useSelector } from '@xstate/react';
 import type { Zero } from '@rocicorp/zero';
 import { CallType, InvitationResponse } from '@xyne/shared';
 import { toast } from 'sonner';
+import { playAudio } from '../../../utils/audioPlayer';
 import { roomActor } from '../../../machines/roomMachine';
 import { MiniCallView } from './MiniCallView';
 import { FullCallView } from './FullCallView';
@@ -25,6 +25,7 @@ import { useUsers } from '../../../hooks/useUsers';
 import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
 import { ScreenPickerModal } from '../../ScreenPicker/ScreenPickerModal';
 import { mutators } from '../../../zero/mutators';
+import { isParticipantScreenShareEnabled } from '../../../utils/livekitScreenShare';
 
 export interface CustomLiveKitRoomProps {
   token: string;
@@ -101,7 +102,9 @@ export function CustomLiveKitRoom({
   const isScreenSharing = localParticipant
     ? isNativeMode
       ? (localParticipant as (typeof participants)[0]).isScreenShareEnabled
-      : (localParticipant as NonNullable<typeof room>['localParticipant']).isScreenShareEnabled
+      : isParticipantScreenShareEnabled(
+          localParticipant as NonNullable<typeof room>['localParticipant'],
+        )
     : false;
 
   // Determine simple machine state string for child components

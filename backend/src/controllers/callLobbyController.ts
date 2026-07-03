@@ -1,8 +1,13 @@
 import { Request, Response } from 'express';
-import { InvitationResponse } from '@prisma/client';
+import { InvitationResponse, Prisma } from '@prisma/client';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { repositories } from '@/database/repositories';
-import { livekitService } from '@/services/liveKitService';
+import {
+  livekitService,
+  allowedSourcesFor,
+  hasActiveLock,
+  getHostControls,
+} from '@/services/liveKitService';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import {
@@ -11,8 +16,19 @@ import {
   extCallCookieOptions,
 } from '@/services/externalCallTokenService';
 import type { CallLobbyRequest } from '@/types/express';
+import type { CallParticipantMetadata } from '@xyne/shared';
 
 const isProduction = process.env.NODE_ENV === 'production';
+
+function hasRemovedByHost(metadata: unknown): boolean {
+  return (metadata as CallParticipantMetadata | null)?.removedByHost === true;
+}
+
+function stripRemovedByHostFlag(metadata: unknown): Prisma.InputJsonValue {
+  const meta = (metadata as CallParticipantMetadata | null) ?? {};
+  const { removedByHost: _removedByHost, ...rest } = meta;
+  return rest as Prisma.InputJsonValue;
+}
 
 /** Helper — set the HTTP-only session cookie for an external participant. */
 function setSessionCookie(
@@ -65,13 +81,32 @@ export const callLobbyController = {
       // Session exists — skip approval
       if (callSession) {
         const trimmedName = displayName?.trim();
-        await db.callParticipant.update({
-          where: { id: callSession.participantId },
-          data: {
+        const existing = await repositories.calls.findExternalParticipantById({
+          participantId: callSession.participantId,
+          callId: call.callId,
+        });
+        if (!existing) {
+          res.status(403).json({ error: 'Not authenticated for this call' });
+          return;
+        }
+
+        if (hasRemovedByHost(existing.metadata)) {
+          await repositories.calls.markExternalParticipantRequested({
+            participantId: callSession.participantId,
             ...(trimmedName && { displayName: trimmedName }),
-            response: InvitationResponse.ACCEPTED,
-            joinedAt: null,
-          },
+            respondedAt: new Date(),
+          });
+
+          logger.info(
+            `[call-lobby] requestToJoin: removed participant re-requested approval | participantId=${callSession.participantId}`,
+          );
+          res.status(200).json({ skipApproval: false, participantId: callSession.participantId });
+          return;
+        }
+
+        await repositories.calls.acceptExternalParticipantSession({
+          participantId: callSession.participantId,
+          ...(trimmedName && { displayName: trimmedName }),
         });
 
         logger.info(
@@ -161,11 +196,35 @@ export const callLobbyController = {
         return;
       }
 
+      if (hasRemovedByHost(participant.metadata)) {
+        await repositories.calls.updateParticipantMetadata(
+          participant.id,
+          stripRemovedByHostFlag(participant.metadata),
+        );
+      }
+
+      const callRecord = await repositories.calls.findById(call.callId);
+      const hostControls = getHostControls(callRecord);
+      const lockedSources = hasActiveLock(hostControls)
+        ? allowedSourcesFor(hostControls)
+        : undefined;
+
+      if (hasActiveLock(hostControls)) {
+        try {
+          await livekitService.setRoomHostControls(call.roomName, hostControls);
+        } catch (err) {
+          logger.warn(
+            `[call-lobby] externalJoin: failed to sync host controls metadata | callId=${call.roomName}, error=${err}`,
+          );
+        }
+      }
+
       const token = await livekitService.generateAccessToken({
         userIdentity: participant.id,
         roomName: call.roomName,
         userName: participant.displayName ?? 'Guest',
         metadata: JSON.stringify({ isExternal: true }),
+        canPublishSources: lockedSources,
       });
 
       // Refresh cookie on join
@@ -191,16 +250,37 @@ export const callLobbyController = {
    */
   rejoinLobby: async (req: Request, res: Response): Promise<void> => {
     try {
-      const { callSession } = req as CallLobbyRequest;
+      const { call, callSession } = req as CallLobbyRequest;
 
       if (!callSession) {
         res.status(403).json({ error: 'Not authenticated for this call' });
         return;
       }
 
-      await db.callParticipant.update({
-        where: { id: callSession.participantId },
-        data: { response: InvitationResponse.ACCEPTED, joinedAt: null },
+      const existing = await repositories.calls.findExternalParticipantById({
+        participantId: callSession.participantId,
+        callId: call.callId,
+      });
+      if (!existing) {
+        res.status(403).json({ error: 'Not authenticated for this call' });
+        return;
+      }
+
+      if (hasRemovedByHost(existing.metadata)) {
+        await repositories.calls.markExternalParticipantRequested({
+          participantId: callSession.participantId,
+          respondedAt: new Date(),
+        });
+
+        logger.info(
+          `[call-lobby] rejoinLobby: removed participant re-requested approval | participantId=${callSession.participantId}`,
+        );
+        res.json({ skipApproval: false, participantId: callSession.participantId });
+        return;
+      }
+
+      await repositories.calls.acceptExternalParticipantSession({
+        participantId: callSession.participantId,
       });
 
       logger.info(

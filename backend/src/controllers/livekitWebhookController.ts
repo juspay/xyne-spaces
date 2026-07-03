@@ -10,7 +10,13 @@ import { callSideEffectService } from '@/services/callSideEffectService';
 import { livekitWebhookACL } from './livekitWebhookACL';
 import { transcriptService } from '@/services/transcriptService';
 import { CallOrigin } from '@prisma/client';
-import { livekitService } from '@/services/liveKitService';
+import {
+  livekitService,
+  getHostControls,
+  hasActiveLock,
+} from '@/services/liveKitService';
+import { callHostControlService } from '@/services/callHostControlService';
+import { isTrackLockedByHostControls } from '@/services/callHostControlUtils';
 import { callRecordingService } from '@/services/callRecordingService';
 import { EgressStatus } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
@@ -96,6 +102,10 @@ class LiveKitWebhookController {
           await this.handleParticipantLeft(event);
           break;
 
+        case 'track_published':
+          await this.handleTrackPublished(event);
+          break;
+
         case 'egress_started':
           await this.handleEgressStarted(event);
           break;
@@ -130,6 +140,41 @@ class LiveKitWebhookController {
       creationTime: event.room?.creationTime ? Number(event.room.creationTime) : undefined,
       metadata: event.room?.metadata,
     });
+  }
+
+  private async handleTrackPublished(event: WebhookEvent): Promise<void> {
+    const roomName = event.room?.name;
+    const participant = event.participant;
+    const track = event.track;
+
+    if (!roomName || !participant?.identity || !track?.sid) return;
+    if (participant.identity.startsWith('agent-')) return;
+    if (participant.kind === ParticipantInfo_Kind.EGRESS) return;
+
+    try {
+      const call = await repositories.calls.findByExternalId(roomName);
+      if (!call || call.createdByUserId === participant.identity) return;
+
+      const hostControls = getHostControls(call);
+      if (!hasActiveLock(hostControls)) return;
+
+      await callHostControlService.applyHostControlsToParticipant(
+        roomName,
+        participant.identity,
+        'track_published',
+      );
+
+      if (!track.muted && isTrackLockedByHostControls(track.source, hostControls)) {
+        await livekitService.muteTrack(roomName, participant.identity, track.sid, true);
+        logger.info(
+          `[LiveKit Webhook] Muted locked published track | room=${roomName}, participant=${participant.identity}, source=${track.source}, trackSid=${track.sid}`,
+        );
+      }
+    } catch (error) {
+      logger.warn(
+        `[LiveKit Webhook] Failed to enforce host controls for published track | room=${roomName}, participant=${participant.identity}, trackSid=${track.sid}, error=${error}`,
+      );
+    }
   }
 
   /**
@@ -476,6 +521,11 @@ class LiveKitWebhookController {
       }
       // Notify all connected clients that participants changed
       if (roomName) {
+        await callHostControlService.applyHostControlsToParticipant(
+          roomName,
+          participant.identity,
+          'participant_joined',
+        );
         void livekitService.sendParticipantsChanged(roomName);
       }
     } catch (error) {

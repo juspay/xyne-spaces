@@ -20,7 +20,7 @@ import {
 } from 'livekit-client';
 import { BackgroundBlur } from '@livekit/track-processors';
 import type { Zero } from '@rocicorp/zero';
-import type { Call } from '@xyne/shared';
+import { DEFAULT_HOST_CONTROLS, type Call, type HostControls } from '@xyne/shared';
 import {
   parseAIDataMessage,
   decodeDataPayload,
@@ -41,8 +41,14 @@ import {
   detectReactNativeWebView,
   isNativeCallSupported,
 } from '../utils/reactNativeBridge';
+import { isParticipantScreenShareEnabled } from '../utils/livekitScreenShare';
 import { logger, Event } from '../utils/logger';
 import { getCallJoinSettings } from '../hooks/useCallJoinSettings';
+import {
+  isHostControlLockedForLocal,
+  isHostControlLockedForLocalWithControls,
+  parseHostControlsFromMetadata,
+} from '../utils/hostControls';
 
 // Set LiveKit log level
 setLogLevel('warn');
@@ -167,6 +173,7 @@ export interface RoomContext {
   pushToTalkState: 'idle' | 'active';
   isCallChatOpen: boolean;
   unreadCallChatCount: number;
+  hostControls: HostControls;
   // Background blur on the local camera feed (web only). Off by default.
   isBackgroundBlurEnabled: boolean;
 }
@@ -225,6 +232,7 @@ export type RoomMachineEvent =
   | { type: 'LOCAL_TRACK_UNPUBLISHED' }
   | { type: 'ERROR'; error: string }
   | { type: 'UPDATE_ACTIVE_CALLS'; calls: Call[] }
+  | { type: 'HOST_CONTROLS_CHANGED'; hostControls: HostControls }
   | {
       type: 'AI_INVITE_ACTION';
       users: AIInviteUser[];
@@ -307,15 +315,20 @@ export const roomMachine = setup({
           callType,
         });
 
+        if (result.pending || !result.token) {
+          return { pending: true as const };
+        }
+
         return {
-          externalId: result.externalId,
+          pending: false as const,
+          externalId: result.externalId ?? null,
           token: result.token,
-          livekitUrl: result.livekitUrl,
+          livekitUrl: result.livekitUrl ?? null,
           callType,
-          roomLink: result.roomLink,
-          channelId: result.channelId, // Use channelId from backend response (may be resolved from invitedUserId)
+          roomLink: result.roomLink ?? null,
+          channelId: result.channelId ?? null,
           targetUserIds,
-          scopeType: result.scopeType, // Channel scope type for CallKit filtering
+          scopeType: result.scopeType ?? null,
         };
       },
     ),
@@ -329,14 +342,20 @@ export const roomMachine = setup({
       // For scheduled calls, backend creates room if it doesn't exist yet
       const result = await callService.joinCall({ callId });
 
+      // No token means the host must admit this user.
+      if (result.pending || !result.token) {
+        return { pending: true as const };
+      }
+
       return {
-        externalId: result.externalId,
+        pending: false as const,
+        externalId: result.externalId ?? callId,
         token: result.token,
-        livekitUrl: result.livekitUrl,
+        livekitUrl: result.livekitUrl ?? '',
         callId: callId, // Pass through the externalId for DB writes
-        roomLink: result.roomLink,
-        channelId: result.channelId,
-        scopeType: result.scopeType, // Channel scope type for CallKit filtering
+        roomLink: result.roomLink ?? null,
+        channelId: result.channelId ?? null,
+        scopeType: result.scopeType ?? null,
       };
     }),
 
@@ -356,11 +375,32 @@ export const roomMachine = setup({
           sendBack({ type: 'PARTICIPANTS_CHANGED' });
         };
 
+        const syncHostControls = (metadata?: string) => {
+          if (!metadata) return;
+          const hostControls = parseHostControlsFromMetadata(metadata);
+          if (hostControls) {
+            sendBack({
+              type: 'HOST_CONTROLS_CHANGED',
+              hostControls,
+            });
+          }
+        };
+
         // Connection events
         room.on(LiveKitRoomEvent.Connected, () => {
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Connected });
           updateParticipants();
+          syncHostControls(room.metadata);
         });
+
+        room.on(LiveKitRoomEvent.RoomMetadataChanged, (metadata: string) => {
+          syncHostControls(metadata);
+          updateParticipants();
+        });
+
+        // Listener mounts after connect; sync current metadata once.
+        syncHostControls(room.metadata);
+        updateParticipants();
 
         room.on(LiveKitRoomEvent.Reconnecting, () => {
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Reconnecting });
@@ -445,6 +485,20 @@ export const roomMachine = setup({
               isSubscribed: publication.isSubscribed,
               isMuted: publication.isMuted,
             });
+          },
+        );
+
+        room.on(
+          LiveKitRoomEvent.TrackUnpublished,
+          (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+            logger.info(Event.LIVEKIT_TRACK_UNSUBSCRIBED, {
+              callId,
+              participantIdentity: participant.identity,
+              trackSource: publication.source?.toString() ?? 'unknown',
+              trackKind: publication.kind,
+              trackSid: publication.trackSid,
+            });
+            updateParticipants();
           },
         );
 
@@ -985,7 +1039,7 @@ export const roomMachine = setup({
           name: localParticipant.name || 'You',
           isCameraEnabled: localParticipant.isCameraEnabled,
           isMicrophoneEnabled: localParticipant.isMicrophoneEnabled,
-          isScreenShareEnabled: localParticipant.isScreenShareEnabled,
+          isScreenShareEnabled: isParticipantScreenShareEnabled(localParticipant),
           isLocal: true,
           participant: localParticipant,
         });
@@ -997,7 +1051,7 @@ export const roomMachine = setup({
             name: participant.name || participant.identity,
             isCameraEnabled: participant.isCameraEnabled ?? false,
             isMicrophoneEnabled: participant.isMicrophoneEnabled ?? false,
-            isScreenShareEnabled: participant.isScreenShareEnabled ?? false,
+            isScreenShareEnabled: isParticipantScreenShareEnabled(participant),
             isLocal: false,
             participant: participant,
           });
@@ -1117,6 +1171,7 @@ export const roomMachine = setup({
       isCallChatOpen: () => false,
       unreadCallChatCount: () => 0,
       isBackgroundBlurEnabled: () => false,
+      hostControls: () => DEFAULT_HOST_CONTROLS,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1124,17 +1179,31 @@ export const roomMachine = setup({
         const enableTracksAndSelectDevices = async (): Promise<void> => {
           try {
             const { joinMuted, joinWithoutVideo } = getCallJoinSettings();
+            const metadataHostControls = context.room!.metadata
+              ? parseHostControlsFromMetadata(context.room!.metadata)
+              : null;
+            const effectiveHostControls = metadataHostControls ?? context.hostControls;
 
             const alreadyJoinedCount = context.room!.remoteParticipants.size;
             const shouldMuteByDefault = alreadyJoinedCount > DEFAULT_MUTE_THRESHOLD;
+            const micLocked = isHostControlLockedForLocalWithControls(
+              context,
+              effectiveHostControls,
+              'lockMic',
+            );
+            const cameraLocked = isHostControlLockedForLocalWithControls(
+              context,
+              effectiveHostControls,
+              'lockCamera',
+            );
 
             // Respect user preference: if joinMuted is true, always mute
             // If joinMuted is false, use the existing threshold logic
-            const enableMic = !joinMuted && !shouldMuteByDefault;
+            const enableMic = !micLocked && !joinMuted && !shouldMuteByDefault;
             await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
 
             // For video: respect user preference
-            const enableCamera = !joinWithoutVideo;
+            const enableCamera = !cameraLocked && !joinWithoutVideo;
 
             await context.room!.localParticipant.setCameraEnabled(enableCamera);
 
@@ -1157,7 +1226,6 @@ export const roomMachine = setup({
         duration: 4000,
       });
     },
-
     // Sync the background-blur processor with context flag (web only).
     // If enabling fails (e.g. WASM/model load), revert the flag so the toggle
     // doesn't lie, and tell the user.
@@ -1166,6 +1234,42 @@ export const roomMachine = setup({
       void syncBackgroundBlur(context.room, context.isBackgroundBlurEnabled, () => {
         self.send({ type: 'SET_BACKGROUND_BLUR', enabled: false });
         toast.error('Could not enable background blur');
+      });
+    },
+    enforceHostControls: ({ context }) => {
+      const micLocked = isHostControlLockedForLocal(context, 'lockMic');
+      const cameraLocked = isHostControlLockedForLocal(context, 'lockCamera');
+      const screenShareLocked = isHostControlLockedForLocal(context, 'lockScreenShare');
+
+      if (!context.isNativeMode) {
+        const localParticipant = context.room?.localParticipant;
+        if (micLocked && localParticipant?.isMicrophoneEnabled) {
+          void localParticipant.setMicrophoneEnabled(false);
+        }
+        if (cameraLocked && localParticipant?.isCameraEnabled) {
+          void localParticipant.setCameraEnabled(false);
+        }
+        if (screenShareLocked && localParticipant?.isScreenShareEnabled) {
+          void localParticipant?.setScreenShareEnabled(false);
+        }
+        return;
+      }
+
+      const localParticipant = context.participants.find(p => p.isLocal);
+      if (micLocked && localParticipant?.isMicrophoneEnabled) {
+        reactNativeBridge.livekitToggleMic(false);
+      }
+      if (cameraLocked && localParticipant?.isCameraEnabled) {
+        reactNativeBridge.livekitToggleCamera(false);
+      }
+      if (screenShareLocked && localParticipant?.isScreenShareEnabled) {
+        reactNativeBridge.livekitToggleScreenShare(false);
+      }
+    },
+    showRequestingAdmissionToast: () => {
+      toast.info('Requesting to join', {
+        description: 'Waiting for the host to let you in.',
+        duration: 4000,
       });
     },
   },
@@ -1220,13 +1324,26 @@ export const roomMachine = setup({
     isCallChatOpen: false,
     unreadCallChatCount: 0,
     isBackgroundBlurEnabled: false,
+    hostControls: DEFAULT_HOST_CONTROLS,
   },
   id: 'roomMachine',
   on: {
     UPDATE_ACTIVE_CALLS: {
-      actions: assign({
-        activeCalls: ({ event }) => (event.type === 'UPDATE_ACTIVE_CALLS' ? event.calls : []),
-      }),
+      actions: [
+        assign({
+          activeCalls: ({ event }) => (event.type === 'UPDATE_ACTIVE_CALLS' ? event.calls : []),
+        }),
+        'enforceHostControls',
+      ],
+    },
+    HOST_CONTROLS_CHANGED: {
+      actions: [
+        assign({
+          hostControls: ({ event, context }) =>
+            event.type === 'HOST_CONTROLS_CHANGED' ? event.hostControls : context.hostControls,
+        }),
+        'enforceHostControls',
+      ],
     },
   },
   initial: 'idle',
@@ -1338,23 +1455,30 @@ export const roomMachine = setup({
           }
           return input;
         },
-        onDone: {
-          target: 'connecting',
-          actions: [
-            assign({
-              externalId: ({ event }) => event.output.externalId,
-              token: ({ event }) => event.output.token,
-              serverUrl: ({ event }) => event.output.livekitUrl,
-              callType: ({ event }) => event.output.callType,
-              roomLink: ({ event }) => event.output.roomLink,
-              channelId: ({ event }) => event.output.channelId,
-              targetUserIds: ({ event }) => event.output.targetUserIds || [],
-              scopeType: ({ event }) => event.output.scopeType ?? null, // Store scopeType from API response
-            }),
-            'createRoom',
-            'clearError',
-          ],
-        },
+        onDone: [
+          {
+            guard: ({ event }): boolean => event.output.pending === true,
+            target: 'idle',
+            actions: ['showRequestingAdmissionToast'],
+          },
+          {
+            target: 'connecting',
+            actions: [
+              assign({
+                externalId: ({ event }) => event.output.externalId ?? null,
+                token: ({ event }) => event.output.token ?? null,
+                serverUrl: ({ event }) => event.output.livekitUrl ?? null,
+                callType: ({ event, context }) => event.output.callType ?? context.callType,
+                roomLink: ({ event }) => event.output.roomLink ?? null,
+                channelId: ({ event }) => event.output.channelId ?? null,
+                targetUserIds: ({ event }) => event.output.targetUserIds || [],
+                scopeType: ({ event }) => event.output.scopeType ?? null,
+              }),
+              'createRoom',
+              'clearError',
+            ],
+          },
+        ],
         onError: {
           target: 'failed',
           actions: assign({
@@ -1391,22 +1515,29 @@ export const roomMachine = setup({
         input: ({ context }) => ({
           callId: context.callId || '',
         }),
-        onDone: {
-          target: 'connecting',
-          actions: [
-            assign({
-              externalId: ({ event }) => event.output.externalId,
-              token: ({ event }) => event.output.token,
-              serverUrl: ({ event }) => event.output.livekitUrl,
-              callId: ({ event }) => event.output.callId,
-              roomLink: ({ event }) => event.output.roomLink,
-              channelId: ({ event }) => event.output.channelId || null,
-              scopeType: ({ event }) => event.output.scopeType ?? null,
-            }),
-            'createRoom',
-            'clearError',
-          ],
-        },
+        onDone: [
+          {
+            guard: ({ event }): boolean => event.output.pending === true,
+            target: 'idle',
+            actions: ['showRequestingAdmissionToast'],
+          },
+          {
+            target: 'connecting',
+            actions: [
+              assign({
+                externalId: ({ event }) => event.output.externalId ?? null,
+                token: ({ event }) => event.output.token ?? null,
+                serverUrl: ({ event }) => event.output.livekitUrl ?? null,
+                callId: ({ event }) => event.output.callId ?? null,
+                roomLink: ({ event }) => event.output.roomLink ?? null,
+                channelId: ({ event }) => event.output.channelId || null,
+                scopeType: ({ event }) => event.output.scopeType ?? null,
+              }),
+              'createRoom',
+              'clearError',
+            ],
+          },
+        ],
         onError: {
           target: 'failed',
           actions: [
@@ -1543,6 +1674,8 @@ export const roomMachine = setup({
         },
         TOGGLE_MIC: {
           actions: ({ context }) => {
+            if (isHostControlLockedForLocal(context, 'lockMic')) return;
+
             if (context.isNativeMode) {
               // Get current state from participants
               const localParticipant = context.participants.find(p => p.isLocal);
@@ -1558,6 +1691,8 @@ export const roomMachine = setup({
           actions: [
             assign({
               pushToTalkState: ({ context }) => {
+                if (isHostControlLockedForLocal(context, 'lockMic')) return 'idle';
+
                 // Only activate push-to-talk if currently muted
                 const isCurrentlyMuted = context.isNativeMode
                   ? !(context.participants.find(p => p.isLocal)?.isMicrophoneEnabled ?? false)
@@ -1566,6 +1701,8 @@ export const roomMachine = setup({
               },
             }),
             ({ context }) => {
+              if (isHostControlLockedForLocal(context, 'lockMic')) return;
+
               // Only unmute if currently muted
               const isCurrentlyMuted = context.isNativeMode
                 ? !(context.participants.find(p => p.isLocal)?.isMicrophoneEnabled ?? false)
@@ -1598,6 +1735,8 @@ export const roomMachine = setup({
         },
         TOGGLE_CAMERA: {
           actions: ({ context }) => {
+            if (isHostControlLockedForLocal(context, 'lockCamera')) return;
+
             if (context.isNativeMode) {
               const localParticipant = context.participants.find(p => p.isLocal);
               const currentState = localParticipant?.isCameraEnabled ?? false;
@@ -1627,6 +1766,8 @@ export const roomMachine = setup({
         },
         TOGGLE_SCREEN_SHARE: {
           actions: ({ context }): void => {
+            if (isHostControlLockedForLocal(context, 'lockScreenShare')) return;
+
             if (context.isNativeMode) {
               // Get current state from participants
               const localParticipant = context.participants.find(p => p.isLocal);
@@ -1875,7 +2016,7 @@ export const roomMachine = setup({
               'updateConnectionState',
               (): void => {
                 toast.info('Call ended', {
-                  description: 'The host has ended the call for everyone',
+                  description: 'The host has ended the call for you',
                   duration: 5000,
                 });
               },
@@ -1906,7 +2047,7 @@ export const roomMachine = setup({
         LOCAL_TRACK_PUBLISHED: {
           // Re-apply blur when the camera track (re)publishes: join, re-enable,
           // or device switch (which republishes a fresh track, dropping the processor).
-          actions: ['updateParticipants', 'applyBackgroundBlur'],
+          actions: ['updateParticipants', 'enforceHostControls', 'applyBackgroundBlur'],
         },
         LOCAL_TRACK_UNPUBLISHED: {
           actions: 'updateParticipants',

@@ -100,7 +100,8 @@ export const CallCard: React.FC<CallCardProps> = ({
     isUserInCall: isCurrentCall,
   });
 
-  const { action, requestToJoin, isRequesting } = useCallJoinState(call.externalId || '', user?.id);
+  const { action, requestToJoin, cancelJoinRequest, isRequesting, isCancellingRequest } =
+    useCallJoinState(call.externalId || '', user?.id);
 
   // Check if user is active in this call on another device/tab (for "Switch" label)
   const userIsActiveInCall = isUserActiveInCall(call.participants || [], user?.id ?? '');
@@ -199,7 +200,9 @@ export const CallCard: React.FC<CallCardProps> = ({
               action={action}
               onJoin={handleJoinCall}
               onRequest={requestToJoin}
+              onCancelRequest={cancelJoinRequest}
               isRequesting={isRequesting}
+              isCancellingRequest={isCancellingRequest}
               variant='text'
               joinLabel={userIsActiveInCall ? 'Switch' : 'Join'}
               testId={

@@ -1,6 +1,13 @@
-import { RoomServiceClient, AccessToken } from 'livekit-server-sdk';
+import {
+  RoomServiceClient,
+  AccessToken,
+  TrackSource,
+  TwirpError,
+  type ParticipantInfo,
+} from 'livekit-server-sdk';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { DEFAULT_HOST_CONTROLS, type HostControls } from '@xyne/shared';
 
 export interface LiveKitRoomOptions {
   name: string;
@@ -15,6 +22,83 @@ export interface LiveKitTokenOptions {
   userName?: string;
   ttl?: string;
   metadata?: string;
+  /** Restricts publishable track sources. */
+  canPublishSources?: TrackSource[];
+}
+
+export function allowedSourcesFor(hostControls: HostControls): TrackSource[] {
+  const allowed: TrackSource[] = [];
+  if (!hostControls.lockMic) allowed.push(TrackSource.MICROPHONE);
+  if (!hostControls.lockCamera) allowed.push(TrackSource.CAMERA);
+  if (!hostControls.lockScreenShare) {
+    allowed.push(TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO);
+  }
+  return allowed;
+}
+
+export function hasActiveLock(hostControls: HostControls): boolean {
+  return hostControls.lockMic || hostControls.lockCamera || hostControls.lockScreenShare;
+}
+
+export function isLiveKitNotFoundError(error: unknown): boolean {
+  if (error instanceof TwirpError) {
+    return error.status === 404 || error.code === 'not_found';
+  }
+
+  if (!error || typeof error !== 'object') return false;
+
+  const maybeError = error as { status?: unknown; code?: unknown };
+  return maybeError.status === 404 || maybeError.code === 'not_found';
+}
+
+export function getHostControls(call: { metadata: unknown } | null): HostControls {
+  const metadata = call?.metadata;
+  const stored =
+    metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? (metadata as { hostControls?: unknown }).hostControls
+      : undefined;
+
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+    return DEFAULT_HOST_CONTROLS;
+  }
+
+  const controls = stored as Partial<Record<keyof HostControls, unknown>>;
+  return {
+    lockMic:
+      typeof controls.lockMic === 'boolean' ? controls.lockMic : DEFAULT_HOST_CONTROLS.lockMic,
+    lockCamera:
+      typeof controls.lockCamera === 'boolean'
+        ? controls.lockCamera
+        : DEFAULT_HOST_CONTROLS.lockCamera,
+    lockScreenShare:
+      typeof controls.lockScreenShare === 'boolean'
+        ? controls.lockScreenShare
+        : DEFAULT_HOST_CONTROLS.lockScreenShare,
+  };
+}
+
+function parseRoomMetadata(
+  roomName: string,
+  rawMetadata: string | undefined,
+  operation: string,
+): Record<string, unknown> {
+  if (!rawMetadata) return {};
+
+  try {
+    const parsed = JSON.parse(rawMetadata) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    logger.warn(
+      `[LiveKit] Ignoring non-object room metadata | room=${roomName}, operation=${operation}`,
+    );
+  } catch (error) {
+    logger.warn(
+      `[LiveKit] Failed to parse room metadata | room=${roomName}, operation=${operation}, error=${error}`,
+    );
+  }
+
+  return {};
 }
 
 export class LiveKitService {
@@ -89,9 +173,10 @@ export class LiveKitService {
       at.addGrant({
         roomJoin: true,
         room: options.roomName,
-        canPublish: true,
+        canPublish: options.canPublishSources === undefined || options.canPublishSources.length > 0,
         canSubscribe: true,
         canPublishData: true,
+        ...(options.canPublishSources && { canPublishSources: options.canPublishSources }),
       });
 
       const token = await at.toJwt();
@@ -136,7 +221,7 @@ export class LiveKitService {
     }
   }
 
-  async listParticipants(roomName: string): Promise<any[]> {
+  async listParticipants(roomName: string): Promise<ParticipantInfo[]> {
     try {
       const participants = await this.roomService.listParticipants(roomName);
       logger.info(`Listed ${participants.length} participants in room ${roomName}`);
@@ -145,6 +230,12 @@ export class LiveKitService {
       logger.error(`Failed to list participants for room ${roomName}:`, error);
       return [];
     }
+  }
+
+  async listParticipantsOrThrow(roomName: string): Promise<ParticipantInfo[]> {
+    const participants = await this.roomService.listParticipants(roomName);
+    logger.info(`Listed ${participants.length} participants in room ${roomName}`);
+    return participants;
   }
 
   async removeParticipant(roomName: string, participantIdentity: string): Promise<void> {
@@ -169,7 +260,11 @@ export class LiveKitService {
         return;
       }
 
-      const existingMetadata = rooms[0].metadata ? JSON.parse(rooms[0].metadata) : {};
+      const existingMetadata = parseRoomMetadata(
+        roomName,
+        rooms[0].metadata,
+        'participants_changed',
+      );
       const updatedMetadata = {
         ...existingMetadata,
         participantsVersion: Date.now(),
@@ -209,6 +304,56 @@ export class LiveKitService {
     } catch (error) {
       // Non-critical — the DB row is the source of truth; this only drives the indicator.
       logger.warn(`[LiveKit] Failed to set recording state for room ${roomName}:`, error);
+    }
+  }
+
+  async updateParticipantPublishSources(
+    roomName: string,
+    identity: string,
+    allowedSources: TrackSource[],
+  ): Promise<void> {
+    try {
+      await this.roomService.updateParticipant(roomName, identity, {
+        permission: {
+          canPublish: allowedSources.length > 0,
+          canSubscribe: true,
+          canPublishData: true,
+          canPublishSources: allowedSources,
+        },
+      });
+      logger.info(
+        `[${roomName}] participant_publish_sources_updated | identity=${identity}, allowed=${allowedSources.join(',')}`,
+      );
+    } catch (error) {
+      logger.error(
+        `[${roomName}] participant_publish_sources_update_failed | identity=${identity}, error=${error}`,
+      );
+      throw error;
+    }
+  }
+
+  /** Persist host-control locks into LiveKit room metadata. */
+  async setRoomHostControls(roomName: string, hostControls: HostControls): Promise<boolean> {
+    try {
+      const rooms = await this.roomService.listRooms([roomName]);
+      if (!rooms || rooms.length === 0) {
+        logger.debug(`[LiveKit] Room ${roomName} not found, skipping host controls update`);
+        return false;
+      }
+
+      const existingMetadata = parseRoomMetadata(roomName, rooms[0].metadata, 'host_controls');
+      const updatedMetadata = {
+        ...existingMetadata,
+        hostControls,
+        hostControlsVersion: Date.now(),
+      };
+
+      await this.roomService.updateRoomMetadata(roomName, JSON.stringify(updatedMetadata));
+      logger.info(`[LiveKit] Updated host controls for room ${roomName} | ${JSON.stringify(hostControls)}`);
+      return true;
+    } catch (error) {
+      logger.error(`[LiveKit] Failed to set host controls for room ${roomName}:`, error);
+      throw error;
     }
   }
 

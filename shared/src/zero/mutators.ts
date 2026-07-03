@@ -86,6 +86,7 @@ import {
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
+import type { CallParticipantMetadata } from '../types/call.js';
 
 /** Build initial_message_md from message data. Single helper for all conversation creation sites. */
 function buildInitialMessageMd(msg: {
@@ -3058,6 +3059,32 @@ export const mutators = defineMutators({
           throw new Error('Call not found or not active');
         }
 
+        const activeRequests = await tx.run(
+          zql.call_participants
+            .where('userId', ctx.userID)
+            .where('response', InvitationResponse.REQUESTED)
+            .related('call'),
+        );
+
+        for (const request of activeRequests) {
+          if (request.callId === call.id || request.call?.status !== CallStatus.ACTIVE) {
+            continue;
+          }
+
+          const metadata = request.metadata as CallParticipantMetadata | null;
+          if (metadata?.removedByHost) {
+            await tx.mutate.call_participants.update({
+              id: request.id,
+              response: InvitationResponse.DECLINED,
+              respondedAt: timestamp,
+              joinedAt: null,
+              leftAt: timestamp,
+            });
+          } else {
+            await tx.mutate.call_participants.delete({ id: request.id });
+          }
+        }
+
         // Check if participant already exists
         const existingParticipant = await tx.run(
           zql.call_participants.where('callId', call.id).where('userId', ctx.userID).one(),
@@ -3098,6 +3125,40 @@ export const mutators = defineMutators({
             isExternal: false,
           });
         }
+      },
+    ),
+    cancelJoinRequest: defineMutator(
+      z.object({
+        callId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { callId, timestamp } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+        if (!call) {
+          throw new Error('Call not found');
+        }
+
+        const participant = await tx.run(
+          zql.call_participants.where('callId', call.id).where('userId', ctx.userID).one(),
+        );
+
+        if (!participant || participant.response !== InvitationResponse.REQUESTED) {
+          return;
+        }
+
+        const metadata = participant.metadata as CallParticipantMetadata | null;
+        if (metadata?.removedByHost) {
+          await tx.mutate.call_participants.update({
+            id: participant.id,
+            response: InvitationResponse.DECLINED,
+            respondedAt: timestamp,
+            joinedAt: null,
+            leftAt: timestamp,
+          });
+          return;
+        }
+
+        await tx.mutate.call_participants.delete({ id: participant.id });
       },
     ),
     cancel: defineMutator(
