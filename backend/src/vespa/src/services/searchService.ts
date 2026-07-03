@@ -117,6 +117,146 @@ export class SearchService {
   }
 
   /**
+   * Search the xyne-apps catalog (`app` schema), scoped to one of the three Apps
+   * views (Installed / Org / Marketplace):
+   *   - 'installed'   → apps installed in the caller's workspace.
+   *   - 'org'         → ORG-scoped apps owned by the caller's org.
+   *   - 'marketplace' → GLOBAL apps across all orgs.
+   *
+   * Hybrid lexical + (for queries > 3 chars) semantic. Matches on name,
+   * description, creator, and owning org name (so a cross-org marketplace app is
+   * findable by its org, e.g. "Juspay" — mirroring the UI's "Created by" fallback).
+   * No per-user ACL — visibility is gated by the XYNE-APPS resource permission at
+   * the route. Install state is resolved from the DB (source of truth), scoped to
+   * the caller's workspace via the install user's workspaceId.
+   */
+  async searchApps(
+    query: string,
+    workspaceId: string | undefined,
+    opts: {
+      view: 'installed' | 'org' | 'marketplace';
+      orgId?: string;
+      limit?: number;
+      offset?: number;
+    },
+  ): Promise<{
+    results: Array<{
+      docId: string;
+      name: string;
+      description: string;
+      createdBy: string;
+      orgId: string;
+      orgName: string;
+      scope: string;
+      version: number;
+      createdAt: number;
+      relevance: number;
+      installed: boolean;
+      installedAppId: string | null;
+      installedVersion: number | null;
+      webhookUrl: string | null;
+      botUserId: string | null;
+    }>;
+    total: number;
+  }> {
+    const limit = opts.limit ?? 50;
+    const offset = opts.offset ?? 0;
+    const view = opts.view;
+    const searchQuery = escapeQueryForUserInput(query);
+    if (!searchQuery) return { results: [], total: 0 };
+
+    // Workspace-scoped installs (install user's workspaceId — same join as
+    // installedAppsRepository.findByWorkspaceId). Drives both the Installed-view
+    // corpus filter and the per-hit install state across all views.
+    const myInstalls = workspaceId
+      ? await db.installedApps.findMany({
+          where: { user: { workspaceId } },
+          select: { id: true, appId: true, userId: true, webhookUrl: true, version: true },
+        })
+      : [];
+    const installByApp = new Map<
+      string,
+      { installedAppId: string; userId: string; webhookUrl: string | null; version: number }
+    >();
+    for (const inst of myInstalls) {
+      if (!installByApp.has(inst.appId)) {
+        installByApp.set(inst.appId, {
+          installedAppId: inst.id,
+          userId: inst.userId,
+          webhookUrl: inst.webhookUrl ?? null,
+          version: inst.version,
+        });
+      }
+    }
+
+    // Installed view with no installs → nothing to search.
+    const installedAppIds = Array.from(installByApp.keys());
+    if (view === 'installed' && installedAppIds.length === 0) {
+      return { results: [], total: 0 };
+    }
+
+    const useSemantic = query.trim().length > 3;
+
+    const { yql, params } = this.yqlBuilder.buildAppYql({
+      view,
+      orgId: opts.orgId,
+      installedAppIds,
+    });
+    // Lexical retrieval; the embedding (passed below when useSemantic) only
+    // re-ranks via closeness in the rank-profile — it does not expand the match set.
+
+    const payload: Record<string, unknown> = {
+      yql,
+      query: searchQuery,
+      ...params,
+      hits: limit,
+      offset,
+      'ranking.profile': 'default_native',
+      'input.query(alpha)': 0.35,
+      timeout: '15s',
+      'presentation.summary': 'lean',
+      ...(useSemantic ? { 'input.query(e)': 'embed(@query)' } : {}),
+    };
+
+    try {
+      const response = await this.vespa.search<VespaSearchResponse>(payload as any);
+      const root = (response?.root ?? {}) as any;
+      const total = root?.fields?.totalCount ?? 0;
+      const children = (root?.children ?? []) as Array<any>;
+      const hits = children
+        .map((c) => ({
+          docId: c?.fields?.docId ?? '',
+          name: c?.fields?.name ?? '',
+          description: c?.fields?.description ?? '',
+          createdBy: c?.fields?.createdBy ?? '',
+          orgId: c?.fields?.orgId ?? '',
+          orgName: c?.fields?.orgName ?? '',
+          scope: c?.fields?.scope ?? '',
+          version: c?.fields?.version ?? 0,
+          createdAt: c?.fields?.createdAt ?? 0,
+          relevance: c?.relevance ?? 0,
+        }))
+        .filter((r) => r.docId);
+
+      const results = hits.map((h) => {
+        const inst = installByApp.get(h.docId);
+        return {
+          ...h,
+          installed: !!inst,
+          installedAppId: inst?.installedAppId ?? null,
+          installedVersion: inst?.version ?? null,
+          webhookUrl: inst?.webhookUrl ?? null,
+          botUserId: inst?.userId ?? null,
+        };
+      });
+      return { results, total };
+    } catch (error) {
+      this.logger.error(`App search failed: ${getErrorMessage(error)}`);
+      return { results: [], total: 0 };
+    }
+  }
+
+  /**
    * Generic Vespa search service
    */
   searchVespa = async (

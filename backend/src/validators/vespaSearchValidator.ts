@@ -17,10 +17,10 @@ export const vespaSearchQuerySchema = Joi.object({
 
   // Apps to search (comma-separated)
   apps: Joi.string()
-    .pattern(/^(chat|ticket|user|file|collection|mail)(,(chat|ticket|user|file|collection|mail))*$/)
+    .pattern(/^(chat|ticket|user|file|collection|mail|xyneapp)(,(chat|ticket|user|file|collection|mail|xyneapp))*$/)
     .default('chat,ticket,user,file,mail')
     .messages({
-      'string.pattern.base': 'Apps must be comma-separated values from: chat, ticket, user, file, collection, mail'
+      'string.pattern.base': 'Apps must be comma-separated values from: chat, ticket, user, file, collection, mail, xyneapp'
     }),
 
   // Pagination
@@ -280,6 +280,11 @@ export const vespaSearchQuerySchema = Joi.object({
   // When newest/oldest is set, grouping is disabled automatically (flat ranked list).
   orderBy: Joi.string().valid('newest', 'oldest', 'relevance').optional().messages({
     'any.only': 'orderBy must be one of: newest, oldest, relevance'
+  }),
+
+  // xyne-apps catalog view (apps=xyneapp). Scopes search to one of the three tabs.
+  view: Joi.string().valid('installed', 'org', 'marketplace').optional().messages({
+    'any.only': 'view must be one of: installed, org, marketplace'
   }),
 
   // Chunk-level KB drill-in (opt-in). Used by claw-auth's kb-get-chunks /

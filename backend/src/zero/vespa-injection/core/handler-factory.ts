@@ -13,6 +13,7 @@ import { TranscriptsVespaHandler } from '../tables/transcripts-handler';
 import { MessageAttachmentsVespaHandler } from '../tables/message-attachments-handler';
 import { ChannelStatsVespaHandler } from '../tables/channel-stats-handler';
 import { FormEntityValuesVespaHandler } from '../tables/form-entity-values-handler';
+import { AppsVespaHandler } from '../tables/apps-handler';
 /**
  * Factory for getting the appropriate Vespa handler for a given table.
  * 
@@ -64,6 +65,10 @@ export class VespaHandlerFactory {
       // File attachments
       case 'message_attachments':
         return new MessageAttachmentsVespaHandler(ctx);
+
+      // xyne-apps catalog
+      case 'apps':
+        return new AppsVespaHandler(ctx);
 
       // Default: no Vespa jobs for unhandled tables
       default:

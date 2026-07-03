@@ -10,6 +10,7 @@ export const fileSchema = 'file'
 export const memorySchema = 'memory';
 export const samTranscriptSchema = 'sam_transcript';
 export const mailSchema = 'mail';
+export const appSchema = 'app';
 export type VespaSchema =
   | typeof ticketSchema
   | typeof messageSchema
@@ -21,6 +22,7 @@ export type VespaSchema =
   | typeof memorySchema
   | typeof samTranscriptSchema
   | typeof mailSchema
+  | typeof appSchema
 
 export const VESPA_SCHEMAS: VespaSchema[] = [
   ticketSchema,
@@ -32,7 +34,8 @@ export const VESPA_SCHEMAS: VespaSchema[] = [
   fileSchema,
   memorySchema,
   samTranscriptSchema,
-  mailSchema
+  mailSchema,
+  appSchema
 ];
 
 export const MemoryScope = {
@@ -102,7 +105,8 @@ export enum VespaDocType {
   FACT = 'fact',
   SOP = 'sop',
   SAM_TRANSCRIPT = 'sam_transcript',
-  MAIL = 'mail'
+  MAIL = 'mail',
+  APP = 'app'
 }
 
 export enum SubApp {
@@ -462,6 +466,29 @@ export interface VespaMailDocument extends VespaDocument {
   attachmentFilenames?: string[];
 }
 
+/**
+ * Vespa document for the `app` schema (xyne-apps catalog search).
+ * `workspaceId` is stamped at feed time from the creator's workspace until the
+ * Apps table gains its own column. Creator identity is denormalized for lexical
+ * (BM25/fuzzy) matching; only name + description are embedded (see app.sd).
+ */
+export interface VespaAppDocument {
+  docId: string;
+  docType: VespaDocType.APP;
+  workspaceId: string;
+  orgId: string;
+  scope: string;
+  version: number;
+  name: string;
+  description: string;
+  createdBy: string;
+  creatorName: string;
+  creatorEmail: string;
+  orgName: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type VespaSearchResult =
   | VespaChatContainerDocument
   | VespaChatAttachmentDocument
@@ -520,6 +547,7 @@ export type InsertDocument =
   | VespaMemoryDocument
   | VespaSamTranscriptDocument
   | VespaMailDocument
+  | VespaAppDocument
 
 export type SchemaDataMap = {
   [messageSchema]: VespaChatMessageDocument;
@@ -532,6 +560,7 @@ export type SchemaDataMap = {
   [memorySchema]: VespaMemoryDocument;
   [samTranscriptSchema]: VespaSamTranscriptDocument;
   [mailSchema]: VespaMailDocument;
+  [appSchema]: VespaAppDocument;
 };
 
 export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
@@ -544,6 +573,7 @@ export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
   [fileSchema]: VespaDocType.FILE,
   [samTranscriptSchema]: VespaDocType.SAM_TRANSCRIPT,
   [mailSchema]: VespaDocType.MAIL,
+  [appSchema]: VespaDocType.APP,
 };
 
 export interface MatchFeatures {

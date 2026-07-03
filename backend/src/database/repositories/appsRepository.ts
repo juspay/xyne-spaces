@@ -1,5 +1,8 @@
 import { BaseRepository } from './base';
 import { Prisma } from '@prisma/client';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { appSchema } from '@/vespa/src/types';
+import { logger } from '@/utils/logger';
 import crypto from 'crypto';
 import { encrypt } from '@/services/encryptionService';
 
@@ -92,10 +95,20 @@ export class AppsRepository extends BaseRepository<
       ...data,
       updatedAt: new Date(),
     };
-    return this.db.apps.update({ where: { id }, data: dataWithUpdatedAt });
+    const result = await this.db.apps.update({ where: { id }, data: dataWithUpdatedAt });
+    // Re-index the app so column changes that bypass the Zero mutator path propagate
+    vespaQueue
+      .addJob({ schema: appSchema, jobType: 'feed', docId: id })
+      .catch((err) => logger.error(`Failed to queue Vespa re-index for app ${id}:`, err));
+    return result;
   }
 
   async delete(id: string) {
-    return this.db.apps.delete({ where: { id } });
+    const result = await this.db.apps.delete({ where: { id } });
+    // Queue removal from the Vespa search index.
+    vespaQueue
+      .addJob({ schema: appSchema, jobType: 'delete', docId: id })
+      .catch((err) => logger.error(`Failed to queue Vespa delete for app ${id}:`, err));
+    return result;
   }
 }

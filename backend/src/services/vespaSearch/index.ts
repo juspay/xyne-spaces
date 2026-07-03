@@ -188,6 +188,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       startChunkIndex,     // 0-based offset into the doc's chunks (no-query mode)
       chunkLimit,          // max chunks to return in no-query mode (1-30, default 15)
       orderBy,             // 'newest' | 'oldest' | 'relevance' — Vespa ORDER BY timestamp
+      view,                // xyne-apps view: 'installed' | 'org' | 'marketplace'
       // Note: subApp was moved up to be with other frontend filters
     } = req.query;
 
@@ -496,6 +497,34 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // Allow empty query if filterOnly is true
     if (!q && filterOnly !== 'true') {
       res.status(400).json({ success: false, error: 'Query parameter "q" is required' });
+      return;
+    }
+
+    // xyne-apps catalog search — dedicated `app` schema. No per-user ACL (route is
+    // already gated by the XYNE-APPS resource permission); scoped to one of the
+    // three Apps views in the search service. Short-circuits the universal
+    // chat/ticket/file pipeline below.
+    if (String(apps).trim() === 'xyneapp') {
+      const rawView = String(view ?? 'installed');
+      const appsView: 'installed' | 'org' | 'marketplace' =
+        rawView === 'org' || rawView === 'marketplace' ? rawView : 'installed';
+      // Org view needs the caller's org id (apps have no workspaceId — they're
+      // org-scoped). Resolve it from the caller's workspace.
+      let callerOrgId: string | undefined;
+      if (appsView === 'org' && workspaceId) {
+        const ws = await db.workspace.findUnique({
+          where: { id: workspaceId },
+          select: { orgId: true },
+        });
+        callerOrgId = ws?.orgId ?? undefined;
+      }
+      const { results, total } = await vespaService.searchService.searchApps(String(q ?? ''), workspaceId, {
+        view: appsView,
+        orgId: callerOrgId,
+        limit: limit ? Number(limit) : 50,
+        offset: offset ? Number(offset) : 0,
+      });
+      res.json({ success: true, results, total });
       return;
     }
 

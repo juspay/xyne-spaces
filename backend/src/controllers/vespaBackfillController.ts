@@ -10,6 +10,7 @@ import {
   ticketSchema,
   mailSchema,
   fileSchema,
+  appSchema,
   SubApp,
 } from '@/vespa/src/types';
 import { AttachmentEntityType, ChannelType, Prisma } from '@prisma/client';
@@ -292,6 +293,57 @@ export class AdminBackfillController {
     }
 
     logger.info(`✓ Transformed and queued ${totalQueued} projects for ingestion`);
+    return totalQueued;
+  }
+
+  /**
+   * Backfill apps (xyne-apps catalog) to the Vespa `app` schema.
+   * Queues a feed job per app; the worker re-fetches the row and derives
+   * workspaceId + creator identity from the creator's user record (mapApp).
+   */
+  private static async backfillApps(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let whereClause: Prisma.AppsWhereInput = {};
+    if (cutoffTime) {
+      whereClause = fromTime
+        ? { updatedAt: { gte: fromTime, lte: cutoffTime } }
+        : { updatedAt: { lte: cutoffTime } };
+    }
+
+    logger.info('🔄 Backfilling apps...');
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      const apps = await db.apps.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        // `id` is a unique tiebreaker: without it, ties on createdAt/updatedAt make
+        // skip/take pagination unstable (rows repeat across pages, others get skipped
+        // and never queued). Seeded apps share a timestamp, which exposed this.
+        orderBy: cutoffTime
+          ? [{ updatedAt: 'asc' }, { id: 'asc' }]
+          : [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true },
+      });
+
+      if (apps.length === 0) break;
+
+      for (const app of apps) {
+        try {
+          await vespaQueue.addJob({ schema: appSchema, jobType: 'feed', docId: app.id });
+          totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to queue app ${app.id}:`, error);
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Queued ${totalQueued} apps...`);
+    }
+
+    logger.info(`✓ Queued ${totalQueued} apps for ingestion`);
     return totalQueued;
   }
 
@@ -849,7 +901,7 @@ export class AdminBackfillController {
       // Determine which schemas to backfill
       const requestedSchemas = schemasParam
         ? schemasParam.split(',').map(s => s.trim().toLowerCase())
-        : ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail'];
+        : ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail', 'app'];
 
       // Parse fromTimestamp if provided, otherwise start from the beginning
       let fromTime: Date | null = null;
@@ -873,7 +925,7 @@ export class AdminBackfillController {
         logger.info(`📅 No fromTimestamp provided - will backfill from the beginning`);
       }
 
-      const validSchemas = ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail'];
+      const validSchemas = ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail', 'app'];
       const schemasToBackfill = requestedSchemas.filter(s => validSchemas.includes(s));
 
       if (schemasToBackfill.length === 0) {
@@ -1035,6 +1087,10 @@ export class AdminBackfillController {
 
       if (schemasToBackfill.includes('mail')) {
         stats.mail = await AdminBackfillController.backfillMail(cutoffTime, fromTime);
+      }
+
+      if (schemasToBackfill.includes('app')) {
+        stats.app = await AdminBackfillController.backfillApps(cutoffTime, fromTime);
       }
 
       const totalQueued = Object.values(stats).reduce((sum, count) => sum + count, 0);

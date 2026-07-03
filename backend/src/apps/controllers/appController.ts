@@ -8,6 +8,8 @@ import { logger } from '@/utils/logger';
 import { installApp, configureWebhook, regenerateJwt, getSigningSecret } from '../core/appUtils';
 import { isValidUrl } from '@/utils/urlUtils';
 import { UserManagementService } from '@/services/userManagementService';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { appSchema } from '@/vespa/src/types';
 
 const CreateAppBodySchema = z.object({
   name: z.string().min(1, 'App name cannot be empty').trim(),
@@ -101,6 +103,11 @@ export class AppController {
 
       // Create the app
       const app = await repositories.apps.createApp(appData);
+
+      // Queue Vespa indexing for the new app (worker fetches + maps by docId).
+      vespaQueue
+        .addJob({ schema: appSchema, jobType: 'feed', docId: app.id })
+        .catch((err) => logger.error(`Failed to queue Vespa feed for app ${app.id}:`, err));
 
       res.status(201).json(app);
     } catch (error) {

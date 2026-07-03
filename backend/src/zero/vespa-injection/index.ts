@@ -21,3 +21,4 @@ export { ProjectsVespaHandler } from './tables/projects-handler';
 export { RCAVespaHandler } from './tables/rca-handler';
 export { MessageAttachmentsVespaHandler } from './tables/message-attachments-handler';
 export { FormEntityValuesVespaHandler } from './tables/form-entity-values-handler';
+export { AppsVespaHandler } from './tables/apps-handler';

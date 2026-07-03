@@ -108,6 +108,26 @@ export interface AppPermission {
   description: string | null;
 }
 
+export interface AppSearchHit {
+  docId: string;
+  name: string;
+  description: string;
+  createdBy: string;
+  orgId: string;
+  orgName: string;
+  scope: string;
+  version: number;
+  createdAt: number;
+  relevance: number;
+  // Install state, scoped to the caller's workspace (resolved from the DB server-side).
+  installed: boolean;
+  installedAppId: string | null;
+  installedVersion: number | null;
+  webhookUrl: string | null;
+  botUserId: string | null;
+}
+
+export type AppsView = 'installed' | 'org' | 'marketplace';
 interface GrantedPermissionsResponse {
   permissions: string[];
   permissionsPending: boolean;
@@ -135,6 +155,25 @@ export class AppsService {
   async createApp(data: CreateAppRequest): Promise<App> {
     const response = await apiInstance.post<App>('/apps/create', data);
     return response.data;
+  }
+
+  /**
+   * App search via Vespa (`app` schema), scoped to one of the three Apps views
+   * (Installed / Org / Marketplace). Returns ranked hits (with workspace-scoped
+   * install state + owning-org attribution) and the total match count.
+   */
+  async search(
+    query: string,
+    view: AppsView,
+    limit = 50,
+    offset = 0,
+  ): Promise<{ results: AppSearchHit[]; total: number }> {
+    const response = await apiInstance.get<{
+      success: boolean;
+      results: AppSearchHit[];
+      total: number;
+    }>('/vespaSearch', { params: { q: query, apps: 'xyneapp', view, limit, offset } });
+    return { results: response.data?.results ?? [], total: response.data?.total ?? 0 };
   }
 
   async installApp(appId: string): Promise<InstallAppResponse> {

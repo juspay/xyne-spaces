@@ -85,6 +85,7 @@ export class InstalledAppsRepository extends BaseRepository<
         appId: true,
         userId: true,
         webhookUrl: true,
+        version: true, // installed version — gates the Update button (installed < latest)
       },
     });
   }
