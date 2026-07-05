@@ -794,9 +794,9 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           )}
           {isAtRoot ? (
             // Collections are channel-scoped, so creation must go through the
-            // CreateCollectionModal (it owns the channel picker + file step).
+            // CreateCollectionModal (it owns the channel picker + name step).
             // The single-field NameDialog can't capture scope, so we wire
-            // both "New" and "Upload" to the same modal.
+            // root creation through the scoped modal.
             <button
               type='button'
               onClick={() => setIsCreateModalOpen(true)}
@@ -972,7 +972,6 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           .filter(ch => ch.scopeType === ChannelScopeType.DEFAULT)
           .map(ch => ({ id: ch.id, name: ch.name }))}
         onSuccess={handleCreateSuccess}
-        folderOnly={true}
       />
 
       {shareTarget
