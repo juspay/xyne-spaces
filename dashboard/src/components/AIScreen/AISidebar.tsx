@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useTheme, type Theme } from '../../hooks/useTheme';
+import { useAskAIVersion } from '../../hooks/useAskAIVersion';
+import { useSessionsList, useSessionMutations } from '../../hooks/useAskAISessions';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { deleteV2Conversation } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
@@ -551,12 +553,15 @@ export function AISidebar({
     expand: toggle,
   });
 
-  // Scope the conversation history to the currently-selected agent. Without
-  // the slug the list (and delete proxy) default to 'ask-ai' on the backend,
-  // so history for any other agent never loads.
+  const { askAIVersion } = useAskAIVersion();
   const { selectedAgentSlug } = useSelectedAgent();
-  const { data: sessions = [] } = useV2SessionsList(selectedAgentSlug);
+  const isV2 = askAIVersion === 'v2';
+  const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
+  const { data: v1Sessions = [] } = useSessionsList();
+  const { deleteSession: deleteSessionMutation } = useSessionMutations();
+  const { data: v2Sessions = [] } = useV2SessionsList(effectiveAgentSlug, isV2);
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
+  const sessions = isV2 ? v2Sessions : v1Sessions;
 
   const handleCreateChat = (): void => {
     onCreateChat();
@@ -566,14 +571,13 @@ export function AISidebar({
     onSelectSession(sessionId);
   };
 
-  // /ai page is v2-only (claw-backed). The v1 session mutation endpoints
-  // (/xyne-ai/sessions/:id/...) write to a different store and 404 for v2
-  // conversation IDs, so we go through the v2 delete proxy directly.
-  // Rename + star are not exposed here because claw-auth has no backing
-  // fields for them.
   const handleDeleteSession = async (sessionId: string): Promise<void> => {
     try {
-      await deleteV2Conversation(sessionId, selectedAgentSlug);
+      if (isV2) {
+        await deleteV2Conversation(sessionId, effectiveAgentSlug);
+      } else {
+        await deleteSessionMutation.mutateAsync(sessionId);
+      }
       // If the user just deleted the conversation they're viewing, bounce
       // back to the new-chat landing so the thread pane isn't stuck on a
       // stale session id.
@@ -581,7 +585,9 @@ export function AISidebar({
         onCreateChat();
       }
     } finally {
-      invalidateV2Sessions(selectedAgentSlug);
+      if (isV2) {
+        invalidateV2Sessions(effectiveAgentSlug);
+      }
     }
   };
 

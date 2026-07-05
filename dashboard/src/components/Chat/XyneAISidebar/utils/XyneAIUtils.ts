@@ -1,5 +1,28 @@
 import type { ToolOutput as GeniusToolOutput, MetricConfig, GroupbyConfig } from 'cosmic-ai-genius';
-import type { StreamingParsedContent } from './XyneAITypes';
+import type { Message, StoredMessage, StreamingParsedContent } from './XyneAITypes';
+
+export function normalizeLoadedMessagesForDisplay(
+  messages: Array<Message | StoredMessage>,
+): Message[] {
+  return messages.map(msg => {
+    const toolOutputs = msg.toolOutputs;
+    if (
+      msg.type === 'bot' &&
+      msg.isStreaming &&
+      (!msg.content || msg.content.trim().length === 0) &&
+      (!toolOutputs || toolOutputs.length === 0)
+    ) {
+      return {
+        ...msg,
+        isStreaming: false,
+        isAborted: true,
+        content: 'Answer was aborted. Please try asking your question again.',
+      };
+    }
+
+    return { ...msg, isStreaming: false };
+  });
+}
 
 // Helper to determine metric type from key name
 export function getMetricTypeFromKey(key: string): MetricConfig['metric_type'] {

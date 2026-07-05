@@ -13,6 +13,9 @@ import type { ComposerContext } from '../../components/AIScreen/composerContext'
 import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen/AIChatThread';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
+import { useSessionInvalidator } from '../../hooks/useAskAISessions';
+import { useAskAIVersion } from '../../hooks/useAskAIVersion';
+import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 
 const AI_ACTIVE_SESSION_KEY = 'ai-active-session-id';
 const AI_SHOW_CHAT_VIEW_KEY = 'ai-show-chat-view';
@@ -42,7 +45,12 @@ const AIScreen = (): ReactElement => {
   // chat instead of clearing them — matching XyneAISidebar.
   const lastContextRef = useRef<ComposerContext | undefined>(undefined);
   const navigate = useNavigate();
-  const { invalidateSessions } = useV2SessionInvalidator();
+  const { askAIVersion } = useAskAIVersion();
+  const { selectedAgentSlug } = useSelectedAgent();
+  const isV2 = askAIVersion === 'v2';
+  const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
+  const { invalidateSessions: invalidateV1Sessions } = useSessionInvalidator();
+  const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
   useEffect(() => {
     showChatViewRef.current = showChatView;
@@ -193,9 +201,13 @@ const AIScreen = (): ReactElement => {
       // A new chat just acquired its server sessionId — refresh the recents
       // list so this conversation shows up immediately, without needing a
       // page reload or a navigate-away-and-back.
-      invalidateSessions();
+      if (isV2) {
+        invalidateV2Sessions(effectiveAgentSlug);
+      } else {
+        invalidateV1Sessions();
+      }
     },
-    [invalidateSessions],
+    [effectiveAgentSlug, invalidateV1Sessions, invalidateV2Sessions, isV2],
   );
 
   const handleAccount = useCallback((): void => {
@@ -255,6 +267,7 @@ const AIScreen = (): ReactElement => {
                   autoFocus
                   onSubmit={handleComposerSubmit}
                   onAgentChange={handleAgentChange}
+                  showAgentSelector={isV2}
                   onContextChange={handleContextChange}
                   hideDisclaimer
                 />

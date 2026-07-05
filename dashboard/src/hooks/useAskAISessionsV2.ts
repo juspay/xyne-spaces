@@ -28,11 +28,12 @@ const v2SessionMessagesKey = (convId: string, agentSlug?: string | null): readon
  * List all conversations for the current user from claw.
  * @param agentSlug - Optional agent slug to filter conversations per-agent.
  */
-export function useV2SessionsList(agentSlug?: string | null) {
+export function useV2SessionsList(agentSlug?: string | null, enabled = true) {
   return useQuery({
     queryKey: V2_SESSIONS_KEY(agentSlug),
     queryFn: () => fetchV2Conversations(agentSlug),
     staleTime: 30_000,
+    enabled,
   });
 }
 

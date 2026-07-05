@@ -30,6 +30,8 @@ import remarkBreaks from 'remark-breaks';
 import { Link } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import { useAskAIVersion } from '../../hooks/useAskAIVersion';
+import { loadSessionDetail } from '../../hooks/useAskAISessions';
 import type {
   Message,
   MessageAttachment,
@@ -73,6 +75,7 @@ import {
 import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
 import {
+  normalizeLoadedMessagesForDisplay,
   resolveActivePath,
   getSiblings,
   BRANCH_ROOT_KEY,
@@ -1183,6 +1186,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   void threadId; // Used by stream manager via useXyneAIStream internally
 
   const { selectedAgentSlug } = useSelectedAgent();
+  const { askAIVersion } = useAskAIVersion();
+  const isV2 = askAIVersion === 'v2';
+  const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
 
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: [],
@@ -1192,8 +1198,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     setConversationId,
     setDebugEvents,
     setDebugArtifactsReadyVersion,
-    isV2: true,
-    agentSlug: selectedAgentSlug,
+    isV2,
+    agentSlug: effectiveAgentSlug,
   });
 
   // ── Branching: resolve the visible path from the full message tree ────────────
@@ -1393,31 +1399,44 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         setDebugArtifactsReadyVersion(0);
         setDebugSessionId(null);
 
-        const messages = await fetchV2ConversationMessages(sessionId, selectedAgentSlug);
-        const loadedMessages = messages.map(msg => ({
-          ...msg,
-          isStreaming: false,
-          timestamp: msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp),
-        }));
+        if (isV2) {
+          const messages = await fetchV2ConversationMessages(sessionId, effectiveAgentSlug);
+          const loadedMessages = messages.map(msg => ({
+            ...msg,
+            isStreaming: false,
+            timestamp: msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp),
+          }));
 
-        // Overlay any local-only messages from the manager that haven't been
-        // persisted yet (covers the race where the server hasn't committed
-        // the just-finished bot reply when the user switches back).
-        const liveForOverlay =
-          xyneAIStreamManager.getActiveStream(threadId) ??
-          xyneAIStreamManager.findActiveStreamBySessionId(sessionId);
-        if (liveForOverlay) {
-          const serverIds = new Set(loadedMessages.map(m => m.id));
-          for (const localMsg of liveForOverlay.messages) {
-            if (!serverIds.has(localMsg.id)) {
-              loadedMessages.push({ ...localMsg, isStreaming: false });
+          // Overlay any local-only messages from the manager that haven't been
+          // persisted yet (covers the race where the server hasn't committed
+          // the just-finished bot reply when the user switches back).
+          const liveForOverlay =
+            xyneAIStreamManager.getActiveStream(threadId) ??
+            xyneAIStreamManager.findActiveStreamBySessionId(sessionId);
+          if (liveForOverlay) {
+            const serverIds = new Set(loadedMessages.map(m => m.id));
+            for (const localMsg of liveForOverlay.messages) {
+              if (!serverIds.has(localMsg.id)) {
+                loadedMessages.push({ ...localMsg, isStreaming: false });
+              }
             }
           }
+
+          setMessages(loadedMessages);
+          setConversationId(sessionId);
+          onConversationChange?.(sessionId);
+          return;
         }
 
-        setMessages(loadedMessages);
-        setConversationId(sessionId);
-        onConversationChange?.(sessionId);
+        const fullConversation = await loadSessionDetail(sessionId);
+        if (!fullConversation) {
+          return;
+        }
+
+        setMessages(normalizeLoadedMessagesForDisplay(fullConversation.messages));
+        setConversationId(fullConversation.sessionId);
+        setBranchSelections(fullConversation.branchSelections ?? {});
+        onConversationChange?.(fullConversation.sessionId);
       } catch (error) {
         console.error('[AIChatThread] Failed to load session:', error);
       } finally {
@@ -1426,7 +1445,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     };
 
     void loadSession();
-  }, [sessionId, threadId, onConversationChange, selectedAgentSlug]);
+  }, [sessionId, threadId, onConversationChange, effectiveAgentSlug, isV2]);
 
   // Auto-submit initialQuery once on mount, applying the landing composer's
   // chosen context/toggles to this first turn.
@@ -1741,7 +1760,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                     }}
                     feedbackValue={feedbackValue}
                     onDebug={
-                      message.type === 'bot'
+                      isV2 && message.type === 'bot'
                         ? () => {
                             setDebugTurnIndex(botTurnIndex);
                             // Pin to this message's run when known (branching-safe);
@@ -1753,7 +1772,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                         : undefined
                     }
                     onOpenToolDebug={
-                      message.type === 'bot'
+                      isV2 && message.type === 'bot'
                         ? (toolCallId: string) => {
                             setDebugTurnIndex(botTurnIndex);
                             setDebugSessionId(message.debugSessionId ?? null);
@@ -1812,6 +1831,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                 void handleSubmit(text, attachments, context);
               }}
               onAgentChange={onAgentChange}
+              showAgentSelector={isV2}
               initialExtras={initialExtras}
               onContextChange={onContextChange}
               pending={isAnyMessageStreaming}
@@ -1822,12 +1842,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         </div>
       </div>
 
-      {showDebugger && (
+      {showDebugger && isV2 && (
         <AskAIDebugPanel
           inline
           open={showDebugger}
           conversationId={conversationId}
-          agentSlug={selectedAgentSlug || 'ask-ai'}
+          agentSlug={effectiveAgentSlug || 'ask-ai'}
           liveEvents={debugEvents}
           running={isAnyMessageStreaming}
           artifactsReadyVersion={debugArtifactsReadyVersion}

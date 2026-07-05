@@ -20,6 +20,7 @@ interface ConversationHistoryProps {
   onToggleStar: (conversation: ConversationHistoryType) => Promise<void>;
   onDeleteConversation: (conversation: ConversationHistoryType) => Promise<void>;
   onRenameConversation: (conversation: ConversationHistoryType, newName: string) => Promise<void>;
+  showStarRenameActions?: boolean;
   selectedAgentSlug?: string | null;
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
@@ -75,6 +76,7 @@ export const ConversationHistory = ({
   onToggleStar,
   onDeleteConversation,
   onRenameConversation,
+  showStarRenameActions = true,
   selectedAgentSlug,
   agents,
   onSelectAgent,
@@ -250,6 +252,7 @@ export const ConversationHistory = ({
                 onRename={handleRename}
                 onToggleStar={onToggleStar}
                 onDeleteConversation={onDeleteConversation}
+                showStarRenameActions={showStarRenameActions}
                 setRenameValue={setRenameValue}
                 setRenamingId={setRenamingId}
                 setOpenDropdownId={setOpenDropdownId}
@@ -284,6 +287,7 @@ export const ConversationHistory = ({
                     onRename={handleRename}
                     onToggleStar={onToggleStar}
                     onDeleteConversation={onDeleteConversation}
+                    showStarRenameActions={showStarRenameActions}
                     setRenameValue={setRenameValue}
                     setRenamingId={setRenamingId}
                     setOpenDropdownId={setOpenDropdownId}
@@ -332,6 +336,7 @@ export const ConversationHistory = ({
                 onRename={handleRename}
                 onToggleStar={onToggleStar}
                 onDeleteConversation={onDeleteConversation}
+                showStarRenameActions={showStarRenameActions}
                 setRenameValue={setRenameValue}
                 setRenamingId={setRenamingId}
                 setOpenDropdownId={setOpenDropdownId}
@@ -358,6 +363,7 @@ export const ConversationHistory = ({
               onRename={handleRename}
               onToggleStar={onToggleStar}
               onDeleteConversation={onDeleteConversation}
+              showStarRenameActions={showStarRenameActions}
               setRenameValue={setRenameValue}
               setRenamingId={setRenamingId}
               setOpenDropdownId={setOpenDropdownId}
@@ -389,6 +395,7 @@ interface ConversationSectionProps {
   onRename: (conversation: ConversationHistoryType) => Promise<void>;
   onToggleStar: (conversation: ConversationHistoryType) => Promise<void>;
   onDeleteConversation: (conversation: ConversationHistoryType) => Promise<void>;
+  showStarRenameActions: boolean;
   setRenameValue: (value: string) => void;
   setRenamingId: (id: string | null) => void;
   setOpenDropdownId: (id: string | null) => void;
@@ -410,6 +417,7 @@ const ConversationSection = ({
   onRename,
   onToggleStar,
   onDeleteConversation,
+  showStarRenameActions,
   setRenameValue,
   setRenamingId,
   setOpenDropdownId,
@@ -461,6 +469,7 @@ const ConversationSection = ({
                   void onDeleteConversation(conversation);
                 }
               }}
+              showStarRenameActions={showStarRenameActions}
               setRenameValue={setRenameValue}
               setRenamingId={setRenamingId}
               setOpenDropdownId={setOpenDropdownId}
@@ -491,6 +500,7 @@ interface ConversationItemProps {
   onRename: () => void;
   onToggleStar: () => void;
   onDelete: () => void;
+  showStarRenameActions: boolean;
   setRenameValue: (value: string) => void;
   setRenamingId: (id: string | null) => void;
   setOpenDropdownId: (id: string | null) => void;
@@ -511,6 +521,7 @@ const ConversationItem = ({
   onRename,
   onToggleStar,
   onDelete,
+  showStarRenameActions,
   setRenameValue,
   setRenamingId,
   setOpenDropdownId,
@@ -717,34 +728,41 @@ const ConversationItem = ({
           description='Manage this conversation'
         >
           <div className='flex flex-col bg-popover rounded-t-[20px] overflow-hidden'>
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                onToggleStar();
-                setOpenDropdownId(null);
-              }}
-              className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 border-b border-border touch-manipulation'
-              data-track-category='XyneAI'
-              data-track-name='TOGGLE_STAR_CONVERSATION'
-              data-track-metadata={JSON.stringify({ conversationId: conversation.id, isStarred })}
-            >
-              {isStarred || conversation.isStarred ? <XyneStarred /> : <XyneUnstarred />}
-              <span>{isStarred || conversation.isStarred ? 'Unstar' : 'Star'}</span>
-            </button>
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                onStartRename();
-                setOpenDropdownId(null);
-              }}
-              className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 border-b border-border touch-manipulation'
-              data-track-category='XyneAI'
-              data-track-name='RENAME_CONVERSATION'
-              data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
-            >
-              <XyneRename />
-              <span>Rename</span>
-            </button>
+            {showStarRenameActions && (
+              <>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    onToggleStar();
+                    setOpenDropdownId(null);
+                  }}
+                  className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 border-b border-border touch-manipulation'
+                  data-track-category='XyneAI'
+                  data-track-name='TOGGLE_STAR_CONVERSATION'
+                  data-track-metadata={JSON.stringify({
+                    conversationId: conversation.id,
+                    isStarred,
+                  })}
+                >
+                  {isStarred || conversation.isStarred ? <XyneStarred /> : <XyneUnstarred />}
+                  <span>{isStarred || conversation.isStarred ? 'Unstar' : 'Star'}</span>
+                </button>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    onStartRename();
+                    setOpenDropdownId(null);
+                  }}
+                  className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 border-b border-border touch-manipulation'
+                  data-track-category='XyneAI'
+                  data-track-name='RENAME_CONVERSATION'
+                  data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
+                >
+                  <XyneRename />
+                  <span>Rename</span>
+                </button>
+              </>
+            )}
             <button
               onClick={e => {
                 e.stopPropagation();
@@ -779,34 +797,38 @@ const ConversationItem = ({
           }
           className='w-48 p-0 bg-popover border border-border rounded-lg shadow-lg'
         >
-          <button
-            onClick={e => {
-              e.stopPropagation();
-              onToggleStar();
-              setOpenDropdownId(null);
-            }}
-            className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 border-b border-border'
-            data-track-category='XyneAI'
-            data-track-name='TOGGLE_STAR_DESKTOP'
-            data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
-          >
-            {isStarred || conversation.isStarred ? <XyneStarred /> : <XyneUnstarred />}
-            <span>{isStarred || conversation.isStarred ? 'Unstar' : 'Star'}</span>
-          </button>
-          <button
-            onClick={e => {
-              e.stopPropagation();
-              onStartRename();
-              setOpenDropdownId(null);
-            }}
-            className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 border-b border-border'
-            data-track-category='XyneAI'
-            data-track-name='RENAME_DESKTOP'
-            data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
-          >
-            <XyneRename />
-            <span>Rename</span>
-          </button>
+          {showStarRenameActions && (
+            <>
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  onToggleStar();
+                  setOpenDropdownId(null);
+                }}
+                className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 border-b border-border'
+                data-track-category='XyneAI'
+                data-track-name='TOGGLE_STAR_DESKTOP'
+                data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
+              >
+                {isStarred || conversation.isStarred ? <XyneStarred /> : <XyneUnstarred />}
+                <span>{isStarred || conversation.isStarred ? 'Unstar' : 'Star'}</span>
+              </button>
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  onStartRename();
+                  setOpenDropdownId(null);
+                }}
+                className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 border-b border-border'
+                data-track-category='XyneAI'
+                data-track-name='RENAME_DESKTOP'
+                data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
+              >
+                <XyneRename />
+                <span>Rename</span>
+              </button>
+            </>
+          )}
           <button
             onClick={e => {
               e.stopPropagation();

@@ -29,7 +29,12 @@ import type {
   ConversationHistory as ConversationHistoryType,
   LastInputContext,
 } from './utils/XyneAITypes';
-import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
+import {
+  normalizeLoadedMessagesForDisplay,
+  resolveActivePath,
+  getSiblings,
+  BRANCH_ROOT_KEY,
+} from './utils/XyneAIUtils';
 import {
   useSessionsList,
   useSessionMutations,
@@ -37,7 +42,10 @@ import {
   saveSessionMetadata,
 } from '../../../hooks/useAskAISessions';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../../hooks/useAskAISessionsV2';
-import { fetchV2ConversationMessages } from '../../../services/XyneAI/XyneAISessionsV2Service';
+import {
+  deleteV2Conversation,
+  fetchV2ConversationMessages,
+} from '../../../services/XyneAI/XyneAISessionsV2Service';
 import type {
   Message,
   SummarizerCitation,
@@ -564,17 +572,17 @@ const XyneAISidebar = ({
     queryKey: ['accessible-claw-agents'],
     queryFn: fetchAccessibleClawAgents,
     staleTime: 60_000,
+    enabled: askAIVersion === 'v2',
   });
 
-  // isV2 is true when the global config is v2 OR when a non-ask-ai claw agent is selected.
-  // Selecting a claw agent forces v2 backend for queries, sessions, and messages.
-  const isV2 = askAIVersion === 'v2' || selectedAgentSlug !== null;
+  const isV2 = askAIVersion === 'v2';
+  const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
   useEffect(() => {
     onDebuggerOpenChange?.(showDebugger && isV2);
   }, [showDebugger, isV2, onDebuggerOpenChange]);
   // When selectedAgentSlug is null (Ask AI default), look for 'ask-ai' agent in v2 mode
-  const selectedAgent = selectedAgentSlug
-    ? (accessibleAgents.find(a => a.slug === selectedAgentSlug) ?? null)
+  const selectedAgent = effectiveAgentSlug
+    ? (accessibleAgents.find(a => a.slug === effectiveAgentSlug) ?? null)
     : isV2
       ? (accessibleAgents.find(a => a.slug === 'ask-ai') ?? null)
       : null;
@@ -652,7 +660,7 @@ const XyneAISidebar = ({
       transcripts: selectedTranscripts,
       recordings: selectedRecordings,
     }),
-    agentSlug: selectedAgentSlug,
+    agentSlug: effectiveAgentSlug,
   });
 
   // Start fresh chat when startFreshChat flag is set
@@ -726,8 +734,11 @@ const XyneAISidebar = ({
   } = useSessionMutations();
 
   // v2 sessions hooks (used when v2 is enabled)
-  const { data: v2SessionsData, refetch: refetchV2Sessions } = useV2SessionsList(selectedAgentSlug);
-  const { invalidateSessions: _invalidateV2Sessions } = useV2SessionInvalidator();
+  const { data: v2SessionsData, refetch: refetchV2Sessions } = useV2SessionsList(
+    effectiveAgentSlug,
+    isV2,
+  );
+  const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
   // Sync sessions list to local state for the ConversationHistory component
   // Uses v2 data when available, otherwise falls back to v1
@@ -865,7 +876,7 @@ const XyneAISidebar = ({
 
           const clawMessages = await fetchV2ConversationMessages(
             mostRecentConv.sessionId,
-            selectedAgentSlug,
+            effectiveAgentSlug,
           );
           const messagesWithoutStreaming: Message[] = clawMessages.map(msg => ({
             ...msg,
@@ -945,23 +956,7 @@ const XyneAISidebar = ({
 
           setConversationChannelId(mostRecent.channelId);
 
-          const messagesWithoutStreaming: Message[] = mostRecent.messages.map(msg => {
-            const toolOutputs = msg.toolOutputs;
-            if (
-              msg.type === 'bot' &&
-              msg.isStreaming &&
-              (!msg.content || msg.content.trim().length === 0) &&
-              (!toolOutputs || toolOutputs.length === 0)
-            ) {
-              return {
-                ...msg,
-                isStreaming: false,
-                isAborted: true,
-                content: 'Answer was aborted. Please try asking your question again.',
-              };
-            }
-            return { ...msg, isStreaming: false };
-          });
+          const messagesWithoutStreaming = normalizeLoadedMessagesForDisplay(mostRecent.messages);
           setMessages(messagesWithoutStreaming);
           setConversationId(mostRecent.sessionId);
           setBranchSelections(mostRecent.branchSelections ?? {});
@@ -1005,6 +1000,9 @@ const XyneAISidebar = ({
     v2SessionsData,
     refetchV2Sessions,
     restoreInputContext,
+    selectedAgentSlug,
+    effectiveAgentSlug,
+    setSelectedAgentSlug,
   ]);
 
   // Refetch sessions list when history sidebar is opened to get fresh data
@@ -1118,7 +1116,7 @@ const XyneAISidebar = ({
         setDebugArtifactsReadyVersion(0);
         const clawMessages = await fetchV2ConversationMessages(
           conversation.sessionId,
-          selectedAgentSlug,
+          effectiveAgentSlug,
         );
         // Overlay any local-only messages from the manager. If the user sent a
         // message in this conversation, switched away, came back AFTER the
@@ -1159,23 +1157,9 @@ const XyneAISidebar = ({
           return;
         }
 
-        const messagesWithoutStreaming: Message[] = fullConversation.messages.map(msg => {
-          const toolOutputs = msg.toolOutputs;
-          if (
-            msg.type === 'bot' &&
-            msg.isStreaming &&
-            (!msg.content || msg.content.trim().length === 0) &&
-            (!toolOutputs || toolOutputs.length === 0)
-          ) {
-            return {
-              ...msg,
-              isStreaming: false,
-              isAborted: true,
-              content: 'Answer was aborted. Please try asking your question again.',
-            };
-          }
-          return { ...msg, isStreaming: false };
-        });
+        const messagesWithoutStreaming = normalizeLoadedMessagesForDisplay(
+          fullConversation.messages,
+        );
         setMessages(messagesWithoutStreaming);
         setConversationId(fullConversation.sessionId);
         setConversationChannelId(fullConversation.channelId);
@@ -1220,6 +1204,8 @@ const XyneAISidebar = ({
   }, [conversationId, isFullscreen]);
 
   const handleToggleStar = async (conversation: ConversationHistoryType): Promise<void> => {
+    if (isV2) return;
+
     try {
       await toggleStarMutation.mutateAsync(conversation.sessionId);
     } catch (error) {
@@ -1229,7 +1215,12 @@ const XyneAISidebar = ({
 
   const handleDeleteConversation = async (conversation: ConversationHistoryType): Promise<void> => {
     try {
-      await deleteSessionMutation.mutateAsync(conversation.sessionId);
+      if (isV2) {
+        await deleteV2Conversation(conversation.sessionId, effectiveAgentSlug);
+        invalidateV2Sessions(effectiveAgentSlug);
+      } else {
+        await deleteSessionMutation.mutateAsync(conversation.sessionId);
+      }
       // If deleted conversation was active, clear messages
       if (conversation.sessionId === conversationId) {
         setMessages([]);
@@ -1247,6 +1238,8 @@ const XyneAISidebar = ({
     conversation: ConversationHistoryType,
     newName: string,
   ): Promise<void> => {
+    if (isV2) return;
+
     try {
       await renameMutation.mutateAsync({ sessionId: conversation.sessionId, title: newName });
     } catch (error) {
@@ -1285,17 +1278,19 @@ const XyneAISidebar = ({
   // reset to a fresh conversation scoped to that agent.
   const handleSelectAgent = useCallback(
     (slug: string | null): void => {
+      if (!isV2) return;
       if (slug === selectedAgentSlug) return;
       setSelectedAgentSlug(slug);
       handleNewChat();
     },
-    [selectedAgentSlug, setSelectedAgentSlug, handleNewChat],
+    [isV2, selectedAgentSlug, setSelectedAgentSlug, handleNewChat],
   );
 
   // When user selects an agent from the history page, stay on history
   // and refresh the conversation list for that agent.
   const handleSelectAgentFromHistory = useCallback(
     (slug: string | null): void => {
+      if (!isV2) return;
       if (slug === selectedAgentSlug) return;
       setSelectedAgentSlug(slug);
       // Clear active conversation but stay on history page
@@ -1307,7 +1302,7 @@ const XyneAISidebar = ({
       // Refresh sessions list for the new agent
       void refetchV2Sessions();
     },
-    [selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions],
+    [isV2, selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions],
   );
 
   const handleLoadConversationRef = useRef(handleLoadConversation);
@@ -1970,9 +1965,10 @@ const XyneAISidebar = ({
             onToggleStar={handleToggleStar}
             onDeleteConversation={handleDeleteConversation}
             onRenameConversation={handleRenameConversation}
-            selectedAgentSlug={selectedAgentSlug}
-            agents={accessibleAgents}
-            onSelectAgent={handleSelectAgentFromHistory}
+            showStarRenameActions={!isV2}
+            selectedAgentSlug={effectiveAgentSlug}
+            agents={isV2 ? accessibleAgents : []}
+            {...(isV2 ? { onSelectAgent: handleSelectAgentFromHistory } : {})}
             selectedAgentColor={selectedAgentColor}
           />
         ) : showUserActivityPanel ? (
@@ -2039,7 +2035,7 @@ const XyneAISidebar = ({
                     // selector reflects it and the loaded session is scoped to
                     // the right agent (not the one currently selected).
                     const respondingAgent = s?.agentSlug ?? null;
-                    if (respondingAgent !== selectedAgentSlug) {
+                    if (isV2 && respondingAgent !== selectedAgentSlug) {
                       setSelectedAgentSlug(respondingAgent);
                     }
                     xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: sid });
@@ -2097,9 +2093,9 @@ const XyneAISidebar = ({
                             showChannelTag={false}
                             isStreaming={false}
                             contextPanelPosition='top'
-                            selectedAgentSlug={selectedAgentSlug}
-                            agents={accessibleAgents}
-                            onSelectAgent={handleSelectAgent}
+                            selectedAgentSlug={effectiveAgentSlug}
+                            agents={isV2 ? accessibleAgents : []}
+                            {...(isV2 ? { onSelectAgent: handleSelectAgent } : {})}
                             {...sharedInputSectionProps}
                           />
                         }
@@ -2135,7 +2131,7 @@ const XyneAISidebar = ({
                     <XyneAISuggestions
                       queries={suggestionQueries}
                       onSuggestionClick={handleSuggestionClick}
-                      selectedAgentSlug={selectedAgentSlug}
+                      selectedAgentSlug={effectiveAgentSlug}
                     />
                   )
                 ) : (
@@ -2297,9 +2293,9 @@ const XyneAISidebar = ({
                     showChannelTag={true}
                     isStreaming={isActiveSessionStreaming}
                     contextPanelPosition='bottom'
-                    selectedAgentSlug={selectedAgentSlug}
-                    agents={accessibleAgents}
-                    onSelectAgent={handleSelectAgent}
+                    selectedAgentSlug={effectiveAgentSlug}
+                    agents={isV2 ? accessibleAgents : []}
+                    {...(isV2 ? { onSelectAgent: handleSelectAgent } : {})}
                     compactToolbar={isCompactSidebar}
                     tightToolbar={isTightSidebar}
                     {...sharedInputSectionProps}
@@ -2331,7 +2327,7 @@ const XyneAISidebar = ({
             inline
             width={debuggerWidth}
             conversationId={conversationId || streamThreadKey}
-            agentSlug={selectedAgentSlug || 'ask-ai'}
+            agentSlug={effectiveAgentSlug || 'ask-ai'}
             liveEvents={debugEvents}
             running={isActiveSessionStreaming}
             artifactsReadyVersion={debugArtifactsReadyVersion}
