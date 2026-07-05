@@ -70,9 +70,9 @@ export const BoardTableRow = ({
           size='sm'
           className='bg-[#6276be] hover:bg-[#5060a0] text-white flex-shrink-0 whitespace-nowrap'
           data-track-category='BOARD_CREATE'
-          data-track-name='DUPLICATE_BOARD'
+          data-track-name='CLONE_BOARD'
         >
-          Duplicate
+          Clone
         </Button>
       </div>
     </div>

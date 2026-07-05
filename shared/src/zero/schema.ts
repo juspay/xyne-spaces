@@ -2137,6 +2137,8 @@ export const formFieldsTable = table('form_fields')
   })
   .primaryKey('id');
 
+export type FormFieldValue = string | string[] | null;
+
 export const formEntityValuesTable = table('form_entity_values')
   .columns({
     id: string(),
@@ -2147,7 +2149,7 @@ export const formEntityValuesTable = table('form_entity_values')
     contextId: string().optional(),
     version: number().optional(), // NULL treated as 1 in code
     fieldValue: string(),
-    actualFieldValue: json().optional(),
+    actualFieldValue: json<FormFieldValue>().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

@@ -30,6 +30,7 @@ import type {
   FormFields,
   FormEntityValues,
   TicketStageRequest,
+  BoardMetadata,
 } from '@xyne/shared';
 import {
   TicketPriority,
@@ -44,6 +45,7 @@ import {
   LookupType,
   BoardType,
   ApproverType,
+  ReenterMode,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -84,6 +86,7 @@ import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
 import { StageFormModal } from '../StageFormModal/StageFormModal';
+import { StageFormInlinePanel } from '../StageFormInlinePanel/StageFormInlinePanel';
 import { FormViewerDialog } from './FormViewerDialog';
 import Tooltip from '../../ui/Tooltip';
 import WorkflowTriggerModal from '../../Workflow/WorkflowTriggerModal';
@@ -460,8 +463,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     isReviewer?: boolean;
     hasApprovers: boolean;
     existingRequest?: TicketStageRequest | null;
+    showPersistedDocValues?: boolean;
   } | null>(null);
-
   const [editingStageETA, setEditingStageETA] = useState(false);
   const [stageEtaValue, setStageEtaValue] = useState('');
   const stageEtaInputRef = useRef<HTMLInputElement>(null);
@@ -605,6 +608,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   });
 
   const isNonLinearBoard = boardData?.boardType === BoardType.NON_LINEAR;
+  const showNextStageFormInTicketDetails =
+    !isNonLinearBoard &&
+    ((boardData?.metadata as BoardMetadata | null | undefined)?.showNextStageFormInTicketDetails ??
+      false) === true;
 
   // Transitions (with approvers) are fetched via the dedicated query, not embedded in boardDetailById.
   const [boardStageTransitions] = useCachedQuery(
@@ -724,6 +731,106 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     () => (stages ?? []).filter(s => s.name === ticket?.stageName || !isStageUnreachable(s)),
     [stages, ticket?.stageName, isStageUnreachable],
   );
+
+  const nextStageDetailsConfig = useMemo(() => {
+    if (
+      !showNextStageFormInTicketDetails ||
+      !ticket?.stageName ||
+      stagesWithFormInfo.length === 0
+    ) {
+      return null;
+    }
+
+    const currentStage = stagesWithFormInfo.find(stage => stage.name === ticket.stageName);
+    if (!currentStage) return null;
+
+    if (isNonLinearBoard && stageTransitions.length > 0) {
+      const outgoingTransitions = stageTransitions
+        .filter(transition => transition.fromStageId === currentStage.id)
+        .map(transition => ({
+          transition,
+          targetStage: stagesWithFormInfo.find(stage => stage.id === transition.toStageId),
+        }))
+        .filter(
+          (
+            item,
+          ): item is {
+            transition: (typeof stageTransitions)[number];
+            targetStage: (typeof stagesWithFormInfo)[number];
+          } => !!item.targetStage,
+        )
+        .sort(
+          (a, b) =>
+            (a.targetStage.sequenceNumber ?? Number.MAX_SAFE_INTEGER) -
+            (b.targetStage.sequenceNumber ?? Number.MAX_SAFE_INTEGER),
+        );
+
+      const nextTransition = outgoingTransitions[0];
+      if (!nextTransition) return null;
+
+      return {
+        sourceStageName: currentStage.name,
+        targetStage: nextTransition.targetStage,
+        formId: nextTransition.transition.formId ?? null,
+        hasApprovers:
+          (nextTransition.transition.requiresApproval ?? false) ||
+          (nextTransition.transition.transitionApprovers?.length ?? 0) > 0,
+        reenterMode: nextTransition.transition.onReenter ?? null,
+      };
+    }
+
+    const targetStage = stagesWithFormInfo.find(
+      stage => stage.sequenceNumber === currentStage.sequenceNumber + 1,
+    );
+    if (!targetStage) return null;
+
+    return {
+      sourceStageName: currentStage.name,
+      targetStage,
+      formId: targetStage.formId ?? null,
+      hasApprovers: (targetStage.approvers?.length ?? 0) > 0,
+      reenterMode: null as ReenterMode | null,
+    };
+  }, [
+    isNonLinearBoard,
+    showNextStageFormInTicketDetails,
+    stageTransitions,
+    stagesWithFormInfo,
+    ticket?.stageName,
+  ]);
+
+  const getStageEtas = useCallback(
+    (stageId: string) =>
+      (ticket?.stageEtaEntries ?? [])
+        .filter(eta => eta.stageId === stageId)
+        .map(eta => ({
+          id: eta.id,
+          stageId: eta.stageId,
+          version: eta.version ?? null,
+          stageEnteredAt: eta.stageEnteredAt,
+        })),
+    [ticket?.stageEtaEntries],
+  );
+
+  const nextStageEtas = useMemo(
+    () => (nextStageDetailsConfig ? getStageEtas(nextStageDetailsConfig.targetStage.id) : []),
+    [getStageEtas, nextStageDetailsConfig],
+  );
+
+  const stageFormModalEtas = useMemo(
+    () => (stageFormModal ? getStageEtas(stageFormModal.targetStage.id) : []),
+    [getStageEtas, stageFormModal],
+  );
+
+  const stageFormModalReenterMode = useMemo<ReenterMode | null>(() => {
+    if (!stageFormModal || !isNonLinearBoard) return null;
+    const current = stagesWithFormInfo.find(stage => stage.name === stageFormModal.sourceStageName);
+    if (!current) return null;
+    const transition = stageTransitions.find(
+      t => t.fromStageId === current.id && t.toStageId === stageFormModal.targetStage.id,
+    );
+    return (transition?.onReenter as ReenterMode | null) ?? null;
+  }, [isNonLinearBoard, stageFormModal, stageTransitions, stagesWithFormInfo]);
 
   // Query channel if ticket has conversation with channelId
   const channelId = ticket?.conversation?.channelId;
@@ -1800,7 +1907,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
 
       // Open form modal for everyone (approvers and non-approvers)
-      const existingRequest = ticket.ticketStageRequests?.find(r => r.stageId === targetStage.id);
+      const existingRequest = ticket.ticketStageRequests?.find(
+        r =>
+          r.stageId === targetStage.id &&
+          (r.status === TicketStageRequestStatus.SUBMITTED ||
+            r.status === TicketStageRequestStatus.DRAFT),
+      );
       setStageFormModal({
         ticket,
         targetStage,
@@ -3182,6 +3294,55 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         )}
 
+        {nextStageDetailsConfig &&
+          (nextStageDetailsConfig.formId ? (
+            <StageFormInlinePanel
+              ticket={ticket}
+              targetStage={nextStageDetailsConfig.targetStage}
+              sourceStageName={nextStageDetailsConfig.sourceStageName}
+              formId={nextStageDetailsConfig.formId}
+              hasApprovers={nextStageDetailsConfig.hasApprovers}
+              isNonLinearBoard={isNonLinearBoard}
+              reenterMode={nextStageDetailsConfig.reenterMode}
+              targetStageEtas={nextStageEtas}
+            />
+          ) : (
+            <div className='my-4 rounded-lg border border-border bg-background p-4'>
+              <div className='flex items-center justify-between gap-4'>
+                <div>
+                  <p className='text-base font-semibold text-foreground'>Next stage</p>
+                  <p className='mt-1 text-sm text-muted-foreground'>
+                    <span className='font-medium text-foreground'>
+                      {nextStageDetailsConfig.sourceStageName}
+                    </span>
+                    <span className='mx-2'>→</span>
+                    <span className='font-medium text-foreground'>
+                      {nextStageDetailsConfig.targetStage.name}
+                    </span>
+                  </p>
+                </div>
+                <Tooltip
+                  content={
+                    nextStageDetailsConfig.hasApprovers
+                      ? 'Submit the form for approval'
+                      : 'Move to the next stage'
+                  }
+                >
+                  <Button
+                    onClick={() => handleStageChange(nextStageDetailsConfig.targetStage.name)}
+                    data-track-category='Tickets'
+                    data-track-name='MoveToNextStageFromDetails'
+                    data-track-metadata={JSON.stringify({
+                      stageId: nextStageDetailsConfig.targetStage.id,
+                    })}
+                  >
+                    {nextStageDetailsConfig.hasApprovers ? 'Submit for approval' : 'Submit'}
+                  </Button>
+                </Tooltip>
+              </div>
+            </div>
+          ))}
+
         {/* Stage Forms Section */}
         {formsToShow.length > 0 && (
           <div className='my-4'>
@@ -3231,7 +3392,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   const previousStage = stagesWithFormInfo?.find(
                     s => s.sequenceNumber === currentStageSeq - 1,
                   );
-
                   return (
                     <div key={item.id} className='py-2'>
                       <div className='flex items-center justify-between gap-4'>
@@ -3520,7 +3680,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           ) : (
                             // Stages WITHOUT approvers: Just show View Form button
                             <button
-                              onClick={() =>
+                              onClick={() => {
                                 setStageFormModal({
                                   ticket,
                                   targetStage: stage ?? {
@@ -3535,8 +3695,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   isReviewer: false,
                                   hasApprovers: false,
                                   existingRequest: item.request!,
-                                })
-                              }
+                                  showPersistedDocValues: item.type === 'form',
+                                });
+                              }}
                               className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
                               aria-label='View form'
                               data-track-category='Tickets'
@@ -3963,6 +4124,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           hasApprovers={stageFormModal.hasApprovers ?? false}
           existingRequest={stageFormModal.existingRequest ?? null}
           isNonLinearBoard={isNonLinearBoard}
+          showPersistedDocValues={stageFormModal.showPersistedDocValues ?? false}
+          reenterMode={stageFormModalReenterMode}
+          targetStageEtas={stageFormModalEtas}
           onSuccess={() => setStageFormModal(null)}
         />
       )}

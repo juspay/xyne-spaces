@@ -145,10 +145,6 @@ function buildParentMessageMd(msg: {
 }
 import { zql } from './builder.js';
 import {
-  parseDashboardConfig,
-  validateDashboardConfig,
-} from '../dashboard/dashboardConfig.js';
-import {
   addReplyToData,
   buildRepliesMdFromMessages,
   isChatMessageType,
@@ -160,6 +156,7 @@ import {
   updateInitialMessageMdReaction,
 } from './messageMetadata.js';
 import { updateTicketMdFromZero } from '../utils/ticketMetadata.js';
+import { stringFromFormValue } from '../tickets/utils.js';
 
 async function getConversationSeenCutoffAt(
   tx: Transaction<Schema>,
@@ -267,6 +264,9 @@ async function hasCanvasVersionEditAccess(
 
   return Boolean(participant);
 }
+
+const FORM_VALUE_CHANGED_MESSAGE =
+  'Form value changed. Review the latest form changes before saving.';
 
 export const mutators = defineMutators({
   notificationSettings: {
@@ -4492,7 +4492,6 @@ export const mutators = defineMutators({
               });
             }
 
-            // Handle stage approvers (optional)
             const normalizedApprovers = (stage.approvers ?? []).map(entry => ({
               approverId: entry.approverId,
               approverType: entry.approverType === 'ROLE' ? ApproverType.ROLE : ApproverType.USER,
@@ -4505,8 +4504,7 @@ export const mutators = defineMutators({
                 });
               }
             }
-            if (normalizedApprovers.length > 0) {
-              // Delete all existing approvers for this stage
+            if (stage.approvers !== undefined || stage.approverIds !== undefined) {
               const existingApprovers = await tx.run(zql.stage_approvers.where('stageId', stageId));
               for (const existing of existingApprovers) {
                 await tx.mutate.stage_approvers.delete({
@@ -4514,7 +4512,6 @@ export const mutators = defineMutators({
                 });
               }
 
-              // Insert new approvers for this stage
               for (const entry of normalizedApprovers) {
                 await tx.mutate.stage_approvers.insert({
                   id: `${stageId}-${entry.approverType}-${entry.approverId}`,
@@ -4566,6 +4563,32 @@ export const mutators = defineMutators({
         );
       }
 
+      const transitions = await tx.run(zql.stage_transitions.where('boardId', boardId));
+      for (const transition of transitions) {
+        const transitionApprovers = await tx.run(
+          zql.stage_approvers.where('transitionId', transition.id),
+        );
+        for (const approver of transitionApprovers) {
+          await tx.mutate.stage_approvers.delete({
+            id: approver.id,
+          });
+        }
+        await tx.mutate.stage_transitions.delete({
+          id: transition.id,
+        });
+      }
+
+      const boardFormMappings = await tx.run(
+        zql.forms_context_mapping
+          .where('contextId', boardId)
+          .where('contextType', FormContextType.BOARD),
+      );
+      for (const mapping of boardFormMappings) {
+        await tx.mutate.forms_context_mapping.delete({
+          id: mapping.id,
+        });
+      }
+
       // Delete all stages first
       const stages = await tx.run(zql.stages.where('boardId', boardId));
       for (const stage of stages) {
@@ -4581,6 +4604,17 @@ export const mutators = defineMutators({
         const mappings = await tx.run(zql.stage_pr_status_mappings.where('stageId', stage.id));
         for (const mapping of mappings) {
           await tx.mutate.stage_pr_status_mappings.delete({
+            id: mapping.id,
+          });
+        }
+
+        const formMappings = await tx.run(
+          zql.forms_context_mapping
+            .where('contextId', stage.id)
+            .where('contextType', FormContextType.STAGE),
+        );
+        for (const mapping of formMappings) {
+          await tx.mutate.forms_context_mapping.delete({
             id: mapping.id,
           });
         }
@@ -4810,8 +4844,8 @@ export const mutators = defineMutators({
 
           await tx.mutate.messages.insert({
             messageId: requestActivityId,
-            workspaceId: ctx.workspaceId,
             conversationId: ticket.conversationId,
+            ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
             senderId: updatedBy,
             content: `${actorName} ${actionText} ${stage.name}`,
             msgType: MessageType.SYSTEM,
@@ -4821,6 +4855,36 @@ export const mutators = defineMutators({
             isSent: false,
             showInChannel: false,
             createdAt: payload.createdAt,
+            metadata: {
+              activityType: ActivityType.STAGE_CHANGE_REQUEST,
+              isTicketActivity: true,
+              fromStage: ticket.stageName,
+              toStage: stage.name,
+              hasForm,
+            },
+          });
+        } else if (
+          status === TicketStageRequestStatus.SUBMITTED &&
+          existingApproval?.status === TicketStageRequestStatus.DRAFT &&
+          requestActivityId
+        ) {
+          const actorName = actor?.name || 'Someone';
+          const hasForm = !!formId;
+          const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
+
+          await tx.mutate.messages.insert({
+            messageId: requestActivityId,
+            conversationId: ticket.conversationId,
+            ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
+            senderId: updatedBy,
+            content: `${actorName} ${actionText} ${stage.name}`,
+            msgType: MessageType.SYSTEM,
+            hasAttachment: false,
+            edited: false,
+            isDeleted: false,
+            isSent: false,
+            showInChannel: false,
+            createdAt: updatedAt,
             metadata: {
               activityType: ActivityType.STAGE_CHANGE_REQUEST,
               isTicketActivity: true,
@@ -7269,7 +7333,16 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
-        args: { id, entityId, entityType, fieldId, newValue, timestamp, contextId, version },
+        args: {
+          id,
+          entityId,
+          entityType,
+          fieldId,
+          newValue,
+          timestamp,
+          contextId,
+          version,
+        },
       }) => {
         // Fetch the form field to determine field type
         const formField = await tx.run(zql.form_fields.where('id', fieldId).one());
@@ -7299,6 +7372,19 @@ export const mutators = defineMutators({
           createdAt: timestamp,
           updatedAt: timestamp,
         });
+
+        const nextAttachmentId =
+          fieldType === FormFieldType.DOC ? stringFromFormValue(actualFieldValue) : null;
+        if (entityType === FormEntityType.TICKET && fieldType === FormFieldType.DOC && nextAttachmentId) {
+          const nextAttachment = await tx.run(zql.message_attachments.where('id', nextAttachmentId).one());
+          if (
+            nextAttachment &&
+            (nextAttachment.entityId !== id ||
+              nextAttachment.entityType !== AttachmentEntityType.FORM_ENTITY_VALUE)
+          ) {
+            throw new Error('Attachment is not bound to this form value');
+          }
+        }
       },
     ),
     update: defineMutator(
@@ -7306,8 +7392,17 @@ export const mutators = defineMutators({
         formEntityValueId: z.string(),
         newValue: z.array(z.string()),
         updatedAt: z.number(),
+        expectedValueUpdatedAt: z.number().nullable().optional(),
       }),
-      async ({ tx, args: { formEntityValueId, newValue, updatedAt } }) => {
+      async ({
+        tx,
+        args: {
+          formEntityValueId,
+          newValue,
+          updatedAt,
+          expectedValueUpdatedAt,
+        },
+      }) => {
         // Validate form entity value exists and get formField relation
         const formEntityValue = await tx.run(
           zql.form_entity_values.where('id', formEntityValueId).related('formField').one(),
@@ -7315,6 +7410,13 @@ export const mutators = defineMutators({
 
         if (!formEntityValue) {
           throw new Error('Form entity value not found');
+        }
+
+        if (
+          expectedValueUpdatedAt !== undefined &&
+          (formEntityValue.updatedAt ?? null) !== expectedValueUpdatedAt
+        ) {
+          throw new Error(FORM_VALUE_CHANGED_MESSAGE);
         }
 
         const fieldType = formEntityValue.formField?.fieldType;
@@ -7326,19 +7428,23 @@ export const mutators = defineMutators({
           ? newValue // Store array for MULTI_SELECT/USER (including empty arrays)
           : newValue[0] || null; // Store first element or null for other types
 
-        // For DOC fields where the value is changing, delete the prior
-        // MessageAttachment row so we don't accumulate orphans pointing at the
-        // same FormEntityValues row. The new attachment (if any) was already
-        // written directly via the upload pipeline before this mutator runs.
+        const nextDocAttachmentId =
+          fieldType === FormFieldType.DOC ? stringFromFormValue(valueToStore) : null;
         if (
+          formEntityValue.entityType === FormEntityType.TICKET &&
           fieldType === FormFieldType.DOC &&
-          typeof formEntityValue.actualFieldValue === 'string' &&
-          formEntityValue.actualFieldValue &&
-          formEntityValue.actualFieldValue !== valueToStore
+          nextDocAttachmentId
         ) {
-          await tx.mutate.message_attachments.delete({
-            id: formEntityValue.actualFieldValue,
-          });
+          const nextAttachment = await tx.run(
+            zql.message_attachments.where('id', nextDocAttachmentId).one(),
+          );
+          if (
+            nextAttachment &&
+            (nextAttachment.entityId !== formEntityValueId ||
+              nextAttachment.entityType !== AttachmentEntityType.FORM_ENTITY_VALUE)
+          ) {
+            throw new Error('Attachment is not bound to this form value');
+          }
         }
 
         await tx.mutate.form_entity_values.update({
@@ -10177,10 +10283,12 @@ export const mutators = defineMutators({
         const targetStage = await tx.run(
           zql.stages.where('boardId', ticket.boardId).where('name', toStageName).one(),
         );
+        if (!targetStage) return;
+
         await tx.mutate.tickets.update({
           id: ticketId,
           stageName: toStageName,
-          ...(targetStage?.defaultTicketStatusV2 && {
+          ...(targetStage.defaultTicketStatusV2 && {
             statusV2: targetStage.defaultTicketStatusV2,
           }),
           updatedAt: now,

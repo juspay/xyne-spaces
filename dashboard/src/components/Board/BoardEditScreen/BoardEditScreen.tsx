@@ -7,8 +7,10 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from '../../../components/ui/Button';
 import {
+  BoardType,
   FormContextType,
   FormEntityType,
+  PRStatusEvent,
   type BoardMetadata,
   type FieldOrderItem,
   type TicketFormConfig,
@@ -43,8 +45,97 @@ import {
 interface BoardData {
   id: string;
   name?: string;
+  boardType?: BoardType;
   [key: string]: unknown;
 }
+
+interface DuplicateSourceStage {
+  id: string;
+  name: string;
+  eta?: number | null;
+  sequenceNumber: number;
+  defaultTicketStatusV2?: TicketStatusV2 | null;
+  prStatusMappings?: readonly {
+    prStatus: PRStatusEvent;
+  }[];
+  approvers?: readonly {
+    userId?: string | null;
+  }[];
+  formContextMappings?: readonly {
+    formId?: string | null;
+    form?: {
+      id: string;
+      formName?: string | null;
+    } | null;
+    contextType?: string | null;
+    entityType?: string | null;
+  }[];
+}
+
+interface DuplicateSourceBoard {
+  id: string;
+  name?: string;
+  boardType?: BoardType;
+  stages?: readonly DuplicateSourceStage[];
+}
+
+interface DuplicateSourceTransition {
+  id: string;
+  fromStageId?: string | null;
+  toStageId: string;
+  formId?: string | null;
+  requiresApproval?: boolean | null;
+  bypassApprovalForAutomation?: boolean | null;
+  visitSlaMode?: string | null;
+  fixedEtaHours?: number | null;
+  onReenter?: string | null;
+  transitionApprovers?: readonly {
+    userId?: string | null;
+    roleId?: string | null;
+    approverType?: string | null;
+  }[];
+}
+
+interface ClonedBoardStage {
+  id: string;
+  name: string;
+  eta: number;
+  sequenceNumber: number;
+  defaultTicketStatusV2: TicketStatusV2;
+  prStatusMappings: {
+    id: string;
+    stageId: string;
+    prStatus: PRStatusEvent;
+    createdAt: number;
+  }[];
+  approvers: {
+    id: string;
+    userId: string;
+    stageId: string;
+  }[];
+  formContextMappings: {
+    id: string;
+    formId: string;
+    contextId: string;
+    contextType: FormContextType;
+    entityType: FormEntityType;
+    form?: {
+      id: string;
+      formName: string;
+    };
+  }[];
+}
+
+const asDuplicateSourceBoard = (board: unknown): DuplicateSourceBoard | null =>
+  board && typeof board === 'object' && 'id' in board ? (board as DuplicateSourceBoard) : null;
+
+const getDuplicateStageFormId = (stage: DuplicateSourceStage): string | undefined =>
+  stage.formContextMappings?.find(
+    mapping =>
+      mapping.formId &&
+      String(mapping.contextType) === String(FormContextType.STAGE) &&
+      String(mapping.entityType) === String(FormEntityType.TICKET),
+  )?.formId ?? undefined;
 
 interface BoardEditScreenProps {
   boardId?: string;
@@ -78,9 +169,19 @@ const BoardEditScreen = ({
   });
 
   // Fetch source board data when duplicating
-  const [sourceBoard] = useCachedQuery(queries.getBoardById({ boardId: sourceBoardId || '' }), {
-    enabled: !!sourceBoardId && mode === 'create',
-  });
+  const [sourceBoard] = useCachedQuery(
+    queries.boardFullDetailById({ boardId: sourceBoardId || '' }),
+    {
+      enabled: !!sourceBoardId && mode === 'create',
+    },
+  );
+
+  const [sourceStageTransitions] = useCachedQuery(
+    queries.getStageTransitionsByBoardId({ boardId: sourceBoardId || '' }),
+    {
+      enabled: !!sourceBoardId && mode === 'create',
+    },
+  );
 
   const [project] = useCachedQuery(queries.projectById({ projectId: projectId || '' }), {
     enabled: !!projectId,
@@ -142,6 +243,28 @@ const BoardEditScreen = ({
 
   // Get ticket form config from board metadata
   const ticketFormConfig = useMemo(() => getTicketFormConfig(boardData), [boardData]);
+  const boardMetadata = useMemo(
+    () =>
+      (boardData && typeof boardData === 'object' && 'metadata' in boardData
+        ? (boardData.metadata as BoardMetadata)
+        : {}) || {},
+    [boardData],
+  );
+  const boardTypeFromData = useMemo(
+    () =>
+      boardData && typeof boardData === 'object' && 'boardType' in boardData
+        ? ((boardData as { boardType?: BoardType }).boardType ?? BoardType.DEFAULT)
+        : BoardType.DEFAULT,
+    [boardData],
+  );
+  const isNonLinearBoardData = boardTypeFromData === BoardType.NON_LINEAR;
+  const [showNextStageFormInTicketDetails, setShowNextStageFormInTicketDetails] = useState(false);
+
+  useEffect(() => {
+    setShowNextStageFormInTicketDetails(
+      !isNonLinearBoardData && (boardMetadata.showNextStageFormInTicketDetails ?? false),
+    );
+  }, [boardMetadata.showNextStageFormInTicketDetails, isNonLinearBoardData]);
 
   // Get field order from board metadata
   const fieldOrderFromMetadata = useMemo(() => getFieldOrderFromMetadata(boardData), [boardData]);
@@ -432,9 +555,236 @@ const BoardEditScreen = ({
     };
   }, [isAddingField, editingFieldId, saveCustomField]);
 
+  const cloneSourceBoardWorkflow = useCallback(
+    async (
+      newBoardId: string,
+      newBoardName: string,
+      metadata: BoardMetadata,
+    ): Promise<BoardData | null> => {
+      if (!sourceBoardId) return null;
+
+      const duplicateSourceBoard = asDuplicateSourceBoard(sourceBoard);
+      if (!duplicateSourceBoard) {
+        throw new Error('Source board details are still loading');
+      }
+
+      const sourceStages = [...(duplicateSourceBoard.stages ?? [])].sort(
+        (a, b) => a.sequenceNumber - b.sequenceNumber,
+      );
+      const clonedBoardBase: BoardData = {
+        id: newBoardId,
+        name: newBoardName,
+        metadata,
+        boardType: duplicateSourceBoard.boardType ?? BoardType.DEFAULT,
+      };
+      if (sourceStages.length === 0) {
+        return { ...clonedBoardBase, stages: [] };
+      }
+
+      const sourceTransitions = Array.isArray(sourceStageTransitions)
+        ? (sourceStageTransitions as DuplicateSourceTransition[])
+        : [];
+      const formIdMap = new Map<string, string>();
+
+      const cloneForm = async (sourceFormId: string): Promise<string> => {
+        const existing = formIdMap.get(sourceFormId);
+        if (existing) return existing;
+
+        const sourceForm = await formService.getFormById(sourceFormId);
+        const clonedForm = await formService.createForm({
+          formName: `${sourceForm.formName} Copy`,
+          ...(sourceForm.formDescription && { formDescription: sourceForm.formDescription }),
+          contextType: sourceForm.contextType,
+          entityType: sourceForm.entityType,
+          fields: sourceForm.fields.map(field => ({
+            fieldName: field.fieldName,
+            fieldType: field.fieldType,
+            ...(Array.isArray(field.fieldEnum) &&
+              field.fieldEnum.length > 0 && { fieldEnum: field.fieldEnum }),
+            isOptional: field.isOptional,
+          })),
+        });
+        formIdMap.set(sourceFormId, clonedForm.id);
+        return clonedForm.id;
+      };
+
+      const formIdsToClone = new Set<string>();
+      sourceStages.forEach(stage => {
+        const formId = getDuplicateStageFormId(stage);
+        if (formId) formIdsToClone.add(formId);
+      });
+      sourceTransitions.forEach(transition => {
+        if (transition.formId) formIdsToClone.add(transition.formId);
+      });
+
+      for (const formId of formIdsToClone) {
+        await cloneForm(formId);
+      }
+
+      const sourceStageIdToNewStageId = new Map<string, string>();
+      const stageIds: Record<string, string> = {};
+      const prStatusMappingIds: Record<string, string> = {};
+      sourceStages.forEach(stage => {
+        const newStageId = uuidv4();
+        sourceStageIdToNewStageId.set(stage.id, newStageId);
+        stageIds[String(stage.sequenceNumber)] = newStageId;
+        stage.prStatusMappings?.forEach(mapping => {
+          prStatusMappingIds[`${stage.sequenceNumber}-${mapping.prStatus}`] = uuidv4();
+        });
+      });
+
+      const stagesData = sourceStages.map(stage => {
+        const sourceFormId = getDuplicateStageFormId(stage);
+        const clonedFormId = sourceFormId ? formIdMap.get(sourceFormId) : undefined;
+        const stageId = sourceStageIdToNewStageId.get(stage.id);
+        if (!stageId) {
+          throw new Error(`Failed to allocate copied stage ID for ${stage.name}`);
+        }
+        return {
+          id: stageId,
+          name: stage.name,
+          eta: stage.eta ?? 0,
+          sequenceNumber: stage.sequenceNumber,
+          defaultTicketStatusV2: stage.defaultTicketStatusV2 ?? TicketStatusV2.STARTED,
+          prStatuses: (stage.prStatusMappings ?? []).map(mapping => mapping.prStatus),
+          approverIds: (stage.approvers ?? [])
+            .map(approver => approver.userId)
+            .filter((userId): userId is string => Boolean(userId)),
+          ...(clonedFormId && { formId: clonedFormId }),
+        };
+      });
+
+      const clonedStagesForInitialBoard: ClonedBoardStage[] = sourceStages.map(stage => {
+        const stageId = sourceStageIdToNewStageId.get(stage.id);
+        if (!stageId) {
+          throw new Error(`Failed to allocate copied stage ID for ${stage.name}`);
+        }
+        const sourceFormId = getDuplicateStageFormId(stage);
+        const clonedFormId = sourceFormId ? formIdMap.get(sourceFormId) : undefined;
+        const sourceFormName = stage.formContextMappings?.find(
+          mapping => mapping.formId === sourceFormId,
+        )?.form?.formName;
+        return {
+          id: stageId,
+          name: stage.name,
+          eta: stage.eta ?? 0,
+          sequenceNumber: stage.sequenceNumber,
+          defaultTicketStatusV2: stage.defaultTicketStatusV2 ?? TicketStatusV2.STARTED,
+          prStatusMappings: (stage.prStatusMappings ?? []).map(mapping => ({
+            id: prStatusMappingIds[`${stage.sequenceNumber}-${mapping.prStatus}`] ?? uuidv4(),
+            stageId,
+            prStatus: mapping.prStatus,
+            createdAt: Date.now(),
+          })),
+          approvers: (stage.approvers ?? [])
+            .map(approver => approver.userId)
+            .filter((userId): userId is string => Boolean(userId))
+            .map(userId => ({
+              id: `${stageId}-${userId}`,
+              userId,
+              stageId,
+            })),
+          formContextMappings: clonedFormId
+            ? [
+                {
+                  id: `${stageId}-form-mapping`,
+                  formId: clonedFormId,
+                  contextId: stageId,
+                  contextType: FormContextType.STAGE,
+                  entityType: FormEntityType.TICKET,
+                  ...(sourceFormName && {
+                    form: {
+                      id: clonedFormId,
+                      formName: `${sourceFormName} Copy`,
+                    },
+                  }),
+                },
+              ]
+            : [],
+        };
+      });
+
+      const updateResult = zero.mutate(
+        mutators.board.update({
+          boardId: newBoardId,
+          name: newBoardName,
+          metadata,
+          boardType: duplicateSourceBoard.boardType ?? BoardType.DEFAULT,
+          timestamp: Date.now(),
+          stageIds,
+          stages: stagesData,
+          prStatusMappingIds,
+        }),
+      );
+      const updateResponse = await updateResult.server;
+      if (updateResponse.type === 'error') {
+        throw new Error(updateResponse.error.message || 'Failed to copy board stages');
+      }
+
+      const transitionsToCopy = sourceTransitions
+        .map(transition => {
+          const toStageId = sourceStageIdToNewStageId.get(transition.toStageId);
+          if (!toStageId) return null;
+          const fromStageId = transition.fromStageId
+            ? sourceStageIdToNewStageId.get(transition.fromStageId)
+            : null;
+          if (transition.fromStageId && !fromStageId) return null;
+          const clonedFormId = transition.formId ? formIdMap.get(transition.formId) : undefined;
+          return {
+            id: uuidv4(),
+            ...(fromStageId && { fromStageId }),
+            toStageId,
+            ...(clonedFormId && { formId: clonedFormId }),
+            requiresApproval: transition.requiresApproval ?? false,
+            bypassApprovalForAutomation: transition.bypassApprovalForAutomation ?? false,
+            ...(transition.visitSlaMode && { visitSlaMode: transition.visitSlaMode }),
+            ...(transition.fixedEtaHours !== null &&
+              transition.fixedEtaHours !== undefined && {
+                fixedEtaHours: transition.fixedEtaHours,
+              }),
+            ...(transition.onReenter && { onReenter: transition.onReenter }),
+            approvers: (transition.transitionApprovers ?? [])
+              .map(approver => {
+                const approverType = approver.approverType ?? 'USER';
+                const approverId = approverType === 'ROLE' ? approver.roleId : approver.userId;
+                if (!approverId) return null;
+                return {
+                  id: uuidv4(),
+                  approverId,
+                  approverType,
+                };
+              })
+              .filter(
+                (approver): approver is { id: string; approverId: string; approverType: string } =>
+                  approver !== null,
+              ),
+          };
+        })
+        .filter((transition): transition is NonNullable<typeof transition> => transition !== null);
+
+      if (transitionsToCopy.length > 0) {
+        const transitionResult = zero.mutate(
+          mutators.nonLinear.syncTransitions({
+            boardId: newBoardId,
+            transitions: transitionsToCopy,
+            now: Date.now(),
+          }),
+        );
+        const transitionResponse = await transitionResult.server;
+        if (transitionResponse?.type === 'error') {
+          throw new Error(transitionResponse.error?.message || 'Failed to copy board transitions');
+        }
+      }
+
+      return { ...clonedBoardBase, stages: clonedStagesForInitialBoard };
+    },
+    [sourceBoard, sourceBoardId, sourceStageTransitions, zero],
+  );
+
   const handleSave = useCallback(async () => {
     // Create mode: create board first
     if (!boardId && mode === 'create') {
+      let createdBoardIdForCleanup: string | null = null;
       try {
         if (!boardName.trim()) {
           toast.error('Board name is required');
@@ -501,9 +851,14 @@ const BoardEditScreen = ({
           };
         });
 
+        const initialMetadataBase: BoardMetadata = { ...boardMetadata };
+        delete initialMetadataBase.customFieldsFormId;
+
         const initialMetadata: BoardMetadata = {
+          ...initialMetadataBase,
           fieldOrder,
           ticketFormConfig,
+          ...(!isNonLinearBoardData && { showNextStageFormInTicketDetails }),
           ...(customFieldsFormId && { customFieldsFormId }),
         };
 
@@ -512,14 +867,19 @@ const BoardEditScreen = ({
         }>('/boards', {
           name: boardName.trim(),
           projectId: projectId,
+          ...(sourceBoardId &&
+            asDuplicateSourceBoard(sourceBoard)?.boardType && {
+              boardType: asDuplicateSourceBoard(sourceBoard)?.boardType,
+            }),
           metadata: initialMetadata,
         });
 
         const newBoardId = response.data.board.id;
+        createdBoardIdForCleanup = newBoardId;
 
         if (customFieldsFormId) {
           // Create form context mapping
-          zero.mutate(
+          const mappingResult = zero.mutate(
             mutators.formContextMapping.upsert({
               contextId: newBoardId,
               contextType: FormContextType.BOARD,
@@ -528,14 +888,55 @@ const BoardEditScreen = ({
               mappingId: uuidv4(),
             }),
           );
+          const mappingResponse = await mappingResult.server;
+          if (mappingResponse?.type === 'error') {
+            throw new Error(mappingResponse.error.message || 'Failed to map board form');
+          }
         }
+
+        let clonedBoardForNext: BoardData | null = null;
+        if (sourceBoardId) {
+          clonedBoardForNext = await cloneSourceBoardWorkflow(
+            newBoardId,
+            boardName.trim(),
+            initialMetadata,
+          );
+        }
+
+        const boardForNext = clonedBoardForNext ?? { ...response.data.board };
+        if (sourceBoardId && !clonedBoardForNext) {
+          delete boardForNext['stages'];
+        }
+        createdBoardIdForCleanup = null;
 
         toast.success('Board created successfully');
         onSave?.();
-        onNext?.(response.data.board);
+        onNext?.(boardForNext);
       } catch (error) {
+        const cleanupMessages: string[] = [];
+        if (createdBoardIdForCleanup) {
+          try {
+            const deleteResult = zero.mutate(
+              mutators.board.delete({ boardId: createdBoardIdForCleanup }),
+            );
+            const deleteResponse = await deleteResult.server;
+            if (deleteResponse?.type === 'error') {
+              cleanupMessages.push(deleteResponse.error.message || 'board cleanup failed');
+            }
+          } catch (cleanupError) {
+            cleanupMessages.push(
+              cleanupError instanceof Error ? cleanupError.message : 'board cleanup failed',
+            );
+          }
+        }
+
+        const errorMessage =
+          error instanceof Error ? error.message : 'An unexpected error occurred.';
         toast.error('Failed to create board', {
-          description: error instanceof Error ? error.message : 'An unexpected error occurred.',
+          description:
+            cleanupMessages.length > 0
+              ? `${errorMessage} Cleanup incomplete: ${cleanupMessages.join('; ')}.`
+              : errorMessage,
           duration: 5000,
         });
       }
@@ -604,10 +1005,7 @@ const BoardEditScreen = ({
       const customFields = fields.filter(f => !DEFAULT_TICKET_FIELDS.some(df => df.id === f.id));
 
       // Get existing metadata
-      const existingMetadata =
-        (boardData && typeof boardData === 'object' && 'metadata' in boardData
-          ? (boardData.metadata as BoardMetadata)
-          : {}) || {};
+      const existingMetadata = boardMetadata;
 
       let customFieldsFormId = existingMetadata.customFieldsFormId;
 
@@ -669,6 +1067,7 @@ const BoardEditScreen = ({
         ...existingMetadata,
         fieldOrder,
         ticketFormConfig,
+        ...(!isNonLinearBoardData && { showNextStageFormInTicketDetails }),
         ...(customFieldsFormId && { customFieldsFormId }),
       };
 
@@ -710,12 +1109,21 @@ const BoardEditScreen = ({
     formMapping?.formId,
     mode,
     projectId,
+    boardMetadata,
+    isNonLinearBoardData,
+    showNextStageFormInTicketDetails,
+    sourceBoard,
+    sourceBoardId,
+    cloneSourceBoardWorkflow,
   ]);
 
   if (!isOpen) return null;
 
   const loading =
-    mode === 'edit' ? board === undefined || project === undefined : project === undefined;
+    mode === 'edit'
+      ? board === undefined || project === undefined
+      : project === undefined ||
+        (!!sourceBoardId && (sourceBoard === undefined || sourceStageTransitions === undefined));
 
   if (loading) {
     return (

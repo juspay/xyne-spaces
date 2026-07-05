@@ -35,6 +35,23 @@ type ReleaseBoardFlow =
   | { kind: 'edit-application'; applicationBoardId: string }
   | null;
 
+const getNextClonedBoardName = (
+  sourceName: string,
+  existingBoardNames: readonly string[],
+): string => {
+  const baseName = sourceName.replace(/\s+-\s+V\d+$/i, '').trim() || sourceName.trim();
+  const existingNames = new Set(existingBoardNames.map(name => name.trim().toLowerCase()));
+
+  for (let version = 2; version <= existingNames.size + 2; version += 1) {
+    const candidate = `${baseName} - V${version}`;
+    if (!existingNames.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+  }
+
+  return `${baseName} - V${existingNames.size + 2}`;
+};
+
 const ProjectDetailScreen = (): ReactElement => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -432,13 +449,16 @@ const ProjectDetailScreen = (): ReactElement => {
         />
       )}
 
-      {/* Duplicate Board Modal */}
+      {/* Clone Board Modal */}
       {duplicatingBoard && projectId && (
         <BoardEditScreen
           projectId={projectId}
           isOpen={true}
           mode='create'
-          initialBoardName={`${duplicatingBoard.name} - V2`}
+          initialBoardName={getNextClonedBoardName(
+            duplicatingBoard.name,
+            (boards ?? []).map(board => board.name),
+          )}
           sourceBoardId={duplicatingBoard.id}
           onClose={() => setDuplicatingBoard(null)}
           onSave={() => {
