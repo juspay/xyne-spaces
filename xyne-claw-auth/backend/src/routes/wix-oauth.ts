@@ -43,6 +43,11 @@ import { CONFIG } from "../config.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { evictSession } from "../mcp/runner.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
+import { signOAuthState, verifyOAuthState } from "../lib/oauth-state.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("wix-oauth");
 
 const WIX_REGISTER_URL = "https://mcp.wix.com/register";
 const WIX_AUTH_URL = "https://mcp.wix.com/authorize";
@@ -62,12 +67,17 @@ interface StatePayload {
   redirectUri: string;
 }
 
+// HMAC-signed state — prevents an attacker from forging state={userId:victim}
+// to bind their provider account to a victim (or capture victim tokens).
 function encodeState(payload: StatePayload): string {
-  return Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const { userId, ...extra } = payload;
+  return signOAuthState(userId, extra);
 }
 
 function decodeState(state: string): StatePayload {
-  return JSON.parse(Buffer.from(state, "base64url").toString()) as StatePayload;
+  // Throws OAuthStateError on tampered/expired state; callers try/catch this.
+  const verified = verifyOAuthState(state);
+  return { userId: verified.userId, ...(verified.extra ?? {}) } as StatePayload;
 }
 
 /** Generates a PKCE code verifier (43 random url-safe bytes). */
@@ -143,47 +153,28 @@ router.use("/:userId", pinUserIdParam);
 // ── Token endpoint ─────────────────────────────────────────────────────────
 
 /**
- * GET /:userId/oauth/wix/token
- * Returns a valid Wix access token, refreshing if within 60 s of expiry.
+ * Live Wix access-token provider for the shared `/oauth/:provider/token` route
+ * (see lib/oauth-token-endpoint.ts). Public client — clientId in the refresh
+ * body, no secret.
  */
-router.get("/:userId/oauth/wix/token", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
+export const wixOAuthProvider: OAuthTokenProvider = {
+  serverType: "wix",
+  label: "Wix",
+  async refresh(creds) {
+    const c = creds as unknown as WixTokens;
 
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: "wix" } },
-      include: { mcpServer: true },
-    });
-
-    if (!connection) {
-      res.status(404).json({ success: false, error: "No Wix connection found for this user" });
-      return;
-    }
-
-    const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-    const creds = JSON.parse(decrypted) as WixTokens;
-
-    if (Date.now() <= creds.expires - 60_000) {
-      res.json({ success: true, data: { accessToken: creds.accessToken } });
-      return;
-    }
-
-    // Refresh — Wix is a public client; send client_id in body, no secret.
     const refreshRes = await fetch(WIX_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        client_id: creds.clientId,
-        refresh_token: creds.refreshToken,
+        client_id: c.clientId,
+        refresh_token: c.refreshToken,
       }),
     });
 
     if (!refreshRes.ok) {
-      const text = await refreshRes.text();
-      console.error(`[wix-oauth] Token refresh failed for user ${userId}: ${refreshRes.status} ${text}`);
-      res.status(502).json({ success: false, error: "Wix token refresh failed" });
-      return;
+      throw new TokenRefreshError(502, `${refreshRes.status} ${await refreshRes.text()}`);
     }
 
     const tokens = (await refreshRes.json()) as {
@@ -192,25 +183,14 @@ router.get("/:userId/oauth/wix/token", async (req: Request<{ userId: string }>, 
       expires_in: number;
     };
 
-    const newCreds: WixTokens = {
-      clientId: creds.clientId,
+    return {
+      clientId: c.clientId,
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token ?? creds.refreshToken,
+      refreshToken: tokens.refresh_token ?? c.refreshToken,
       expires: Date.now() + tokens.expires_in * 1000,
     };
-
-    const { ciphertext, iv, authTag } = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
-    await prisma.userMcpConnection.update({
-      where: { id: connection.id },
-      data: { encryptedCreds: ciphertext, iv, authTag },
-    });
-
-    res.json({ success: true, data: { accessToken: tokens.access_token } });
-  } catch (err) {
-    console.error("[wix-oauth] token error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+  },
+};
 
 // ── Authorize endpoint ─────────────────────────────────────────────────────
 
@@ -247,7 +227,7 @@ router.post("/:userId/oauth/wix/authorize", async (req: Request<{ userId: string
 
     res.json({ success: true, data: { authUrl: authUrl.toString() } });
   } catch (err) {
-    console.error("[wix-oauth] authorize error:", err);
+    log.error("[wix-oauth] authorize error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -297,7 +277,7 @@ router.post("/:userId/oauth/wix/callback", async (req: Request<{ userId: string 
 
     if (!tokenRes.ok) {
       const text = await tokenRes.text();
-      console.error(`[wix-oauth] Token exchange failed for user ${userId}: ${tokenRes.status} ${text}`);
+      log.error(`[wix-oauth] Token exchange failed for user ${userId}: ${tokenRes.status} ${text}`);
       res.status(502).json({ success: false, error: "Wix token exchange failed" });
       return;
     }
@@ -310,10 +290,10 @@ router.post("/:userId/oauth/wix/callback", async (req: Request<{ userId: string 
 
     await storeWixTokens(userId, clientId, tokens.access_token, tokens.refresh_token, tokens.expires_in);
 
-    console.log(`[wix-oauth] Stored Wix credentials for user ${userId}`);
+    log.info(`[wix-oauth] Stored Wix credentials for user ${userId}`);
     res.json({ success: true, data: { message: "Wix account connected successfully" } });
   } catch (err) {
-    console.error("[wix-oauth] callback error:", err);
+    log.error("[wix-oauth] callback error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -337,7 +317,7 @@ wixCallbackRouter.get("/wix/callback", async (req: Request, res: Response) => {
     };
 
     if (oauthError) {
-      console.error(`[wix-oauth] OAuth error: ${oauthError}`);
+      log.error(`[wix-oauth] OAuth error: ${oauthError}`);
       res.redirect(`${frontendUrl}?wix_error=${encodeURIComponent(oauthError)}`);
       return;
     }
@@ -371,7 +351,7 @@ wixCallbackRouter.get("/wix/callback", async (req: Request, res: Response) => {
 
     if (!tokenRes.ok) {
       const text = await tokenRes.text();
-      console.error(`[wix-oauth] Browser callback token exchange failed: ${tokenRes.status} ${text}`);
+      log.error(`[wix-oauth] Browser callback token exchange failed: ${tokenRes.status} ${text}`);
       res.redirect(`${frontendUrl}?wix_error=token_exchange_failed`);
       return;
     }
@@ -384,17 +364,17 @@ wixCallbackRouter.get("/wix/callback", async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      console.error(`[wix-oauth] User not found: ${userId}`);
+      log.error(`[wix-oauth] User not found: ${userId}`);
       res.redirect(`${frontendUrl}?wix_error=user_not_found`);
       return;
     }
 
     await storeWixTokens(userId, clientId, tokens.access_token, tokens.refresh_token, tokens.expires_in);
 
-    console.log(`[wix-oauth] Stored Wix credentials for user ${userId} via browser callback`);
+    log.info(`[wix-oauth] Stored Wix credentials for user ${userId} via browser callback`);
     res.redirect(`${frontendUrl}?wix_connected=true`);
   } catch (err) {
-    console.error("[wix-oauth] browser callback error:", err);
+    log.error("[wix-oauth] browser callback error:", err);
     res.redirect(`${frontendUrl}?wix_error=internal_error`);
   }
 });
@@ -436,7 +416,7 @@ async function storeWixTokens(
   await evictSession(userId, "wix").catch(() => {});
 
   syncToolsForServer(userId, "wix", server.name, { accessToken, refreshToken, clientId }).catch((err) => {
-    console.error(`[wix-oauth] tool sync failed for user ${userId}:`, err);
+    log.error(`[wix-oauth] tool sync failed for user ${userId}:`, err);
   });
 }
 

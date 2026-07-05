@@ -261,10 +261,10 @@ export function MessageBubble({
                 </div>
               )}
             </div>
-            {footer && (
-              <div className="mt-1 px-1 text-xs text-zinc-500">{footer}</div>
-            )}
           </>
+        )}
+        {footer && (
+          <div className="mt-1 px-1 text-xs text-zinc-500">{footer}</div>
         )}
       </div>
     </div>
@@ -700,7 +700,7 @@ function PendingActionBlocks({
     <div className="mt-2 space-y-2">
       {actions.map((pa, i) => (
         <PendingActionItem
-          key={`${pa.serverType}-${pa.tool}-${i}`}
+          key={pa.signature || `${pa.serverType}-${pa.tool}-${i}`}
           action={pa}
           onApprove={onApprove}
           onDecline={onDecline}

@@ -16,3 +16,5 @@ export { skillRepository } from "./skillRepository.js";
 export { subagentDefinitionRepository } from "./subagentDefinitionRepository.js";
 export { subagentShareRepository } from "./subagentShareRepository.js";
 export { activeGoalRepository } from "./activeGoalRepository.js";
+export { evalRepository } from "./evalRepository.js";
+export type { EvalTurnInput, ImportConversationInput } from "./evalRepository.js";

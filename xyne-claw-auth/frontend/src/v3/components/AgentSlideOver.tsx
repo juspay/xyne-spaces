@@ -19,8 +19,6 @@ import {
   PlusIcon,
   CaretRightIcon,
   HammerIcon,
-  GitBranchIcon,
-  ArrowSquareOutIcon,
   SparkleIcon,
 } from "@phosphor-icons/react";
 
@@ -679,19 +677,12 @@ export function AgentSlideOver({
         {(() => {
           const cfgTools =
             (agent.config as {
-              tools?: { subagents?: string[]; direct?: string[]; custom?: string[] };
+              tools?: { subagents?: string[]; direct?: string[]; custom?: string[]; gateway?: string[] };
             } | undefined)?.tools;
           const subagents = cfgTools?.subagents ?? [];
           const writeToolSlugs = cfgTools?.direct ?? [];
           const mcpToolSlugs = cfgTools?.custom ?? [];
           const skills = agent.skills ?? [];
-          // Git repo URL — read both legacy (V1 `repoUrl`) and current
-          // (V3 `gitRepoUrl`) keys. Render the row only when set.
-          const repoUrl =
-            ((agent.config as { gitRepoUrl?: string } | undefined)?.gitRepoUrl ??
-              (agent.config as { repoUrl?: string } | undefined)?.repoUrl ??
-              "").trim();
-          const hasRepoUrl = repoUrl.length > 0;
 
           const subagentChips =
             subagents.length > 0 ? (
@@ -787,31 +778,6 @@ export function AgentSlideOver({
                   emptyHint="Tools provided by connected MCP servers"
                   onConfigure={() => onEdit(agent.slug)}
                 />
-                {hasRepoUrl && (
-                  <div className="flex items-center gap-2.5 px-4 py-3">
-                    <span className="w-[16px] h-[16px] flex items-center justify-center text-xyne-fg-tertiary flex-shrink-0">
-                      <GitBranchIcon size={14} />
-                    </span>
-                    <span className="text-[13px] text-xyne-fg-secondary flex-shrink-0">
-                      Git repo
-                    </span>
-                    <a
-                      href={repoUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ml-auto inline-flex items-center gap-1.5 text-[13px] text-xyne-fg-primary hover:text-xyne-brand transition-colors min-w-0 max-w-[280px]"
-                      title={repoUrl}
-                    >
-                      <span className="truncate">
-                        {repoUrl.replace(/^https?:\/\//, "")}
-                      </span>
-                      <ArrowSquareOutIcon
-                        size={12}
-                        className="flex-shrink-0 text-xyne-fg-tertiary"
-                      />
-                    </a>
-                  </div>
-                )}
               </MetaCard>
             </div>
           );

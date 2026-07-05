@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { SpinnerGapIcon, CheckIcon, XIcon } from "@phosphor-icons/react";
+import { SpinnerGapIcon, CheckIcon, XIcon, PencilSimpleIcon } from "@phosphor-icons/react";
 import { patchDigitalTwinCandidate } from "../../../lib/api";
 import type { DigitalTwinCandidate } from "../../../lib/api";
 import { Dialog } from "../ui/Dialog";
@@ -116,6 +116,10 @@ export function ProposalModal({
       <div className="flex flex-col gap-[6px]">
         <label className="flex items-center gap-[6px] text-[10px] font-semibold uppercase tracking-[0.08em] text-xyne-fg-muted">
           Memory text
+          <span className="flex items-center gap-[3px] font-normal normal-case tracking-normal text-xyne-fg-tertiary">
+            <PencilSimpleIcon size={11} />
+            editable
+          </span>
           {isDirty && (
             <span className="font-normal normal-case tracking-normal text-xyne-warning-fg">
               · edited
@@ -127,7 +131,8 @@ export function ProposalModal({
           onChange={(e) => setText(e.target.value)}
           rows={5}
           disabled={isBusy}
-          className="w-full resize-none rounded-lg border border-xyne-border bg-xyne-surface-sunken px-[12px] py-[8px] text-[13px] leading-relaxed text-xyne-fg-primary focus:border-xyne-brand focus:outline-none disabled:opacity-60"
+          placeholder="Edit this memory before approving…"
+          className="w-full resize-none rounded-lg border border-xyne-border bg-xyne-surface-sunken px-[12px] py-[8px] text-[13px] leading-relaxed text-xyne-fg-primary transition-colors hover:border-xyne-border-strong focus:border-xyne-brand focus:bg-xyne-surface focus:outline-none disabled:opacity-60"
         />
       </div>
 

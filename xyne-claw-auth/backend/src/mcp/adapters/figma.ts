@@ -11,7 +11,7 @@ export const figmaAdapter: StdioMcpAdapter = {
     const apiKey = credentials["apiKey"] as string;
     return {
       cmd: "npx",
-      args: ["figma-mcp"],
+      args: ["-y", "figma-mcp@0.1.4"],
       env: {
         FIGMA_API_KEY: apiKey,
       },

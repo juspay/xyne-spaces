@@ -17,6 +17,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../hooks/useAuth";
 import { useHomeData } from "../../hooks/useHomeData";
 import { useAttentionItems } from "../../hooks/useAttentionItems";
+import { SplashV3 } from "../SplashV3";
 import {
   getTimeGreeting,
   getRunsWindowLabel,
@@ -34,12 +35,31 @@ interface HomePageV3Props {
   userId: string;
 }
 
+/**
+ * Module-scoped guard: distinguishes a fresh page load (direct URL hit or
+ * browser refresh) from a same-session navigation via react-router. The
+ * variable lives for the lifetime of the JS bundle — i.e. one tab — so:
+ *   - Direct URL / refresh   → bundle reloads → splashSeen = false  → splash plays
+ *   - react-router back/forward / link nav → bundle stays → splashSeen = true → no splash
+ */
+let splashSeen = false;
+
 export function HomePageV3({ userId }: HomePageV3Props) {
   const auth = useAuth();
   const navigate = useNavigate();
   const data = useHomeData();
   const [days, setDays] = useState<1 | 7 | 30>(7);
   const attention = useAttentionItems(data);
+
+  // Splash plays only on the FIRST mount of HomePageV3 within a fresh page
+  // load. Subsequent mounts (back from another route, link nav, etc.) see
+  // splashSeen=true and skip it. A full reload / direct URL hit rebuilds
+  // the bundle → splashSeen resets to false → splash plays again.
+  const [splashDone, setSplashDone] = useState(() => splashSeen);
+  const handleSplashDone = () => {
+    splashSeen = true;
+    setSplashDone(true);
+  };
 
   const firstName =
     auth.status === "authenticated"
@@ -58,6 +78,7 @@ export function HomePageV3({ userId }: HomePageV3Props) {
 
   return (
     <div className="flex-1 overflow-x-hidden overflow-y-auto">
+      {!splashDone && <SplashV3 onDone={handleSplashDone} />}
       <div className="max-w-[1180px] mx-auto px-[40px] pt-[32px] pb-[56px] w-full">
         <div className="flex gap-[28px] items-start">
           {/* ═══════════════ LEFT COLUMN ═══════════════ */}
@@ -87,11 +108,6 @@ export function HomePageV3({ userId }: HomePageV3Props) {
                 <p className="text-[13px] text-xyne-fg-secondary">
                   {windowLabel}
                   <span className="mx-[6px] text-xyne-fg-tertiary">·</span>
-                  {headlineRuns} run{headlineRuns !== 1 ? "s" : ""}
-                  {/* Sessions always render alongside runs so the line reads
-                      consistently regardless of activity level (was gated on
-                      > 0, which hid the column on quiet days like today). */}
-                  <span className="mx-[6px] text-xyne-fg-tertiary">·</span>
                   {data.uniqueSessionsToday} session{data.uniqueSessionsToday !== 1 ? "s" : ""}
                   {data.activeWorkflows > 0 && (
                     <>
@@ -103,14 +119,6 @@ export function HomePageV3({ userId }: HomePageV3Props) {
                 </p>
               )}
             </div>
-
-            {/* Session activity chart */}
-            <SessionActivityChart
-              runs={data.runs}
-              isLoading={data.isLoading}
-              days={days}
-              onDaysChange={setDays}
-            />
 
             {/* Insight strip: top agent + yesterday context + resume */}
             <HomeInsightStrip
@@ -137,6 +145,14 @@ export function HomePageV3({ userId }: HomePageV3Props) {
               userId={userId}
               isLoading={data.isLoading}
               days={days}
+            />
+
+            {/* Session activity chart */}
+            <SessionActivityChart
+              runs={data.runs}
+              isLoading={data.isLoading}
+              days={days}
+              onDaysChange={setDays}
             />
 
           </div>

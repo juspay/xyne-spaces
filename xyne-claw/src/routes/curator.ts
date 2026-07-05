@@ -14,6 +14,9 @@ import { validateS2SKey } from "../middleware/auth.js";
 import { distillSession } from "../curator.js";
 import type { SessionTranscriptForCurator } from "xyne-claw-shared";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("curator");
+
 export const curatorRouter = Router();
 
 curatorRouter.post("/internal/curator/distill", validateS2SKey, async (req: Request, res: Response) => {
@@ -42,7 +45,7 @@ curatorRouter.post("/internal/curator/distill", validateS2SKey, async (req: Requ
     const updates = await distillSession(transcript);
     res.json({ success: true, updates });
   } catch (err) {
-    console.error(`[curator-route] distill failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`[curator-route] distill failed: ${err instanceof Error ? err.message : String(err)}`);
     res.status(500).json({
       success: false,
       error: err instanceof Error ? err.message : "Internal error",

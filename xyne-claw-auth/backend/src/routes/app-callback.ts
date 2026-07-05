@@ -5,15 +5,53 @@
  * On approve (context has messageContent): posts the message to the original channel.
  * On decline: no-op.
  * In both cases: calls Spaces to mark the action as done in the message frontmatter.
+ *
+ * On write-action failure: posts a failure message with Retry/Dismiss buttons.
+ * Retry (actionType "write-retry") starts a new /run with failure context so the
+ * LLM can diagnose the error and retry with corrected parameters.
  */
 
 import { Router, type Request, type Response } from "express";
+import crypto from "node:crypto";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { expandSpacesMentions } from "../lib/mention-transform.js";
+import { agentRunRepository } from "../repositories/index.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("app-callback");
 
 const router = Router();
+
+/**
+ * Flag a conversation's most-recent run as having touched a user-scoped
+ * credential, so the admin "All Runs" ACL hides it from other admins. Used by
+ * every approved-write branch that executes a user's PERSONAL credential
+ * (generic MCP with source==="user", and the Google/Microsoft branches that
+ * read the user's own OAuth connection directly). Fire-and-forget — bookkeeping
+ * must never block or fail the write. The queue-time mark at /mcp/call keys off
+ * the ASKER's identity, which can differ from the executing `writeUserId`
+ * (Digital-Twin / on-behalf-of writes), so it can miss; this is the backstop.
+ */
+function flagUserTokenRun(conversationId: string | undefined, agentSlug: string | undefined): void {
+  if (!conversationId) return;
+  agentRunRepository
+    .markUsedUserTokenByConversation(conversationId, agentSlug)
+    .catch((e) =>
+      log.warn(
+        `[app-callback] markUsedUserToken failed for conv ${conversationId}:`,
+        e instanceof Error ? e.message : String(e),
+      ),
+    );
+}
+
+function humanizeToolName(tool: string): string {
+  return tool
+    .replace(/^(spaces-|google-|microsoft-)/, "")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 async function spacesAppFetch(path: string, body: Record<string, unknown>, appToken: string): Promise<unknown> {
   const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
@@ -47,6 +85,218 @@ async function getAgentToken(agentSlug: string | undefined): Promise<string | nu
   return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
 }
 
+async function escalateWriteActionFailure(opts: {
+  tool: string;
+  serverType: string;
+  errorReason: string;
+  writeUserId: string;
+  signature: string;
+  agentSlug: string | undefined;
+  channelId: string | undefined;
+  conversationId: string | undefined;
+  originalTask: string | undefined;
+  paramsStr: string;
+}): Promise<void> {
+  const {
+    tool,
+    serverType,
+    errorReason,
+    writeUserId,
+    signature,
+    agentSlug,
+    channelId,
+    conversationId,
+    originalTask,
+    paramsStr,
+  } = opts;
+
+  if (!conversationId && !channelId) {
+    log.warn("[app-callback] Cannot post failure message — no conversationId or channelId in context");
+    return;
+  }
+
+  const appToken = await getAgentToken(agentSlug);
+  if (!appToken) {
+    log.error(`[app-callback] Cannot post failure message — no agent token for ${agentSlug ?? "(default)"}`);
+    return;
+  }
+
+  const agent = agentSlug
+    ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
+    : await prisma.agent.findFirst({ where: { isDefault: true } });
+
+  const retryId = crypto.randomUUID();
+  const dismissId = crypto.randomUUID();
+  const callbackBase = `${CONFIG.selfUrl}/claw/api/v1/app/callback`;
+
+  const failureMsg = [
+    "---",
+    "appActions:",
+    `  - actionId: "${retryId}"`,
+    `    label: "Retry"`,
+    `    type: "button"`,
+    `    color: "#22c55e"`,
+    `    actionableUrl: "${callbackBase}"`,
+    `    context:`,
+    `      actionType: "write-retry"`,
+    `      serverType: "${serverType}"`,
+    `      tool: "${tool}"`,
+    `      params: ${JSON.stringify(paramsStr)}`,
+    `      userId: "${writeUserId}"`,
+    `      signature: "${signature}"`,
+    `      agentSlug: "${agentSlug ?? ""}"`,
+    ...(channelId ? [`      channelId: "${channelId}"`] : []),
+    ...(conversationId ? [`      conversationId: "${conversationId}"`] : []),
+    ...(originalTask ? [`      originalTask: ${JSON.stringify(originalTask)}`] : []),
+    `      errorReason: ${JSON.stringify(errorReason)}`,
+    `  - actionId: "${dismissId}"`,
+    `    label: "Dismiss"`,
+    `    type: "button"`,
+    `    color: "#ef4444"`,
+    `    actionableUrl: "${callbackBase}"`,
+    `    context:`,
+    `      userId: "${writeUserId}"`,
+    "---",
+    "",
+    `❌ **Action failed**: ${errorReason}`,
+    "",
+    `The agent wanted to execute **${humanizeToolName(tool)}**. Click **Retry** to let the agent try again.`,
+  ].join("\n");
+
+  try {
+    const body: Record<string, unknown> = {
+      markdownText: failureMsg,
+      userId: agent?.spacesAppUserId ?? "",
+      metadata: { hasAppActions: true, appId: agent?.spacesAppId ?? "", contentFormat: "markdown" },
+    };
+    if (conversationId) {
+      body.conversationId = conversationId;
+    } else if (channelId) {
+      body.channelId = channelId;
+    }
+
+    await spacesAppFetch("/chat/postMessage", body, appToken);
+    log.info(`[app-callback] Posted failure message with Retry/Dismiss for ${tool} in ${conversationId ?? channelId}`);
+  } catch (err) {
+    log.error(`[app-callback] Failed to post failure message:`, err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function startWriteRetryRun(opts: {
+  tool: string;
+  serverType: string;
+  errorReason: string;
+  writeUserId: string;
+  agentSlug: string | undefined;
+  channelId: string | undefined;
+  conversationId: string | undefined;
+  originalTask: string | undefined;
+  paramsStr: string;
+}): Promise<void> {
+  const {
+    tool,
+    serverType,
+    errorReason,
+    writeUserId,
+    agentSlug,
+    channelId,
+    conversationId,
+    originalTask,
+    paramsStr,
+  } = opts;
+
+  const agent = agentSlug
+    ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
+    : await prisma.agent.findFirst({ where: { isDefault: true } });
+
+  if (!agent?.spacesAppToken || !agent.spacesAppId) {
+    log.error(`[app-callback] write-retry: no agent found for ${agentSlug ?? "(default)"}`);
+    return;
+  }
+
+  const appToken = decrypt(...agent.spacesAppToken.split(":") as [string, string, string], CONFIG.encryptionKey);
+
+  const paramsPreview = paramsStr.length > 500 ? paramsStr.slice(0, 500) + "…" : paramsStr;
+  const retryTask = originalTask
+    ? `The write action ${tool} failed with error: ${errorReason}. Original task: ${originalTask}. Diagnose the failure and retry with corrected parameters, or explain why it cannot be retried.`
+    : `The write action ${tool} failed with error: ${errorReason}. Diagnose the failure and retry with corrected parameters, or explain why it cannot be retried.`;
+
+  const retryContext = `Failed tool call: ${tool}(${paramsPreview}). Error: ${errorReason}.${originalTask ? ` Original task: ${originalTask}` : ""}`;
+
+  try {
+    const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
+    const runRes = await fetch(runUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
+      body: JSON.stringify({
+        userId: writeUserId,
+        task: retryTask,
+        context: retryContext,
+        agentSlug: agentSlug ?? undefined,
+        conversationId: conversationId ?? undefined,
+        channelId: channelId ?? undefined,
+        callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+        progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+      }),
+    });
+
+    if (!runRes.ok) {
+      log.error(`[app-callback] write-retry: /run returned ${runRes.status}`);
+      return;
+    }
+
+    const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
+    if (runBody.success && runBody.sessionId) {
+      const { setSession } = await import("./webhook.js");
+      const sessionContext = {
+        mentionedUserId: agent.spacesAppUserId ?? "",
+        senderId: writeUserId,
+        senderName: "",
+        channelId: channelId ?? "",
+        channelName: channelId ?? "",
+        conversationId: conversationId ?? "",
+        task: `Retry after failure: ${originalTask ?? tool}`,
+        agentSlug: agentSlug ?? "",
+        responseMode: "conversation" as const,
+        appToken,
+        spacesAppId: agent.spacesAppId,
+        spacesAppUserId: agent.spacesAppUserId ?? "",
+      };
+      await setSession(runBody.sessionId, sessionContext);
+
+      const { registerRunRecovery } = await import("../queue/run-recovery-worker.js");
+      await registerRunRecovery({
+        rootSessionId: runBody.sessionId,
+        maxRetries: CONFIG.runRecoveryMaxRetries,
+        timeoutMs: CONFIG.runRecoveryTimeoutMs,
+        retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+        dispatchPayload: {
+          userId: writeUserId,
+          task: retryTask,
+          agentSlug: agentSlug ?? "",
+          conversationId: conversationId ?? "",
+          channelId: channelId ?? "",
+          eventType: "APP_MENTIONED",
+          traceId: runBody.sessionId,
+          callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+          context: retryContext,
+        },
+        sessionContext,
+      });
+
+      log.info(`[app-callback] write-retry: started new /run session=${runBody.sessionId} for ${tool}`);
+    } else {
+      log.error(`[app-callback] write-retry: /run failed — ${JSON.stringify(runBody)}`);
+    }
+  } catch (err) {
+    log.error("[app-callback] write-retry: failed to start /run:", err instanceof Error ? err.message : String(err));
+  }
+}
+
 router.post("/callback", async (req: Request, res: Response) => {
   const payload = req.body as {
     actionId?: string;
@@ -56,9 +306,14 @@ router.post("/callback", async (req: Request, res: Response) => {
     callerUserId?: string;
   };
 
-  const { actionId, context = {}, messageId, callerUserId } = payload;
+  const { actionId, context = {}, messageId } = payload;
 
-  console.log(`[app-callback] actionId=${actionId} messageId=${messageId} callerUserId=${callerUserId}`);
+  // Identity comes from the authenticated session (requireAuth set x-user-id
+  // from the Spaces cookie), NOT the request body — the body field was
+  // spoofable and the per-branch checks below fail closed on a missing id.
+  const callerUserId = (req.headers["x-user-id"] as string | undefined) ?? undefined;
+
+  log.info(`[app-callback] actionId=${actionId} messageId=${messageId} callerUserId=${callerUserId ?? "(none)"}`);
 
   // Acknowledge immediately
   res.json({ success: true });
@@ -75,13 +330,13 @@ router.post("/callback", async (req: Request, res: Response) => {
     const answerUserId = context["userId"] as string;
 
     if (!questionId || !answer || !answerUserId) {
-      console.error("[app-callback] Missing user-answer fields");
+      log.error("[app-callback] Missing user-answer fields");
       return;
     }
 
-    // Verify caller is the intended user (XYNE-12145)
-    if (callerUserId && callerUserId !== answerUserId) {
-      console.error(`[app-callback] Unauthorized: caller ${callerUserId} != expected ${answerUserId}`);
+    // Verify caller is the intended user (XYNE-12145). Fail closed.
+    if (!callerUserId || callerUserId !== answerUserId) {
+      log.error(`[app-callback] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${answerUserId}`);
       return;
     }
 
@@ -97,7 +352,7 @@ router.post("/callback", async (req: Request, res: Response) => {
         ? decrypt(...agent.spacesAppToken.split(":") as [string, string, string], CONFIG.encryptionKey)
         : "";
 
-      const runUrl = `${CONFIG.internalUrl}/claw/api/v1/run`;
+      const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
       const runRes = await fetch(runUrl, {
         method: "POST",
         headers: {
@@ -133,12 +388,67 @@ router.post("/callback", async (req: Request, res: Response) => {
         });
       }
 
-      console.log(`[app-callback] User answered "${answer}" → new /run (session=${runBody.sessionId})`);
+      log.info(`[app-callback] User answered "${answer}" → new /run (session=${runBody.sessionId})`);
     } catch (err) {
-      console.error("[app-callback] Failed to start new run with answer:", err);
+      log.error("[app-callback] Failed to start new run with answer:", err);
     }
 
     await deleteQuestion(questionId).catch(() => {});
+    return;
+  }
+
+  // (start-goal moved to flow-action.ts — FlowUI v2.0 migration.)
+
+  // ── Write action retry (LLM escalation) ──
+  if (actionType === "write-retry") {
+    const serverType = context["serverType"] as string;
+    const tool = context["tool"] as string;
+    const paramsStr = context["params"] as string;
+    const writeUserId = context["userId"] as string;
+    const signature = context["signature"] as string;
+    const agentSlug = context["agentSlug"] as string | undefined;
+    const channelId = context["channelId"] as string | undefined;
+    const conversationId = context["conversationId"] as string | undefined;
+    const originalTask = context["originalTask"] as string | undefined;
+    const errorReason = context["errorReason"] as string | undefined;
+
+    if (!writeUserId) {
+      log.error("[app-callback] write-retry: missing userId");
+      return;
+    }
+
+    if (!callerUserId || callerUserId !== writeUserId) {
+      log.error(`[app-callback] write-retry: Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${writeUserId}`);
+      return;
+    }
+
+    const appToken = await getAgentToken(agentSlug);
+    if (appToken && (conversationId || channelId)) {
+      try {
+        const body: Record<string, unknown> = {
+          markdownText: `🔄 Retrying **${humanizeToolName(tool ?? "unknown")}** — the agent is diagnosing the failure and will attempt again.`,
+          userId: (agentSlug
+            ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
+            : await prisma.agent.findFirst({ where: { isDefault: true } }))?.spacesAppUserId ?? "",
+          metadata: { contentFormat: "markdown" },
+        };
+        if (conversationId) body.conversationId = conversationId;
+        else if (channelId) body.channelId = channelId;
+        await spacesAppFetch("/chat/postMessage", body, appToken);
+      } catch { /* non-fatal */ }
+    }
+
+    await startWriteRetryRun({
+      tool: tool ?? "unknown",
+      serverType: serverType ?? "unknown",
+      errorReason: errorReason ?? "Unknown error",
+      writeUserId,
+      agentSlug,
+      channelId,
+      conversationId,
+      originalTask,
+      paramsStr: paramsStr ?? "{}",
+    });
     return;
   }
 
@@ -150,9 +460,12 @@ router.post("/callback", async (req: Request, res: Response) => {
     const writeUserId = context["userId"] as string;
     const signature = context["signature"] as string;
     const agentSlug = context["agentSlug"] as string | undefined;
+    const actionChannelId = context["channelId"] as string | undefined;
+    const actionConversationId = context["conversationId"] as string | undefined;
+    const actionOriginalTask = context["originalTask"] as string | undefined;
 
     if (!serverType || !tool || !paramsStr || !writeUserId || !signature) {
-      console.error("[app-callback] Missing write action fields");
+      log.error("[app-callback] Missing write action fields");
       return;
     }
 
@@ -162,13 +475,13 @@ router.post("/callback", async (req: Request, res: Response) => {
     const { verifyActionSignature } = await import("./mcp.js");
     const action = { serverType, tool, params, userId: writeUserId };
     if (!verifyActionSignature(action, signature)) {
-      console.error("[app-callback] HMAC verification failed — action may have been tampered with");
+      log.error("[app-callback] HMAC verification failed — action may have been tampered with");
       return;
     }
 
-    // Verify caller is the intended user (XYNE-12145)
-    if (callerUserId && callerUserId !== writeUserId) {
-      console.error(`[app-callback] Unauthorized: caller ${callerUserId} != expected ${writeUserId}`);
+    // Verify caller is the intended user (XYNE-12145). Fail closed.
+    if (!callerUserId || callerUserId !== writeUserId) {
+      log.error(`[app-callback] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${writeUserId}`);
       return;
     }
 
@@ -180,12 +493,12 @@ router.post("/callback", async (req: Request, res: Response) => {
           ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
           : await prisma.agent.findFirst({ where: { isDefault: true } });
         if (!agent?.spacesAppToken) {
-          console.error(`[app-callback] spaces-send-message: no spacesAppToken for agent ${agentSlug ?? "(default)"}`);
+          log.error(`[app-callback] spaces-send-message: no spacesAppToken for agent ${agentSlug ?? "(default)"}`);
           return;
         }
         const tokenParts = agent.spacesAppToken.split(":");
         if (tokenParts.length < 3 || !tokenParts[0] || !tokenParts[1] || !tokenParts[2]) {
-          console.error("[app-callback] spaces-send-message: invalid spacesAppToken format");
+          log.error("[app-callback] spaces-send-message: invalid spacesAppToken format");
           return;
         }
         const appToken = decrypt(tokenParts[0], tokenParts[1], tokenParts[2], CONFIG.encryptionKey);
@@ -202,7 +515,7 @@ router.post("/callback", async (req: Request, res: Response) => {
             ? { conversationId, text: content }
             : { channelId: channelId, text: content };
           await spacesAppFetch("/chat/postMessage", body, appToken);
-          console.log(`[app-callback] spaces-send-message: sent to ${conversationId ?? channelId}`);
+          log.info(`[app-callback] spaces-send-message: sent to ${conversationId ?? channelId}`);
           return;
         }
 
@@ -213,7 +526,7 @@ router.post("/callback", async (req: Request, res: Response) => {
         try {
           const joinRes = (await spacesAppFetch(`/channel/${targetChannelId}/join`, {}, appToken)) as { channelName?: string; channelId?: string };
           channelName = joinRes.channelName ?? targetChannelId;
-          console.log(`[app-callback] spaces-send-message: ensured membership in #${channelName}`);
+          log.info(`[app-callback] spaces-send-message: ensured membership in #${channelName}`);
         } catch (e) {
           const errMsg = e instanceof Error ? e.message : String(e);
           // 403 with "private" in the message means private channel — report and bail
@@ -223,11 +536,11 @@ router.post("/callback", async (req: Request, res: Response) => {
             if (sourceConversationId) {
               await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: failMsg }, appToken).catch(() => {});
             }
-            console.log(`[app-callback] spaces-send-message: private channel, cannot join`);
+            log.info(`[app-callback] spaces-send-message: private channel, cannot join`);
             return;
           }
           // Other errors (network, 404) — still attempt the post, channel name unknown
-          console.error(`[app-callback] spaces-send-message: join failed (will still attempt post):`, e);
+          log.error(`[app-callback] spaces-send-message: join failed (will still attempt post):`, e);
         }
 
         // Post in target channel
@@ -237,11 +550,11 @@ router.post("/callback", async (req: Request, res: Response) => {
         const confirmMsg = `✅ Posted in #${channelName}`;
         if (sourceConversationId) {
           await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: confirmMsg }, appToken).catch((e) => {
-            console.error("[app-callback] spaces-send-message: failed to send confirmation:", e);
+            log.error("[app-callback] spaces-send-message: failed to send confirmation:", e);
           });
         }
 
-        console.log(`[app-callback] spaces-send-message: cross-posted to #${channelName}`);
+        log.info(`[app-callback] spaces-send-message: cross-posted to #${channelName}`);
         return;
       }
 
@@ -250,7 +563,7 @@ router.post("/callback", async (req: Request, res: Response) => {
         const { getAllCustomTools } = await import("xyne-claw-shared");
         const toolDef = getAllCustomTools().find((t) => t.slug === tool);
         if (!toolDef) {
-          console.error(`[app-callback] Unknown Google tool: ${tool}`);
+          log.error(`[app-callback] Unknown Google tool: ${tool}`);
           return;
         }
 
@@ -259,7 +572,7 @@ router.post("/callback", async (req: Request, res: Response) => {
           where: { userId: writeUserId, mcpServer: { type: "google" } },
         });
         if (!connection) {
-          console.error(`[app-callback] No Google connection for user ${writeUserId}`);
+          log.error(`[app-callback] No Google connection for user ${writeUserId}`);
           return;
         }
         const decryptedCreds = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
@@ -293,13 +606,15 @@ router.post("/callback", async (req: Request, res: Response) => {
               data: { encryptedCreds: encrypted.ciphertext, iv: encrypted.iv, authTag: encrypted.authTag },
             });
           } else {
-            console.error(`[app-callback] Google token refresh failed: ${refreshRes.status}`);
+            log.error(`[app-callback] Google token refresh failed: ${refreshRes.status}`);
             return;
           }
         }
 
+        // Executes the user's personal Google OAuth token → ACL-flag the run.
+        flagUserTokenRun(actionConversationId, agentSlug);
         const result = await toolDef.execute(params, { config: { GOOGLE_ACCESS_TOKEN: accessToken } });
-        console.log(`[app-callback] Google write action approved: ${tool} → ${result.slice(0, 100)}`);
+        log.info(`[app-callback] Google write action approved: ${tool} → ${result.slice(0, 100)}`);
         return;
       }
 
@@ -308,7 +623,7 @@ router.post("/callback", async (req: Request, res: Response) => {
         const { getAllCustomTools } = await import("xyne-claw-shared");
         const toolDef = getAllCustomTools().find((t) => t.slug === tool);
         if (!toolDef) {
-          console.error(`[app-callback] Unknown Microsoft tool: ${tool}`);
+          log.error(`[app-callback] Unknown Microsoft tool: ${tool}`);
           return;
         }
 
@@ -317,7 +632,7 @@ router.post("/callback", async (req: Request, res: Response) => {
           where: { userId: writeUserId, mcpServer: { type: "microsoft" } },
         });
         if (!connection) {
-          console.error(`[app-callback] No Microsoft connection for user ${writeUserId}`);
+          log.error(`[app-callback] No Microsoft connection for user ${writeUserId}`);
           return;
         }
         const decryptedCreds = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
@@ -352,35 +667,55 @@ router.post("/callback", async (req: Request, res: Response) => {
               data: { encryptedCreds: encrypted.ciphertext, iv: encrypted.iv, authTag: encrypted.authTag },
             });
           } else {
-            console.error(`[app-callback] Microsoft token refresh failed: ${refreshRes.status}`);
+            log.error(`[app-callback] Microsoft token refresh failed: ${refreshRes.status}`);
             return;
           }
         }
 
+        // Executes the user's personal Microsoft OAuth token → ACL-flag the run.
+        flagUserTokenRun(actionConversationId, agentSlug);
         const result = await toolDef.execute(params, { config: { MICROSOFT_ACCESS_TOKEN: accessToken } });
-        console.log(`[app-callback] Microsoft write action approved: ${tool} → ${result.slice(0, 100)}`);
+        log.info(`[app-callback] Microsoft write action approved: ${tool} → ${result.slice(0, 100)}`);
         return;
       }
 
       // MCP-based tools — execute via MCP runner
       const { callTool } = await import("../mcp/runner.js");
       const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
-      const { loadEffectiveCredentials } = await import("../lib/credentials-loader.js");
+      const { loadEffectiveCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
       if (!(await hasConnectorDefinition(serverType))) {
-        console.error(`[app-callback] No adapter for ${serverType}`);
+        log.error(`[app-callback] No adapter for ${serverType}`);
         return;
       }
 
       const effective = await loadEffectiveCredentials(writeUserId, serverType, agentSlug);
       if (!effective) {
-        console.error(`[app-callback] No connection for user ${writeUserId} / ${serverType}`);
+        log.error(`[app-callback] No connection for user ${writeUserId} / ${serverType}`);
         return;
       }
 
-      const result = await callTool(writeUserId, serverType, effective.credentials, tool, params);
-      console.log(`[app-callback] Write action approved: ${tool} → ${result.content.slice(0, 100)}`);
+      // Private user credential on an approved write → flag the run for the ACL
+      // (excludes the ambient Spaces session — see isPrivateUserCredential).
+      if (isPrivateUserCredential(serverType, effective.source)) flagUserTokenRun(actionConversationId, agentSlug);
+
+      const result = await callTool(writeUserId, serverType, effective.credentials, tool, params, agentSlug);
+      log.info(`[app-callback] Write action approved: ${tool} → ${result.content.slice(0, 100)}`);
     } catch (err) {
-      console.error(`[app-callback] Failed to execute write action ${tool}:`, err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      log.error(`[app-callback] Failed to execute write action ${tool}:`, errMsg);
+
+      await escalateWriteActionFailure({
+        tool,
+        serverType,
+        errorReason: errMsg.slice(0, 500),
+        writeUserId,
+        signature,
+        agentSlug,
+        channelId: actionChannelId,
+        conversationId: actionConversationId,
+        originalTask: actionOriginalTask,
+        paramsStr,
+      });
     }
     return;
   }
@@ -397,9 +732,9 @@ router.post("/callback", async (req: Request, res: Response) => {
   const workspaceId = context["workspaceId"] as string | undefined;
 
   if (targetConversationId && messageContent && targetChannelId && mentionedUserId && workspaceId) {
-    // Verify caller is the intended user (XYNE-12145)
-    if (callerUserId && callerUserId !== mentionedUserId) {
-      console.error(`[app-callback] Unauthorized: caller ${callerUserId} != expected ${mentionedUserId}`);
+    // Verify caller is the intended user (XYNE-12145). Fail closed.
+    if (!callerUserId || callerUserId !== mentionedUserId) {
+      log.error(`[app-callback] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${mentionedUserId}`);
       return;
     }
 
@@ -425,13 +760,13 @@ router.post("/callback", async (req: Request, res: Response) => {
 
       if (!postRes.ok) {
         const text = await postRes.text().catch(() => "");
-        console.error(`[app-callback] Failed to post: ${postRes.status} ${text.slice(0, 200)}`);
+        log.error(`[app-callback] Failed to post: ${postRes.status} ${text.slice(0, 200)}`);
         return;
       }
 
-      console.log(`[app-callback] Posted approved message to conversation ${targetConversationId}`);
+      log.info(`[app-callback] Posted approved message to conversation ${targetConversationId}`);
     } catch (err) {
-      console.error("[app-callback] Failed to post:", err);
+      log.error("[app-callback] Failed to post:", err);
     }
   }
 });

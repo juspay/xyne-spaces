@@ -18,6 +18,7 @@
 
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
+import { acquireCronLeaderLock } from "../lib/cron-leader-lock.js";
 import {
   fetchUserMessages,
   fetchUserHostedCalls,
@@ -124,7 +125,13 @@ function scheduleNextRun(): void {
 
   setTimeout(async () => {
     try {
-      await runDigitalTwinDailySync();
+      // Multi-replica guard: every pod arms this timer; only the pod that wins
+      // the date-scoped Redis lock actually runs the sync (cron-leader-lock.ts).
+      if (await acquireCronLeaderLock("digital-twin-daily")) {
+        await runDigitalTwinDailySync();
+      } else {
+        logger.info("[daily] skipped — another replica is running tonight's sync");
+      }
     } catch (err) {
       logger.error("[daily] unhandled error", { err: err instanceof Error ? err.message : String(err) });
     } finally {

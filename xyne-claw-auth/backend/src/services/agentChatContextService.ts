@@ -1,7 +1,10 @@
 import { interact, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call" | "activity";
-export type ContextSearchType = Exclude<ContextType, "activity"> | "all";
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "activity" | "collection" | "file";
+// 'collection' / 'file' are not user-searchable via this service (they're
+// picked through the dashboard's KB picker, not via the generic search), so
+// they're intentionally excluded from the search-type enum.
+export type ContextSearchType = Exclude<ContextType, "activity" | "collection" | "file"> | "all";
 
 export interface ContextItem {
   id: string;
@@ -120,6 +123,8 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     ticket: 0,
     canvas: 0,
     call: 0,
+    collection: 0,
+    file: 0,
   };
 
   for (const raw of input) {
@@ -128,7 +133,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     const type = obj["type"];
     const id = obj["id"];
     const title = obj["title"];
-    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|activity" };
+    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|activity|collection|file" };
     if (typeof id !== "string" || id.trim().length === 0) return { items: [], error: "attachedContext.id must be a non-empty string" };
     if (typeof title !== "string" || title.trim().length === 0) return { items: [], error: "attachedContext.title must be a non-empty string" };
     const threadId = obj["threadId"];
@@ -197,8 +202,14 @@ export async function searchContextItems(type: ContextSearchType, q: string, lim
   return searchCalls(query, safeLimit, auth);
 }
 
-export async function buildAttachedContextPayload(items: AttachedContextRef[], auth?: SpacesAuthContext): Promise<{ promptPrefix?: string; contextFiles: ContextFile[] }> {
-  if (items.length === 0) return { contextFiles: [] };
+export async function buildAttachedContextPayload(
+  items: AttachedContextRef[],
+  auth?: SpacesAuthContext,
+  opts?: { threadConversationId?: string; canvasViewAccessId?: string },
+): Promise<{ promptPrefix?: string; contextFiles: ContextFile[] }> {
+  const threadConversationId = opts?.threadConversationId;
+  const canvasViewAccessId = opts?.canvasViewAccessId;
+  if (items.length === 0 && !threadConversationId && !canvasViewAccessId) return { contextFiles: [] };
 
   const sections = await Promise.all(items.map(async (item) => {
     try {
@@ -212,7 +223,49 @@ export async function buildAttachedContextPayload(items: AttachedContextRef[], a
     }
   }));
 
-  const lines: string[] = ["# Attached context"];
+  // The Spaces thread the assistant was opened from arrives via
+  // SPACES_CONVERSATION_ID (Session Metadata), NOT through the attachedContext
+  // array — so it was never explained here. Fold it in as the FIRST section
+  // (the user is most likely asking about it). Skip when it's a claw session id
+  // rather than a Spaces conversation, or already covered by an attached item.
+  if (
+    threadConversationId &&
+    !threadConversationId.startsWith("chat-") &&
+    !threadConversationId.startsWith("scheduled_") &&
+    !items.some((i) => i.threadId === threadConversationId)
+  ) {
+    try {
+      sections.unshift(await resolveThreadSection(threadConversationId, auth));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sections.unshift({
+        header: `Spaces thread (conversationId=${threadConversationId})`,
+        inlineText: `Unable to resolve thread: ${message}. Read it with \`spaces-messages\` (conversationId=${threadConversationId}).`,
+      });
+    }
+  }
+
+  // The canvas the assistant was opened from (with an optional selected section
+  // quoted in the query) arrives as SPACES_CANVAS_VIEW_ACCESS_ID — free text in
+  // the query otherwise, never explained. Fold it in as the FIRST section so
+  // the agent reads the full canvas before explaining a quoted snippet.
+  if (canvasViewAccessId) {
+    try {
+      sections.unshift(await resolveCanvasByViewAccessSection(canvasViewAccessId, auth));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sections.unshift({
+        header: `Canvas (viewAccessId=${canvasViewAccessId})`,
+        inlineText: `Unable to resolve canvas: ${message}. Read it with \`spaces-read-canvas\` (viewAccessId=${canvasViewAccessId}).`,
+      });
+    }
+  }
+
+  const lines: string[] = [
+    "# Attached context",
+    "",
+    "I have attached the following item(s) with my message:",
+  ];
   const contextFiles: ContextFile[] = [];
 
   for (const section of sections) {
@@ -229,6 +282,19 @@ export async function buildAttachedContextPayload(items: AttachedContextRef[], a
     }
     lines.push("No additional data available.");
   }
+
+  // Single consolidated guidance block. Kept AFTER the item list so the model
+  // reads "here is what's attached" then "here is how to use it", right before
+  // the "## Query" that claw appends.
+  lines.push(
+    "",
+    "---",
+    "Refer to these attached item(s) to answer my query. The details above are only a stub — fetch fresh data with each item's noted `spaces-*` / `kb-*` tools before answering, and ground your answer in all of them.",
+    "- If my message isn't really a question (just a greeting or small talk), reply normally instead of forcing it onto the attached items.",
+    "- If the query is vague, don't guess — search broad: fan out several queries across the org, then converge on the single best-quality answer.",
+    "- If anything is ambiguous or you're unsure, ask me before assuming.",
+    "- Never state unverified information. When your answer draws on org data, back each claim with an inline citation token — and never repeat the same token more than once.",
+  );
 
   return {
     promptPrefix: lines.join("\n"),
@@ -384,7 +450,34 @@ async function resolveSection(item: AttachedContextRef, auth?: SpacesAuthContext
   if (item.type === "ticket") return resolveTicketSection(item, auth);
   if (item.type === "canvas") return resolveCanvasSection(item, auth);
   if (item.type === "activity") return resolveActivitySection(item);
+  if (item.type === "collection") return resolveCollectionSection(item);
+  if (item.type === "file") return resolveFileSection(item);
   return resolveCallSection(item, auth);
+}
+
+/** Knowledge Base collection attached from the ask-ai v2 picker.
+ *  We don't try to inline the file list — the kb-list-files tool gives the
+ *  agent live results and gates by the agent's KB scope. We just point the
+ *  agent at the right tool and id. */
+async function resolveCollectionSection(item: AttachedContextRef): Promise<ResolvedContextSection> {
+  const header = `Collection "${item.title}" (id=${item.id})`;
+  const lines = [
+    `Collection: ${item.title} (collectionId=${item.id})`,
+    `Fetch: enumerate files with \`kb-list-files\` (collectionId=${item.id}); find one with \`kb-search\` (collectionId=${item.id} + query); read a file with \`kb-read-file\` (fileId from kb-list-files).`,
+  ];
+  return { header, inlineText: lines.join("\n") };
+}
+
+/** Knowledge Base file attached from the ask-ai v2 picker.
+ *  The `id` is the CollectionItem.id (cuid) — the same identifier the
+ *  agent's kb-read-file tool expects. */
+async function resolveFileSection(item: AttachedContextRef): Promise<ResolvedContextSection> {
+  const header = `File "${item.title}" (id=${item.id})`;
+  const lines = [
+    `File: ${item.title} (fileId=${item.id})`,
+    `Fetch: read its full content with \`kb-read-file\` (fileId=${item.id}).`,
+  ];
+  return { header, inlineText: lines.join("\n") };
 }
 
 async function resolveActivitySection(item: AttachedContextRef): Promise<ResolvedContextSection> {
@@ -407,6 +500,36 @@ async function resolveActivitySection(item: AttachedContextRef): Promise<Resolve
   return { header: `Activity "${item.title}"`, inlineText: lines.join("\n") };
 }
 
+/** A Spaces thread/conversation the user opened the assistant from. It arrives
+ *  as agentConfig.SPACES_CONVERSATION_ID (NOT via the attachedContext array),
+ *  so it's resolved here and folded into the same "# Attached context" block. */
+async function resolveThreadSection(conversationId: string, auth?: SpacesAuthContext): Promise<ResolvedContextSection> {
+  const header = `Spaces thread (conversationId=${conversationId})`;
+  const rows = (await interact({
+    model: "message",
+    operation: "findMany",
+    where: {
+      conversationId: { equals: conversationId },
+      isDeleted: { equals: false },
+    },
+    orderBy: [{ createdAt: "desc" }],
+    take: TICKET_MESSAGE_LIMIT,
+  }, auth)) as MessageRow[];
+  const recent = (rows ?? []).slice().reverse();
+
+  const lines = [
+    "This is the Spaces thread the user opened the assistant from — the query is most likely about this discussion.",
+    `Fetch: read the full thread with \`spaces-messages\` (conversationId=${conversationId}); use \`spaces-message-detail\` (messageId) for a single message's reactions/attachments.`,
+  ];
+  if (recent.length > 0) {
+    lines.push("", "Recent messages:");
+    for (const message of recent) {
+      lines.push(`- [${formatDate(message.createdAt)}] ${message.senderId ?? "unknown"}: ${truncate(message.content ?? "", 280)}`);
+    }
+  }
+  return { header, inlineText: lines.join("\n") };
+}
+
 async function resolveChannelSection(item: AttachedContextRef, auth?: SpacesAuthContext): Promise<ResolvedContextSection> {
   const channelRows = (await interact({
     model: "channel",
@@ -422,18 +545,10 @@ async function resolveChannelSection(item: AttachedContextRef, auth?: SpacesAuth
   }
   const threadId = item.threadId ?? channel.conversationId;
   const lines = [
-    `Channel: #${channel.name}`,
-    `Channel id: ${item.id}`,
-    `Scope: ${channel.scopeType ?? "UNKNOWN"} · Visibility: ${channel.visibility ?? "UNKNOWN"}`,
-    `Participants: ${typeof channel.participantCount === "number" ? channel.participantCount : "unknown"}`,
+    `Channel: #${channel.name} (channelId=${item.id})`,
+    `Scope: ${channel.scopeType ?? "UNKNOWN"} · Visibility: ${channel.visibility ?? "UNKNOWN"} · Participants: ${typeof channel.participantCount === "number" ? channel.participantCount : "unknown"}`,
     ...(threadId ? [`Thread conversationId: ${threadId}`] : []),
-    "",
-    "Use spaces subagent tools to inspect this context (fresh data):",
-    `- spaces-channels with channelId=${item.id}`,
-    threadId
-      ? `- spaces-messages with conversationId=${threadId} to read this thread`
-      : `- spaces-activity with channelId=${item.id} to discover conversationId, then spaces-messages`,
-    `- spaces-activity with channelId=${item.id} for recent events`,
+    `Fetch: search inside it with \`spaces-search\` (in=${item.id}); ${threadId ? `read the thread with \`spaces-messages\` (conversationId=${threadId})` : `use \`spaces-activity\` (channelId=${item.id}) to find a conversationId, then \`spaces-messages\``}; \`spaces-channels\` for metadata.`,
   ];
   return { header, inlineText: lines.join("\n") };
 }
@@ -489,6 +604,29 @@ async function resolveTicketSection(item: AttachedContextRef, auth?: SpacesAuthC
   return inlineOrFile(header, ticketLines.join("\n"), "ticket", item.id);
 }
 
+/** The canvas the assistant was opened from, keyed by viewAccessId (the id in
+ *  the /chat/canvas/<viewAccessId> URL — the same id spaces-read-canvas takes).
+ *  Title lookup is best-effort (view-link-only access may not resolve via the
+ *  PG gateway); the fetch hint works regardless since spaces-read-canvas honors
+ *  view access. */
+async function resolveCanvasByViewAccessSection(viewAccessId: string, auth?: SpacesAuthContext): Promise<ResolvedContextSection> {
+  const rows = (await interact({
+    model: "canvas",
+    operation: "findMany",
+    where: { viewAccessId: { equals: viewAccessId } },
+    take: 1,
+  }, auth)) as CanvasRow[];
+  const title = rows[0]?.title;
+  const header = title
+    ? `Canvas "${title}" (viewAccessId=${viewAccessId})`
+    : `Canvas (viewAccessId=${viewAccessId})`;
+  const inlineText = [
+    "This is the canvas the user opened the assistant from — the query may be about a specific section quoted from it (look for a `from canvas(...)` block in the query).",
+    `Fetch: read the full markdown with \`spaces-read-canvas\` (viewAccessId=${viewAccessId}) before answering, so you can explain any quoted section in its full context.`,
+  ].join("\n");
+  return { header, inlineText };
+}
+
 async function resolveCanvasSection(item: AttachedContextRef, auth?: SpacesAuthContext): Promise<ResolvedContextSection> {
   const rows = (await interact({
     model: "canvas",
@@ -501,9 +639,8 @@ async function resolveCanvasSection(item: AttachedContextRef, auth?: SpacesAuthC
   const title = row?.title ?? item.title;
   const header = `Canvas "${title}" (id=${item.id})`;
   const inlineText = [
-    `Canvas title: ${title}`,
-    `Canvas id: ${item.id}`,
-    "Use the spaces-canvases MCP tool with this id to read full content on demand.",
+    `Canvas: ${title} (id=${item.id})`,
+    `Fetch: read its full content with \`spaces-read-canvas\` (id=${item.id}).`,
   ].join("\n");
   return { header, inlineText };
 }
@@ -530,22 +667,14 @@ async function resolveCallSection(item: AttachedContextRef, auth?: SpacesAuthCon
   }, auth)) as ConversationRow[];
 
   const threadId = item.threadId ?? conversations[0]?.conversationId;
+  const callSearch = (call.title?.trim() || item.title).replace(/"/g, "'");
   const lines = [
-    `Call title: ${call.title?.trim() || "(untitled call)"}`,
-    `Call id: ${item.id}`,
-    `Status: ${call.status ?? "UNKNOWN"} · Type: ${call.callType ?? "UNKNOWN"}`,
-    ...(call.channelId ? [`Channel id: ${call.channelId}`] : []),
+    `Call: ${call.title?.trim() || "(untitled call)"} (id=${item.id})`,
+    `Status: ${call.status ?? "UNKNOWN"} · Type: ${call.callType ?? "UNKNOWN"}${call.channelId ? ` · channelId=${call.channelId}` : ""}`,
     ...(threadId ? [`Thread conversationId: ${threadId}`] : []),
     ...(call.startsAt ? [`Starts: ${formatDate(call.startsAt)}`] : []),
     ...(call.endsAt ? [`Ends: ${formatDate(call.endsAt)}`] : []),
-    "",
-    "Use spaces subagent tools to inspect this call (fresh data):",
-    ...(call.channelId
-      ? [`- spaces-calls with channelId=${call.channelId} and search=\"${(call.title?.trim() || item.title).replace(/"/g, "'")}\"`]
-      : [`- spaces-calls with search=\"${(call.title?.trim() || item.title).replace(/"/g, "'")}\"`]),
-    threadId
-      ? `- spaces-messages with conversationId=${threadId} to read call thread`
-      : "- spaces-activity (or spaces-calls result refs) to discover conversationId, then spaces-messages",
+    `Fetch: transcript & AI summary with \`spaces-meeting-insights\`; metadata/participants with \`spaces-calls\` (${call.channelId ? `channelId=${call.channelId}, ` : ""}search="${callSearch}")${threadId ? `; read the call thread with \`spaces-messages\` (conversationId=${threadId})` : ""}.`,
   ];
   return { header, inlineText: lines.join("\n") };
 }
@@ -614,7 +743,15 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function isContextType(value: unknown): value is ContextType {
-  return value === "channel" || value === "ticket" || value === "canvas" || value === "call" || value === "activity";
+  return (
+    value === "channel" ||
+    value === "ticket" ||
+    value === "canvas" ||
+    value === "call" ||
+    value === "activity" ||
+    value === "collection" ||
+    value === "file"
+  );
 }
 
 function labelForType(type: ContextType): string {
@@ -622,5 +759,7 @@ function labelForType(type: ContextType): string {
   if (type === "ticket") return "Ticket";
   if (type === "canvas") return "Canvas";
   if (type === "activity") return "Activity";
+  if (type === "collection") return "Collection";
+  if (type === "file") return "File";
   return "Call";
 }

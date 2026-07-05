@@ -7,7 +7,7 @@ import {
   CaretDownIcon,
   ArrowCounterClockwiseIcon,
 } from "@phosphor-icons/react";
-import { listAgentShares, removeAgentShare, addAgentShare } from "../../../../lib/api";
+import { listAgentShares, removeAgentShare, addAgentShare, searchUsers } from "../../../../lib/api";
 import type { Agent } from "../../../../lib/types";
 import type { AgentPermissions } from "../../../lib/agentPermissions";
 import { Avatar } from "../../ui/Avatar";
@@ -57,8 +57,40 @@ export function ContributorsTab({ agent, userId, permissions }: Props) {
   const [shares, setShares] = useState<ShareRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [newUserId, setNewUserId] = useState("");
   const [newRole, setNewRole] = useState<"VIEWER" | "EDITOR" | "CONTRIBUTOR">("VIEWER");
+
+  // Contributor search-as-you-type. `query` is the input text; `selected` is
+  // the picked directory user (its id is what we actually share with). Typing
+  // clears the selection and re-queries GET /users?q=. If the user types a raw
+  // id/email and never picks a suggestion we still submit the raw text (the
+  // old behaviour), so pasting a known id keeps working.
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [selected, setSelected] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [showResults, setShowResults] = useState(false);
+
+  // Debounced directory search. Skips while a suggestion is selected (the
+  // input then shows "Name · email", not a fresh query).
+  useEffect(() => {
+    const q = query.trim();
+    if (selected || q.length < 2) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const t = setTimeout(() => {
+      searchUsers(q, userId)
+        .then((rows) => {
+          setResults(rows);
+          setShowResults(true);
+        })
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query, selected, userId]);
 
   // Optimistic removal state: userId -> { share, timeout }
   const pendingRef = useRef<Map<string, { share: ShareRow; timeout: ReturnType<typeof setTimeout> }>>(new Map());
@@ -120,12 +152,17 @@ export function ContributorsTab({ agent, userId, permissions }: Props) {
   );
 
   const handleAdd = useCallback(async () => {
-    if (!newUserId.trim() || adding) return;
+    // Prefer the picked directory user; fall back to raw typed text (id/email).
+    const target = (selected?.id ?? query).trim();
+    if (!target || adding) return;
     setAdding(true);
     try {
-      await addAgentShare(agent.slug, userId, newUserId.trim(), newRole);
+      await addAgentShare(agent.slug, userId, target, newRole);
       showSnackbar({ variant: "success", title: "Contributor added" });
-      setNewUserId("");
+      setQuery("");
+      setSelected(null);
+      setResults([]);
+      setShowResults(false);
       // Refresh list
       const updated = await listAgentShares(agent.slug, userId);
       setShares(updated);
@@ -138,7 +175,7 @@ export function ContributorsTab({ agent, userId, permissions }: Props) {
     } finally {
       setAdding(false);
     }
-  }, [newUserId, newRole, adding, agent.slug, userId, showSnackbar]);
+  }, [selected, query, newRole, adding, agent.slug, userId, showSnackbar]);
 
   const visibleShares = shares.filter((s) => !pendingRef.current.has(s.userId));
   const pendingList = Array.from(pendingRef.current.values()).map((p) => p.share);
@@ -237,13 +274,53 @@ export function ContributorsTab({ agent, userId, permissions }: Props) {
         <div className="flex flex-col gap-2 rounded-xl border border-xyne-border-subtle bg-xyne-surface-subtle p-4">
           <p className="text-[13px] font-medium text-xyne-fg-primary">Add contributor</p>
           <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={newUserId}
-              onChange={(e) => setNewUserId(e.target.value)}
-              placeholder="User ID"
-              className="flex-1 rounded-lg border border-xyne-border bg-xyne-surface px-3 py-1.5 text-[13px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:shadow-[var(--comp-focus-ring)] focus:outline-none"
-            />
+            {/* Search-as-you-type user picker. Querying GET /users?q= by name or
+                email and letting the owner click a match — the field used to be
+                a raw "User ID" box, so typing a name returned nothing. */}
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setSelected(null);
+                }}
+                onFocus={() => { if (results.length > 0) setShowResults(true); }}
+                onBlur={() => { setTimeout(() => setShowResults(false), 150); }}
+                placeholder="Search by name or email…"
+                className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-3 py-1.5 text-[13px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:shadow-[var(--comp-focus-ring)] focus:outline-none"
+              />
+              {showResults && (query.trim().length >= 2) && !selected && (
+                <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-60 overflow-y-auto rounded-lg border border-xyne-border bg-xyne-surface py-1 shadow-lg">
+                  {searching && results.length === 0 ? (
+                    <div className="px-3 py-2 text-[12px] text-xyne-fg-tertiary">Searching…</div>
+                  ) : results.length === 0 ? (
+                    <div className="px-3 py-2 text-[12px] text-xyne-fg-tertiary">No matching users</div>
+                  ) : (
+                    results.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        // onMouseDown (not onClick) so it fires before the input's onBlur closes the list.
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSelected(u);
+                          setQuery(`${u.name} · ${u.email}`);
+                          setShowResults(false);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-xyne-surface-subtle"
+                      >
+                        <Avatar name={u.name} size={24} shape="circle" />
+                        <span className="flex min-w-0 flex-col">
+                          <span className="truncate text-[13px] text-xyne-fg-primary">{u.name}</span>
+                          <span className="truncate text-[11px] text-xyne-fg-tertiary">{u.email}</span>
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
             {/* Role dropdown — styled Menu (same primitive used on the
                   provider chip elsewhere) instead of a native <select>, so
                   the popup matches the rest of the UI in light + dark mode
@@ -274,7 +351,7 @@ export function ContributorsTab({ agent, userId, permissions }: Props) {
               size="sm"
               leadingIcon={<PlusIcon size={12} />}
               onClick={handleAdd}
-              disabled={adding || !newUserId.trim()}
+              disabled={adding || !(selected?.id ?? query).trim()}
             >
               {adding ? "Adding…" : "Add"}
             </Button>

@@ -4,6 +4,34 @@ export const SERVER = {
   authServiceUrl: process.env["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003",
 } as const;
 
+// SSRF guard for caller-supplied callback/progress URLs. These arrive in the
+// /run body and are always set by claw-auth to its own internal origin
+// (= authServiceUrl). We never fetch a callback/progress target that isn't that
+// exact origin, so a leaked S2S key can't turn the callback into an SSRF
+// primitive against cloud metadata / internal services. Extra origins can be
+// added via XYNE_CLAW_CALLBACK_ORIGINS (comma-separated) if a second internal
+// host ever needs to receive callbacks.
+const ALLOWED_CALLBACK_ORIGINS: ReadonlySet<string> = (() => {
+  const origins = new Set<string>();
+  for (const candidate of [SERVER.authServiceUrl, ...(process.env["XYNE_CLAW_CALLBACK_ORIGINS"] ?? "").split(",")]) {
+    const trimmed = candidate?.trim();
+    if (!trimmed) continue;
+    try { origins.add(new URL(trimmed).origin); } catch { /* ignore malformed */ }
+  }
+  return origins;
+})();
+
+export function isAllowedCallbackUrl(raw: string | undefined | null): boolean {
+  if (!raw) return false;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    return ALLOWED_CALLBACK_ORIGINS.has(u.origin);
+  } catch {
+    return false;
+  }
+}
+
 export const PATHS = {
   dataDir: process.env["XYNE_CLAW_DATA_DIR"] ?? "./data",
   agentDir: process.env["XYNE_CLAW_AGENT_DIR"] ?? "",
@@ -16,7 +44,7 @@ export const LITELLM = {
   // Cheap-and-fast model used by judge/boss roles (chain-judge, goal-judge).
   // Boss decisions are short structured calls; running them on the same big
   // model as the worker would double the per-turn cost for marginal quality.
-  fastModel: process.env["LITELLM_FAST_MODEL"] ?? "private-large",
+  fastModel: process.env["LITELLM_FAST_MODEL"] ?? "open-large",
 } as const;
 
 export const AGENT = {

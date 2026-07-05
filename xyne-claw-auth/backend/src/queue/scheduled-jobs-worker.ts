@@ -4,19 +4,23 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { ensureUserExists } from "../lib/users-jit.js";
+import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import type { ScheduledJobData } from "./scheduled-jobs-queue.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("scheduled-jobs-worker");
 
 let worker: Worker<ScheduledJobData> | undefined;
 
 async function processJob(job: Job<ScheduledJobData>): Promise<void> {
   const { scheduledJobId, userId, agentSlug, task, context, channelId, conversationId } = job.data;
 
-  console.log(`[scheduler] Firing job ${scheduledJobId} (agent: ${agentSlug})`);
+  log.info(`[scheduler] Firing job ${scheduledJobId} (agent: ${agentSlug})`);
 
   // Verify the job is still active
   const row = await prisma.scheduledJob.findUnique({ where: { id: scheduledJobId } });
   if (!row || row.status !== "active") {
-    console.log(`[scheduler] Job ${scheduledJobId} is ${row?.status ?? "missing"}, skipping`);
+    log.info(`[scheduler] Job ${scheduledJobId} is ${row?.status ?? "missing"}, skipping`);
     return;
   }
 
@@ -25,7 +29,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
   // never had one — e.g. job restored from a backup) would fail at the
   // FK-bound writes downstream.
   await ensureUserExists(userId, "scheduled-job").catch((err) => {
-    console.warn(`[scheduler] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
+    log.warn(`[scheduler] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
   });
 
   // Fire the agent via the local /run endpoint
@@ -52,13 +56,21 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
   // rest of this worker).
   const agentRow = await prisma.agent.findUnique({
     where: { slug: agentSlug },
-    select: { config: true },
+    select: { id: true, config: true },
   }).catch((err) => {
-    console.warn(`[scheduler] agent lookup failed for ${agentSlug}:`, err instanceof Error ? err.message : err);
+    log.warn(`[scheduler] agent lookup failed for ${agentSlug}:`, err instanceof Error ? err.message : err);
     return null;
   });
 
-  const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/run`, {
+  // Resolve the agent's configured provider so a scheduled run uses the same
+  // (premium) model a human chat would — not the platform default. Headless:
+  // agent-level creds only, honoring the agent's providerAlwaysOn policy.
+  // Best-effort — if the row is gone we fire without it (platform default).
+  const { providerConfigs, providerOrder } = agentRow
+    ? await resolveAgentProviderConfigs(agentRow)
+    : { providerConfigs: {}, providerOrder: [] as string[] };
+
+  const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -72,7 +84,21 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
       channelId,
       conversationId: runConversationId,
       callbackUrl,
+      // Marks the run as scheduler-triggered: xyne-claw strips the
+      // schedule-task tool for these runs (self-scheduling ban — see
+      // run.ts). The conversationId "scheduled_" prefix is the fallback
+      // signal for the same check.
+      eventType: "scheduled_job",
+      // We persist the user ChatMessage and AgentRun ourselves below (with the
+      // correct triggerSource: "scheduled"). Without this flag, /internal/run
+      // also inserts an AgentRun for the same sessionId — tagged "spaces" — and
+      // our insert then loses the race with a P2002 unique-constraint error
+      // (~19/hour in prod), mislabeling every scheduled run as "spaces" in the
+      // Control Center. Mirrors how /agent-chat opts out (see run.ts).
+      __persistedByCaller: true,
       ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
+      ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
+      ...(providerOrder.length > 1 ? { providerOrder } : {}),
     }),
   });
 
@@ -111,7 +137,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
       conversationId: runConversationId,
       scheduledJobId,
       ...(channelId ? { channelId } : {}),
-    }).catch((e) => console.warn(`[scheduler] AgentRun.start failed:`, e instanceof Error ? e.message : e));
+    }).catch((e) => log.warn(`[scheduler] AgentRun.start failed:`, e instanceof Error ? e.message : e));
     await chatMessageRepository.create({
       conversationId: runConversationId,
       agentSlug,
@@ -119,10 +145,10 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
       role: "user",
       content: task,
       status: "completed",
-    }).catch((e) => console.warn(`[scheduler] ChatMessage.create failed:`, e instanceof Error ? e.message : e));
+    }).catch((e) => log.warn(`[scheduler] ChatMessage.create failed:`, e instanceof Error ? e.message : e));
   }
 
-  console.log(`[scheduler] Job ${scheduledJobId} → session ${body.sessionId}`);
+  log.info(`[scheduler] Job ${scheduledJobId} → session ${body.sessionId}`);
 
   // Update tracking
   const isOnce = row.type === "once";
@@ -149,14 +175,14 @@ export function initScheduledJobsWorker(): Worker<ScheduledJobData> {
   });
 
   worker.on("failed", (job, err) => {
-    console.error(`[scheduler] Job ${job?.data.scheduledJobId ?? job?.id} failed:`, err.message);
+    log.error(`[scheduler] Job ${job?.data.scheduledJobId ?? job?.id} failed:`, err.message);
   });
 
   worker.on("error", (err) => {
-    console.error("[scheduler] Worker error:", err.message);
+    log.error("[scheduler] Worker error:", err.message);
   });
 
-  console.log("[scheduler] Worker started");
+  log.info("[scheduler] Worker started");
 
   return worker;
 }

@@ -1,9 +1,14 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join as joinPath } from "node:path";
+import type { Attachment } from "./agent.js";
 import { SERVER } from "./config.js";
+import { promoteIfOversized } from "./tool-output.js";
 import { writeAttachmentToContext } from "./attachment-write.js";
+import { readFile, realpath } from "node:fs/promises";
+import { resolve as resolvePath, isAbsolute, sep } from "node:path";
+
+import { createLogger } from "./logger.js";
+const log = createLogger("mcp");
 
 /**
  * `spaces-fetch-attachment` returns a `[SPACES_ATTACHMENT:fileName:mimeType]\n<base64>`
@@ -36,82 +41,23 @@ async function persistSpacesAttachmentIfMarker(
   }
 }
 
-// File-promotion threshold for MCP tool results. Mirrors pi-coding-agent's
-// built-in DEFAULT_MAX_BYTES (50KB) for bash/read/ls/grep/find — pi promotes
-// over-large output to a temp file and embeds the path in the tool_result so
-// the LLM can `read` it. That logic only applies to pi's OWN built-in tools.
-// MCP tool results take a different code path (customTools), so pi never
-// sees them at the truncation layer. This wrapper applies the same pattern
-// to anything an MCP server returns.
-//
-// We use a tighter 32KB cap (vs pi's 50KB for bash) because MCP tool results
-// often include JSON which is structure-heavy — the model has to skim more
-// tokens per useful fact than it does with raw shell output.
-const MCP_RESULT_INLINE_CAP_BYTES = 32 * 1024;
-// Show the agent a small preview before the path so it doesn't have to
-// blindly read the file when it could already answer from the head.
-const MCP_RESULT_PREVIEW_BYTES = 2 * 1024;
-
-/**
- * If the MCP tool result is over MCP_RESULT_INLINE_CAP_BYTES, dump it to
- * `<workspaceDir>/.context/mcp-results/<safeServerType>-<safeToolName>-<ts>.json`
- * and replace the LLM-visible content with a preview + the relative path.
- *
- * Path is RELATIVE to workspaceDir so it matches how the agent already
- * references other `.context/` files (read tool resolves relative paths
- * against its scoped cwd, which IS workspaceDir).
- */
-async function promoteIfOversized(
-  workspaceDir: string,
-  serverType: string,
-  toolName: string,
-  rawContent: string,
-): Promise<string> {
-  if (rawContent.length <= MCP_RESULT_INLINE_CAP_BYTES) {
-    return rawContent;
-  }
-  const safeServer = serverType.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const safeTool = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
-  // ISO-like timestamp without colons/dots for filename safety.
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const relPath = `.context/mcp-results/${safeServer}-${safeTool}-${stamp}.json`;
-  const absPath = joinPath(workspaceDir, relPath);
-  try {
-    await mkdir(joinPath(workspaceDir, ".context", "mcp-results"), { recursive: true });
-    await writeFile(absPath, rawContent, { encoding: "utf8" });
-  } catch (err) {
-    // Disk write failed — fall back to inline with truncation note so the
-    // agent at least sees the head + a clear signal that data was lost.
-    const truncated = rawContent.slice(0, MCP_RESULT_INLINE_CAP_BYTES);
-    return [
-      `[Tool returned ${rawContent.length} chars — full result could not be saved to disk:`,
-      `   ${err instanceof Error ? err.message : String(err)}`,
-      `   Showing only the first ${MCP_RESULT_INLINE_CAP_BYTES} chars; the tail was dropped.]`,
-      ``,
-      truncated,
-    ].join("\n");
-  }
-  const preview = rawContent.slice(0, MCP_RESULT_PREVIEW_BYTES);
-  console.log(`[mcp/promotion] ${safeServer}/${safeTool} result ${rawContent.length}b → ${relPath}`);
-  return [
-    `[Tool returned ${rawContent.length} chars — full result saved to ${relPath}.`,
-    `Use the read tool on that path (with offset/limit) or grep on it to inspect.`,
-    `If you're looking for specific entries, consider re-calling the tool with narrower filters.]`,
-    ``,
-    `## Preview (first ${MCP_RESULT_PREVIEW_BYTES} chars)`,
-    preview,
-  ].join("\n");
-}
+// MCP and custom/sandbox tools share the same over-large-output handling —
+// spill to a file under .context/ and hand the model a preview + path. See
+// tool-output.ts for the implementation (promoteIfOversized).
 
 interface McpToolInfo {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
+  readonly serviceName?: string;
+  readonly backendId?: string;
+  readonly selectionKey?: string;
 }
 
 interface McpServerTools {
   readonly serverType: string;
   readonly serverName: string;
+  readonly displayName?: string;
   readonly tools: McpToolInfo[];
   readonly writeTools: readonly string[];
 }
@@ -129,6 +75,7 @@ async function authFetch<T>(path: string, sessionToken: string, init?: RequestIn
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${sessionToken}`,
+      "x-s2s-key": SERVER.s2sKey,
       ...init?.headers,
     },
   });
@@ -139,6 +86,11 @@ async function authFetch<T>(path: string, sessionToken: string, init?: RequestIn
   return body.data;
 }
 
+function injectToolCallIdIntoClawCitations(content: string, toolCallId: string): string {
+  if (!content || !toolCallId) return content;
+  return content.split("__TOOL_CALL_ID__").join(toolCallId);
+}
+
 /** A group of MCP tools from one server, with write tool info preserved */
 export interface McpToolGroup {
   serverType: string;
@@ -147,16 +99,128 @@ export interface McpToolGroup {
   writeTools: string[];
 }
 
+// ── Inbound file forwarding (INPUT counterpart of claw-auth file forwarding) ──
+//
+// Some MCP tools need an actual file as input (e.g. "upload this document").
+// MCP tool calls carry only JSON params, so the agent references a file already
+// present in the claw workspace via a `{{file:<relpath>}}` marker; for
+// whitelisted servers we read that file, base64-encode it, and substitute it
+// into the param BEFORE the call leaves claw. The base64 never enters the
+// model's context — the model only ever emits the short marker.
+//
+// SECURITY: forwarding raw bytes to a remote MCP server can leak confidential
+// workspace files, so it is gated by a server allowlist. Path resolution is
+// confined to the session workspace (no absolute paths, no `..` traversal, no
+// symlink escape) so the agent cannot exfiltrate host files (claw-auth secrets,
+// /etc/*, or another session's data).
+//
+// Allowlist source: the CLAW_FILE_INPUT_FORWARDING_SERVERS env var (comma-
+// separated serverTypes). Mirrors claw-auth's FILE_FORWARDING_SERVERS pattern.
+const FILE_INPUT_FORWARDING_SERVERS = new Set<string>(
+  (process.env["CLAW_FILE_INPUT_FORWARDING_SERVERS"] ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean),
+);
+
+function isFileInputForwardingServer(serverType: string): boolean {
+  return FILE_INPUT_FORWARDING_SERVERS.has(serverType);
+}
+
+// Cap on a single forwarded file (base64 inflates ~33%; both the call body and
+// the remote server must tolerate it). Configurable; defaults to 25 MiB.
+const MAX_FORWARDED_FILE_BYTES = Number(
+  process.env["CLAW_MAX_FORWARDED_FILE_BYTES"] ?? 25 * 1024 * 1024,
+);
+
+// Exact-match marker for a string param value: `{{file:<relpath>}}`.
+const FILE_MARKER_RE = /^\{\{file:(.+)\}\}$/;
+
+const FILE_INPUT_HINT =
+  "\n\nFile input: to send a workspace file as a parameter value, set that " +
+  "parameter to `{{file:<relative/path>}}` (e.g. `{{file:.context/report.pdf}}`). " +
+  "The file's bytes are base64-encoded and forwarded in place of the marker. " +
+  "Only files inside this session's workspace can be forwarded.";
+
+/**
+ * Read a workspace-relative file, refusing anything that resolves outside
+ * `workspaceDir` (absolute paths, `..` traversal, or symlink escape).
+ */
+export async function readWorkspaceFile(workspaceDir: string, relPath: string): Promise<Buffer> {
+  if (isAbsolute(relPath)) {
+    throw new Error(`absolute paths are not allowed: ${relPath}`);
+  }
+  const base = await realpath(workspaceDir);
+  const target = resolvePath(base, relPath);
+  // realpath resolves symlinks and throws if the file is missing.
+  const real = await realpath(target);
+  if (real !== base && !real.startsWith(base + sep)) {
+    throw new Error(`refusing to forward a file outside the workspace: ${relPath}`);
+  }
+  const buf = await readFile(real);
+  if (buf.byteLength > MAX_FORWARDED_FILE_BYTES) {
+    throw new Error(
+      `file ${relPath} is ${buf.byteLength} bytes, exceeding the ${MAX_FORWARDED_FILE_BYTES}-byte forwarding limit`,
+    );
+  }
+  return buf;
+}
+
+/**
+ * Deep-scan tool params for `{{file:<relpath>}}` markers and replace each with
+ * the base64 content of the referenced workspace file. Returns the rewritten
+ * params and the list of forwarded relative paths (for logging).
+ */
+export async function injectForwardedFiles(
+  params: Record<string, unknown>,
+  workspaceDir: string,
+): Promise<{ params: Record<string, unknown>; forwarded: string[] }> {
+  const forwarded: string[] = [];
+  async function walk(val: unknown): Promise<unknown> {
+    if (typeof val === "string") {
+      const m = FILE_MARKER_RE.exec(val.trim());
+      if (!m) return val;
+      const rel = m[1]!.trim();
+      const buf = await readWorkspaceFile(workspaceDir, rel);
+      forwarded.push(rel);
+      return buf.toString("base64");
+    }
+    if (Array.isArray(val)) {
+      const out: unknown[] = [];
+      for (const item of val) out.push(await walk(item));
+      return out;
+    }
+    if (val && typeof val === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(val as Record<string, unknown>)) out[k] = await walk(v);
+      return out;
+    }
+    return val;
+  }
+  const rewritten = (await walk(params)) as Record<string, unknown>;
+  return { params: rewritten, forwarded };
+}
+
 export async function loadMcpToolsForUser(
   sessionId: string,
   sessionToken: string,
   workspaceDir: string,
   toolPermissions?: Record<string, string>,
   agentSlug?: string,
+  // Base dir for over-large tool-result offload. Defaults to the ephemeral
+  // workspace, but callers with a conversation should pass the persistent
+  // session dir (toolOutputBaseDir) so spilled files survive resume + are
+  // reachable by the read/grep tools and the sandbox on later turns. Binary
+  // attachments still land in workspaceDir (they're inputs for this run).
+  toolOutputDir: string = workspaceDir,
+  // Streaming sink for files forwarded from MCP tools (FILE_FORWARDING_TOOLS in
+  // claw-auth). Same callback custom-tools uses → pushes to the user mid-run.
+  onAttachment?: (a: Attachment) => void,
 ): Promise<{
   groups: McpToolGroup[];
   cleanup: () => Promise<void>;
   getPendingActions: () => Array<Record<string, unknown>>;
+  getAttachments: () => Attachment[];
 }> {
   const permissions = toolPermissions ?? {};
   const servers = await authFetch<McpServerTools[]>(
@@ -165,19 +229,16 @@ export async function loadMcpToolsForUser(
   );
 
   if (servers.length === 0) {
-    return { groups: [], cleanup: async () => {}, getPendingActions: () => [] };
+    return { groups: [], cleanup: async () => {}, getPendingActions: () => [], getAttachments: () => [] };
   }
 
   const pendingActions: Array<Record<string, unknown>> = [];
+  const mcpAttachments: Attachment[] = [];
   const groups: McpToolGroup[] = [];
 
   for (const server of servers) {
-    // query-routing tools are only available to the investigation-agent
-    if (server.serverType === "query-routing" && agentSlug !== "investigation-agent") {
-      continue;
-    }
-
     const tools: ToolDefinition[] = [];
+    const displayName = server.displayName ?? server.serverName;
 
     for (const mcpTool of server.tools) {
       const toolKey = `${server.serverType}__${mcpTool.name}`;
@@ -188,16 +249,51 @@ export async function loadMcpToolsForUser(
       // the last dot, breaking tool dispatch. Replace everything except
       // alphanumerics, underscores, and hyphens.
       const safeName = `${server.serverName}__${mcpTool.name}`.replace(/[^a-zA-Z0-9_\-]/g, "_");
-      const definition: ToolDefinition = {
+      const acceptsFiles = isFileInputForwardingServer(server.serverType);
+      const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
+      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string } = {
         name: safeName,
-        label: `${server.serverName}/${mcpTool.name}`,
-        description: mcpTool.description || `Tool ${mcpTool.name} from ${server.serverName}`,
+        label: `${displayName}/${mcpTool.name}`,
+        ...(typeof mcpTool.serviceName === "string" && mcpTool.serviceName.length > 0
+          ? { serviceName: mcpTool.serviceName }
+          : {}),
+        ...(typeof mcpTool.backendId === "string" && mcpTool.backendId.length > 0
+          ? { backendId: mcpTool.backendId }
+          : {}),
+        ...(typeof mcpTool.selectionKey === "string" && mcpTool.selectionKey.length > 0
+          ? { selectionKey: mcpTool.selectionKey }
+          : {}),
+        description: acceptsFiles ? baseDescription + FILE_INPUT_HINT : baseDescription,
         parameters: Type.Unsafe(mcpTool.inputSchema),
         async execute(_toolCallId, params) {
+          // For allowlisted servers, replace any `{{file:<relpath>}}` markers in
+          // the params with the base64 content of the referenced workspace file
+          // before the call leaves claw. The model never sees the bytes.
+          let callParams = params as Record<string, unknown>;
+          if (acceptsFiles) {
+            try {
+              const sub = await injectForwardedFiles(callParams, workspaceDir);
+              callParams = sub.params;
+              if (sub.forwarded.length > 0) {
+                log.info(
+                  `[mcp] forwarded ${sub.forwarded.length} workspace file(s) to ${server.serverType}: ${sub.forwarded.join(", ")}`,
+                );
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              log.warn(`[mcp] file forwarding failed for ${server.serverType}/${mcpTool.name}: ${msg}`);
+              return { content: [{ type: "text" as const, text: `File forwarding failed: ${msg}` }], details: {} };
+            }
+          }
           const result = await authFetch<{
             content: string;
             citations?: import("xyne-claw-shared").Citation[];
             pendingAction?: Record<string, unknown>;
+            attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
+            /** Out-of-band debug payload (currently the Vespa YQL from kb-search /
+             *  spaces-search). Stashed via recordDebug for tool_execution_end
+             *  to attach to the persisted ToolInvocation — never reaches the LLM. */
+            debug?: Record<string, unknown>;
           }>(
             `/claw/api/v1/sessions/${encodeURIComponent(sessionId)}/mcp/call`,
             sessionToken,
@@ -206,7 +302,7 @@ export async function loadMcpToolsForUser(
               body: JSON.stringify({
                 serverType: server.serverType,
                 tool: mcpTool.name,
-                params: params as Record<string, unknown>,
+                params: callParams,
                 permission,
                 agentSlug,
               }),
@@ -217,11 +313,35 @@ export async function loadMcpToolsForUser(
             pendingActions.push(result.pendingAction);
           }
 
+          // File forwarding: claw-auth lifted binary output (e.g. a generated
+          // PDF report) into `attachments` for allowlisted tools. Collect them
+          // so run.ts includes them in the run's final attachments, and stream
+          // each to the user immediately via onAttachment. The base64 is NOT in
+          // result.content (claw-auth replaced it with a short summary), so the
+          // model never sees the blob.
+          if (result.attachments && result.attachments.length > 0) {
+            for (const att of result.attachments) {
+              mcpAttachments.push(att);
+              try { onAttachment?.(att); } catch (err) {
+                log.warn(`[mcp] onAttachment threw for ${att.fileName}:`, err instanceof Error ? err.message : err);
+              }
+            }
+          }
+
           // Stash structured citations keyed by toolCallId so agent.ts can
           // attach them to the recorded ToolInvocation in tool_execution_end.
           if (result.citations && result.citations.length > 0) {
             const { recordCitations } = await import("./citations.js");
             recordCitations(_toolCallId, result.citations);
+          }
+
+          // Stash MCP debug metadata (currently the Vespa YQL from kb-search /
+          // spaces-search). Same lifecycle as citations — recorded here on
+          // tool return, lifted by takeDebug() in tool_execution_end so it
+          // lands on the persisted ToolInvocation. Never enters tool content.
+          if (result.debug && typeof result.debug === "object" && Object.keys(result.debug).length > 0) {
+            const { recordDebug } = await import("./citations.js");
+            recordDebug(_toolCallId, result.debug);
           }
 
           // Spaces attachment marker: when spaces-fetch-attachment returns,
@@ -234,16 +354,18 @@ export async function loadMcpToolsForUser(
               ? await persistSpacesAttachmentIfMarker(workspaceDir, result.content)
               : null;
 
+          const renderedContent = injectToolCallIdIntoClawCitations(result.content, _toolCallId);
+
           // Mirror pi-coding-agent's bash-tool pattern for over-large output:
           // dump to a file under .context/, embed the relative path in the
           // result, return a small preview. Without this, MCP tools that
           // return tens-of-MB blobs (iswitch_list_resources, etc.) blow
           // through the LLM's context window in a single turn.
           const promotedText = await promoteIfOversized(
-            workspaceDir,
+            toolOutputDir,
             server.serverType,
             mcpTool.name,
-            persistedAttachmentText ?? result.content,
+            persistedAttachmentText ?? renderedContent,
           );
           return {
             content: [{ type: "text" as const, text: promotedText }],
@@ -263,7 +385,7 @@ export async function loadMcpToolsForUser(
   }
 
   const totalTools = groups.reduce((sum, g) => sum + g.tools.length, 0);
-  console.log(`[mcp] Loaded ${totalTools} tools in ${groups.length} groups for session ${sessionId}`);
+  log.info(`[mcp] Loaded ${totalTools} tools in ${groups.length} groups for session ${sessionId}`);
 
-  return { groups, cleanup: async () => {}, getPendingActions: () => pendingActions };
+  return { groups, cleanup: async () => {}, getPendingActions: () => pendingActions, getAttachments: () => mcpAttachments };
 }

@@ -36,6 +36,9 @@ import { encrypt, decryptSpacesCbc } from "../crypto.js";
 import { prisma } from "../db.js";
 import { getInstalledAppSigningSecret } from "./spaces-db.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("spaces-app-secret");
+
 function packGcm(plaintext: string): string {
   const e = encrypt(plaintext, CONFIG.encryptionKey);
   return `${e.ciphertext}:${e.iv}:${e.authTag}`;
@@ -57,30 +60,30 @@ export async function backfillSigningSecretFromSpacesDb(args: {
 }): Promise<boolean> {
   const { agentId, spacesAppId } = args;
   if (CONFIG.spacesEncryptionKey.length === 0) {
-    console.warn(
+    log.warn(
       `[spaces-app-secret] SPACES_ENCRYPTION_KEY unset — cannot decrypt Spaces DB blob for agentId=${agentId}. Set it to xyne-spaces' ENCRYPTION_KEY value.`,
     );
     return false;
   }
   const blob = await getInstalledAppSigningSecret(spacesAppId);
   if (!blob) {
-    console.warn(`[spaces-app-secret] no installed_apps row for spacesAppId=${spacesAppId} (agentId=${agentId})`);
+    log.warn(`[spaces-app-secret] no installed_apps row for spacesAppId=${spacesAppId} (agentId=${agentId})`);
     return false;
   }
   try {
     const plaintext = decryptSpacesCbc(blob, CONFIG.spacesEncryptionKey);
     if (!plaintext) {
-      console.warn(`[spaces-app-secret] decrypt produced empty secret for agentId=${agentId}`);
+      log.warn(`[spaces-app-secret] decrypt produced empty secret for agentId=${agentId}`);
       return false;
     }
     await prisma.agent.update({
       where: { id: agentId },
       data: { signingSecret: packGcm(plaintext) },
     });
-    console.log(`[spaces-app-secret] stored signing secret for agentId=${agentId} (db path)`);
+    log.info(`[spaces-app-secret] stored signing secret for agentId=${agentId} (db path)`);
     return true;
   } catch (err) {
-    console.warn(
+    log.warn(
       `[spaces-app-secret] db-path backfill failed for agentId=${agentId}: ${err instanceof Error ? err.message : String(err)}`,
     );
     return false;
@@ -109,7 +112,7 @@ export async function fetchAndStoreSigningSecretFromSpacesApi(args: {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      console.warn(
+      log.warn(
         `[spaces-app-secret] fetch failed for agentId=${agentId} status=${res.status}: ${body.slice(0, 200)}`,
       );
       return false;
@@ -120,17 +123,17 @@ export async function fetchAndStoreSigningSecretFromSpacesApi(args: {
     const json = (await res.json()) as { signingSecret?: string; data?: { signingSecret?: string } };
     const plaintext = json?.signingSecret ?? json?.data?.signingSecret;
     if (typeof plaintext !== "string" || plaintext.length === 0) {
-      console.warn(`[spaces-app-secret] fetch returned no secret for agentId=${agentId}`);
+      log.warn(`[spaces-app-secret] fetch returned no secret for agentId=${agentId}`);
       return false;
     }
     await prisma.agent.update({
       where: { id: agentId },
       data: { signingSecret: packGcm(plaintext) },
     });
-    console.log(`[spaces-app-secret] stored signing secret for agentId=${agentId} (api path)`);
+    log.info(`[spaces-app-secret] stored signing secret for agentId=${agentId} (api path)`);
     return true;
   } catch (err) {
-    console.warn(
+    log.warn(
       `[spaces-app-secret] api fetch errored for agentId=${agentId}: ${err instanceof Error ? err.message : String(err)}`,
     );
     return false;

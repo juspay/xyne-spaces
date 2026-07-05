@@ -14,7 +14,6 @@ import { useSubagents } from "../hooks/useSubagents";
 import { enableSubagent, disableSubagent, deleteSubagent } from "../../lib/api";
 import type { SubagentDef } from "../../lib/api";
 import { SubagentRow } from "./subagents/SubagentRow";
-import { SubagentSlideOver } from "./subagents/SubagentSlideOver";
 import { CreateSubagentDialog } from "./dialogs/CreateSubagentDialog";
 
 interface SubagentsPageV3Props {
@@ -48,12 +47,6 @@ export function SubagentsPageV3({ userId }: SubagentsPageV3Props) {
      `selectedSubagent` from the live array each render fixes the slide-
      over's "green dot says active after I disabled it" bug — same pattern
      we apply on the Skills page. */
-  const [selectedName, setSelectedName] = useState<string | null>(null);
-  const [selectedIsBuiltIn, setSelectedIsBuiltIn] = useState(false);
-  const selectedSubagent =
-    selectedName == null
-      ? null
-      : subagents.find((s) => s.name === selectedName) ?? null;
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SubagentDef | null>(null);
@@ -116,7 +109,6 @@ export function SubagentsPageV3({ userId }: SubagentsPageV3Props) {
     try {
       await deleteSubagent(deleteTarget.name);
       setDeleteTarget(null);
-      setSelectedName(null);
       showSnackbar({
         variant: "success",
         title: `${deleteTarget.name} deleted`,
@@ -137,7 +129,7 @@ export function SubagentsPageV3({ userId }: SubagentsPageV3Props) {
           <PageLayout
             header={
               <PageListHeader
-                title="Specialists"
+                title="Subagents"
                 subtitle="Pre-built domain experts your agents can delegate to. Each comes with a persona and a tool set."
                 icon={<TreeStructureIcon size={18} />}
                 stats={[
@@ -146,11 +138,11 @@ export function SubagentsPageV3({ userId }: SubagentsPageV3Props) {
                   { value: loading ? undefined : custom.length, label: "Custom" },
                   { value: loading ? undefined : disabledCount, label: "Disabled", highlight: disabledCount > 0 ? "warning" : null },
                 ]}
-                createLabel="New specialist"
+                createLabel="New subagent"
                 onCreateClick={() => setShowCreateDialog(true)}
                 searchValue={searchQuery}
                 onSearchChange={setSearchQuery}
-                searchPlaceholder="Search specialists…"
+                searchPlaceholder="Search subagents…"
                 loading={loading}
               />
             }
@@ -192,10 +184,7 @@ export function SubagentsPageV3({ userId }: SubagentsPageV3Props) {
                             key={s.name}
                             subagent={s}
                             isBuiltIn={false}
-                            onSelect={(sub) => {
-                              setSelectedName(sub.name);
-                              setSelectedIsBuiltIn(false);
-                            }}
+                            onSelect={(sub) => navigate(`/v3/subagents/${sub.name}`)}
                             onToggleEnabled={handleToggle}
                             toggling={togglingId === s.name}
                           />
@@ -256,10 +245,7 @@ export function SubagentsPageV3({ userId }: SubagentsPageV3Props) {
                             key={s.name}
                             subagent={s}
                             isBuiltIn={true}
-                            onSelect={(sub) => {
-                              setSelectedName(sub.name);
-                              setSelectedIsBuiltIn(true);
-                            }}
+                            onSelect={(sub) => navigate(`/v3/subagents/${sub.name}`)}
                             onToggleEnabled={handleToggle}
                             toggling={togglingId === s.name}
                           />
@@ -294,25 +280,6 @@ export function SubagentsPageV3({ userId }: SubagentsPageV3Props) {
           />
         </div>
 
-        {/* Tinted tray — matches the agent / MCP slide-over treatment so the
-            white floating panel reads as a lifted card against a soft gray
-            strip instead of bleeding into the list to its left. */}
-        {selectedSubagent && (
-          <div className="h-full bg-xyne-surface-sunken border-l border-xyne-border-subtle">
-            <SubagentSlideOver
-              subagent={selectedSubagent}
-              isBuiltIn={selectedIsBuiltIn}
-              userId={userId}
-              onClose={() => setSelectedName(null)}
-              onToggleEnabled={handleToggle}
-              onEdit={(name) => {
-                setSelectedName(null);
-                navigate(`/v3/subagents/${name}`);
-              }}
-              onDelete={setDeleteTarget}
-            />
-          </div>
-        )}
       </div>
 
       <ConfirmDialog

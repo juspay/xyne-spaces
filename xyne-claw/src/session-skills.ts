@@ -13,8 +13,23 @@
  */
 
 import { join, resolve } from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, rm } from "node:fs/promises";
 import { PATHS } from "./config.js";
+
+import { createLogger } from "./logger.js";
+const log = createLogger("session-skills");
+
+/**
+ * Delete a session-skills scope dir. Skills are materialized per run and per
+ * subagent invocation under `session-skills/<scope>/` and are only needed while
+ * that run executes — without this they accumulate forever and fill the disk.
+ * Best-effort; never throws.
+ */
+export async function deleteSessionSkills(sessionScope: string): Promise<void> {
+  if (!sessionScope) return;
+  const skillsDir = resolve(join(PATHS.dataDir, "session-skills", sessionScope));
+  await rm(skillsDir, { recursive: true, force: true }).catch(() => {});
+}
 
 /**
  * Decide whether `f.content` should be base64-decoded before writeFile.
@@ -187,9 +202,6 @@ export async function writeSessionSkills(
     const fullPath = join(skillSubdir, "SKILL.md");
     const fileContent = buildSkillFile(slug, skill.name, skill.description ?? "", skill.content);
     await writeFile(fullPath, fileContent, "utf8");
-    console.log(
-      `[skill-debug] Wrote ${fullPath} (${fileContent.length} bytes, slug=${slug}, hasDescription=${Boolean(skill.description?.trim())})`,
-    );
 
     // Materialize sibling files. relativePath is already normalized at
     // upload time on the claw-auth side (see SkillFile.normalizeSkillRelativePath),
@@ -199,7 +211,7 @@ export async function writeSessionSkills(
       for (const f of skill.files) {
         const safePath = normalizeRelativePath(f.relativePath);
         if (!safePath) {
-          console.warn(`[skill-debug] Skipping skill file with unsafe relativePath: ${f.relativePath}`);
+          log.warn(`[skill] Skipping skill file with unsafe relativePath: ${f.relativePath}`);
           continue;
         }
         const filePath = join(skillSubdir, safePath);
@@ -207,17 +219,12 @@ export async function writeSessionSkills(
         if (isBinaryContentType(f.contentType, safePath)) {
           const buf = Buffer.from(f.content, "base64");
           await writeFile(filePath, buf);
-          console.log(
-            `[skill-debug] Wrote skill file ${filePath} (${buf.length} bytes, binary contentType=${f.contentType ?? "(inferred)"})`,
-          );
         } else {
           await writeFile(filePath, f.content, "utf8");
-          console.log(`[skill-debug] Wrote skill file ${filePath} (${f.content.length} bytes, text)`);
         }
       }
     }
   }
 
-  console.log(`[skill-debug] writeSessionSkills wrote ${skills.length} skill(s) to ${skillsDir}`);
   return skillsDir;
 }

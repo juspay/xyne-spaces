@@ -30,7 +30,7 @@ export const mixpanelAdapter: StdioMcpAdapter = {
     const projectId = credentials["projectId"] as string;
     return {
       cmd: "npx",
-      args: ["-y", "@mercuryml/mcp-mixpanel"],
+      args: ["-y", "@mercuryml/mcp-mixpanel@1.0.9"],
       env: {
         SERVICE_ACCOUNT_USER_NAME: username,
         SERVICE_ACCOUNT_PASSWORD: password,

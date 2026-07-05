@@ -1,5 +1,5 @@
 /**
- * SubagentEditPageV3 — specialist configuration.
+ * SubagentEditPageV3 — subagent configuration.
  *
  * Layout (single-column, tab-based — replaces the previous two-column split):
  *

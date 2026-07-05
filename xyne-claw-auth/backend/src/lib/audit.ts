@@ -1,6 +1,9 @@
 import type { AgentAuditEvent } from "@prisma/client";
 import { auditLogRepository } from "../repositories/index.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("audit");
+
 interface AuditLogEntry {
   actorUserId?: string;
   eventType: AgentAuditEvent;
@@ -17,6 +20,6 @@ export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
   try {
     await auditLogRepository.create(entry);
   } catch (err) {
-    console.error("[audit] Failed to write audit log:", err);
+    log.error("[audit] Failed to write audit log:", err);
   }
 }

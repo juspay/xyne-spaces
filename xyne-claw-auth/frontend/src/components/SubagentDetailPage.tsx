@@ -429,7 +429,9 @@ function ToolsCard({ draft, setDraft, available, disabled }: {
       tools: tools.filter((t) => !writeToolNames.has(t.name)),
     }))
     .filter((g) => g.tools.length > 0);
-  const serverToolNames = new Set(serverGroups.flatMap((g) => g.tools.map((t) => t.name)));
+  // slug + name so the badge count is correct whether a server tool was stored
+  // by its new unique slug or a legacy bare name.
+  const serverToolNames = new Set(serverGroups.flatMap((g) => g.tools.flatMap((t) => [t.slug, t.name])));
   const selectedWriteCount = [...draft.directTools].filter((n) => writeToolNames.has(n)).length;
   const selectedServerCount = [...draft.directTools].filter((n) => serverToolNames.has(n)).length;
 
@@ -481,8 +483,17 @@ function ToolsCard({ draft, setDraft, available, disabled }: {
                       key={t.slug}
                       type="button"
                       disabled={disabled}
-                      onClick={() => setDraft({ ...draft, directTools: toggleSet(draft.directTools, t.name) })}
-                      className={`rounded-lg border px-3 py-1.5 text-sm transition disabled:opacity-50 ${draft.directTools.has(t.name) ? "border-green-500 bg-green-950/30 text-green-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}
+                      // Select by unique `slug`, not `name` (same-named tools on
+                      // different servers must not toggle together); drop any legacy
+                      // bare-name entry so re-saving migrates name → slug.
+                      onClick={() => {
+                        const next = new Set(draft.directTools);
+                        next.delete(t.name);
+                        if (next.has(t.slug)) next.delete(t.slug);
+                        else next.add(t.slug);
+                        setDraft({ ...draft, directTools: next });
+                      }}
+                      className={`rounded-lg border px-3 py-1.5 text-sm transition disabled:opacity-50 ${draft.directTools.has(t.slug) || draft.directTools.has(t.name) ? "border-green-500 bg-green-950/30 text-green-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}
                     >
                       {t.name}
                     </button>

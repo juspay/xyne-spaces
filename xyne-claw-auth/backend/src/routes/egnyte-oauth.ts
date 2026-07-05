@@ -26,6 +26,10 @@ import { syncToolsForServer } from "../tool-sync.js";
 import { evictSession } from "../mcp/runner.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-state.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("egnyte-oauth");
 
 function getEgnyteCredentials(): { clientId: string; clientSecret: string } {
   const clientId = process.env["EGNYTE_CLIENT_ID"];
@@ -91,49 +95,32 @@ router.use("/:userId", pinUserIdParam);
 // ── Token endpoint ─────────────────────────────────────────────────────────
 
 /**
- * GET /:userId/oauth/egnyte/token
- * Returns a valid Egnyte access token, refreshing if within 60 s of expiry.
+ * Live Egnyte access-token provider for the shared `/oauth/:provider/token`
+ * route (see lib/oauth-token-endpoint.ts). The token endpoint is per-tenant
+ * (derived from the stored `domain`, which is also surfaced in the response so
+ * the caller can route the MCP URL).
  */
-router.get("/:userId/oauth/egnyte/token", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
-
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: "egnyte" } },
-      include: { mcpServer: true },
-    });
-
-    if (!connection) {
-      res.status(404).json({ success: false, error: "No Egnyte connection found for this user" });
-      return;
-    }
-
-    const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-    const creds = JSON.parse(decrypted) as EgnyteTokens;
-
-    if (Date.now() <= creds.expires - 60_000) {
-      res.json({ success: true, data: { accessToken: creds.accessToken, domain: creds.domain } });
-      return;
-    }
-
+export const egnyteOAuthProvider: OAuthTokenProvider = {
+  serverType: "egnyte",
+  label: "Egnyte",
+  responseData: (creds) => ({ accessToken: creds.accessToken, domain: creds.domain }),
+  async refresh(creds) {
+    const c = creds as unknown as EgnyteTokens;
     const { clientId, clientSecret } = getEgnyteCredentials();
 
-    const refreshRes = await fetch(egnyteTokenUrl(creds.domain), {
+    const refreshRes = await fetch(egnyteTokenUrl(c.domain), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: creds.refreshToken,
+        refresh_token: c.refreshToken,
         client_id: clientId,
         client_secret: clientSecret,
       }),
     });
 
     if (!refreshRes.ok) {
-      const text = await refreshRes.text();
-      console.error(`[egnyte-oauth] Token refresh failed for user ${userId}: ${refreshRes.status} ${text}`);
-      res.status(502).json({ success: false, error: "Egnyte token refresh failed" });
-      return;
+      throw new TokenRefreshError(502, `${refreshRes.status} ${await refreshRes.text()}`);
     }
 
     const tokens = (await refreshRes.json()) as {
@@ -142,26 +129,15 @@ router.get("/:userId/oauth/egnyte/token", async (req: Request<{ userId: string }
       expires_in?: number;
     };
 
-    const newCreds: EgnyteTokens = {
+    return {
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token ?? creds.refreshToken,
-      domain: creds.domain,
+      refreshToken: tokens.refresh_token ?? c.refreshToken,
+      domain: c.domain,
       // Egnyte tokens are typically valid for 3600 s; fall back if omitted.
       expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
     };
-
-    const { ciphertext, iv, authTag } = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
-    await prisma.userMcpConnection.update({
-      where: { id: connection.id },
-      data: { encryptedCreds: ciphertext, iv, authTag },
-    });
-
-    res.json({ success: true, data: { accessToken: tokens.access_token, domain: creds.domain } });
-  } catch (err) {
-    console.error("[egnyte-oauth] token error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+  },
+};
 
 // ── Authorize endpoint ─────────────────────────────────────────────────────
 
@@ -201,7 +177,7 @@ router.post("/:userId/oauth/egnyte/authorize", async (req: Request<{ userId: str
 
     res.json({ success: true, data: { authUrl: authUrl.toString() } });
   } catch (err) {
-    console.error("[egnyte-oauth] authorize error:", err);
+    log.error("[egnyte-oauth] authorize error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -252,7 +228,7 @@ router.post("/:userId/oauth/egnyte/callback", async (req: Request<{ userId: stri
 
     res.json({ success: true, data: { message: "Egnyte account connected successfully" } });
   } catch (err) {
-    console.error("[egnyte-oauth] callback error:", err);
+    log.error("[egnyte-oauth] callback error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -276,7 +252,7 @@ egnyteCallbackRouter.get("/egnyte/callback", async (req: Request, res: Response)
     };
 
     if (oauthError) {
-      console.error(`[egnyte-oauth] OAuth error: ${oauthError}`);
+      log.error(`[egnyte-oauth] OAuth error: ${oauthError}`);
       res.redirect(`${frontendUrl}?egnyte_error=${encodeURIComponent(oauthError)}`);
       return;
     }
@@ -291,7 +267,7 @@ egnyteCallbackRouter.get("/egnyte/callback", async (req: Request, res: Response)
       verified = verifyOAuthState(state);
     } catch (err) {
       const reason = err instanceof OAuthStateError ? err.reason : "malformed";
-      console.error(`[egnyte-oauth] state ${reason}`);
+      log.error(`[egnyte-oauth] state ${reason}`);
       res.redirect(`${frontendUrl}?egnyte_error=invalid_state`);
       return;
     }
@@ -307,7 +283,7 @@ egnyteCallbackRouter.get("/egnyte/callback", async (req: Request, res: Response)
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      console.error(`[egnyte-oauth] User not found: ${userId}`);
+      log.error(`[egnyte-oauth] User not found: ${userId}`);
       res.redirect(`${frontendUrl}?egnyte_error=user_not_found`);
       return;
     }
@@ -318,10 +294,10 @@ egnyteCallbackRouter.get("/egnyte/callback", async (req: Request, res: Response)
       return;
     }
 
-    console.log(`[egnyte-oauth] Stored Egnyte credentials for user ${userId} (domain: ${domain}.egnyte.com)`);
+    log.info(`[egnyte-oauth] Stored Egnyte credentials for user ${userId} (domain: ${domain}.egnyte.com)`);
     res.redirect(`${frontendUrl}?egnyte_connected=true`);
   } catch (err) {
-    console.error("[egnyte-oauth] browser callback error:", err);
+    log.error("[egnyte-oauth] browser callback error:", err);
     res.redirect(`${frontendUrl}?egnyte_error=internal_error`);
   }
 });
@@ -354,7 +330,7 @@ async function exchangeAndStore(
 
   if (!tokenRes.ok) {
     const text = await tokenRes.text();
-    console.error(`[egnyte-oauth] Token exchange failed: ${tokenRes.status} ${text}`);
+    log.error(`[egnyte-oauth] Token exchange failed: ${tokenRes.status} ${text}`);
     return { ok: false, status: 502, code: "token_exchange_failed", error: "Egnyte token exchange failed" };
   }
 
@@ -408,7 +384,7 @@ async function storeEgnyteTokens(
   await evictSession(userId, "egnyte").catch(() => {});
 
   syncToolsForServer(userId, "egnyte", server.name, { accessToken, refreshToken, domain }).catch((err) => {
-    console.error(`[egnyte-oauth] tool sync failed for user ${userId}:`, err);
+    log.error(`[egnyte-oauth] tool sync failed for user ${userId}:`, err);
   });
 }
 

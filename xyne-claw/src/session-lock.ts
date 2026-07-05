@@ -19,6 +19,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { SERVER } from "./config.js";
+import { metric } from "./metrics.js";
 
 const POD_ID = randomUUID();
 export const SESSION_LOCK_TTL_MS = Number(process.env["SESSION_LOCK_TTL_MS"] ?? 15 * 60 * 1000);
@@ -47,10 +48,14 @@ export async function acquireSessionLock(conversationId: string): Promise<boolea
       body: JSON.stringify({ holder: holderToken(conversationId), ttlMs: SESSION_LOCK_TTL_MS }),
       signal: AbortSignal.timeout(LOCK_CALL_TIMEOUT_MS),
     });
-    if (!res.ok) return true; // fail-open
+    if (!res.ok) {
+      metric.count("session_lock_failopen", { reason: `http_${res.status}` });
+      return true; // fail-open
+    }
     const data = (await res.json()) as { acquired?: boolean };
     return data.acquired !== false;
   } catch {
+    metric.count("session_lock_failopen", { reason: "exception" });
     return true; // fail-open — never block a run because the lock service hiccupped
   }
 }

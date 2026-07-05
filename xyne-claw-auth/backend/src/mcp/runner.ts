@@ -8,13 +8,44 @@ import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition } from "./connector-definitions.js";
 import { getSpacesAuthForUser } from "../lib/spaces-db.js";
 import { provisionStdioCommand } from "./provision.js";
+import { prisma } from "../db.js";
+import { decrypt } from "../crypto.js";
+import { CONFIG } from "../config.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("runner");
+
+/**
+ * Resolve the app token for an agent's app user. App users have no Spaces login
+ * session (so getSpacesAuthForUser returns null for them), but the agent row
+ * carries a `spacesAppToken` (GCM-encrypted "ciphertext:iv:authTag"). When the
+ * spaces MCP runs for such a userId we hand it this token + APP MODE so its
+ * tools hit the /api/apps/* routes instead of /api/query.
+ */
+async function resolveAppTokenForAppUser(appUserId: string): Promise<string | null> {
+  try {
+    const agent = await prisma.agent.findFirst({
+      where: { spacesAppUserId: appUserId },
+      select: { spacesAppToken: true },
+    });
+    if (!agent?.spacesAppToken) return null;
+    const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
+    if (!ciphertext || !iv || !authTag) return null;
+    return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
+  } catch (err) {
+    log.warn(
+      `[mcp/runner] app-token resolve failed for app user ${appUserId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
 
 // Resolved once at module load — process.cwd() here is the running backend's
 // dir. Logged so prod tells us if the path lands somewhere without
 // node_modules/tsx (which is the failure mode we just fixed).
 const TSX_ESM_PATH = path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs");
 const TSX_ESM_URL = `file://${TSX_ESM_PATH}`;
-console.log(
+log.info(
   `[mcp/runner] tsx loader path=${TSX_ESM_PATH} exists=${existsSync(TSX_ESM_PATH)} cwd=${process.cwd()}`,
 );
 
@@ -34,6 +65,32 @@ interface McpSession {
 
 const sessions = new Map<string, McpSession>();
 
+// In-flight spawns, keyed like `sessions`. Coalesces concurrent first-time
+// getOrCreateSession calls for the same key onto ONE spawn — without this, two
+// concurrent callers each spawn a child process and the second `sessions.set`
+// overwrites the first, ORPHANING its child (a leaked `node` MCP server). That
+// plus un-cleaned-up failed connects grew claw-auth to ~100 node children /
+// 44 GiB → kubelet eviction (2026-06-14).
+const inflight = new Map<string, Promise<Client>>();
+
+/**
+ * Global per-call timeout for MCP requests (10 minutes). Applied around
+ * `client.callTool()` and `client.listTools()`. Without this, a slow MCP
+ * effectively gets the `@modelcontextprotocol/sdk` default (~60s), which
+ * was biting operators on slow integrations (knowledge-base queries,
+ * batched external APIs).
+ *
+ * Set globally rather than per-integration because (a) we couldn't reproduce
+ * the original "30s" complaint as a real claw-auth-side cutoff, and (b) the
+ * heterogeneous-MCP case ("Slack should fail fast, KB should be lenient")
+ * never came up in practice. If it does, layer a per-integration override
+ * via httpConfigTemplate.timeoutMs at that point.
+ *
+ * Initial `client.connect()` and stdio child startup keep SDK defaults —
+ * different failure mode, separate concern.
+ */
+const MCP_REQUEST_TIMEOUT_MS = 600_000;
+
 // Idle eviction. A cached session pins a child process (stdio) or an HTTP
 // client plus its buffers in claw-auth's heap. Previously sessions were only
 // dropped on token rotation / OAuth events / transport close — never on idle —
@@ -42,7 +99,21 @@ const sessions = new Map<string, McpSession>();
 const SESSION_IDLE_TTL_MS = Number(process.env["MCP_SESSION_IDLE_TTL_MS"] ?? 20 * 60 * 1000);
 const SESSION_SWEEP_INTERVAL_MS = Number(process.env["MCP_SESSION_SWEEP_INTERVAL_MS"] ?? 5 * 60 * 1000);
 
-function sessionKey(userId: string, serverType: string): string {
+/**
+ * Server types whose spawned MCP server runs with credentials bound to a
+ * specific agent (not the user). For these, the cache key MUST include the
+ * agent slug, otherwise the first agent to warm the cache (e.g. xyne-doctor)
+ * leaks its app token to every subsequent call from any other agent owned by
+ * the same user (e.g. harry) — observed cross-attribution bug.
+ *
+ * Anything not in this set keeps the legacy per-user keying.
+ */
+const PER_AGENT_SERVER_TYPES = new Set<string>(["xyne-spaces-app-tools"]);
+
+function sessionKey(userId: string, serverType: string, agentSlug?: string): string {
+  if (PER_AGENT_SERVER_TYPES.has(serverType) && agentSlug) {
+    return `${userId}:${serverType}:${agentSlug}`;
+  }
   return `${userId}:${serverType}`;
 }
 
@@ -59,7 +130,7 @@ function sweepIdleSessions(): void {
     session.transport.close().catch(() => {});
   }
   if (evicted > 0) {
-    console.log(`[mcp/runner] idle sweep: evicted ${evicted} session(s) (${sessions.size} cached)`);
+    log.info(`[mcp/runner] idle sweep: evicted ${evicted} session(s) (${sessions.size} cached)`);
   }
 }
 
@@ -70,8 +141,9 @@ async function getOrCreateSession(
   userId: string,
   serverType: string,
   credentials: Record<string, unknown>,
+  agentSlug?: string,
 ): Promise<Client> {
-  const key = sessionKey(userId, serverType);
+  const key = sessionKey(userId, serverType, agentSlug);
 
   // For xyne-spaces: ALWAYS read fresh creds from the Spaces DB FIRST, before
   // any cache lookup. The cached child process has its token baked into env
@@ -90,7 +162,16 @@ async function getOrCreateSession(
         userId,
       };
     } else {
-      credentials = { ...credentials, userId };
+      // No login session for this userId. If it's an agent's app user, fall back
+      // to the agent's app token in APP MODE so the spaces tools work headlessly
+      // via /api/apps/* (no user session needed).
+      const appToken = await resolveAppTokenForAppUser(userId);
+      if (appToken) {
+        log.info(`[mcp/runner] xyne-spaces app-mode for app user ${userId} (no session, using app token)`);
+        credentials = { ...credentials, token: appToken, authMode: "app", userId };
+      } else {
+        credentials = { ...credentials, userId };
+      }
     }
   }
 
@@ -111,16 +192,39 @@ async function getOrCreateSession(
     // For other server types, creds rarely change between calls — but if they
     // do (e.g. user re-enters Bitbucket token), the same eviction kicks in.
     if (incomingToken && existing.spawnedToken && existing.spawnedToken !== incomingToken) {
-      console.log(`[mcp/runner] evicting stale cached session for ${key} (token rotated)`);
+      log.info(`[mcp/runner] evicting stale cached session for ${key} (token rotated)`);
       sessions.delete(key);
       await existing.transport.close().catch(() => {});
     } else {
-      console.log(`[mcp/runner] reusing cached session for ${key}`);
+      log.info(`[mcp/runner] reusing cached session for ${key}`);
       existing.lastUsedAt = Date.now(); // keep alive — only idle sessions are swept
       return existing.client;
     }
   }
 
+  // Coalesce concurrent first-time spawns for this key onto one in-flight
+  // promise so we never spawn (and then orphan) duplicate child processes.
+  const pending = inflight.get(key);
+  if (pending) {
+    log.info(`[mcp/runner] awaiting in-flight spawn for ${key}`);
+    return pending;
+  }
+
+  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken)
+    .finally(() => inflight.delete(key));
+  inflight.set(key, spawnPromise);
+  return spawnPromise;
+}
+
+/** Spawn + connect a fresh MCP session. Always reaps the child on connect
+ *  failure (close() does SIGTERM→SIGKILL) so a failed/slow connect can't leak
+ *  an orphaned MCP server process. */
+async function spawnSession(
+  key: string,
+  serverType: string,
+  credentials: Record<string, unknown>,
+  incomingToken: string | undefined,
+): Promise<Client> {
   const definition = await resolveConnectorDefinition(serverType);
   if (!definition) {
     throw new Error(`No connector definition for server type: ${serverType}`);
@@ -137,7 +241,7 @@ async function getOrCreateSession(
         headers,
       },
     });
-    console.log(`[mcp/runner] spawning HTTP session for ${key} url=${url}`);
+    log.info(`[mcp/runner] spawning HTTP session for ${key} url=${url}`);
   } else {
     // Local MCP server — spawn child process over stdio
     const { cmd, args, env } = definition.buildStdioCommand(credentials);
@@ -171,7 +275,16 @@ async function getOrCreateSession(
   }
 
   const client = new Client({ name: "xyne-claw-auth", version: "0.1.0" });
-  await client.connect(transport as Parameters<typeof client.connect>[0]);
+  try {
+    await client.connect(transport as Parameters<typeof client.connect>[0]);
+  } catch (err) {
+    // Connect failed (timeout, server crash on startup, bad creds). The child
+    // process is already spawned — reap it (close() does SIGTERM→SIGKILL) so a
+    // failed connect can't leak an orphaned MCP server. This was the dominant
+    // leak: every "Some servers failed to list tools" left a live `node` child.
+    await transport.close().catch(() => {});
+    throw err;
+  }
 
   transport.onclose = () => {
     sessions.delete(key);
@@ -191,9 +304,18 @@ export async function listToolsForUser(
   serverType: string,
   serverName: string,
   credentials: Record<string, unknown>,
+  agentSlug?: string,
 ): Promise<McpServerTools> {
-  const client = await getOrCreateSession(userId, serverType, credentials);
-  const result = await client.listTools();
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug);
+  // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent
+  // internal timer initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC`
+  // (60s, see @modelcontextprotocol/sdk shared/protocol.js:712). Without
+  // `timeout`, the SDK's 60s default wins the race and aborts the request
+  // before our AbortSignal fires. The signal is kept as belt-and-suspenders.
+  const result = await client.listTools(undefined, {
+    timeout: MCP_REQUEST_TIMEOUT_MS,
+    signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
+  });
 
   const tools: McpToolInfo[] = result.tools.map((t) => ({
     name: t.name,
@@ -206,20 +328,109 @@ export async function listToolsForUser(
   return { serverType, serverName, tools, writeTools };
 }
 
+// Servers whose tools' binary output should be forwarded to the user as a file
+// attachment instead of being dropped (the default keeps only text).
+//
+// Primary source is the DB: the SERVER-level `mcpServer.forwardFiles` flag
+// (admin-toggleable, surfaced via the resolved connector definition). It's
+// server-level rather than per-tool because the extractor only ever lifts
+// BINARY content (EmbeddedResource blob / image / audio) — a text/data tool on
+// the same server returns text and is unaffected. The hardcoded set is a
+// bootstrap fallback (covers a server before its row is configured).
+const FILE_FORWARDING_SERVERS = new Set<string>([
+  "q-analytics-mcp",
+]);
+
+// Small TTL cache so a rapid tool-call loop doesn't re-resolve the definition.
+const FORWARD_FLAG_TTL_MS = 60_000;
+const forwardFlagCache = new Map<string, { val: boolean; at: number }>();
+
+async function shouldForwardFiles(serverType: string): Promise<boolean> {
+  // Fast path / bootstrap: code-level allowlist.
+  if (FILE_FORWARDING_SERVERS.has(serverType)) return true;
+  // DB-driven: the server's forwardFiles flag (via the connector definition).
+  const cached = forwardFlagCache.get(serverType);
+  if (cached && Date.now() - cached.at < FORWARD_FLAG_TTL_MS) return cached.val;
+  let val = false;
+  try {
+    const def = await resolveConnectorDefinition(serverType);
+    val = def?.forwardFiles === true;
+  } catch {
+    val = false; // best-effort: on error, don't forward (text-only fallback)
+  }
+  forwardFlagCache.set(serverType, { val, at: Date.now() });
+  return val;
+}
+
+function extForMime(mime: string): string {
+  const m = mime.toLowerCase();
+  if (m.includes("pdf")) return "pdf";
+  if (m.includes("png")) return "png";
+  if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
+  if (m.includes("csv")) return "csv";
+  if (m.includes("spreadsheet") || m.includes("excel") || m.includes("xlsx")) return "xlsx";
+  if (m.includes("json")) return "json";
+  if (m.includes("zip")) return "zip";
+  return "bin";
+}
+
+/**
+ * Pull binary files out of an MCP result's content array:
+ *   • EmbeddedResource ({type:"resource", resource:{blob, mimeType}}) → file
+ *   • ImageContent / AudioContent ({type:"image"|"audio", data, mimeType}) → file
+ * Returns base64 attachments; ignores text items (incl. base64 text fallbacks).
+ */
+function extractAttachments(
+  items: Array<Record<string, unknown>>,
+  tool: string,
+): Array<{ fileName: string; mimeType: string; data: string }> {
+  const out: Array<{ fileName: string; mimeType: string; data: string }> = [];
+  let idx = 0;
+  for (const c of items) {
+    const type = c["type"];
+    if (type === "resource" && c["resource"] && typeof c["resource"] === "object") {
+      const res = c["resource"] as Record<string, unknown>;
+      if (typeof res["blob"] === "string") {
+        const mime = typeof res["mimeType"] === "string" ? res["mimeType"] : "application/octet-stream";
+        out.push({ fileName: `${tool}-${++idx}.${extForMime(mime)}`, mimeType: mime, data: res["blob"] });
+      }
+    } else if ((type === "image" || type === "audio") && typeof c["data"] === "string") {
+      const mime = typeof c["mimeType"] === "string"
+        ? c["mimeType"]
+        : type === "image" ? "image/png" : "audio/mpeg";
+      out.push({ fileName: `${tool}-${++idx}.${extForMime(mime)}`, mimeType: mime, data: c["data"] });
+    }
+  }
+  return out;
+}
+
 export async function callTool(
   userId: string,
   serverType: string,
   credentials: Record<string, unknown>,
   tool: string,
   params: Record<string, unknown>,
+  agentSlug?: string,
 ): Promise<McpCallResult> {
-  const client = await getOrCreateSession(userId, serverType, credentials);
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug);
 
-  const result = await client.callTool({ name: tool, arguments: params });
+  // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
+  // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.
+  const result = await client.callTool({ name: tool, arguments: params }, undefined, {
+    timeout: MCP_REQUEST_TIMEOUT_MS,
+    signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
+  });
 
   if ("content" in result && Array.isArray(result.content)) {
-    const text = result.content
-      .filter((c): c is { type: "text"; text: string } => c.type === "text")
+    const items = result.content as Array<Record<string, unknown>>;
+
+    // File forwarding: for allowlisted tools, lift binary content (EmbeddedResource
+    // blobs / image / audio) into `attachments` so it reaches the user as a real
+    // file instead of being dropped. The default path below keeps only text.
+    const attachments = (await shouldForwardFiles(serverType)) ? extractAttachments(items, tool) : undefined;
+
+    const text = items
+      .filter((c): c is { type: "text"; text: string } => c["type"] === "text" && typeof c["text"] === "string")
       .map((c) => c.text)
       .join("\n");
 
@@ -230,25 +441,40 @@ export async function callTool(
     // MCP `_meta` is a free-form metadata field. Tools surface structured
     // citations there so we can attach them to the invocation record without
     // grepping the markdown body for IDs (Tier 1 citation propagation).
-    const meta = (result as { _meta?: { citations?: unknown } })._meta;
+    // Same channel is used by spaces-search to carry the Vespa YQL debug
+    // payload under `_meta.debug` — strictly metadata, never enters `content`.
+    const meta = (result as { _meta?: { citations?: unknown; debug?: unknown } })._meta;
     const citations = Array.isArray(meta?.citations) ? meta.citations as McpCallResult["citations"] : undefined;
-    return citations && citations.length > 0
-      ? { content: text, citations }
-      : { content: text };
+    const debug = meta?.debug && typeof meta.debug === "object"
+      ? meta.debug as Record<string, unknown>
+      : undefined;
+
+    // When we forwarded file(s), suppress the (often huge, base64-chunked) text
+    // body — the file goes to the user; the model only needs a short confirmation.
+    const content = attachments && attachments.length > 0
+      ? `Generated and forwarded ${attachments.length} file(s) to the user: ${attachments.map((a) => a.fileName).join(", ")}.`
+      : text;
+
+    return {
+      content,
+      ...(citations && citations.length > 0 ? { citations } : {}),
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      ...(debug ? { debug } : {}),
+    };
   }
 
   return { content: JSON.stringify(result) };
 }
 
-export async function evictSession(userId: string, serverType: string): Promise<void> {
-  const key = sessionKey(userId, serverType);
+export async function evictSession(userId: string, serverType: string, agentSlug?: string): Promise<void> {
+  const key = sessionKey(userId, serverType, agentSlug);
   const session = sessions.get(key);
   if (session) {
-    console.log(`[mcp/runner] evicting cached session for ${key}`);
+    log.info(`[mcp/runner] evicting cached session for ${key}`);
     sessions.delete(key);
     await session.transport.close().catch(() => {});
   } else {
-    console.log(`[mcp/runner] evictSession no-op for ${key} (not cached)`);
+    log.info(`[mcp/runner] evictSession no-op for ${key} (not cached)`);
   }
 }
 

@@ -17,6 +17,9 @@ import type { Request, Response } from "express";
 import { gcsService } from "../services/gcsService.js";
 import { redisService } from "../redis.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("sessions-archive");
+
 const SESSION_PREFIX = "claw-sessions";
 
 // ── Distributed per-conversation lock (HA) ───────────────────────────────────
@@ -123,11 +126,11 @@ sessionsArchiveRouter.post("/archive", async (req: Request, res: Response) => {
       uploaded += 1;
     }
 
-    console.log(`[sessions-archive] archived conversationId=${conversationId} files=${uploaded}`);
+    log.info(`[sessions-archive] archived conversationId=${conversationId} files=${uploaded}`);
     res.json({ success: true, uploaded });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[sessions-archive] archive failed conversationId=${conversationId}: ${msg}`);
+    log.error(`[sessions-archive] archive failed conversationId=${conversationId}: ${msg}`);
     res.status(500).json({ success: false, error: msg });
   }
 });
@@ -166,11 +169,11 @@ sessionsArchiveRouter.get("/restore/:conversationId", async (req: Request, res: 
       files.push({ path: relPath, contentBase64: buf.toString("base64") });
     }
 
-    console.log(`[sessions-archive] restored conversationId=${conversationId} files=${files.length}`);
+    log.info(`[sessions-archive] restored conversationId=${conversationId} files=${files.length}`);
     res.json({ success: true, files });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[sessions-archive] restore failed conversationId=${conversationId}: ${msg}`);
+    log.error(`[sessions-archive] restore failed conversationId=${conversationId}: ${msg}`);
     res.status(500).json({ success: false, error: msg });
   }
 });
@@ -196,7 +199,7 @@ sessionsArchiveRouter.post("/lock/:conversationId", async (req: Request<{ conver
     // Fail-open: if Redis is unreachable, don't block runs — report acquired so
     // claw proceeds. The lock is an anti-corruption optimization, not a gate
     // that should take the whole fleet down during a Redis blip.
-    console.warn(`[sessions-archive] lock acquire error for ${conversationId}:`, err instanceof Error ? err.message : err);
+    log.warn(`[sessions-archive] lock acquire error for ${conversationId}:`, err instanceof Error ? err.message : err);
     res.json({ success: true, acquired: true, degraded: true });
   }
 });
@@ -226,7 +229,7 @@ sessionsArchiveRouter.post("/lock/:conversationId/refresh", async (req: Request<
     );
     res.json({ success: true, refreshed: refreshed === 1 });
   } catch (err) {
-    console.warn(`[sessions-archive] lock refresh error for ${conversationId}:`, err instanceof Error ? err.message : err);
+    log.warn(`[sessions-archive] lock refresh error for ${conversationId}:`, err instanceof Error ? err.message : err);
     res.json({ success: true, refreshed: false, degraded: true });
   }
 });
@@ -252,7 +255,7 @@ sessionsArchiveRouter.delete("/lock/:conversationId", async (req: Request<{ conv
     );
     res.json({ success: true, released: released === 1 });
   } catch (err) {
-    console.warn(`[sessions-archive] lock release error for ${conversationId}:`, err instanceof Error ? err.message : err);
+    log.warn(`[sessions-archive] lock release error for ${conversationId}:`, err instanceof Error ? err.message : err);
     res.json({ success: true, released: false, degraded: true });
   }
 });

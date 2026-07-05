@@ -1485,6 +1485,24 @@ export function ControlCenterPage({ userId }: ControlCenterPageProps) {
           <div className="mx-auto flex w-full max-w-350 flex-col gap-6 px-[32px] py-[24px] 2xl:flex-row">
             {/* Left column – 70% */}
             <div className="flex w-full min-w-0 flex-col gap-6 2xl:w-[70%]">
+              {/* Recent Sessions Table */}
+              <div>
+                <div className="mb-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-xyne-fg-tertiary">
+                  Recent Sessions
+                  <span className="normal-case text-xyne-fg-secondary">
+                    {windowSessions.length} sessions
+                  </span>
+                </div>
+                {loading ? (
+                  <Skeleton className="h-75 rounded-xl" />
+                ) : (
+                  <SessionsTable
+                    runs={windowRuns}
+                    sessions={windowSessions}
+                  />
+                )}
+              </div>
+
               {/* Sessions over time */}
               <div>
                 <div className="mb-3 flex items-center justify-between">
@@ -1501,24 +1519,6 @@ export function ControlCenterPage({ userId }: ControlCenterPageProps) {
                   <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
                     <ActivityTimeline sessions={windowSessions} days={days} />
                   </div>
-                )}
-              </div>
-
-              {/* Recent Sessions Table */}
-              <div>
-                <div className="mb-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-xyne-fg-tertiary">
-                  Recent Sessions
-                  <span className="normal-case text-xyne-fg-secondary">
-                    {windowSessions.length} sessions
-                  </span>
-                </div>
-                {loading ? (
-                  <Skeleton className="h-75 rounded-xl" />
-                ) : (
-                  <SessionsTable
-                    runs={windowRuns}
-                    sessions={windowSessions}
-                  />
                 )}
               </div>
 

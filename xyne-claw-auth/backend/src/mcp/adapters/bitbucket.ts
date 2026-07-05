@@ -16,7 +16,7 @@ export const bitbucketAdapter: StdioMcpAdapter = {
     const baseUrl = (credentials["baseUrl"] as string) || "https://bitbucket.example.com";
     return {
       cmd: "npx",
-      args: ["-y", "@nexus2520/bitbucket-mcp-server"],
+      args: ["-y", "@nexus2520/bitbucket-mcp-server@2.2.0"],
       env: {
         BITBUCKET_USERNAME: username,
         BITBUCKET_TOKEN: token,

@@ -9,6 +9,7 @@ export interface AgentToolSelection {
   subagents: string[];
   direct: string[];
   custom: string[];
+  gateway: string[];
 }
 
 interface Props {
@@ -229,9 +230,22 @@ export function ToolPickerDialog({ open, onOpenChange, initial, onSave }: Props)
                           <ToolPill
                             key={t.slug}
                             label={t.name}
-                            selected={selection.direct.includes(t.name)}
+                            // Select by the unique `slug`, NOT `name`. Two
+                            // different MCP servers can expose a tool with the
+                            // same `name` (e.g. `ping`, `search_files`); keying
+                            // selection on `name` made both pills toggle as one.
+                            // `slug` is unique per (source, tool). Mirrors the
+                            // custom-tools section above. Legacy configs that
+                            // stored the bare name still match via the `||`.
+                            selected={selection.direct.includes(t.slug) || selection.direct.includes(t.name)}
                             onToggle={() =>
-                              setSelection((s) => ({ ...s, direct: toggle(s.direct, t.name) }))
+                              setSelection((s) => ({
+                                ...s,
+                                // Drop any legacy bare-name entry for this tool
+                                // while toggling the slug, so re-saving migrates
+                                // the stored id from name → slug cleanly.
+                                direct: toggle(s.direct.filter((d) => d !== t.name), t.slug),
+                              }))
                             }
                           />
                         ))}

@@ -2,6 +2,9 @@ import { Storage, type Bucket, type StorageOptions } from "@google-cloud/storage
 import type { Readable } from "node:stream";
 import { CONFIG } from "../config.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("gcsService");
+
 class GCSService {
   private static instance: GCSService | null = null;
   private storage: Storage;
@@ -16,9 +19,9 @@ class GCSService {
     const isDev = process.env["NODE_ENV"] !== "production";
     if (isDev && CONFIG.fakeGcsHost) {
       opts.apiEndpoint = CONFIG.fakeGcsHost.startsWith("http") ? CONFIG.fakeGcsHost : `http://${CONFIG.fakeGcsHost}`;
-      console.log(`[gcs] using fake-gcs-server at ${opts.apiEndpoint} bucket=${this.bucketName}`);
+      log.info(`[gcs] using fake-gcs-server at ${opts.apiEndpoint} bucket=${this.bucketName}`);
     } else {
-      console.log(`[gcs] using Application Default Credentials bucket=${this.bucketName}`);
+      log.info(`[gcs] using Application Default Credentials bucket=${this.bucketName}`);
     }
 
     this.storage = new Storage(opts);

@@ -14,15 +14,33 @@
  * deleted. Next sweep retries. This trades PVC headroom for zero data loss.
  */
 
-import { mkdir, readdir, readFile, stat, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat, statfs, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { existsSync } from "node:fs";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PATHS, SERVER } from "./config.js";
+import { gcsRestoreSession, gcsUploadSessionFromDisk, gcsSessionUpdatedAt, type SessionDiskFile } from "./gcs.js";
+import { metric } from "./metrics.js";
 
-const SESSION_TTL_DAYS = 7;
-const SESSION_TTL_MS = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+import { createLogger } from "./logger.js";
+const log = createLogger("session-store");
+
+// Local session dirs are a CACHE, not the system of record: every run flushes
+// to GCS before releasing the conversation lock, and ensureFreshSession
+// restores on resume (any pod). The TTL therefore only trades disk footprint
+// against a GCS restore download on cold resume. The old 7-day default made
+// every pod hold a week of every session it touched (ENOSPC, 2026-06-12);
+// a few hours keeps active threads warm without the pile-up.
+const SESSION_TTL_HOURS = Number(process.env["SESSION_TTL_HOURS"] ?? 6);
+const SESSION_TTL_MS = SESSION_TTL_HOURS * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 15 * 60 * 1000; // 15 min — also the disk-pressure check cadence
 const ARCHIVE_TIMEOUT_MS = 120_000; // 2 min — sessions can be tens of MB
+// Disk-pressure backstop: when the sessions volume crosses the high-water
+// mark, evict least-recently-used idle sessions (archive-then-delete, same
+// strictness as the TTL path) until usage drops below the low-water mark —
+// regardless of TTL. Makes ENOSPC structurally unreachable under burst load.
+const DISK_HIGH_WATER_PCT = Number(process.env["SESSION_DISK_HIGH_WATER_PCT"] ?? 80);
+const DISK_LOW_WATER_PCT = Number(process.env["SESSION_DISK_LOW_WATER_PCT"] ?? 70);
 
 function sessionsRoot(): string {
   return path.join(PATHS.dataDir, "sessions");
@@ -31,6 +49,24 @@ function sessionsRoot(): string {
 /** Get the session directory for a conversationId */
 export function sessionDir(conversationId: string): string {
   return path.join(sessionsRoot(), conversationId);
+}
+
+/** Debug artifacts are stored under the session dir so they archive/restore with the session. */
+export function sessionDebugDir(conversationId: string): string {
+  return path.join(sessionDir(conversationId), "debug");
+}
+
+/**
+ * Base dir under which over-large tool results are offloaded (see
+ * tool-output.ts `promoteIfOversized`). Prefer the PERSISTENT session dir: it
+ * survives the per-run ephemeral workspace teardown, is archived to GCS and
+ * restored on resume / cross-pod, and shares the same host mount the sandbox
+ * sees — so the agent can still `read`/`grep` an offloaded file on a later
+ * turn. Falls back to the ephemeral workspace only for conversation-less
+ * (in-memory) runs where there is no session dir.
+ */
+export function toolOutputBaseDir(conversationId: string | undefined, workspaceDir: string): string {
+  return conversationId ? sessionDir(conversationId) : workspaceDir;
 }
 
 /** Check if a persistent session exists for this conversationId */
@@ -45,23 +81,31 @@ export async function ensureSessionDir(conversationId: string): Promise<string> 
   return dir;
 }
 
+/** Ensure the per-session debug artifact directory exists. */
+export async function ensureSessionDebugDir(conversationId: string): Promise<string> {
+  const dir = sessionDebugDir(conversationId);
+  await mkdir(dir, { recursive: true });
+  return dir;
+}
+
 /** Delete a specific session */
 export async function deleteSession(conversationId: string): Promise<void> {
   const dir = sessionDir(conversationId);
   try {
     await rm(dir, { recursive: true, force: true });
-    console.log(`[session-store] Deleted session ${conversationId}`);
+    log.info(`[session-store] Deleted session ${conversationId}`);
   } catch {
     // ignore
   }
 }
 
 /**
- * Walk a session dir and collect every regular file as { relativePath, contents }.
- * Used as the manifest sent to the archive endpoint.
+ * Walk a session dir and list every regular file (path + size, NO contents).
+ * The direct-GCS path streams from these; only the claw-auth fallback ever
+ * materializes file contents in memory.
  */
-async function collectSessionFiles(dir: string): Promise<{ path: string; contentBase64: string }[]> {
-  const out: { path: string; contentBase64: string }[] = [];
+async function listSessionFiles(dir: string): Promise<SessionDiskFile[]> {
+  const out: SessionDiskFile[] = [];
   async function walk(current: string, prefix: string): Promise<void> {
     const entries = await readdir(current, { withFileTypes: true });
     for (const e of entries) {
@@ -70,8 +114,8 @@ async function collectSessionFiles(dir: string): Promise<{ path: string; content
       if (e.isDirectory()) {
         await walk(abs, rel);
       } else if (e.isFile()) {
-        const buf = await readFile(abs);
-        out.push({ path: rel, contentBase64: buf.toString("base64") });
+        const s = await stat(abs);
+        out.push({ path: rel, absPath: abs, sizeBytes: s.size });
       }
     }
   }
@@ -80,27 +124,55 @@ async function collectSessionFiles(dir: string): Promise<{ path: string; content
 }
 
 /**
- * Upload a single session's files to GCS via claw-auth's S2S archive endpoint.
- * Returns true on success. On any failure (claw-auth down, S2S mismatch, GCS
- * error), returns false — the caller MUST leave the local dir intact.
+ * Upload a single session's files to GCS — directly when running on GKE
+ * (Workload Identity), via claw-auth's S2S archive endpoint otherwise.
+ * Returns true on success. On any failure (GCS error, claw-auth down, S2S
+ * mismatch), returns false — the caller MUST leave the local dir intact.
  */
 export async function archiveSessionToGcs(conversationId: string): Promise<boolean> {
-  if (!SERVER.s2sKey) {
-    console.warn(`[session-store] No S2S key configured — refusing to archive ${conversationId}`);
-    return false;
-  }
-
   const dir = sessionDir(conversationId);
   if (!existsSync(dir)) return true; // already gone, treat as archived
 
-  let files: { path: string; contentBase64: string }[];
+  let diskFiles: SessionDiskFile[];
   try {
-    files = await collectSessionFiles(dir);
+    diskFiles = await listSessionFiles(dir);
   } catch (err) {
-    console.warn(`[session-store] Failed to read session ${conversationId} for archive:`, err);
+    metric.count("session_archive", { result: "fail", path: "read", reason: "list_error" });
+    log.warn(`[session-store] Failed to list session ${conversationId} for archive:`, err);
     return false;
   }
-  if (files.length === 0) return true; // empty session dir, nothing to archive
+  if (diskFiles.length === 0) return true; // empty session dir, nothing to archive
+
+  // PRIMARY path: stream to GCS directly (ADC / Workload Identity). The
+  // claw-auth round-trip below is the fallback — during a claw-auth rollout
+  // its S2S endpoint 503s exactly when SIGTERM'd runs need checkpointing
+  // (prod incident 2026-06-09). Returns false when direct GCS is unavailable
+  // (no credentials) or any upload fails.
+  if (await gcsUploadSessionFromDisk(conversationId, diskFiles)) {
+    metric.count("session_archive", { result: "ok", path: "gcs" });
+    log.info(`[session-store] Archived ${conversationId} (${diskFiles.length} files, direct GCS)`);
+    return true;
+  }
+
+  if (!SERVER.s2sKey) {
+    metric.count("session_archive", { result: "fail", path: "none", reason: "no_s2s" });
+    log.warn(`[session-store] No S2S key configured — cannot archive ${conversationId} via claw-auth fallback`);
+    return false;
+  }
+
+  // Fallback manifest is base64-in-memory — this is where a too-large session
+  // dies ("Invalid string length"). Only the fallback pays that cost now; the
+  // streaming primary path above has no per-session memory ceiling.
+  let files: { path: string; contentBase64: string }[];
+  try {
+    files = await Promise.all(
+      diskFiles.map(async (f) => ({ path: f.path, contentBase64: (await readFile(f.absPath)).toString("base64") })),
+    );
+  } catch (err) {
+    metric.count("session_archive", { result: "fail", path: "read", reason: "collect_error" });
+    log.warn(`[session-store] Failed to read session ${conversationId} for archive:`, err);
+    return false;
+  }
 
   const url = `${SERVER.authServiceUrl.replace(/\/$/, "")}/claw/api/v1/internal/sessions/archive`;
   try {
@@ -116,32 +188,50 @@ export async function archiveSessionToGcs(conversationId: string): Promise<boole
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      console.warn(`[session-store] Archive HTTP ${res.status} for ${conversationId}: ${body.slice(0, 200)}`);
+      metric.count("session_archive", { result: "fail", path: "clawauth", reason: `http_${res.status}` });
+      log.warn(`[session-store] Archive HTTP ${res.status} for ${conversationId}: ${body.slice(0, 200)}`);
       return false;
     }
     const data = (await res.json()) as { success?: boolean; uploaded?: number };
     if (!data.success) {
-      console.warn(`[session-store] Archive rejected for ${conversationId}`);
+      metric.count("session_archive", { result: "fail", path: "clawauth", reason: "rejected" });
+      log.warn(`[session-store] Archive rejected for ${conversationId}`);
       return false;
     }
-    console.log(`[session-store] Archived ${conversationId} (${data.uploaded ?? files.length} files)`);
+    metric.count("session_archive", { result: "ok", path: "clawauth" });
+    log.info(`[session-store] Archived ${conversationId} (${data.uploaded ?? files.length} files)`);
     return true;
   } catch (err) {
-    console.warn(`[session-store] Archive call failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
+    metric.count("session_archive", { result: "fail", path: "clawauth", reason: "exception" });
+    log.warn(`[session-store] Archive call failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
     return false;
   }
 }
 
 /**
- * Lazy-restore a session from GCS via claw-auth's S2S restore endpoint.
+ * Lazy-restore a session from GCS — directly when running on GKE, via
+ * claw-auth's S2S restore endpoint otherwise.
  * If files are returned, writes them to the local session dir and returns
  * true. If no archive exists for this conversationId, returns false (the
  * caller treats it as "start fresh"). Throws nothing — restore is best
  * effort; failures degrade to "no session" instead of blocking the run.
  */
 export async function restoreSessionFromArchive(conversationId: string): Promise<boolean> {
-  if (!SERVER.s2sKey) return false;
   if (existsSync(sessionDir(conversationId))) return true; // already local, nothing to do
+
+  // PRIMARY path: read GCS directly (same object layout as claw-auth's
+  // sessions-archive.ts, so the two paths are interchangeable). null means
+  // direct GCS is unavailable/errored → fall back to the claw-auth round-trip;
+  // an empty array means GCS is reachable and no archive exists → start fresh.
+  const direct = await gcsRestoreSession(conversationId);
+  if (direct !== null) {
+    if (direct.length === 0) return false;
+    await writeRestoredFiles(conversationId, direct);
+    log.info(`[session-store] Restored ${conversationId} (${direct.length} files, direct GCS)`);
+    return true;
+  }
+
+  if (!SERVER.s2sKey) return false;
 
   const url = `${SERVER.authServiceUrl.replace(/\/$/, "")}/claw/api/v1/internal/sessions/restore/${encodeURIComponent(conversationId)}`;
   try {
@@ -152,7 +242,7 @@ export async function restoreSessionFromArchive(conversationId: string): Promise
     });
 
     if (!res.ok) {
-      console.warn(`[session-store] Restore HTTP ${res.status} for ${conversationId}`);
+      log.warn(`[session-store] Restore HTTP ${res.status} for ${conversationId}`);
       return false;
     }
     const data = (await res.json()) as { success?: boolean; files?: { path: string; contentBase64: string }[] };
@@ -160,21 +250,141 @@ export async function restoreSessionFromArchive(conversationId: string): Promise
       return false;
     }
 
-    const dir = await ensureSessionDir(conversationId);
-    for (const f of data.files) {
-      // Defense in depth — even though claw-auth validates, double-check here.
-      if (!f.path || f.path.includes("..") || f.path.startsWith("/")) continue;
-      const dest = path.join(dir, f.path);
-      const parent = path.dirname(dest);
-      if (parent !== dir) await mkdir(parent, { recursive: true });
-      await writeFile(dest, Buffer.from(f.contentBase64, "base64"));
-    }
-    console.log(`[session-store] Restored ${conversationId} (${data.files.length} files) from archive`);
+    await writeRestoredFiles(conversationId, data.files);
+    log.info(`[session-store] Restored ${conversationId} (${data.files.length} files) from archive`);
     return true;
   } catch (err) {
-    console.warn(`[session-store] Restore call failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[session-store] Restore call failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
     return false;
   }
+}
+
+async function writeRestoredFiles(conversationId: string, files: { path: string; contentBase64: string }[]): Promise<void> {
+  const dir = await ensureSessionDir(conversationId);
+  for (const f of files) {
+    // Defense in depth — even though claw-auth validates, double-check here.
+    if (!f.path || f.path.includes("..") || f.path.startsWith("/")) continue;
+    const dest = path.join(dir, f.path);
+    const parent = path.dirname(dest);
+    if (parent !== dir) await mkdir(parent, { recursive: true });
+    await writeFile(dest, Buffer.from(f.contentBase64, "base64"));
+  }
+}
+
+// ── Freshness-aware resume (multi-pod / PVC-less HA) ────────────────────────
+//
+// With >1 runtime pod (or local-disk-as-cache after the PVC is dropped), the
+// previous turn of a conversation may have run on ANOTHER pod: this pod's
+// local copy exists but is STALE, and the plain `hasSession()` check would
+// happily resume from it, silently forking the conversation. GCS is the
+// source of truth — the finishing pod always flushes the session to GCS
+// BEFORE releasing the conversation lock (agent.ts finally block), and this
+// check runs AFTER acquiring that lock, so "GCS newer than local" is a
+// reliable staleness signal, not a race.
+//
+// Decisions (logged + metric'd, grep `[session-store] freshness` to verify
+// during chaos testing):
+//   fresh-start      — no local copy, no GCS archive → new conversation
+//   restored-missing — no local copy, GCS archive restored (pod restart /
+//                      other-pod history / post-TTL resume)
+//   local-fresh      — local copy at least as new as GCS → use local
+//   restored-stale   — GCS newer than local → local wiped, GCS restored
+//   local-unverified — GCS unreachable → use local and log loudly
+//   stale-keep       — GCS newer but restore FAILED → keep stale local
+//                      (continuity beats hard failure; the fork is logged)
+
+/** Clock-skew + write-latency margin for the local-vs-GCS comparison. */
+const FRESHNESS_SKEW_MS = Number(process.env["SESSION_FRESHNESS_SKEW_MS"] ?? 2_000);
+
+/** Newest mtime across every regular file in the session dir (0 if none). */
+async function localSessionUpdatedAt(conversationId: string): Promise<number> {
+  let newest = 0;
+  async function walk(current: string): Promise<void> {
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const e of entries) {
+      const p = path.join(current, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (e.isFile()) {
+        const s = await stat(p);
+        if (s.mtimeMs > newest) newest = s.mtimeMs;
+      }
+    }
+  }
+  try {
+    await walk(sessionDir(conversationId));
+  } catch {
+    return 0;
+  }
+  return newest;
+}
+
+export type SessionFreshness =
+  | "fresh-start"
+  | "restored-missing"
+  | "local-fresh"
+  | "restored-stale"
+  | "local-unverified"
+  | "stale-keep";
+
+/**
+ * Make the local session dir current before a resume. Call AFTER acquiring
+ * the conversation lock. Never throws — every failure degrades to the most
+ * conversation-preserving option available.
+ */
+export async function ensureFreshSession(conversationId: string): Promise<SessionFreshness> {
+  const localAt = hasSession(conversationId) ? await localSessionUpdatedAt(conversationId) : 0;
+
+  let decision: SessionFreshness;
+  let gcsAt: number | null = null;
+  if (localAt === 0) {
+    // An EMPTY local dir would short-circuit restoreSessionFromArchive
+    // ("already local") — remove it so the restore actually runs.
+    if (hasSession(conversationId)) {
+      await rm(sessionDir(conversationId), { recursive: true, force: true }).catch(() => {});
+    }
+    const restored = await restoreSessionFromArchive(conversationId).catch(() => false);
+    decision = restored ? "restored-missing" : "fresh-start";
+  } else {
+    gcsAt = await gcsSessionUpdatedAt(conversationId);
+    if (gcsAt === null) {
+      decision = "local-unverified";
+    } else if (gcsAt <= localAt + FRESHNESS_SKEW_MS) {
+      decision = "local-fresh";
+    } else {
+      // Local is stale — the last flush came from another pod. Move it aside
+      // (NOT delete) so a failed restore can roll back to the stale copy:
+      // a slightly-forked conversation beats a vanished one.
+      const dir = sessionDir(conversationId);
+      const backup = `${dir}.stale-${Date.now()}`;
+      try {
+        await rename(dir, backup);
+      } catch {
+        // Can't move it aside — proceed with the stale local rather than risk
+        // a partial mix of old+new files.
+        decision = "stale-keep";
+        metric.count("session_freshness", { decision });
+        log.warn(`[session-store] freshness ${conversationId}: stale local could not be moved aside — keeping stale copy`);
+        return decision;
+      }
+      const restored = await restoreSessionFromArchive(conversationId).catch(() => false);
+      if (restored) {
+        decision = "restored-stale";
+        await rm(backup, { recursive: true, force: true }).catch(() => {});
+      } else {
+        decision = "stale-keep";
+        await rename(backup, dir).catch(() => {});
+        log.error(
+          `[session-store] freshness: GCS is newer but restore FAILED for ${conversationId} — rolled back to stale local (turns after ${new Date(localAt).toISOString()} may be missing)`,
+        );
+      }
+    }
+  }
+
+  log.info(
+    `[session-store] freshness ${conversationId}: local=${localAt ? new Date(localAt).toISOString() : "none"} gcs=${gcsAt !== null ? (gcsAt ? new Date(gcsAt).toISOString() : "none") : "unknown"} → ${decision}`,
+  );
+  metric.count("session_freshness", { decision });
+  return decision;
 }
 
 // ── Per-turn checkpoint to GCS (HA) ──────────────────────────────────────────
@@ -265,11 +475,121 @@ export async function flushSessionNow(conversationId: string): Promise<void> {
 export async function flushAllActiveSessions(budgetMs: number): Promise<void> {
   const ids = [...activeSessions];
   if (ids.length === 0) return;
-  console.log(`[session-store] SIGTERM flush: ${ids.length} active session(s) → GCS`);
+  log.info(`[session-store] SIGTERM flush: ${ids.length} active session(s) → GCS`);
   await Promise.race([
     Promise.allSettled(ids.map((id) => flushSessionNow(id))),
     new Promise((resolve) => setTimeout(resolve, budgetMs)),
   ]);
+}
+
+/**
+ * Branch a session from sourceConversationId to targetConversationId using
+ * PI's native tree branching. Opens the source session, finds the relevant
+ * branch point (last user entry, or the entry before it for edit-user), calls
+ * SessionManager.createBranchedSession, and moves the resulting file into the
+ * target session directory.
+ *
+ * Modes:
+ *   - "lastUser"       — branch AT the last user entry → cloned session ends on
+ *                        that user turn → regenerate replays it as a sibling
+ *                        assistant.
+ *   - "beforeLastUser" — branch at the entry BEFORE the last user → cloned
+ *                        session ends just before the user wrote → edit-user
+ *                        runs a new user message as a sibling user branch.
+ *
+ * Returns true on success. Lazy-restores the source from GCS if archived.
+ */
+export type BranchSessionMode = "lastUser" | "beforeLastUser";
+
+export async function branchSession(
+  sourceConversationId: string,
+  targetConversationId: string,
+  mode: BranchSessionMode = "lastUser",
+): Promise<boolean> {
+  const sourceDir = sessionDir(sourceConversationId);
+  const targetDir = sessionDir(targetConversationId);
+  log.info(
+    `[session-store] Branch requested ${sourceConversationId} → ${targetConversationId} mode=${mode} sourceExists=${existsSync(sourceDir)} targetExists=${existsSync(targetDir)}`,
+  );
+
+  // Lazy-restore source if archived to GCS.
+  if (!existsSync(sourceDir)) {
+    log.info(`[session-store] Branch source missing locally; attempting archive restore for ${sourceConversationId}`);
+    await restoreSessionFromArchive(sourceConversationId).catch(() => false);
+  }
+  if (!existsSync(sourceDir)) {
+    log.warn(`[session-store] Cannot branch: source session not found ${sourceConversationId}`);
+    return false;
+  }
+
+  let files: string[];
+  try {
+    files = await readdir(sourceDir);
+  } catch (err) {
+    log.warn(`[session-store] Branch readdir failed for ${sourceConversationId}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+  const jsonlFile = files.find((f) => f.endsWith(".jsonl"));
+  if (!jsonlFile) {
+    log.warn(`[session-store] Cannot branch: no .jsonl file in ${sourceConversationId}`);
+    return false;
+  }
+
+  const sourcePath = path.join(sourceDir, jsonlFile);
+
+  try {
+    const sm = SessionManager.open(sourcePath);
+    const entries = sm.getEntries();
+    log.info(
+      `[session-store] Source session entries loaded ${sourceConversationId} count=${entries.length} leaf=${sm.getLeafId() ?? "null"}`,
+    );
+
+    let lastUserMsgId: string | null = null;
+    let beforeLastUserEntryId: string | null = null;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i] as { type: string; id: string; message?: { role?: string } };
+      if (entry.type === "message" && entry.message?.role === "user") {
+        lastUserMsgId = entry.id;
+        beforeLastUserEntryId = i > 0 ? (entries[i - 1] as { id: string }).id : null;
+        break;
+      }
+    }
+
+    const branchFromId = mode === "beforeLastUser" ? beforeLastUserEntryId : lastUserMsgId;
+    if (!branchFromId) {
+      log.warn(
+        `[session-store] Cannot branch: no user message found ${sourceConversationId} mode=${mode} lastUser=${lastUserMsgId} beforeLastUser=${beforeLastUserEntryId}`,
+      );
+      return false;
+    }
+
+    const branchedPath = sm.createBranchedSession(branchFromId);
+    if (!branchedPath) {
+      log.warn(`[session-store] createBranchedSession returned undefined for ${sourceConversationId}`);
+      return false;
+    }
+
+    // PI defers the write to disk if the branch contains no assistant
+    // messages — force a rewrite so the file actually exists on disk before
+    // we try to rename it into the target dir.
+    if (!existsSync(branchedPath)) {
+      log.info(`[session-store] Branched path missing on disk; forcing rewrite for ${sourceConversationId}`);
+      (sm as unknown as { _rewriteFile(): void })._rewriteFile();
+    }
+
+    await mkdir(targetDir, { recursive: true });
+    const targetPath = path.join(targetDir, path.basename(branchedPath));
+    await rename(branchedPath, targetPath);
+    log.info(
+      `[session-store] Branched session complete ${sourceConversationId} → ${targetConversationId} at ${targetPath}`,
+    );
+    return true;
+  } catch (err) {
+    log.error(
+      `[session-store] Branch failed ${sourceConversationId} → ${targetConversationId}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
+    );
+    return false;
+  }
 }
 
 /** Clean up sessions older than TTL — archive to GCS first, only delete on success. */
@@ -286,6 +606,12 @@ export async function cleanupSessions(): Promise<void> {
     for (const entry of entries) {
       const dir = path.join(root, entry);
       try {
+        // Leftover ensureFreshSession rollback backups are not sessions —
+        // never archive them under their bogus ".stale-" name; just delete.
+        if (entry.includes(".stale-")) {
+          await rm(dir, { recursive: true, force: true });
+          continue;
+        }
         const stats = await stat(dir);
         if (now - stats.mtimeMs <= SESSION_TTL_MS) continue;
 
@@ -303,11 +629,83 @@ export async function cleanupSessions(): Promise<void> {
     }
 
     if (cleaned > 0 || archiveFailed > 0) {
-      console.log(`[session-store] Sweep: archived+deleted=${cleaned}, archive-failed=${archiveFailed} (left on disk for retry)`);
+      log.info(`[session-store] Sweep: archived+deleted=${cleaned}, archive-failed=${archiveFailed} (left on disk for retry)`);
     }
   } catch {
     // root dir may not exist yet
   }
+
+  await evictForDiskPressure().catch(() => {});
+}
+
+/** Used fraction (0–100) of the filesystem holding the sessions root, or null. */
+async function sessionsVolumeUsedPct(): Promise<number | null> {
+  try {
+    const s = await statfs(sessionsRoot());
+    if (s.blocks <= 0) return null;
+    return ((s.blocks - s.bfree) / s.blocks) * 100;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Disk-pressure backstop: when the sessions volume is above the high-water
+ * mark, archive+evict idle sessions LRU-first (TTL ignored) until below the
+ * low-water mark. Sessions with a run in flight and entries whose archive
+ * fails are skipped — same zero-data-loss strictness as the TTL sweep.
+ */
+async function evictForDiskPressure(): Promise<void> {
+  let usedPct = await sessionsVolumeUsedPct();
+  if (usedPct === null || usedPct < DISK_HIGH_WATER_PCT) return;
+  log.warn(`[session-store] Disk pressure: sessions volume at ${usedPct.toFixed(1)}% (high-water ${DISK_HIGH_WATER_PCT}%) — evicting LRU sessions`);
+  metric.count("session_disk_pressure", { stage: "triggered" });
+
+  const root = sessionsRoot();
+  let entries: { name: string; mtimeMs: number }[];
+  try {
+    const names = await readdir(root);
+    entries = (
+      await Promise.all(
+        names.map(async (name) => {
+          try {
+            return { name, mtimeMs: (await stat(path.join(root, name))).mtimeMs };
+          } catch {
+            return null;
+          }
+        }),
+      )
+    ).filter((e): e is { name: string; mtimeMs: number } => e !== null);
+  } catch {
+    return;
+  }
+  entries.sort((a, b) => a.mtimeMs - b.mtimeMs); // oldest first
+
+  let evicted = 0;
+  let skipped = 0;
+  for (const entry of entries) {
+    usedPct = await sessionsVolumeUsedPct();
+    if (usedPct === null || usedPct <= DISK_LOW_WATER_PCT) break;
+    if (activeSessions.has(entry.name)) {
+      skipped++;
+      continue; // never evict under a running session
+    }
+    const dir = path.join(root, entry.name);
+    if (entry.name.includes(".stale-")) {
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+      continue;
+    }
+    if (await archiveSessionToGcs(entry.name)) {
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+      evicted++;
+    } else {
+      skipped++; // archive failed — keep on disk, never drop unarchived data
+    }
+  }
+  metric.count("session_disk_pressure", { stage: "done" });
+  log.warn(
+    `[session-store] Disk pressure: evicted=${evicted}, skipped=${skipped}, volume now ${usedPct === null ? "unknown" : `${usedPct.toFixed(1)}%`}`,
+  );
 }
 
 /** Start periodic cleanup */

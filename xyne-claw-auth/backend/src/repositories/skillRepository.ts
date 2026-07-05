@@ -28,13 +28,29 @@ export interface SkillFileInput {
   contentType?: string | undefined;
 }
 
+/**
+ * Field-scoped owner projection. We deliberately select ONLY identity
+ * fields (id/name/email) rather than `include: { owner: true }`: the User
+ * row carries private Digital-Twin columns and routes/skills.ts forwards
+ * rows to clients without a sanitizer, so a broad include would leak them.
+ */
+const OWNER_SELECT = { select: { id: true, name: true, email: true } } as const;
+
 export const skillRepository = {
-  listVisible: (userId?: string) =>
+  /**
+   * Same admin-bypass rule as agentRepository.listVisible. Admins see ALL
+   * skills, including private ones owned by other users — necessary for
+   * operators auditing skill libraries workspace-wide.
+   */
+  listVisible: (opts: { userId?: string; isAdmin?: boolean } = {}) =>
     prisma.skill.findMany({
-      where: userId
-        ? { OR: [{ scope: "global" }, { ownerUserId: userId }] }
-        : { scope: "global" },
+      where: opts.isAdmin
+        ? {}
+        : opts.userId
+          ? { OR: [{ scope: "global" }, { ownerUserId: opts.userId }] }
+          : { scope: "global" },
       orderBy: { name: "asc" },
+      include: { owner: OWNER_SELECT },
     }),
 
   findAll: (source?: string) =>
@@ -44,7 +60,7 @@ export const skillRepository = {
     }),
 
   findBySlug: (slug: string) =>
-    prisma.skill.findUnique({ where: { slug } }),
+    prisma.skill.findUnique({ where: { slug }, include: { owner: OWNER_SELECT } }),
 
   findById: (id: string) =>
     prisma.skill.findUnique({ where: { id } }),

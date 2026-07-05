@@ -3,6 +3,9 @@ import { getRequesterId } from "../middleware/agent-acl.js";
 import { agentRunRepository, agentRepository } from "../repositories/index.js";
 import { windowFromDays } from "../lib/time-window.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("dashboard");
+
 const router = Router();
 
 /**
@@ -97,7 +100,7 @@ router.get("/", async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    console.error("[dashboard] user dashboard error:", err);
+    log.error("[dashboard] user dashboard error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

@@ -264,7 +264,7 @@ export function SubagentToolsTab({
           </span>
         </div>
         <p className="text-[12px] text-xyne-fg-tertiary">
-          Pick what this specialist can call directly. Write tools and MCP
+          Pick what this subagent can call directly. Write tools and MCP
           server tools land in <span className="font-mono">tools.direct</span>;
           system tools land in <span className="font-mono">tools.custom</span>.
         </p>

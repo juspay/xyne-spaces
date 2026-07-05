@@ -1,16 +1,19 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   BrainIcon,
   GearSixIcon,
   PowerIcon,
+  ChartLineUpIcon,
 } from "@phosphor-icons/react";
 import { useDigitalTwin } from "../../hooks/useDigitalTwin";
 import { DigitalTwinBanner } from "./DigitalTwinBanner";
 import { DigitalTwinMemoriesTab } from "./DigitalTwinMemoriesTab";
+import { DigitalTwinMetricsPageV3 } from "./DigitalTwinMetricsPageV3";
 import { ReviewPanel } from "./ReviewPanel";
 import { EnableModal } from "./EnableModal";
 import { DisableModal } from "./DisableModal";
 import { SettingsModal } from "./SettingsModal";
+import { MemoryApprovalCard } from "./MemoryApprovalCard";
 import { UploadModal } from "./UploadModal";
 import { Tooltip } from "../ui/Tooltip";
 
@@ -21,12 +24,39 @@ interface DigitalTwinPageV3Props {
 export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
   const { status, loading, error, reload, backfillStalled } = useDigitalTwin(userId);
 
+  const [showMetrics,       setShowMetrics]       = useState(false);
   const [showEnable,        setShowEnable]        = useState(false);
   const [enableMode,        setEnableMode]        = useState<"enable" | "backfill">("enable");
   const [showDisable,       setShowDisable]       = useState(false);
   const [showSettings,      setShowSettings]      = useState(false);
   const [showUpload,        setShowUpload]        = useState(false);
   const [reviewRefreshKey,  setReviewRefreshKey]  = useState(0);
+
+  /* ── Resizable split between Memories (left) and Controls (right) ── */
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [leftPct, setLeftPct] = useState(60);
+
+  const startDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => {
+      const el = gridRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      // Clamp so neither column collapses past a usable width.
+      setLeftPct(Math.min(78, Math.max(30, pct)));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
 
   const reloadAll = useCallback(() => {
     reload();
@@ -54,8 +84,8 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
 
-      {/* ── Page header ── */}
-      <div className="shrink-0 border-b border-xyne-border bg-xyne-surface">
+      {/* ── Page header — hidden when metrics view is active ── */}
+      <div className={`shrink-0 border-b border-xyne-border bg-xyne-surface ${showMetrics ? "hidden" : ""}`}>
         <div className="flex items-center gap-[12px] px-[24px] py-[14px]">
           <BrainIcon size={22} className="text-xyne-brand" />
           <div>
@@ -65,86 +95,131 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
             </p>
           </div>
 
-          {/* Settings + Disable — shown when Twin is on */}
-          {status?.enabled && (
-            <div className="ml-auto flex items-center gap-[8px]">
-              <Tooltip content="Configure Twin behavior — response suffix, preferences" side="bottom">
-                <button
-                  onClick={() => setShowSettings(true)}
-                  className="flex h-[32px] w-[32px] items-center justify-center rounded-lg border border-xyne-border bg-xyne-surface text-xyne-fg-secondary shadow-sm transition hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
-                  aria-label="Settings"
-                >
-                  <GearSixIcon size={15} weight="duotone" />
-                </button>
-              </Tooltip>
+          <div className="ml-auto flex items-center gap-[8px]">
+            {/* Metrics button — always visible */}
+            <Tooltip content="View approval metrics" side="bottom">
               <button
-                onClick={() => setShowDisable(true)}
-                className="flex items-center gap-[6px] rounded-lg border border-xyne-error-fg/30 bg-xyne-error-fg/8 px-[10px] py-[6px] text-xyne-error-fg transition hover:bg-xyne-error-fg/15"
-                aria-label="Disable Twin"
+                onClick={() => setShowMetrics(true)}
+                className={`flex items-center gap-[6px] rounded-lg border px-[10px] py-[6px] text-[12px] font-medium transition ${
+                  showMetrics
+                    ? "border-xyne-brand bg-xyne-brand/8 text-xyne-brand"
+                    : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary shadow-sm hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                }`}
+                aria-label="Approval Metrics"
               >
-                <PowerIcon size={14} weight="duotone" />
-                <span className="text-[12px] font-medium">Disable</span>
+                <ChartLineUpIcon size={14} />
+                <span>Metrics</span>
               </button>
-            </div>
-          )}
-        </div>
-      </div>
+            </Tooltip>
 
-      {/* ── Body — always two-column: memories left (60%), controls right (40%) ── */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="flex min-h-0 flex-1 justify-center overflow-hidden">
-          <div className="grid min-h-0 w-full max-w-[1280px] grid-cols-[3fr_2fr] overflow-hidden">
-
-            {/* LEFT (60%): Memories — always present */}
-            <div className="min-h-0 overflow-hidden border-r border-xyne-border">
-              <DigitalTwinMemoriesTab userId={userId} onCandidateApproved={reloadAll} />
-            </div>
-
-            {/* RIGHT (40%): Controls */}
-            <div className="flex flex-col gap-[16px] overflow-y-auto p-[20px]">
-
-              {/* Card 1: Status banner */}
-              <DigitalTwinBanner {...bannerProps} />
-
-              {error && <ErrorBanner message={error} onRetry={reloadAll} />}
-
-              {/* ── Section 2: Review ── */}
-              {status?.enabled && (
-                <ReviewPanel
-                  userId={userId}
-                  refreshKey={reviewRefreshKey}
-                  onApproved={reloadAll}
-                  onBackfill={handleBackfill}
-                  onUpload={() => setShowUpload(true)}
-                />
-              )}
-
-              {/* Disabled: muted review placeholder */}
-              {!status?.enabled && (
-                <div className="rounded-xl border border-xyne-border bg-xyne-surface-sunken p-[14px]">
-                  <p className="text-[12px] font-semibold text-xyne-fg-muted">Review</p>
-                  <p className="mt-[3px] text-[11px] leading-relaxed text-xyne-fg-tertiary">
-                    Enable your Twin to start reviewing memories.
-                  </p>
-                </div>
-              )}
-
-              {/* Response suffix */}
-              {status?.enabled && status.responseSuffix && (
-                <div className="rounded-xl border border-xyne-border bg-xyne-surface-sunken p-[14px]">
-                  <p className="mb-[6px] text-[10px] font-semibold uppercase tracking-[0.08em] text-xyne-fg-muted">
-                    Response suffix
-                  </p>
-                  <p className="text-[12px] italic leading-relaxed text-xyne-fg-secondary">
-                    &ldquo;{status.responseSuffix}&rdquo;
-                  </p>
-                </div>
-              )}
-
-            </div>
+            {/* Settings + Disable — shown when Twin is on */}
+            {status?.enabled && (
+              <>
+                <Tooltip content="Configure Twin behavior — response suffix, preferences" side="bottom">
+                  <button
+                    onClick={() => setShowSettings(true)}
+                    className="flex h-[32px] w-[32px] items-center justify-center rounded-lg border border-xyne-border bg-xyne-surface text-xyne-fg-secondary shadow-sm transition hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                    aria-label="Settings"
+                  >
+                    <GearSixIcon size={15} weight="duotone" />
+                  </button>
+                </Tooltip>
+                <button
+                  onClick={() => setShowDisable(true)}
+                  className="flex items-center gap-[6px] rounded-lg border border-xyne-error-fg/30 bg-xyne-error-fg/8 px-[10px] py-[6px] text-xyne-error-fg transition hover:bg-xyne-error-fg/15"
+                  aria-label="Disable Twin"
+                >
+                  <PowerIcon size={14} weight="duotone" />
+                  <span className="text-[12px] font-medium">Disable</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
+
+      {/* ── Body ── */}
+      {!showMetrics ? (
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-h-0 flex-1 justify-center overflow-hidden">
+            <div
+              ref={gridRef}
+              className="grid min-h-0 w-full max-w-[1280px] grid-rows-[minmax(0,1fr)] overflow-hidden"
+              style={{ gridTemplateColumns: `${leftPct}% 7px minmax(0, 1fr)` }}
+            >
+
+              {/* LEFT: Memories */}
+              <div className="min-h-0 overflow-hidden">
+                <DigitalTwinMemoriesTab userId={userId} onCandidateApproved={reloadAll} />
+              </div>
+
+              {/* DIVIDER — drag to resize */}
+              <div
+                onMouseDown={startDrag}
+                role="separator"
+                aria-orientation="vertical"
+                title="Drag to resize"
+                className="group relative cursor-col-resize select-none"
+              >
+                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-xyne-border transition-colors group-hover:bg-xyne-brand" />
+                {/* Wider invisible hit area is the whole 7px column */}
+              </div>
+
+              {/* RIGHT: Controls */}
+              <div className="flex min-h-0 flex-col gap-[16px] overflow-y-auto p-[20px] [&>*]:shrink-0">
+
+                <DigitalTwinBanner {...bannerProps} />
+
+                {error && <ErrorBanner message={error} onRetry={reloadAll} />}
+
+                {status?.enabled && (
+                  <ReviewPanel
+                    userId={userId}
+                    refreshKey={reviewRefreshKey}
+                    onApproved={reloadAll}
+                    onBackfill={handleBackfill}
+                    onUpload={() => setShowUpload(true)}
+                  />
+                )}
+
+                {status?.enabled && (
+                  <MemoryApprovalCard
+                    userId={userId}
+                    approvalMode={status.memoryApprovalMode ?? "manual"}
+                    minScore={status.memoryAutoApproveMinScore ?? 0.9}
+                    onSaved={reloadAll}
+                  />
+                )}
+
+                {!status?.enabled && (
+                  <div className="rounded-xl border border-xyne-border bg-xyne-surface-sunken p-[14px]">
+                    <p className="text-[12px] font-semibold text-xyne-fg-muted">Review</p>
+                    <p className="mt-[3px] text-[11px] leading-relaxed text-xyne-fg-tertiary">
+                      Enable your Twin to start reviewing memories.
+                    </p>
+                  </div>
+                )}
+
+                {status?.enabled && status.responseSuffix && (
+                  <div className="rounded-xl border border-xyne-border bg-xyne-surface-sunken p-[14px]">
+                    <p className="mb-[6px] text-[10px] font-semibold uppercase tracking-[0.08em] text-xyne-fg-muted">
+                      Response suffix
+                    </p>
+                    <p className="text-[12px] italic leading-relaxed text-xyne-fg-secondary">
+                      &ldquo;{status.responseSuffix}&rdquo;
+                    </p>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <DigitalTwinMetricsPageV3 userId={userId} onBack={() => setShowMetrics(false)} />
+        </div>
+      )}
 
       {/* ── Modals ── */}
       <EnableModal

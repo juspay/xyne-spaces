@@ -27,6 +27,10 @@ import {
   type UserMemoryRecord,
   type UserMemorySubsystem,
 } from "xyne-claw-shared";
+import { fetchLiteLLMWithRetry } from "./litellm-retry.js";
+
+import { createLogger } from "./logger.js";
+const log = createLogger("user-memory-curator");
 
 const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
 const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
@@ -167,18 +171,18 @@ export async function distillUserMemory(
 ): Promise<UserMemoryCandidatePayload[]> {
   if (records.length === 0) return [];
   if (!LITELLM_API_KEY) {
-    console.warn("[user-memory-curator] LITELLM_API_KEY not set — skipping");
+    log.warn("[user-memory-curator] LITELLM_API_KEY not set — skipping");
     return [];
   }
 
   const batch = records.slice(0, MAX_RECORDS_PER_BATCH);
   if (records.length > MAX_RECORDS_PER_BATCH) {
-    console.warn(`[user-memory-curator] batch truncated ${records.length} → ${MAX_RECORDS_PER_BATCH} records userId=${userId}`);
+    log.warn(`[user-memory-curator] batch truncated ${records.length} → ${MAX_RECORDS_PER_BATCH} records userId=${userId}`);
   }
 
   let raw: string | undefined;
   try {
-    const res = await fetch(`${LITELLM_URL}/v1/chat/completions`, {
+    const res = await fetchLiteLLMWithRetry(`${LITELLM_URL}/v1/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${LITELLM_API_KEY}`,
@@ -194,12 +198,11 @@ export async function distillUserMemory(
         tool_choice: { type: "function", function: { name: EMIT_CANDIDATES_TOOL.function.name } },
         temperature: 0.2,
       }),
-      signal: AbortSignal.timeout(CURATOR_TIMEOUT_MS),
-    });
+    }, { timeoutMs: CURATOR_TIMEOUT_MS, label: `user-memory-curator:${userId}` });
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      console.warn(`[user-memory-curator] LiteLLM returned ${res.status} userId=${userId}: ${body.slice(0, 200)}`);
+      log.warn(`[user-memory-curator] LiteLLM returned ${res.status} userId=${userId}: ${body.slice(0, 200)}`);
       return [];
     }
 
@@ -209,11 +212,11 @@ export async function distillUserMemory(
 
     raw = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!raw) {
-      console.warn(`[user-memory-curator] no tool_call in response userId=${userId}`);
+      log.warn(`[user-memory-curator] no tool_call in response userId=${userId}`);
       return [];
     }
   } catch (err) {
-    console.warn(`[user-memory-curator] LLM call failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[user-memory-curator] LLM call failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 
@@ -221,12 +224,12 @@ export async function distillUserMemory(
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    console.warn(`[user-memory-curator] bad JSON from LLM userId=${userId}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[user-memory-curator] bad JSON from LLM userId=${userId}: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 
   if (!Array.isArray(parsed.candidates)) {
-    console.warn(`[user-memory-curator] malformed candidates field userId=${userId}`);
+    log.warn(`[user-memory-curator] malformed candidates field userId=${userId}`);
     return [];
   }
 

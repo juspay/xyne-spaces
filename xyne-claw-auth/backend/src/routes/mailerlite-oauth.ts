@@ -42,6 +42,11 @@ import { CONFIG } from "../config.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { evictSession } from "../mcp/runner.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
+import { signOAuthState, verifyOAuthState } from "../lib/oauth-state.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("mailerlite-oauth");
 
 const MAILERLITE_REGISTER_URL = "https://mcp.mailerlite.com/register";
 const MAILERLITE_AUTH_URL = "https://mcp.mailerlite.com/authorize";
@@ -61,12 +66,17 @@ interface StatePayload {
   redirectUri: string;
 }
 
+// HMAC-signed state — prevents an attacker from forging state={userId:victim}
+// to bind their provider account to a victim (or capture victim tokens).
 function encodeState(payload: StatePayload): string {
-  return Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const { userId, ...extra } = payload;
+  return signOAuthState(userId, extra);
 }
 
 function decodeState(state: string): StatePayload {
-  return JSON.parse(Buffer.from(state, "base64url").toString()) as StatePayload;
+  // Throws OAuthStateError on tampered/expired state; callers try/catch this.
+  const verified = verifyOAuthState(state);
+  return { userId: verified.userId, ...(verified.extra ?? {}) } as StatePayload;
 }
 
 /** Generates a PKCE code verifier (43 random url-safe bytes). */
@@ -159,47 +169,28 @@ router.use("/:userId", pinUserIdParam);
 // ── Token endpoint ─────────────────────────────────────────────────────────
 
 /**
- * GET /:userId/oauth/mailerlite/token
- * Returns a valid MailerLite access token, refreshing if within 60 s of expiry.
+ * Live MailerLite access-token provider for the shared `/oauth/:provider/token`
+ * route (see lib/oauth-token-endpoint.ts). Public client — clientId in the
+ * refresh body, no secret.
  */
-router.get("/:userId/oauth/mailerlite/token", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
+export const mailerliteOAuthProvider: OAuthTokenProvider = {
+  serverType: "mailerlite",
+  label: "MailerLite",
+  async refresh(creds) {
+    const c = creds as unknown as MailerLiteTokens;
 
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: "mailerlite" } },
-      include: { mcpServer: true },
-    });
-
-    if (!connection) {
-      res.status(404).json({ success: false, error: "MailerLite not connected" });
-      return;
-    }
-
-    const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-    const creds = JSON.parse(decrypted) as MailerLiteTokens;
-
-    if (Date.now() <= creds.expires - 60_000) {
-      res.json({ success: true, data: { accessToken: creds.accessToken } });
-      return;
-    }
-
-    // Refresh — MailerLite is a public client; send client_id in body, no secret.
     const refreshRes = await fetch(MAILERLITE_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        client_id: creds.clientId,
-        refresh_token: creds.refreshToken,
+        client_id: c.clientId,
+        refresh_token: c.refreshToken,
       }),
     });
 
     if (!refreshRes.ok) {
-      const text = await refreshRes.text();
-      console.error(`[mailerlite-oauth] Token refresh failed: ${refreshRes.status} ${text}`);
-      res.status(500).json({ success: false, error: "Failed to refresh MailerLite token" });
-      return;
+      throw new TokenRefreshError(502, `${refreshRes.status} ${await refreshRes.text()}`);
     }
 
     const tokens = (await refreshRes.json()) as {
@@ -208,25 +199,14 @@ router.get("/:userId/oauth/mailerlite/token", async (req: Request<{ userId: stri
       expires_in: number;
     };
 
-    const newCreds: MailerLiteTokens = {
-      clientId: creds.clientId,
+    return {
+      clientId: c.clientId,
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token ?? creds.refreshToken,
+      refreshToken: tokens.refresh_token ?? c.refreshToken,
       expires: Date.now() + tokens.expires_in * 1000,
     };
-
-    const { ciphertext, iv, authTag } = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
-    await prisma.userMcpConnection.update({
-      where: { id: connection.id },
-      data: { encryptedCreds: ciphertext, iv, authTag },
-    });
-
-    res.json({ success: true, data: { accessToken: tokens.access_token } });
-  } catch (err) {
-    console.error("[mailerlite-oauth] token error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+  },
+};
 
 // ── Authorize endpoint ─────────────────────────────────────────────────────
 
@@ -263,7 +243,7 @@ router.post("/:userId/oauth/mailerlite/authorize", async (req: Request<{ userId:
 
     res.json({ success: true, data: { authUrl: authUrl.toString() } });
   } catch (err) {
-    console.error("[mailerlite-oauth] authorize error:", err);
+    log.error("[mailerlite-oauth] authorize error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -313,7 +293,7 @@ router.post("/:userId/oauth/mailerlite/callback", async (req: Request<{ userId: 
 
     if (!tokenRes.ok) {
       const text = await tokenRes.text();
-      console.error(`[mailerlite-oauth] Token exchange failed: ${tokenRes.status} ${text}`);
+      log.error(`[mailerlite-oauth] Token exchange failed: ${tokenRes.status} ${text}`);
       res.status(500).json({ success: false, error: "Failed to exchange authorization code" });
       return;
     }
@@ -326,10 +306,10 @@ router.post("/:userId/oauth/mailerlite/callback", async (req: Request<{ userId: 
 
     await storeMailerLiteTokens(userId, clientId, tokens.access_token, tokens.refresh_token, tokens.expires_in);
 
-    console.log(`[mailerlite-oauth] Stored MailerLite credentials for user ${userId}`);
+    log.info(`[mailerlite-oauth] Stored MailerLite credentials for user ${userId}`);
     res.json({ success: true, data: { message: "MailerLite account connected successfully" } });
   } catch (err) {
-    console.error("[mailerlite-oauth] callback error:", err);
+    log.error("[mailerlite-oauth] callback error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -353,7 +333,7 @@ mailerliteCallbackRouter.get("/mailerlite/callback", async (req: Request, res: R
     };
 
     if (oauthError) {
-      console.error(`[mailerlite-oauth] OAuth error: ${oauthError}`);
+      log.error(`[mailerlite-oauth] OAuth error: ${oauthError}`);
       res.redirect(`${frontendUrl}?mailerlite_error=${encodeURIComponent(oauthError)}`);
       return;
     }
@@ -387,7 +367,7 @@ mailerliteCallbackRouter.get("/mailerlite/callback", async (req: Request, res: R
 
     if (!tokenRes.ok) {
       const text = await tokenRes.text();
-      console.error(`[mailerlite-oauth] Token exchange failed: ${tokenRes.status} ${text}`);
+      log.error(`[mailerlite-oauth] Token exchange failed: ${tokenRes.status} ${text}`);
       res.redirect(`${frontendUrl}?mailerlite_error=token_exchange_failed`);
       return;
     }
@@ -400,10 +380,10 @@ mailerliteCallbackRouter.get("/mailerlite/callback", async (req: Request, res: R
 
     await storeMailerLiteTokens(userId, clientId, tokens.access_token, tokens.refresh_token, tokens.expires_in);
 
-    console.log(`[mailerlite-oauth] Browser callback: MailerLite connected for user ${userId}`);
+    log.info(`[mailerlite-oauth] Browser callback: MailerLite connected for user ${userId}`);
     res.redirect(`${frontendUrl}?mailerlite_connected=true`);
   } catch (err) {
-    console.error("[mailerlite-oauth] Browser callback error:", err);
+    log.error("[mailerlite-oauth] Browser callback error:", err);
     res.redirect(`${frontendUrl}?mailerlite_error=internal_error`);
   }
 });
@@ -443,7 +423,7 @@ async function storeMailerLiteTokens(
   await evictSession(userId, "mailerlite").catch(() => {});
 
   syncToolsForServer(userId, "mailerlite", server.name, { accessToken, refreshToken, clientId }).catch((err) => {
-    console.error(`[mailerlite-oauth] Tool sync failed for user ${userId}:`, err);
+    log.error(`[mailerlite-oauth] Tool sync failed for user ${userId}:`, err);
   });
 }
 

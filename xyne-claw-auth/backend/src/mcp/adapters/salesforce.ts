@@ -29,7 +29,7 @@ export const salesforceAdapter: StdioMcpAdapter = {
 
     return {
       cmd: "npx",
-      args: ["-y", "@acquis-consulting/acquis-salesforce-mcp"],
+      args: ["-y", "@acquis-consulting/acquis-salesforce-mcp@1.0.5"],
       env: {
         SALESFORCE_CONNECTION_TYPE: "username_password",
         SALESFORCE_USERNAME: username,

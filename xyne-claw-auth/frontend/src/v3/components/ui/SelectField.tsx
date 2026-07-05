@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Combobox } from "@base-ui-components/react/combobox";
 import { ChevronDown, Check } from "lucide-react";
 import { cn } from "../../../lib/utils";
@@ -37,6 +38,13 @@ export function SelectField({
   const fieldId = id ?? `select-${label?.toLowerCase().replace(/\s+/g, "-") ?? "field"}`;
   const hasError = Boolean(error);
 
+  const selected = value ? options.find((o) => o.value === value) ?? null : null;
+  const selectedLabel = selected?.label ?? "";
+  const [inputValue, setInputValue] = useState(selectedLabel);
+  useEffect(() => {
+    setInputValue(selectedLabel);
+  }, [selectedLabel]);
+
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       {label && (
@@ -47,9 +55,12 @@ export function SelectField({
 
       <Combobox.Root
         items={options}
-        value={value ? options.find((o) => o.value === value) ?? null : null}
+        value={selected}
         defaultValue={defaultValue ? options.find((o) => o.value === defaultValue) ?? null : undefined}
         onValueChange={(item) => onValueChange?.(item ? (item as SelectOption).value : null)}
+        inputValue={inputValue}
+        onInputValueChange={(v) => setInputValue(v)}
+        onOpenChange={(open) => setInputValue(open ? "" : selectedLabel)}
         disabled={disabled}
       >
         <div

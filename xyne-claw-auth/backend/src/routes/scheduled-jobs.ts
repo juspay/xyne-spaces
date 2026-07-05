@@ -15,7 +15,10 @@ import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
 import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
-import { getSpacesAuthForUser } from "../lib/spaces-db.js";
+import { requireStrictS2S } from "../middleware/require-auth.js";
+import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
+import { buildSpacesMentionLookups } from "../lib/mention-lookups.js";
 import {
   enqueueDelayedJob,
   enqueueCronJob,
@@ -29,6 +32,9 @@ import {
 // though the .d.ts file claims the export exists. Default-import the
 // module object and pull the static method off it.
 import cronParser from "cron-parser";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("scheduled-jobs");
 const { parseExpression } = cronParser;
 
 const router = Router();
@@ -183,9 +189,23 @@ router.post("/", async (req: Request, res: Response) => {
       const live = await getSpacesAuthForUser(userId, "scheduled-job");
       if (live?.workspaceId) {
         workspaceId = live.workspaceId;
-        console.log(`[scheduled-jobs] resolved workspaceId=${workspaceId} from Spaces DB for userId=${userId}`);
+        log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from Spaces session for userId=${userId}`);
+      }
+    }
+
+    // Final fallback: read workspaceId straight off the user row (no live
+    // session required). getSpacesAuthForUser only resolves for currently
+    // logged-in users, so reminders typed hours earlier / S2S / automation
+    // triggers previously fell through to a NULL workspaceId — and Spaces then
+    // silently rejected result delivery when the job fired ("missing
+    // workspaceId on row"). The user row always carries the workspaceId.
+    if (!workspaceId) {
+      const wsId = await getWorkspaceIdForUser(userId, "scheduled-job");
+      if (wsId) {
+        workspaceId = wsId;
+        log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from users row for userId=${userId}`);
       } else {
-        console.warn(`[scheduled-jobs] no workspaceId from body/cookie/SpacesDB for userId=${userId} — row will be created with NULL and result delivery will fail`);
+        log.warn(`[scheduled-jobs] no workspaceId from body/cookie/session/usersRow for userId=${userId} — row will be created with NULL and result delivery will fail`);
       }
     }
 
@@ -263,7 +283,7 @@ router.post("/", async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`[scheduled-jobs] Created ${type} job ${row.id} for agent ${agentSlug}`);
+    log.info(`[scheduled-jobs] Created ${type} job ${row.id} for agent ${agentSlug}`);
 
     res.json({
       success: true,
@@ -277,7 +297,7 @@ router.post("/", async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    console.error("[scheduled-jobs] Create error:", err);
+    log.error("[scheduled-jobs] Create error:", err);
     res.status(500).json({ success: false, error: "Failed to create scheduled job" });
   }
 });
@@ -307,7 +327,7 @@ router.get("/", async (req: Request, res: Response) => {
       })),
     });
   } catch (err) {
-    console.error("[scheduled-jobs] List error:", err);
+    log.error("[scheduled-jobs] List error:", err);
     res.status(500).json({ success: false, error: "Failed to list scheduled jobs" });
   }
 });
@@ -344,7 +364,7 @@ router.get("/runs", async (req: Request, res: Response) => {
 
     res.json({ success: true, data: runs });
   } catch (err) {
-    console.error("[scheduled-jobs] List runs error:", err);
+    log.error("[scheduled-jobs] List runs error:", err);
     res.status(500).json({ success: false, error: "Failed to list runs" });
   }
 });
@@ -368,7 +388,7 @@ router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
       data: { ...row, delayMs: row.delayMs != null ? Number(row.delayMs) : null },
     });
   } catch (err) {
-    console.error("[scheduled-jobs] Get error:", err);
+    log.error("[scheduled-jobs] Get error:", err);
     res.status(500).json({ success: false, error: "Failed to get scheduled job" });
   }
 });
@@ -507,9 +527,9 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
             data: { bullSchedulerId: schedulerId },
           });
         }
-        console.log(`[scheduled-jobs] Rescheduled ${updated.id} → '${updated.cronExpression}'`);
+        log.info(`[scheduled-jobs] Rescheduled ${updated.id} → '${updated.cronExpression}'`);
       } catch (err) {
-        console.error(`[scheduled-jobs] Failed to re-bind scheduler ${schedulerId}:`, err);
+        log.error(`[scheduled-jobs] Failed to re-bind scheduler ${schedulerId}:`, err);
         // DB is already updated — surface the Redis failure so the caller
         // knows the binding may be stale and can retry.
         res.status(500).json({
@@ -526,7 +546,7 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
     if (onceRescheduled) {
       if (updated.bullJobId) {
         await cancelJob(updated.bullJobId).catch((err) => {
-          console.warn(`[scheduled-jobs] Failed to cancel old bullJob ${updated.bullJobId} for ${updated.id}:`, err instanceof Error ? err.message : err);
+          log.warn(`[scheduled-jobs] Failed to cancel old bullJob ${updated.bullJobId} for ${updated.id}:`, err instanceof Error ? err.message : err);
         });
       }
       const jobData: ScheduledJobData = {
@@ -544,9 +564,9 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
           where: { id: updated.id },
           data: { bullJobId: newBullJobId },
         });
-        console.log(`[scheduled-jobs] Rescheduled once-job ${updated.id} → fires at ${updated.nextRunAt?.toISOString()} (delay ${newDelayMsForRescheduledOnce}ms)`);
+        log.info(`[scheduled-jobs] Rescheduled once-job ${updated.id} → fires at ${updated.nextRunAt?.toISOString()} (delay ${newDelayMsForRescheduledOnce}ms)`);
       } catch (err) {
-        console.error(`[scheduled-jobs] Failed to re-enqueue once-job ${updated.id}:`, err);
+        log.error(`[scheduled-jobs] Failed to re-enqueue once-job ${updated.id}:`, err);
         // DB is ahead of Redis. The next fire won't happen until the user
         // retries the reschedule. Surface this so the caller knows.
         res.status(500).json({
@@ -562,7 +582,7 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
       data: { ...updated, delayMs: updated.delayMs != null ? Number(updated.delayMs) : null },
     });
   } catch (err) {
-    console.error("[scheduled-jobs] Patch error:", err);
+    log.error("[scheduled-jobs] Patch error:", err);
     res.status(500).json({ success: false, error: "Failed to update scheduled job" });
   }
 });
@@ -601,17 +621,21 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
       data: { status: "cancelled" },
     });
 
-    console.log(`[scheduled-jobs] Cancelled job ${row.id}`);
+    log.info(`[scheduled-jobs] Cancelled job ${row.id}`);
     res.json({ success: true });
   } catch (err) {
-    console.error("[scheduled-jobs] Cancel error:", err);
+    log.error("[scheduled-jobs] Cancel error:", err);
     res.status(500).json({ success: false, error: "Failed to cancel scheduled job" });
   }
 });
 
 // ── POST /:id/result — callback from xyne-claw after scheduled run ──
 
-router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) => {
+// S2S-only: this is the run-result callback from xyne-claw. The router is
+// mounted under requireAuth (which accepts a browser cookie) for job
+// management, so without this an ordinary logged-in user could POST a forged
+// result that posts a message as the agent into the job owner's channel.
+router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
   const payload = req.body as {
     sessionId?: string;
@@ -623,9 +647,11 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
     toolInvocations?: unknown;
     tokenUsage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
+    provider?: string;
+    model?: string;
   };
 
-  console.log(`[scheduled-jobs/result] Job ${id}: status=${payload.status}`);
+  log.info(`[scheduled-jobs/result] Job ${id}: status=${payload.status}`);
   res.json({ success: true });
 
   // Finalize AgentRun + save assistant ChatMessage (fire-and-forget)
@@ -635,6 +661,8 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
       status,
       result: payload.result ?? null,
       error: payload.error ?? null,
+      ...(payload.provider !== undefined ? { provider: payload.provider } : {}),
+      ...(payload.model !== undefined ? { model: payload.model } : {}),
       ...(payload.toolsUsed ? { toolsUsed: payload.toolsUsed } : {}),
       ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
       ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
@@ -691,26 +719,57 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
       });
     }
   } catch (err) {
-    console.error(`[scheduled-jobs/result] Failed to persist run for job ${id}:`, err);
+    log.error(`[scheduled-jobs/result] Failed to persist run for job ${id}:`, err);
   }
 
   if (payload.status !== "completed" || !payload.result) return;
 
   const row = await prisma.scheduledJob.findUnique({ where: { id } });
   if (!row) {
-    console.warn(`[scheduled-jobs/result] Job ${id} not found`);
+    log.warn(`[scheduled-jobs/result] Job ${id} not found`);
     return;
   }
 
   // Resolve agent's Spaces app token
   const agent = await prisma.agent.findFirst({ where: { slug: row.agentSlug } });
   if (!agent?.spacesAppToken || !agent.spacesAppId) {
-    console.error(`[scheduled-jobs/result] Agent ${row.agentSlug} has no Spaces app credentials`);
+    log.error(`[scheduled-jobs/result] Agent ${row.agentSlug} has no Spaces app credentials`);
     return;
   }
 
   const appToken = decryptStoredField(agent.spacesAppToken);
   const spacesAppUserId = agent.spacesAppUserId ?? "";
+
+  // Deterministic tagging for scheduled results. This path used to post
+  // payload.result raw, so agent-emitted mentions (`@bowmitha.c`,
+  // `@Name[userId]`, even full HTML-span output) never became real,
+  // notifying Spaces mentions — only the webhook result path ran the
+  // mention pipeline. Resolve plain `@Name` / `@email` / `@dotted.handle`
+  // shorthand against Spaces using the job creator's session (the scheduled
+  // run acts on their behalf), then expand to the HTML span format. Both
+  // steps degrade gracefully: no session → bracketed forms still expand;
+  // lookup misses → text left as-is.
+  let resultText = payload.result;
+  try {
+    const senderAuth = row.userId
+      ? await getSpacesAuthForUser(row.userId, "scheduled-job").catch(() => null)
+      : null;
+    if (senderAuth?.token) {
+      resultText = await resolveUnboundMentions(
+        resultText,
+        buildSpacesMentionLookups({
+          token: senderAuth.token,
+          sessionId: senderAuth.sessionId,
+          workspaceId: senderAuth.workspaceId,
+        }),
+      );
+    } else {
+      log.warn(`[scheduled-jobs/result] Job ${id}: no active Spaces session for creator ${row.userId ?? "(none)"} — skipping @name resolution (bracketed mentions still expand)`);
+    }
+  } catch (err) {
+    log.warn(`[scheduled-jobs/result] Job ${id}: mention resolution failed, posting unresolved text:`, err instanceof Error ? err.message : err);
+  }
+  resultText = expandSpacesMentions(resultText);
 
   try {
     // Spaces' app API requires `workspaceId` on postMessage and openDm. We
@@ -718,7 +777,7 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
     // created before that column existed have null workspaceId — surface a
     // clear error so the user knows to recreate the job.
     if (!row.workspaceId) {
-      console.error(`[scheduled-jobs/result] Job ${id}: missing workspaceId on row — Spaces will reject delivery. Recreate the job.`);
+      log.error(`[scheduled-jobs/result] Job ${id}: missing workspaceId on row — Spaces will reject delivery. Recreate the job.`);
       return;
     }
 
@@ -738,21 +797,21 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
         form.append("channelId", postChannelId);
         form.append("userId", spacesAppUserId);
         form.append("workspaceId", row.workspaceId);
-        form.append("markdownText", payload.result);
+        form.append("markdownText", resultText);
         form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
 
         await spacesAppFetchMultipart("/files/filesUpload", form, appToken);
       } else {
         await spacesAppFetch("/chat/postMessage", {
           channelId: postChannelId,
-          markdownText: payload.result,
+          markdownText: resultText,
           userId: spacesAppUserId,
           workspaceId: row.workspaceId,
           metadata: { contentFormat: "markdown" },
         }, appToken);
       }
 
-      console.log(`[scheduled-jobs/result] Posted result to channel ${postChannelId}${row.targetChannelId ? " (override)" : ""}`);
+      log.info(`[scheduled-jobs/result] Posted result to channel ${postChannelId}${row.targetChannelId ? " (override)" : ""}`);
     } else if (row.channelId && row.conversationId) {
       // Reply in the original thread (default "thread" mode)
       if (payload.attachments?.length) {
@@ -766,7 +825,7 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
         form.append("conversationId", row.conversationId);
         form.append("userId", spacesAppUserId);
         form.append("workspaceId", row.workspaceId);
-        form.append("markdownText", payload.result);
+        form.append("markdownText", resultText);
         form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
 
         await spacesAppFetchMultipart("/files/filesUpload", form, appToken);
@@ -774,14 +833,14 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
         await spacesAppFetch("/chat/postMessage", {
           channelId: row.channelId,
           conversationId: row.conversationId,
-          markdownText: payload.result,
+          markdownText: resultText,
           userId: spacesAppUserId,
           workspaceId: row.workspaceId,
           metadata: { contentFormat: "markdown" },
         }, appToken);
       }
 
-      console.log(`[scheduled-jobs/result] Posted result to thread ${row.conversationId}`);
+      log.info(`[scheduled-jobs/result] Posted result to thread ${row.conversationId}`);
     } else if (row.userId) {
       // DM the user
       const dmResult = (await spacesAppFetch("/channel/openDm", {
@@ -791,16 +850,16 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
 
       await spacesAppFetch("/chat/postMessage", {
         channelId: dmResult.channelId,
-        markdownText: payload.result,
+        markdownText: resultText,
         userId: spacesAppUserId,
         workspaceId: row.workspaceId,
         metadata: { contentFormat: "markdown" },
       }, appToken);
 
-      console.log(`[scheduled-jobs/result] DM'd result to user ${row.userId}`);
+      log.info(`[scheduled-jobs/result] DM'd result to user ${row.userId}`);
     }
   } catch (err) {
-    console.error(`[scheduled-jobs/result] Failed to deliver result for job ${id}:`, err);
+    log.error(`[scheduled-jobs/result] Failed to deliver result for job ${id}:`, err);
   }
 });
 

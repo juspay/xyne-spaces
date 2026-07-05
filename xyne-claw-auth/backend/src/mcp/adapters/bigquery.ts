@@ -82,7 +82,7 @@ export const bigqueryAdapter: StdioMcpAdapter = {
     writeFileSync(keyPath, keyJson, { mode: 0o600 });
     TEMP_KEY_DIRS.add(tmpDir);
 
-    const args = ["-y", "@ergut/mcp-bigquery-server", "--project-id", projectId, "--key-file", keyPath];
+    const args = ["-y", "@ergut/mcp-bigquery-server@1.0.4", "--project-id", projectId, "--key-file", keyPath];
     if (location) args.push("--location", location);
 
     return { cmd: "npx", args, env: {} };

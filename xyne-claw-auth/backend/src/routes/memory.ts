@@ -22,14 +22,31 @@ import type { MemoryRecord, EntityGraphEdge } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
 import { createLogger, createTraceId } from "../logger.js";
-import { requireAuth } from "../middleware/require-auth.js";
-import { curateApprovedTranscript, readSessionTranscript, backfillBatches } from "../services/memoryCronService.js";
+import { requireAuth, requireUserAuth } from "../middleware/require-auth.js";
+import { isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
+import { curateApprovedTranscript, readSessionTranscript, backfillBatches, type SessionTranscript } from "../services/memoryCronService.js";
 
 const logger = createLogger("memory-review", createTraceId());
 
 // All memory backend operations go through the provider abstraction.
 // Default is HindsightProvider, swappable via the MEMORY_PROVIDER env var.
 const memory = getMemoryProvider();
+
+const DIGITAL_TWIN_SLUG = "digital-twin";
+const DIGITAL_TWIN_BANK = bankIdForAgent(DIGITAL_TWIN_SLUG);
+
+/**
+ * Twin detection MUST key on the bank id, not the raw slug. bankIdForAgent
+ * sanitizes (lowercase, collapse non-alphanumerics, truncate 44), so slugs
+ * like "digital_twin" / "Digital-Twin" / "digital--twin" all resolve to the
+ * twin's bank `xyne-digital-twin`. A raw `=== "digital-twin"` check would let
+ * such an agent reach the shared twin bank WITHOUT the per-user `user:<id>`
+ * scoping — exposing every user's personal memories. Anything that lands in
+ * the twin bank gets twin treatment.
+ */
+function isDigitalTwinAgent(agentSlug: string | undefined): boolean {
+  return !!agentSlug && bankIdForAgent(agentSlug) === DIGITAL_TWIN_BANK;
+}
 
 export const memoryRouter = Router();
 
@@ -89,7 +106,7 @@ async function checkTwinAccess(
   mode: "read" | "delete" | "bank-op",
   opts: { userTag?: string; hindsightMemoryId?: string } = {},
 ): Promise<boolean> {
-  if (agentSlug !== "digital-twin") return true;
+  if (!isDigitalTwinAgent(agentSlug)) return true;
 
   const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
   if (!requesterId) {
@@ -151,7 +168,7 @@ async function checkTwinAccess(
  * GET /memory/reviews
  * List pending memory reviews. Admins only.
  */
-memoryRouter.get("/reviews", requireAuth, async (req, res) => {
+memoryRouter.get("/reviews", requireUserAuth, requireClawAdmin, async (req, res) => {
   try {
     const { agentSlug, status = "pending", limit = "20", offset = "0" } = req.query as Record<string, string>;
 
@@ -180,7 +197,7 @@ memoryRouter.get("/reviews", requireAuth, async (req, res) => {
  * not emit Spaces per-memory buttons; batch-level approval lives on a
  * different endpoint (POST /memory/batches/:id/approve).
  */
-memoryRouter.patch("/review/:id", requireAuth, async (req, res) => {
+memoryRouter.patch("/review/:id", requireUserAuth, requireClawAdmin, async (req, res) => {
   const { action } = req.body as { action?: string };
   await handleReviewAction((req.params["id"] as string) ?? "", action ?? "", res);
 });
@@ -320,7 +337,7 @@ const RANGE_DAYS: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
  * last-7d recall-hit counts from MemoryRecallHit. Scope is inferred from
  * the memory's tags (`shared` or `user:{uid}`).
  */
-memoryRouter.get("/banks/:agentSlug/memories", requireAuth, async (req, res) => {
+memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
     const { scope, search, subsystem, userTag, limit = "50", offset = "0" } = req.query as Record<string, string>;
@@ -334,7 +351,7 @@ memoryRouter.get("/banks/:agentSlug/memories", requireAuth, async (req, res) => 
     // requesting userId. Other agent banks (assistant, doctor, etc.) are
     // shared/agent-scoped so they don't need this gate.
     const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
-    if (agentSlug === "digital-twin") {
+    if (isDigitalTwinAgent(agentSlug)) {
       const expected = requesterId ? `user:${requesterId}` : "";
       if (!userTag || userTag !== expected) {
         res.status(403).json({
@@ -357,7 +374,7 @@ memoryRouter.get("/banks/:agentSlug/memories", requireAuth, async (req, res) => 
     // gains exact-match support), but we fetch wider than `take` so the
     // post-filter has room to find the user's actual records even if
     // Hindsight returned a mixed bag.
-    if (agentSlug === "digital-twin" && userTag) {
+    if (isDigitalTwinAgent(agentSlug) && userTag) {
       const WIDE_FETCH = 500;
       const widePage = await memory.listMemories(bankId, {
         limit: WIDE_FETCH,
@@ -424,6 +441,18 @@ memoryRouter.get("/banks/:agentSlug/memories", requireAuth, async (req, res) => 
     }
 
     // ── Non-digital-twin banks: legacy path (provider-filtered) ────────
+    // Shared agent banks can still hold user-scoped memories (tag `user:<id>`),
+    // so a caller must not read another user's personal records by passing an
+    // arbitrary `userTag` (or scope=user). Only an admin may query across
+    // users; everyone else is pinned to their own user-tag.
+    const isAdmin = requesterId ? await isClawAdmin(requesterId) : false;
+    if (!isAdmin) {
+      const ownTag = requesterId ? `user:${requesterId}` : "";
+      if (userTag && userTag.startsWith("user:") && userTag !== ownTag) {
+        res.status(403).json({ success: false, error: "userTag must match the requesting user" });
+        return;
+      }
+    }
     const listFilter: { limit: number; offset: number; search?: string; tags?: string[] } = {
       limit: take,
       offset: skip,
@@ -446,7 +475,14 @@ memoryRouter.get("/banks/:agentSlug/memories", requireAuth, async (req, res) => 
 
     let items = page.memories;
     if (scope === "user") {
-      items = items.filter((m) => (m.tags ?? []).some((t) => t.startsWith("user:")));
+      // Non-admins only ever see their own user-scoped records here (the
+      // userTag guard above pins them); admins may see all user-tagged ones.
+      const ownTag = requesterId ? `user:${requesterId}` : "";
+      items = items.filter((m) => {
+        const tags = m.tags ?? [];
+        if (!tags.some((t) => t.startsWith("user:"))) return false;
+        return isAdmin || tags.includes(ownTag);
+      });
     }
 
     const ids = items.map((m) => m.id);
@@ -505,7 +541,7 @@ memoryRouter.get("/banks/:agentSlug/memories", requireAuth, async (req, res) => 
  * total recalls in range, and the top-N hottest memories (ranked by
  * recall hit count) for the Hot Memories panel.
  */
-memoryRouter.get("/banks/:agentSlug/stats", requireAuth, async (req, res) => {
+memoryRouter.get("/banks/:agentSlug/stats", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
     const range = (req.query["range"] as string) || "7d";
@@ -516,7 +552,7 @@ memoryRouter.get("/banks/:agentSlug/stats", requireAuth, async (req, res) => {
 
     // Per-user privacy gate for the digital-twin bank — see /memories route.
     const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
-    if (agentSlug === "digital-twin") {
+    if (isDigitalTwinAgent(agentSlug)) {
       const expected = requesterId ? `user:${requesterId}` : "";
       if (!userTag || userTag !== expected) {
         res.status(403).json({ success: false, error: "Digital Twin stats are per-user; userTag must match requester" });
@@ -536,7 +572,7 @@ memoryRouter.get("/banks/:agentSlug/stats", requireAuth, async (req, res) => {
     // - recallsInRange  = count of MemoryRecallHit rows whose
     //                     hindsightMemoryId belongs to this user's memories
     // - hot             = top-N recalled memories LIMITED to this user's ids
-    if (agentSlug === "digital-twin" && userTag && requesterId) {
+    if (isDigitalTwinAgent(agentSlug) && userTag && requesterId) {
       const WIDE_FETCH = 500;
       const userMemoriesPage = await memory.listMemories(bankId, {
         limit: WIDE_FETCH,
@@ -709,7 +745,7 @@ memoryRouter.get("/banks/:agentSlug/stats", requireAuth, async (req, res) => {
  * SAME agent_runs sessions" — i.e., investigating one area touched the
  * other.
  */
-memoryRouter.get("/banks/:agentSlug/subsystem-graph", requireAuth, async (req, res) => {
+memoryRouter.get("/banks/:agentSlug/subsystem-graph", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
     const userTag = (req.query["userTag"] as string | undefined)?.trim();
@@ -717,7 +753,7 @@ memoryRouter.get("/banks/:agentSlug/subsystem-graph", requireAuth, async (req, r
 
     // Per-user privacy gate for the digital-twin bank — see /memories route.
     const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
-    if (agentSlug === "digital-twin") {
+    if (isDigitalTwinAgent(agentSlug)) {
       const expected = requesterId ? `user:${requesterId}` : "";
       if (!userTag || userTag !== expected) {
         res.status(403).json({ success: false, error: "Digital Twin graph is per-user; userTag must match requester" });
@@ -730,7 +766,7 @@ memoryRouter.get("/banks/:agentSlug/subsystem-graph", requireAuth, async (req, r
 
     const pageRaw = await memory.listMemories(bankId, listFilter).catch(() => ({ memories: [] }));
     // Defense-in-depth: drop anything not tagged for the requester.
-    const page = (agentSlug === "digital-twin" && userTag)
+    const page = (isDigitalTwinAgent(agentSlug) && userTag)
       ? { memories: pageRaw.memories.filter((m) => (m.tags ?? []).includes(userTag)) }
       : pageRaw;
 
@@ -823,7 +859,7 @@ memoryRouter.get("/banks/:agentSlug/subsystem-graph", requireAuth, async (req, r
  * Returns { nodes: [], edges: [] } when the provider doesn't support
  * entity graphs OR the bank is empty.
  */
-memoryRouter.get("/banks/:agentSlug/graph", requireAuth, async (req, res) => {
+memoryRouter.get("/banks/:agentSlug/graph", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
     const userTag = (req.query["userTag"] as string | undefined)?.trim();
@@ -851,7 +887,7 @@ memoryRouter.get("/banks/:agentSlug/graph", requireAuth, async (req, res) => {
     //   - edges/weight: cooccurrence within THIS user's memories
     //
     // Entities the user never mentions are dropped entirely.
-    if (agentSlug === "digital-twin" && userTag) {
+    if (isDigitalTwinAgent(agentSlug) && userTag) {
       const requesterId = userTag.startsWith("user:") ? userTag.slice("user:".length) : "";
 
       const [bankGraph, userMemoriesPage] = await Promise.all([
@@ -953,7 +989,7 @@ memoryRouter.get("/banks/:agentSlug/graph", requireAuth, async (req, res) => {
  * Does NOT log to MemoryRecallHit (manual test queries shouldn't inflate
  * the hot-memory rankings).
  */
-memoryRouter.post("/banks/:agentSlug/recall", requireAuth, async (req, res) => {
+memoryRouter.post("/banks/:agentSlug/recall", requireUserAuth, async (req, res) => {
   const agentSlug = req.params["agentSlug"] as string;
   try {
     const { query, scope, userId, budget = "low" } = req.body as {
@@ -980,7 +1016,7 @@ memoryRouter.post("/banks/:agentSlug/recall", requireAuth, async (req, res) => {
     // ID, regardless of what the request body asks for.
     const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
     const tags: string[] = [];
-    if (agentSlug === "digital-twin") {
+    if (isDigitalTwinAgent(agentSlug)) {
       if (!requesterId) {
         res.status(401).json({ success: false, error: "x-user-id header required for Digital Twin recall" });
         return;
@@ -993,6 +1029,14 @@ memoryRouter.post("/banks/:agentSlug/recall", requireAuth, async (req, res) => {
         res.status(400).json({ success: false, error: "userId is required for user-scope recall" });
         return;
       }
+      // Pin to the requester's own user-scope unless they're an admin —
+      // otherwise any logged-in user could probe another user's personal
+      // memories stored in a shared bank by passing userId=<victim>.
+      const isAdmin = requesterId ? await isClawAdmin(requesterId) : false;
+      if (!isAdmin && userId !== requesterId) {
+        res.status(403).json({ success: false, error: "userId must match the requesting user" });
+        return;
+      }
       tags.push(`user:${userId}`);
     }
 
@@ -1003,7 +1047,7 @@ memoryRouter.post("/banks/:agentSlug/recall", requireAuth, async (req, res) => {
     // AUTHORITATIVE filter for digital-twin: Hindsight's tag-filter on
     // the recall path is not trusted (same incident as /memories — see
     // route comment). Drop anything the requester's user-tag isn't on.
-    const results = (agentSlug === "digital-twin" && requesterId)
+    const results = (isDigitalTwinAgent(agentSlug) && requesterId)
       ? rawResults.filter((m) => (m.tags ?? []).includes(`user:${requesterId}`))
       : rawResults;
     logger.info("[memory] recall result", {
@@ -1035,7 +1079,7 @@ memoryRouter.post("/banks/:agentSlug/recall", requireAuth, async (req, res) => {
  * PendingMemoryReview rows as rejected so they don't show in the All list.
  * MemoryRecallHit rows are retained for historical hit-count fidelity.
  */
-memoryRouter.delete("/banks/:agentSlug/memories/:hindsightMemoryId", requireAuth, async (req, res) => {
+memoryRouter.delete("/banks/:agentSlug/memories/:hindsightMemoryId", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
     const hindsightMemoryId = req.params["hindsightMemoryId"] as string;
@@ -1067,6 +1111,87 @@ memoryRouter.delete("/banks/:agentSlug/memories/:hindsightMemoryId", requireAuth
   }
 });
 
+/**
+ * POST /memory/banks/:agentSlug/upload-md
+ *
+ * Seed an agent's memory bank from a markdown document — the agent-memory
+ * counterpart to Digital Twin's /digital-twin/upload-md. Owner/admin only,
+ * because the bank is shared across everyone who uses the agent.
+ *
+ * The .md is wrapped as a synthetic session transcript and run through the
+ * SAME curator the nightly cron uses (curateApprovedTranscript), so the
+ * extracted facts land as PENDING `PendingMemoryReview` rows for this agent —
+ * NOT retained to the live bank until an admin approves them in the review
+ * queue. Nothing about the agent's live memory changes on upload.
+ */
+memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, res) => {
+  try {
+    const agentSlug = req.params["agentSlug"] as string;
+    const userId = (req as { user?: { id?: string } }).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+
+    // Owner/admin gate.
+    const agent = await agentRepository.findBySlug(agentSlug);
+    if (!agent) {
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    const admin = await isClawAdmin(userId);
+    if (!admin && agent.ownerUserId !== userId) {
+      res.status(403).json({ success: false, error: "Only the agent owner or an admin can upload memory documents." });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { filename?: string; content?: string };
+    const filename = (body.filename ?? "").trim();
+    const content = (body.content ?? "").trim();
+    if (!filename || !content) {
+      res.status(400).json({ success: false, error: "filename and content are required" });
+      return;
+    }
+    if (content.length > 200_000) {
+      res.status(413).json({ success: false, error: "Content exceeds 200 KB limit" });
+      return;
+    }
+
+    // Wrap the doc as a synthetic transcript; the curator extracts cluster-
+    // tagged candidates from the `result` body, same as a real session.
+    const now = new Date();
+    const reviewDate = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const transcript: SessionTranscript = {
+      sessionId: `upload-${now.getTime()}-${filename}`.slice(0, 200),
+      userId,
+      agentSlug,
+      conversationId: null,
+      channelId: null,
+      task: `Knowledge upload "${filename}" — extract durable, reusable facts and guidelines from this document for the agent's memory.`,
+      result: content.slice(0, 50_000),
+      toolsUsed: [],
+      toolInvocations: [],
+      tokensIn: 0,
+      tokensOut: 0,
+      approvalStrategy: "upload",
+      startedAt: now,
+      completedAt: now,
+    };
+
+    const reviewIds = await curateApprovedTranscript(transcript, reviewDate);
+
+    logger.info("[memory] /upload-md curated agent document", {
+      agentSlug, filename, candidatesCreated: reviewIds.length, by: userId,
+    });
+    res.json({ success: true, data: { filename, candidatesCreated: reviewIds.length } });
+  } catch (err) {
+    logger.error("[memory] POST /banks/:agentSlug/upload-md failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Batch approval — one approval per (agent, night). Approval gate sits BEFORE
 // retain: only approved sessions reach the memory provider, so rejected
@@ -1079,7 +1204,7 @@ memoryRouter.delete("/banks/:agentSlug/memories/:hindsightMemoryId", requireAuth
  *
  * List batch reviews. Default sort: most recent first.
  */
-memoryRouter.get("/batches", requireAuth, async (req, res) => {
+memoryRouter.get("/batches", requireUserAuth, async (req, res) => {
   try {
     const { agentSlug, status, limit = "20", offset = "0" } = req.query as Record<string, string>;
 
@@ -1090,7 +1215,7 @@ memoryRouter.get("/batches", requireAuth, async (req, res) => {
     // userMemoryCandidate table, grouped by subsystem.  We return a
     // shape compatible with the Batches tab UI (id / status / counts)
     // so the same client renderer works for both flavours.
-    if (agentSlug === "digital-twin") {
+    if (isDigitalTwinAgent(agentSlug)) {
       const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
       if (!requesterId) {
         res.status(401).json({ success: false, error: "Authentication required for digital-twin batches" });
@@ -1154,28 +1279,20 @@ memoryRouter.get("/batches", requireAuth, async (req, res) => {
   }
 });
 
-/**
- * GET /memory/batches/:id/spaces-action?type=approve-all|reject-all
- *
- * Spaces approve/reject button callback. Lives on a separate path so the
- * default GET /batches/:id (UI detail view) can use requireAuth cleanly.
- * No auth here — clicking the Spaces button is the auth signal for the
- * batch action.
- */
-memoryRouter.get("/batches/:id/spaces-action", async (req, res) => {
-  const type = req.query["type"] as string | undefined;
-  if (type !== "approve-all" && type !== "reject-all") {
-    res.status(400).send(htmlMessage("Invalid action — expected ?type=approve-all|reject-all", "⚠️"));
-    return;
-  }
-  await handleBatchActionViaGet(req.params["id"] as string, type, res);
-});
+// The unauthenticated GET /batches/:id/spaces-action route is deleted. It was
+// the callback for the Spaces digest approve/reject buttons, but that digest
+// is no longer sent (see memoryCronService.ts — "the digests were noise"), so
+// the route had no legitimate caller left while still letting anyone with a
+// batch ID approve/reject memory batches without auth — and, being a
+// state-mutating GET, link-preview bots prefetching the URL could fire it.
+// Batch actions now go exclusively through POST /batches/:id/approve|reject
+// below (requireUserAuth + requireClawAdmin).
 
 /**
  * GET /memory/batches/:id
  * Returns the batch + per-session previews (task, toolsUsed, tokens). UI only.
  */
-memoryRouter.get("/batches/:id", requireAuth, async (req, res) => {
+memoryRouter.get("/batches/:id", requireUserAuth, async (req, res) => {
   try {
     const batchId = req.params["id"] as string;
     const batch = await prisma.pendingBatchReview.findUnique({ where: { id: batchId } });
@@ -1226,7 +1343,7 @@ memoryRouter.get("/batches/:id", requireAuth, async (req, res) => {
  * the provider's returned memory IDs in retainedMemoryIds. Updates batch
  * status to "approved" (all approved) or "partial" (subset approved).
  */
-memoryRouter.post("/batches/:id/approve", requireAuth, async (req, res) => {
+memoryRouter.post("/batches/:id/approve", requireUserAuth, requireClawAdmin, async (req, res) => {
   try {
     const batchId = req.params["id"] as string;
     const body = (req.body ?? {}) as { sessionIds?: string[] };
@@ -1327,7 +1444,7 @@ memoryRouter.post("/recall-hits", requireAuth, async (req, res) => {
  * POST /memory/batches/:id/reject
  * Mark the batch rejected. No transcripts are retained.
  */
-memoryRouter.post("/batches/:id/reject", requireAuth, async (req, res) => {
+memoryRouter.post("/batches/:id/reject", requireUserAuth, requireClawAdmin, async (req, res) => {
   try {
     const batchId = req.params["id"] as string;
     const ok = await rejectBatch(batchId);
@@ -1439,56 +1556,6 @@ async function rejectBatch(batchId: string): Promise<boolean> {
   return true;
 }
 
-async function handleBatchActionViaGet(
-  batchId: string,
-  action: "approve-all" | "reject-all",
-  res: import("express").Response,
-): Promise<void> {
-  try {
-    if (action === "approve-all") {
-      const batch = await prisma.pendingBatchReview.findUnique({ where: { id: batchId } });
-      if (!batch) {
-        res.status(404).send(htmlMessage("Batch not found", "❌"));
-        return;
-      }
-      if (batch.status !== "pending") {
-        res.send(htmlMessage(`Batch already ${batch.status}. You can close this tab.`, "✅"));
-        return;
-      }
-      startApprovalInBackground(batchId);
-      res.send(
-        htmlMessage(
-          `Approving ${batch.sessionIds.length} sessions in the background — ` +
-            `this can take several minutes. Refresh the dashboard to see progress. ` +
-            `You can close this tab.`,
-          "⏳",
-        ),
-      );
-      return;
-    }
-    const ok = await rejectBatch(batchId);
-    if (!ok) {
-      res.status(404).send(htmlMessage("Batch not found", "❌"));
-      return;
-    }
-    res.send(htmlMessage("Batch rejected — no memories were stored.", "❌"));
-  } catch (err) {
-    logger.error("[memory] Batch GET action failed", {
-      batchId,
-      action,
-      err: err instanceof Error ? err.message : String(err),
-    });
-    res.status(500).send(htmlMessage("Internal error", "⚠️"));
-  }
-}
-
-function htmlMessage(text: string, emoji: string): string {
-  return (
-    `<html><body style="font-family:system-ui;padding:2rem;text-align:center">` +
-    `<h2>${emoji} ${text}</h2><p>You can close this tab.</p></body></html>`
-  );
-}
-
 /**
  * POST /memory/banks/:agentSlug/backfill
  * Body: { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }    (preferred)
@@ -1496,13 +1563,13 @@ function htmlMessage(text: string, emoji: string): string {
  *
  * Range is inclusive on both ends. Max span is 30 days.
  */
-memoryRouter.post("/banks/:agentSlug/backfill", requireAuth, async (req, res) => {
+memoryRouter.post("/banks/:agentSlug/backfill", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
     // For digital-twin, backfill is per-user and triggered via
     // /digital-twin/enable or /digital-twin/backfill — never on the
     // shared bank surface. Block to avoid cross-user backfill triggers.
-    if (agentSlug === "digital-twin") {
+    if (isDigitalTwinAgent(agentSlug)) {
       res.status(403).json({
         success: false,
         error: "Use /digital-twin/enable or /digital-twin/backfill for per-user Twin backfills",
@@ -1592,14 +1659,14 @@ function readMemoryStatus(config: Record<string, unknown> | null | undefined): M
 }
 
 /** GET /memory/banks/:agentSlug/status — current memory flags for the UI toggle. */
-memoryRouter.get("/banks/:agentSlug/status", requireAuth, async (req, res) => {
+memoryRouter.get("/banks/:agentSlug/status", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
     // For digital-twin, the bank-level status (memoryEnabled flag) is a
     // shared property; per-user opt-in is the relevant signal and lives
     // under /digital-twin/status. Refuse direct reads of the bank flag
     // for this slug to keep one source of truth.
-    if (agentSlug === "digital-twin") {
+    if (isDigitalTwinAgent(agentSlug)) {
       res.status(403).json({
         success: false,
         error: "digital-twin bank status — use /digital-twin/status for per-user state",
@@ -1626,7 +1693,7 @@ memoryRouter.get("/banks/:agentSlug/status", requireAuth, async (req, res) => {
  * prefetch runs at start, transcript dumps at end, nightly cron picks it up.
  * Idempotent.
  */
-memoryRouter.post("/banks/:agentSlug/enable", requireAuth, async (req, res) => {
+memoryRouter.post("/banks/:agentSlug/enable", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
     if (!(await checkTwinAccess(req, res, agentSlug, "bank-op"))) return;
@@ -1668,7 +1735,7 @@ memoryRouter.post("/banks/:agentSlug/enable", requireAuth, async (req, res) => {
  * (admin can purge separately). From the next session onwards, no prefetch or
  * transcript-dump fires for this agent.
  */
-memoryRouter.post("/banks/:agentSlug/disable", requireAuth, async (req, res) => {
+memoryRouter.post("/banks/:agentSlug/disable", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
     if (!(await checkTwinAccess(req, res, agentSlug, "bank-op"))) return;

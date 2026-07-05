@@ -5,13 +5,21 @@ import {
   RobotIcon,
   MagnifyingGlassIcon,
   CaretRightIcon,
+  CpuIcon,
 } from "@phosphor-icons/react";
 import type { Agent } from "../../lib/types";
 import { useSnackbar } from "./ui/Snackbar";
 import { PageListHeader } from "./ui/PageListHeader";
 import { PageLayout } from "./ui/PageLayout";
 import { useAgents } from "../hooks/useAgents";
-import { updateAgent, getUserDashboard } from "../../lib/api";
+import {
+  updateAgent,
+  getUserDashboard,
+  getUserAgentConfig,
+  setUserAgentConfig,
+  listProviderCredentials,
+  type ProviderCredential,
+} from "../../lib/api";
 import {
   AGENT_CATEGORIES,
   groupAgentsByCategory,
@@ -55,8 +63,11 @@ function scopeToLabel(scope: string): ScopeTabLabel {
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function ownerLabel(agent: Agent): string {
-  if (agent.spacesAppId != null) return "Spaces App";
+  // Prefer the real owner (matches the slide-over's Owner row). Only fall
+  // back to "Spaces App" / "Xyne" when the agent genuinely has no owner.
   if (agent.owner?.name) return agent.owner.name;
+  if (agent.owner?.email) return agent.owner.email;
+  if (agent.spacesAppId != null) return "Spaces App";
   return "Xyne";
 }
 
@@ -108,6 +119,120 @@ function getScopeBadgeProps(agent: Agent, userId: string): ScopeBadgeResult {
   return { type: "badge", label: "personal", variant: "neutral" };
 }
 
+// ── ProviderPopup ──────────────────────────────────────────────────────
+
+const PROVIDERS = [
+  { id: "spaces",  label: "Spaces (Default)",  description: "Shared LLM gateway",                                         needsCreds: false },
+  { id: "copilot", label: "GitHub Copilot",     description: "Use your GitHub Copilot subscription",                       needsCreds: true },
+  { id: "claude",  label: "Anthropic Claude",   description: "Use your Anthropic API key or Pro/Max OAuth token",          needsCreds: true },
+  { id: "codex",   label: "OpenAI (Codex)",     description: "Use your OpenAI Platform API key",                           needsCreds: true },
+];
+
+function ProviderPopup({
+  agentSlug,
+  userId,
+  onClose,
+}: {
+  agentSlug: string;
+  userId: string;
+  onClose: () => void;
+}) {
+  const [current, setCurrent] = useState<string>("spaces");
+  const [creds, setCreds] = useState<ProviderCredential[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    void Promise.all([
+      getUserAgentConfig(agentSlug, userId),
+      listProviderCredentials(userId),
+    ]).then(([cfg, c]) => {
+      setCurrent((cfg as { provider?: string })?.provider ?? "spaces");
+      setCreds(c);
+      setError(null);
+    }).catch(() => {
+      setError("Failed to load config");
+    }).finally(() => setLoading(false));
+  }, [agentSlug, userId]);
+
+  const credMap = new Map(creds.map((c) => [c.provider, c]));
+
+  const handleSelect = async (provider: string) => {
+    if (provider === current || saving !== null) return;
+    setSaving(provider);
+    setError(null);
+    try {
+      await setUserAgentConfig(agentSlug, userId, { provider });
+      setCurrent(provider);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-[16px] border border-xyne-border bg-xyne-surface p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="mb-1 text-[16px] font-semibold text-xyne-fg-primary">Configure Provider</h3>
+        <p className="mb-4 text-[12px] text-xyne-fg-tertiary">
+          Pick which provider this agent should use. Credentials are managed in the Settings tab.
+        </p>
+
+        {loading ? (
+          <p className="text-[13px] text-xyne-fg-tertiary">Loading…</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {PROVIDERS.map((p) => {
+              const hasCreds = !p.needsCreds || credMap.get(p.id)?.hasApiKey;
+              const active = current === p.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => void handleSelect(p.id)}
+                  disabled={saving !== null || (p.needsCreds && !hasCreds)}
+                  className={`flex w-full items-start justify-between rounded-[10px] border p-3 text-left transition-colors disabled:opacity-50 ${
+                    active
+                      ? "border-xyne-brand bg-xyne-brand/10"
+                      : "border-xyne-border bg-xyne-surface-subtle hover:border-xyne-border-strong hover:bg-xyne-surface-sunken"
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-[6px]">
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${active ? "bg-xyne-brand" : "bg-xyne-fg-muted"}`} />
+                      <span className="text-[13px] font-medium text-xyne-fg-primary">{p.label}</span>
+                      {active && <span className="rounded-full bg-xyne-brand/15 px-[8px] py-[1px] text-[11px] font-medium text-xyne-brand">Current</span>}
+                      {p.needsCreds && (hasCreds
+                        ? <span className="rounded-full bg-xyne-success-bg px-[8px] py-[1px] text-[11px] font-medium text-xyne-success-fg">Configured</span>
+                        : <span className="rounded-full bg-xyne-warning-bg px-[8px] py-[1px] text-[11px] font-medium text-xyne-warning-fg">Not configured</span>
+                      )}
+                    </div>
+                    <p className="mt-[4px] pl-[14px] text-[11px] text-xyne-fg-tertiary">{p.description}</p>
+                    {p.needsCreds && !hasCreds && (
+                      <p className="mt-[2px] pl-[14px] text-[11px] text-xyne-warning-fg">Set this up in the Settings tab first.</p>
+                    )}
+                  </div>
+                  {saving === p.id && <span className="shrink-0 text-[12px] text-xyne-fg-tertiary">Saving…</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {error && <p className="mt-3 text-[12px] text-xyne-error-fg">{error}</p>}
+
+        <div className="mt-5 flex justify-end">
+          <button onClick={onClose} className="rounded-[8px] px-4 py-2 text-[13px] text-xyne-fg-secondary hover:text-xyne-fg-primary transition-colors">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── AgentRow ───────────────────────────────────────────────────────────
 
 interface AgentRowProps {
@@ -118,7 +243,7 @@ interface AgentRowProps {
   lastUsed: string | null;
   onClick: () => void;
   onToggle: (enabled: boolean) => Promise<boolean>;
-  dashboardLoading: boolean;
+  onProvider: () => void;
 }
 
 function AgentRow({
@@ -129,7 +254,7 @@ function AgentRow({
   lastUsed,
   onClick,
   onToggle,
-  dashboardLoading,
+  onProvider,
 }: AgentRowProps) {
   const [descTooltipVisible, setDescTooltipVisible] = useState(false);
   const descTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -273,19 +398,25 @@ function AgentRow({
         </span>
       </div>
 
-      {/* Last used */}
-      <div
-        data-id="agent-row-cell-last-used"
-        className={`flex w-[100px] shrink-0 items-center justify-end px-3 py-3.5 ${dimmed}`}
-      >
-        {dashboardLoading ? (
-          <Skeleton className="h-3 w-14" />
-        ) : (
-          <span className="text-[11px] text-xyne-fg-tertiary text-right">
-            {lastUsed ? formatTimeAgo(lastUsed) : "Never used"}
-          </span>
-        )}
-      </div>
+
+      {/* Provider button — V1 parity */}
+      {isOwner && (
+        <div
+          data-id="agent-row-cell-provider"
+          className="flex shrink-0 items-center px-2 py-3.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={onProvider}
+            className="group flex h-[28px] w-[28px] items-center justify-center gap-0 rounded-full border border-xyne-brand/40 bg-xyne-brand/8 text-[11px] font-semibold text-xyne-brand hover:bg-xyne-brand/15 hover:border-xyne-brand/60 hover:w-auto hover:gap-[5px] hover:px-[10px] transition-all duration-150 overflow-hidden"
+          >
+            <CpuIcon size={13} className="shrink-0" />
+            <span className="max-w-0 group-hover:max-w-[56px] overflow-hidden transition-all duration-150 whitespace-nowrap">
+              Provider
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Toggle (owner-only) / Status (non-owners) */}
       <div
@@ -375,6 +506,7 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
     : null;
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [providerSlug, setProviderSlug] = useState<string | null>(null);
   /**
    * Hold the slug — not the Agent object — so the slide-over always renders
    * against the freshest entry in the `agents` list (e.g. after the user
@@ -574,11 +706,11 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
           category={slugToCategory.get(agent.slug) ?? "other"}
           searchQuery={searchQuery}
           lastUsed={getLastUsed(agent.slug)}
-          onClick={() => setSlideOverSlug(agent.slug)}
+          onClick={() => navigate(`/v3/agents/${agent.slug}`)}
           onToggle={(enabled) =>
             handleAgentToggle(agent.slug, agent.name, enabled)
           }
-          dashboardLoading={dashboardLoading}
+          onProvider={() => setProviderSlug(agent.slug)}
         />
       ))}
     </div>
@@ -586,6 +718,13 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
 
   return (
     <>
+      {providerSlug && (
+        <ProviderPopup
+          agentSlug={providerSlug}
+          userId={userId}
+          onClose={() => setProviderSlug(null)}
+        />
+      )}
       <div className="flex h-full w-full overflow-hidden">
         <div className="flex-1 min-w-0 overflow-hidden">
           <PageLayout
@@ -605,6 +744,7 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
             searchValue={inputValue}
             onSearchChange={setInputValue}
             searchPlaceholder="Search agents…"
+            centerSearch
             tabs={[
               { key: "all", label: "All" },
               { key: "mine", label: "My agents" },

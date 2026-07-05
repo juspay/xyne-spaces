@@ -13,7 +13,11 @@ import { CONFIG } from "../config.js";
 import { createLogger, createTraceId } from "../logger.js";
 
 const logger = createLogger("goal-judge-client", createTraceId());
-const JUDGE_TIMEOUT_MS = Number(process.env["GOAL_JUDGE_TIMEOUT_MS"] ?? 25_000);
+// Default 30 minutes — must match (or exceed) the inner judge timeout in
+// xyne-claw's goal-judge.ts, otherwise this outer S2S call aborts first and we
+// get judge_unavailable even while the judge is still working. Shared env var
+// GOAL_JUDGE_TIMEOUT_MS overrides both.
+const JUDGE_TIMEOUT_MS = Number(process.env["GOAL_JUDGE_TIMEOUT_MS"] ?? 1_800_000);
 
 export interface GoalJudgeAttachmentMeta {
   fileName: string;

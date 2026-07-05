@@ -188,6 +188,10 @@ export async function handleSlashCommandBeforeRun(args: {
     return { kind: "goalCleared", replyToUser: "Cleared /goal." };
   }
 
+  // Non-goal commands (/clear, /compact) are handled by the caller, not here —
+  // narrow the union so the goalStart access below typechecks.
+  if (command.kind !== "goalStart") return { kind: "passthrough" };
+
   // goalStart — the caller still has to record the row with the run-dispatch
   // payload (only they assemble it). We surface the condition + the first
   // turn's task here so the caller doesn't need to know the wording.

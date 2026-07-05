@@ -17,7 +17,7 @@ export const sequencethinkingAdapter: StdioMcpAdapter = {
     buildCommand(_credentials) {
         return {
             cmd: "npx",
-            args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+            args: ["-y", "@modelcontextprotocol/server-sequential-thinking@2025.12.18"],
             env: {},
         };
     },

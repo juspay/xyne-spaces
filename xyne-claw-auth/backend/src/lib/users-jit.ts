@@ -19,6 +19,9 @@
 import { prisma } from "../db.js";
 import { getSpacesUserById, type SpacesAuthCaller } from "./spaces-db.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("users-jit");
+
 export async function ensureUserExists(
   userId: string,
   caller: SpacesAuthCaller = "unknown",
@@ -40,6 +43,6 @@ export async function ensureUserExists(
     update: { email: spacesUser.email, name: spacesUser.name },
   });
 
-  console.log(`[users-jit] created local user ${spacesUser.email} (id=${spacesUser.id}) caller=${caller}`);
+  log.info(`[users-jit] created local user ${spacesUser.email} (id=${spacesUser.id}) caller=${caller}`);
   return true;
 }

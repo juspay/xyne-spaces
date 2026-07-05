@@ -5,6 +5,9 @@
 
 import { LITELLM } from "./config.js";
 
+import { createLogger } from "./logger.js";
+const log = createLogger("chain-judge");
+
 export async function judgeChainContinuation(
   agentResult: string,
   sourceAgent: string,
@@ -96,7 +99,7 @@ You MUST call the \`decide\` tool — do not respond in plain text.`,
     });
 
     if (!res.ok) {
-      console.warn(`[chain-judge] LLM returned ${res.status}, defaulting to stop`);
+      log.warn(`[chain-judge] LLM returned ${res.status}, defaulting to stop`);
       return { action: "stop", reason: `LLM error ${res.status}` };
     }
 
@@ -152,16 +155,21 @@ You MUST call the \`decide\` tool — do not respond in plain text.`,
     }
 
     if (decision) {
-      console.log(`[chain-judge] ${sourceAgent} → ${targetAgent}: ${decision.action} (${decision.reason})`);
+      log.info(`[chain-judge] ${sourceAgent} → ${targetAgent}: ${decision.action} (${decision.reason})`);
+      // Fail closed: only an explicit "continue" triggers the target agent.
+      // Anything malformed defaults to stop, matching every other failure
+      // path here — the content fallback above can parse JSON echoed from
+      // untrusted agent output, so a permissive default would let planted
+      // text drive chain continuation.
       return {
-        action: decision.action === "stop" ? "stop" : "continue",
-        reason: decision.reason ?? "",
+        action: decision.action === "continue" ? "continue" : "stop",
+        reason: typeof decision.reason === "string" ? decision.reason : "",
       };
     }
-    console.warn(`[chain-judge] Failed to parse JSON: ${raw.slice(0, 200)}, defaulting to stop`);
+    log.warn(`[chain-judge] Failed to parse JSON: ${raw.slice(0, 200)}, defaulting to stop`);
     return { action: "stop", reason: "JSON parse error" };
   } catch (err) {
-    console.warn(`[chain-judge] Failed, defaulting to stop:`, err instanceof Error ? err.message : err);
+    log.warn(`[chain-judge] Failed, defaulting to stop:`, err instanceof Error ? err.message : err);
     return { action: "stop", reason: "fetch error" };
   }
 }

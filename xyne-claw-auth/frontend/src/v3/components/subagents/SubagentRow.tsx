@@ -100,9 +100,12 @@ export function SubagentRow({
       </span>
 
       {/* Creator label for custom */}
-      {!isBuiltIn && subagent.createdByUserId && (
-        <span className="text-[10px] text-xyne-fg-tertiary shrink-0">
-          Custom
+      {!isBuiltIn && (subagent.createdByName || subagent.createdByEmail) && (
+        <span
+          className="text-[10px] text-xyne-fg-tertiary shrink-0 max-w-[140px] truncate"
+          title={subagent.createdByEmail ?? undefined}
+        >
+          by {subagent.createdByName || subagent.createdByEmail}
         </span>
       )}
 

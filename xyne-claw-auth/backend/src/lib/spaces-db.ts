@@ -23,6 +23,9 @@
 import { PrismaClient } from "@prisma/client";
 import { CONFIG } from "../config.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("spaces-db");
+
 export interface SpacesUserAuth {
   /** Spaces user JWT (workspace-scoped if available, else legacy access token). */
   token: string;
@@ -68,7 +71,7 @@ async function refreshSpacesAccessToken(sessionId: string, workspaceId: string):
       redirect: "manual",
     });
     if (!res.ok) {
-      console.warn(`[spaces-db] refresh-session sessionId=${sessionId} status=${res.status}`);
+      log.warn(`[spaces-db] refresh-session sessionId=${sessionId} status=${res.status}`);
       return null;
     }
     const cookies = res.headers.getSetCookie?.() ?? [];
@@ -90,14 +93,14 @@ async function refreshSpacesAccessToken(sessionId: string, workspaceId: string):
     for (const c of cookies) {
       const m = c.match(/^([a-zA-Z0-9_]+)=(eyJ[^;]+)/);
       if (m && m[2]) {
-        console.log(`[spaces-db] refresh-session matched JWT-shaped cookie name=${m[1]}`);
+        log.info(`[spaces-db] refresh-session matched JWT-shaped cookie name=${m[1]}`);
         return decodeURIComponent(m[2]);
       }
     }
-    console.warn(`[spaces-db] refresh-session sessionId=${sessionId} response cookies=[${cookies.map((c) => c.split("=")[0]).join(",")}] — no token-bearing cookie found`);
+    log.warn(`[spaces-db] refresh-session sessionId=${sessionId} response cookies=[${cookies.map((c) => c.split("=")[0]).join(",")}] — no token-bearing cookie found`);
     return null;
   } catch (err) {
-    console.warn(
+    log.warn(
       `[spaces-db] refresh-session sessionId=${sessionId} failed: ${err instanceof Error ? err.message : String(err)}`,
     );
     return null;
@@ -123,10 +126,10 @@ function getClient(): PrismaClient | null {
       datasourceUrl: CONFIG.spacesDbUrl,
       log: ["error"],
     });
-    console.log("[spaces-db] Read-only client initialized");
+    log.info("[spaces-db] Read-only client initialized");
     return _client;
   } catch (err) {
-    console.error("[spaces-db] Failed to init client:", err instanceof Error ? err.message : err);
+    log.error("[spaces-db] Failed to init client:", err instanceof Error ? err.message : err);
     _initFailed = true;
     return null;
   }
@@ -154,6 +157,7 @@ export type SpacesAuthCaller =
   | "require-auth"
   | "scheduled-job"
   | "write-action"
+  | "clone-owner-dm"
   | "unknown";
 
 export async function getSpacesAuthForUser(
@@ -192,11 +196,11 @@ export async function getSpacesAuthForUser(
     const elapsed = Date.now() - started;
 
     if (!row) {
-      console.log(`[spaces-db] read userId=${userId} caller=${caller} result=miss-no-session ms=${elapsed}`);
+      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=miss-no-session ms=${elapsed}`);
       return null;
     }
     if (!row.workspaceId) {
-      console.log(`[spaces-db] read userId=${userId} caller=${caller} result=miss-no-workspace ms=${elapsed}`);
+      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=miss-no-workspace ms=${elapsed}`);
       return null;
     }
 
@@ -204,7 +208,7 @@ export async function getSpacesAuthForUser(
     const tokenValid = row.accessToken && row.accessTokenExpiry && row.accessTokenExpiry.getTime() > now;
 
     if (tokenValid) {
-      console.log(`[spaces-db] read userId=${userId} caller=${caller} result=hit ms=${elapsed}`);
+      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=hit ms=${elapsed}`);
       return {
         token: row.accessToken!,
         sessionId: row.id,
@@ -216,15 +220,15 @@ export async function getSpacesAuthForUser(
     // alive (refreshTokenExpiry > NOW already filtered). Ask Spaces to mint
     // a fresh JWT for this session — same path Spaces' own middleware uses.
     const staleReason = !row.accessToken ? "null-token" : "expired-token";
-    console.log(
+    log.info(
       `[spaces-db] read userId=${userId} caller=${caller} result=stale (${staleReason}) ms=${elapsed} → refreshing`,
     );
     const freshToken = await refreshSpacesAccessToken(row.id, row.workspaceId);
     if (!freshToken) {
-      console.log(`[spaces-db] read userId=${userId} caller=${caller} result=refresh-failed`);
+      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=refresh-failed`);
       return null;
     }
-    console.log(
+    log.info(
       `[spaces-db] read userId=${userId} caller=${caller} result=refreshed tokenLen=${freshToken.length}`,
     );
     return {
@@ -236,7 +240,7 @@ export async function getSpacesAuthForUser(
     // Don't crash the whole MCP spawn over a DB hiccup — surface as null and
     // let the caller fall back to cached creds.
     const elapsed = Date.now() - started;
-    console.warn(
+    log.warn(
       `[spaces-db] read userId=${userId} caller=${caller} result=error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
     );
     return null;
@@ -280,14 +284,58 @@ export async function getSpacesUserById(
     `;
     const row = rows[0];
     const elapsed = Date.now() - started;
-    console.log(
+    log.info(
       `[spaces-db] user-lookup userId=${userId} caller=${caller} result=${row ? "hit" : "miss"} ms=${elapsed}`,
     );
     return row ?? null;
   } catch (err) {
     const elapsed = Date.now() - started;
-    console.warn(
+    log.warn(
       `[spaces-db] user-lookup userId=${userId} caller=${caller} result=error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Resolve a user's workspaceId directly from `public.users`, WITHOUT requiring
+ * an active login session. `getSpacesAuthForUser` only returns a workspaceId
+ * when the user has a live, non-expired session — so scheduled jobs created by
+ * a user who isn't currently logged in (the common case for a "remind me at
+ * 10 PM" typed hours earlier, or any S2S/automation trigger) fell through to a
+ * NULL workspaceId and Spaces then rejected result delivery. The workspaceId
+ * lives on the user row itself, so this session-independent lookup is the
+ * reliable fallback. Single-workspace deployment → one workspaceId per user.
+ *
+ * Returns null when SPACES_DB_URL is unset, the user is missing, the column is
+ * NULL, or on any DB error — callers treat null as "couldn't resolve".
+ */
+export async function getWorkspaceIdForUser(
+  userId: string,
+  caller: SpacesAuthCaller = "unknown",
+): Promise<string | null> {
+  const client = getClient();
+  if (!client) return null;
+  if (!userId) return null;
+
+  const started = Date.now();
+  try {
+    const rows = await client.$queryRaw<Array<{ workspaceId: string | null }>>`
+      SELECT "workspaceId"
+      FROM public.users
+      WHERE id = ${userId}
+      LIMIT 1
+    `;
+    const workspaceId = rows[0]?.workspaceId ?? null;
+    const elapsed = Date.now() - started;
+    log.info(
+      `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=${workspaceId ? "hit" : "miss"} ms=${elapsed}`,
+    );
+    return workspaceId;
+  } catch (err) {
+    const elapsed = Date.now() - started;
+    log.warn(
+      `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
     );
     return null;
   }
@@ -322,15 +370,173 @@ export async function getInstalledAppSigningSecret(
     `;
     const blob = rows[0]?.signingSecret;
     if (!blob) {
-      console.warn(`[spaces-db] installed-app-secret spacesAppId=${spacesAppId} result=miss`);
+      log.warn(`[spaces-db] installed-app-secret spacesAppId=${spacesAppId} result=miss`);
       return null;
     }
     return blob;
   } catch (err) {
-    console.warn(
+    log.warn(
       `[spaces-db] installed-app-secret spacesAppId=${spacesAppId} result=error err=${err instanceof Error ? err.message : String(err)}`,
     );
     return null;
+  }
+}
+
+/**
+ * Resolve a user-group mention alias (e.g. `data-intelligence`) → group, read
+ * DIRECTLY from `public.user_groups`. This bypasses the `/api/query` gateway,
+ * which forbids the `userGroup` model ("Model userGroup is not allowed for
+ * querying"), and the group-read REST routes, which were removed (reads moved
+ * to Zero/zql) — so a direct DB read is the only server-side path for the
+ * mention resolver to tag `@group`s.
+ *
+ * `alias` is GLOBALLY @unique with NO workspace column in the schema, so the
+ * match is unambiguous (0 or 1). LIMIT 2 is defensive only. Active groups only.
+ *
+ * Requires `GRANT SELECT ON public.user_groups TO claw_readonly` on the Spaces
+ * DB role (in addition to the existing users / user_sessions / installed_apps
+ * grants). Returns [] when SPACES_DB_URL is unset, no match, or on any error.
+ */
+export async function getSpacesGroupByAlias(
+  alias: string,
+): Promise<Array<{ id: string; name: string; alias: string | null }>> {
+  const client = getClient();
+  if (!client) return [];
+  const trimmed = alias.trim();
+  if (!trimmed) return [];
+
+  try {
+    const rows = await client.$queryRaw<Array<{ id: string; name: string; alias: string | null }>>`
+      SELECT id, name, alias
+      FROM public.user_groups
+      WHERE lower(alias) = lower(${trimmed}) AND "isActive" = true
+      LIMIT 2
+    `;
+    return rows;
+  } catch (err) {
+    log.warn(
+      `[spaces-db] group-by-alias alias=${trimmed} result=error err=${err instanceof Error ? err.message : String(err)}`,
+    );
+    return [];
+  }
+}
+
+/** True when the Spaces read-only DB client is configured + initialised. */
+export function spacesDbAvailable(): boolean {
+  return getClient() !== null;
+}
+
+type UserHit = { id: string; name: string };
+
+// Only ever resolve a mention to a real, active HUMAN — never a BOT/APP user
+// (they'd be tagged as "people" otherwise). `name` and `displayName` are both
+// candidates because agents emit either; we return the canonical `name` for the
+// chip label. LIMIT 2 preserves the resolver's "≥2 ⇒ ambiguous, skip" rule.
+const HUMAN = `"userType" = 'USER' AND status = 'ACTIVE'`;
+
+/**
+ * Resolve `@First Last` → active human users with that exact (case-insensitive)
+ * display name. Direct DB read — bypasses the app-token 401 on Spaces' HTTP
+ * user endpoints. Returns 0/1/2 rows (caller treats ≥2 as ambiguous).
+ *
+ * Requires `GRANT SELECT ON public.users TO claw_readonly`.
+ */
+export async function getSpacesUsersByName(name: string, workspaceId?: string): Promise<UserHit[]> {
+  const client = getClient();
+  if (!client) return [];
+  const trimmed = name.trim();
+  if (!trimmed) return [];
+  // Scope to the agent's workspace when known — `public.users.workspaceId`
+  // exists in prod (see getSpacesAuthForUser) even though it isn't in the Prisma
+  // model. Without it, a common name shared across workspaces (e.g. a
+  // cross-platform import) matches ≥2 rows and the resolver leaves it untagged.
+  const params: string[] = [trimmed];
+  let wsClause = "";
+  if (workspaceId && workspaceId.trim()) {
+    params.push(workspaceId.trim());
+    wsClause = ` AND "workspaceId" = $2`;
+  }
+  try {
+    return await client.$queryRawUnsafe<UserHit[]>(
+      `SELECT id, name FROM public.users
+       WHERE ${HUMAN} AND (lower(name) = lower($1) OR lower("displayName") = lower($1))${wsClause}
+       LIMIT 2`,
+      ...params,
+    );
+  } catch (err) {
+    log.warn(`[spaces-db] users-by-name name=${trimmed} err=${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
+/** The workspace a user belongs to (`public.users.workspaceId`). Used to scope
+ *  name resolution to the agent's own workspace. Returns null if unknown. */
+export async function getSpacesUserWorkspaceId(userId: string): Promise<string | null> {
+  const client = getClient();
+  if (!client) return null;
+  const trimmed = userId.trim();
+  if (!trimmed) return null;
+  try {
+    const rows = await client.$queryRawUnsafe<Array<{ workspaceId: string | null }>>(
+      `SELECT "workspaceId" FROM public.users WHERE id = $1 LIMIT 1`,
+      trimmed,
+    );
+    return rows[0]?.workspaceId ?? null;
+  } catch (err) {
+    log.warn(`[spaces-db] user-workspace userId=${trimmed} err=${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+/** Resolve `@email@domain` → the active user with that email (email is @unique). */
+export async function getSpacesUserByEmail(email: string, workspaceId?: string): Promise<UserHit[]> {
+  const client = getClient();
+  if (!client) return [];
+  const trimmed = email.trim();
+  if (!trimmed) return [];
+  // Emails are NOT globally unique: the same person is imported into multiple
+  // workspaces (one users row each), so an unscoped lookup returns ≥2 rows and
+  // the mention resolver leaves it untagged (prod bug — @email never resolved
+  // while @Name did). Scope to the agent's workspace when known, like byName.
+  const params: string[] = [trimmed];
+  let wsClause = "";
+  if (workspaceId && workspaceId.trim()) {
+    params.push(workspaceId.trim());
+    wsClause = ` AND "workspaceId" = $2`;
+  }
+  try {
+    return await client.$queryRawUnsafe<UserHit[]>(
+      `SELECT id, name FROM public.users WHERE status = 'ACTIVE' AND lower(email) = lower($1)${wsClause} LIMIT 2`,
+      ...params,
+    );
+  } catch (err) {
+    log.warn(`[spaces-db] user-by-email err=${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
+/** Resolve a dotted handle (`@bowmitha.c`) → the user whose email local-part is
+ *  the handle (email starts `${handle}@`). Matches the HTTP byHandle semantics. */
+export async function getSpacesUsersByHandle(handle: string, workspaceId?: string): Promise<UserHit[]> {
+  const client = getClient();
+  if (!client) return [];
+  const trimmed = handle.trim();
+  if (!trimmed) return [];
+  // Same cross-workspace duplication as byEmail — scope to the workspace when known.
+  const params: string[] = [trimmed];
+  let wsClause = "";
+  if (workspaceId && workspaceId.trim()) {
+    params.push(workspaceId.trim());
+    wsClause = ` AND "workspaceId" = $2`;
+  }
+  try {
+    return await client.$queryRawUnsafe<UserHit[]>(
+      `SELECT id, name FROM public.users WHERE status = 'ACTIVE' AND lower(email) LIKE lower($1) || '@%'${wsClause} LIMIT 2`,
+      ...params,
+    );
+  } catch (err) {
+    log.warn(`[spaces-db] users-by-handle err=${err instanceof Error ? err.message : String(err)}`);
+    return [];
   }
 }
 

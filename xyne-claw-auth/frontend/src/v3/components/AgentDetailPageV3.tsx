@@ -10,6 +10,7 @@ import type {
   ProviderCredential,
 } from "../../lib/api";
 import {
+  ApiError,
   getAgentDetail,
   getUserAgentConfig,
   updateAgent,
@@ -25,9 +26,17 @@ import {
   deleteAgent,
   promoteAgent,
   demoteAgent,
+  cloneAgent,
   listAgents,
   listAgentShares,
   listProviderCredentials,
+  listSandboxRepos,
+  listSbxGitRepos,
+  listResearchAgentProducts,
+  listResearchAgentRepositories,
+  type SandboxRepoOption,
+  type SbxGitRepoOption,
+  type ResearchAgentOption,
 } from "../../lib/api";
 import { ADMIN_REQUEST_FORWARDED_MESSAGE } from "../../lib/admin-request-notice";
 import type { AgentProvider } from "../hooks/useAgents";
@@ -43,6 +52,7 @@ import { SkillPickerDialog } from "./SkillPickerDialog";
 import { ChainWorkflowModal } from "./ChainWorkflowModal";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { RenameHandleDialog } from "./agent-detail/RenameHandleDialog";
+import { CloneAgentDialog } from "./agent-detail/CloneAgentDialog";
 
 /* ── helpers ───────────────────────────────────────────────────────── */
 
@@ -52,6 +62,7 @@ function extractToolsFromConfig(config: Record<string, unknown> | undefined | nu
     subagents: t.subagents ?? [],
     direct:    t.direct ?? [],
     custom:    t.custom ?? [],
+    gateway:   t.gateway ?? [],
   };
 }
 
@@ -94,12 +105,71 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [draftTools, setDraftTools] = useState<AgentToolSelection>({ subagents: [], direct: [], custom: [] });
+  const [draftTools, setDraftTools] = useState<AgentToolSelection>({ subagents: [], direct: [], custom: [], gateway: [] });
   const [draftSkillIds, setDraftSkillIds] = useState<string[]>([]);
+  const [draftKbResources, setDraftKbResources] = useState<import("./KnowledgeBasePicker").KbSelection[]>([]);
+  const [draftKbScope, setDraftKbScope] = useState<"COLLECTIONS" | "USER">("COLLECTIONS");
   const [draftProvider, setDraftProvider] = useState<AgentProvider>("spaces");
   const [draftModel, setDraftModel] = useState<string | null>(null);
-  const [draftGitRepoUrl, setDraftGitRepoUrl] = useState("");
   const [draftPromptInjection, setDraftPromptInjection] = useState("");
+  // Sandbox repo pin (REPO_CONFIGS key). When set, the runtime forces
+  // sandbox-repo-setup onto this repo. "" = agent chooses.
+  const [draftSandboxRepo, setDraftSandboxRepo] = useState("");
+  const [sandboxRepoOptions, setSandboxRepoOptions] = useState<SandboxRepoOption[]>([]);
+  // Reviewer-style read-only multi-repo sandbox (agent.config.forceReadOnlySandbox):
+  // routes every run to the shared read-only sbx-git sandbox (grep across all repos,
+  // no per-project clone, mutating sandbox tools stripped).
+  const [draftForceReadOnlySandbox, setDraftForceReadOnlySandbox] = useState(false);
+  // Operator-selected repo focus for read-only agents (agent.config.sbxGitRepos).
+  const [draftSbxGitRepos, setDraftSbxGitRepos] = useState<string[]>([]);
+  const [sbxGitRepoOptions, setSbxGitRepoOptions] = useState<SbxGitRepoOption[]>([]);
+  const [draftResearchAgentProductId, setDraftResearchAgentProductId] = useState("");
+  const [draftResearchAgentRepositoryId, setDraftResearchAgentRepositoryId] = useState("");
+  const [researchAgentProductOptions, setResearchAgentProductOptions] = useState<ResearchAgentOption[]>([]);
+  const [researchAgentRepositoryOptions, setResearchAgentRepositoryOptions] = useState<ResearchAgentOption[]>([]);
+  // Per-agent opt-in: when true, xyne-claw injects the `suggest-goal` tool
+  // and a /goal-awareness primer. The agent can then propose a one-click
+  // "Run autonomously" button (the `pendingGoalSuggestion` payload). Default
+  // false so existing agents are unchanged.
+  const [draftSuggestGoal, setDraftSuggestGoal] = useState(false);
+  // Per-agent opt-in: when true, claw-auth's webhook wraps every user message
+  // as `/goal <text>` before parsing, so every interaction with this agent
+  // runs as an autonomous /goal loop. User-typed `/stop` and `/goal status`
+  // still work (they start with `/` and bypass the wrap). Default false.
+  const [draftAutoGoal, setDraftAutoGoal] = useState(false);
+  // Opt-in response verification (agent.config.verifyResponses). When on, the
+  // agent delivers its final answer via submit-response, which checks factual
+  // claims against gathered tool evidence before posting. Default false.
+  const [draftVerifyResponses, setDraftVerifyResponses] = useState(false);
+  // Opt-in citation reflection (agent.config.citationReflection). When on, after
+  // the agent answers, xyne-claw nudges it once to add inline [clf-…] citations
+  // if it drew on citeable sources but cited none. Cheap (regex + ≤1 re-prompt,
+  // no extra LLM judge call). Default false.
+  const [draftCitationReflection, setDraftCitationReflection] = useState(false);
+  // Opt-in generic auto-citations (agent.config.autoToolCitations). When on,
+  // xyne-claw chunks EVERY tool result that doesn't already self-cite and injects
+  // [clf-…] tokens (+ a generic citation per chunk) so the model can cite any
+  // tool's output. Tools that emit their own citations are untouched. Default false.
+  const [draftAutoToolCitations, setDraftAutoToolCitations] = useState(false);
+  // Per-agent delivery criteria (agent.config.verifyResponseCriteria) — free
+  // text stacked ON TOP of the default factual check when verifyResponses is on.
+  // Inverted semantics: absence of evidence for a stated requirement is a
+  // failure (e.g. "must post a Proof-of-Testing video before claiming done").
+  const [draftVerifyResponseCriteria, setDraftVerifyResponseCriteria] = useState("");
+  // Structured output (agent.config.outputFormat). When enabled, xyne-claw
+  // injects a `submit-result` tool the agent must deliver its final answer
+  // through. Two modes: "json" (schema-constrained payload; optional markdown
+  // render template for the chat reply) and "markdown" (agent writes markdown
+  // directly; optional structural outline). Default off.
+  const [draftOutputFormatEnabled, setDraftOutputFormatEnabled] = useState(false);
+  const [draftOutputType, setDraftOutputType] = useState<"json" | "markdown">("json");
+  const [draftOutputSchema, setDraftOutputSchema] = useState("");
+  const [draftOutputTemplate, setDraftOutputTemplate] = useState("");
+  // Process guard (outputFormat.requireToolsBeforeSubmit): comma/newline-
+  // separated tool-name substrings that MUST run before submit-result is
+  // accepted. Stops a schema-constrained agent from short-circuiting a multi-
+  // step pipeline with an empty/placeholder payload. Empty = no guard.
+  const [draftOutputRequireTools, setDraftOutputRequireTools] = useState("");
   const [skillTriggers, setSkillTriggers] = useState<
     Array<{ toolName: string; skillSlug: string; when: "before" | "after"; prompt: string }>
   >([]);
@@ -107,11 +177,13 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   /* ── UI state ──────────────────────────────────────────────────── */
   const [togglingEnabled, setTogglingEnabled] = useState(false);
   const [pushing, setPushing] = useState<"push_to_spaces" | "push_to_global" | null>(null);
-  // Default landing tab — "run-history" is the highest-signal idle view
-  // (shows what the agent has actually done lately). The previous
-  // "preview" default was a static summary that mirrored the form; the
-  // panel was removed for now — see AgentPreviewPanel.tsx (orphaned).
-  const [activeTab, setActiveTab] = useState<TabId>("run-history");
+  const [cloning, setCloning] = useState(false);
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
+  // Default landing tab — "overview" is the calm status dashboard ("Running
+  // well") that summarizes activity/memory/people/connections; selecting a
+  // card drops into that panel. Provider settings now live in the left
+  // column's "Model & provider" card, not the right rail.
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
@@ -165,12 +237,30 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setPrompt(agentData.systemPrompt ?? agentData.description ?? "");
         setDraftTools(extractToolsFromConfig(agentData.config));
         setDraftSkillIds((agentData.skills ?? []).map((s) => s.skillId));
+        setDraftKbResources((agentData.collections ?? []).map((c) => ({ collectionId: c.collectionId, fileId: c.fileId })));
+        setDraftKbScope(agentData.kbScope === "USER" ? "USER" : "COLLECTIONS");
         setDraftProvider(provider);
         setDraftModel(model);
-        const gitUrl = (agentData.config as { gitRepoUrl?: string }).gitRepoUrl ?? "";
-        setDraftGitRepoUrl(gitUrl);
         const promptInj = (agentData.config as { promptInjection?: string }).promptInjection ?? "";
         setDraftPromptInjection(promptInj);
+        setDraftSandboxRepo((agentData.config as { sandboxRepo?: string }).sandboxRepo ?? "");
+        setDraftForceReadOnlySandbox((agentData.config as { forceReadOnlySandbox?: boolean }).forceReadOnlySandbox === true);
+        setDraftSbxGitRepos(Array.isArray((agentData.config as { sbxGitRepos?: string[] }).sbxGitRepos) ? (agentData.config as { sbxGitRepos: string[] }).sbxGitRepos : []);
+        setDraftResearchAgentProductId((agentData.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agentData.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "");
+        setDraftResearchAgentRepositoryId((agentData.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agentData.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "");
+        setDraftSuggestGoal((agentData.config as { suggestGoal?: boolean }).suggestGoal === true);
+        setDraftAutoGoal((agentData.config as { autoGoal?: boolean }).autoGoal === true);
+        setDraftVerifyResponses((agentData.config as { verifyResponses?: boolean }).verifyResponses === true);
+        setDraftCitationReflection((agentData.config as { citationReflection?: boolean }).citationReflection === true);
+        setDraftAutoToolCitations((agentData.config as { autoToolCitations?: boolean }).autoToolCitations === true);
+        setDraftVerifyResponseCriteria((agentData.config as { verifyResponseCriteria?: string }).verifyResponseCriteria ?? "");
+        const outputFormat = (agentData.config as { outputFormat?: { type?: string; schema?: Record<string, unknown>; template?: string; requireToolsBeforeSubmit?: string[] } }).outputFormat;
+        const ofType = outputFormat?.type === "markdown" ? "markdown" : "json";
+        setDraftOutputFormatEnabled(outputFormat?.type === "json" || outputFormat?.type === "markdown");
+        setDraftOutputType(ofType);
+        setDraftOutputSchema(outputFormat?.schema ? JSON.stringify(outputFormat.schema, null, 2) : "");
+        setDraftOutputTemplate(outputFormat?.template ?? "");
+        setDraftOutputRequireTools(Array.isArray(outputFormat?.requireToolsBeforeSubmit) ? outputFormat.requireToolsBeforeSubmit.join(", ") : "");
         const rawTriggers = ((agentData.config as { skillTriggers?: Array<{ toolName: string; skillSlug: string; when: string; prompt?: string }> })?.skillTriggers ?? []);
         setSkillTriggers(rawTriggers.map((t) => ({ ...t, when: t.when as "before" | "after", prompt: t.prompt ?? "" })));
 
@@ -190,6 +280,10 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     getAvailableTools().then(setAvailableTools).catch(() => {});
     listSkills().then(setAvailableSkills).catch(() => {});
     listProviderCredentials(userId).then(setProviderCredentials).catch(() => {});
+    listSandboxRepos().then(setSandboxRepoOptions).catch(() => {});
+    listSbxGitRepos().then(setSbxGitRepoOptions).catch(() => {});
+    listResearchAgentProducts().then(setResearchAgentProductOptions).catch(() => {});
+    listResearchAgentRepositories().then(setResearchAgentRepositoryOptions).catch(() => {});
   }, [userId]);
 
   useEffect(() => {
@@ -214,8 +308,29 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const basePrompt = agent.systemPrompt ?? agent.description ?? "";
     const baseTools = extractToolsFromConfig(agent.config);
     const baseSkills = (agent.skills ?? []).map((s) => s.skillId);
-    const baseGitUrl = (agent.config as { gitRepoUrl?: string }).gitRepoUrl ?? "";
+    const baseKb = (agent.collections ?? []).map((c) => `${c.collectionId}::${c.fileId ?? ""}`).sort();
+    const draftKb = draftKbResources.map((r) => `${r.collectionId}::${r.fileId ?? ""}`).sort();
+    const kbChanged = baseKb.length !== draftKb.length || baseKb.some((k, i) => k !== draftKb[i]);
+    const baseKbScope: "COLLECTIONS" | "USER" = agent.kbScope === "USER" ? "USER" : "COLLECTIONS";
+    const kbScopeChanged = draftKbScope !== baseKbScope;
     const basePromptInjection = (agent.config as { promptInjection?: string }).promptInjection ?? "";
+    const baseSandboxRepo = (agent.config as { sandboxRepo?: string }).sandboxRepo ?? "";
+    const baseForceReadOnlySandbox = (agent.config as { forceReadOnlySandbox?: boolean }).forceReadOnlySandbox === true;
+    const baseSbxGitRepos = Array.isArray((agent.config as { sbxGitRepos?: string[] }).sbxGitRepos) ? (agent.config as { sbxGitRepos: string[] }).sbxGitRepos : [];
+    const baseResearchAgentProductId = (agent.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agent.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "";
+    const baseResearchAgentRepositoryId = (agent.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agent.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "";
+    const baseSuggestGoal = (agent.config as { suggestGoal?: boolean }).suggestGoal === true;
+    const baseAutoGoal = (agent.config as { autoGoal?: boolean }).autoGoal === true;
+    const baseVerifyResponses = (agent.config as { verifyResponses?: boolean }).verifyResponses === true;
+    const baseCitationReflection = (agent.config as { citationReflection?: boolean }).citationReflection === true;
+    const baseAutoToolCitations = (agent.config as { autoToolCitations?: boolean }).autoToolCitations === true;
+    const baseVerifyResponseCriteria = (agent.config as { verifyResponseCriteria?: string }).verifyResponseCriteria ?? "";
+    const baseOutputFormat = (agent.config as { outputFormat?: { type?: string; schema?: Record<string, unknown>; template?: string; requireToolsBeforeSubmit?: string[] } }).outputFormat;
+    const baseOutputFormatEnabled = baseOutputFormat?.type === "json" || baseOutputFormat?.type === "markdown";
+    const baseOutputType = baseOutputFormat?.type === "markdown" ? "markdown" : "json";
+    const baseOutputSchema = baseOutputFormat?.schema ? JSON.stringify(baseOutputFormat.schema, null, 2) : "";
+    const baseOutputTemplate = baseOutputFormat?.template ?? "";
+    const baseOutputRequireTools = Array.isArray(baseOutputFormat?.requireToolsBeforeSubmit) ? baseOutputFormat.requireToolsBeforeSubmit.join(", ") : "";
     const baseTriggersRaw = ((agent.config as { skillTriggers?: Array<{ toolName: string; skillSlug: string; when: string; prompt?: string }> })?.skillTriggers ?? []);
     const baseTriggers = baseTriggersRaw.map((t) => ({ toolName: t.toolName, skillSlug: t.skillSlug, when: t.when, prompt: t.prompt ?? "" }));
     const triggersChanged = JSON.stringify(baseTriggers) !== JSON.stringify(skillTriggers);
@@ -226,27 +341,38 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       !sameSet(draftTools.subagents, baseTools.subagents) ||
       !sameSet(draftTools.direct, baseTools.direct) ||
       !sameSet(draftTools.custom, baseTools.custom) ||
+      !sameSet(draftTools.gateway, baseTools.gateway) ||
       !sameSet(draftSkillIds, baseSkills) ||
+      kbChanged ||
+      kbScopeChanged ||
       draftProvider !== config.provider ||
       (draftModel ?? null) !== (config.model ?? null) ||
-      draftGitRepoUrl !== baseGitUrl ||
       draftPromptInjection !== basePromptInjection ||
+      draftSandboxRepo !== baseSandboxRepo ||
+      draftForceReadOnlySandbox !== baseForceReadOnlySandbox ||
+      JSON.stringify([...draftSbxGitRepos].sort()) !== JSON.stringify([...baseSbxGitRepos].sort()) ||
+      draftResearchAgentProductId !== baseResearchAgentProductId ||
+      draftResearchAgentRepositoryId !== baseResearchAgentRepositoryId ||
+      draftSuggestGoal !== baseSuggestGoal ||
+      draftAutoGoal !== baseAutoGoal ||
+      draftVerifyResponses !== baseVerifyResponses ||
+      draftCitationReflection !== baseCitationReflection ||
+      draftAutoToolCitations !== baseAutoToolCitations ||
+      draftVerifyResponseCriteria !== baseVerifyResponseCriteria ||
+      draftOutputFormatEnabled !== baseOutputFormatEnabled ||
+      draftOutputType !== baseOutputType ||
+      draftOutputSchema !== baseOutputSchema ||
+      draftOutputTemplate !== baseOutputTemplate ||
+      draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftProvider, draftModel, draftGitRepoUrl, draftPromptInjection, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftAutoGoal, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
-  const handleTriggerToggle = useCallback((job: ScheduledJob, active: boolean) => {
-    setScheduledJobs((prev) =>
-      prev.map((j) => (j.id === job.id ? { ...j, status: active ? "active" : "paused" } : j))
-    );
-    showSnackbar({
-      variant: "info",
-      title: `Trigger ${active ? "enabled" : "paused"}`,
-      description: "Persistence not wired yet",
-    });
-  }, [showSnackbar]);
+  const handleJobsChange = useCallback((updatedJobs: ScheduledJob[]) => {
+    setScheduledJobs(updatedJobs);
+  }, []);
 
   const handleToggleEnabled = useCallback(async (v: boolean) => {
     if (!agent || togglingEnabled) return;
@@ -279,20 +405,108 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     setSavingConfig(true);
     try {
       const nextConfig = { ...(agent.config ?? {}) } as Record<string, unknown>;
-      if (draftTools.subagents.length || draftTools.direct.length || draftTools.custom.length) {
+      if (draftTools.subagents.length || draftTools.direct.length || draftTools.custom.length || draftTools.gateway.length) {
         nextConfig.tools = draftTools;
       } else {
         delete nextConfig.tools;
-      }
-      if (draftGitRepoUrl) {
-        nextConfig.gitRepoUrl = draftGitRepoUrl;
-      } else {
-        delete nextConfig.gitRepoUrl;
       }
       if (draftPromptInjection) {
         nextConfig.promptInjection = draftPromptInjection;
       } else {
         delete nextConfig.promptInjection;
+      }
+      if (draftSandboxRepo) {
+        nextConfig.sandboxRepo = draftSandboxRepo;
+      } else {
+        delete nextConfig.sandboxRepo;
+      }
+      if (draftForceReadOnlySandbox) {
+        nextConfig.forceReadOnlySandbox = true;
+      } else {
+        delete nextConfig.forceReadOnlySandbox;
+      }
+      if (draftSbxGitRepos.length > 0) {
+        nextConfig.sbxGitRepos = draftSbxGitRepos;
+      } else {
+        delete nextConfig.sbxGitRepos;
+      }
+      nextConfig.product_id = draftResearchAgentProductId || null;
+      nextConfig.repository_id = draftResearchAgentRepositoryId || null;
+      delete nextConfig.RESEARCH_AGENT_PRODUCT_ID;
+      delete nextConfig.RESEARCH_AGENT_REPOSITORY_ID;
+      if (draftSuggestGoal) {
+        nextConfig.suggestGoal = true;
+      } else {
+        delete nextConfig.suggestGoal;
+      }
+      if (draftVerifyResponses) {
+        nextConfig.verifyResponses = true;
+        // Per-agent criteria only meaningful when verification is on.
+        if (draftVerifyResponseCriteria.trim()) {
+          nextConfig.verifyResponseCriteria = draftVerifyResponseCriteria.trim();
+        } else {
+          delete nextConfig.verifyResponseCriteria;
+        }
+      } else {
+        delete nextConfig.verifyResponses;
+        delete nextConfig.verifyResponseCriteria;
+      }
+      if (draftCitationReflection) {
+        nextConfig.citationReflection = true;
+      } else {
+        delete nextConfig.citationReflection;
+      }
+      if (draftCitationReflection) {
+        nextConfig.citationReflection = true;
+      } else {
+        delete nextConfig.citationReflection;
+      }
+      if (draftAutoToolCitations) {
+        nextConfig.autoToolCitations = true;
+      } else {
+        delete nextConfig.autoToolCitations;
+      }
+      if (draftAutoGoal) {
+        nextConfig.autoGoal = true;
+      } else {
+        delete nextConfig.autoGoal;
+      }
+      // Structured output. Parse + lightly validate here so the user gets an
+      // inline error instead of a backend 400 on save (the backend re-validates
+      // in agent-config-validation.ts).
+      if (draftOutputFormatEnabled) {
+        const template = draftOutputTemplate.trim();
+        // Split on comma OR newline; trim; drop blanks. Empty → no guard key.
+        const requireTools = draftOutputRequireTools
+          .split(/[\n,]/)
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0);
+        const gate = requireTools.length > 0 ? { requireToolsBeforeSubmit: requireTools } : {};
+        if (draftOutputType === "markdown") {
+          nextConfig.outputFormat = { type: "markdown", ...(template ? { template } : {}), ...gate };
+        } else {
+          if (!draftOutputSchema.trim()) {
+            showSnackbar({ variant: "error", title: "Add a JSON Schema for structured output, or turn it off" });
+            setSavingConfig(false);
+            return;
+          }
+          let parsedSchema: unknown;
+          try {
+            parsedSchema = JSON.parse(draftOutputSchema);
+          } catch (err) {
+            showSnackbar({ variant: "error", title: "Output schema is not valid JSON", description: err instanceof Error ? err.message : undefined });
+            setSavingConfig(false);
+            return;
+          }
+          if (!parsedSchema || typeof parsedSchema !== "object" || Array.isArray(parsedSchema) || typeof (parsedSchema as Record<string, unknown>)["type"] !== "string") {
+            showSnackbar({ variant: "error", title: 'Output schema must be a JSON Schema object with a top-level "type"' });
+            setSavingConfig(false);
+            return;
+          }
+          nextConfig.outputFormat = { type: "json", schema: parsedSchema as Record<string, unknown>, ...(template ? { template } : {}), ...gate };
+        }
+      } else {
+        delete nextConfig.outputFormat;
       }
       const activeTriggers = skillTriggers.filter((t) => t.toolName && t.skillSlug);
       if (activeTriggers.length > 0) {
@@ -308,6 +522,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
           systemPrompt: prompt,
           config: nextConfig,
           skills: draftSkillIds,
+          // In USER scope, knowledgeBase[] is ignored server-side AND the
+          // server clears any stored grants. Sending the array anyway is a
+          // no-op; we skip it to keep the payload honest.
+          ...(draftKbScope === "COLLECTIONS" ? { knowledgeBase: draftKbResources } : {}),
+          kbScope: draftKbScope,
         }),
       ];
 
@@ -337,7 +556,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftProvider, draftModel, draftGitRepoUrl, draftPromptInjection, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftAutoGoal, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const handleDeleteWorkflow = useCallback(async () => {
     if (!deleteWorkflowTarget) return;
@@ -412,6 +631,46 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       setPushing(null);
     }
   }, [agent, pushing, userId, showSnackbar]);
+
+  /**
+   * Clone the current agent. Owners/contributors/admins get an instant copy
+   * (server returns cloned=true) and we navigate to the new agent so they can
+   * pick a model before first run — the clone intentionally carries no model.
+   * Everyone else raises an approval request routed to the owner (cloned=false).
+   */
+  const doClone = useCallback(async (name: string) => {
+    if (!agent || cloning) return;
+    setCloning(true);
+    try {
+      const result = await cloneAgent(agent.slug, userId, name);
+      if (result.cloned) {
+        showSnackbar({
+          variant: "success",
+          title: `Cloned "${agent.name}"`,
+          description: "Your copy is ready — pick a model to start using it.",
+        });
+        setCloneDialogOpen(false);
+        navigate(`/v3/agents/${result.agent.slug}`);
+      } else {
+        showSnackbar({
+          variant: "success",
+          title: "Clone request sent",
+          description: `${agent.name}'s owner will review your request.`,
+        });
+        setCloneDialogOpen(false);
+      }
+    } catch (err) {
+      const isDuplicate = err instanceof ApiError && err.status === 409;
+      showSnackbar({
+        variant: isDuplicate ? "info" : "error",
+        title: isDuplicate ? "Request already pending" : "Clone failed",
+        description: err instanceof Error ? err.message : undefined,
+      });
+      if (isDuplicate) setCloneDialogOpen(false);
+    } finally {
+      setCloning(false);
+    }
+  }, [agent, cloning, userId, navigate, showSnackbar]);
 
   /**
    * Admin moderation — promote or demote an agent the viewer does NOT own.
@@ -496,11 +755,15 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
           onAdminPromote={() => setAdminConfirm("promote")}
           onAdminDemote={() => setAdminConfirm("demote")}
           adminBusy={adminBusy}
+          onClone={() => setCloneDialogOpen(true)}
+          cloning={cloning}
+          cloneNeedsApproval={!permissions?.canEdit}
         />
 
         <div className="flex flex-1 overflow-hidden">
           <AgentDetailLeftColumn
             agent={agent}
+            userId={userId}
             permissions={permissions}
             draftName={draftName}
             onDraftNameChange={setDraftName}
@@ -520,10 +783,50 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             draftSkillIds={draftSkillIds}
             onToggleSkill={toggleSkill}
             availableSkills={availableSkills}
+            draftKbResources={draftKbResources}
+            onDraftKbResourcesChange={setDraftKbResources}
+            draftKbScope={draftKbScope}
+            onDraftKbScopeChange={setDraftKbScope}
             skillTriggers={skillTriggers}
             onSkillTriggersChange={setSkillTriggers}
             draftPromptInjection={draftPromptInjection}
             onDraftPromptInjectionChange={setDraftPromptInjection}
+            draftSandboxRepo={draftSandboxRepo}
+            onDraftSandboxRepoChange={setDraftSandboxRepo}
+            sandboxRepoOptions={sandboxRepoOptions}
+            draftForceReadOnlySandbox={draftForceReadOnlySandbox}
+            onDraftForceReadOnlySandboxChange={setDraftForceReadOnlySandbox}
+            draftSbxGitRepos={draftSbxGitRepos}
+            onDraftSbxGitReposChange={setDraftSbxGitRepos}
+            sbxGitRepoOptions={sbxGitRepoOptions}
+            draftResearchAgentProductId={draftResearchAgentProductId}
+            onDraftResearchAgentProductIdChange={setDraftResearchAgentProductId}
+            researchAgentProductOptions={researchAgentProductOptions}
+            draftResearchAgentRepositoryId={draftResearchAgentRepositoryId}
+            onDraftResearchAgentRepositoryIdChange={setDraftResearchAgentRepositoryId}
+            researchAgentRepositoryOptions={researchAgentRepositoryOptions}
+            draftSuggestGoal={draftSuggestGoal}
+            onDraftSuggestGoalChange={setDraftSuggestGoal}
+            draftVerifyResponses={draftVerifyResponses}
+            onDraftVerifyResponsesChange={setDraftVerifyResponses}
+            draftCitationReflection={draftCitationReflection}
+            onDraftCitationReflectionChange={setDraftCitationReflection}
+            draftAutoToolCitations={draftAutoToolCitations}
+            onDraftAutoToolCitationsChange={setDraftAutoToolCitations}
+            draftVerifyResponseCriteria={draftVerifyResponseCriteria}
+            onDraftVerifyResponseCriteriaChange={setDraftVerifyResponseCriteria}
+            draftAutoGoal={draftAutoGoal}
+            onDraftAutoGoalChange={setDraftAutoGoal}
+            draftOutputFormatEnabled={draftOutputFormatEnabled}
+            onDraftOutputFormatEnabledChange={setDraftOutputFormatEnabled}
+            draftOutputType={draftOutputType}
+            onDraftOutputTypeChange={setDraftOutputType}
+            draftOutputSchema={draftOutputSchema}
+            onDraftOutputSchemaChange={setDraftOutputSchema}
+            draftOutputTemplate={draftOutputTemplate}
+            onDraftOutputTemplateChange={setDraftOutputTemplate}
+            draftOutputRequireTools={draftOutputRequireTools}
+            onDraftOutputRequireToolsChange={setDraftOutputRequireTools}
             onOpenToolPicker={() => setPickerOpen(true)}
             onOpenSkillPicker={() => setSkillPickerOpen(true)}
             onRequestRenameHandle={() => setRenameOpen(true)}
@@ -536,8 +839,9 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             activeTab={activeTab}
             onTabChange={setActiveTab}
             scheduledJobs={scheduledJobs}
-            onToggleJob={handleTriggerToggle}
+            onJobsChange={handleJobsChange}
             agentStats={agentStats}
+            shareCount={shares.length}
             workflows={chainWorkflows}
             workflowsLoading={chainLoading}
             onCreateWorkflow={() => {
@@ -628,6 +932,15 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
           showSnackbar({ variant: "success", title: `Renamed to "${newHandle}"` });
           navigate(`/v3/agents/${newHandle}`, { replace: true });
         }}
+      />
+
+      <CloneAgentDialog
+        open={cloneDialogOpen}
+        onOpenChange={setCloneDialogOpen}
+        sourceName={agent.name}
+        needsApproval={!permissions?.canEdit}
+        submitting={cloning}
+        onConfirm={(name) => void doClone(name)}
       />
     </>
   );

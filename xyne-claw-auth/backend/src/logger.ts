@@ -1,45 +1,20 @@
-import crypto from "node:crypto";
-
 /**
- * Simple structured logger with trace ID support.
- * Every log line includes the traceId so you can follow a request
- * across webhook → run → claw → result in Grafana.
+ * Structured JSON logging for xyne-claw-auth.
+ *
+ * Delegates to the shared logger in xyne-claw-shared so the whole claw stack
+ * emits one identical JSON shape (parsed natively by VictoriaLogs). The
+ * `createLogger(component, traceId)` API is preserved for existing call sites;
+ * new code can also import `logger` / `loggerContext` directly.
+ *
+ * `service` is taken from SERVICE_NAME (set to "xyne-claw-auth" in this
+ * deployment's env; also defaulted in main.ts for local dev).
  */
-
-export function createTraceId(): string {
-  return crypto.randomUUID().slice(0, 8);
-}
-
-export interface Logger {
-  info(message: string, data?: Record<string, unknown>): void;
-  warn(message: string, data?: Record<string, unknown>): void;
-  error(message: string, data?: Record<string, unknown>): void;
-}
-
-export function createLogger(component: string, traceId: string): Logger {
-  const prefix = `[${component}] [${traceId}]`;
-
-  return {
-    info(message: string, data?: Record<string, unknown>) {
-      if (data) {
-        console.log(`${prefix} ${message}`, JSON.stringify(data));
-      } else {
-        console.log(`${prefix} ${message}`);
-      }
-    },
-    warn(message: string, data?: Record<string, unknown>) {
-      if (data) {
-        console.warn(`${prefix} ${message}`, JSON.stringify(data));
-      } else {
-        console.warn(`${prefix} ${message}`);
-      }
-    },
-    error(message: string, data?: Record<string, unknown>) {
-      if (data) {
-        console.error(`${prefix} ${message}`, JSON.stringify(data));
-      } else {
-        console.error(`${prefix} ${message}`);
-      }
-    },
-  };
-}
+export {
+  logger,
+  loggerContext,
+  createLogger,
+  createTraceId,
+  withLogContext,
+  setLogContext,
+} from "xyne-claw-shared";
+export type { LogContext, Logger } from "xyne-claw-shared";

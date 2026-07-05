@@ -6,6 +6,10 @@ import type { CredentialField } from "../mcp/types.js";
 import { getCredentialFieldsByServerType } from "../mcp/connector-definitions.js";
 import { getRequesterId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
+import { isOAuthServer } from "../lib/oauth-server-types.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("servers");
 
 /**
  * Diff two connector-definition snapshots and return only the fields that
@@ -74,6 +78,20 @@ function isAbsoluteHttpUrl(value: string): boolean {
   }
 }
 
+// A stdio connector's `cmd` is spawned by the gateway. Restrict it to a vetted
+// set of package launchers so a registered connector can't be a direct shell
+// (the prior gap: cmd="bash", args=["-c","<reverse shell>"] was accepted and
+// spawned verbatim). Shells, interpreters invoked as a bare command, and any
+// absolute/relative path are rejected. NOTE: this is a launcher allow-list, not
+// a full per-binary registry — `node -e` / `python -c` style payloads are still
+// expressible by an authenticated registrant, so /servers also requires a real
+// session (requireUserAuth) and connector publishing stays admin-gated.
+const ALLOWED_STDIO_CMDS = new Set<string>([
+  "npx", "node", "npm", "pnpm", "bunx", "bun",
+  "uvx", "uv", "python", "python3",
+  "deno", "mcp-remote", "docker",
+]);
+
 function validateConnectorConfig(input: {
   transport: "stdio" | "http";
   launchConfigTemplate?: Prisma.InputJsonValue | undefined;
@@ -86,6 +104,17 @@ function validateConnectorConfig(input: {
     const args = launch["args"];
     if (typeof cmd !== "string" || cmd.trim().length === 0) return "Launch Config JSON must include non-empty cmd";
     if (!Array.isArray(args)) return "Launch Config JSON must include args array";
+
+    // Reject anything outside the vetted launcher allow-list, and any cmd that
+    // carries a path separator (e.g. /bin/bash, ./run.sh) — only a bare,
+    // allow-listed launcher name is permitted.
+    const cmdName = cmd.trim();
+    if (cmdName.includes("/") || cmdName.includes("\\")) {
+      return `Launch Config cmd must be a bare launcher name, not a path: "${cmdName}"`;
+    }
+    if (!ALLOWED_STDIO_CMDS.has(cmdName)) {
+      return `Launch Config cmd "${cmdName}" is not an allowed launcher. Allowed: ${[...ALLOWED_STDIO_CMDS].join(", ")}`;
+    }
 
     // Guard common pitfall: mcp-remote target as relative path (e.g. /crm/v2)
     const usesMcpRemote = (cmd === "mcp-remote") || args.some((a) => String(a) === "mcp-remote");
@@ -124,9 +153,13 @@ router.get("/", async (req: Request, res: Response) => {
       orderBy: { name: "asc" },
     });
     const visible = servers.filter((s: any) => isVisibleToUser(parseConnectorMeta(s.connectorMeta), requesterId));
-    res.json({ success: true, data: visible });
+    // Decorate with `oauth` so the UI can tell OAuth connectors apart (they
+    // need the browser flow, can't be pinned credential-less) without
+    // hardcoding a google/microsoft list in the frontend.
+    const decorated = visible.map((s: any) => ({ ...s, oauth: isOAuthServer(s.type, s.connectorMeta) }));
+    res.json({ success: true, data: decorated });
   } catch (err) {
-    console.error("[servers] list error:", err);
+    log.error("[servers] list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -172,6 +205,25 @@ router.post("/", async (req: Request, res: Response) => {
 
     const existingType = await isValidServerType(type);
     const effectiveTransport = transport === "http" ? "http" : "stdio";
+
+    // HARD BLOCK: stdio connectors are code-only. A stdio launchConfigTemplate
+    // becomes a child process spawned INSIDE the claw-auth gateway (the trusted
+    // tier holding the platform's secrets — see mcp/runner.ts). Allow-listing
+    // `cmd` to npx/node/python/docker is NOT a boundary: `npx <evil-pkg>`,
+    // `node -e`, `python -c`, `docker run` all execute arbitrary code. So no
+    // stdio launch command may be registered via the API at all — new stdio
+    // connectors must be added as a code-reviewed static adapter under
+    // src/mcp/adapters/. (The resolver also ignores any DB-stored stdio launch
+    // command at spawn time, so a pre-existing or injected row can't run either.)
+    // Self-serve users may still register `http` (remote) MCP connectors, which
+    // never spawn a local process.
+    if (effectiveTransport === "stdio" && launchConfigTemplate) {
+      res.status(403).json({
+        success: false,
+        error: "stdio connectors cannot be registered via the API. Add a code-reviewed static adapter under src/mcp/adapters/, or register an http (remote) MCP connector instead.",
+      });
+      return;
+    }
 
     if (!existingType && !launchConfigTemplate && !httpConfigTemplate) {
       res.status(400).json({ success: false, error: "New connector types require launch/http config templates" });
@@ -393,7 +445,7 @@ router.post("/", async (req: Request, res: Response) => {
     });
     res.status(201).json({ success: true, data: server });
   } catch (err) {
-    console.error("[servers] create error:", err);
+    log.error("[servers] create error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -431,7 +483,7 @@ router.post("/:id/request-publish", async (req: Request<{ id: string }>, res: Re
     });
     res.json({ success: true, data: updated });
   } catch (err) {
-    console.error("[servers] request-publish error:", err);
+    log.error("[servers] request-publish error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -442,7 +494,7 @@ router.get("/publish-requests", requireClawAdmin, async (_req: Request, res: Res
     const pending = servers.filter((s: any) => parseConnectorMeta(s.connectorMeta).publishStatus === "pending");
     res.json({ success: true, data: pending });
   } catch (err) {
-    console.error("[servers] publish-requests list error:", err);
+    log.error("[servers] publish-requests list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -474,7 +526,7 @@ router.post("/publish-requests/:id/approve", requireClawAdmin, async (req: Reque
     });
     res.json({ success: true, data: updated });
   } catch (err) {
-    console.error("[servers] approve publish error:", err);
+    log.error("[servers] approve publish error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -507,7 +559,7 @@ router.post("/publish-requests/:id/reject", requireClawAdmin, async (req: Reques
     });
     res.json({ success: true, data: updated });
   } catch (err) {
-    console.error("[servers] reject publish error:", err);
+    log.error("[servers] reject publish error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -530,7 +582,7 @@ router.get("/edit-requests", requireClawAdmin, async (_req: Request, res: Respon
     });
     res.json({ success: true, data: requests });
   } catch (err) {
-    console.error("[servers] list edit-requests error:", err);
+    log.error("[servers] list edit-requests error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -603,7 +655,7 @@ router.post("/edit-requests/:id/approve", requireClawAdmin, async (req: Request<
 
     res.json({ success: true, data: { editRequestId: editRequest.id, server: after } });
   } catch (err) {
-    console.error("[servers] approve edit-request error:", err);
+    log.error("[servers] approve edit-request error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -641,7 +693,7 @@ router.post("/edit-requests/:id/reject", requireClawAdmin, async (req: Request<{
 
     res.json({ success: true });
   } catch (err) {
-    console.error("[servers] reject edit-request error:", err);
+    log.error("[servers] reject edit-request error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -684,7 +736,7 @@ router.post("/edit-requests/:id/cancel", async (req: Request<{ id: string }>, re
 
     res.json({ success: true });
   } catch (err) {
-    console.error("[servers] cancel edit-request error:", err);
+    log.error("[servers] cancel edit-request error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -693,33 +745,49 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
   try {
     const id = req.params.id;
     const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "x-user-id header is required" });
+      return;
+    }
     // Snapshot before delete so the audit row preserves the connector shape
     // for forensic restore. Without this the row vanishes with no trail.
     const existing = await prisma.mcpServer.findUnique({ where: { id } });
-    await prisma.mcpServer.delete({ where: { id } });
-    if (existing) {
-      await writeAuditLog({
-        ...(requesterId ? { actorUserId: requesterId } : {}),
-        eventType: "MCP_CONNECTOR_DELETED",
-        targetId: existing.id,
-        description: `Deleted MCP connector definition ${existing.type} (${existing.name})`,
-        metadata: {
-          type: existing.type,
-          name: existing.name,
-          transport: existing.transport,
-          launchConfigTemplate: existing.launchConfigTemplate,
-          httpConfigTemplate: existing.httpConfigTemplate,
-          credentialForm: existing.credentialForm,
-        },
-      });
+    if (!existing) {
+      res.status(404).json({ success: false, error: "Server not found" });
+      return;
     }
+    // Authorization: only the connector's owner or a CLAW_ADMIN may delete it.
+    // Without this any authenticated user could delete global/shared
+    // connectors (slack, grafana, …) and then re-register the type as their
+    // own with an attacker-chosen config.
+    const existingMeta = parseConnectorMeta(existing.connectorMeta);
+    const requesterIsAdmin = await isClawAdmin(requesterId);
+    if (!requesterIsAdmin && existingMeta.ownerUserId !== requesterId) {
+      res.status(403).json({ success: false, error: "Only the connector owner or a CLAW_ADMIN can delete it" });
+      return;
+    }
+    await prisma.mcpServer.delete({ where: { id } });
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "MCP_CONNECTOR_DELETED",
+      targetId: existing.id,
+      description: `Deleted MCP connector definition ${existing.type} (${existing.name})`,
+      metadata: {
+        type: existing.type,
+        name: existing.name,
+        transport: existing.transport,
+        launchConfigTemplate: existing.launchConfigTemplate,
+        httpConfigTemplate: existing.httpConfigTemplate,
+        credentialForm: existing.credentialForm,
+      },
+    });
     res.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "P2025") {
       res.status(404).json({ success: false, error: "Server not found" });
       return;
     }
-    console.error("[servers] delete error:", err);
+    log.error("[servers] delete error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

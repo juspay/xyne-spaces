@@ -8,8 +8,11 @@
 
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { getAllCustomTools, parseToolsConfig, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
+import { getAllCustomTools, parseToolsConfig, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
 import { SERVER } from "./config.js";
+
+import { createLogger } from "./logger.js";
+const log = createLogger("custom-tools");
 
 interface Attachment {
   fileName: string;
@@ -42,15 +45,30 @@ const ATTACHMENT_GLOBAL_RE = /\[ATTACHMENT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]
 const INSPECT_RE = /^\[INSPECT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]+)$/;
 const SLIDE_JSON_RE = /SLIDE_JSON_START\s*([\s\S]+?)\s*SLIDE_JSON_END/;
 
+// PLATFORM_ONLY_CONFIG_KEYS is imported from xyne-claw-shared (single source of
+// truth — also enforced at the xyne-claw-auth /run boundary). See that module
+// for why each key must resolve from env only.
+
 function resolveToolConfig(
   toolConfigSchema: Record<string, { default: string }> | undefined,
   agentConfig: Record<string, unknown>,
 ): Record<string, string> {
   const resolved: Record<string, string> = {};
+  for (const [key, value] of Object.entries(agentConfig)) {
+    // Platform-only keys must NEVER come from agentConfig — not even keys a tool
+    // doesn't declare in its schema (the second loop below only guards declared
+    // keys). Skipping them here forces env/default sourcing and closes the
+    // secret-exfil / SSRF / GIT_SSH_COMMAND-injection bypass.
+    if (PLATFORM_ONLY_CONFIG_KEYS.has(key)) continue;
+    if (typeof value === "string") resolved[key] = value;
+  }
   if (!toolConfigSchema) return resolved;
   for (const [key, field] of Object.entries(toolConfigSchema)) {
     const agentVal = agentConfig[key];
-    if (typeof agentVal === "string" && agentVal.length > 0) {
+    // Platform-only keys can never be overridden from agentConfig — env/default
+    // only — so a hostile agent config can't redirect internal calls or
+    // exfiltrate platform secrets.
+    if (!PLATFORM_ONLY_CONFIG_KEYS.has(key) && typeof agentVal === "string" && agentVal.length > 0) {
       resolved[key] = agentVal;
     } else if (process.env[key]) {
       resolved[key] = process.env[key]!;
@@ -77,6 +95,9 @@ async function signWriteAction(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${sessionToken}`,
+      // S2S key alongside the run's session token — claw-auth's
+      // /sessions/:id/* routes require both (see routes/mcp.ts).
+      "x-s2s-key": SERVER.s2sKey,
     },
     body: JSON.stringify({ serverType, tool, params }),
   });
@@ -116,6 +137,7 @@ export function loadCustomTools(
   s2sKey?: string,
   sessionToken?: string,
   parentToolCallId?: string,
+  providerConfig?: ToolExecutionContext["providerConfig"],
 ): CustomToolsResult {
   const agentSlug = meta?.["agentSlug"];
   const userId = meta?.["userId"] ?? "";
@@ -129,25 +151,40 @@ export function loadCustomTools(
   // and Microsoft, which only need their OAuth token to be available.
   const toolsConfig = parseToolsConfig(agentConfig ?? undefined);
   const selectedCustom = new Set(toolsConfig?.custom ?? []);
-  const hasGoogleSelected = [...selectedCustom].some((s) => s.startsWith("google-"));
-  const hasMicrosoftSelected = [...selectedCustom].some((s) => s.startsWith("microsoft-"));
+  // Google + Microsoft are no longer loaded as in-process custom tools — they
+  // run as claw-auth-hosted stdio MCP connectors (type "google"/"microsoft"),
+  // resolved through the normal MCP credential path. See mcp/servers/google-server.ts
+  // and mcp/adapters/google.ts in xyne-claw-auth. The custom:google/custom:microsoft
+  // defs are filtered out below.
+  const hasResearchAgentSelected = [...selectedCustom].some((s) =>
+    s === "query-codebase" || s === "review-pull-request" || s.startsWith("research-agent-"),
+  );
   const hasWorkloadSelected = [...selectedCustom].some((s) => s.startsWith("workload-"));
+  // Sandbox tools (sandbox-create / sandbox-run / sandbox-write-file /
+  // sandbox-pw-* / etc.) mount directly on the parent. The sandbox subagent
+  // was removed (2026-06-14) and every agent that used it was migrated to list
+  // the sandbox-* slugs in `tools.custom` — so selection is now simply "any
+  // sandbox-* slug present." (The old `tools.subagents: ["sandbox"]` OR-branch
+  // is gone; nothing writes that anymore.)
+  const hasSandboxSelected = [...selectedCustom].some((s) => s.startsWith("sandbox-"));
 
-  // Filter tools by agent — pgm and research-agent stay slug-locked because
-  // they assume a specific agent environment; google/microsoft are allowed for
-  // any agent whose config selects at least one of those tools (or the
-  // built-in google-agent / microsoft-agent slugs for backward compat).
+  // Filter tools by agent — pgm stays slug-locked because it assumes a
+  // specific agent environment; google/microsoft/research-agent are allowed
+  // for any agent whose config selects at least one of those tools (or the
+  // built-in agent slugs for backward compat).
   const customTools = allCustomTools.filter((ct) => {
     let allowed = true;
     if (ct.source === "custom:pgm") allowed = agentSlug === "pgm-agent";
-    else if (ct.source === "custom:google") allowed = agentSlug === "google-agent" || hasGoogleSelected;
-    else if (ct.source === "custom:microsoft") allowed = agentSlug === "microsoft-agent" || hasMicrosoftSelected;
-    else if (ct.source === "custom:research-agent") allowed = agentSlug === "research-agent" || agentSlug === "ask-ai";
+    // Google + Microsoft migrated to claw-auth stdio MCP connectors — never
+    // load them as in-process custom tools anymore.
+    else if (ct.source === "custom:google" || ct.source === "custom:microsoft") allowed = false;
+    else if (ct.source === "custom:research-agent") allowed = agentSlug === "research-agent" || agentSlug === "ask-ai" || hasResearchAgentSelected;
     // web-search / deep-research are unrestricted — any agent gets them.
     // Removed the prior agentSlug + config-flag gate per request.
     else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai";
     else if (ct.source === "custom:workload") allowed = hasWorkloadSelected || agentSlug === "workload-agent";
-    
+    else if (ct.source === "custom:sandbox") allowed = hasSandboxSelected;
+
     return allowed;
   });
   const allAttachments: Attachment[] = [];
@@ -163,11 +200,23 @@ export function loadCustomTools(
   // ran or none of them included trailing text.
   let lastAttachmentSummary: string | null = null;
 
+  // Pin the agent's configured sandbox repo (agent.config.sandboxRepo) into the
+  // tool meta. sandbox-repo-setup reads context.meta.sandboxRepo and, when set,
+  // forces THAT repo regardless of the repoName the LLM passes — making the repo
+  // selection deterministic (set once in the agent UI, enforced here).
+  const pinnedSandboxRepo = typeof agentConfig?.["sandboxRepo"] === "string"
+    ? (agentConfig["sandboxRepo"] as string).trim()
+    : "";
+  const toolMeta: Record<string, string> | undefined = (meta || pinnedSandboxRepo)
+    ? { ...(meta ?? {}), ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}) }
+    : undefined;
+
   const tools = customTools.map((ct) => {
     const resolvedConfig = resolveToolConfig(ct.configSchema, config);
     const context: ToolExecutionContext = {
       config: resolvedConfig,
-      ...(meta ? { meta } : {}),
+      ...(toolMeta ? { meta: toolMeta } : {}),
+      ...(providerConfig ? { providerConfig } : {}),
       ...(researchContext ? { researchContext } : {}),
       pendingQuestions: allPendingQuestions,
       pendingResponses: allPendingResponses,
@@ -204,14 +253,14 @@ export function loadCustomTools(
             const serverType = ct.source.replace("custom:", "");
             const signedAction = await signWriteAction(sessionId, sessionToken, serverType, ct.slug, params as Record<string, unknown>);
             allPendingActions.push(signedAction);
-            console.log(`[custom-tool] ${ct.slug} is a write tool — queued for approval`);
+            log.info(`[custom-tool] ${ct.slug} is a write tool — queued for approval`);
             return {
               content: [{ type: "text" as const, text: `Action queued for user approval: ${ct.name}. The user will see an Approve/Decline prompt.` }],
               details: {},
             };
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
-            console.error(`[custom-tool] ${ct.slug} failed to sign write action:`, errMsg);
+            log.error(`[custom-tool] ${ct.slug} failed to sign write action:`, errMsg);
             return {
               content: [{ type: "text" as const, text: `Error: Could not queue action for approval — ${errMsg}` }],
               details: {},
@@ -224,10 +273,10 @@ export function loadCustomTools(
           result = await ct.execute(params as Record<string, unknown>, toolContext);
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.error(`[custom-tool] ${ct.slug} threw:`, errMsg);
+          log.error(`[custom-tool] ${ct.slug} threw:`, errMsg);
           result = `Error: ${errMsg}`;
         }
-        console.log(`[custom-tool] ${ct.slug} result: ${result.slice(0, 300)}`);
+        log.info(`[custom-tool] ${ct.slug} result: ${result.slice(0, 300)}`);
 
         // INSPECT marker — image goes into agent's content for self-verification
         // but is NOT pushed to allAttachments (user does not receive the file).
@@ -239,7 +288,7 @@ export function loadCustomTools(
           const mimeType = inspectMatch[2]!;
           const data = inspectMatch[3]!;
           const isImage = mimeType.startsWith("image/");
-          console.log(`[inspect] ${ct.slug} fileName=${fileName} mime=${mimeType} bytes=${data.length} (NOT delivered to user)`);
+          log.info(`[inspect] ${ct.slug} fileName=${fileName} mime=${mimeType} bytes=${data.length} (NOT delivered to user)`);
           if (isImage) {
             return {
               content: [
@@ -283,7 +332,7 @@ export function loadCustomTools(
               try {
                 metadata["slideJson"] = JSON.parse(slideMatch[1]);
               } catch (err) {
-                console.warn(`[custom-tool] ${ct.slug} slide JSON parse failed:`, err instanceof Error ? err.message : err);
+                log.warn(`[custom-tool] ${ct.slug} slide JSON parse failed:`, err instanceof Error ? err.message : err);
               }
             }
           }
@@ -295,12 +344,12 @@ export function loadCustomTools(
             ...(Object.keys(metadata).length ? { metadata } : {}),
           };
           allAttachments.push(attachment);
-          console.log(
+          log.info(
             `[attachment] +1 ${ct.slug} fileName=${attachment.fileName} mime=${attachment.mimeType} ` +
               `bytes=${attachment.data.length} total=${allAttachments.length}`,
           );
           try { onAttachment?.(attachment); } catch (err) {
-            console.warn(`[custom-tool] ${ct.slug} onAttachment callback threw:`, err instanceof Error ? err.message : err);
+            log.warn(`[custom-tool] ${ct.slug} onAttachment callback threw:`, err instanceof Error ? err.message : err);
           }
           // Capture the user-provided summary (trailing text). Stripped of
           // any SLIDE_JSON block so the fallback text doesn't include
@@ -343,12 +392,12 @@ export function loadCustomTools(
             const attachment: Attachment = { fileName, mimeType, data };
             allAttachments.push(attachment);
             fileNames.push(fileName);
-            console.log(
+            log.info(
               `[attachment] +1 ${ct.slug} fileName=${fileName} mime=${mimeType} ` +
                 `bytes=${data.length} total=${allAttachments.length}`,
             );
             try { onAttachment?.(attachment); } catch (err) {
-              console.warn(`[custom-tool] ${ct.slug} onAttachment callback threw:`, err instanceof Error ? err.message : err);
+              log.warn(`[custom-tool] ${ct.slug} onAttachment callback threw:`, err instanceof Error ? err.message : err);
             }
             if (mimeType.startsWith("image/")) {
               imageContent.push({ type: "image" as const, data, mimeType });

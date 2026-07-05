@@ -3,16 +3,24 @@ import { skillRepository, agentRequestRepository } from "../repositories/index.j
 import { getRequesterId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("skills");
+
 const router = Router();
 
-// List skills: global + user's own personal skills
+// List skills: global + user's own personal skills (admins see ALL)
 router.get("/", async (req: Request, res: Response) => {
   try {
-    const userId = req.query["userId"] as string | undefined;
-    const skills = await skillRepository.listVisible(userId);
+    const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
+    const authedUserId = String(req.headers["x-user-id"] ?? "");
+    const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+    const skills = await skillRepository.listVisible({
+      ...(scopeUserId ? { userId: scopeUserId } : {}),
+      isAdmin: admin,
+    });
     res.json({ success: true, data: skills });
   } catch (err) {
-    console.error("[skills] list error:", err);
+    log.error("[skills] list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -27,7 +35,7 @@ router.get("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     }
     res.json({ success: true, data: skill });
   } catch (err) {
-    console.error("[skills] get error:", err);
+    log.error("[skills] get error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -90,7 +98,7 @@ router.post("/", async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, data: skill });
   } catch (err) {
-    console.error("[skills] create error:", err);
+    log.error("[skills] create error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -130,7 +138,7 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     const skill = await skillRepository.update(req.params.slug, data);
     res.json({ success: true, data: skill });
   } catch (err) {
-    console.error("[skills] update error:", err);
+    log.error("[skills] update error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -161,7 +169,7 @@ router.delete("/:slug", async (req: Request<{ slug: string }>, res: Response) =>
       res.status(404).json({ success: false, error: "Skill not found" });
       return;
     }
-    console.error("[skills] delete error:", err);
+    log.error("[skills] delete error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -185,7 +193,7 @@ router.post("/:slug/promote", requireClawAdmin, async (req: Request<{ slug: stri
 
     res.json({ success: true, data: updated });
   } catch (err) {
-    console.error("[skills] promote error:", err);
+    log.error("[skills] promote error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -209,7 +217,7 @@ router.post("/:slug/demote", requireClawAdmin, async (req: Request<{ slug: strin
 
     res.json({ success: true, data: updated });
   } catch (err) {
-    console.error("[skills] demote error:", err);
+    log.error("[skills] demote error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -246,7 +254,7 @@ router.post("/:slug/request", async (req: Request<{ slug: string }>, res: Respon
 
     res.status(201).json({ success: true, data: request });
   } catch (err) {
-    console.error("[skills] request error:", err);
+    log.error("[skills] request error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -289,7 +297,7 @@ router.get("/:slug/files", async (req: Request<{ slug: string }>, res: Response)
       })),
     });
   } catch (err) {
-    console.error("[skills] list files error:", err);
+    log.error("[skills] list files error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -318,7 +326,7 @@ router.get("/:slug/files/:fileId", async (req: Request<{ slug: string; fileId: s
       },
     });
   } catch (err) {
-    console.error("[skills] get file error:", err);
+    log.error("[skills] get file error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -393,7 +401,7 @@ router.put("/:slug/files", async (req: Request<{ slug: string }>, res: Response)
       })),
     });
   } catch (err) {
-    console.error("[skills] replace files error:", err);
+    log.error("[skills] replace files error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

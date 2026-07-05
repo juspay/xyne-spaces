@@ -29,6 +29,15 @@ const SLUG_FROM_NAME = (name: string): string =>
 
 const SLUG_VALID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
+/** A connector can be "pinned" to the agent with no credentials when it
+ *  publishes no credential schema AND isn't an OAuth connector — e.g. an HTTP
+ *  connector whose token is baked into its httpConfigTemplate, or a no-auth
+ *  server. The `oauth` flag is set by the backend (canonical OAuth set /
+ *  connectorMeta.authMethod), so the frontend doesn't hardcode a list. */
+function canPinWithoutCreds(server: McpServer, fieldCount: number): boolean {
+  return fieldCount === 0 && server.oauth !== true;
+}
+
 /** Identifies a row in editing mode. `slug: null` means "creating a new
  *  instance of this server type" (allow slug + displayName edits). Editing
  *  an existing instance has the row's slug here and locks the slug field. */
@@ -405,6 +414,7 @@ export function AgentMcpTabV3({ agentSlug, userId, canEdit }: Props) {
                             onSave={save}
                             onCancel={cancelEdit}
                             ctaLabel="Update credentials"
+                            allowEmptyPin={canPinWithoutCreds(server, fields.length)}
                           />
                         )}
                       </div>
@@ -474,6 +484,7 @@ export function AgentMcpTabV3({ agentSlug, userId, canEdit }: Props) {
                       onSave={save}
                       onCancel={cancelEdit}
                       ctaLabel={isFirstInstance ? "Connect" : "Save instance"}
+                      allowEmptyPin={canPinWithoutCreds(server, fields.length)}
                     />
                   </div>
                 );
@@ -645,6 +656,7 @@ function EditForm({
   onSave,
   onCancel,
   ctaLabel,
+  allowEmptyPin = false,
 }: {
   fields: CredentialField[];
   draft: Record<string, string>;
@@ -653,11 +665,18 @@ function EditForm({
   onSave: () => void;
   onCancel: () => void;
   ctaLabel: string;
+  /** When true, a no-field connector can still be saved (pinned) with empty
+   *  credentials — for credential-less, non-OAuth connectors. */
+  allowEmptyPin?: boolean;
 }) {
   return (
     <div className="mt-3">
       {fields.length === 0 ? (
-        <p className="text-xs text-xyne-fg-muted">No credential schema published for this MCP. Skip for now.</p>
+        <p className="text-xs text-xyne-fg-muted">
+          {allowEmptyPin
+            ? "This connector needs no credentials — pin it to the agent."
+            : "No credential schema published for this MCP. Skip for now."}
+        </p>
       ) : (
         <div className="space-y-2">
           {fields.map((field) => (
@@ -682,7 +701,7 @@ function EditForm({
       <div className="mt-3 flex gap-2">
         <button
           onClick={onSave}
-          disabled={saving || fields.length === 0}
+          disabled={saving || (fields.length === 0 && !allowEmptyPin)}
           className="rounded bg-xyne-fg-primary px-3 py-1 text-xs font-medium text-xyne-surface transition hover:bg-xyne-surface-elevated disabled:opacity-50"
         >
           {saving ? "Saving…" : ctaLabel}

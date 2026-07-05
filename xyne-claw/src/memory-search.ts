@@ -10,6 +10,10 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import type { RecalledMemory } from "xyne-claw-shared";
 import { HINDSIGHT, SERVER } from "./config.js";
+import { isDigitalTwinAgent } from "./memory.js";
+
+import { createLogger } from "./logger.js";
+const log = createLogger("memory-search");
 
 const MAX_LIMIT = 12;
 const MIN_LIMIT = 1;
@@ -82,7 +86,10 @@ export function buildMemorySearchTool(
       // is the default-everywhere agent and does NOT get personal memory —
       // routing every assistant call through user recall would be wasteful
       // and noisy for the many quick general queries it handles.
-      const isDigitalTwin = agentSlug === "digital-twin";
+      // Keyed on the bank id (not the raw slug) so sanitization collisions
+      // like "digital--twin" can't reach the twin bank ungated — see
+      // isDigitalTwinAgent in memory.ts.
+      const isDigitalTwin = isDigitalTwinAgent(agentSlug);
       const tags = isDigitalTwin
         ? [`user:${userId}`]
         : subsystem
@@ -96,7 +103,19 @@ export function buildMemorySearchTool(
           tags,
           maxTokens: limit * 250,
         });
-        const trimmed = hits.slice(0, limit);
+        // AUTHORITATIVE privacy filter for the digital-twin bank — do NOT trust
+        // the provider's tag filter. Hindsight over-matches tag queries
+        // (incident 2026-05-25: returns ALL bank memories regardless of the tag
+        // passed). In the twin bank the `user:` tag is the ONLY thing separating
+        // users, so re-filter in JS by the requester's tag before anything
+        // reaches the model. Mirrors memory.ts:recall — every Memory-tab read
+        // already does this; the agent recall path must too. (Non-twin/shared
+        // banks hold agent knowledge, not personal data — left as provider-filtered
+        // to avoid changing their recall behaviour.)
+        const scoped = isDigitalTwin
+          ? hits.filter((m) => (m.tags ?? []).includes(`user:${userId}`))
+          : hits;
+        const trimmed = scoped.slice(0, limit);
 
         if (sessionId) {
           // Fire-and-forget: POST recall hits to claw-auth so the Memory tab's
@@ -125,7 +144,7 @@ export function buildMemorySearchTool(
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[memory-search] recall failed agent=${agentSlug} sessionId=${sessionId}: ${msg}`);
+        log.warn(`[memory-search] recall failed agent=${agentSlug} sessionId=${sessionId}: ${msg}`);
         return {
           content: [{ type: "text" as const, text: `Memory search failed: ${msg}` }],
           details: { error: true },

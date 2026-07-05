@@ -27,7 +27,7 @@ model User {
   createdChainBindings  ChannelAgentChainBinding[] @relation("CreatedChainBindings")
 
   /// Digital Twin opt-in. Pipeline (backfill + daily curator + recall) is fully
-  /// dormant when false — nothing about this user's Spaces data gets read.
+/// dormant when false — nothing about this user's Spaces data gets read.
   digitalTwinEnabled       Boolean    @default(false)
   digitalTwinEnabledAt     DateTime?
   /// Optional string appended to the end of every Digital Twin reply
@@ -35,6 +35,12 @@ model User {
   /// Typical use: disclaimer ("— sent via Digital Twin"), contact line,
   /// or a "may contain mistakes" footer.
   digitalTwinResponseSuffix String?
+  /// Per-user memory approval mode. "manual" preserves the existing
+  /// review queue; "auto" lets the curator retain high-confidence
+  /// candidates immediately while falling back to pending on retain failure.
+  digitalTwinMemoryApprovalMode String @default("manual")
+  /// Minimum curator confidence required when auto-approval is enabled.
+  digitalTwinMemoryAutoApproveMinScore Float @default(0.9)
   /// Per-source backfill state. JSON shape:
   ///   { messages: { from, to, cursor, complete },
   ///     calls:    { from, to, cursor, complete },
@@ -133,6 +139,22 @@ model AgentChainWorkflow {
   /// bindings are opened to all users (userId="*"). Set on approval of a
   /// WorkflowGlobalRequest.
   global          Boolean                   @default(false)
+  /// JSON array of trigger entries. Each entry:
+  /// { id: string, type: string, channels: [{ channelId, spacesAutomationId }] }
+  triggers        Json                      @default("[]")
+  /// When non-null, the workflow owner has CONSENTED to run triggered
+  /// executions with this user's credentials (their connected MCP/tool
+  /// creds) instead of the agent's app identity. The value is the consenting
+  /// user's id — always the workflow creator, since consent is self-asserted
+  /// by the credential owner. Null = no consent; runs use whatever identity
+  /// the trigger supplies. Read at /:id/trigger to resolve the effective
+  /// userId for credential resolution.
+  credentialUserId String?
+  /// When non-null, this is the auto-managed SINGLE-NODE backing workflow for an
+  /// agent's page-level triggers (entry node = this agent). It is hidden from
+  /// the Workflows list and edited only via the agent page's Triggers section.
+  /// One per agent (unique). Null = a normal user-authored chain workflow.
+  agentTriggerSlug String?                   @unique
   createdByUserId String
   createdByUser   User                      @relation("CreatedChainWorkflows", fields: [createdByUserId], references: [id], onDelete: Cascade)
   createdAt       DateTime                  @default(now())
@@ -140,7 +162,12 @@ model AgentChainWorkflow {
   bindings        ChannelAgentChainBinding[]
   globalRequests  WorkflowGlobalRequest[]
 
-  @@index([createdByUserId])
+  // A workflow name is scoped to its creator: a single user can't own two
+  // workflows with the same name, so a name unambiguously identifies one of
+  // their workflows. (Different users may reuse a name — they never see each
+  // other's workflows; lookups are by id.) The composite index also serves the
+  // per-user list query, so a standalone @@index([createdByUserId]) is redundant.
+  @@unique([createdByUserId, name])
   @@map("agent_chain_workflows")
 }
 
@@ -273,17 +300,48 @@ model Agent {
   /// Spaces' `installed_apps.signingSecret` but stored under claw-auth's
   /// encryption format. See lib/spaces-app-secret.ts.
   signingSecret        String?  @db.Text
+  /// Prompt versioning. `systemPrompt` above stays the denormalized copy of the
+  /// ACTIVE version so every runtime read path is unchanged. These point at the
+  /// active row in `agent_prompt_versions`: `activePromptVersionId` is the row
+  /// id (rollback target); `activePromptVersion` is its monotonic number
+  /// (denormalized for cheap run-stamping + display).
+  activePromptVersionId String?
+  activePromptVersion   Int?
+  kbScope               String                     @default("COLLECTIONS")
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
   promotedBy           String?
   promotedAt           DateTime?
   tools                AgentTool[]
   skills               AgentSkill[]
+  collections          AgentCollection[]
   shares               AgentShare[]
   mcpConnections       AgentMcpConnection[]
   providerCredentials  AgentProviderCredentials[]
+  promptVersions       AgentPromptVersion[]
 
   @@map("agents")
+}
+
+/// Append-only history of an agent's system prompt. A new row is created on
+/// every prompt edit (never overwritten); the agent's denormalized
+/// `systemPrompt` + `activePromptVersion(Id)` always mirror exactly one of
+/// these rows. Enables history, diff, rollback, and per-run attribution.
+model AgentPromptVersion {
+  id              String   @id @default(cuid())
+  agentId         String
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  /// Monotonic per agent: 1, 2, 3, … (see @@unique below).
+  version         Int
+  systemPrompt    String   @db.Text
+  /// Optional changelog note for this version.
+  note            String?  @db.Text
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@unique([agentId, version])
+  @@index([agentId, createdAt])
+  @@map("agent_prompt_versions")
 }
 
 model AgentShare {
@@ -306,6 +364,8 @@ model AgentRun {
   sessionId        String    @unique
   userId           String
   agentSlug        String
+  provider         String?   /// LLM provider used for the run: spaces|codex|claude|copilot|openrouter
+  model            String?   /// Concrete model id, e.g. private-large, open-large, gpt-5.5
   triggerSource    String    /// "spaces" | "scheduled" | "chat" | "api"
   status           String    @default("running") /// "running" | "completed" | "failed" | "cancelled"
   currentToolLabel String?
@@ -317,6 +377,7 @@ model AgentRun {
   projectName      String?
   result           String?   @db.Text
   error            String?   @db.Text
+  reasoning        String?   @db.Text
   toolsUsed        String[]  @default([])
   toolInvocations  Json?     /// Array<ToolInvocation> with args, result (truncated), durationMs, isError
   tokensIn         Int?
@@ -338,11 +399,27 @@ model AgentRun {
   rating           String?   /// "up" | "down"
   ratingComment    String?   @db.Text
   ratedAt          DateTime?
+  /// The agent's active prompt version number at run-start. Lets quality /
+  /// latency be correlated to a specific prompt version. Null for runs created
+  /// before prompt versioning, or if the agent has no versioned prompt.
+  promptVersion    Int?
+  /// True when the run used a user-scoped credential (the user's OAuth/session
+  /// token — e.g. a per-user OAuth connector fetch). Such runs touch the user's
+  /// private data, so the admin "All Runs" view hides OTHER users' runs where
+  /// this is true. Default false (app/shared identity → safe to surface).
+  usedUserToken    Boolean   @default(false)
   startedAt        DateTime  @default(now())
   completedAt      DateTime?
+  /// Links a completed run to the specific assistant ChatMessage it produced.
+  /// Needed for branching: one user message may have multiple assistant
+  /// siblings (regenerate / edit-user branches), so chronological pairing of
+  /// runs ↔ assistant messages is ambiguous. Populated in the chat-callback.
+  chatMessageId    String?
 
   @@index([userId, status, startedAt])
   @@index([agentSlug, startedAt])
+  @@index([provider, completedAt])
+  @@index([chatMessageId])
   @@map("agent_runs")
 }
 
@@ -353,8 +430,14 @@ model ChatMessage {
   userId         String
   role           String   // "user" | "assistant"
   content        String   @db.Text
+  reasoning      String?  @db.Text
   status         String   @default("completed")
   createdAt      DateTime @default(now())
+  /// Tree parent reference for branching conversations. A conversation is a
+  /// tree: a user message can have multiple assistant children (regenerate),
+  /// and an assistant message can have multiple user children (edit-user).
+  /// The UI projects one selected path; siblings are reachable via the pager.
+  parentId       String?
 
   attachments    ChatAttachment[]
 
@@ -392,16 +475,25 @@ model AgentRequest {
   agentSlug   String?
   skillId     String?
   skillSlug   String?
-  requestType String   // "push_to_spaces" | "push_to_global"
+  requestType String   // "push_to_spaces" | "push_to_global" | "clone"
   requesterId String
   status      String   @default("pending") // "pending" | "approved" | "rejected"
   reviewerId  String?
   reviewNote  String?
+  // For requestType == "clone": the name the requester chose for their copy,
+  // captured at request time and applied when the owner approves. Null → the
+  // clone falls back to "<source> (Copy)".
+  requestedName String?
+  // For requestType == "clone": the agent that was created when the request
+  // was approved. Lets the approve path stay idempotent (replay returns the
+  // same clone) and gives the frontend a deep-link target.
+  resultAgentId String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([status])
   @@index([requesterId])
+  @@index([agentId])
   @@map("agent_requests")
 }
 
@@ -435,6 +527,11 @@ enum AgentAuditEvent {
   MCP_CONNECTOR_EDIT_REJECTED
   MCP_CONNECTOR_EDIT_SUPERSEDED
   MCP_CONNECTOR_EDIT_CANCELLED
+  // Agent config/toolbox edits (incl. non-HTTP "ghost" writers). Added by
+  // migration 20260617150000_agent_config_audit_event (ALTER TYPE ADD VALUE);
+  // this keeps the Prisma-generated type in sync so a fresh `prisma generate`
+  // (e.g. the Docker build) accepts `eventType: "AGENT_CONFIG_UPDATED"`.
+  AGENT_CONFIG_UPDATED
 }
 
 model AgentAuditLog {
@@ -504,6 +601,29 @@ model AgentSkill {
 
   @@unique([agentId, skillId])
   @@map("agent_skills")
+}
+
+/// Per-agent Knowledge Base grant. References a Collection (and optionally a
+/// specific file) in the spaces backend. There is NO foreign key — Collections
+/// live in a different database (the spaces postgres), so `collectionId` /
+/// `fileId` are opaque ids validated at write time against the requesting
+/// user's accessible KB tree.
+///
+/// fileId IS NULL → grant covers the whole collection (and all descendants).
+/// fileId IS NOT NULL → grant covers ONLY that single file. The unique index
+/// includes fileId so an agent can have both kinds of grants on the same
+/// collection (e.g. whole-collection + a file from a sibling collection).
+model AgentCollection {
+  id           String   @id @default(cuid())
+  agentId      String
+  agent        Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  collectionId String
+  fileId       String?
+  createdAt    DateTime @default(now())
+
+  @@unique([agentId, collectionId, fileId])
+  @@index([agentId])
+  @@map("agent_collections")
 }
 
 model Tool {
@@ -580,6 +700,13 @@ model McpServer {
   /// like a corporate Bitbucket bot, but never for per-user OAuth like
   /// google/microsoft/xyne-spaces).
   allowGlobalFallback Boolean @default(false)
+  /// When true, binary content this server's tools return (EmbeddedResource
+  /// blob / image / audio) is forwarded to the user as a file attachment
+  /// instead of being dropped. Server-level because the runner only ever
+  /// extracts binary blocks — a text/data tool on the same server returns text
+  /// and is unaffected. Admin-toggleable; surfaced via the resolved connector
+  /// definition so the runner reads it without a per-tool catalog query.
+  forwardFiles Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   connections UserMcpConnection[]
@@ -968,3 +1095,220 @@ model ActiveGoal {
   @@index([status, updatedAt])
   @@map("active_goals")
 }
+
+/// Output of the FailureCurator — a structured "why this agent is
+/// failing and what to change" finding, evidenced by 2+ AgentRun
+/// sessionIds. Generated hourly by the curator worker; reviewed and
+/// applied/dismissed by the operator via the metrics page.
+///
+/// `bucket` is the user-side symptom class:
+///   agent_unable_to_do_work  — soft refusals / low-effort completions
+///   failure                  — explicit fails/cancellations/retries
+///   user_frustrated          — follow-up user messages express anger
+///
+/// `rootCause` is the actionable diagnosis the operator changes:
+///   need-memory, missing-tool, prompt-ambiguity, wrong-subagent,
+///   redundant-subagent-call, tool-misuse, ext-api-failure,
+///   permission-denied, memory-miss, identity-bleed, no-actionable
+model AgentImprovementCandidate {
+  id            String   @id @default(cuid())
+  agentSlug     String
+  bucket        String   /// see enum in failure-curator.ts
+  rootCause     String   /// see enum in failure-curator.ts
+  finding       String   @db.Text /// 1-2 sentence concrete description
+  evidence      Json     /// string[] of agent_runs.sessionId — ≥2
+  proposedFix   Json     /// { type, description } — see ImprovementCandidate type
+  confidence    String   @default("medium") /// "high" | "medium" | "low"
+  status        String   @default("pending") /// "pending" | "applied" | "dismissed"
+  /// Audit metadata for dedupe + UI. Includes:
+  ///   - mergeCount: how many curator runs reinforced this candidate
+  ///   - lastEvidenceAt: max(completedAt) across all evidence sessions
+  ///   - dismissUntil: ISO timestamp; suppresses similar findings for 7d
+  ///                   after dismiss (matched on agentSlug+bucket+rootCause)
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([agentSlug, status, updatedAt])
+  @@index([status, createdAt])
+  @@map("agent_improvement_candidates")
+}
+
+/// Per-agent watermark for the FailureCurator's incremental scan. The
+/// hourly worker only looks at runs with completedAt > lastProcessedAt
+/// since the last time we generated candidates, so we don't re-process
+/// the same sessions over and over.
+model AgentCuratorState {
+  agentSlug         String   @id
+  lastProcessedAt   DateTime
+  lastRunAt         DateTime @default(now())
+  /// How many curator invocations have we made for this agent
+  invocationCount   Int      @default(0)
+  /// How many candidates emitted total (across all invocations)
+  candidateCount    Int      @default(0)
+  updatedAt         DateTime @updatedAt
+
+  @@map("agent_curator_state")
+}
+
+/// ── Evals ───────────────────────────────────────────────────────────────
+/// A folder in the eval explorer (flat list — no nesting) holding
+/// conversations. There is intentionally NO typed "source" entity —
+/// the structure is plain folders; a conversation's free-form `source` string
+/// is enough to tag where it came from (manual / support-email / spaces / …)
+/// when an ingestion pipeline or webhook starts feeding rows in.
+model EvalFolder {
+  id            String             @id @default(cuid())
+  name          String
+  conversations EvalConversation[]
+  source        String?            // e.g. "spaces"
+  sourceKind    String?            // "channel" | "email-channel"
+  sourceChannelId String?
+  createdBy     String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([sourceChannelId])
+  @@map("eval_folders")
+}
+
+/// One conversation to evaluate: an ordered list of turns. Lives in a folder.
+/// `turns` is [{ message, expectedResponse }]. The agent to run against is NOT
+/// stored here — it's chosen per-run, so the same conversation can be evaluated
+/// against different agents over time.
+model EvalConversation {
+  id          String           @id @default(cuid())
+  folderId    String
+  folder      EvalFolder       @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  title       String
+  turns       Json
+  source      String?
+  externalId  String?
+  externalUpdatedAt DateTime?
+  lastMessageId     String?
+  createdBy   String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  turnResults EvalGeneratedTurn[]
+
+  @@index([folderId, createdAt])
+  @@map("eval_conversations")
+}
+
+/// One execution over a set of conversations. `conversationIds` is the planned
+/// scope (selected conversations, or every conversation in `folderId` for a
+/// batch run) — used to show progress. The browser orchestrates the replay via
+/// the agent-chat SSE endpoint and writes each turn back as it completes.
+model EvalGeneration {
+  id              String           @id @default(cuid())
+  agentSlug       String
+  status          String           @default("running") /// "running" | "completed" | "failed" | "cancelled"
+  genProvider     String?
+  genModel        String?
+  conversationIds String[]
+  folderId        String?
+  createdBy       String?
+  startedAt       DateTime         @default(now())
+  completedAt     DateTime?
+  turnResults     EvalGeneratedTurn[]
+
+  @@index([folderId, startedAt])
+  @@map("eval_generations")
+}
+
+/// One turn of one conversation within a run: the input, the ground-truth
+/// answer, and what claw produced (answer + reasoning + tool calls). Reasoning
+/// is captured by the browser off the agent-chat SSE `reasoning` stream — neither
+/// claw nor claw-auth persists it otherwise.
+model EvalGeneratedTurn {
+  id                 String           @id @default(cuid())
+  runId              String
+  generation         EvalGeneration   @relation(fields: [runId], references: [id], onDelete: Cascade)
+  conversationId     String
+  conversation       EvalConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  turnIndex          Int
+  inputMessage       String           @db.Text
+  expectedResponse   String?          @db.Text
+  clawAnswer         String?          @db.Text
+  reasoning          String?          @db.Text
+  toolInvocations    Json?
+  status             String           @default("running") /// "running" | "completed" | "failed"
+  clawConversationId String?
+  sessionId          String?
+  matchScore         Int?
+  judgeReasoning     String?          @db.Text
+  judgeModel         String?
+  judgedAt           DateTime?
+  judgeScores        EvalVerdict[]
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([runId, conversationId, turnIndex])
+  @@index([runId])
+  @@index([conversationId])
+  @@map("eval_generated_turns")
+}
+
+/// A named LLM judge = a grading rubric (prompt) + the model that runs it. Users
+/// create several; a run can be scored by multiple judges at once, and the UI
+/// lets you switch which judge's scores drive the view (turns + report).
+model EvalJudge {
+  id        String   @id @default(cuid())
+  name      String
+  prompt    String   @db.Text
+  model     String   @default("")
+  isDefault Boolean  @default(false)
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("eval_judges")
+}
+
+/// One judge×model verdict on one turn. The same judge (rubric) can be scored
+/// by several models in one pass — each (judge, model) pair keeps its own row.
+/// `judgeName`/`model` are denormalized so a deleted judge's past scores still
+/// render (no hard FK to EvalJudge on purpose).
+model EvalVerdict {
+  id           String         @id @default(cuid())
+  turnResultId String
+  turnResult   EvalGeneratedTurn @relation(fields: [turnResultId], references: [id], onDelete: Cascade)
+  judgeId      String
+  judgeName    String
+  score        Int?
+  reasoning    String?        @db.Text
+  status       String         @default("scored")
+  model        String         @default("default")
+  passId       String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([turnResultId, judgeId, model])
+  @@index([turnResultId])
+  @@map("eval_verdicts")
+}
+
+// ==========================================
+// MCP Gateway Registry Tables
+// Backend services dynamically register their tools here
+// ==========================================
+
+model ServiceRegistry {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  tenantUniqueId  String   @map("tenant_unique_id")
+  serviceName     String   @map("service_name")
+  backendId       String   @map("backend_id")
+  backendUrl      String   @map("backend_url")
+  tools           Json
+  xAuthHeaderName String?  @map("x_auth_header_name")
+  tokenEndpointUrl String? @map("token_endpoint_url")
+  registeredAt    DateTime @default(now()) @map("registered_at")
+
+  @@unique([tenantUniqueId, serviceName, backendId], name: "unique_service_backend_tenant")
+  @@index([tenantUniqueId])
+  @@index([serviceName])
+  @@index([tenantUniqueId, serviceName])
+  @@map("service_registry")
+}
+

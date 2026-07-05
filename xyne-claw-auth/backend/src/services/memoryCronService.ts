@@ -32,6 +32,7 @@ import type { Prisma } from "@prisma/client";
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
+import { acquireCronLeaderLock } from "../lib/cron-leader-lock.js";
 import { shouldReviewSession } from "./sessionHeuristic.js";
 import { distillSession } from "./sessionCurator.js";
 
@@ -574,7 +575,13 @@ function scheduleNextRun(): void {
 
   setTimeout(async () => {
     try {
-      await runMemorySync();
+      // Multi-replica guard: every pod arms this timer; only the pod that wins
+      // the date-scoped Redis lock actually runs the sync (cron-leader-lock.ts).
+      if (await acquireCronLeaderLock("memory-cron")) {
+        await runMemorySync();
+      } else {
+        logger.info("[memory-cron] Skipped — another replica is running tonight's sync");
+      }
     } catch (err) {
       logger.error("[memory-cron] Unhandled error in nightly sync", {
         err: err instanceof Error ? err.message : String(err),

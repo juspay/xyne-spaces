@@ -20,7 +20,7 @@ export const hubspotAdapter: StdioMcpAdapter = {
     const token = credentials["hubspotPersonalAccessToken"] as string;
     return {
       cmd: "npx",
-      args: ["-y", "@hubspot/mcp-server"],
+      args: ["-y", "@hubspot/mcp-server@0.4.0"],
       env: {
         PRIVATE_APP_ACCESS_TOKEN: token,
       },

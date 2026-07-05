@@ -50,14 +50,31 @@ const PING_TOOL = {
 };
 
 const SEND_MESSAGE_TOOL = {
-  name: "spaces-send-message",
+  name: "apps-send-message",
   description:
-    "Send a message in Spaces using the bot's app credentials (not the user's token). " +
-    "Use this only if someone asks you to forward message to some channel. " +
-    "Mention shorthand (server-expanded — preferred): write `@Name[userId]` for a user, " +
-    "`@Alias[group:GROUP_ID:Group Name]` for a group, or `@channel` / `@here` for specials. " +
-    "Resolve userId first via spaces-users / spaces-search / spaces-whoami — never invent one. " +
-    "Simple usage: provide conversationId (reply in thread) or channelId (post in channel) with content. " +
+    "Send a message to a DIFFERENT thread or channel — NOT the one the user is chatting with you in — using the BOT'S app credentials (NOT the user's token). " +
+    "The message appears in Spaces with the bot's name + avatar, not the human's. " +
+    "" +
+    "DO NOT use this tool to reply in the SAME thread the user is already chatting with you in — " +
+    "your normal text response IS automatically posted back to that thread by the framework. " +
+    "Calling this tool with the same conversationId would post a duplicate. " +
+    "" +
+    "Correct uses: " +
+    "(a) cross-channel announcement / broadcast (use targetChannelId), " +
+    "(b) run-completion pings to a different thread / channel, " +
+    "(c) scheduled-job alerts the bot fires autonomously, " +
+    "(d) when the user explicitly says 'post this to #other-channel as the bot'. " +
+    "" +
+    "Wrong uses: ANY normal answer to the user's current question (just return the text — the framework posts it). " +
+    "" +
+    "If the human asks you to write something on THEIR behalf (so it shows up as them), " +
+    "use `user-send-message` instead. " +
+    "" +
+    "Mention shorthand (server-expanded): `@Name[userId]` for a user, `@Alias[group:GROUP_ID:Group Name]` " +
+    "for a group, or `@channel` / `@here` for specials. Resolve userId first via spaces-users / " +
+    "spaces-search / spaces-whoami — never invent one. " +
+    "" +
+    "Simple usage: provide conversationId (reply in a DIFFERENT thread) or channelId (post in a DIFFERENT channel) with content. " +
     "Cross-channel posting: provide targetChannelId to post in a different channel — the bot auto-joins PUBLIC channels " +
     "and reports failure for PRIVATE channels. When targetChannelId is set, confirms the action in the source thread.",
   inputSchema: {
@@ -84,7 +101,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
     return { content: [{ type: "text", text: "ok" }] };
   }
 
-  if (name === "spaces-send-message") {
+  // Accept legacy `spaces-send-message` name as an alias so any agent or
+  // chain config that still references the old name continues to work.
+  if (name === "apps-send-message" || name === "spaces-send-message") {
     if (!APP_TOKEN || !SPACES_URL) {
       return {
         content: [{ type: "text", text: "XYNE_SPACES_APP_TOKEN or XYNE_SPACES_URL not set — server misconfigured." }],
@@ -125,7 +144,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
           return { content: [{ type: "text", text: failMsg }], isError: true };
         }
         // Non-fatal join error — still attempt the post
-        console.error("[spaces-send-message] join failed (will still attempt post):", e);
+        console.error("[apps-send-message] join failed (will still attempt post):", e);
       }
 
       await spacesAppFetch("/chat/postMessage", { channelId: targetChannelId, text: content });
@@ -138,7 +157,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
       return { content: [{ type: "text", text: confirmMsg }] };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return { content: [{ type: "text", text: `spaces-send-message error: ${msg}` }], isError: true };
+      return { content: [{ type: "text", text: `apps-send-message error: ${msg}` }], isError: true };
     }
   }
 

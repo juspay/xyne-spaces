@@ -53,6 +53,8 @@ export function SubagentEditHeader({
      absorbed into the header as a small meta-line under the name. */
   const metaParts: string[] = [];
   if (subagent.source) metaParts.push(subagent.source);
+  const creator = subagent.createdByName || subagent.createdByEmail;
+  if (!isBuiltIn && creator) metaParts.push(`by ${creator}`);
   if (created) metaParts.push(`created ${created}`);
   if (updated && updated !== created) metaParts.push(`updated ${updated}`);
 
@@ -73,7 +75,7 @@ export function SubagentEditHeader({
         <div className="flex min-w-0 flex-col">
           {/* Row 1: name + lock + badges.
               Name uses `font-mono` because it doubles as the permanent
-              identifier — agents reference this specialist by name in
+              identifier — agents reference this subagent by name in
               their `config.tools.subagents` array, so it can't be renamed
               (backend returns 400 "name is immutable" on rename). Styling
               it as an ID visually signals "this is a slug, not a label".
@@ -81,7 +83,7 @@ export function SubagentEditHeader({
           <div className="flex items-center gap-1.5 min-w-0">
             <span
               className="max-w-[260px] truncate font-mono text-[13px] font-medium text-xyne-fg-primary"
-              title="Permanent — agents reference this specialist by name. Edit other fields below."
+              title="Permanent — agents reference this subagent by name. Edit other fields below."
             >
               {subagent.name}
             </span>

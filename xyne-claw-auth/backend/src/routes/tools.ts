@@ -3,10 +3,19 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
-import { syncToolsForServer } from "../tool-sync.js";
-import { requireClawAdmin } from "../middleware/agent-acl.js";
+import { syncToolsForServer, reconcileServerCatalog } from "../tool-sync.js";
+import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
+import { SKIP_CATALOG_SOURCES } from "../catalog-skip.js";
+
+import { createLogger } from "../logger.js";
+import { gatewayCatalogSource, gatewayToolSelectionKey } from "../mcpgateway/key-format.js";
+const log = createLogger("tools");
 
 const router = Router();
+const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
+  ?.split(",")
+  .map((tenant) => tenant.trim())
+  .find((tenant) => tenant.length > 0);
 
 type CustomSubagentRow = {
   name: string;
@@ -35,7 +44,7 @@ async function listCustomSubagentRows(): Promise<CustomSubagentRow[]> {
   if (!delegate) {
     // Backward-compat: older generated Prisma client (without subagentDefinition)
     // should not break /tools/available.
-    console.warn("[tools] subagentDefinition delegate missing; returning builtin subagents only");
+    log.warn("[tools] subagentDefinition delegate missing; returning builtin subagents only");
     return [];
   }
   try {
@@ -46,7 +55,7 @@ async function listCustomSubagentRows(): Promise<CustomSubagentRow[]> {
   } catch (err) {
     if (isMissingTableError(err)) {
       // Backward-compat: DB not migrated with subagent_definitions table yet.
-      console.warn("[tools] subagent_definitions table missing; returning builtin subagents only");
+      log.warn("[tools] subagent_definitions table missing; returning builtin subagents only");
       return [];
     }
     throw err;
@@ -88,10 +97,15 @@ export type IntegrationToolEntry = {
 export type Integration = {
   slug: string;
   label: string;
-  kind: "mcp" | "builtin" | "custom";
+  kind: "mcp" | "builtin" | "custom" | "gateway";
   connected: boolean;
+  /** Populated only for kind=="gateway". Lists every backendId registered under this serviceName. */
+  backendIds?: string[];
   readTools: IntegrationToolEntry[];
   writeTools: IntegrationToolEntry[];
+  /** How many agents currently select tools from this integration — powers the
+   *  "most used by other agents" ordering in the picker. */
+  usageCount: number;
 };
 
 export type AvailableToolsCatalog = {
@@ -113,14 +127,68 @@ export type AvailableToolsCatalog = {
 // Single source of truth for the agent-config catalog. Used by /available
 // (which returns it as-is) and by /agents/suggest-tools (which feeds a
 // compressed form to the LLM). Don't fork — keep both surfaces in sync.
-export async function buildAvailableToolsCatalog(): Promise<AvailableToolsCatalog> {
+type GatewayToolDescriptor = {
+  name: string;
+  description: string;
+  method?: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseGatewayTools(rawTools: unknown): GatewayToolDescriptor[] {
+  if (!Array.isArray(rawTools)) return [];
+  const parsed: GatewayToolDescriptor[] = [];
+  for (const entry of rawTools) {
+    if (!isRecord(entry) || typeof entry.name !== "string") continue;
+    parsed.push({
+      name: entry.name,
+      description: typeof entry.description === "string" ? entry.description : "",
+      ...(typeof entry.method === "string" ? { method: entry.method.toUpperCase() } : {}),
+    });
+  }
+  return parsed;
+}
+
+function isGatewayWriteMethod(method: string | undefined): boolean {
+  if (!method) return false;
+  return method.toUpperCase() !== "GET";
+}
+
+function gatewayDisplayLabel(serviceName: string, backendId: string): string {
+  return `${humanise(serviceName)} (${backendId})`;
+}
+
+export async function buildAvailableToolsCatalog(tenantUniqueId?: string): Promise<AvailableToolsCatalog> {
+  const gatewayTenant = tenantUniqueId ?? DEFAULT_GATEWAY_TENANT;
   const { SUBAGENT_DEFINITIONS } = await import("xyne-claw-shared");
 
   // Get MCP servers (available integrations)
   const servers = await prisma.mcpServer.findMany({ orderBy: { name: "asc" } });
 
+    // Filter builtin sandbox tools whose UI toggle has no runtime effect — so
+    // they never appear in v1's `serverTools`/`writeTools` arrays or v3's
+    // `integrations` cards. Two classes are hidden:
+    //   (a) ALWAYS_ON — the five builtins always enabled by pi-coding-agent's
+    //       hard-coded allowlist (xyne-claw/src/agent.ts:911 →
+    //       ["read","write","grep","find","ls"]). Toggling them off in the
+    //       UI doesn't disable them at runtime.
+    //   (b) ALWAYS_OFF — `bash` is explicitly EXCLUDED from that allowlist
+    //       (see security comment at agent.ts:899-901), and `edit` is never
+    //       registered as either a pi builtin or a customTool — so neither
+    //       is ever exposed to the model. Toggling them on does nothing.
+    // If we later wire `bash` or `edit` through (allowlist change or new
+    // custom tool), remove the corresponding name(s) and the card will
+    // reappear automatically.
+    const RUNTIME_NOOP_BUILTINS = new Set([
+      "read", "write", "grep", "find", "ls", // always-on at runtime
+      "bash", "edit",                          // never callable from runtime
+    ]);
+
     // Get all tools grouped by source
-    const tools = await prisma.tool.findMany({ orderBy: [{ source: "asc" }, { name: "asc" }] });
+    const tools = (await prisma.tool.findMany({ orderBy: [{ source: "asc" }, { name: "asc" }] }))
+      .filter((t) => !(t.source === "builtin" && RUNTIME_NOOP_BUILTINS.has(t.name)));
 
     // Subagents from shared definitions (built-ins) PLUS user-created
     // custom subagents from the subagent_definitions table. Both surfaces
@@ -181,12 +249,17 @@ export async function buildAvailableToolsCatalog(): Promise<AvailableToolsCatalo
       if (!list.some((t) => t.name === tool.name)) list.push({ slug: tool.slug, name: tool.name });
       serverTools[key] = list;
     }
-    // Ensure write tools from adapters are included even if not synced
+    // Ensure write tools AND adapter-declared static tools are included even
+    // if the `tools` table has not been synced yet. staticTools is for tools
+    // that should appear in the picker without needing a per-user connection
+    // (e.g. bot-token servers where credentialFields=[] and sync only fires
+    // at user-creation time). writeTools doubles as a fallback for HITL-gated
+    // tools — see types.ts comments.
     for (const server of servers) {
       const type = server.type;
       const definition = await resolveConnectorDefinition(type);
       const list = serverTools[type] ?? [];
-      for (const toolName of definition?.writeTools ?? []) {
+      for (const toolName of [...(definition?.writeTools ?? []), ...(definition?.staticTools ?? [])]) {
         if (!list.some((t) => t.name === toolName)) list.push({ slug: toolName, name: toolName });
       }
       serverTools[type] = list;
@@ -208,6 +281,7 @@ export async function buildAvailableToolsCatalog(): Promise<AvailableToolsCatalo
     }
 
     const integrations: Integration[] = [];
+    const gatewayIntegrationSlugsByService = new Map<string, string[]>();
 
     // 1) MCP-backed integrations (Slack, Jira, Airtable, ...). One card
     //    per registered server type — connected status comes from whether
@@ -231,12 +305,15 @@ export async function buildAvailableToolsCatalog(): Promise<AvailableToolsCatalo
         connected: true,
         readTools: entries.filter((e) => e.riskLevel === "read"),
         writeTools: entries.filter((e) => e.riskLevel !== "read"),
+        usageCount: 0,
       });
     }
 
-    // 2) Builtin sandbox tools (read/write/edit/grep/find/ls/bash). These
-    //    aren't an MCP server but conceptually behave like an integration
-    //    ("the agent's sandbox filesystem"), so we expose them as one card.
+    // 2) Builtin sandbox tools. The `tools` array is already filtered up-front
+    //    to exclude runtime-noop builtins (see RUNTIME_NOOP_BUILTINS above).
+    //    Currently every builtin falls into that bucket — so this card never
+    //    renders today. Kept here so that if a new pi-coding-agent builtin
+    //    becomes runtime-callable in the future, it automatically appears.
     const builtinTools = tools.filter((t) => t.source === "builtin");
     if (builtinTools.length > 0) {
       const entries = builtinTools.map((t) => {
@@ -256,6 +333,7 @@ export async function buildAvailableToolsCatalog(): Promise<AvailableToolsCatalo
         connected: true,
         readTools: entries.filter((e) => e.riskLevel === "read"),
         writeTools: entries.filter((e) => e.riskLevel !== "read"),
+        usageCount: 0,
       });
     }
 
@@ -279,21 +357,166 @@ export async function buildAvailableToolsCatalog(): Promise<AvailableToolsCatalo
         connected: true,
         readTools: entries.filter((e) => e.riskLevel === "read"),
         writeTools: entries.filter((e) => e.riskLevel !== "read"),
+        usageCount: 0,
       });
     }
 
-    integrations.sort((a, b) => a.label.localeCompare(b.label));
+    // 4) MCP Gateway services (service_registry). These are tenant-scoped and
+    // selectable like other integrations, but runtime execution is routed via
+    // gateway instead of local MCP adapters.
+    if (gatewayTenant) {
+      let gatewayRows = await prisma.serviceRegistry.findMany({
+        where: { tenantUniqueId: gatewayTenant },
+        select: {
+          serviceName: true,
+          backendId: true,
+          tools: true,
+        },
+        orderBy: [{ serviceName: "asc" }],
+      });
+
+      // Local-dev safety net: if the authenticated workspace tenant has no
+      // gateway rows but a default tenant is configured, fall back so the UI
+      // can still discover registered gateway tools.
+      if (
+        gatewayRows.length === 0
+        && tenantUniqueId
+        && DEFAULT_GATEWAY_TENANT
+        && tenantUniqueId !== DEFAULT_GATEWAY_TENANT
+        && process.env.NODE_ENV !== "production"
+      ) {
+        gatewayRows = await prisma.serviceRegistry.findMany({
+          where: { tenantUniqueId: DEFAULT_GATEWAY_TENANT },
+          select: {
+            serviceName: true,
+            backendId: true,
+            tools: true,
+          },
+          orderBy: [{ serviceName: "asc" }],
+        });
+        if (gatewayRows.length > 0) {
+          console.warn(
+            `[tools] using default gateway tenant (${DEFAULT_GATEWAY_TENANT}) as fallback for workspace tenant ${tenantUniqueId}`,
+          );
+        }
+      }
+
+      for (const row of gatewayRows) {
+        const source = gatewayCatalogSource(row.serviceName, row.backendId);
+        const slugsForService = gatewayIntegrationSlugsByService.get(row.serviceName) ?? [];
+        slugsForService.push(source);
+        gatewayIntegrationSlugsByService.set(row.serviceName, slugsForService);
+        const seenTools = new Set<string>();
+        const serviceTools = parseGatewayTools(row.tools).filter((tool) => {
+          if (seenTools.has(tool.name)) return false;
+          seenTools.add(tool.name);
+          return true;
+        });
+        const entries = serviceTools.map((tool) => ({
+          slug: gatewayToolSelectionKey(row.serviceName, row.backendId, tool.name),
+          name: tool.name,
+          description: tool.description,
+          riskLevel: classifyRisk(tool.name, isGatewayWriteMethod(tool.method)),
+        } satisfies IntegrationToolEntry));
+
+        if (entries.length === 0) continue;
+
+        serverTools[source] = entries.map((entry) => ({
+          slug: entry.slug,
+          name: entry.name,
+        }));
+
+        integrations.push({
+          slug: source,
+          label: gatewayDisplayLabel(row.serviceName, row.backendId),
+          kind: "gateway",
+          backendIds: [row.backendId],
+          connected: true,
+          usageCount: 0,
+          readTools: entries.filter((e) => e.riskLevel === "read"),
+          writeTools: entries.filter((e) => e.riskLevel !== "read"),
+        });
+      }
+    }
+
+    // Popularity: how many agents currently reference each integration, so the
+    // picker can surface "most used by other agents" first. An agent references
+    // an integration if its config.tools picks any of that integration's tool
+    // slugs (custom[]/direct[]) or names the integration as a subagent.
+    const slugToIntegration = new Map<string, string>();
+    for (const integ of integrations) {
+      for (const e of [...integ.readTools, ...integ.writeTools]) slugToIntegration.set(e.slug, integ.slug);
+    }
+    const subagentToIntegration = new Map<string, string>();
+    for (const sa of subagents) subagentToIntegration.set(sa.name, sa.serverType);
+
+    const usage = new Map<string, number>();
+    const agentConfigs = await prisma.agent.findMany({ select: { config: true } });
+    for (const a of agentConfigs) {
+      const t = (a.config as { tools?: { custom?: string[]; direct?: string[]; subagents?: string[]; gateway?: string[] } } | null)?.tools;
+      if (!t) continue;
+      const refs = new Set<string>();
+      for (const s of [...(t.custom ?? []), ...(t.direct ?? [])]) {
+        const ig = slugToIntegration.get(s);
+        if (ig) refs.add(ig);
+      }
+      for (const s of t.subagents ?? []) {
+        const ig = subagentToIntegration.get(s);
+        if (ig) refs.add(ig);
+      }
+      for (const s of t.gateway ?? []) {
+        const gatewaySlugs = gatewayIntegrationSlugsByService.get(s);
+        if (gatewaySlugs) {
+          for (const slug of gatewaySlugs) refs.add(slug);
+        } else {
+          refs.add(s);
+        }
+      }
+      for (const ig of refs) usage.set(ig, (usage.get(ig) ?? 0) + 1);
+    }
+    for (const integ of integrations) integ.usageCount = usage.get(integ.slug) ?? 0;
+    integrations.sort((a, b) => b.usageCount - a.usageCount || a.label.localeCompare(b.label));
 
     return { subagents, mcpServers: servers, writeTools, customGroups, serverTools, integrations };
 }
 
 // List available subagents, MCP servers, and direct tools for agent creation
-router.get("/available", async (_req: Request, res: Response) => {
+router.get("/available", async (req: Request, res: Response) => {
   try {
-    const catalog = await buildAvailableToolsCatalog();
+    // Reconcile the catalog from the LIVE tool lists of the requester's
+    // connected MCP servers BEFORE building the response, so the picker never
+    // drifts from what the agent can actually call (server-side tool changes,
+    // new connectors). The catalog is only consumed here — the runtime uses the
+    // live /mcp/tools list — so this is the single point that needs to be fresh.
+    // Best-effort + bounded: per-server timeout, debounced in reconcileServerCatalog,
+    // failures ignored (we still serve the current catalog).
+    const userId = getRequesterId(req);
+    if (userId) {
+      const connections = await prisma.userMcpConnection.findMany({
+        where: { userId },
+        include: { mcpServer: true },
+        distinct: ["mcpServerId"],
+      });
+      const RECONCILE_TIMEOUT_MS = 8_000;
+      await Promise.allSettled(
+        connections.map(async (conn) => {
+          if (!(await hasConnectorDefinition(conn.mcpServer.type))) return;
+          const credentials = JSON.parse(
+            decrypt(conn.encryptedCreds, conn.iv, conn.authTag, CONFIG.encryptionKey),
+          ) as Record<string, unknown>;
+          await Promise.race([
+            reconcileServerCatalog(userId, conn.mcpServer.type, conn.mcpServer.name, credentials),
+            new Promise((resolve) => setTimeout(resolve, RECONCILE_TIMEOUT_MS)),
+          ]);
+        }),
+      );
+    }
+
+    const tenantUniqueId = (req as Request & { user?: { workspaceId?: string } }).user?.workspaceId;
+    const catalog = await buildAvailableToolsCatalog(tenantUniqueId);
     res.json({ success: true, data: catalog });
   } catch (err) {
-    console.error("[tools] available error:", err);
+    log.error("[tools] available error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -305,13 +528,30 @@ router.get("/", async (_req: Request, res: Response) => {
     });
     res.json({ success: true, data: tools });
   } catch (err) {
-    console.error("[tools] list error:", err);
+    log.error("[tools] list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
 
-router.post("/sync", requireClawAdmin, async (_req: Request, res: Response) => {
+router.post("/sync", requireClawAdmin, async (req: Request, res: Response) => {
   try {
+    // Optional filter: sync only specific MCP server(s) instead of the full
+    // sweep (the full sweep spawns every connected server for every user and
+    // routinely exceeds the nginx upstream timeout → 504). Accept names/types
+    // from body { serverTypes: [...] } / { serverType: "google" } or query
+    // ?types=google,microsoft / ?type=google. Matched (case-insensitively)
+    // against the server's `type` OR display `name`, so either works.
+    const body = (req.body ?? {}) as { serverType?: unknown; serverTypes?: unknown };
+    const rawFilter = [
+      ...(Array.isArray(body.serverTypes) ? body.serverTypes : []),
+      ...(body.serverType != null ? [body.serverType] : []),
+      ...(typeof req.query["types"] === "string" ? req.query["types"].split(",") : []),
+      ...(typeof req.query["type"] === "string" ? [req.query["type"]] : []),
+    ]
+      .map((s) => String(s).trim().toLowerCase())
+      .filter(Boolean);
+    const filter = rawFilter.length > 0 ? new Set(rawFilter) : null;
+
     // Find all connections grouped by server type, pick one per type
     const connections = await prisma.userMcpConnection.findMany({
       include: { mcpServer: true },
@@ -320,20 +560,48 @@ router.post("/sync", requireClawAdmin, async (_req: Request, res: Response) => {
 
     let totalSynced = 0;
     const errors: string[] = [];
+    const syncedServers: string[] = [];
 
     for (const conn of connections) {
       if (!(await hasConnectorDefinition(conn.mcpServer.type))) continue;
+      // Targeted sync: skip servers that don't match the requested type/name.
+      if (
+        filter &&
+        !filter.has(conn.mcpServer.type.toLowerCase()) &&
+        !filter.has((conn.mcpServer.name ?? "").toLowerCase())
+      ) {
+        continue;
+      }
 
       try {
         const decrypted = decrypt(conn.encryptedCreds, conn.iv, conn.authTag, CONFIG.encryptionKey);
         const credentials = JSON.parse(decrypted) as Record<string, unknown>;
         const count = await syncToolsForServer(conn.userId, conn.mcpServer.type, conn.mcpServer.name, credentials);
         totalSynced += count;
+        syncedServers.push(conn.mcpServer.type);
       } catch (err) {
         const msg = `${conn.mcpServer.type}: ${err instanceof Error ? err.message : String(err)}`;
         errors.push(msg);
-        console.error(`[tools/sync] ${msg}`);
+        log.error(`[tools/sync] ${msg}`);
       }
+    }
+
+    // A targeted sync only touches the requested MCP server(s). The builtin +
+    // shared-registry upserts below are GLOBAL housekeeping (re-seed every
+    // custom tool), irrelevant to one server and slow — only run on a full sweep.
+    if (filter) {
+      const noMatch = syncedServers.length === 0 && errors.length === 0;
+      res.json({
+        success: true,
+        data: {
+          synced: totalSynced,
+          servers: syncedServers,
+          errors,
+          requested: [...filter],
+          ...(noMatch ? { note: "no connected MCP server matched the requested name(s)" } : {}),
+        },
+      });
+      return;
     }
 
     // Also ensure builtin tools exist
@@ -356,9 +624,13 @@ router.post("/sync", requireClawAdmin, async (_req: Request, res: Response) => {
     }
     totalSynced += builtins.length;
 
-    // Sync custom tools from shared registry (pgm, google, research-agent, etc.)
+    // Sync custom tools from shared registry (pgm, research-agent, etc.).
+    // SKIP_CATALOG_SOURCES (google/microsoft) are per-user OAuth MCP connectors,
+    // NOT custom tools — upserting them here would resurrect the `custom:*` rows
+    // the catalog-cleanup migration deletes (and the picker would list them under
+    // "custom tools"). Same filter bootstrap-tools.ts uses; shared so they can't drift.
     const { getAllCustomTools } = await import("xyne-claw-shared");
-    const customTools = getAllCustomTools();
+    const customTools = getAllCustomTools().filter((ct) => !SKIP_CATALOG_SOURCES.has(ct.source));
     for (const ct of customTools) {
       await prisma.tool.upsert({
         where: { slug: ct.slug },
@@ -379,9 +651,9 @@ router.post("/sync", requireClawAdmin, async (_req: Request, res: Response) => {
     }
     totalSynced += customTools.length;
 
-    res.json({ success: true, data: { synced: totalSynced, errors } });
+    res.json({ success: true, data: { synced: totalSynced, servers: syncedServers, errors } });
   } catch (err) {
-    console.error("[tools/sync] error:", err);
+    log.error("[tools/sync] error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

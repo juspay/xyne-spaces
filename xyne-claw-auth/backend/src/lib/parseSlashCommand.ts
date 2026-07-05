@@ -16,7 +16,14 @@
 export type SlashCommand =
   | { kind: "goalStart"; condition: string }
   | { kind: "goalStatus" }
-  | { kind: "goalClear" };
+  | { kind: "goalClear" }
+  // `/clear` — wipe this thread's agent session (forget prior context).
+  | { kind: "clear" }
+  // `/compact [instructions]` — compact (summarize) the thread's context and
+  // continue. Optional instructions steer what the summary should preserve.
+  | { kind: "compact"; instructions: string }
+  // `/help` — list the available slash commands.
+  | { kind: "help" };
 
 // Strip a sequence of leading `@<token>` mentions so /goal works even when
 // the message addresses an agent first (e.g. `@Xyne Doctor /goal count to 10`).
@@ -32,6 +39,22 @@ export function parseSlashCommand(input: string | undefined | null): SlashComman
   if (trimmed.length === 0 || trimmed[0] !== "/") return null;
 
   const lower = trimmed.toLowerCase();
+
+  if (lower === "/help") {
+    return { kind: "help" };
+  }
+  // `/clear` — exact match only (so "/clearfoo" or "/clear the air" fall
+  // through to a normal message). `/goal clear` stays goal-specific below.
+  if (lower === "/clear") {
+    return { kind: "clear" };
+  }
+  // `/compact` or `/compact <instructions>`.
+  if (lower === "/compact") {
+    return { kind: "compact", instructions: "" };
+  }
+  if (lower.startsWith("/compact ")) {
+    return { kind: "compact", instructions: trimmed.slice("/compact ".length).trim().slice(0, 2_000) };
+  }
 
   if (lower === "/stop" || lower === "/goal clear") {
     return { kind: "goalClear" };

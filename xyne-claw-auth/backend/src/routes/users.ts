@@ -4,6 +4,9 @@ import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { syncToolsForServer } from "../tool-sync.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("users");
 const router = Router();
 
 /**
@@ -42,7 +45,7 @@ router.get("/", async (req: Request, res: Response) => {
 
     res.json({ success: true, data: users });
   } catch (err) {
-    console.error("[users] list error:", err);
+    log.error("[users] list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -86,13 +89,13 @@ router.post("/", async (req: Request, res: Response) => {
     // Auto-configure xyne-spaces MCP connection if token provided
     if (spacesToken && typeof spacesToken === "string") {
       autoConfigureSpaces(user.id, spacesToken).catch((err) => {
-        console.error("[users] auto-configure xyne-spaces failed:", err);
+        log.error("[users] auto-configure xyne-spaces failed:", err);
       });
     }
 
     res.json({ success: true, data: user });
   } catch (err) {
-    console.error("[users] upsert error:", err);
+    log.error("[users] upsert error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -136,11 +139,11 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
   // Sync tools
   if (await hasConnectorDefinition(serverType)) {
     syncToolsForServer(userId, serverType, server.name, credentials).catch((err) => {
-      console.error(`[users] tool sync failed for ${serverType}:`, err);
+      log.error(`[users] tool sync failed for ${serverType}:`, err);
     });
   }
 
-  console.log(`[users] Auto-configured xyne-spaces for user ${userId}`);
+  log.info(`[users] Auto-configured xyne-spaces for user ${userId}`);
 
   // Also auto-connect xyne-spaces-app-tools for this user.
   // Stores the default agent's spacesAppToken so the MCP server can post autonomously
@@ -169,7 +172,7 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
         try {
           decryptedAppToken = decrypt(parts[0], parts[1], parts[2], cfg.encryptionKey);
         } catch {
-          console.error("[users] failed to decrypt agent spacesAppToken for xyne-spaces-app-tools");
+          log.error("[users] failed to decrypt agent spacesAppToken for xyne-spaces-app-tools");
         }
       }
     }
@@ -195,13 +198,13 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
     const appToolsType = "xyne-spaces-app-tools";
     if (await hasConnectorDefinition(appToolsType)) {
       syncToolsForServer(userId, appToolsType, appToolsServer.name, appToolsCredentials).catch((err) => {
-        console.error(`[users] tool sync failed for ${appToolsType}:`, err);
+        log.error(`[users] tool sync failed for ${appToolsType}:`, err);
       });
     }
 
-    console.log(`[users] Auto-configured xyne-spaces-app-tools for user ${userId}`);
+    log.info(`[users] Auto-configured xyne-spaces-app-tools for user ${userId}`);
   } catch (err) {
-    console.error(`[users] auto-configure xyne-spaces-app-tools failed for user ${userId}:`, err);
+    log.error(`[users] auto-configure xyne-spaces-app-tools failed for user ${userId}:`, err);
     // Non-fatal — don't block the spaces configuration
   }
 }
@@ -219,7 +222,7 @@ router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
 
     res.json({ success: true, data: user });
   } catch (err) {
-    console.error("[users] get error:", err);
+    log.error("[users] get error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

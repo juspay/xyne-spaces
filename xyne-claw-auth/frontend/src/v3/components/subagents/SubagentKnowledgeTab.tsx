@@ -143,7 +143,7 @@ export function SubagentKnowledgeTab({
         <div className="flex flex-col gap-1.5">
           <SectionTitle title="Parameter" technical="what the parent passes" />
           <p className="text-[12px] text-xyne-fg-tertiary">
-            The contract between this specialist and the agents that delegate
+            The contract between this subagent and the agents that delegate
             to it.
           </p>
         </div>

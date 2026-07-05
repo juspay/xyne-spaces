@@ -16,8 +16,25 @@
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import { HINDSIGHT } from "./config.js";
 
+import { createLogger } from "./logger.js";
+const log = createLogger("memory");
+
 /** Stable bank id for an agent — re-exported for legacy callers. */
 export const memoryBankId = bankIdForAgent;
+
+export const DIGITAL_TWIN_SLUG = "digital-twin";
+
+/**
+ * Twin gate — MUST be keyed on the bank id, not the raw slug. bankIdForAgent
+ * sanitizes (lowercase, collapse hyphens, truncate), so distinct raw slugs
+ * like "digital--twin" map onto the twin's bank; an exact-slug comparison
+ * would let such an agent read the bank WITHOUT the per-user `user:<id>`
+ * gating and leak every opted-in user's personal memories. Anything that
+ * lands in the twin bank gets twin scoping.
+ */
+export function isDigitalTwinAgent(agentSlug: string): boolean {
+  return bankIdForAgent(agentSlug) === bankIdForAgent(DIGITAL_TWIN_SLUG);
+}
 
 export interface SubsystemSummary {
   name: string;
@@ -69,7 +86,7 @@ export async function listSubsystemTaxonomy(
     return Array.from(acc, ([name, v]) => ({ name, memoryCount: v.count, sampleContent: v.sample }))
       .sort((a, b) => b.memoryCount - a.memoryCount);
   } catch (err) {
-    console.warn(`[memory] listSubsystemTaxonomy failed for agent=${agentSlug}: ${errMsg(err)}`);
+    log.warn(`[memory] listSubsystemTaxonomy failed for agent=${agentSlug}: ${errMsg(err)}`);
     return [];
   }
 }

@@ -13,7 +13,14 @@
  */
 import { LITELLM } from "./config.js";
 
-const JUDGE_TIMEOUT_MS = Number(process.env["GOAL_JUDGE_TIMEOUT_MS"] ?? 20_000);
+import { createLogger } from "./logger.js";
+const log = createLogger("goal-judge");
+
+// Default 30 minutes. LiteLLM can be very slow under load, and a timed-out
+// judge fails open to "judge_unavailable" — which strips the loop of its
+// smart termination (completed/stuck/infeasible). Better to wait out a slow
+// LiteLLM than to blind the judge. Override per-env with GOAL_JUDGE_TIMEOUT_MS.
+const JUDGE_TIMEOUT_MS = Number(process.env["GOAL_JUDGE_TIMEOUT_MS"] ?? 1_800_000);
 
 export interface GoalJudgeAttachmentMeta {
   fileName: string;
@@ -154,7 +161,7 @@ export async function judgeGoalProgress(input: GoalJudgeInput): Promise<GoalJudg
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      console.warn(`[goal-judge] LiteLLM ${res.status}: ${body.slice(0, 200)}`);
+      log.warn(`[goal-judge] LiteLLM ${res.status}: ${body.slice(0, 200)}`);
       return { done: false, reason: "judge_unavailable" };
     }
 
@@ -163,7 +170,7 @@ export async function judgeGoalProgress(input: GoalJudgeInput): Promise<GoalJudg
     };
     const raw = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!raw) {
-      console.warn("[goal-judge] no tool_call in response — defaulting to continue");
+      log.warn("[goal-judge] no tool_call in response — defaulting to continue");
       return { done: false, reason: "judge_unavailable" };
     }
 
@@ -172,7 +179,7 @@ export async function judgeGoalProgress(input: GoalJudgeInput): Promise<GoalJudg
     const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 240) : "unspecified";
     return { done, reason };
   } catch (err) {
-    console.warn(`[goal-judge] call failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[goal-judge] call failed: ${err instanceof Error ? err.message : String(err)}`);
     return { done: false, reason: "judge_unavailable" };
   }
 }

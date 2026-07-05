@@ -33,6 +33,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LITELLM } from "./config.js";
 
+import { createLogger } from "./logger.js";
+const log = createLogger("video-attachment");
+
 const execFileAsync = promisify(execFile);
 
 // Caps. Tuned for "scene-detect, ~30 frame" sampling. A typical few-minute
@@ -103,7 +106,7 @@ async function extractFrames(inputPath: string, outDir: string): Promise<string[
     // in the image (Dockerfile change not rebuilt); other = codec/filter
     // failure. Without this the failure looked like "0 frames" with no cause.
     const code = (e as { code?: string })?.code;
-    console.warn(`[video] ffmpeg scene-detect failed (code=${code ?? "?"}): ${(e as Error)?.message?.slice(0, 200)}`);
+    log.warn(`[video] ffmpeg scene-detect failed (code=${code ?? "?"}): ${(e as Error)?.message?.slice(0, 200)}`);
   });
 
   let frames = (await readdir(outDir).catch(() => []))
@@ -111,7 +114,7 @@ async function extractFrames(inputPath: string, outDir: string): Promise<string[
     .sort()
     .map((f) => join(outDir, f));
 
-  console.log(`[video] scene-detect produced ${frames.length} frame(s)`);
+  log.info(`[video] scene-detect produced ${frames.length} frame(s)`);
   if (frames.length >= 3) return frames.slice(0, MAX_FRAMES);
 
   // Fallback: even sampling. Probe duration, then pick MAX_FRAMES evenly.
@@ -137,14 +140,14 @@ async function extractFrames(inputPath: string, outDir: string): Promise<string[
   ];
   await execFileAsync("ffmpeg", evenArgs, { timeout: FFMPEG_TIMEOUT_MS }).catch((e) => {
     const code = (e as { code?: string })?.code;
-    console.warn(`[video] ffmpeg even-sample failed (code=${code ?? "?"}, durationSec=${durationSec}): ${(e as Error)?.message?.slice(0, 200)}`);
+    log.warn(`[video] ffmpeg even-sample failed (code=${code ?? "?"}, durationSec=${durationSec}): ${(e as Error)?.message?.slice(0, 200)}`);
   });
 
   frames = (await readdir(outDir).catch(() => []))
     .filter((f) => f.endsWith(".png"))
     .sort()
     .map((f) => join(outDir, f));
-  console.log(`[video] even-sample produced ${frames.length} frame(s) (durationSec=${durationSec})`);
+  log.info(`[video] even-sample produced ${frames.length} frame(s) (durationSec=${durationSec})`);
   return frames.slice(0, MAX_FRAMES);
 }
 
@@ -198,7 +201,7 @@ async function rollWindow(
     // Keep the prior state on a failed window rather than aborting — partial
     // narrative beats no narrative.
     const body = await res.text().catch(() => "");
-    console.warn(`[video] rollWindow ${windowIndex}/${totalWindows} failed: HTTP ${res.status} ${body.slice(0, 160)}`);
+    log.warn(`[video] rollWindow ${windowIndex}/${totalWindows} failed: HTTP ${res.status} ${body.slice(0, 160)}`);
     return priorState;
   }
   const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };

@@ -17,6 +17,9 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { LITELLM, AGENT } from "./config.js";
 
+import { createLogger } from "./logger.js";
+const log = createLogger("research-tool");
+
 const RESEARCH_SYSTEM_PROMPT = `You are a focused research agent for Xyne Spaces. Your ONLY job is to thoroughly research the given topic using your available Spaces tools and return structured findings.
 
 ## Research Protocol
@@ -76,7 +79,7 @@ export function createResearchTool(opts: ResearchToolOptions): ToolDefinition {
     }),
     async execute(_toolCallId: string, params: unknown) {
       const { topic } = params as { topic: string };
-      console.log(`[spaces-research] Starting research: ${topic.slice(0, 100)}`);
+      log.info(`[spaces-research] Starting research: ${topic.slice(0, 100)}`);
 
       try {
         const authStorage = AuthStorage.create();
@@ -119,7 +122,7 @@ export function createResearchTool(opts: ResearchToolOptions): ToolDefinition {
         const toolsUsed: string[] = [];
         session.subscribe((event) => {
           if (event.type === "tool_execution_start") {
-            console.log(`[spaces-research] Tool: ${event.toolName} args=${JSON.stringify(event.args ?? {}).slice(0, 150)}`);
+            log.info(`[spaces-research] Tool: ${event.toolName} args=${JSON.stringify(event.args ?? {}).slice(0, 150)}`);
           }
           if (event.type === "tool_execution_end") {
             toolsUsed.push(event.toolName);
@@ -136,7 +139,7 @@ export function createResearchTool(opts: ResearchToolOptions): ToolDefinition {
         const text = session.getLastAssistantText() ?? "(No findings)";
         session.dispose();
 
-        console.log(`[spaces-research] Completed: ${toolsUsed.length} tools used, ${text.length} chars`);
+        log.info(`[spaces-research] Completed: ${toolsUsed.length} tools used, ${text.length} chars`);
 
         return {
           content: [{ type: "text" as const, text }],
@@ -144,7 +147,7 @@ export function createResearchTool(opts: ResearchToolOptions): ToolDefinition {
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[spaces-research] Failed:`, msg);
+        log.error(`[spaces-research] Failed:`, msg);
         return {
           content: [{ type: "text" as const, text: `Research failed: ${msg}` }],
           details: {},

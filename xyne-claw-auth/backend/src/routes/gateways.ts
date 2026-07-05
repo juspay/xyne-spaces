@@ -2,6 +2,9 @@ import { Router, type Request, type Response } from "express";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("gateways");
+
 const router = Router();
 
 // ── Gateway CRUD ─────────────────────────────────────────────────────
@@ -13,7 +16,7 @@ router.get("/", async (_req: Request, res: Response) => {
     });
     res.json({ success: true, data: gateways });
   } catch (err) {
-    console.error("[gateways] list error:", err);
+    log.error("[gateways] list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -46,7 +49,7 @@ router.post("/", async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, data: gateway });
   } catch (err) {
-    console.error("[gateways] create error:", err);
+    log.error("[gateways] create error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -60,7 +63,7 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(404).json({ success: false, error: "Gateway not found" });
       return;
     }
-    console.error("[gateways] delete error:", err);
+    log.error("[gateways] delete error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -77,7 +80,7 @@ router.get("/:id/identities", async (req: Request<{ id: string }>, res: Response
 
     res.json({ success: true, data: identities });
   } catch (err) {
-    console.error("[gateways] list identities error:", err);
+    log.error("[gateways] list identities error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -129,7 +132,7 @@ router.post("/:id/identities", async (req: Request<{ id: string }>, res: Respons
 
     res.status(201).json({ success: true, data: identity });
   } catch (err) {
-    console.error("[gateways] link identity error:", err);
+    log.error("[gateways] link identity error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -143,7 +146,7 @@ router.delete("/:id/identities/:identityId", async (req: Request<{ id: string; i
       res.status(404).json({ success: false, error: "Identity not found" });
       return;
     }
-    console.error("[gateways] delete identity error:", err);
+    log.error("[gateways] delete identity error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

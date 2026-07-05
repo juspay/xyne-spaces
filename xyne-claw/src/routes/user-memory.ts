@@ -12,6 +12,9 @@ import { validateS2SKey } from "../middleware/auth.js";
 import { distillUserMemory } from "../user-memory-curator.js";
 import type { UserMemoryDistillRequest, UserMemoryRecord } from "xyne-claw-shared";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("user-memory");
+
 export const userMemoryRouter = Router();
 
 userMemoryRouter.post("/internal/user-memory/distill", validateS2SKey, async (req: Request, res: Response) => {
@@ -41,7 +44,7 @@ userMemoryRouter.post("/internal/user-memory/distill", validateS2SKey, async (re
     const candidates = await distillUserMemory(body.userId, { from: body.window.from, to: body.window.to }, records);
     res.json({ success: true, candidates });
   } catch (err) {
-    console.error(`[user-memory-route] distill failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`[user-memory-route] distill failed: ${err instanceof Error ? err.message : String(err)}`);
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Internal error" });
   }
 });

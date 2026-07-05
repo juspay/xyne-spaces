@@ -7,6 +7,7 @@ import {
   GlobeIcon,
   ArrowUpIcon,
   ArrowDownIcon,
+  CopyIcon,
 } from "@phosphor-icons/react";
 import type { Agent } from "../../../lib/types";
 import type { AgentPermissions } from "../../lib/agentPermissions";
@@ -121,6 +122,15 @@ interface AgentDetailHeaderProps {
   onAdminDemote?: () => void;
   /** Which admin action is in flight (disables both buttons + the trigger). */
   adminBusy?: "promote" | "demote" | null;
+  /** Clone this agent (copies system prompt + tools + skills into a new
+   *  personal agent). Owners/contributors clone instantly; other viewers
+   *  raise an approval request handled server-side. Rendered for any viewer
+   *  who can see the page. */
+  onClone?: () => void;
+  cloning?: boolean;
+  /** Advisory label — server is authoritative on whether approval is needed.
+   *  When true the button reads "Request clone" instead of "Clone agent". */
+  cloneNeedsApproval?: boolean;
 }
 
 export function AgentDetailHeader({
@@ -139,6 +149,9 @@ export function AgentDetailHeader({
   onAdminPromote,
   onAdminDemote,
   adminBusy = null,
+  onClone,
+  cloning = false,
+  cloneNeedsApproval = false,
 }: AgentDetailHeaderProps) {
   const navigate = useNavigate();
   // Actual ownership — getAgentPermissions promotes admins to role="owner",
@@ -236,6 +249,26 @@ export function AgentDetailHeader({
             disabled={publishing}
             forceExpanded={publishing}
             title="Submit this agent for admin approval to make it global."
+          />
+        )}
+
+        {onClone && (
+          <ExpandingAction
+            icon={<CopyIcon size={18} />}
+            label={
+              cloning
+                ? (cloneNeedsApproval ? "Requesting…" : "Cloning…")
+                : (cloneNeedsApproval ? "Request clone" : "Clone agent")
+            }
+            variant="ghost"
+            onClick={onClone}
+            disabled={cloning}
+            forceExpanded={cloning}
+            title={
+              cloneNeedsApproval
+                ? "Send a clone request to this agent's owner. A clone copies only the system prompt, tools, and skills."
+                : "Create your own copy — copies the system prompt, tools, and skills into a new personal agent."
+            }
           />
         )}
 

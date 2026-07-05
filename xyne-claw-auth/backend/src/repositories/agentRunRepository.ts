@@ -1,6 +1,84 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { formatDayIST } from "../lib/ist-time.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("agent-run");
+
+// Postgres `jsonb` rejects the NUL character (U+0000) inside string values
+// ("unsupported Unicode escape sequence "). Sandbox tool output (grep on
+// binary, etc.) regularly contains NULs, so an un-sanitized appendToolInvocation
+// throws on every such tool call. Strip NULs from every string in the value.
+function stripNulDeep(value: unknown): unknown {
+  if (typeof value === "string") return value.replace(/\u0000/g, "");
+  if (Array.isArray(value)) return value.map(stripNulDeep);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = stripNulDeep(v);
+    return out;
+  }
+  return value;
+}
+
+// Upper bound on retained tool-invocation rows per run. The column is rewritten
+// in full on every progress event (read-modify-write), so it must not grow
+// without limit on a heavy investigation. Keep the most recent rows.
+const MAX_TOOL_INVOCATIONS = Number(process.env["MAX_TOOL_INVOCATIONS"] ?? 1000);
+
+/**
+ * Per-session write lock backed by a Postgres advisory lock.
+ *
+ * Why this is needed: every `pushInvocation` from claw fires `appendToolInvocation`
+ * as a separate HTTP request handled in parallel. Each one does
+ *   findUnique → modify in JS → update
+ * with NO transactional locking on the column. When a subagent fires N child
+ * tools concurrently (e.g. 6 spaces-messages calls inside one parent), the
+ * later writes clobber earlier ones — observed symptom: only 2–3 of 6 child
+ * invocations persist; the rest vanish along with their citations, breaking
+ * every `[clf-functions.X:N#K]` chip whose toolCallId was dropped.
+ *
+ * Implementation: opens a Prisma transaction and acquires
+ * `pg_advisory_xact_lock(hashtext('agent_run:' || sessionId))` as the first
+ * statement. The lock is held until the transaction commits / rolls back —
+ * any other connection (same pod or different pod) trying to acquire the
+ * same key blocks until then. This makes the serialization correct across
+ * horizontally-scaled claw-auth replicas, not just within one process.
+ *
+ * Trade-offs:
+ *  - `hashtext` is a 32-bit hash; two unrelated sessionIds can collide and
+ *    serialize unnecessarily — a perf nit, not a correctness issue.
+ *  - The whole callback runs inside the transaction, so its DB ops MUST use
+ *    the passed `tx` client (not the global `prisma`) — otherwise they run
+ *    on a different connection and don't see / aren't covered by the lock.
+ *  - Default Prisma tx timeout is 5s; we bump it because the wait queue can
+ *    grow when a subagent fires many children at once.
+ */
+const LOCK_NAMESPACE = "agent_run";
+
+async function withSessionWriteLock<T>(
+  sessionId: string,
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return prisma.$transaction(
+    async (tx) => {
+      const lockKey = `${LOCK_NAMESPACE}:${sessionId}`;
+      // pg_advisory_xact_lock takes bigint; hashtext returns int4 which
+      // Postgres widens implicitly. Released on commit/rollback — no
+      // explicit unlock needed.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      return fn(tx);
+    },
+    {
+      // Total time the transaction (queue wait + work) may take. Bumped from
+      // the 5s default because a busy session can queue many concurrent
+      // appends behind one in-flight transaction.
+      timeout: 30_000,
+      // Max time the request will wait for a pool connection before opening
+      // the transaction. Default 2s is fine; keep explicit for clarity.
+      maxWait: 5_000,
+    },
+  );
+}
 
 /** Inclusive window for time-series padding. `null` = all time (unbounded left). */
 export type TimeWindow = { start: Date; end: Date } | null;
@@ -22,6 +100,9 @@ export interface FinalizeRunInput {
   status: "completed" | "failed" | "cancelled";
   result?: string | null;
   error?: string | null;
+  reasoning?: string | null;
+  provider?: string | null;
+  model?: string | null;
   toolsUsed?: string[];
   toolInvocations?: unknown;    // Prisma JSON — array of tool call details
   tokenUsage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
@@ -38,25 +119,66 @@ export interface FinalizeRunInput {
     toolMs?: number;
     lastRetryReason?: string;
   };
+  /** Links this run to the specific assistant ChatMessage it produced. Set by
+   *  the chat callback so the messages endpoint can pair runs ↔ assistants
+   *  deterministically once branching introduces multiple assistant siblings. */
+  chatMessageId?: string | null;
 }
 
 export const agentRunRepository = {
-  start: (input: StartRunInput) =>
-    prisma.agentRun.create({
-      data: {
-        sessionId: input.sessionId,
-        userId: input.userId,
-        agentSlug: input.agentSlug,
-        triggerSource: input.triggerSource,
-        task: input.task,
-        status: "running",
-        ...(input.conversationId ? { conversationId: input.conversationId } : {}),
-        ...(input.scheduledJobId ? { scheduledJobId: input.scheduledJobId } : {}),
-        ...(input.channelId ? { channelId: input.channelId } : {}),
-        ...(input.projectId ? { projectId: input.projectId } : {}),
-        ...(input.projectName ? { projectName: input.projectName } : {}),
-      },
-    }),
+  start: async (input: StartRunInput) => {
+    // Stamp the agent's active prompt version so quality/latency can later be
+    // correlated to a specific prompt revision. Resolved here (one indexed
+    // lookup by slug) so none of the 5 call sites need to thread it through.
+    // Best-effort: a missing agent / unversioned prompt just leaves it null.
+    const agent = await prisma.agent.findUnique({
+      where: { slug: input.agentSlug },
+      select: { activePromptVersion: true },
+    });
+    try {
+      const row = await prisma.agentRun.create({
+        data: {
+          sessionId: input.sessionId,
+          userId: input.userId,
+          agentSlug: input.agentSlug,
+          triggerSource: input.triggerSource,
+          task: input.task,
+          status: "running",
+          ...(agent?.activePromptVersion != null ? { promptVersion: agent.activePromptVersion } : {}),
+          ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+          ...(input.scheduledJobId ? { scheduledJobId: input.scheduledJobId } : {}),
+          ...(input.channelId ? { channelId: input.channelId } : {}),
+          ...(input.projectId ? { projectId: input.projectId } : {}),
+          ...(input.projectName ? { projectName: input.projectName } : {}),
+        },
+      });
+      log.info(
+        `[agent-run] start session=${input.sessionId} agent=${input.agentSlug} user=${input.userId}`,
+        {
+          event: "agent_run_start",
+          sessionId: input.sessionId,
+          userId: input.userId,
+          agentSlug: input.agentSlug,
+          triggerSource: input.triggerSource,
+          ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+          ...(input.channelId ? { channelId: input.channelId } : {}),
+          ...(input.projectId ? { projectId: input.projectId } : {}),
+        },
+      );
+      return row;
+    } catch (err) {
+      // Idempotent on the unique sessionId: when two paths race to register the
+      // same run (e.g. /internal/run + its caller), the loser must not throw a
+      // P2002 storm that buries real failures. Return the existing row instead.
+      // The FIRST writer wins triggerSource; callers that need a specific
+      // attribution should be the sole writer (pass __persistedByCaller).
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        const existing = await prisma.agentRun.findUnique({ where: { sessionId: input.sessionId } });
+        if (existing) return existing;
+      }
+      throw err;
+    }
+  },
 
   updateProgress: (sessionId: string, currentToolLabel: string) =>
     prisma.agentRun.updateMany({
@@ -71,13 +193,20 @@ export const agentRunRepository = {
     // only the parent agent's own calls. A naive overwrite would drop all
     // child rows on completion, making a just-reloaded chat look different
     // from what the user saw while streaming.
+    //
+    // Serialized via `withSessionWriteLock` (Postgres advisory lock) so
+    // finalize doesn't race against a late-arriving appendToolInvocation —
+    // the lock waits for in-flight appends on this sessionId (from any pod)
+    // to commit before reading `existing`, guaranteeing finalize sees every
+    // persisted invocation. All DB ops use `tx`.
+    return withSessionWriteLock(sessionId, async (tx) => {
     let finalInvocations: unknown[] | undefined;
     // Always merge once the run is finalizing, even if the callback didn't
     // include its own toolInvocations — we still need to sweep stale
     // "running" placeholders (see below).
-    const existingRow = await prisma.agentRun.findUnique({
+    const existingRow = await tx.agentRun.findUnique({
       where: { sessionId },
-      select: { toolInvocations: true },
+      select: { toolInvocations: true, userId: true, agentSlug: true },
     });
     const existing = Array.isArray(existingRow?.toolInvocations)
       ? (existingRow!.toolInvocations as Array<Record<string, unknown>>)
@@ -117,14 +246,17 @@ export const agentRunRepository = {
       finalInvocations = merged;
     }
 
-    return prisma.agentRun.updateMany({
+    const updated = await tx.agentRun.updateMany({
       where: { sessionId },
       data: {
         status: input.status,
         ...(input.result !== undefined ? { result: input.result } : {}),
         ...(input.error !== undefined ? { error: input.error } : {}),
+        ...(input.reasoning !== undefined ? { reasoning: input.reasoning } : {}),
+        ...(input.provider !== undefined ? { provider: input.provider } : {}),
+        ...(input.model !== undefined ? { model: input.model } : {}),
         ...(input.toolsUsed ? { toolsUsed: input.toolsUsed } : {}),
-        ...(finalInvocations !== undefined ? { toolInvocations: finalInvocations as Prisma.InputJsonValue } : {}),
+        ...(finalInvocations !== undefined ? { toolInvocations: stripNulDeep(finalInvocations) as Prisma.InputJsonValue } : {}),
         ...(input.tokenUsage ? {
           tokensIn: input.tokenUsage.input ?? null,
           tokensOut: input.tokenUsage.output ?? null,
@@ -143,9 +275,29 @@ export const agentRunRepository = {
           toolMs: input.latency.toolMs ?? null,
           lastRetryReason: input.latency.lastRetryReason ?? null,
         } : {}),
+        ...(input.chatMessageId !== undefined ? { chatMessageId: input.chatMessageId } : {}),
         completedAt: new Date(),
         currentToolLabel: null,
       },
+    });
+    log.info(`[agent-run] end session=${sessionId} status=${input.status}`, {
+      event: "agent_run_end",
+      sessionId,
+      ...(existingRow?.userId ? { userId: existingRow.userId } : {}),
+      ...(existingRow?.agentSlug ? { agentSlug: existingRow.agentSlug } : {}),
+      status: input.status,
+      ...(input.error ? { error: String(input.error).slice(0, 500) } : {}),
+      toolsUsedCount: input.toolsUsed?.length ?? 0,
+      totalMs: input.latency?.totalMs ?? null,
+      llmTotalMs: input.latency?.llmTotalMs ?? null,
+      toolMs: input.latency?.toolMs ?? null,
+      llmTurns: input.latency?.llmTurns ?? null,
+      llmRetries: input.latency?.llmRetries ?? null,
+      ttftMs: input.latency?.firstTurnTtftMs ?? null,
+      tokensIn: input.tokenUsage?.input ?? null,
+      tokensOut: input.tokenUsage?.output ?? null,
+    });
+    return updated;
     });
   },
 
@@ -161,19 +313,33 @@ export const agentRunRepository = {
     //   - A "completed" row is pushed on tool_execution_end with the SAME toolCallId
     // We replace the placeholder in place so the JSON column mirrors the live
     // frontend state (single row per tool call, not duplicated).
-    const run = await prisma.agentRun.findUnique({ where: { sessionId }, select: { toolInvocations: true } });
-    const existing = Array.isArray(run?.toolInvocations) ? (run!.toolInvocations as Array<Record<string, unknown>>) : [];
-    const inv = invocation as Record<string, unknown>;
-    const incomingId = inv["toolCallId"];
-    let next: unknown[];
-    if (incomingId && existing.some((p) => p["toolCallId"] === incomingId)) {
-      next = existing.map((p) => p["toolCallId"] === incomingId ? inv : p);
-    } else {
-      next = [...existing, inv];
-    }
-    await prisma.agentRun.update({
-      where: { sessionId },
-      data: { toolInvocations: next as Prisma.InputJsonValue },
+    //
+    // Serialized via `withSessionWriteLock` (Postgres advisory lock) so
+    // concurrent appends on the same sessionId — within one pod OR across
+    // multiple pods — don't race and clobber each other. All DB ops below
+    // run through `tx` so they're covered by the lock.
+    await withSessionWriteLock(sessionId, async (tx) => {
+      const run = await tx.agentRun.findUnique({ where: { sessionId }, select: { toolInvocations: true } });
+      const existing = Array.isArray(run?.toolInvocations) ? (run!.toolInvocations as Array<Record<string, unknown>>) : [];
+      // Strip NULs so the jsonb write doesn't throw (this is the root cause of the
+      // "appendToolInvocation failed" storm on sandbox-heavy runs).
+      const inv = stripNulDeep(invocation) as Record<string, unknown>;
+      const incomingId = inv["toolCallId"];
+      let next: Array<Record<string, unknown>>;
+      if (incomingId && existing.some((p) => p["toolCallId"] === incomingId)) {
+        next = existing.map((p) => p["toolCallId"] === incomingId ? inv : p);
+      } else {
+        next = [...existing, inv];
+      }
+      // Bound the column — keep the most recent rows so a heavy investigation
+      // can't grow it without limit (it's rewritten in full on every event).
+      if (next.length > MAX_TOOL_INVOCATIONS) {
+        next = next.slice(next.length - MAX_TOOL_INVOCATIONS);
+      }
+      await tx.agentRun.update({
+        where: { sessionId },
+        data: { toolInvocations: next as Prisma.InputJsonValue },
+      });
     });
   },
 
@@ -187,10 +353,311 @@ export const agentRunRepository = {
       },
       orderBy: { startedAt: "desc" },
       take: opts?.limit ?? 50,
+      select: {
+        id: true,
+        sessionId: true,
+        userId: true,
+        agentSlug: true,
+        triggerSource: true,
+        status: true,
+        currentToolLabel: true,
+        task: true,
+        conversationId: true,
+        scheduledJobId: true,
+        channelId: true,
+        projectId: true,
+        projectName: true,
+        result: true,
+        error: true,
+        toolsUsed: true,
+        tokensIn: true,
+        tokensOut: true,
+        tokensCacheRead: true,
+        tokensCacheWrite: true,
+        totalMs: true,
+        llmTotalMs: true,
+        llmDecodeMs: true,
+        llmWaitMs: true,
+        llmTurns: true,
+        llmRetries: true,
+        ttftMs: true,
+        tokensPerSec: true,
+        toolMs: true,
+        lastRetryReason: true,
+        rating: true,
+        ratingComment: true,
+        ratedAt: true,
+        startedAt: true,
+        completedAt: true,
+        chatMessageId: true,
+        // Included because routes/agent-chat.ts and routes/runs.ts pair
+        // assistant messages with their tool invocations from a listByUser
+        // call. If a future caller needs the cheaper variant (no JSON blob),
+        // add a `listByUserLight`-style projection rather than stripping it
+        // here — stripping breaks message-to-tools mapping in the chat UI.
+        toolInvocations: true,
+      },
+    }),
+
+  /**
+   * Admin "All Runs" for a single agent: every user's runs of `agentSlug`, but
+   * ACL-filtered — the requester's OWN runs are always shown, while OTHER
+   * users' runs appear only when `usedUserToken=false` (a run that touched the
+   * user's private OAuth/session data is never surfaced to an admin). Caller
+   * MUST gate this on isClawAdmin.
+   */
+  listAllForAgent: async (
+    agentSlug: string,
+    requesterId: string,
+    opts?: { status?: string; limit?: number; conversationId?: string },
+  ) => {
+    const rows = await prisma.agentRun.findMany({
+      where: {
+        agentSlug,
+        ...(opts?.status ? { status: opts.status } : {}),
+        ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
+        OR: [
+          { userId: requesterId }, // your own runs, always
+          { usedUserToken: false }, // other users' runs only if no user-token usage
+        ],
+      },
+      orderBy: { startedAt: "desc" },
+      take: opts?.limit ?? 50,
+      select: {
+        id: true,
+        sessionId: true,
+        userId: true,
+        agentSlug: true,
+        triggerSource: true,
+        status: true,
+        currentToolLabel: true,
+        task: true,
+        conversationId: true,
+        scheduledJobId: true,
+        channelId: true,
+        projectId: true,
+        projectName: true,
+        result: true,
+        error: true,
+        toolsUsed: true,
+        tokensIn: true,
+        tokensOut: true,
+        tokensCacheRead: true,
+        tokensCacheWrite: true,
+        totalMs: true,
+        llmTotalMs: true,
+        llmDecodeMs: true,
+        llmWaitMs: true,
+        llmTurns: true,
+        llmRetries: true,
+        ttftMs: true,
+        tokensPerSec: true,
+        toolMs: true,
+        lastRetryReason: true,
+        rating: true,
+        ratingComment: true,
+        ratedAt: true,
+        usedUserToken: true,
+        startedAt: true,
+        completedAt: true,
+        chatMessageId: true,
+        toolInvocations: true,
+      },
+    });
+    // Hydrate userName / userEmail so the admin "All Runs" view can show and
+    // filter by who ran each one (a single batched query keyed by distinct
+    // userIds). Truncated userId is unreadable; admins need real names.
+    const userIds = [...new Set(rows.map((r) => r.userId))];
+    const users =
+      userIds.length === 0
+        ? []
+        : await prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, email: true, name: true },
+          });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    return rows.map((r) => {
+      const u = userMap.get(r.userId);
+      return { ...r, userName: u?.name ?? null, userEmail: u?.email ?? null };
+    });
+  },
+
+  /**
+   * Mark a run as having used a user-scoped credential. Called when a tool
+   * fetches the user's OAuth/session token for a session (oauth-token-endpoint),
+   * so the admin "All Runs" ACL can hide it from other admins.
+   */
+  markUsedUserToken: (sessionId: string) =>
+    prisma.agentRun.updateMany({
+      where: { sessionId },
+      data: { usedUserToken: true },
+    }),
+
+  /**
+   * Conversation-keyed variant for the write-action approval paths
+   * (app-callback / flow-action), which execute a user-credential write at
+   * APPROVAL time and only know conversationId + agentSlug (no sessionId — and
+   * the executing `writeUserId` may differ from the run's asker, so the
+   * queue-time mark can miss it). Marks the most recent run of the
+   * conversation+agent (the one that queued the action). Over-marking is safe;
+   * the only direction that matters is never UNDER-marking.
+   */
+  markUsedUserTokenByConversation: async (conversationId: string, agentSlug?: string) => {
+    const run = await prisma.agentRun.findFirst({
+      where: { conversationId, ...(agentSlug ? { agentSlug } : {}) },
+      orderBy: { startedAt: "desc" },
+      select: { sessionId: true },
+    });
+    if (run) {
+      await prisma.agentRun.update({
+        where: { sessionId: run.sessionId },
+        data: { usedUserToken: true },
+      });
+    }
+  },
+
+  /**
+   * All runs for a conversation, across users. Used by the admin view of the
+   * chat-messages route — regular users get the user-scoped listByUser instead
+   * (per-user ACL on shared conversation+agent sessions). Same projection as
+   * listByUser so the assistant-message ↔ tool-invocation pairing still works.
+   *
+   * ACL: even an admin must NOT receive tool invocations from OTHER users' runs
+   * that executed under a USER credential (usedUserToken) — identical rule to
+   * the All Runs list (listAllForAgent). Without this, an admin opening a SHARED
+   * conversation would see, via the tool-invocation pairing, the exact
+   * user-token tool calls the All Runs ACL hides from the list. Your own runs
+   * always; everyone else's only when no user token was used.
+   */
+  listByConversation: (conversationId: string, requesterId: string, opts?: { limit?: number }) =>
+    prisma.agentRun.findMany({
+      where: {
+        conversationId,
+        OR: [{ userId: requesterId }, { usedUserToken: false }],
+      },
+      orderBy: { startedAt: "desc" },
+      take: opts?.limit ?? 50,
+      select: {
+        id: true,
+        sessionId: true,
+        userId: true,
+        agentSlug: true,
+        triggerSource: true,
+        status: true,
+        currentToolLabel: true,
+        task: true,
+        conversationId: true,
+        scheduledJobId: true,
+        channelId: true,
+        projectId: true,
+        projectName: true,
+        result: true,
+        error: true,
+        toolsUsed: true,
+        tokensIn: true,
+        tokensOut: true,
+        tokensCacheRead: true,
+        tokensCacheWrite: true,
+        totalMs: true,
+        llmTotalMs: true,
+        llmDecodeMs: true,
+        llmWaitMs: true,
+        llmTurns: true,
+        llmRetries: true,
+        ttftMs: true,
+        tokensPerSec: true,
+        toolMs: true,
+        lastRetryReason: true,
+        rating: true,
+        ratingComment: true,
+        ratedAt: true,
+        startedAt: true,
+        completedAt: true,
+        chatMessageId: true,
+        toolInvocations: true,
+      },
     }),
 
   findBySessionId: (sessionId: string) =>
     prisma.agentRun.findUnique({ where: { sessionId } }),
+
+  /**
+   * Minimal sessionId → (owner, usedUserToken) projection for a conversation.
+   * Powers the debug-artifacts ACL: an admin viewing a SHARED conversation must
+   * not see other users' user-token runs (their debug snapshots, tool I/O,
+   * subagents), mirroring the All Runs list ACL. The route builds the set of
+   * "hidden" sessionIds (usedUserToken && not the viewer's own) from this.
+   */
+  listSessionAclForConversation: (conversationId: string) =>
+    prisma.agentRun.findMany({
+      where: { conversationId },
+      select: { sessionId: true, userId: true, usedUserToken: true },
+    }),
+
+  /**
+   * Cross-user run listing for a single agent. Powers the get-agent-runs
+   * system tool — lets any agent ask "show me runs of pr-rules-miner this
+   * week" without needing admin permissions. Joins to users for email +
+   * name so the tool result is human-readable.
+   *
+   * Returns a lightweight projection on purpose — agent reasoning over a
+   * run list rarely needs full task/result/toolInvocations payload; including
+   * those would blow the LLM context for a popular agent with hundreds of
+   * recent runs.
+   */
+  listByAgentSlug: async (
+    slug: string,
+    opts?: { since?: Date; limit?: number; status?: string },
+  ) => {
+    const rows = await prisma.agentRun.findMany({
+      where: {
+        agentSlug: slug,
+        ...(opts?.status ? { status: opts.status } : {}),
+        ...(opts?.since ? { startedAt: { gte: opts.since } } : {}),
+      },
+      select: {
+        sessionId: true,
+        userId: true,
+        agentSlug: true,
+        status: true,
+        triggerSource: true,
+        task: true,
+        conversationId: true,
+        channelId: true,
+        toolsUsed: true,
+        tokensIn: true,
+        tokensOut: true,
+        totalMs: true,
+        rating: true,
+        startedAt: true,
+        completedAt: true,
+      },
+      orderBy: { startedAt: "desc" },
+      take: opts?.limit ?? 50,
+    });
+    // Hydrate userEmail / userName so the tool consumer doesn't need a
+    // second round-trip per row. Use a single batched query keyed by the
+    // distinct userIds present.
+    const userIds = [...new Set(rows.map((r) => r.userId))];
+    const users = userIds.length === 0
+      ? []
+      : await prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, email: true, name: true },
+        });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    return rows.map((r) => {
+      const u = userMap.get(r.userId);
+      return {
+        ...r,
+        // Truncate task in the response — tools rarely need the full prompt,
+        // and a 5KB task × 50 rows is 250KB of unnecessary token spend.
+        task: r.task && r.task.length > 240 ? r.task.slice(0, 240) + "…" : r.task,
+        userEmail: u?.email ?? null,
+        userName: u?.name ?? null,
+      };
+    });
+  },
 
   /**
    * Lightweight variant of listByUser for the v3 home page.
