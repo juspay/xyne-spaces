@@ -401,6 +401,7 @@ export const useXyneAIStream = ({
           callIds: eCallIds,
           attachedContext: combinedAttachedContext,
           agentSlug: agentSlug ?? undefined,
+          version: isV2 ? 'v2' : 'v1',
         },
         allMessages,
       );

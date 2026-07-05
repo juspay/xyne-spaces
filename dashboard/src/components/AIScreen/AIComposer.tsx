@@ -79,6 +79,7 @@ interface AIComposerProps {
    *  selections (channels, KB, web search, …) across the agent switch, matching
    *  the XyneAISidebar behaviour. */
   onAgentChange?: ((slug: string | null, context: ComposerContext) => void) | undefined;
+  showAgentSelector?: boolean;
   /** Seeds the extra context/toggles (web search, deep research, collections,
    *  etc.) — used for the landing → chat handoff so the chat composer starts
    *  with whatever the user selected on the landing page. */
@@ -199,6 +200,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     onStop,
     hideDisclaimer,
     onAgentChange,
+    showAgentSelector = true,
     initialExtras,
     onContextChange,
   },
@@ -769,12 +771,13 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               />
             </div>
 
-            {/* Right cluster: agent selector + mic + send */}
             <div className='flex shrink-0 items-center gap-1.5'>
-              <AIAgentSelector
-                disabled={pending}
-                onAgentChange={slug => onAgentChange?.(slug, buildContext())}
-              />
+              {showAgentSelector && (
+                <AIAgentSelector
+                  disabled={pending}
+                  onAgentChange={slug => onAgentChange?.(slug, buildContext())}
+                />
+              )}
               <ComposerVoiceButton
                 onTranscript={handleTranscript}
                 onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}

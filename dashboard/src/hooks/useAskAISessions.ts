@@ -24,7 +24,7 @@ import {
 // Query Keys
 // ============================================================================
 
-const SESSIONS_KEY = ['xyne-ai-sessions'] as const;
+export const SESSIONS_KEY = ['xyne-ai-sessions'] as const;
 // ============================================================================
 // Hooks
 // ============================================================================
@@ -38,6 +38,16 @@ export function useSessionsList() {
     queryFn: fetchSessions,
     staleTime: 30_000,
   });
+}
+
+export function useSessionInvalidator() {
+  const queryClient = useQueryClient();
+
+  const invalidateSessions = () => {
+    void queryClient.invalidateQueries({ queryKey: SESSIONS_KEY });
+  };
+
+  return { invalidateSessions };
 }
 
 /**

@@ -37,6 +37,8 @@ import XyneAIStreamWorker from './xyneAIStream.worker?worker';
 import type { WorkerIncomingMessage, WorkerOutgoingMessage } from './xyneAIStream.worker';
 import { reactNativeBridge, NativeInboundMessageType } from '../../utils/reactNativeBridge';
 import { fetchV2ConversationMessages } from './XyneAISessionsV2Service';
+import { queryClient } from '../clients/queryClient';
+import { SESSIONS_KEY } from '../../hooks/useAskAISessions';
 import { getAskAIErrorInfo } from '../../utils/askAIErrorMapping';
 import {
   deriveStreamSlotKey,
@@ -65,6 +67,7 @@ export interface StreamState {
   debugEvents: DebugEventRecord[];
   debugArtifactsReadyVersion: number;
   startedAt: number;
+  version?: 'v1' | 'v2';
   agentSlug?: string;
   showInSidebar: boolean;
 }
@@ -812,7 +815,7 @@ class XyneAIStreamManager {
   ): Promise<string> {
     const streamId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    request.version = getStoredVersion();
+    request.version = request.version ?? getStoredVersion();
 
     // Handle any existing stream for this thread
     const existingStream = this.activeStreams.get(threadId);
@@ -857,6 +860,7 @@ class XyneAIStreamManager {
       debugArtifactsReadyVersion: 0,
       startedAt: Date.now(),
       showInSidebar: request.showInSidebar ?? true,
+      ...(request.version && { version: request.version }),
       ...(request.agentSlug && { agentSlug: request.agentSlug }),
       ...(request.suppressCompletionToast && { suppressCompletionToast: true }),
     };
@@ -1592,6 +1596,9 @@ class XyneAIStreamManager {
     // This fixes rendering misalignment issues caused by partial/broken markdown
     // during streaming deltas (similar to refreshRuns pattern in claw chat)
     void this.refreshMessagesFromBackend(streamId, threadId);
+    if (currentState.version === 'v1') {
+      void queryClient.invalidateQueries({ queryKey: SESSIONS_KEY });
+    }
 
     const notifyKey = currentState.sessionId || currentState.streamSlotKey || threadId;
     const viewingThis = Boolean(
