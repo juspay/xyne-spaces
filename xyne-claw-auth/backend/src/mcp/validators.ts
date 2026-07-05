@@ -1,4 +1,5 @@
-import { callTool } from "./runner.js";
+import { createLogger } from "../logger.js";
+const log = createLogger("validators");
 
 type ValidatorFn = (
   params: Record<string, unknown>,
@@ -22,12 +23,12 @@ export async function validateWriteAction(
   try {
     return await fn(params, credentials);
   } catch (err) {
-    console.warn(`[validator] ${serverType}/${tool} threw, allowing approval:`, err instanceof Error ? err.message : err);
+    log.warn(`[validator] ${serverType}/${tool} threw, allowing approval:`, err instanceof Error ? err.message : err);
     return null;
   }
 }
 
-register("xyne-spaces", "spaces-create-ticket", async (params, credentials) => {
+register("xyne-spaces", "spaces-create-ticket", async (params) => {
   const projectId = (params["projectId"] as string | undefined)?.trim();
   const boardId = (params["boardId"] as string | undefined)?.trim();
   const channelId = (params["channelId"] as string | undefined)?.trim();
@@ -40,25 +41,18 @@ register("xyne-spaces", "spaces-create-ticket", async (params, credentials) => {
   if (!boardId) return "boardId is required";
   if (!channelId) return "channelId is required";
 
-  const userId = (credentials["userId"] as string | undefined) ?? "";
-  if (!userId) return null;
-
-  const projRes = await callTool(userId, "xyne-spaces", credentials, "spaces-projects", { limit: 100 });
-  const projText = typeof projRes.content === "string" ? projRes.content : "";
-  if (projText && !projText.includes(projectId)) {
-    return `projectId ${projectId} not found in your workspace — run spaces-projects to list valid ids`;
-  }
-
-  const boardRes = await callTool(userId, "xyne-spaces", credentials, "spaces-boards", { limit: 100 });
-  const boardText = typeof boardRes.content === "string" ? boardRes.content : "";
-  if (boardText && !boardText.includes(boardId)) {
-    return `boardId ${boardId} not found — run spaces-boards to list valid ids for projectId ${projectId}`;
-  }
-
+  // ID existence (project / board / channel) is validated authoritatively by
+  // the Spaces create-ticket API. On failure, the write-retry loop
+  // (XYNE-13828) posts the real error back so the agent can self-correct. We
+  // deliberately do NOT pre-check existence here: the old string-`.includes`
+  // lookup ran over a paginated, workspace-wide list and produced false
+  // negatives (rejecting perfectly valid boards), and because a validator
+  // rejection is not a write-action failure it bypassed the retry loop
+  // entirely. Required-field checks above are enough.
   return null;
 });
 
-register("xyne-spaces", "spaces-schedule-call", async (params, credentials) => {
+register("xyne-spaces", "spaces-schedule-call", async (params) => {
   const title = (params["title"] as string | undefined)?.trim();
   const startsAt = (params["startsAt"] as string | undefined)?.trim();
   const endsAt = (params["endsAt"] as string | undefined)?.trim();
@@ -76,22 +70,13 @@ register("xyne-spaces", "spaces-schedule-call", async (params, credentials) => {
   if (Number.isNaN(endMs)) return `endsAt ${endsAt} is not a valid ISO 8601 timestamp`;
   if (endMs <= startMs) return "endsAt must be after startsAt";
 
-  const userId = (credentials["userId"] as string | undefined) ?? "";
-  if (!userId) return null;
-
-  if (channelId) {
-    const chRes = await callTool(userId, "xyne-spaces", credentials, "spaces-channels", { limit: 100 });
-    const chText = typeof chRes.content === "string" ? chRes.content : "";
-    if (chText && !chText.includes(channelId)) {
-      return `channelId ${channelId} not found — run spaces-channels to list valid ids`;
-    }
-  }
-
+  // channelId existence is validated by the Spaces API; see the create-ticket
+  // note above. No pre-flight `.includes` lookup.
   return null;
 });
 
 
-register("xyne-spaces", "spaces-update-ticket", async (params, credentials) => {
+register("xyne-spaces", "spaces-update-ticket", async (params) => {
   const ticketId = (params["ticketId"] as string | undefined)?.trim();
   const assigneeId = (params["assigneeId"] as string | undefined)?.trim();
   const stage = (params["stage"] as string | undefined)?.trim();
@@ -117,25 +102,8 @@ register("xyne-spaces", "spaces-update-ticket", async (params, credentials) => {
     return `eta is not a valid ISO 8601 date — got "${eta}"`;
   }
 
-  const userId = (credentials["userId"] as string | undefined) ?? "";
-  if (!userId) return null;
-
-  // Verify the ticket exists
-  const ticketRes = await callTool(userId, "xyne-spaces", credentials, "spaces-tickets", { limit: 100 });
-  const ticketText = typeof ticketRes.content === "string" ? ticketRes.content : "";
-  if (ticketText && !ticketText.includes(ticketId)) {
-    return `ticketId ${ticketId} not found — run spaces-tickets to list valid tickets`;
-  }
-
-  // Verify assigneeId exists if provided
-  if (assigneeId) {
-    const userRes = await callTool(userId, "xyne-spaces", credentials, "spaces-users", { nameOrEmail: assigneeId, limit: 10 });
-    const userText = typeof userRes.content === "string" ? userRes.content : "";
-    if (userText && !userText.includes(assigneeId)) {
-      return `assigneeId ${assigneeId} not found — run spaces-users to find valid user IDs`;
-    }
-  }
-
+  // ticketId / assigneeId existence is validated by the Spaces update-ticket
+  // API; see the create-ticket note above. No pre-flight `.includes` lookup.
   return null;
 });
 

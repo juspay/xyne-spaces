@@ -310,10 +310,64 @@ export async function unlinkIdentity(gatewayId: string, identityId: string): Pro
 
 // ── Agents ────────────────────────────────────────────────────────────
 
-export async function listAgents(userId?: string): Promise<Agent[]> {
-  const qs = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+export async function listAgents(userId?: string, allAgents?: boolean): Promise<Agent[]> {
+  // allAgents=true asks the backend for the FULL roster (admins only — server
+  // enforces). Use it only where you genuinely need every user's agents (e.g.
+  // the metrics agent filter); the default list stays filtered to
+  // global ∪ owned ∪ shared.
+  const params = new URLSearchParams();
+  if (userId) params.set("userId", userId);
+  if (allAgents) params.set("scope", "all");
+  const qs = params.toString() ? `?${params.toString()}` : "";
   const data = await request<{ success: boolean; data: Agent[] }>(
     `${AUTH_API_URL}/api/v1/agents${qs}`,
+  );
+  return data.data;
+}
+
+export interface SandboxRepoOption {
+  key: string;
+  name: string;
+  description?: string;
+}
+
+/** Available sandbox repo setups (for the agent "Sandbox repository" picker). */
+export async function listSandboxRepos(): Promise<SandboxRepoOption[]> {
+  const data = await request<{ success: boolean; data: SandboxRepoOption[] }>(
+    `${AUTH_API_URL}/api/v1/sandbox/repos`,
+  );
+  return data.data;
+}
+
+export interface SbxGitRepoOption {
+  key: string;
+  path: string;
+}
+
+/** Individual repos in the shared read-only sbx-git sandbox (for the read-only
+ *  agent "Repo context" multi-select). */
+export async function listSbxGitRepos(): Promise<SbxGitRepoOption[]> {
+  const data = await request<{ success: boolean; data: SbxGitRepoOption[] }>(
+    `${AUTH_API_URL}/api/v1/sandbox/sbx-git-repos`,
+  );
+  return data.data;
+}
+
+export interface ResearchAgentOption {
+  id: string;
+  name: string;
+}
+
+export async function listResearchAgentProducts(): Promise<ResearchAgentOption[]> {
+  const data = await request<{ success: boolean; data: ResearchAgentOption[] }>(
+    `${AUTH_API_URL}/api/v1/research-agent/products`,
+  );
+  return data.data;
+}
+
+export async function listResearchAgentRepositories(): Promise<ResearchAgentOption[]> {
+  const data = await request<{ success: boolean; data: ResearchAgentOption[] }>(
+    `${AUTH_API_URL}/api/v1/research-agent/repositories`,
   );
   return data.data;
 }
@@ -328,10 +382,14 @@ export interface IntegrationToolEntry {
 export interface Integration {
   slug: string;
   label: string;
-  kind: "mcp" | "builtin" | "custom";
+  kind: "mcp" | "builtin" | "custom" | "gateway";
   connected: boolean;
+  /** Only populated for kind==="gateway". Lists every backendId registered under this serviceName. */
+  backendIds?: string[];
   readTools: IntegrationToolEntry[];
   writeTools: IntegrationToolEntry[];
+  /** How many agents select tools from this integration (popularity). */
+  usageCount: number;
 }
 
 export interface AvailableTools {
@@ -373,6 +431,30 @@ export async function suggestTools(
   return data.data;
 }
 
+// Generate a structured-output contract (JSON Schema + markdown template)
+// from a plain-text description. Proxies to xyne-claw's generator; returns
+// the pair plus any server-side sanity warnings for the user to review.
+export interface GeneratedOutputFormat {
+  schema: string;
+  template: string;
+  notes: string;
+  warnings: string[];
+}
+
+export async function generateOutputFormat(payload: {
+  description: string;
+  format: "json" | "markdown";
+  existingSchema?: string;
+  existingTemplate?: string;
+  agentName?: string;
+}): Promise<GeneratedOutputFormat> {
+  const data = await request<{ success: boolean; data: GeneratedOutputFormat }>(
+    `${AUTH_API_URL}/api/v1/agents/generate-output-format`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  return data.data;
+}
+
 export async function checkAgentName(name: string, slug: string): Promise<{ slugAvailable: boolean; nameAvailable: boolean }> {
   const data = await request<{ success: boolean; data: { slugAvailable: boolean; nameAvailable: boolean } }>(
     `${AUTH_API_URL}/api/v1/agents/check-name?name=${encodeURIComponent(name)}&slug=${encodeURIComponent(slug)}`,
@@ -381,7 +463,7 @@ export async function checkAgentName(name: string, slug: string): Promise<{ slug
 }
 
 export async function createAgent(
-  payload: { slug: string; name: string; description?: string; systemPrompt: string; color?: string; ownerUserId?: string },
+  payload: { slug: string; name: string; description?: string; systemPrompt: string; color?: string; ownerUserId?: string; skills?: string[]; knowledgeBase?: Array<{ collectionId: string; fileId?: string | null }>; kbScope?: "COLLECTIONS" | "USER" },
 ): Promise<Agent> {
   const data = await request<{ success: boolean; data: Agent }>(
     `${AUTH_API_URL}/api/v1/agents`,
@@ -406,11 +488,43 @@ export async function getAgentDetail(slug: string): Promise<Agent> {
 
 export async function updateAgent(
   slug: string,
-  payload: { slug?: string; enabled?: boolean; name?: string; description?: string; systemPrompt?: string; color?: string; modelId?: string; config?: Record<string, unknown>; skills?: string[] },
+  payload: { slug?: string; enabled?: boolean; name?: string; description?: string; systemPrompt?: string; promptNote?: string; color?: string; modelId?: string; config?: Record<string, unknown>; skills?: string[]; knowledgeBase?: Array<{ collectionId: string; fileId?: string | null }>; kbScope?: "COLLECTIONS" | "USER" },
 ): Promise<Agent> {
   const data = await request<{ success: boolean; data: Agent }>(
     `${AUTH_API_URL}/api/v1/agents/${slug}`,
     { method: "PUT", body: JSON.stringify(payload) },
+  );
+  return data.data;
+}
+
+// ── Prompt versioning ────────────────────────────────────────────────
+// Every system-prompt edit creates an immutable version; the agent's
+// `systemPrompt` is the denormalized active copy. These power the history /
+// rollback UI.
+export interface PromptVersion {
+  id: string;
+  agentId: string;
+  version: number;
+  systemPrompt: string;
+  note: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+}
+
+export async function getPromptVersions(
+  slug: string,
+): Promise<{ activeVersion: number | null; versions: PromptVersion[] }> {
+  const data = await request<{ success: boolean; data: { activeVersion: number | null; versions: PromptVersion[] } }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/prompt-versions`,
+  );
+  return data.data;
+}
+
+/** Roll back to / re-activate a specific prompt version. Returns the updated agent. */
+export async function activatePromptVersion(slug: string, version: number): Promise<Agent> {
+  const data = await request<{ success: boolean; data: Agent }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/prompt-versions/${version}/activate`,
+    { method: "POST" },
   );
   return data.data;
 }
@@ -491,6 +605,28 @@ export async function exchangeAgentCodexOauth(
 ): Promise<void> {
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/provider-credentials/codex/oauth/exchange`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+// Agent-scoped Anthropic (Claude) OAuth — captures the {access_token,
+// refresh_token, expires_at} bundle so the token can be auto-refreshed.
+export async function startAgentClaudeOauth(
+  slug: string,
+): Promise<{ url: string; state: string; expiresIn: number }> {
+  const data = await request<{ success: boolean; data: { url: string; state: string; expiresIn: number } }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/provider-credentials/claude/oauth/start`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  return data.data;
+}
+
+export async function exchangeAgentClaudeOauth(
+  slug: string,
+  payload: { code: string; state: string },
+): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/provider-credentials/claude/oauth/exchange`,
     { method: "POST", body: JSON.stringify(payload) },
   );
 }
@@ -582,6 +718,20 @@ export interface ChainWorkflowDefinition {
   edges: ChainWorkflowEdge[];
 }
 
+export interface ChainWorkflowTriggerChannel {
+  channelId: string;
+  spacesAutomationId: string | null;
+  /** Webhook-backed triggers (GitHub/Bitbucket): URL to paste into the repo. */
+  webhookUrl?: string | null;
+}
+
+export interface ChainWorkflowTrigger {
+  id: string;
+  type: string;
+  channels: ChainWorkflowTriggerChannel[];
+  configValues?: Record<string, string>;
+}
+
 export interface ChainWorkflow {
   id: string;
   name: string;
@@ -590,6 +740,12 @@ export interface ChainWorkflow {
   /** True once promoted to global (available to all users) by an admin. */
   global?: boolean;
   createdByUserId: string;
+  /**
+   * Non-null when the owner consented to run triggered executions with their
+   * own credentials. Value is the consenting user's id (= the creator).
+   */
+  credentialUserId?: string | null;
+  triggers: ChainWorkflowTrigger[];
   createdAt: string;
   updatedAt: string;
   bindings?: Array<{
@@ -627,6 +783,9 @@ export async function createChainWorkflow(payload: {
   name: string;
   definition: ChainWorkflowDefinition;
   isPublished?: boolean;
+  triggers?: Array<{ type: string; channelIds: string[]; configValues?: Record<string, string> }>;
+  /** Owner consent: run triggered executions with the creator's own creds. */
+  useCreatorCredentials?: boolean;
 }): Promise<ChainWorkflow> {
   const data = await request<{ success: boolean; data: ChainWorkflow }>(
     `${AUTH_API_URL}/api/v1/chain-workflows`,
@@ -639,6 +798,9 @@ export async function updateChainWorkflow(id: string, payload: {
   name?: string;
   definition?: ChainWorkflowDefinition;
   isPublished?: boolean;
+  triggers?: Array<{ id?: string; type: string; channelIds: string[]; configValues?: Record<string, string> }> | null;
+  /** Owner consent toggle (owner-only on the backend). */
+  useCreatorCredentials?: boolean;
 }): Promise<ChainWorkflow> {
   const data = await request<{ success: boolean; data: ChainWorkflow }>(
     `${AUTH_API_URL}/api/v1/chain-workflows/${id}`,
@@ -657,15 +819,112 @@ export interface SpacesChannel {
   projectName: string | null;
 }
 
-export async function listSpacesChannels(q?: string, limit = 50, agentSlug?: string): Promise<SpacesChannel[]> {
+export async function listSpacesChannels(q?: string, limit = 50, agentSlug?: string, memberOnly?: boolean): Promise<SpacesChannel[]> {
   const params = new URLSearchParams();
   if (q && q.trim()) params.set("q", q.trim());
   params.set("limit", String(limit));
   if (agentSlug) params.set("agentSlug", agentSlug);
+  if (memberOnly) params.set("memberOnly", "true");
   const data = await request<{ success: boolean; data: SpacesChannel[] }>(
     `${AUTH_API_URL}/api/v1/spaces/channels?${params.toString()}`,
   );
   return data.data;
+}
+
+export interface SpacesProject {
+  id: string;
+  name: string;
+  description: string | null;
+  updatedAt: string | null;
+}
+
+export async function listSpacesProjects(q?: string, limit = 50): Promise<SpacesProject[]> {
+  const params = new URLSearchParams();
+  if (q && q.trim()) params.set("q", q.trim());
+  params.set("limit", String(limit));
+  const data = await request<{ success: boolean; data: SpacesProject[] }>(
+    `${AUTH_API_URL}/api/v1/spaces/projects?${params.toString()}`,
+  );
+  return data.data;
+}
+
+export interface SpacesBoard {
+  id: string;
+  name: string;
+  description: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  updatedAt: string | null;
+}
+
+export async function listSpacesBoards(q?: string, limit = 50, projectId?: string): Promise<SpacesBoard[]> {
+  const params = new URLSearchParams();
+  if (q && q.trim()) params.set("q", q.trim());
+  params.set("limit", String(limit));
+  if (projectId) params.set("projectId", projectId);
+  const data = await request<{ success: boolean; data: SpacesBoard[] }>(
+    `${AUTH_API_URL}/api/v1/spaces/boards?${params.toString()}`,
+  );
+  return data.data;
+}
+
+export interface SpacesTriggerSummary {
+  type: string;
+  name: string;
+  description?: string;
+}
+
+export interface SpacesTriggerPropertySchema {
+  type?: string;
+  description?: string;
+  enum?: string[];
+  default?: unknown;
+  // present when type === "array"
+  items?: { type?: string; enum?: string[] };
+  // present when type === "object" (nested trigger OUTPUT fields, e.g. message.content)
+  properties?: Record<string, SpacesTriggerPropertySchema>;
+  // zodToJsonSchema may emit a nested object as a $ref into definitions
+  $ref?: string;
+}
+
+interface SpacesTriggerSchemaDefinition {
+  type?: string;
+  properties?: Record<string, SpacesTriggerPropertySchema>;
+  required?: string[];
+  additionalProperties?: boolean;
+}
+
+type SpacesJsonSchema = {
+  $ref?: string;
+  definitions?: Record<string, SpacesTriggerSchemaDefinition>;
+  properties?: Record<string, SpacesTriggerPropertySchema>;
+  required?: string[];
+};
+
+export interface SpacesTriggerSchema {
+  type: string;
+  name: string;
+  description?: string;
+  // zodToJsonSchema with { name: 'config' } wraps properties under
+  // { $ref: '#/definitions/config', definitions: { config: { properties, required } } }
+  configSchema: SpacesJsonSchema;
+  // Same wrapping for the trigger's OUTPUT payload — the fields available as
+  // {{trigger.*}} variable refs in step configs.
+  outputSchema?: SpacesJsonSchema;
+}
+
+export async function listSpacesTriggers(): Promise<SpacesTriggerSummary[]> {
+  const res = await request<{ success: boolean; data: SpacesTriggerSummary[] }>(
+    `${AUTH_API_URL}/api/v1/spaces/automations-schema/triggers`,
+  );
+  return res.data;
+}
+
+export async function getSpacesTriggerSchema(type: string): Promise<SpacesTriggerSchema> {
+  const res = await request<{ success: boolean; data: SpacesTriggerSchema }>(
+    `${AUTH_API_URL}/api/v1/spaces/automations-schema/triggers/${encodeURIComponent(type)}`,
+  );
+  return res.data;
 }
 
 export async function deleteChainWorkflow(id: string): Promise<void> {
@@ -799,7 +1058,7 @@ export async function pollGitHubLogin(slug: string, userId: string): Promise<{ s
 export async function listClaudeModels(
   slug: string,
   userId: string,
-  payload?: { apiKey?: string; baseUrl?: string },
+  payload?: { apiKey?: string; baseUrl?: string; authType?: string },
 ): Promise<ClaudeModelInfo[]> {
   const data = await request<{ success: boolean; data: ClaudeModelInfo[] }>(
     `${AUTH_API_URL}/api/v1/agents/${slug}/user-config/${userId}/claude-models`,
@@ -856,6 +1115,22 @@ export async function autoConnectSpaces(userId: string): Promise<void> {
 export async function connectGoogle(userId: string): Promise<string> {
   const data = await request<{ success: boolean; data: { authUrl: string } }>(
     `${AUTH_API_URL}/api/v1/users/${userId}/oauth/google/authorize`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  return data.data.authUrl;
+}
+
+/**
+ * Generic OAuth connect for any connector the backend flags `oauth: true`
+ * (attio, honeycomb, … and any DB connector with connectorMeta.authMethod=
+ * "oauth"). All OAuth routes share the path `/oauth/<type>/authorize` and
+ * return `{ authUrl }`; the caller redirects the browser there. google/microsoft
+ * keep their dedicated helpers (extra callback handling), so they aren't routed
+ * through here.
+ */
+export async function connectOAuth(userId: string, serverType: string): Promise<string> {
+  const data = await request<{ success: boolean; data: { authUrl: string } }>(
+    `${AUTH_API_URL}/api/v1/users/${userId}/oauth/${encodeURIComponent(serverType)}/authorize`,
     { method: "POST", body: JSON.stringify({}) },
   );
   return data.data.authUrl;
@@ -1040,6 +1315,14 @@ export async function configureAgentWebhook(slug: string): Promise<void> {
   );
 }
 
+export async function grantAgentPermissions(slug: string): Promise<void> {
+  const userToken = getGoogleToken();
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/agents/${slug}/grant-permissions`,
+    { method: "POST", body: JSON.stringify({ userToken }) },
+  );
+}
+
 export async function uploadAgentPicture(slug: string, file: File): Promise<{ pictureUrl?: string }> {
   const form = new FormData();
   form.append("picture", file, file.name);
@@ -1132,6 +1415,7 @@ export interface AuditLogEntry {
 export async function checkIsAdmin(userId: string): Promise<boolean> {
   const data = await request<{ success: boolean; data: { isAdmin: boolean } }>(
     `${AUTH_API_URL}/api/v1/admin/roles/check/${userId}`,
+    { headers: { "x-user-id": userId } },
   );
   return data.data.isAdmin;
 }
@@ -1316,6 +1600,74 @@ export async function submitAgentRequest(slug: string, userId: string, requestTy
   );
 }
 
+// ── Agent cloning ─────────────────────────────────────────────────────────────
+
+export interface CloneRequestItem {
+  id: string;
+  agentId?: string;
+  agentSlug?: string;
+  agentName?: string;
+  requestType: string;
+  requesterId: string;
+  requesterName?: string;
+  requesterEmail?: string;
+  status: string;
+  resultAgentId?: string | null;
+  createdAt: string;
+}
+
+/**
+ * Result of POST /agents/:slug/clone.
+ *  - cloned=true  → the caller was privileged; `agent` is the new clone.
+ *  - cloned=false → an approval request was raised; `request` is pending.
+ */
+export type CloneAgentResult =
+  | { cloned: true; agent: Agent }
+  | { cloned: false; request: CloneRequestItem };
+
+export async function cloneAgent(slug: string, userId: string, name?: string): Promise<CloneAgentResult> {
+  const data = await request<{ success: boolean; data: Agent | CloneRequestItem; cloned: boolean }>(
+    `${AUTH_API_URL}/api/v1/agents/${slug}/clone`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(name ? { name } : {}) },
+  );
+  return data.cloned
+    ? { cloned: true, agent: data.data as Agent }
+    : { cloned: false, request: data.data as CloneRequestItem };
+}
+
+/** Clone requests awaiting MY approval (agents I own). */
+export async function listIncomingCloneRequests(userId: string): Promise<CloneRequestItem[]> {
+  const data = await request<{ success: boolean; data: CloneRequestItem[] }>(
+    `${AUTH_API_URL}/api/v1/agents/clone-requests/incoming`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+/** Clone requests I raised (their status). */
+export async function listOutgoingCloneRequests(userId: string): Promise<CloneRequestItem[]> {
+  const data = await request<{ success: boolean; data: CloneRequestItem[] }>(
+    `${AUTH_API_URL}/api/v1/agents/clone-requests/outgoing`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function approveCloneRequest(requestId: string, userId: string): Promise<Agent | null> {
+  const data = await request<{ success: boolean; data: Agent | null }>(
+    `${AUTH_API_URL}/api/v1/agents/clone-requests/${requestId}/approve`,
+    { method: "POST", headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function rejectCloneRequest(requestId: string, userId: string, note?: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/agents/clone-requests/${requestId}/reject`,
+    { method: "POST", headers: { "x-user-id": userId, "Content-Type": "application/json" }, body: JSON.stringify(note ? { note } : {}) },
+  );
+}
+
 export async function listPendingRequests(userId: string): Promise<AgentRequestItem[]> {
   const data = await request<{ success: boolean; data: AgentRequestItem[] }>(
     `${AUTH_API_URL}/api/v1/agents/requests/pending`,
@@ -1468,6 +1820,21 @@ export async function listAgentShares(slug: string, userId: string): Promise<Arr
     { headers: { "x-user-id": userId } },
   );
   return data.data;
+}
+
+// Search the user directory (claw-auth User table) by name OR email for the
+// contributor picker. Backed by GET /users?q= (case-insensitive, top 20).
+// NOTE: only returns users who already exist in claw-auth (have used the
+// product) — it is NOT the full Spaces org directory.
+export async function searchUsers(
+  q: string,
+  requesterId: string,
+): Promise<Array<{ id: string; name: string; email: string }>> {
+  const data = await request<{ success: boolean; data: Array<{ id: string; name: string; email: string }> }>(
+    `${AUTH_API_URL}/api/v1/users?q=${encodeURIComponent(q)}`,
+    { headers: { "x-user-id": requesterId } },
+  );
+  return data.data ?? [];
 }
 
 export async function addAgentShare(slug: string, requesterId: string, targetUserId: string, role: "VIEWER" | "EDITOR" | "CONTRIBUTOR"): Promise<void> {
@@ -1630,6 +1997,9 @@ export interface ChatMsg {
   content: string;
   status: string;
   createdAt: string;
+  reasoning?: string | null;
+  /** Tree parent for branching conversations. Null/undefined = root child. */
+  parentId?: string | null;
   attachments?: ChatAttachmentMeta[];
   contextItems?: AttachedContextRef[];
 }
@@ -1732,12 +2102,26 @@ export interface StreamedAttachment {
   metadata?: Record<string, unknown>;
 }
 
+export interface DebugEventRecord {
+  seq: number;
+  at: string;
+  kind: string;
+  turn?: number;
+  llmCall?: number;
+  toolCallId?: string;
+  parentToolCallId?: string;
+  subagentName?: string;
+  data: Record<string, unknown>;
+}
+
 export interface StreamCallbacks {
   onProgress?: (toolLabel: string) => void;
   onInvocation?: (inv: ToolInvocation) => void;
   onReasoningDelta?: (delta: string) => void;
   onTextDelta?: (delta: string) => void;
   onAttachment?: (att: StreamedAttachment) => void;
+  onDebugEvent?: (event: DebugEventRecord) => void;
+  onDebugArtifactsReady?: (meta: { sessionId?: string; conversationId?: string }) => void;
   onRunMeta?: (meta: { sessionId: string }) => void;
   /** Fires on the SSE `meta` event with the real conversationId — sent
    *  immediately after the backend creates the conversation row, well before
@@ -1755,9 +2139,17 @@ export interface PendingAction {
 }
 
 export interface ChatReply {
+  /** Persisted assistant message id (server-assigned). The frontend uses this
+   *  to swap its optimistic local id once the run finishes. */
+  id?: string;
+  /** Persisted user message id for this turn. Same swap reason as `id`. */
+  userMessageId?: string;
   role: string;
   content: string;
   status: string;
+  /** Tree parent the assistant attached under — relayed so the client can
+   *  stitch the optimistic placeholder into the persisted tree. */
+  parentId?: string | null;
   pendingActions?: PendingAction[];
   attachments?: ChatAttachmentMeta[];
 }
@@ -1770,12 +2162,42 @@ export async function sendChatMessage(
   callbacks?: StreamCallbacks | ((toolLabel: string) => void),
   attachmentIds?: string[],
   attachedContext?: AttachedContextRef[],
+  // Branching args (positional and forgiving for backward compat):
+  //   - isRegenerate / parentUserMessageId
+  //   - parentAssistantMessageIdOrSignal: either the assistant parent id OR
+  //     a plain AbortSignal (legacy callers).
+  //   - signalOrIsEditUserMessage: either an AbortSignal OR `true` to flag
+  //     the call as an edit-user branch.
+  //   - editedUserMessageId: id of the user message being edited.
+  //   - signal: explicit terminal AbortSignal slot.
+  isRegenerate?: boolean,
+  parentUserMessageId?: string,
+  parentAssistantMessageIdOrSignal?: string | AbortSignal,
+  signalOrIsEditUserMessage?: AbortSignal | boolean,
+  editedUserMessageId?: string,
   signal?: AbortSignal,
+  requestOptions?: {
+    disableTools?: boolean;
+    additionalInstructions?: string;
+  },
 ): Promise<{ conversationId: string; reply: ChatReply }> {
   // Backward-compat: allow passing a single onProgress function (old signature).
   const cb: StreamCallbacks = typeof callbacks === "function"
     ? { onProgress: callbacks }
     : (callbacks ?? {});
+
+  const parentAssistantMessageId =
+    typeof parentAssistantMessageIdOrSignal === "string" ? parentAssistantMessageIdOrSignal : undefined;
+  // Resolve the request's AbortSignal across overload slots. Legacy callers
+  // pass it in the parentAssistantMessageIdOrSignal slot; mid-vintage callers
+  // pass it in signalOrIsEditUserMessage; new callers use the terminal `signal`.
+  const requestSignal =
+    parentAssistantMessageIdOrSignal instanceof AbortSignal
+      ? parentAssistantMessageIdOrSignal
+      : signalOrIsEditUserMessage instanceof AbortSignal
+        ? signalOrIsEditUserMessage
+        : signal;
+  const isEditUserMessage = signalOrIsEditUserMessage === true;
 
   const res = await fetch(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat`, {
     method: "POST",
@@ -1787,8 +2209,17 @@ export async function sendChatMessage(
       userId,
       ...(attachmentIds?.length ? { attachmentIds } : {}),
       ...(attachedContext?.length ? { attachedContext } : {}),
+      ...(isRegenerate ? { isRegenerate: true } : {}),
+      ...(isEditUserMessage ? { isEditUserMessage: true } : {}),
+      ...(parentUserMessageId ? { parentUserMessageId } : {}),
+      ...(parentAssistantMessageId ? { parentAssistantMessageId } : {}),
+      ...(editedUserMessageId ? { editedUserMessageId } : {}),
+      ...(requestOptions?.disableTools ? { disableTools: true } : {}),
+      ...(requestOptions?.additionalInstructions?.trim()
+        ? { additionalInstructions: requestOptions.additionalInstructions.trim() }
+        : {}),
     }),
-    ...(signal ? { signal } : {}),
+    ...(requestSignal ? { signal: requestSignal } : {}),
   });
 
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1824,6 +2255,13 @@ export async function sendChatMessage(
         cb.onTextDelta(data.delta);
       } else if (currentEvent === "attachment" && data.attachment && cb.onAttachment) {
         cb.onAttachment(data.attachment as StreamedAttachment);
+      } else if (currentEvent === "debug" && data.debugEvent && cb.onDebugEvent) {
+        cb.onDebugEvent(data.debugEvent as DebugEventRecord);
+      } else if (currentEvent === "debug_artifacts_ready" && cb.onDebugArtifactsReady) {
+        cb.onDebugArtifactsReady({
+          ...(data.sessionId ? { sessionId: String(data.sessionId) } : {}),
+          ...(data.conversationId ? { conversationId: String(data.conversationId) } : {}),
+        });
       } else if (currentEvent === "done") {
         reply = data;
       }
@@ -1887,6 +2325,39 @@ export async function cancelChatRun(
 }
 
 /**
+ * Fetch the input needed to regenerate the latest assistant response on a
+ * conversation: the user message it was responding to and that message's id.
+ * The caller posts a follow-up to /chat with isRegenerate=true to spawn a
+ * sibling assistant under the same user parent.
+ */
+export async function regenerateChatMessage(
+  slug: string,
+  userId: string,
+  conversationId: string,
+): Promise<{ replayMessage: string; parentUserMessageId: string }> {
+  const res = await fetch(
+    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/regenerate`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "x-user-id": userId },
+    },
+  );
+  const json = (await res.json()) as {
+    success?: boolean;
+    data?: { replayMessage?: string; parentUserMessageId?: string };
+    error?: string;
+  };
+  if (!res.ok || !json.success) {
+    throw new Error(json.error ?? `Regenerate failed: HTTP ${res.status}`);
+  }
+  return {
+    replayMessage: json.data?.replayMessage ?? "",
+    parentUserMessageId: json.data?.parentUserMessageId ?? "",
+  };
+}
+
+/**
  * Approve a pending write action from the chat UI. Verifies + executes on the
  * server; returns the tool's text result so the caller can render it inline.
  */
@@ -1937,6 +2408,7 @@ export interface ChatHistory {
    *  pairs each completed agent run with its terminating assistant message
    *  by chronological order. Absent when the conversation has no tools. */
   invocationsByMsgId: Map<string, ToolInvocation[]>;
+  reasoningByMsgId: Map<string, string>;
 }
 
 export async function pollChatMessages(slug: string, conversationId: string): Promise<ChatHistory> {
@@ -1953,7 +2425,133 @@ export async function pollChatMessages(slug: string, conversationId: string): Pr
       invocationsByMsgId.set(msgId, invs);
     }
   }
-  return { messages: data.data, invocationsByMsgId };
+
+  const reasoningByMsgId = new Map<string, string>();
+  for (const m of data.data) {
+    if (m.role === "assistant" && m.reasoning && m.reasoning.trim()) {
+      reasoningByMsgId.set(m.id, m.reasoning);
+    }
+  }
+  return { messages: data.data, invocationsByMsgId, reasoningByMsgId };
+}
+
+export interface LiveStreamCallbacks {
+  onSnapshot?: (data: { invocationsByMsgId: Record<string, ToolInvocation[]>; inProgress: ToolInvocation[] }) => void;
+  onLabel?: (toolLabel: string) => void;
+  onInvocation?: (inv: ToolInvocation) => void;
+  onDone?: (status: string) => void;
+}
+
+/**
+ * Subscribe to the /live SSE for a conversation this tab is VIEWING (not
+ * driving). Streams tool calls + progress for Spaces-originated runs. Returns a
+ * close fn. Uses fetch+ReadableStream (not EventSource) so we can send the
+ * `x-user-id` header the backend ACL needs. Best-effort: a 404 (feature off) or
+ * any network/abort error just ends the stream silently.
+ */
+export function subscribeLiveConversation(
+  slug: string,
+  conversationId: string,
+  userId: string,
+  callbacks: LiveStreamCallbacks,
+): () => void {
+  const controller = new AbortController();
+  void (async () => {
+    let res: Response;
+    try {
+      res = await fetch(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/live`, {
+        credentials: "include",
+        headers: { "x-user-id": userId, Accept: "text/event-stream" },
+        signal: controller.signal,
+      });
+    } catch {
+      return;
+    }
+    if (!res.ok || !res.body) return;
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let currentEvent = "";
+    let dataLines: string[] = [];
+
+    const flush = () => {
+      if (!currentEvent || dataLines.length === 0) {
+        currentEvent = "";
+        dataLines = [];
+        return;
+      }
+      const dataStr = dataLines.join("\n");
+      dataLines = [];
+      const evt = currentEvent;
+      currentEvent = "";
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(dataStr);
+      } catch {
+        return;
+      }
+      switch (evt) {
+        case "snapshot":
+          callbacks.onSnapshot?.({
+            invocationsByMsgId: (data["invocationsByMsgId"] as Record<string, ToolInvocation[]>) ?? {},
+            inProgress: (data["inProgress"] as ToolInvocation[]) ?? [],
+          });
+          break;
+        case "label":
+          if (typeof data["toolLabel"] === "string") callbacks.onLabel?.(data["toolLabel"]);
+          break;
+        case "invocation":
+          if (data["toolInvocation"]) callbacks.onInvocation?.(data["toolInvocation"] as ToolInvocation);
+          break;
+        case "done":
+          callbacks.onDone?.(typeof data["status"] === "string" ? (data["status"] as string) : "completed");
+          break;
+        default:
+          break;
+      }
+    };
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, nl).replace(/\r$/, "");
+          buffer = buffer.slice(nl + 1);
+          if (line === "") {
+            flush();
+            continue;
+          }
+          if (line.startsWith(":")) continue; // heartbeat comment
+          if (line.startsWith("event:")) currentEvent = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+        }
+      }
+    } catch {
+      /* aborted or network error — end silently */
+    }
+  })();
+  return () => controller.abort();
+}
+
+export interface DebugArtifactBundle {
+  conversationId: string;
+  debugDir: string;
+  debugSession: Record<string, unknown> | null;
+  debugEvents: Record<string, unknown>[] | null;
+  runs: Array<{ fileName: string; data: Record<string, unknown> }>;
+  subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
+}
+
+export async function fetchConversationDebugArtifacts(slug: string, conversationId: string): Promise<DebugArtifactBundle> {
+  const data = await request<{
+    success: boolean;
+    data: DebugArtifactBundle;
+  }>(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/debug`);
+  return data.data;
 }
 
 export interface ConversationSummary {
@@ -1969,6 +2567,63 @@ export async function listChatConversations(slug: string, userId: string): Promi
   );
   return data.data;
 }
+// ── Knowledge Base (spaces collections) ──────────────────────────────
+
+export interface KbFile {
+  id: string;
+  name: string;
+  itemType: "file";
+  fileId: string;
+  ingestionStatus: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KbCollectionNode {
+  id: string;
+  name: string;
+  description: string | null;
+  isPrivate: boolean;
+  ownerId: string;
+  scopeType: string;
+  scopeId: string;
+  parentId: string | null;
+  rootCollectionId: string | null;
+  effectiveRole: "OWNER" | "EDITOR" | "VIEWER";
+  /** Channel display name when scopeType='CHANNEL' (root nodes only). */
+  channelName?: string;
+  /** Project id of the channel that owns this collection (root nodes only). */
+  projectId?: string;
+  /** Project display name (root nodes only). */
+  projectName?: string;
+  children?: KbCollectionNode[];
+  items?: KbFile[];
+}
+
+/** A user's accessible KB tree from spaces, used to populate the picker. */
+export async function listAccessibleKnowledgeBase(): Promise<{ collections: KbCollectionNode[]; noSpacesSession: boolean }> {
+  const data = await request<{ success: boolean; collections: KbCollectionNode[]; noSpacesSession?: boolean }>(
+    `${AUTH_API_URL}/api/v1/knowledge-base/tree?includeItems=1`,
+  );
+  return { collections: data.collections ?? [], noSpacesSession: data.noSpacesSession === true };
+}
+
+/** Selected grant on an agent. fileId IS NULL = whole-collection grant. */
+export interface AgentKbGrant {
+  id: string;
+  agentId: string;
+  collectionId: string;
+  fileId: string | null;
+  createdAt: string;
+}
+
+export async function listAgentKnowledgeBase(slug: string): Promise<AgentKbGrant[]> {
+  const data = await request<{ success: boolean; data: AgentKbGrant[] }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/knowledge-base`,
+  );
+  return data.data;
+}
+
 // ── Standalone Skills CRUD ────────────────────────────────────────────
 
 export interface Skill {
@@ -1981,6 +2636,8 @@ export interface Skill {
   source: string;
   scope: string;
   ownerUserId: string | null;
+  /** Resolved owner identity (scoped to id/name/email by the backend). Null for seeded/system skills. */
+  owner?: { id: string; name: string; email: string } | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -2261,6 +2918,13 @@ export interface AgentRun {
   ratedAt: string | null;
   startedAt: string;
   completedAt: string | null;
+  /** Links this run to the specific assistant message it produced. Needed for
+   *  branching: once a user message has multiple assistant siblings,
+   *  chronology no longer pairs runs ↔ assistants — chatMessageId does. */
+  chatMessageId?: string | null;
+  /** Populated only by the admin "All Runs" (scope=all) listing — null elsewhere. */
+  userName?: string | null;
+  userEmail?: string | null;
 }
 
 export function exportSessionUrl(conversationId: string, agentSlug: string, format: "claude-code" | "markdown" | "claude-project"): string {
@@ -2317,12 +2981,15 @@ export async function listRecentDownRuns(userId: string, days: number | "all" = 
   return data.data;
 }
 
-export async function listRuns(userId: string, opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }): Promise<AgentRun[]> {
+export async function listRuns(userId: string, opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string; allUsers?: boolean }): Promise<AgentRun[]> {
   const qs = new URLSearchParams();
   if (opts?.status) qs.set("status", opts.status);
   if (opts?.limit) qs.set("limit", String(opts.limit));
   if (opts?.conversationId) qs.set("conversationId", opts.conversationId);
   if (opts?.agentSlug) qs.set("agentSlug", opts.agentSlug);
+  // Admin-only: every user's runs of this agent (server enforces isAdmin + the
+  // usedUserToken ACL). Requires agentSlug.
+  if (opts?.allUsers && opts?.agentSlug) qs.set("scope", "all");
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   const data = await request<{ success: boolean; data: AgentRun[] }>(
     `${AUTH_API_URL}/api/v1/runs${suffix}`,
@@ -2416,6 +3083,9 @@ export interface SubagentDef {
   mcpInstanceMap?: Record<string, string>;
   enabled: boolean;
   createdByUserId?: string | null;
+  /** Resolved display name/email of the creator (custom subagents). */
+  createdByName?: string | null;
+  createdByEmail?: string | null;
   createdAt?: string;
   updatedAt?: string;
   skills: Array<{ id: string; slug: string; name: string }>;
@@ -2847,6 +3517,11 @@ export interface DigitalTwinStatus {
   mdFileCount: number;
   /** Optional suffix the user has configured. Empty string when unset. */
   responseSuffix: string;
+  /** Memory approval mode: "manual" (review queue) or "auto" (retain
+   *  high-confidence candidates immediately). */
+  memoryApprovalMode: string;
+  /** Min curator confidence (0–1) required to auto-approve a candidate. */
+  memoryAutoApproveMinScore: number;
 }
 
 export interface DigitalTwinEstimate {
@@ -2979,9 +3654,16 @@ export async function patchDigitalTwinCandidate(
 
 export async function updateDigitalTwinSettings(
   userId: string,
-  patch: { responseSuffix?: string | null },
-): Promise<{ responseSuffix: string }> {
-  const data = await request<{ success: boolean; data: { responseSuffix: string } }>(
+  patch: {
+    responseSuffix?: string | null;
+    memoryApprovalMode?: "manual" | "auto";
+    memoryAutoApproveMinScore?: number;
+  },
+): Promise<{ responseSuffix: string; memoryApprovalMode: string; memoryAutoApproveMinScore: number }> {
+  const data = await request<{
+    success: boolean;
+    data: { responseSuffix: string; memoryApprovalMode: string; memoryAutoApproveMinScore: number };
+  }>(
     `${AUTH_API_URL}/api/v1/digital-twin/settings`,
     {
       method: "PATCH",
@@ -3064,8 +3746,31 @@ export async function listDigitalTwinMemories(
     credentials: "include",
   });
   if (!res.ok) throw new Error(`Failed to list memories: ${res.status}`);
-  const body = await res.json() as { success: boolean; data: { memories: MemoryBankMemory[]; total: number } };
+  // Backend shape: { success, data: MemoryBankMemory[], total, limit, offset }
+  // — the array lives directly in `data`, with `total` as a sibling.
+  const body = await res.json() as { success: boolean; data: MemoryBankMemory[]; total?: number };
   if (!body.success) throw new Error("Failed to list memories");
+  return { memories: body.data ?? [], total: body.total ?? body.data?.length ?? 0 };
+}
+
+/**
+ * Seed an agent's memory bank from a markdown document. Owner/admin only
+ * (enforced server-side). The extracted facts land as PENDING review
+ * candidates — they are not retained to the live bank until approved.
+ */
+export async function uploadAgentMemoryMd(
+  agentSlug: string,
+  filename: string,
+  content: string,
+): Promise<{ filename: string; candidatesCreated: number }> {
+  const res = await fetch(`${MEMORY_BASE}/banks/${encodeURIComponent(agentSlug)}/upload-md`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ filename, content }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string; data?: { filename: string; candidatesCreated: number } };
+  if (!res.ok || !body.success || !body.data) throw new Error(body.error || `Upload failed (${res.status})`);
   return body.data;
 }
 
@@ -3076,6 +3781,7 @@ export async function deleteDigitalTwinMemory(userId: string, hindsightMemoryId:
   );
   if (!res.ok) throw new Error(`Failed to delete memory: ${res.status}`);
 }
+
 
 export async function getDigitalTwinStats(
   userId: string,
@@ -3108,17 +3814,30 @@ export async function recallDigitalTwinMemory(
   return body.data.memories ?? [];
 }
 
+export interface DigitalTwinSubsystemNode {
+  name: string;
+  memoryCount: number;
+  sessionCount: number;
+  sampleContent: string;
+  lastUpdated: string | null;
+}
+export interface DigitalTwinSubsystemEdge {
+  source: string;
+  target: string;
+  sharedSessions: number;
+}
+
 export async function getDigitalTwinSubsystemGraph(
   userId: string,
-): Promise<{ nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> }> {
+): Promise<{ subsystems: DigitalTwinSubsystemNode[]; edges: DigitalTwinSubsystemEdge[] }> {
   const res = await fetch(
     `${MEMORY_BASE}/banks/digital-twin/subsystem-graph?userTag=${encodeURIComponent(`user:${userId}`)}`,
     { credentials: "include" },
   );
   if (!res.ok) throw new Error(`Failed to get graph: ${res.status}`);
-  const body = await res.json() as { success: boolean; data: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } };
+  const body = await res.json() as { success: boolean; data: { subsystems?: DigitalTwinSubsystemNode[]; edges?: DigitalTwinSubsystemEdge[] } };
   if (!body.success) throw new Error("Failed to get graph");
-  return body.data;
+  return { subsystems: body.data.subsystems ?? [], edges: body.data.edges ?? [] };
 }
 
 // ── Memory Batches (nightly curation review) ──────────────────────────
@@ -3196,3 +3915,780 @@ export async function rejectMemoryBatch(batchId: string): Promise<void> {
   if (!res.ok) throw new Error(`Reject failed: ${res.status}`);
 }
 
+// ── Digital Twin Metrics ────────────────────────────────────────────────────
+
+export interface DigitalTwinSubsystemMetric {
+  subsystem: string;
+  approved: number;
+  rejected: number;
+  pending: number;
+}
+
+export interface DigitalTwinSourceMetric {
+  source: string;
+  approved: number;
+  rejected: number;
+}
+
+export interface DigitalTwinMetrics {
+  total: number;
+  approvedClean: number;
+  approvedEdited: number;
+  totalApproved: number;
+  rejected: number;
+  pending: number;
+  approvalRate: number | null;
+  editRate: number | null;
+  previousApprovalRate: number | null;
+  previousEditRate: number | null;
+  bySubsystem: DigitalTwinSubsystemMetric[];
+  bySource: DigitalTwinSourceMetric[];
+  oldestPendingDays: number | null;
+  addedSinceYesterday: number;
+  recallPrecision: number | null;
+  recallRatedCount: number;
+}
+
+export async function getDigitalTwinMetrics(userId: string, days?: number): Promise<DigitalTwinMetrics> {
+  const base = `${AUTH_API_URL}/api/v1/digital-twin/metrics`;
+  const qs = days ? `?days=${days}` : "";
+  const data = await request<{ success: boolean; data: DigitalTwinMetrics }>(
+    `${base}${qs}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+// ── Workspace-wide metrics (v3 Metrics page) ───────────────────────────
+
+export interface SlowSessionToolRow {
+  tool: string;
+  ms: number;
+  calls: number;
+  isError: boolean;
+}
+export interface SlowSession {
+  sessionId: string;
+  agentSlug: string;
+  totalMs: number | null;
+  llmTotalMs: number | null;
+  toolMs: number | null;
+  completedAt: string;
+  task: string | null;
+  topTools: SlowSessionToolRow[];
+}
+
+export interface GlobalMetricsDayBucket {
+  day: string;
+  runs: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  p50TotalMs: number | null;
+  p95TotalMs: number | null;
+  avgLlmMs: number | null;
+  avgToolMs: number | null;
+  errorRate: number;
+}
+export interface GlobalMetricsAgentRow {
+  agentSlug: string;
+  runs: number;
+  p50TotalMs: number | null;
+  p95TotalMs: number | null;
+  avgLlmMs: number | null;
+  avgToolMs: number | null;
+  errorRate: number;
+}
+export interface GlobalMetricsProviderRow {
+  provider: string;
+  model: string | null;
+  runs: number;
+  p50LlmMs: number | null;
+  p95LlmMs: number | null;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  avgTokensPerSec: number | null;
+  errorRate: number;
+}
+export interface GlobalMetrics {
+  days: number;
+  windowStart: string;
+  windowEnd: string;
+  totals: {
+    runs: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    p50TotalMs: number | null;
+    p95TotalMs: number | null;
+    avgLlmMs: number | null;
+    avgToolMs: number | null;
+    errorRate: number;
+  };
+  delta: {
+    runs: number;
+    p50TotalMs: number | null;
+    p95TotalMs: number | null;
+    errorRate: number;
+  };
+  perDay: GlobalMetricsDayBucket[];
+  topAgents: GlobalMetricsAgentRow[];
+  byProvider: GlobalMetricsProviderRow[];
+  slowSessions: SlowSession[];
+}
+
+export async function fetchGlobalMetrics(userId: string, days: 1 | 7 | 30 = 7): Promise<GlobalMetrics> {
+  return request<GlobalMetrics>(
+    `${AUTH_API_URL}/api/v1/metrics/global?days=${days}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+export interface SentimentComment {
+  sessionId: string;
+  rating: "up" | "down";
+  comment: string;
+  completedAt: string;
+}
+export interface AgentSentiment {
+  totalRuns: number;
+  ratingUp: number;
+  ratingDown: number;
+  ratingTotal: number;
+  ratingRatio: number | null;
+  cancelledRate: number;
+  failedRate: number;
+  retriedRate: number;
+  apologeticRate: number;
+  recentComments: SentimentComment[];
+}
+
+// Per-agent metrics — same shape as global minus `topAgents`, with a couple
+// of extra single-agent rollups (avgTurns, avgTokensPerSec).
+export interface AgentMetrics {
+  agentSlug: string;
+  days: number;
+  windowStart: string;
+  windowEnd: string;
+  totals: GlobalMetrics["totals"] & {
+    avgTurns: number | null;
+    avgTokensPerSec: number | null;
+  };
+  delta: GlobalMetrics["delta"];
+  perDay: GlobalMetricsDayBucket[];
+  slowSessions: SlowSession[];
+  toolLatency: ToolLatencyRow[];
+  sentiment: AgentSentiment;
+}
+
+export interface ToolLatencyRow {
+  tool: string;
+  calls: number;
+  errors: number;
+  avgMs: number | null;
+  p50Ms: number | null;
+  p95Ms: number | null;
+  totalMs: number;
+}
+
+// FailureCurator candidate types and endpoints
+export type ImprovementBucket = "agent_unable_to_do_work" | "failure" | "user_frustrated";
+export type ImprovementRootCause =
+  | "need-memory" | "missing-tool" | "prompt-ambiguity" | "wrong-subagent"
+  | "redundant-subagent-call" | "tool-misuse" | "ext-api-failure"
+  | "permission-denied" | "memory-miss" | "identity-bleed" | "no-actionable";
+export type ImprovementFixType =
+  | "prompt-edit" | "add-memory" | "add-tool" | "remove-tool"
+  | "tighten-subagent" | "investigate" | "ops";
+export interface ImprovementCandidate {
+  id: string;
+  bucket: ImprovementBucket;
+  rootCause: ImprovementRootCause;
+  finding: string;
+  evidence: string[];
+  proposedFix: { type: ImprovementFixType; description: string };
+  confidence: "high" | "medium" | "low";
+  metadata: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchAgentImprovements(userId: string, slug: string): Promise<ImprovementCandidate[]> {
+  const data = await request<{ agentSlug: string; candidates: ImprovementCandidate[] }>(
+    `${AUTH_API_URL}/api/v1/metrics/agent/${encodeURIComponent(slug)}/improvements`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.candidates;
+}
+
+export async function applyImprovement(userId: string, id: string): Promise<void> {
+  await request<{ ok: true }>(
+    `${AUTH_API_URL}/api/v1/metrics/improvements/${encodeURIComponent(id)}/apply`,
+    { method: "POST", headers: { "x-user-id": userId } },
+  );
+}
+
+export async function dismissImprovement(userId: string, id: string, reason?: string): Promise<void> {
+  await request<{ ok: true }>(
+    `${AUTH_API_URL}/api/v1/metrics/improvements/${encodeURIComponent(id)}/dismiss`,
+    {
+      method: "POST",
+      headers: { "x-user-id": userId, "Content-Type": "application/json" },
+      ...(reason ? { body: JSON.stringify({ reason }) } : {}),
+    },
+  );
+}
+
+export async function fetchAgentMetrics(userId: string, slug: string, days: 1 | 7 | 30 = 7): Promise<AgentMetrics> {
+  return request<AgentMetrics>(
+    `${AUTH_API_URL}/api/v1/metrics/agent/${encodeURIComponent(slug)}?days=${days}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+// ── Evals ─────────────────────────────────────────────────────────────────
+// A folder explorer of conversations to replay against an agent. The browser
+// orchestrates a run by calling sendChatMessage() per turn (the real chat SSE
+// endpoint), capturing answer + reasoning + tool calls; these endpoints persist
+// folders, conversations, runs and per-turn results.
+
+export interface EvalTurn {
+  message: string;
+  expectedResponse?: string | null;
+}
+
+export interface EvalFolder {
+  id: string;
+  name: string;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  _count?: { conversations: number };
+}
+
+/** List row — no turns (cheap). */
+export interface EvalConversationListItem {
+  id: string;
+  folderId: string;
+  title: string;
+  source: string | null;
+  createdAt: string;
+}
+
+/** Full conversation with turns. */
+export interface EvalConversation extends EvalConversationListItem {
+  turns: EvalTurn[];
+  externalId?: string | null;
+  updatedAt: string;
+}
+
+/** One judge×model verdict on a turn — the same judge can hold several rows,
+ *  one per model it was scored with. */
+export interface EvalTurnJudgeScore {
+  id: string;
+  judgeId: string;
+  judgeName: string;
+  score: number | null;
+  reasoning: string | null;
+  status?: string;
+  model: string;
+  passId?: string | null;
+  updatedAt?: string;
+}
+
+export interface EvalTurnResult {
+  id: string;
+  runId: string;
+  conversationId: string;
+  turnIndex: number;
+  inputMessage: string;
+  expectedResponse: string | null;
+  clawAnswer: string | null;
+  reasoning: string | null;
+  toolInvocations: ToolInvocation[] | null;
+  status: "running" | "completed" | "failed";
+  clawConversationId: string | null;
+  sessionId: string | null;
+  matchScore: number | null;
+  judgeReasoning: string | null;
+  judgeModel: string | null;
+  judgedAt: string | null;
+  judgeScores?: EvalTurnJudgeScore[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvalGeneration {
+  id: string;
+  agentSlug: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  genProvider?: string | null;
+  genModel?: string | null;
+  conversationIds: string[];
+  folderId: string | null;
+  createdBy?: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  turnResults?: EvalTurnResult[];
+}
+
+// ── Folders ──
+export async function listEvalFolders(): Promise<EvalFolder[]> {
+  const data = await request<{ success: boolean; folders: EvalFolder[] }>(
+    `${AUTH_API_URL}/api/v1/evals/folders`,
+  );
+  return data.folders;
+}
+
+export async function createEvalFolder(
+  payload: { name: string },
+  userId: string,
+): Promise<EvalFolder> {
+  const data = await request<{ success: boolean; folder: EvalFolder }>(
+    `${AUTH_API_URL}/api/v1/evals/folders`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+  return data.folder;
+}
+
+export async function deleteEvalFolder(id: string, userId: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/evals/folders/${id}`,
+    { method: "DELETE", headers: { "x-user-id": userId } },
+  );
+}
+
+// ── Conversations ──
+export async function listEvalConversations(
+  folderId: string,
+  opts?: { skip?: number; take?: number; search?: string },
+): Promise<{ total: number; items: EvalConversationListItem[] }> {
+  const p = new URLSearchParams();
+  if (opts?.skip) p.set("skip", String(opts.skip));
+  if (opts?.take) p.set("take", String(opts.take));
+  if (opts?.search) p.set("search", opts.search);
+  const qs = p.toString() ? `?${p.toString()}` : "";
+  return request<{ success: boolean; total: number; items: EvalConversationListItem[] }>(
+    `${AUTH_API_URL}/api/v1/evals/folders/${folderId}/conversations${qs}`,
+  ).then((d) => ({ total: d.total, items: d.items }));
+}
+
+export async function importEvalConversations(
+  folderId: string,
+  conversations: Array<{ title?: string | null; source?: string | null; externalId?: string | null; turns: EvalTurn[] }>,
+  userId: string,
+): Promise<number> {
+  const data = await request<{ success: boolean; imported: number }>(
+    `${AUTH_API_URL}/api/v1/evals/folders/${folderId}/conversations`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify({ conversations }) },
+  );
+  return data.imported;
+}
+
+export async function getEvalConversation(id: string): Promise<EvalConversation> {
+  const data = await request<{ success: boolean; conversation: EvalConversation }>(
+    `${AUTH_API_URL}/api/v1/evals/conversations/${id}`,
+  );
+  return data.conversation;
+}
+
+export async function deleteEvalConversation(id: string, userId: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/evals/conversations/${id}`,
+    { method: "DELETE", headers: { "x-user-id": userId } },
+  );
+}
+
+// ── Runs ──
+export interface GenerationProgress {
+  phase: "running" | "done" | "cancelled" | "failed";
+  conversationsTotal: number;
+  conversationsDone: number;
+  turnsTotal: number;
+  turnsDone: number;
+  turnsFailed: number;
+}
+
+export interface GenerationJobStatus {
+  jobId: string;
+  state: string;
+  progress: GenerationProgress | null;
+  failedReason?: string;
+}
+
+/** Start a run as a resilient background job (replays server-side). Returns
+ *  runId + jobId; poll getGenerationJob. Survives the browser closing. */
+/** Generation-model options for the Run dialog: providers the user configured
+ *  in claw (provider + their chosen model) + platform LiteLLM models. */
+export interface EvalGenModels {
+  providers: Array<{ provider: string; model: string | null }>;
+  litellm: string[];
+}
+
+export async function listEvalGenModels(userId: string): Promise<EvalGenModels> {
+  const data = await request<{ success: boolean } & EvalGenModels>(
+    `${AUTH_API_URL}/api/v1/evals/gen-models`,
+    { headers: { "x-user-id": userId } },
+  );
+  return { providers: data.providers ?? [], litellm: data.litellm ?? [] };
+}
+
+export async function startBackgroundGeneration(
+  payload: { agentSlug: string; conversationIds?: string[]; folderId?: string; genProvider?: string; genModel?: string },
+  userId: string,
+): Promise<{ runId: string; jobId: string }> {
+  const d = await request<{ success: boolean; runId: string; jobId: string }>(
+    `${AUTH_API_URL}/api/v1/evals/generations/background`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+  return { runId: d.runId, jobId: d.jobId };
+}
+
+export async function getGenerationJob(jobId: string, userId: string): Promise<GenerationJobStatus> {
+  return request<{ success: boolean } & GenerationJobStatus>(`${AUTH_API_URL}/api/v1/evals/generation-jobs/${jobId}`, {
+    headers: { "x-user-id": userId },
+  }).then((d) => ({ jobId: d.jobId, state: d.state, progress: d.progress, ...(d.failedReason ? { failedReason: d.failedReason } : {}) }));
+}
+
+export async function cancelGenerationJob(jobId: string, userId: string): Promise<void> {
+  await request<{ success: boolean }>(`${AUTH_API_URL}/api/v1/evals/generation-jobs/${jobId}/cancel`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+  });
+}
+
+export async function getGeneration(id: string): Promise<EvalGeneration> {
+  const data = await request<{ success: boolean; run: EvalGeneration }>(
+    `${AUTH_API_URL}/api/v1/evals/generations/${id}`,
+  );
+  return data.run;
+}
+
+export interface GenerationMeta {
+  id: string;
+  agentSlug: string;
+  status: string;
+  startedAt: string;
+  completedAt: string | null;
+  genProvider?: string | null;
+  genModel?: string | null;
+}
+
+/** All runs for a folder (newest first) — for the regression-compare picker. */
+export async function listGenerationsForFolder(folderId: string): Promise<GenerationMeta[]> {
+  const data = await request<{ success: boolean; runs: GenerationMeta[] }>(
+    `${AUTH_API_URL}/api/v1/evals/folders/${folderId}/generations`,
+  );
+  return data.runs;
+}
+
+export async function getLatestGenerationForFolder(folderId: string): Promise<EvalGeneration | null> {
+  const data = await request<{ success: boolean; run: EvalGeneration | null }>(
+    `${AUTH_API_URL}/api/v1/evals/folders/${folderId}/latest-generation`,
+  );
+  return data.run;
+}
+
+// ── Named judges ──
+export interface EvalJudge {
+  id: string;
+  name: string;
+  prompt: string;
+  model: string;
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export async function listEvalJudges(): Promise<EvalJudge[]> {
+  const data = await request<{ success: boolean; judges: EvalJudge[] }>(`${AUTH_API_URL}/api/v1/evals/judges`);
+  return data.judges;
+}
+
+export async function createEvalJudge(
+  payload: { name: string; prompt: string; model?: string },
+  userId: string,
+): Promise<EvalJudge> {
+  const data = await request<{ success: boolean; judge: EvalJudge }>(`${AUTH_API_URL}/api/v1/evals/judges`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify(payload),
+  });
+  return data.judge;
+}
+
+export async function updateEvalJudge(
+  id: string,
+  payload: { name?: string; prompt?: string; model?: string },
+  userId: string,
+): Promise<EvalJudge> {
+  const data = await request<{ success: boolean; judge: EvalJudge }>(`${AUTH_API_URL}/api/v1/evals/judges/${id}`, {
+    method: "PUT",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify(payload),
+  });
+  return data.judge;
+}
+
+export async function deleteEvalJudge(id: string, userId: string): Promise<void> {
+  await request<{ success: boolean }>(`${AUTH_API_URL}/api/v1/evals/judges/${id}`, {
+    method: "DELETE",
+    headers: { "x-user-id": userId },
+  });
+}
+
+// ── Semantic judge (background scoring job) ──
+/** Enqueue a background scoring job: one or more judges grade a run's turns
+ *  server-side. Omit conversationIds for the whole run, or pass them for one
+ *  conversation. Omit judgeIds to use the built-in Default judge. Returns a
+ *  jobId; poll getEvalJudgeJob for progress. */
+export async function judgeEvalRun(
+  runId: string,
+  payload: {
+    judges?: Array<{ judgeId: string; model?: string }>;
+    conversationIds?: string[];
+    onlyUnscored?: boolean;
+  },
+  userId: string,
+): Promise<{ jobId: string }> {
+  const d = await request<{ success: boolean; jobId: string }>(
+    `${AUTH_API_URL}/api/v1/evals/generations/${runId}/judge`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+  return { jobId: d.jobId };
+}
+
+export interface EvalJudgeProgress {
+  phase: "scoring" | "done" | "cancelled" | "failed";
+  total: number;
+  done: number;
+  judged: number;
+  failed: number;
+  judgeCount: number;
+}
+
+export interface EvalJudgeJobStatus {
+  jobId: string;
+  state: string;
+  progress: EvalJudgeProgress | null;
+  failedReason?: string;
+}
+
+export async function getEvalJudgeJob(jobId: string, userId: string): Promise<EvalJudgeJobStatus> {
+  return request<{ success: boolean } & EvalJudgeJobStatus>(
+    `${AUTH_API_URL}/api/v1/evals/judge-jobs/${jobId}`,
+    { headers: { "x-user-id": userId } },
+  ).then((d) => ({ jobId: d.jobId, state: d.state, progress: d.progress, ...(d.failedReason ? { failedReason: d.failedReason } : {}) }));
+}
+
+export async function cancelEvalJudgeJob(jobId: string, userId: string): Promise<void> {
+  await request<{ success: boolean }>(`${AUTH_API_URL}/api/v1/evals/judge-jobs/${jobId}/cancel`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+  });
+}
+
+export interface SpacesChannelOption {
+  id: string;
+  name: string;
+  type: string;
+}
+
+/** List the user's Spaces channels (with channel `type`) for the eval import
+ *  picker. `spacesAuth=false` means there's no active Spaces session. */
+export async function listEvalSpacesChannels(
+  userId: string,
+): Promise<{ channels: SpacesChannelOption[]; spacesAuth: boolean }> {
+  const data = await request<{ success: boolean; channels: SpacesChannelOption[]; spacesAuth: boolean }>(
+    `${AUTH_API_URL}/api/v1/evals/spaces-channels`,
+    { headers: { "x-user-id": userId } },
+  );
+  return { channels: data.channels, spacesAuth: data.spacesAuth };
+}
+
+export interface EvalImportProgress {
+  phase: "scanning" | "done" | "cancelled";
+  conversationsScanned: number;
+  pairsFound: number;
+  conversationsCreated: number;
+  duplicatesSkipped: number;
+  conversationsUpdated: number;
+  capped: boolean;
+  cursor?: string;
+}
+
+export interface EvalImportStatus {
+  jobId: string;
+  state: string; // waiting | active | completed | failed | delayed | unknown
+  progress: EvalImportProgress | null;
+  failedReason?: string;
+}
+
+/** Enqueue a background import of a thread / chat channel / email channel from
+ *  Spaces over a time range. Returns the jobId; poll getEvalImportJob. */
+export async function importEvalFromSpaces(
+  folderId: string,
+  payload: {
+    kind: "thread" | "channel" | "email-channel";
+    channelId?: string;
+    conversationId?: string;
+    model?: string;
+    range?: string;
+  },
+  userId: string,
+): Promise<{ jobId: string }> {
+  const d = await request<{ success: boolean; jobId: string }>(
+    `${AUTH_API_URL}/api/v1/evals/folders/${folderId}/import-from-spaces`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+  return { jobId: d.jobId };
+}
+
+/** Channel-first import: the backend find-or-creates the folder bound to this
+ *  channel (one folder per channel) and imports into it. Returns the resolved
+ *  folder so the UI can open/expand it. */
+export async function importEvalFromSpacesChannel(
+  payload: { kind: "channel" | "email-channel"; channelId: string; model?: string; range?: string },
+  userId: string,
+): Promise<{ jobId: string; folderId: string; folderName: string }> {
+  const d = await request<{ success: boolean; jobId: string; folderId: string; folderName: string }>(
+    `${AUTH_API_URL}/api/v1/evals/import-from-channel`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+  return { jobId: d.jobId, folderId: d.folderId, folderName: d.folderName };
+}
+
+export async function getEvalImportJob(jobId: string, userId: string): Promise<EvalImportStatus> {
+  return request<{ success: boolean } & EvalImportStatus>(
+    `${AUTH_API_URL}/api/v1/evals/import-jobs/${jobId}`,
+    { headers: { "x-user-id": userId } },
+  ).then((d) => ({ jobId: d.jobId, state: d.state, progress: d.progress, ...(d.failedReason ? { failedReason: d.failedReason } : {}) }));
+}
+
+export async function cancelEvalImportJob(jobId: string, userId: string): Promise<void> {
+  await request<{ success: boolean }>(`${AUTH_API_URL}/api/v1/evals/import-jobs/${jobId}/cancel`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+  });
+}
+
+/** Judge/extraction model options + what an empty ("default") model resolves to. */
+export async function listEvalModels(): Promise<{ models: string[]; defaultModel: string }> {
+  const data = await request<{ success: boolean; models: string[]; defaultModel?: string }>(
+    `${AUTH_API_URL}/api/v1/evals/models`,
+  );
+  return { models: data.models ?? [], defaultModel: data.defaultModel ?? "" };
+}
+
+/**
+ * Parse pasted/uploaded eval data into importable conversations. The frontend
+ * half of the ingestion seam. Accepts (in priority order):
+ *   1. JSONL — one conversation per line (each line any shape below).
+ *   2. Canonical array: [{ title?, source?, turns: [{ message, expectedResponse }] }]
+ *   3. A single turn-keyed object → one conversation:
+ *        { "1": { message, response }, "2": { message, response } }
+ *   4. An array of turn-keyed objects → many conversations.
+ * Returns { conversations } or { error }.
+ */
+export function parseEvalConversations(
+  raw: string,
+): { conversations: Array<{ title?: string; source?: string; turns: EvalTurn[] }> } | { error: string } {
+  const text = raw.trim();
+  if (!text) return { error: "Empty" };
+
+  const turnFrom = (t: unknown): EvalTurn | null => {
+    if (!t || typeof t !== "object") return null;
+    const o = t as Record<string, unknown>;
+    const message = o["message"] ?? o["input"] ?? o["user"] ?? o["query"];
+    if (typeof message !== "string" || !message.trim()) return null;
+    const expected = o["expectedResponse"] ?? o["response"] ?? o["answer"] ?? o["expected"] ?? o["output"];
+    return { message, expectedResponse: typeof expected === "string" ? expected : null };
+  };
+
+  const convFromKeyed = (obj: Record<string, unknown>): { turns: EvalTurn[] } | null => {
+    const keys = Object.keys(obj).filter((k) => /^\d+$/.test(k)).sort((a, b) => Number(a) - Number(b));
+    if (keys.length === 0) return null;
+    const turns: EvalTurn[] = [];
+    for (const k of keys) {
+      const turn = turnFrom(obj[k]);
+      if (!turn) return null;
+      turns.push(turn);
+    }
+    return turns.length ? { turns } : null;
+  };
+
+  const convFromAny = (v: unknown): { title?: string; source?: string; turns: EvalTurn[] } | null => {
+    if (!v || typeof v !== "object") return null;
+    const o = v as Record<string, unknown>;
+    const title = typeof o["title"] === "string" ? (o["title"] as string) : undefined;
+    const source = typeof o["source"] === "string" ? (o["source"] as string) : undefined;
+    // Canonical { turns: [...] }
+    if (Array.isArray(o["turns"])) {
+      const turns: EvalTurn[] = [];
+      for (const t of o["turns"]) {
+        const turn = turnFrom(t);
+        if (!turn) return null;
+        turns.push(turn);
+      }
+      return turns.length ? { ...(title ? { title } : {}), ...(source ? { source } : {}), turns } : null;
+    }
+    // Turn-keyed object
+    const keyed = convFromKeyed(o);
+    if (keyed) return { ...(title ? { title } : {}), ...(source ? { source } : {}), turns: keyed.turns };
+    return null;
+  };
+
+  // JSONL: more than one non-empty line and every line parses as JSON.
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length > 1 && lines.every((l) => l.startsWith("{") || l.startsWith("["))) {
+    const conversations: Array<{ title?: string; source?: string; turns: EvalTurn[] }> = [];
+    let allParsed = true;
+    for (const line of lines) {
+      try {
+        const conv = convFromAny(JSON.parse(line));
+        if (!conv) { allParsed = false; break; }
+        conversations.push(conv);
+      } catch {
+        allParsed = false;
+        break;
+      }
+    }
+    if (allParsed && conversations.length) return { conversations };
+    // fall through to whole-document parse
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { error: "Not valid JSON or JSONL" };
+  }
+
+  if (Array.isArray(parsed)) {
+    if (parsed.length === 0) return { error: "Empty array" };
+    // Simplest shape: a flat array of { message, response } turns → ONE
+    // conversation. Detected when every element parses as a turn and none is
+    // itself a conversation (no nested `turns`).
+    const asTurns = parsed.map(turnFrom);
+    const allBareTurns =
+      asTurns.every((t) => t !== null) &&
+      parsed.every((it) => !it || typeof it !== "object" || !Array.isArray((it as Record<string, unknown>)["turns"]));
+    if (allBareTurns) {
+      return { conversations: [{ turns: asTurns as EvalTurn[] }] };
+    }
+    // Otherwise: an array of conversations (each with `turns` or numbered keys).
+    const conversations: Array<{ title?: string; source?: string; turns: EvalTurn[] }> = [];
+    for (const item of parsed) {
+      const conv = convFromAny(item);
+      if (!conv) return { error: "Each item needs a 'turns' array or numbered message/response keys" };
+      conversations.push(conv);
+    }
+    return { conversations };
+  }
+
+  if (parsed && typeof parsed === "object") {
+    const conv = convFromAny(parsed);
+    if (!conv) return { error: "Could not read turns (need a 'turns' array or numbered message/response keys)" };
+    return { conversations: [conv] };
+  }
+
+  return { error: "Unrecognized shape" };
+}

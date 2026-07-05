@@ -16,10 +16,10 @@
  * Each step uses the same SectionCaption pattern (small uppercase + friendly
  * name • technical name) and the Toolbox step regroups the previously flat
  * MCP / write tool / subagent chips into the three canonical buckets:
- * Specialists · subagents | Direct actions · write tools | Integrations · MCP tools.
+ * Subagents · subagents | Direct actions · write tools | Integrations · MCP tools.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Fragment } from "react";
 import {
   Sparkles,
   ChevronRight,
@@ -27,6 +27,8 @@ import {
   Loader2,
   Check,
   AlertCircle,
+  X,
+  Info,
 } from "lucide-react";
 import {
   createAgent,
@@ -34,13 +36,19 @@ import {
   getAvailableTools,
   listSkills,
   suggestTools,
+  listResearchAgentProducts,
+  listResearchAgentRepositories,
   type AvailableTools,
+  type IntegrationToolEntry,
   type Skill,
   type ToolSuggestion,
+  type ResearchAgentOption,
 } from "../../../lib/api";
 import { Dialog } from "../ui/Dialog";
 import { TextField } from "../ui/TextField";
 import { Button } from "../ui/Button";
+import { ToolboxPicker } from "../ToolboxPicker";
+import { KnowledgeBasePicker, type KbSelection } from "../KnowledgeBasePicker";
 
 interface Props {
   userId: string;
@@ -78,8 +86,14 @@ interface State {
   name: string; description: string; color: string; slug: string; slugManual: boolean; repoUrl: string;
   systemPrompt: string; aiIntent: string; generating: boolean;
   availableTools: AvailableTools | null; toolsLoading: boolean;
-  subagents: string[]; direct: string[]; custom: string[];
+  subagents: string[]; direct: string[]; custom: string[]; gateway: string[];
   availableSkills: Skill[]; skillsLoading: boolean; selectedSkillIds: string[];
+  selectedKbResources: KbSelection[];
+  /** KB scope mode. USER hides the picker and tells the server to ignore
+   *  any grants — the agent inherits the running user's spaces access. */
+  selectedKbScope: "COLLECTIONS" | "USER";
+  researchAgentProducts: ResearchAgentOption[]; researchAgentRepositories: ResearchAgentOption[];
+  researchAgentProductId: string; researchAgentRepositoryId: string; researchAgentOptionsLoading: boolean;
   /** AI-suggested starter toolkit. Auto-fetched once step 2 opens with a
       system prompt or description present. The card sits at the top of
       step 2 and offers one-click apply. */
@@ -92,6 +106,8 @@ interface State {
       user can type "I also need X" and get a new (additive) suggestion
       using the same backend endpoint with a free-form intent. */
   refineIntent: string;
+  /** "all" | "subagents" | "direct" | <mcp-source-key e.g. "github"> | <custom-source e.g. "custom:pgm"> */
+  toolTab: string;
   nameError: string | null; slugError: string | null; checking: boolean; nameValid: boolean;
   creating: boolean; error: string | null;
 }
@@ -101,11 +117,16 @@ const INIT: State = {
   name: "", description: "", color: COLORS[0]!, slug: "", slugManual: false, repoUrl: "",
   systemPrompt: "", aiIntent: "", generating: false,
   availableTools: null, toolsLoading: false,
-  subagents: [], direct: [], custom: [],
+  subagents: [], direct: [], custom: [], gateway: [],
   availableSkills: [], skillsLoading: false, selectedSkillIds: [],
+  selectedKbResources: [],
+  selectedKbScope: "COLLECTIONS",
+  researchAgentProducts: [], researchAgentRepositories: [],
+  researchAgentProductId: "", researchAgentRepositoryId: "", researchAgentOptionsLoading: false,
   suggestion: null, suggestionLoading: false, suggestionApplied: false,
   suggestionDismissed: false, suggestionError: null,
   refineIntent: "",
+  toolTab: "all",
   nameError: null, slugError: null, checking: false, nameValid: false,
   creating: false, error: null,
 };
@@ -153,7 +174,7 @@ interface ToolGroupHeaderProps {
 const SUGGESTION_PHASES = [
   "Reading the tool catalog…",
   "Matching tools to your persona…",
-  "Picking specialists that fit…",
+  "Picking subagents that fit…",
   "Finalizing the starter toolkit…",
 ];
 
@@ -221,8 +242,37 @@ function ToolGroupHeader({
   );
 }
 
+/** Strip a server-type prefix and convert snake_case → Sentence case for display.
+ *  Raw identifier is preserved as the value sent to the backend. */
+function humanizeToolName(name: string, prefix?: string): string {
+  let n = name;
+  if (prefix) {
+    const p = prefix.toLowerCase().replace(/-/g, "_") + "_";
+    if (n.toLowerCase().startsWith(p)) n = n.slice(p.length);
+  }
+  return n.replace(/_/g, " ").replace(/^[a-z]/, (c) => c.toUpperCase());
+}
+
+/** Tailwind class for the 6×6 px risk status dot.
+ *  Unknown tools default to "write" (amber) — never green-washed. */
+function riskDotCls(
+  riskLevel: "read" | "write" | "destructive" | undefined,
+  _selected?: boolean,
+): string {
+  if (riskLevel === "read") return "bg-emerald-500";
+  if (riskLevel === "destructive") return "bg-red-500";
+  return "bg-amber-500";
+}
+
 export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
   const [w, setW] = useState<State>(INIT);
+  // Pinned detail = last clicked tool. Hovered detail = transient on hover/focus.
+  const [pinnedDetail, setPinnedDetail] = useState<IntegrationToolEntry | null>(null);
+  const [hoveredDetail, setHoveredDetail] = useState<IntegrationToolEntry | null>(null);
+  // Collapsible section state — empty = all collapsed; auto-populates on suggestion apply.
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  // Live text filter for tool names.
+  const [toolSearch, setToolSearch] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const u = useCallback((p: Partial<State>) => setW((prev) => ({ ...prev, ...p })), []);
 
@@ -235,26 +285,21 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
     }
   }, [w.step, w.availableTools, u]);
 
-  // Auto-fetch the AI-suggested starter toolkit when the user lands on
-  // the Toolbox step. Runs once per session — if the user changes their
-  // system prompt after seeing it, they can re-roll via the "Re-suggest"
-  // button on the card.
   useEffect(() => {
     if (w.step !== 2) return;
-    if (w.suggestion || w.suggestionLoading || w.suggestionDismissed || w.suggestionApplied) return;
-    const intent = w.systemPrompt.trim() || w.description.trim();
-    if (!intent) return;
-    u({ suggestionLoading: true, suggestionError: null });
-    suggestTools({
-      systemPrompt: w.systemPrompt.trim() || undefined,
-      description: !w.systemPrompt.trim() ? w.description.trim() : undefined,
-    })
-      .then((data) => u({ suggestion: data, suggestionLoading: false }))
-      .catch((err) => u({
-        suggestionError: err instanceof Error ? err.message : "Couldn't load suggestions",
-        suggestionLoading: false,
-      }));
-  }, [w.step, w.suggestion, w.suggestionLoading, w.suggestionDismissed, w.suggestionApplied, w.systemPrompt, w.description, u]);
+    if (w.researchAgentProducts.length || w.researchAgentRepositories.length || w.researchAgentOptionsLoading) return;
+    u({ researchAgentOptionsLoading: true });
+    Promise.all([
+      listResearchAgentProducts().catch(() => [] as ResearchAgentOption[]),
+      listResearchAgentRepositories().catch(() => [] as ResearchAgentOption[]),
+    ])
+      .then(([researchAgentProducts, researchAgentRepositories]) => u({ researchAgentProducts, researchAgentRepositories }))
+      .finally(() => u({ researchAgentOptionsLoading: false }));
+  }, [w.step, w.researchAgentProducts.length, w.researchAgentRepositories.length, w.researchAgentOptionsLoading, u]);
+
+  // The AI-suggested starter toolkit + refine flow now lives inside
+  // ToolboxPicker (shared with the config page). The wizard just passes
+  // `autoSuggest` + `suggestContext`; the component owns the fetch/apply.
 
   // Translate a `ToolSuggestion` into the wizard's state shape.
   //
@@ -365,6 +410,33 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [w.name, effectiveSlug, u]);
 
+  // Reset toolbox UI state when the user leaves / re-enters step 2.
+  useEffect(() => {
+    if (w.step !== 2) {
+      setExpandedSections(new Set());
+      setToolSearch("");
+      setPinnedDetail(null);
+      setHoveredDetail(null);
+    }
+  }, [w.step]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-expand sections that received AI-suggested tools so the user can
+  // immediately verify what "Accept all" applied.
+  useEffect(() => {
+    if (!w.suggestionApplied || !w.suggestion || !w.availableTools) return;
+    const toExpand = new Set<string>();
+    if ((w.suggestion.subagents ?? []).length > 0) toExpand.add("subagents");
+    const suggestedNames = new Set<string>();
+    for (const s of w.suggestion.integrations ?? [])
+      for (const n of [...(s.readTools ?? []), ...(s.writeTools ?? [])]) suggestedNames.add(n);
+    if (w.availableTools.writeTools.some((t) => suggestedNames.has(t.name))) toExpand.add("direct");
+    for (const [src, tools] of Object.entries(w.availableTools.serverTools))
+      if (tools.some((t) => suggestedNames.has(t.name))) toExpand.add(src);
+    for (const g of w.availableTools.customGroups)
+      if (g.tools.some((t) => suggestedNames.has(t.name))) toExpand.add(g.source);
+    setExpandedSections((prev) => new Set([...prev, ...toExpand]));
+  }, [w.suggestionApplied]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggle = (key: "subagents" | "direct" | "custom", val: string) =>
     setW((p) => ({ ...p, [key]: p[key].includes(val) ? p[key].filter((x) => x !== val) : [...p[key], val] }));
 
@@ -373,6 +445,13 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
 
   const toggleCustomGroup = (slugs: string[], allSelected: boolean) =>
     setW((p) => ({ ...p, custom: allSelected ? p.custom.filter((x) => !slugs.includes(x)) : [...new Set([...p.custom, ...slugs])] }));
+
+  const toggleSection = (key: string) =>
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
 
   const formatServerLabel = (serverType: string): string =>
     serverType.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -396,6 +475,7 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
   const handleCreate = async () => {
     u({ creating: true, error: null });
     try {
+      const isUserScopedKb = w.selectedKbScope === "USER";
       await createAgent({
         slug: effectiveSlug,
         name: w.name.trim(),
@@ -403,16 +483,29 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
         systemPrompt: w.systemPrompt.trim(),
         color: w.color,
         ownerUserId: userId,
+        // Send kbScope on create so a USER-scoped agent gets KB tools wired
+        // up immediately without needing the follow-up updateAgent call.
+        kbScope: w.selectedKbScope,
+        // Grants are meaningful only in COLLECTIONS mode — in USER mode the
+        // server ignores them anyway, but sending them implies an intent we
+        // don't have.
+        ...(isUserScopedKb || w.selectedKbResources.length === 0
+          ? {}
+          : { knowledgeBase: w.selectedKbResources }),
       });
-      const hasTools = w.subagents.length || w.direct.length || w.custom.length;
+      const hasTools = w.subagents.length || w.direct.length || w.custom.length || w.gateway.length;
       const hasSkills = w.selectedSkillIds.length > 0;
       const trimmedRepoUrl = w.repoUrl.trim();
       const hasRepoUrl = trimmedRepoUrl.length > 0;
-      if (hasTools || hasSkills || hasRepoUrl) {
+      const hasResearchAgentConfig = w.custom.includes("query-codebase") || w.custom.includes("review-pull-request") || w.researchAgentProductId || w.researchAgentRepositoryId;
+      if (hasTools || hasSkills || hasResearchAgentConfig || hasRepoUrl) {
         const { updateAgent } = await import("../../../lib/api");
         const config: Record<string, unknown> = {};
-        if (hasTools) config["tools"] = { subagents: w.subagents, direct: w.direct, custom: w.custom };
-        if (hasRepoUrl) config["repoUrl"] = trimmedRepoUrl;
+        if (hasTools) config["tools"] = { subagents: w.subagents, direct: w.direct, custom: w.custom, gateway: w.gateway };
+        if (hasResearchAgentConfig) {
+          config["product_id"] = w.researchAgentProductId || null;
+          config["repository_id"] = w.researchAgentRepositoryId || null;
+        }
         await updateAgent(effectiveSlug, {
           ...(Object.keys(config).length > 0 ? { config } : {}),
           ...(hasSkills ? { skills: w.selectedSkillIds } : {}),
@@ -443,52 +536,180 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
         })
     : [];
 
+  // Description + risk-level lookup keyed by tool name. Populated from the
+  // `integrations` field (already computed by the backend with descriptions)
+  // and from subagent definitions. Used by the click-to-detail chip panel.
+  const toolInfoMap = new Map<string, IntegrationToolEntry>();
+  if (w.availableTools) {
+    for (const sa of w.availableTools.subagents) {
+      toolInfoMap.set(sa.name, { slug: sa.name, name: sa.name, description: sa.description, riskLevel: "read" });
+    }
+    for (const intg of w.availableTools.integrations) {
+      for (const t of [...intg.readTools, ...intg.writeTools]) {
+        if (!toolInfoMap.has(t.name)) toolInfoMap.set(t.name, t);
+      }
+    }
+  }
+
+  const pinDetail = (name: string) =>
+    setPinnedDetail((prev) => (prev?.name === name ? null : (toolInfoMap.get(name) ?? null)));
+  const hoverDetail = (name: string | null) =>
+    setHoveredDetail(name ? (toolInfoMap.get(name) ?? null) : null);
+
+  const isLargeToolbox = w.step === 2;
+  const activeDetail = hoveredDetail ?? pinnedDetail;
+
+  // ── Toolbox search helpers (safe to compute here; no-ops when tools not loaded) ──
+  const searchQ = toolSearch.trim().toLowerCase();
+  const toolMatchesSearch = (name: string) =>
+    !searchQ ||
+    name.toLowerCase().includes(searchQ) ||
+    humanizeToolName(name).toLowerCase().includes(searchQ);
+  const sectionOpen = (key: string, toolNames: string[]) =>
+    searchQ ? toolNames.some((n) => toolMatchesSearch(n)) : expandedSections.has(key);
+  const sectionVisible = (toolNames: string[]) =>
+    !searchQ || toolNames.some((n) => toolMatchesSearch(n));
+
+  // Selection summary items — built from the three selection arrays.
+  const selectionItems: Array<{
+    label: string;
+    key: string;
+    riskLevel: "read" | "write" | "destructive" | undefined;
+    onRemove: () => void;
+  }> = [
+    ...w.subagents.map((name) => ({
+      label: name,
+      key: `sa-${name}`,
+      riskLevel: "read" as const,
+      onRemove: () => toggle("subagents", name),
+    })),
+    ...w.direct.map((name) => ({
+      label: humanizeToolName(name),
+      key: `d-${name}`,
+      riskLevel: (toolInfoMap.get(name)?.riskLevel) ?? ("write" as const),
+      onRemove: () => toggle("direct", name),
+    })),
+    ...(w.availableTools?.customGroups.flatMap((g) =>
+      g.tools
+        .filter((t) => w.custom.includes(t.slug))
+        .map((t) => ({
+          label: humanizeToolName(t.name),
+          key: `c-${t.slug}`,
+          riskLevel: (toolInfoMap.get(t.name)?.riskLevel) ?? ("write" as const),
+          onRemove: () => toggle("custom", t.slug),
+        }))
+    ) ?? []),
+  ];
+
+  // Rail items for the large-mode left nav.
+  const railItems: Array<{
+    key: string;
+    label: string;
+    dot?: string;
+    selCount: number;
+    totalCount: number;
+    hasDestructive: boolean;
+  }> = w.availableTools ? (() => {
+    const serverRailItems = mcpEntries
+      .map(([source, tools]) => {
+        const serverReadTools = tools.filter((t) => !writeToolNames.has(t.name));
+        return {
+          key: source,
+          label: formatServerLabel(source),
+          dot: "bg-emerald-500",
+          selCount: serverReadTools.filter((t) => w.direct.includes(t.name)).length,
+          totalCount: serverReadTools.length,
+          hasDestructive: serverReadTools.some((t) => toolInfoMap.get(t.name)?.riskLevel === "destructive"),
+        };
+      })
+      .filter((item) => item.totalCount > 0);
+    const customRailItems = w.availableTools!.customGroups.map((g) => ({
+      key: g.source,
+      label: g.source.replace("custom:", "").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+      dot: "bg-slate-400",
+      selCount: g.tools.filter((t) => w.custom.includes(t.slug)).length,
+      totalCount: g.tools.length,
+      hasDestructive: g.tools.some((t) => toolInfoMap.get(t.name)?.riskLevel === "destructive"),
+    }));
+    const allCount =
+      w.availableTools!.subagents.length +
+      w.availableTools!.writeTools.length +
+      serverRailItems.reduce((s, r) => s + r.totalCount, 0) +
+      customRailItems.reduce((s, r) => s + r.totalCount, 0);
+    return [
+      { key: "all", label: "All tools", dot: undefined, selCount: selectionItems.length, totalCount: allCount, hasDestructive: false },
+      ...(w.availableTools!.subagents.length > 0 ? [{
+        key: "subagents", label: "Subagents", dot: "bg-violet-500",
+        selCount: w.subagents.length, totalCount: w.availableTools!.subagents.length, hasDestructive: false,
+      }] : []),
+      ...(w.availableTools!.writeTools.length > 0 ? [{
+        key: "direct", label: "Direct actions", dot: "bg-amber-500",
+        selCount: w.direct.filter((n) => writeToolNames.has(n)).length,
+        totalCount: w.availableTools!.writeTools.length,
+        hasDestructive: w.availableTools!.writeTools.some((t) => toolInfoMap.get(t.name)?.riskLevel === "destructive"),
+      }] : []),
+      ...serverRailItems,
+      ...customRailItems,
+    ];
+  })() : [];
+
   return (
     <Dialog
       open={true}
       onOpenChange={(o) => { if (!o) onClose(); }}
       title="Create agent"
-      description={
-        // Two-line header: step indicator on top, contextual subtitle
-        // below so users see what this step is about without scanning
-        // the form body.
-        <>
-          <span className="block">
-            Step {w.step + 1} of {STEPS.length}: {STEPS[w.step]}
-          </span>
-          <span className="block text-[13px] text-xyne-fg-secondary mt-1">
-            {STEP_SUBTITLES[w.step]}
-          </span>
-        </>
-      }
-      maxWidth={672}
+      maxWidth={920}
+      maxHeight="min(880px, 90vh)"
+      height="min(880px, 90vh)"
+      bodyClassName={isLargeToolbox ? "flex-1 overflow-hidden flex flex-col" : undefined}
+      description={STEP_SUBTITLES[w.step]}
       footer={
         <div className="flex w-full items-center justify-between">
-          <button
+          <Button
+            variant="secondary"
+            size="lg"
             onClick={() => w.step > 0 ? u({ step: w.step - 1 }) : onClose()}
-            className="flex items-center gap-1 text-[14px] text-xyne-fg-muted transition hover:text-xyne-fg-primary"
           >
-            <ChevronLeft size={16} /> {w.step > 0 ? "Back" : "Cancel"}
-          </button>
+            <ChevronLeft size={15} /> {w.step > 0 ? "Back" : "Cancel"}
+          </Button>
           {w.step < STEPS.length - 1 ? (
-            <Button variant="primary" onClick={() => u({ step: w.step + 1 })} disabled={!canNext}>
+            <Button variant="primary" size="lg" onClick={() => u({ step: w.step + 1 })} disabled={!canNext}>
               Next <ChevronRight size={16} />
             </Button>
           ) : (
-            <Button variant="primary" onClick={handleCreate} disabled={w.creating || !canNext}>
-              {w.creating ? <Loader2 size={14} className="animate-spin" /> : null} Create agent
+            <Button variant="primary" size="lg" onClick={handleCreate} disabled={w.creating || !canNext}>
+              {w.creating ? <Loader2 size={14} className="animate-spin" /> : <Check size={15} />} Create agent
             </Button>
           )}
         </div>
       }
     >
-      <div className="flex gap-1">
+      {/* ── Named step indicator ───────────────────────────────────── */}
+      <div className={isLargeToolbox ? "flex justify-center px-6 pt-5 pb-2 shrink-0" : "flex justify-center py-2"}>
         {STEPS.map((s, i) => (
-          <div key={s} className={`h-1 flex-1 rounded-full transition ${i <= w.step ? "bg-xyne-brand" : "bg-xyne-surface-subtle"}`} />
+          <Fragment key={s}>
+            <div className="flex flex-col items-center gap-1.5 flex-shrink-0">
+              <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-semibold transition-all duration-200 ${
+                i < w.step
+                  ? "bg-xyne-brand text-xyne-fg-inverse"
+                  : i === w.step
+                  ? "ring-2 ring-xyne-brand bg-xyne-surface text-xyne-fg-primary"
+                  : "bg-xyne-surface-subtle text-xyne-fg-tertiary"
+              }`}>
+                {i < w.step ? <Check size={11} strokeWidth={2.5} /> : i + 1}
+              </div>
+              <span className={`text-[10px] font-medium leading-none transition-colors duration-200 ${
+                i === w.step ? "text-xyne-fg-primary" : "text-xyne-fg-tertiary"
+              }`}>{s}</span>
+            </div>
+            {i < STEPS.length - 1 && (
+              <div className={`h-px w-16 flex-shrink-0 mt-3 mx-3 transition-colors duration-300 ${i < w.step ? "bg-xyne-brand" : "bg-xyne-border-subtle"}`} />
+            )}
+          </Fragment>
         ))}
       </div>
 
-      <div className="min-h-[320px]">
+      <div key={w.step} className={`step-enter ${isLargeToolbox ? "flex-1 min-h-0 flex flex-col" : "min-h-[320px] w-full max-w-[600px] mx-auto"}`}>
 
         {/* ─── Step 0: Identity ─────────────────────────────────────── */}
         {w.step === 0 && (
@@ -608,501 +829,49 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
           </div>
         )}
 
-        {/* ─── Step 2: Toolbox (was "Tools") ────────────────────────── */}
+        {/* ─── Step 2: Toolbox ──────────────────────────────────────── */}
         {w.step === 2 && (
-          <div className="space-y-5">
-            <SectionCaption friendly="Toolbox" technical="tools" />
-
-            {/* AI-suggested starter pack — purple-tinted card mirroring the
-                "Generate with AI" block on step 2 (Persona). Auto-loads
-                from the system prompt + description. One-click apply. */}
-            {!w.suggestionDismissed && !w.suggestionApplied && (w.suggestionLoading || w.suggestion || w.suggestionError) && (
-              <div className="rounded-lg border border-[#c4b5fd] dark:border-[#6d28d9]/40 bg-[#faf5ff] dark:bg-[#2e1065]/20 p-3">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.07em] text-[#7c3aed] dark:text-[#a78bfa]">
-                    <Sparkles size={12} /> Suggested for you
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => u({ suggestionDismissed: true })}
-                    className="text-[11px] text-[#7c3aed]/70 dark:text-[#a78bfa]/70 hover:text-[#7c3aed] dark:hover:text-[#a78bfa] transition-colors"
-                    aria-label="Dismiss suggestion"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-
-                {w.suggestionLoading ? (
-                  <SuggestionLoading />
-                ) : w.suggestionError ? (
-                  <div className="flex items-center justify-between gap-2 text-[12px] text-[#7c3aed] dark:text-[#a78bfa]">
-                    <span>{w.suggestionError}</span>
-                    <button
-                      type="button"
-                      onClick={reRollSuggestion}
-                      className="text-[11px] font-medium underline hover:no-underline"
-                    >
-                      Try again
-                    </button>
-                  </div>
-                ) : w.suggestion ? (
-                  (() => {
-                    // Count what the suggestion adds *over* the current
-                    // selection so users see what they're actually agreeing
-                    // to. Must mirror applySuggestion's matching logic —
-                    // scan writeTools / serverTools / customGroups directly
-                    // so the preview count and the resulting chip state
-                    // stay in sync. (Earlier we read `integrations[]` which
-                    // is a parallel view and routinely diverges, making the
-                    // count lie about the apply outcome.)
-                    //
-                    // Splitting `newDirect` vs `newIntegrations` here so the
-                    // preview bucket labels ("Direct actions" / "Integrations")
-                    // match the chip group the user will see highlighted in
-                    // the form below — write tools live in their own group;
-                    // MCP server tools display under Integrations even though
-                    // they're stored in the `direct` state array.
-                    const newSubagents = (w.suggestion.subagents ?? []).filter(
-                      (n) => !w.subagents.includes(n)
-                    );
-                    const newDirect: string[] = [];
-                    const newIntegrationTools: string[] = [];
-                    const newCustom: string[] = [];
-                    if (w.availableTools) {
-                      const suggestedNames = new Set<string>();
-                      for (const sugg of w.suggestion.integrations ?? []) {
-                        for (const n of sugg.readTools ?? []) suggestedNames.add(n);
-                        for (const n of sugg.writeTools ?? []) suggestedNames.add(n);
-                      }
-                      const writeToolNameSet = new Set(
-                        w.availableTools.writeTools.map((t) => t.name),
-                      );
-                      for (const t of w.availableTools.writeTools) {
-                        if (suggestedNames.has(t.name) && !w.direct.includes(t.name)) {
-                          newDirect.push(t.name);
-                        }
-                      }
-                      for (const tools of Object.values(w.availableTools.serverTools)) {
-                        for (const t of tools) {
-                          // Skip anything that's already a write tool — that
-                          // group is dedicated and we'd double-count.
-                          if (writeToolNameSet.has(t.name)) continue;
-                          if (
-                            suggestedNames.has(t.name) &&
-                            !w.direct.includes(t.name) &&
-                            !newIntegrationTools.includes(t.name)
-                          ) {
-                            newIntegrationTools.push(t.name);
-                          }
-                        }
-                      }
-                      for (const g of w.availableTools.customGroups) {
-                        for (const t of g.tools) {
-                          if (suggestedNames.has(t.name) && !w.custom.includes(t.slug)) {
-                            newCustom.push(t.slug);
-                          }
-                        }
-                      }
-                    }
-                    // Integrations bucket = MCP server tools (stored in `direct`)
-                    // + custom MCP tools (stored in `custom`).
-                    const newIntegrationsTotal =
-                      newIntegrationTools.length + newCustom.length;
-                    const total =
-                      newSubagents.length +
-                      newDirect.length +
-                      newIntegrationsTotal;
-
-                    if (total === 0) {
-                      return (
-                        <p className="text-[12px] text-[#7c3aed] dark:text-[#a78bfa]">
-                          Already covered — nothing new to add.
-                        </p>
-                      );
-                    }
-
-                    return (
-                      <div className="flex flex-col gap-2.5">
-                        <p className="text-[12px] text-[#5b21b6] dark:text-[#c4b5fd] leading-relaxed">
-                          Based on what you described, here's a starter toolkit. Accept it, then tweak below.
-                        </p>
-
-                        {/* Preview — grouped summary chips so the user can
-                            scan what would be added without expanding. */}
-                        <div className="flex flex-col gap-1.5">
-                          {newSubagents.length > 0 && (
-                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                              <span className="text-[11px] font-medium text-[#7c3aed] dark:text-[#a78bfa]">
-                                Specialists · {newSubagents.length}
-                              </span>
-                              <span className="flex flex-wrap gap-1">
-                                {newSubagents.slice(0, 4).map((n) => (
-                                  <span
-                                    key={n}
-                                    className="text-[11px] px-1.5 py-0.5 rounded-full bg-white dark:bg-[#1e1b4b]/40 border border-[#c4b5fd] dark:border-[#6d28d9]/40 text-[#5b21b6] dark:text-[#c4b5fd]"
-                                  >
-                                    {n}
-                                  </span>
-                                ))}
-                                {newSubagents.length > 4 && (
-                                  <span className="text-[11px] text-[#7c3aed] dark:text-[#a78bfa]">
-                                    +{newSubagents.length - 4} more
-                                  </span>
-                                )}
-                              </span>
-                            </div>
-                          )}
-                          {newDirect.length > 0 && (
-                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                              <span className="text-[11px] font-medium text-[#7c3aed] dark:text-[#a78bfa]">
-                                Direct actions · {newDirect.length}
-                              </span>
-                              <span className="flex flex-wrap gap-1">
-                                {newDirect.slice(0, 4).map((n) => (
-                                  <span
-                                    key={n}
-                                    className="text-[11px] px-1.5 py-0.5 rounded-full bg-white dark:bg-[#1e1b4b]/40 border border-[#c4b5fd] dark:border-[#6d28d9]/40 text-[#5b21b6] dark:text-[#c4b5fd]"
-                                  >
-                                    {n}
-                                  </span>
-                                ))}
-                                {newDirect.length > 4 && (
-                                  <span className="text-[11px] text-[#7c3aed] dark:text-[#a78bfa]">
-                                    +{newDirect.length - 4} more
-                                  </span>
-                                )}
-                              </span>
-                            </div>
-                          )}
-                          {newIntegrationsTotal > 0 && (
-                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                              <span className="text-[11px] font-medium text-[#7c3aed] dark:text-[#a78bfa]">
-                                Integrations · {newIntegrationsTotal}
-                              </span>
-                              <span className="flex flex-wrap gap-1">
-                                {newIntegrationTools.slice(0, 4).map((n) => (
-                                  <span
-                                    key={n}
-                                    className="text-[11px] px-1.5 py-0.5 rounded-full bg-white dark:bg-[#1e1b4b]/40 border border-[#c4b5fd] dark:border-[#6d28d9]/40 text-[#5b21b6] dark:text-[#c4b5fd]"
-                                  >
-                                    {n}
-                                  </span>
-                                ))}
-                                {newIntegrationTools.length > 4 && (
-                                  <span className="text-[11px] text-[#7c3aed] dark:text-[#a78bfa]">
-                                    +{newIntegrationTools.length - 4} more
-                                  </span>
-                                )}
-                                {newCustom.length > 0 && (
-                                  <span className="text-[11px] text-[#5b21b6] dark:text-[#c4b5fd]">
-                                    {newIntegrationTools.length > 0 ? "· " : ""}
-                                    {newCustom.length} custom tool{newCustom.length === 1 ? "" : "s"}
-                                  </span>
-                                )}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex items-center gap-2 pt-1">
-                          <button
-                            type="button"
-                            onClick={applySuggestion}
-                            className="inline-flex items-center gap-1 rounded-md bg-[#7c3aed] px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-[#6d28d9]"
-                          >
-                            <Sparkles size={12} />
-                            Accept all {total}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={reRollSuggestion}
-                            className="inline-flex items-center gap-1 rounded-md border border-[#c4b5fd] dark:border-[#6d28d9]/40 bg-transparent px-3 py-1.5 text-[12px] font-medium text-[#7c3aed] dark:text-[#a78bfa] transition-colors hover:bg-white dark:hover:bg-[#1e1b4b]/40"
-                          >
-                            Re-suggest
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })()
-                ) : null}
-              </div>
-            )}
-
-            {/* Confirmation strip — shown right after the user accepts. */}
-            {w.suggestionApplied && (
-              <div className="flex items-center justify-between gap-2 rounded-lg border border-xyne-success-border bg-xyne-success-bg px-3 py-2 text-[12px] text-xyne-success-fg">
-                <span className="inline-flex items-center gap-1.5">
-                  <Check size={12} />
-                  Suggestions applied. Refine below as needed.
-                </span>
-                <button
-                  type="button"
-                  onClick={reRollSuggestion}
-                  className="text-[11px] font-medium underline hover:no-underline"
-                >
-                  Re-suggest
-                </button>
-              </div>
-            )}
-
-            {/* Refine input — user-driven follow-up. Lets the user type
-                what they actually need ("I also need a Slack notifier") and
-                get a new suggestion through the same backend endpoint. Sits
-                below the auto-suggest so the auto path stays the primary
-                affordance and refine reads as "still missing something?". */}
-            {!w.suggestionLoading && (
-              <div className="flex flex-col gap-2 rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle/40 p-3">
-                <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.07em] text-xyne-fg-tertiary">
-                  <Sparkles size={12} className="text-[#7c3aed] dark:text-[#a78bfa]" />
-                  Need different tools? Tell me what to add
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={w.refineIntent}
-                    onChange={(e) => u({ refineIntent: e.target.value })}
-                    placeholder="e.g. I also need Slack notifications and Jira ticket creation"
-                    onKeyDown={(e) => { if (e.key === "Enter") handleRefine(); }}
-                    className="min-w-0 flex-1 rounded-md border border-xyne-border bg-xyne-surface px-2.5 py-1.5 text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:outline-none focus:border-[#7c3aed] focus:shadow-[var(--comp-focus-ring)] transition-[border-color,box-shadow]"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleRefine}
-                    disabled={!w.refineIntent.trim()}
-                    className="inline-flex items-center gap-1 rounded-md bg-[#7c3aed] px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-[#6d28d9] disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Sparkles size={12} />
-                    Suggest
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {w.toolsLoading ? (
-              <div className="flex items-center gap-2 text-[13px] text-xyne-fg-muted">
-                <Loader2 size={14} className="animate-spin" /> Loading…
-              </div>
-            ) : w.availableTools ? (
-              <>
-                {/* Specialists · subagents */}
-                {w.availableTools.subagents.length > 0 && (
-                  <div>
-                    <ToolGroupHeader
-                      label="Specialists"
-                      technical="subagents"
-                      count={w.subagents.length}
-                      total={w.availableTools.subagents.length}
-                      description="Bring in other agents to handle parts of the work"
-                      allSelected={w.subagents.length === w.availableTools.subagents.length}
-                      onToggleAll={() => toggleAll("subagents", w.availableTools!.subagents.map((x) => x.name))}
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      {w.availableTools.subagents.map((sa) => {
-                        const selected = w.subagents.includes(sa.name);
-                        return (
-                          <button
-                            key={sa.name}
-                            onClick={() => toggle("subagents", sa.name)}
-                            className={`flex items-start gap-2.5 rounded-lg border p-2.5 text-left transition ${
-                              selected
-                                ? "border-xyne-brand bg-xyne-brand"
-                                : "border-xyne-border bg-xyne-surface hover:border-xyne-border-strong"
-                            }`}
-                          >
-                            <span className="text-base">{SUBAGENT_EMOJI[sa.name] ?? "🤖"}</span>
-                            <div className="min-w-0">
-                              <div className={`text-[12px] font-medium truncate ${selected ? "text-xyne-fg-inverse" : "text-xyne-fg-secondary"}`}>
-                                {sa.name}
-                              </div>
-                              {/* Description fades to a slightly transparent
-                                  inverse when the card is selected so it
-                                  still reads on the brand fill but stays
-                                  subordinate to the name. */}
-                              <div className={`text-[11px] line-clamp-2 ${selected ? "text-xyne-fg-inverse/70" : "text-xyne-fg-muted"}`}>
-                                {sa.description.slice(0, 80)}
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Direct actions · write tools */}
-                {w.availableTools.writeTools.length > 0 && (
-                  <div>
-                    <ToolGroupHeader
-                      label="Direct actions"
-                      technical="write tools"
-                      count={w.direct.filter((n) => writeToolNames.has(n)).length}
-                      total={w.availableTools.writeTools.length}
-                      description="Built-in actions this agent can perform"
-                      allSelected={w.availableTools.writeTools.every((t) => w.direct.includes(t.name))}
-                      onToggleAll={() => toggleAll("direct", w.availableTools!.writeTools.map((x) => x.name))}
-                    />
-                    <div className="flex flex-wrap gap-1.5">
-                      {w.availableTools.writeTools.map((t) => (
-                        <button
-                          key={`${t.source}-${t.name}`}
-                          onClick={() => toggle("direct", t.name)}
-                          className={`rounded-full border px-2.5 py-1 text-[12px] transition ${
-                            w.direct.includes(t.name)
-                              ? "border-xyne-brand bg-xyne-brand text-xyne-fg-inverse"
-                              : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary hover:border-xyne-border-strong"
-                          }`}
-                        >
-                          {t.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Integrations · MCP tools — grouped by source server. */}
-                {(mcpEntries.length > 0 || w.availableTools.customGroups.length > 0) && (
-                  <div>
-                    {(() => {
-                      const allMcpToolNames: string[] = [];
-                      const allCustomSlugs: string[] = [];
-                      for (const [, tools] of mcpEntries) {
-                        for (const t of tools) {
-                          if (!writeToolNames.has(t.name)) allMcpToolNames.push(t.name);
-                        }
-                      }
-                      for (const g of w.availableTools.customGroups) {
-                        for (const t of g.tools) allCustomSlugs.push(t.slug);
-                      }
-                      const totalIntegrations = allMcpToolNames.length + allCustomSlugs.length;
-                      const selectedIntegrations =
-                        w.direct.filter((n) => allMcpToolNames.includes(n)).length +
-                        w.custom.filter((s) => allCustomSlugs.includes(s)).length;
-                      const allSel =
-                        totalIntegrations > 0 &&
-                        allMcpToolNames.every((n) => w.direct.includes(n)) &&
-                        allCustomSlugs.every((s) => w.custom.includes(s));
-                      return (
-                        <ToolGroupHeader
-                          label="Integrations"
-                          technical="MCP tools"
-                          count={selectedIntegrations}
-                          total={totalIntegrations}
-                          description="Tools provided by connected MCP servers"
-                          allSelected={allSel}
-                          onToggleAll={() => {
-                            setW((p) => ({
-                              ...p,
-                              direct: allSel
-                                ? p.direct.filter((n) => !allMcpToolNames.includes(n))
-                                : Array.from(new Set([...p.direct, ...allMcpToolNames])),
-                              custom: allSel
-                                ? p.custom.filter((s) => !allCustomSlugs.includes(s))
-                                : Array.from(new Set([...p.custom, ...allCustomSlugs])),
-                            }));
-                          }}
-                        />
-                      );
-                    })()}
-
-                    <div className="space-y-3">
-                      {/* MCP server-provided tools (direct list) */}
-                      {mcpEntries.map(([source, tools]) => {
-                        const serverTools = tools.filter((t) => !writeToolNames.has(t.name));
-                        const names = serverTools.map((t) => t.name);
-                        const allSel = names.length > 0 && names.every((x) => w.direct.includes(x));
-                        return (
-                          <div key={source} className="rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle/40 p-2.5">
-                            <div className="flex items-center justify-between gap-2 mb-1.5">
-                              <p className="text-[11px] font-medium text-xyne-fg-secondary">
-                                {formatServerLabel(source)}
-                                <span className="ml-1.5 text-xyne-fg-tertiary tabular-nums">
-                                  {names.filter((n) => w.direct.includes(n)).length}/{names.length}
-                                </span>
-                              </p>
-                              <button
-                                onClick={() => toggleAll("direct", names)}
-                                className="text-[11px] text-xyne-fg-tertiary hover:text-xyne-fg-primary transition"
-                              >
-                                {allSel ? "Deselect" : "Select all"}
-                              </button>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {serverTools.map((t) => (
-                                <button
-                                  key={`${source}-${t.slug}`}
-                                  onClick={() => toggle("direct", t.name)}
-                                  className={`rounded-full border px-2.5 py-0.5 text-[12px] transition ${
-                                    w.direct.includes(t.name)
-                                      ? "border-xyne-brand bg-xyne-brand text-xyne-fg-inverse"
-                                      : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary hover:border-xyne-border-strong"
-                                  }`}
-                                >
-                                  {t.name}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {/* Custom MCP groups */}
-                      {w.availableTools.customGroups.map((g) => {
-                        const slugs = g.tools.map((t) => t.slug);
-                        const allSel = slugs.every((x) => w.custom.includes(x));
-                        const label = g.source.replace("custom:", "").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-                        return (
-                          <div key={g.source} className="rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle/40 p-2.5">
-                            <div className="flex items-center justify-between gap-2 mb-1.5">
-                              <p className="text-[11px] font-medium text-xyne-fg-secondary">
-                                {label}
-                                <span className="ml-1.5 text-xyne-fg-tertiary tabular-nums">
-                                  {slugs.filter((s) => w.custom.includes(s)).length}/{slugs.length}
-                                </span>
-                              </p>
-                              <button
-                                onClick={() => toggleCustomGroup(slugs, allSel)}
-                                className="text-[11px] text-xyne-fg-tertiary hover:text-xyne-fg-primary transition"
-                              >
-                                {allSel ? "Deselect" : "Select all"}
-                              </button>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {g.tools.map((t) => (
-                                <button
-                                  key={t.slug}
-                                  onClick={() => toggle("custom", t.slug)}
-                                  className={`rounded-full border px-2.5 py-0.5 text-[12px] transition ${
-                                    w.custom.includes(t.slug)
-                                      ? "border-xyne-brand bg-xyne-brand text-xyne-fg-inverse"
-                                      : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary hover:border-xyne-border-strong"
-                                  }`}
-                                >
-                                  {t.name}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : <p className="text-[13px] text-xyne-fg-muted">Failed to load tools.</p>}
-          </div>
+          <ToolboxPicker
+            variant="large"
+            availableTools={w.availableTools}
+            loading={w.toolsLoading}
+            value={{ subagents: w.subagents, direct: w.direct, custom: w.custom, gateway: w.gateway }}
+            onChange={(next) => setW((p) => ({
+              ...p,
+              subagents: next.subagents,
+              direct: next.direct,
+              custom: next.custom,
+              gateway: next.gateway ?? [],
+            }))}
+            autoSuggest
+            suggestContext={{ systemPrompt: w.systemPrompt, description: w.description }}
+            researchAgent={{
+              productId: w.researchAgentProductId,
+              onProductIdChange: (v) => u({ researchAgentProductId: v }),
+              products: w.researchAgentProducts,
+              repositoryId: w.researchAgentRepositoryId,
+              onRepositoryIdChange: (v) => u({ researchAgentRepositoryId: v }),
+              repositories: w.researchAgentRepositories,
+              loading: w.researchAgentOptionsLoading,
+            }}
+          />
         )}
 
         {/* ─── Step 3: Knowledge (was "Skills") ─────────────────────── */}
         {w.step === 3 && (
           <div className="space-y-4">
             <SectionCaption friendly="Knowledge" technical="skills" />
+            <p className="text-[13px] text-xyne-fg-secondary leading-relaxed">
+              Skills give this agent reference knowledge it can draw on during a task — things like your coding conventions, writing style, or domain glossary. You can skip this and add skills later.
+            </p>
             {w.skillsLoading ? (
               <div className="flex items-center gap-2 text-[13px] text-xyne-fg-muted">
                 <Loader2 size={14} className="animate-spin" /> Loading…
               </div>
             ) : w.availableSkills.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-xyne-border-subtle px-3 py-6 text-center text-[12px] text-xyne-fg-tertiary">
-                No skills available. Create skills from the Skills page.
+              <div className="rounded-lg border border-dashed border-xyne-border-subtle px-3 py-8 text-center">
+                <p className="text-[13px] font-medium text-xyne-fg-secondary">No skills yet</p>
+                <p className="mt-1 text-[12px] text-xyne-fg-tertiary">Create skills from the Skills page to attach reference material to your agents.</p>
               </div>
             ) : (
               <>
@@ -1118,7 +887,7 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                           onClick={() => setW((p) => ({ ...p, selectedSkillIds: p.selectedSkillIds.includes(skill.id) ? p.selectedSkillIds.filter((x) => x !== skill.id) : [...p.selectedSkillIds, skill.id] }))}
                           className={`rounded-full border px-2.5 py-1 text-[12px] transition ${
                             w.selectedSkillIds.includes(skill.id)
-                              ? "border-xyne-brand bg-xyne-brand text-xyne-fg-inverse"
+                              ? "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/50 dark:bg-indigo-900/20 dark:text-indigo-300"
                               : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary hover:border-xyne-border-strong"
                           }`}
                           title={skill.description || skill.slug}
@@ -1141,7 +910,7 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                           onClick={() => setW((p) => ({ ...p, selectedSkillIds: p.selectedSkillIds.includes(skill.id) ? p.selectedSkillIds.filter((x) => x !== skill.id) : [...p.selectedSkillIds, skill.id] }))}
                           className={`rounded-full border px-2.5 py-1 text-[12px] transition ${
                             w.selectedSkillIds.includes(skill.id)
-                              ? "border-xyne-brand bg-xyne-brand text-xyne-fg-inverse"
+                              ? "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/50 dark:bg-indigo-900/20 dark:text-indigo-300"
                               : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary hover:border-xyne-border-strong"
                           }`}
                           title={skill.description || skill.slug}
@@ -1152,13 +921,83 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                     </div>
                   </div>
                 )}
-                {w.selectedSkillIds.length > 0 && (
-                  <p className="text-[11px] text-xyne-fg-tertiary">
-                    {w.selectedSkillIds.length} skill{w.selectedSkillIds.length === 1 ? "" : "s"} selected
-                  </p>
-                )}
+                <p className="text-[11px] text-xyne-fg-tertiary">
+                  {w.selectedSkillIds.length === 0
+                    ? "No skills attached — you can add them later from the agent settings."
+                    : `${w.selectedSkillIds.length} skill${w.selectedSkillIds.length === 1 ? "" : "s"} attached`}
+                </p>
               </>
             )}
+
+            {/* Knowledge Base — two scoping modes:
+                  • COLLECTIONS — pick an explicit allowlist. Same scope for
+                    every user who runs the agent.
+                  • USER        — agent inherits the caller's full spaces KB.
+                    Each session is gated by that user's own permissions. */}
+            <div className="mt-6 space-y-2 border-t border-xyne-border-subtle pt-5">
+              <SectionCaption friendly="Knowledge Base" technical="knowledge-base" />
+              <p className="text-[13px] text-xyne-fg-secondary leading-relaxed">
+                Attach spaces documents this agent can read. The agent automatically gets read-only tools (search, list, read) over the chosen scope.
+              </p>
+
+              <fieldset className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {([
+                  {
+                    value: "COLLECTIONS" as const,
+                    label: "Selected collections & files",
+                    hint: "Pick an explicit allowlist. Same scope for everyone.",
+                  },
+                  {
+                    value: "USER" as const,
+                    label: "Match my access",
+                    hint: "Inherits the running user's spaces access — per session.",
+                  },
+                ]).map((opt) => {
+                  const selected = w.selectedKbScope === opt.value;
+                  return (
+                    <label
+                      key={opt.value}
+                      className={`flex cursor-pointer flex-col gap-1 rounded-lg border px-3 py-2 transition-colors ${
+                        selected ? "border-xyne-accent bg-xyne-accent/5" : "border-xyne-border-subtle hover:border-xyne-border"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="kb-scope-create"
+                          value={opt.value}
+                          checked={selected}
+                          onChange={() => setW((p) => ({ ...p, selectedKbScope: opt.value }))}
+                          className="h-3.5 w-3.5"
+                        />
+                        <span className="text-[13px] font-medium text-xyne-fg-primary">{opt.label}</span>
+                      </span>
+                      <span className="pl-[22px] text-[11px] leading-snug text-xyne-fg-tertiary">{opt.hint}</span>
+                    </label>
+                  );
+                })}
+              </fieldset>
+
+              {w.selectedKbScope === "USER" ? (
+                <div className="rounded-lg border border-xyne-border-subtle bg-xyne-surface-muted px-3 py-3">
+                  <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                    This agent is scoped at the user level — its Knowledge Base reach is whatever the running user can already see in spaces. The per-collection picker is disabled.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <KnowledgeBasePicker
+                    value={w.selectedKbResources}
+                    onChange={(next) => setW((p) => ({ ...p, selectedKbResources: next }))}
+                  />
+                  <p className="text-[11px] text-xyne-fg-tertiary">
+                    {w.selectedKbResources.length === 0
+                      ? "No KB resources attached — the agent will not be able to read documents."
+                      : `${w.selectedKbResources.length} grant${w.selectedKbResources.length === 1 ? "" : "s"} attached`}
+                  </p>
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -1187,6 +1026,15 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
               </pre>
             </div>
 
+            {(w.researchAgentProductId || w.researchAgentRepositoryId || w.custom.includes("query-codebase") || w.custom.includes("review-pull-request")) && (
+              <div>
+                <SectionCaption friendly="Research Agent" technical="context" />
+                <p className="text-[12px] text-xyne-fg-secondary">
+                  Product: {w.researchAgentProductId || "None"} · Repository: {w.researchAgentRepositoryId || "None"}
+                </p>
+              </div>
+            )}
+
             {/* Toolbox summary */}
             {(w.subagents.length > 0 || w.direct.length > 0 || w.custom.length > 0) && (
               <div>
@@ -1194,7 +1042,7 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                 <div className="space-y-2">
                   {w.subagents.length > 0 && (
                     <div>
-                      <p className="text-[11px] text-xyne-fg-tertiary mb-1">Specialists · {w.subagents.length}</p>
+                      <p className="text-[11px] text-xyne-fg-tertiary mb-1">Subagents · {w.subagents.length}</p>
                       <div className="flex flex-wrap gap-1">
                         {w.subagents.map((x) => (
                           <span key={x} className="rounded-full bg-xyne-surface-subtle px-2 py-0.5 text-[11px] text-xyne-fg-primary border border-xyne-border">{x}</span>

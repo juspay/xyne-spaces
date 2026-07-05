@@ -16,28 +16,22 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
+
 import { useNavigate } from "react-router-dom";
 import {
   CaretRightIcon,
-  ThumbsUpIcon,
-  ThumbsDownIcon,
-  CopyIcon,
-  CheckIcon,
   ChatCircleIcon,
   CubeIcon,
   ClockIcon,
   LightningIcon,
   WrenchIcon,
   MagnifyingGlassIcon,
-  PaperPlaneTiltIcon,
   XIcon,
   ArrowSquareOutIcon,
 } from "@phosphor-icons/react";
 import type { Agent } from "../../../lib/types";
 import type { AgentRun } from "../../../lib/api";
-import { rateRun } from "../../../lib/api";
 import { Skeleton } from "../ui/Skeleton";
-import { useSnackbar } from "../ui/Snackbar";
 import { formatTimeAgo, getInitials } from "./homeUtils";
 
 const SPACES_APP_URL =
@@ -205,220 +199,6 @@ function ToolsChip({ tools }: { tools: string[] }) {
   );
 }
 
-interface RunRowProps {
-  run: AgentRun;
-  agent: Agent | undefined;
-  expanded: boolean;
-  ratingOverride: "up" | "down" | null | undefined;
-  ratingBusy: boolean;
-  copied: boolean;
-  /** True when the run has a continuable conversation thread. */
-  canReply: boolean;
-  onToggleExpand: () => void;
-  onRate: (rating: "up" | "down") => void;
-  onCopy: () => void;
-  /** Open the source of this run. Same destination for "Reply" and "View". */
-  onOpen: () => void;
-}
-
-function RunRow({
-  run,
-  agent,
-  expanded,
-  ratingOverride,
-  ratingBusy,
-  copied,
-  canReply,
-  onToggleExpand,
-  onRate,
-  onCopy,
-  onOpen,
-}: RunRowProps) {
-  const agentName = agent?.name ?? run.agentSlug;
-  const reply = replyPreviewFor(run);
-  const effectiveRating =
-    ratingOverride !== undefined ? ratingOverride : run.rating;
-  const canCopy =
-    run.status === "completed" && !!run.result && run.result.trim().length > 0;
-
-  return (
-    <div className="group rounded-[8px] hover:bg-xyne-surface-sunken/40 transition-colors">
-      {/* Header row — click area for expand */}
-      <button
-        type="button"
-        onClick={onToggleExpand}
-        className="w-full flex items-start gap-[10px] px-[8px] py-[8px] text-left"
-      >
-        <div className="w-[28px] h-[28px] rounded-full bg-xyne-surface-sunken border border-xyne-border flex items-center justify-center text-[10px] font-medium text-xyne-fg-secondary flex-shrink-0 mt-[1px]">
-          {getInitials(agentName)}
-        </div>
-        <div className="flex-1 min-w-0 flex flex-col gap-[3px]">
-          <div className="flex items-center gap-[6px] min-w-0 flex-wrap">
-            <span className="text-[13px] font-medium text-xyne-fg-primary truncate">
-              {agentName}
-            </span>
-            <OriginPill source={run.triggerSource} />
-            <span className="text-[11px] text-xyne-fg-tertiary flex-shrink-0">
-              · {formatTimeAgo(run.startedAt)}
-            </span>
-          </div>
-          <span
-            className={`text-[12px] ${reply.tone} ${expanded ? "" : "line-clamp-1"}`}
-            title={expanded ? undefined : reply.text}
-          >
-            {reply.text}
-          </span>
-        </div>
-        {/* Right cluster — rating, copy, view (don't expand on click) */}
-        <div
-          className="flex items-start gap-[4px] flex-shrink-0 mt-[2px]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Rating */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRate("up");
-            }}
-            disabled={ratingBusy}
-            className={`w-[24px] h-[24px] rounded-[6px] flex items-center justify-center transition-colors flex-shrink-0 disabled:opacity-50 ${
-              effectiveRating === "up"
-                ? "bg-xyne-success-bg text-xyne-success-fg"
-                : "text-xyne-fg-tertiary opacity-0 group-hover:opacity-100 hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
-            }`}
-            aria-label="Mark reply helpful"
-            aria-pressed={effectiveRating === "up"}
-          >
-            <ThumbsUpIcon
-              size={12}
-              weight={effectiveRating === "up" ? "fill" : "regular"}
-            />
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRate("down");
-            }}
-            disabled={ratingBusy}
-            className={`w-[24px] h-[24px] rounded-[6px] flex items-center justify-center transition-colors flex-shrink-0 disabled:opacity-50 ${
-              effectiveRating === "down"
-                ? "bg-xyne-error-bg text-xyne-error-fg"
-                : "text-xyne-fg-tertiary opacity-0 group-hover:opacity-100 hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
-            }`}
-            aria-label="Mark reply not helpful"
-            aria-pressed={effectiveRating === "down"}
-          >
-            <ThumbsDownIcon
-              size={12}
-              weight={effectiveRating === "down" ? "fill" : "regular"}
-            />
-          </button>
-          {/* Copy reply — hover-only */}
-          {canCopy && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onCopy();
-              }}
-              className={`w-[24px] h-[24px] rounded-[6px] flex items-center justify-center transition-colors flex-shrink-0 ${
-                copied
-                  ? "bg-xyne-success-bg text-xyne-success-fg"
-                  : "text-xyne-fg-tertiary opacity-0 group-hover:opacity-100 hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
-              }`}
-              aria-label={copied ? "Copied" : "Copy reply"}
-            >
-              {copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />}
-            </button>
-          )}
-          {/* Open — round icon button. Filled primary when there's a continuable thread, outlined otherwise. */}
-          {canReply ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpen();
-              }}
-              className="w-[28px] h-[28px] rounded-full bg-xyne-fg-primary text-xyne-fg-inverse hover:opacity-90 transition-opacity flex-shrink-0 flex items-center justify-center"
-              aria-label="Continue conversation"
-              title="Reply"
-            >
-              <PaperPlaneTiltIcon size={12} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpen();
-              }}
-              className="w-[28px] h-[28px] rounded-full border border-xyne-border text-xyne-fg-secondary hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary transition-colors flex-shrink-0 flex items-center justify-center"
-              aria-label="View source"
-              title="View"
-            >
-              <CaretRightIcon size={12} />
-            </button>
-          )}
-        </div>
-      </button>
-
-      {/* Expanded panel */}
-      {expanded && (
-        <div
-          className="ml-[46px] mr-[8px] mb-[10px] px-[12px] py-[10px] rounded-[8px] bg-xyne-surface-sunken/40 border border-xyne-border-subtle flex flex-col gap-[10px]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Meta row */}
-          <div className="flex items-center gap-[14px] flex-wrap text-[10px] text-xyne-fg-tertiary">
-            <span>
-              Duration{" "}
-              <span className="text-xyne-fg-secondary font-medium">
-                {durationString(run.startedAt, run.completedAt)}
-              </span>
-            </span>
-            {formatTokens(run.tokensIn) !== null && (
-              <span>
-                In{" "}
-                <span className="text-xyne-fg-secondary font-medium">
-                  {formatTokens(run.tokensIn)}
-                </span>
-              </span>
-            )}
-            {formatTokens(run.tokensOut) !== null && (
-              <span>
-                Out{" "}
-                <span className="text-xyne-fg-secondary font-medium">
-                  {formatTokens(run.tokensOut)}
-                </span>
-              </span>
-            )}
-            <span>
-              Status{" "}
-              <span className="text-xyne-fg-secondary font-medium capitalize">
-                {run.status}
-              </span>
-            </span>
-            <ToolsChip tools={run.toolsUsed ?? []} />
-          </div>
-          {/* Original task */}
-          {run.task && (
-            <div className="flex flex-col gap-[3px]">
-              <span className="text-[10px] uppercase tracking-[0.06em] text-xyne-fg-tertiary">
-                Task
-              </span>
-              <span className="text-[11px] text-xyne-fg-secondary whitespace-pre-wrap break-words">
-                {run.task}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function SessionAccordionRow({
   session,
   isExpanded,
@@ -579,15 +359,7 @@ export function RecentRunsCard({
   days = 7,
 }: RecentRunsCardProps) {
   const navigate = useNavigate();
-  const { show: showSnackbar } = useSnackbar();
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [ratings, setRatings] = useState<Record<string, "up" | "down" | null>>(
-    {},
-  );
-  const [ratingBusyIds, setRatingBusyIds] = useState<Set<string>>(new Set());
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [viewMode, setViewMode] = useState<"sessions" | "runs">("sessions");
   const [expandedSessionKeys, setExpandedSessionKeys] = useState<Set<string>>(new Set());
   const [listExpanded, setListExpanded] = useState(false);
 
@@ -600,79 +372,6 @@ export function RecentRunsCard({
     });
   }, []);
 
-  const toggleExpand = useCallback((id: string) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const handleRate = useCallback(
-    async (run: AgentRun, rating: "up" | "down") => {
-      const id = run.id;
-      const current =
-        ratings[id] !== undefined ? ratings[id] : run.rating;
-      const next = current === rating ? null : rating;
-
-      // Optimistic
-      setRatings((prev) => ({ ...prev, [id]: next }));
-      setRatingBusyIds((prev) => new Set(prev).add(id));
-
-      try {
-        // API has no "clear rating" op; only fire when setting up/down.
-        if (next !== null) {
-          await rateRun(userId, run.sessionId, next);
-        }
-      } catch (err) {
-        // Roll back optimistic update
-        setRatings((prev) => ({ ...prev, [id]: current ?? null }));
-        showSnackbar({
-          variant: "error",
-          title: err instanceof Error ? err.message : "Rating failed",
-        });
-      } finally {
-        setRatingBusyIds((prev) => {
-          const nextSet = new Set(prev);
-          nextSet.delete(id);
-          return nextSet;
-        });
-      }
-    },
-    [ratings, userId, showSnackbar],
-  );
-
-  const handleCopy = useCallback(
-    async (run: AgentRun) => {
-      if (!run.result) return;
-      try {
-        await navigator.clipboard.writeText(run.result);
-        setCopiedId(run.id);
-        window.setTimeout(() => {
-          setCopiedId((curr) => (curr === run.id ? null : curr));
-        }, 1500);
-      } catch {
-        showSnackbar({ variant: "error", title: "Copy failed" });
-      }
-    },
-    [showSnackbar],
-  );
-
-  const handleView = useCallback(
-    (run: AgentRun) => {
-      if (run.channelId && run.conversationId) {
-        window.open(spacesThreadUrl(run.channelId, run.conversationId), "_blank");
-      } else if (run.triggerSource === "scheduled") {
-        navigate("/v3/workflows");
-      } else if (run.triggerSource === "chat") {
-        navigate(`/v3/chat?agent=${run.agentSlug}`);
-      } else {
-        navigate("/v3/dashboard");
-      }
-    },
-    [navigate],
-  );
 
   // Filter all runs to the active time window
   const windowRuns = useMemo(() => {
@@ -693,23 +392,8 @@ export function RecentRunsCard({
     );
   }, [query, sessions]);
 
-  const filteredRuns = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return windowRuns;
-    return windowRuns.filter((r) => {
-      const agentName =
-        agents.find((a) => a.slug === r.agentSlug)?.name ?? r.agentSlug;
-      return (
-        agentName.toLowerCase().includes(q) ||
-        (r.task ?? "").toLowerCase().includes(q) ||
-        (r.result ?? "").toLowerCase().includes(q) ||
-        (r.error ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [query, windowRuns, agents]);
-
   // Collapse list when filter/window changes
-  const filterKey = `${viewMode}|${query}|${days}`;
+  const filterKey = `${query}|${days}`;
   const [lastFilterKey, setLastFilterKey] = useState(filterKey);
   if (filterKey !== lastFilterKey) {
     setLastFilterKey(filterKey);
@@ -718,45 +402,19 @@ export function RecentRunsCard({
 
   // Determine visible items and footer label
   const totalSessions = filteredSessions.length;
-  const totalRunItems = filteredRuns.length;
   const visibleSessions = listExpanded
     ? filteredSessions
     : filteredSessions.slice(0, COLLAPSED_COUNT);
-  const visibleRuns = listExpanded
-    ? filteredRuns
-    : filteredRuns.slice(0, COLLAPSED_COUNT);
 
-  const showFooter =
-    !isLoading &&
-    (viewMode === "sessions"
-      ? totalSessions > COLLAPSED_COUNT
-      : totalRunItems > COLLAPSED_COUNT);
+  const showFooter = !isLoading && totalSessions > COLLAPSED_COUNT;
 
   const footerLabel = listExpanded
     ? "Collapse ↑"
-    : viewMode === "sessions"
-    ? `View all ${totalSessions} sessions →`
-    : `View all ${totalRunItems} runs →`;
+    : `View all ${totalSessions} sessions →`;
 
   return (
     <div className="bg-xyne-surface border border-xyne-border rounded-[14px] overflow-hidden">
       <div className="flex items-center gap-[12px] px-[16px] py-[12px] border-b border-xyne-border-subtle">
-        {/* Sessions / Runs toggle */}
-        <div className="flex items-center rounded-[8px] border border-xyne-border overflow-hidden flex-shrink-0">
-          {(["sessions", "runs"] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setViewMode(mode)}
-              className={`px-[10px] py-[5px] text-[12px] font-medium capitalize transition-colors ${
-                viewMode === mode
-                  ? "bg-xyne-surface-sunken text-xyne-fg-primary"
-                  : "text-xyne-fg-muted hover:text-xyne-fg-secondary"
-              }`}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
         {/* Search */}
         <div className="flex-1 relative">
           <MagnifyingGlassIcon
@@ -803,64 +461,37 @@ export function RecentRunsCard({
               </div>
             ))}
           </>
-        ) : viewMode === "sessions" ? (
-          filteredSessions.length === 0 ? (
-            <div className="text-[12px] text-xyne-fg-tertiary text-center py-[12px]">
-              {query ? `No sessions match "${query}"` : days === 1 ? "No sessions today" : `No sessions in the last ${days} days`}
-            </div>
-          ) : (
-            visibleSessions.map((session) => (
-              <SessionAccordionRow
-                key={session.key}
-                session={session}
-                isExpanded={expandedSessionKeys.has(session.key)}
-                onToggle={() => toggleSessionExpand(session.key)}
-                onOpenSession={(s) => {
-                  const convId = s.latest.conversationId;
-                  if (!convId) return;
-                  navigate(
-                    `/v3/chat?agent=${encodeURIComponent(s.agentSlug)}&conversation=${encodeURIComponent(convId)}`,
-                  );
-                }}
-                onOpenRun={(run, s) => {
-                  if (!run.conversationId) return;
-                  navigate(
-                    `/v3/chat?agent=${encodeURIComponent(s.agentSlug)}&conversation=${encodeURIComponent(run.conversationId)}`,
-                  );
-                }}
-              />
-            ))
-          )
-        ) : windowRuns.length === 0 ? (
+        ) : filteredSessions.length === 0 ? (
           <div className="text-[12px] text-xyne-fg-tertiary text-center py-[12px]">
-            {days === 1 ? "No runs today" : `No runs in the last ${days} days`}
-          </div>
-        ) : filteredRuns.length === 0 ? (
-          <div className="text-[12px] text-xyne-fg-tertiary text-center py-[12px]">
-            No runs match &ldquo;{query}&rdquo;
+            {query ? `No sessions match "${query}"` : days === 1 ? "No sessions today" : `No sessions in the last ${days} days`}
           </div>
         ) : (
-          visibleRuns.map((run) => {
-            const canReply =
-              (!!run.channelId && !!run.conversationId) ||
-              run.triggerSource === "chat";
-            return (
-              <RunRow
-                key={run.id}
-                run={run}
-                agent={agents.find((a) => a.slug === run.agentSlug)}
-                expanded={expandedIds.has(run.id)}
-                ratingOverride={ratings[run.id]}
-                ratingBusy={ratingBusyIds.has(run.id)}
-                copied={copiedId === run.id}
-                canReply={canReply}
-                onToggleExpand={() => toggleExpand(run.id)}
-                onRate={(r) => handleRate(run, r)}
-                onCopy={() => handleCopy(run)}
-                onOpen={() => handleView(run)}
-              />
-            );
-          })
+          visibleSessions.map((session) => (
+            <SessionAccordionRow
+              key={session.key}
+              session={session}
+              isExpanded={expandedSessionKeys.has(session.key)}
+              onToggle={() => toggleSessionExpand(session.key)}
+              onOpenSession={(s) => {
+                const run = s.latest;
+                if (run.channelId && run.conversationId) {
+                  window.open(spacesThreadUrl(run.channelId, run.conversationId), "_blank");
+                } else {
+                  const convId = run.conversationId;
+                  if (!convId) return;
+                  navigate(`/v3/chat?agent=${encodeURIComponent(s.agentSlug)}&conversation=${encodeURIComponent(convId)}`);
+                }
+              }}
+              onOpenRun={(run, s) => {
+                if (run.channelId && run.conversationId) {
+                  window.open(spacesThreadUrl(run.channelId, run.conversationId), "_blank");
+                } else {
+                  if (!run.conversationId) return;
+                  navigate(`/v3/chat?agent=${encodeURIComponent(s.agentSlug)}&conversation=${encodeURIComponent(run.conversationId)}`);
+                }
+              }}
+            />
+          ))
         )}
       </div>
 

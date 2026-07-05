@@ -14,6 +14,11 @@ interface DialogProps {
   children: ReactNode;
   footer?: ReactNode;
   maxWidth?: number | string;
+  maxHeight?: number | string;
+  /** Force a specific height (not just max). Use in large/full modal modes so flex-1 children fill correctly. */
+  height?: number | string;
+  headerActions?: ReactNode;
+  bodyClassName?: string;
   /**
    * Shift the modal center-point right by this many pixels.
    * Use half the sidebar width (100 for the 200px V3 sidebar) so the modal
@@ -32,6 +37,10 @@ export function Dialog({
   children,
   footer,
   maxWidth = 560,
+  maxHeight,
+  height,
+  headerActions,
+  bodyClassName,
   leftOffset = 0,
   backdropClassName,
 }: DialogProps) {
@@ -51,6 +60,8 @@ export function Dialog({
           data-id="dialog-popup"
           style={{
             maxWidth,
+            maxHeight: maxHeight !== undefined ? (typeof maxHeight === "number" ? `${maxHeight}px` : maxHeight) : "70vh",
+            ...(height !== undefined ? { height: typeof height === "number" ? `${height}px` : height } : {}),
             width: "calc(100vw - 32px)",
             position: "fixed",
             top: "50%",
@@ -59,54 +70,60 @@ export function Dialog({
           }}
           className={cn(
             "z-[var(--comp-z-modal)]",
-            "flex flex-col",
-            "max-h-[70vh]",
+            "flex flex-col overflow-hidden",
             "rounded-[var(--comp-dialog-radius)] bg-xyne-surface",
             "shadow-[var(--comp-shadow-xl)] border border-xyne-border",
             "outline-none",
-            "transition-[opacity,transform] duration-[var(--comp-duration-normal)] ease-out",
+            "transition-[opacity,transform,width,max-width,height,max-height] duration-500 ease-in-out",
             "data-[starting-style]:opacity-0 data-[starting-style]:[transform:translate(-50%,-50%)_scale(0.95)]",
             "data-[ending-style]:opacity-0 data-[ending-style]:[transform:translate(-50%,-50%)_scale(0.95)]",
           )}
         >
           <div
             data-id="dialog-header"
-            className="flex shrink-0 items-start justify-between gap-4 border-b border-xyne-border-subtle p-[var(--comp-dialog-padding)]"
+            className="flex shrink-0 items-start justify-between gap-4 border-b border-xyne-border-subtle bg-xyne-surface-subtle px-[var(--comp-dialog-padding)] py-4"
           >
             <div className="min-w-0 flex-1">
-              <BaseDialog.Title className="text-[16px] font-semibold leading-snug text-xyne-fg-primary">
+              <BaseDialog.Title className="text-[16px] font-bold leading-snug text-xyne-fg-primary">
                 {title}
               </BaseDialog.Title>
               {description && (
-                <BaseDialog.Description className="mt-1 text-[14px] text-xyne-fg-muted">
+                <BaseDialog.Description className="mt-1 text-[13px] text-xyne-fg-secondary">
                   {description}
                 </BaseDialog.Description>
               )}
             </div>
+          {headerActions && (
+            <div className="flex shrink-0 items-center gap-1">
+              {headerActions}
+            </div>
+          )}
             <BaseDialog.Close
               data-id="dialog-close"
               aria-label="Close"
               className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                "text-xyne-fg-muted hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary",
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
+                "text-xyne-fg-muted hover:bg-xyne-border-subtle hover:text-xyne-fg-primary",
                 "transition-colors duration-[var(--comp-duration-fast)]",
               )}
             >
-              <X size={14} weight="bold" />
+              <X size={15} weight="bold" />
             </BaseDialog.Close>
           </div>
 
           <div
             data-id="dialog-body"
-            className="flex-1 overflow-y-auto p-[var(--comp-dialog-padding)]"
+            className={bodyClassName ?? "flex-1 overflow-y-auto p-[var(--comp-dialog-padding)]"}
           >
-            <div className="flex flex-col gap-4">{children}</div>
+            {bodyClassName !== undefined
+              ? children
+              : <div className="flex flex-col gap-4">{children}</div>}
           </div>
 
           {footer && (
             <div
               data-id="dialog-footer"
-              className="flex shrink-0 items-center justify-end gap-2 border-t border-xyne-border-subtle p-[var(--comp-dialog-padding)]"
+              className="flex shrink-0 items-center justify-end gap-2 border-t border-xyne-border-subtle bg-xyne-surface-subtle/60 px-[var(--comp-dialog-padding)] py-4"
             >
               {footer}
             </div>

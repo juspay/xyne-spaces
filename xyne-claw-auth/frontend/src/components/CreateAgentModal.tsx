@@ -18,7 +18,7 @@ function slugify(name: string): string {
 
 interface State {
   step: number;
-  name: string; description: string; color: string; slug: string; slugManual: boolean; repoUrl: string;
+  name: string; description: string; color: string; slug: string; slugManual: boolean;
   systemPrompt: string; aiIntent: string; generating: boolean;
   availableTools: AvailableTools | null; toolsLoading: boolean;
   subagents: string[]; direct: string[]; custom: string[];
@@ -29,7 +29,7 @@ interface State {
 
 const INIT: State = {
   step: 0,
-  name: "", description: "", color: COLORS[0]!, slug: "", slugManual: false, repoUrl: "",
+  name: "", description: "", color: COLORS[0]!, slug: "", slugManual: false,
   systemPrompt: "", aiIntent: "", generating: false,
   availableTools: null, toolsLoading: false,
   subagents: [], direct: [], custom: [],
@@ -109,13 +109,10 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
       await createAgent({ slug: effectiveSlug, name: w.name.trim(), description: w.description.trim(), systemPrompt: w.systemPrompt.trim(), color: w.color, ownerUserId: userId });
       const hasTools = w.subagents.length || w.direct.length || w.custom.length;
       const hasSkills = w.selectedSkillIds.length > 0;
-      const trimmedRepoUrl = w.repoUrl.trim();
-      const hasRepoUrl = trimmedRepoUrl.length > 0;
-      if (hasTools || hasSkills || hasRepoUrl) {
+      if (hasTools || hasSkills) {
         const { updateAgent } = await import("../lib/api");
         const config: Record<string, unknown> = {};
         if (hasTools) config["tools"] = { subagents: w.subagents, direct: w.direct, custom: w.custom };
-        if (hasRepoUrl) config["repoUrl"] = trimmedRepoUrl;
         await updateAgent(effectiveSlug, {
           ...(Object.keys(config).length > 0 ? { config } : {}),
           ...(hasSkills ? { skills: w.selectedSkillIds } : {}),
@@ -184,15 +181,6 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                     className={`h-7 w-7 rounded-full transition ${w.color === c ? "ring-2 ring-white ring-offset-2 ring-offset-zinc-900" : "hover:scale-110"}`}
                     style={{ backgroundColor: c }} />)}
                 </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-sm text-zinc-400">Git Repository URL <span className="text-xs text-zinc-600">(optional)</span></label>
-                <input value={w.repoUrl} onChange={(e) => u({ repoUrl: e.target.value })}
-                  placeholder="ssh://git@github.com/example-org/arya.git"
-                  spellCheck={false}
-                  autoComplete="off"
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none" />
-                <p className="mt-1 text-xs text-zinc-600">If set, every session for this agent gets a fresh git worktree of this repo as its working directory. Leave blank for non-repo agents. URLs not in xyne-claw's warmpool incur a slow first-clone (~30s).</p>
               </div>
             </div>
           )}
@@ -273,20 +261,37 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                         .map(([source, tools]) => {
                           const writeToolNames = new Set(w.availableTools!.writeTools.map((t) => t.name));
                           const serverTools = tools.filter((t) => !writeToolNames.has(t.name));
-                          const names = serverTools.map((t) => t.name);
-                          const allSel = names.length > 0 && names.every((x) => w.direct.includes(x));
+                          // Select by unique `slug`, NOT `name`: two MCP servers can
+                          // expose a tool with the same `name` (e.g. `ping`), which
+                          // made both pills toggle as one. `|| name` keeps legacy
+                          // (name-stored) selections lit; toggling migrates to slug.
+                          const slugs = serverTools.map((t) => t.slug);
+                          const isSel = (t: { slug: string; name: string }) => w.direct.includes(t.slug) || w.direct.includes(t.name);
+                          const allSel = serverTools.length > 0 && serverTools.every(isSel);
+                          const toggleDirect = (t: { slug: string; name: string }) =>
+                            setW((p) => {
+                              const cleaned = p.direct.filter((d) => d !== t.name);
+                              return { ...p, direct: cleaned.includes(t.slug) ? cleaned.filter((d) => d !== t.slug) : [...cleaned, t.slug] };
+                            });
+                          // Scoped to THIS group's tools (the old global toggleAll
+                          // wiped other groups' selections).
+                          const toggleAllDirect = () =>
+                            setW((p) => {
+                              const without = p.direct.filter((d) => !slugs.includes(d) && !serverTools.some((t) => t.name === d));
+                              return { ...p, direct: allSel ? without : [...without, ...slugs] };
+                            });
                           return (
                             <div key={source} className="mb-3">
                               <div className="mb-1 flex items-center justify-between">
                                 <p className="text-xs font-medium text-zinc-400">{formatServerLabel(source)}</p>
-                                <button onClick={() => toggleAll("direct", names)} className="text-xs text-cyan-400 hover:text-cyan-300">
+                                <button onClick={toggleAllDirect} className="text-xs text-cyan-400 hover:text-cyan-300">
                                   {allSel ? "Deselect all" : "Select all"}
                                 </button>
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 {serverTools.map((t) => (
-                                  <button key={`${source}-${t.slug}`} onClick={() => toggle("direct", t.name)}
-                                    className={`rounded-lg border px-3 py-2 text-sm transition ${w.direct.includes(t.name) ? "border-cyan-500 bg-cyan-950/30 text-cyan-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}>
+                                  <button key={`${source}-${t.slug}`} onClick={() => toggleDirect(t)}
+                                    className={`rounded-lg border px-3 py-2 text-sm transition ${isSel(t) ? "border-cyan-500 bg-cyan-950/30 text-cyan-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}>
                                     {t.name}
                                   </button>
                                 ))}
@@ -406,7 +411,6 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                 </div>
               </div>
               {w.description && <p className="text-sm text-zinc-400">{w.description}</p>}
-              {w.repoUrl.trim() && <div><h4 className="mb-1 text-xs font-medium text-zinc-500">Repository</h4><pre className="overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-xs text-zinc-400">{w.repoUrl.trim()}</pre></div>}
               <div>
                 <h4 className="mb-1 text-xs font-medium text-zinc-500">System Prompt</h4>
                 <pre className="max-h-32 overflow-auto rounded bg-zinc-950 p-3 text-xs text-zinc-400">{w.systemPrompt.slice(0, 500)}{w.systemPrompt.length > 500 ? "..." : ""}</pre>

@@ -64,16 +64,10 @@ const postJsonTool = async (
       };
     }
 
-    // Same safety net as juspay-internal-tools: bulk PR queries across many
-    // repos and wide date ranges can return tens of MB. Cap raw body before
-    // parsing so a single tool call can't blow the agent's context window.
-    const MAX_CHARS = 40_000;
-    if (text.length > MAX_CHARS) {
-      const truncated = text.slice(0, MAX_CHARS);
-      const notice = `\n\n[TRUNCATED: response was ${text.length} chars, showing first ${MAX_CHARS}. Narrow the date range or repo list and call again.]`;
-      return { content: [{ type: "text", text: truncated + notice }] };
-    }
-
+    // No size cap here. claw's promoteIfOversized() is the single context-size
+    // guard: bulk PR queries that return tens of MB are spilled to a file behind
+    // a preview, so the full body is preserved and the model can read/grep it or
+    // re-call with a narrower date range / repo list.
     return { content: [{ type: "text", text: parseResponseText(text) }] };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -62,7 +62,9 @@ export function IntegrationCard({ integration, selected, onToggle, onBulkToggle,
       ? "MCP integration"
       : integration.kind === "builtin"
         ? "Sandbox"
-        : "Custom tools";
+        : integration.kind === "gateway"
+          ? "ACL"
+          : "Custom tools";
 
   // True when the backend has no tools at all for this integration — server
   // is registered but its tool list was never synced to the DB.
@@ -101,11 +103,37 @@ export function IntegrationCard({ integration, selected, onToggle, onBulkToggle,
             )}
             <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-xyne-fg-primary">
               {integration.label}
+              {integration.kind === "gateway" && integration.backendIds && integration.backendIds.length > 0 && (
+                <span className="ml-1.5 text-[11px] font-normal text-xyne-fg-muted">
+                  ({integration.backendIds.join(", ")})
+                </span>
+              )}
             </span>
-            <span className="shrink-0 text-[11px] text-xyne-fg-tertiary">
-              {kindLabel}
-            </span>
+            {integration.kind === "gateway" ? (
+              <span className="shrink-0 rounded border border-xyne-brand/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-xyne-brand/70">
+                ACL
+              </span>
+            ) : (
+              <span className="shrink-0 text-[11px] text-xyne-fg-tertiary">
+                {kindLabel}
+              </span>
+            )}
           </button>
+        )}
+
+        {/* Service-level enable/disable switch for gateway integrations */}
+        {integration.kind === "gateway" && !hasNoTools && (
+          <Switch
+            checked={hasAnySelected}
+            onChange={() => {
+              const allKeys = [
+                ...integration.readTools.map((e) => entryKey(e, integration.kind)),
+                ...integration.writeTools.map((e) => entryKey(e, integration.kind)),
+              ];
+              onBulkToggle(allKeys, !hasAnySelected);
+            }}
+            disabled={disabled}
+          />
         )}
 
         {/* Selection summary — visible regardless of expanded state. */}

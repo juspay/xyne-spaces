@@ -9,9 +9,14 @@
  *   4. Timing-safe compare against `X-Xyne-Signature` header (hex).
  *
  * Rollout modes (env `SPACES_WEBHOOK_VERIFY_MODE`):
- *   - `warn` (default): log mismatches but call next(). Safe for staged
- *     rollout while backfill catches up.
- *   - `enforce`: reject with 401 on any mismatch (or missing material).
+ *   - `enforce` (default): reject with 401 on any mismatch (or missing
+ *     material). This is the secure default — the webhook handler treats the
+ *     event payload's userId/channelId as authoritative and runs agents with
+ *     that user's credentials, so an unsigned/forged event is full
+ *     impersonation. Only an explicit `warn` opens the fail-open path.
+ *   - `warn`: log mismatches but call next(). Opt-in escape hatch for a
+ *     staged rollout while signing-secret backfill catches up; do NOT run
+ *     this in production once backfill is complete.
  *
  * Notes / gotchas:
  *   - Requires `req.rawBody` set by the json `verify` callback in main.ts.
@@ -28,8 +33,13 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { prisma } from "../db.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("verify-spaces-signature");
+
+// Secure by default: fail-closed unless an operator explicitly opts into the
+// `warn` grace-period mode.
 const MODE = (process.env["SPACES_WEBHOOK_VERIFY_MODE"] ?? "warn").toLowerCase();
-const ENFORCE = MODE === "enforce";
+const ENFORCE = MODE !== "warn";
 
 function parseGcmBundle(blob: string): [string, string, string] | null {
   const parts = blob.split(":");
@@ -41,6 +51,33 @@ function parseGcmBundle(blob: string): [string, string, string] | null {
 
 function tag(slug: string, reason: string): string {
   return `[verify-spaces-sig] slug=${slug} reason=${reason}`;
+}
+
+/**
+ * TEMPORARY diagnostic for the `reason=mismatch` investigation. When the raw
+ * body fails verification but the secret is known-correct, the body was mutated
+ * in transit (proxy/ingress re-serialization, whitespace, BOM, line-endings).
+ * This tests candidate canonicalizations and reports which (if any) reconciles
+ * the body with the signature — WITHOUT logging the secret or any body content.
+ * Remove once the canonicalization is identified and fixed at the source.
+ */
+function diagnoseMismatch(rawBody: Buffer, secret: string, received: string): string {
+  const hmac = (s: string | Buffer): string => createHmac("sha256", secret).update(s).digest("hex");
+  const text = rawBody.toString("utf8");
+  const candidates: Array<[string, string | Buffer]> = [["raw", rawBody]];
+  try { candidates.push(["trimEnd", text.replace(/\s+$/, "")]); } catch { /* noop */ }
+  try { candidates.push(["trimStart", text.replace(/^\s+/, "")]); } catch { /* noop */ }
+  try { if (text.charCodeAt(0) === 0xfeff) candidates.push(["stripBOM", text.slice(1)]); } catch { /* noop */ }
+  try { candidates.push(["lf2crlf", text.replace(/\n/g, "\r\n")]); } catch { /* noop */ }
+  try { candidates.push(["crlf2lf", text.replace(/\r\n/g, "\n")]); } catch { /* noop */ }
+  let parses = false;
+  try { candidates.push(["reserialize", JSON.stringify(JSON.parse(text))]); parses = true; } catch { /* not json */ }
+  let hit = "none";
+  for (const [name, value] of candidates) {
+    try { if (hmac(value) === received) { hit = name; break; } } catch { /* noop */ }
+  }
+  const bodySha = createHmac("sha256", "diag").update(rawBody).digest("hex").slice(0, 12);
+  return `match=${hit} parses=${parses} bodyBytes=${rawBody.length} bodySha=${bodySha}`;
 }
 
 export async function verifySpacesSignature(
@@ -57,7 +94,7 @@ export async function verifySpacesSignature(
 
   if (!agent?.signingSecret) {
     if (!ENFORCE) {
-      console.warn(tag(slug, "no_stored_secret") + " — warn-only, passing through");
+      log.warn(tag(slug, "no_stored_secret") + " — warn-only, passing through");
       return next();
     }
     res.status(401).json({ success: false, error: "missing signing secret" });
@@ -67,7 +104,7 @@ export async function verifySpacesSignature(
   // 2. Decrypt with claw-auth's GCM scheme.
   const parts = parseGcmBundle(agent.signingSecret);
   if (!parts) {
-    console.warn(tag(slug, "malformed_secret_blob") + " — treating as no secret");
+    log.warn(tag(slug, "malformed_secret_blob") + " — treating as no secret");
     if (!ENFORCE) return next();
     res.status(401).json({ success: false, error: "malformed signing secret" });
     return;
@@ -76,7 +113,7 @@ export async function verifySpacesSignature(
   try {
     plaintextSecret = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
   } catch (err) {
-    console.warn(tag(slug, "decrypt_failed") + ` — ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(tag(slug, "decrypt_failed") + ` — ${err instanceof Error ? err.message : String(err)}`);
     if (!ENFORCE) return next();
     res.status(401).json({ success: false, error: "secret decrypt failed" });
     return;
@@ -89,7 +126,7 @@ export async function verifySpacesSignature(
   // 4. Compare with the header.
   const received = req.headers["x-xyne-signature"];
   if (typeof received !== "string" || received.length === 0) {
-    console.warn(tag(slug, "no_signature_header") + " — caller did not sign request");
+    log.warn(tag(slug, "no_signature_header") + " — caller did not sign request");
     if (!ENFORCE) return next();
     res.status(401).json({ success: false, error: "missing X-Xyne-Signature" });
     return;
@@ -100,7 +137,7 @@ export async function verifySpacesSignature(
   const matches = recBuf.length === expBuf.length && timingSafeEqual(recBuf, expBuf);
 
   if (!matches) {
-    console.warn(tag(slug, "mismatch") + ` — bodyBytes=${rawBody.length} headerLen=${received.length}`);
+    log.warn(tag(slug, "mismatch") + ` — bodyBytes=${rawBody.length} headerLen=${received.length} ${diagnoseMismatch(rawBody, plaintextSecret, received)}`);
     if (!ENFORCE) return next();
     res.status(401).json({ success: false, error: "invalid signature" });
     return;

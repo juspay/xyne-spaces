@@ -22,6 +22,10 @@
 
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import type { SessionTranscriptForCurator, SubsystemUpdate } from "xyne-claw-shared";
+import { fetchLiteLLMWithRetry } from "./litellm-retry.js";
+
+import { createLogger } from "./logger.js";
+const log = createLogger("curator");
 
 const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
 const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
@@ -56,7 +60,7 @@ async function getKnownSubsystems(agentSlug: string): Promise<KnownSubsystem[]> 
     }
     return out;
   } catch (err) {
-    console.warn(`[curator] Failed to list known subsystems — treating bank as empty agentSlug=${agentSlug}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[curator] Failed to list known subsystems — treating bank as empty agentSlug=${agentSlug}: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
@@ -290,7 +294,7 @@ async function llmCall(
   sessionId: string,
 ): Promise<unknown | null> {
   if (!LITELLM_API_KEY) {
-    console.warn(`[curator] LITELLM_API_KEY not set sessionId=${sessionId}`);
+    log.warn(`[curator] LITELLM_API_KEY not set sessionId=${sessionId}`);
     return null;
   }
   const body = {
@@ -304,18 +308,17 @@ async function llmCall(
     tool_choice: { type: "function", function: { name: tool.function.name } },
   };
   try {
-    const res = await fetch(`${LITELLM_URL}/chat/completions`, {
+    const res = await fetchLiteLLMWithRetry(`${LITELLM_URL}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${LITELLM_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(CURATOR_TIMEOUT_MS),
-    });
+    }, { timeoutMs: CURATOR_TIMEOUT_MS, label: `curator:${sessionId}` });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.warn(`[curator] LiteLLM non-OK sessionId=${sessionId} status=${res.status} body=${text.slice(0, 300)}`);
+      log.warn(`[curator] LiteLLM non-OK sessionId=${sessionId} status=${res.status} body=${text.slice(0, 300)}`);
       return null;
     }
     const data = (await res.json()) as {
@@ -334,26 +337,26 @@ async function llmCall(
       const fallbackContent = String(message?.content ?? "");
       const xmlParsed = tryParseXmlToolCall(fallbackContent, tool.function.name);
       if (xmlParsed !== null) {
-        console.info(
+        log.info(
           `[curator] parsed XML-style tool_call from content sessionId=${sessionId} tool=${tool.function.name}`,
         );
         return xmlParsed;
       }
-      console.warn(
+      log.warn(
         `[curator] expected tool_call but got content-only sessionId=${sessionId} sample=${fallbackContent.slice(0, 200)}`,
       );
       return null;
     }
     const call = toolCalls[0];
     if (call?.function?.name && call.function.name !== tool.function.name) {
-      console.warn(
+      log.warn(
         `[curator] unexpected tool_call name sessionId=${sessionId} expected=${tool.function.name} got=${call.function.name}`,
       );
       return null;
     }
     const argsRaw = call?.function?.arguments;
     if (typeof argsRaw !== "string" || argsRaw.length === 0) {
-      console.warn(`[curator] tool_call arguments missing sessionId=${sessionId}`);
+      log.warn(`[curator] tool_call arguments missing sessionId=${sessionId}`);
       return null;
     }
     try {
@@ -363,18 +366,18 @@ async function llmCall(
       // call markup IN the arguments string instead of JSON. Parse that out.
       const xmlParsed = tryParseXmlToolCall(argsRaw, tool.function.name);
       if (xmlParsed !== null) {
-        console.info(
+        log.info(
           `[curator] parsed XML-style arguments sessionId=${sessionId} tool=${tool.function.name}`,
         );
         return xmlParsed;
       }
-      console.warn(
+      log.warn(
         `[curator] tool_call arguments not valid JSON or XML sessionId=${sessionId} sample=${argsRaw.slice(0, 200)}`,
       );
       return null;
     }
   } catch (err) {
-    console.error(`[curator] LLM call failed sessionId=${sessionId} err=${err instanceof Error ? err.message : String(err)}`);
+    log.error(`[curator] LLM call failed sessionId=${sessionId} err=${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -488,7 +491,7 @@ export async function distillSession(t: SessionTranscriptForCurator): Promise<Su
 
   const classification = await classifyTouchedSubsystems(t, known);
   if (classification.existing.length === 0 && classification.newProposals.length === 0) {
-    console.info(`[curator] No subsystems touched sessionId=${t.sessionId} agentSlug=${t.agentSlug} knownCount=${known.length}`);
+    log.info(`[curator] No subsystems touched sessionId=${t.sessionId} agentSlug=${t.agentSlug} knownCount=${known.length}`);
     return [];
   }
 
@@ -514,7 +517,7 @@ export async function distillSession(t: SessionTranscriptForCurator): Promise<Su
     }
   }
 
-  console.info(`[curator] Distilled sessionId=${t.sessionId} agentSlug=${t.agentSlug} updates=${updates.length} existingTouched=${classification.existing.length} newProposed=${classification.newProposals.length}`);
+  log.info(`[curator] Distilled sessionId=${t.sessionId} agentSlug=${t.agentSlug} updates=${updates.length} existingTouched=${classification.existing.length} newProposed=${classification.newProposals.length}`);
 
   return updates;
 }

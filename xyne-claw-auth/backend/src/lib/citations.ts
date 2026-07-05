@@ -1,4 +1,71 @@
 import type { Citation as StructuredCitation } from "xyne-claw-shared";
+import { iconUrlForKey } from "xyne-claw-shared";
+
+/**
+ * Re-attach the inline `data:` SVG icon onto each citation from its persisted
+ * `iconKey`, returning NEW objects safe to send to the dashboard. We persist
+ * only `iconKey` (a few bytes) — the heavy icon bytes are hydrated here on the
+ * way OUT, so they never land in `agent_runs.toolInvocations`.
+ *
+ * Non-mutating and backward-compatible: the input is never modified, and
+ * citations that already carry an `iconUrl` (legacy/path rows) or lack an
+ * `iconKey` are passed through untouched.
+ */
+export function hydrateInvocationIcons(inv: unknown): unknown {
+  if (!inv || typeof inv !== "object") return inv;
+  const citations = (inv as Record<string, unknown>).citations;
+  if (!Array.isArray(citations) || citations.length === 0) return inv;
+  let changed = false;
+  const hydrated = citations.map((c) => {
+    if (!c || typeof c !== "object") return c;
+    const cit = c as Record<string, unknown>;
+    if (cit.iconUrl || !cit.iconKey) return c; // already hydrated, or no key
+    const url = iconUrlForKey(cit.iconKey as string);
+    if (!url) return c;
+    changed = true;
+    return { ...cit, iconUrl: url };
+  });
+  return changed ? { ...(inv as Record<string, unknown>), citations: hydrated } : inv;
+}
+
+/** Array variant of {@link hydrateInvocationIcons} for a full toolInvocations
+ *  list (the reload path). Non-arrays pass through unchanged. */
+export function hydrateCitationIcons<T>(invocations: T): T {
+  if (!Array.isArray(invocations)) return invocations;
+  return invocations.map(hydrateInvocationIcons) as unknown as T;
+}
+
+/**
+ * Collect the de-duplicated `iconKey → data:` SVG URI map used across a list of
+ * tool invocations. This is the payload-slimming alternative to per-citation
+ * hydration: instead of stamping the (often identical) SVG bytes onto EVERY
+ * citation — e.g. 6 thread chips each carrying the same ~1.6 KB Spaces mark —
+ * the citations keep only their tiny `iconKey` and the bytes ship ONCE per
+ * unique key in this map. The dashboard re-attaches them at render time.
+ *
+ * Only keys that resolve to a known icon are included. Citations without an
+ * `iconKey` (legacy/path rows that carry an inline `iconUrl` instead) are
+ * ignored here and rendered from their own `iconUrl` client-side.
+ */
+export function collectCitationIconUrls(
+  invocations: unknown,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!Array.isArray(invocations)) return out;
+  for (const inv of invocations) {
+    if (!inv || typeof inv !== "object") continue;
+    const citations = (inv as Record<string, unknown>).citations;
+    if (!Array.isArray(citations)) continue;
+    for (const c of citations) {
+      if (!c || typeof c !== "object") continue;
+      const key = (c as Record<string, unknown>).iconKey;
+      if (typeof key !== "string" || key in out) continue;
+      const url = iconUrlForKey(key);
+      if (url) out[key] = url;
+    }
+  }
+  return out;
+}
 
 interface Citation {
   label: string;
@@ -17,7 +84,6 @@ interface CitationBuildOptions {
 
 interface InvocationLike {
   toolName?: unknown;
-  toolCallId?: unknown;
   args?: unknown;
   result?: unknown;
   citations?: unknown;
@@ -30,7 +96,8 @@ function isStructuredCitation(v: unknown): v is StructuredCitation {
     r["kind"] === "thread" ||
     r["kind"] === "canvas" ||
     r["kind"] === "ticket" ||
-    r["kind"] === "external"
+    r["kind"] === "external" ||
+    r["kind"] === "collection-item"
   );
 }
 
@@ -87,6 +154,20 @@ function addStructuredCitation(
   }
   if (c.kind === "external" && c.url) {
     addCitation(target, seenUrls, c.label ?? "Source link", c.url);
+    return;
+  }
+  // KB tools (kb-search / kb-read-file / kb-get-chunks / kb-search-within-doc)
+  // attach `url` directly (built via deepLinkForFile in kb-handlers.ts), so the
+  // structured-citation path just forwards it through. Drop the citation when
+  // url is missing — happens for collections we don't have full tree metadata
+  // for (e.g. workspace-scoped instead of channel-scoped).
+  if (c.kind === "collection-item" && c.url) {
+    addCitation(
+      target,
+      seenUrls,
+      c.label ?? c.fileName ?? "Knowledge base file",
+      c.url,
+    );
     return;
   }
 }
@@ -277,6 +358,12 @@ function resolveLlmCitation(
     const normalizedUrl = normalizeHttpUrl(c.url);
     if (!normalizedUrl) return null;
     return { label: c.label || "Source link", url: normalizedUrl };
+  }
+  if (c.kind === "collection-item" && c.url) {
+    return {
+      label: c.label || c.fileName || "Knowledge base file",
+      url: c.url,
+    };
   }
   return null;
 }
@@ -544,40 +631,4 @@ export function appendCitations(
   }
   const appended = `${markdown.trimEnd()}\n\n${citationBlock}`;
   return appended;
-}
-
-/**
- * Append inline `[clf-<toolCallId>#<chunkIndex>]` citation tokens to the
- * assistant result, derived from the structured `Citation[]` carried on each
- * `ToolInvocation.citations`. Desk's autodraft `DraftSourcesPanel` scans
- * content for `[clf-…]` tokens and resolves them via `findCitationForChunk` —
- * this is what makes Grafana (and other claw-tool) results render as clickable
- * source rows. One token per (toolCallId, chunkIndex); invocations without
- * citations are skipped. Inert when no citations exist.
- */
-export function appendClawCitationTokens(
-  markdown: string,
-  toolInvocations: unknown,
-): string {
-  if (!Array.isArray(toolInvocations) || toolInvocations.length === 0) return markdown;
-  const tokens: string[] = [];
-  const seen = new Set<string>();
-  for (const inv of toolInvocations as InvocationLike[]) {
-    const toolCallId = asString(inv?.toolCallId);
-    const citations = inv?.citations;
-    if (!toolCallId || !Array.isArray(citations) || citations.length === 0) continue;
-    for (const c of citations) {
-      if (!isStructuredCitation(c)) continue;
-      const rawChunk = c.chunkIndex;
-      const chunkIndex = typeof rawChunk === "number" && Number.isFinite(rawChunk) && rawChunk > 0
-        ? rawChunk
-        : 1;
-      const token = `[clf-${toolCallId}#${chunkIndex}]`;
-      if (seen.has(token)) continue;
-      seen.add(token);
-      tokens.push(token);
-    }
-  }
-  if (tokens.length === 0) return markdown;
-  return `${markdown.trimEnd()}\n\n${tokens.join(" ")}`;
 }

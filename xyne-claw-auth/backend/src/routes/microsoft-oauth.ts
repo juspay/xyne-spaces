@@ -14,6 +14,10 @@ import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-state.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("microsoft-oauth");
 
 const MICROSOFT_SCOPES = [
   "openid",
@@ -65,77 +69,45 @@ const router = Router();
 router.use("/:userId", pinUserIdParam);
 
 /**
- * GET /:userId/oauth/microsoft/token
- * Returns a valid Microsoft access token for the user (refreshes if expired).
- * Called by xyne-claw before running microsoft-agent tasks.
+ * Live Microsoft access-token provider for the shared `/oauth/:provider/token`
+ * route (see lib/oauth-token-endpoint.ts). Microsoft Identity rotates refresh
+ * tokens on every refresh, so the new refresh_token MUST be stored.
  */
-router.get("/:userId/oauth/microsoft/token", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
+export const microsoftOAuthProvider: OAuthTokenProvider = {
+  serverType: "microsoft",
+  label: "Microsoft",
+  async refresh(creds) {
+    const { clientId, clientSecret, tenantId } = getMicrosoftCredentials();
 
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: "microsoft" } },
-      include: { mcpServer: true },
+    const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: creds.refreshToken,
+        grant_type: "refresh_token",
+      }),
     });
 
-    if (!connection) {
-      res.status(404).json({ success: false, error: "No Microsoft connection found for this user" });
-      return;
+    if (!response.ok) {
+      throw new TokenRefreshError(502, `${response.status} ${await response.text()}`);
     }
 
-    const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-    const creds = JSON.parse(decrypted) as MicrosoftTokens;
+    const tokens = (await response.json()) as {
+      access_token: string;
+      refresh_token: string;
+      expires_in: number;
+    };
 
-    // Check if token is expired (with 60s buffer)
-    if (Date.now() > creds.expires - 60_000) {
-      const { clientId, clientSecret, tenantId } = getMicrosoftCredentials();
-
-      const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: clientId,
-          client_secret: clientSecret,
-          refresh_token: creds.refreshToken,
-          grant_type: "refresh_token",
-        }),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.error(`[microsoft-oauth] Token refresh failed for user ${userId}: ${response.status} ${text}`);
-        res.status(502).json({ success: false, error: "Microsoft token refresh failed" });
-        return;
-      }
-
-      const tokens = (await response.json()) as {
-        access_token: string;
-        refresh_token: string;
-        expires_in: number;
-      };
-
-      // Microsoft rotates refresh tokens — always store the new one
-      const newCreds: MicrosoftTokens = {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        expires: Date.now() + tokens.expires_in * 1000,
-      };
-
-      const { ciphertext, iv, authTag } = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
-      await prisma.userMcpConnection.update({
-        where: { id: connection.id },
-        data: { encryptedCreds: ciphertext, iv, authTag },
-      });
-
-      res.json({ success: true, data: { accessToken: tokens.access_token } });
-    } else {
-      res.json({ success: true, data: { accessToken: creds.accessToken } });
-    }
-  } catch (err) {
-    console.error("[microsoft-oauth] token error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+    // Microsoft rotates refresh tokens — always store the new one
+    return {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expires: Date.now() + tokens.expires_in * 1000,
+    };
+  },
+};
 
 /**
  * POST /:userId/oauth/microsoft/authorize
@@ -162,7 +134,7 @@ router.post("/:userId/oauth/microsoft/authorize", async (req: Request<{ userId: 
 
     res.json({ success: true, data: { authUrl: authUrl.toString() } });
   } catch (err) {
-    console.error("[microsoft-oauth] authorize error:", err);
+    log.error("[microsoft-oauth] authorize error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -197,7 +169,7 @@ router.post("/:userId/oauth/microsoft/callback", async (req: Request<{ userId: s
 
     if (!response.ok) {
       const text = await response.text();
-      console.error(`[microsoft-oauth] Token exchange failed for user ${userId}: ${response.status} ${text}`);
+      log.error(`[microsoft-oauth] Token exchange failed for user ${userId}: ${response.status} ${text}`);
       res.status(502).json({ success: false, error: "Microsoft token exchange failed" });
       return;
     }
@@ -249,10 +221,10 @@ router.post("/:userId/oauth/microsoft/callback", async (req: Request<{ userId: s
       });
     }
 
-    console.log(`[microsoft-oauth] Stored Microsoft credentials for user ${userId}`);
+    log.info(`[microsoft-oauth] Stored Microsoft credentials for user ${userId}`);
     res.json({ success: true, data: { message: "Microsoft account connected successfully" } });
   } catch (err) {
-    console.error("[microsoft-oauth] callback error:", err);
+    log.error("[microsoft-oauth] callback error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -277,7 +249,7 @@ microsoftCallbackRouter.get("/microsoft/callback", async (req: Request, res: Res
     };
 
     if (oauthError) {
-      console.error(`[microsoft-oauth] OAuth error: ${oauthError} — ${error_description}`);
+      log.error(`[microsoft-oauth] OAuth error: ${oauthError} — ${error_description}`);
       res.redirect(`${frontendUrl}?microsoft_error=${encodeURIComponent(oauthError)}`);
       return;
     }
@@ -292,7 +264,7 @@ microsoftCallbackRouter.get("/microsoft/callback", async (req: Request, res: Res
       userId = verifyOAuthState(state).userId;
     } catch (err) {
       const reason = err instanceof OAuthStateError ? err.reason : "malformed";
-      console.error(`[microsoft-oauth] state ${reason}`);
+      log.error(`[microsoft-oauth] state ${reason}`);
       res.redirect(`${frontendUrl}?microsoft_error=invalid_state`);
       return;
     }
@@ -315,7 +287,7 @@ microsoftCallbackRouter.get("/microsoft/callback", async (req: Request, res: Res
 
     if (!response.ok) {
       const text = await response.text();
-      console.error(`[microsoft-oauth] Token exchange failed: ${response.status} ${text}`);
+      log.error(`[microsoft-oauth] Token exchange failed: ${response.status} ${text}`);
       res.redirect(`${frontendUrl}?microsoft_error=token_exchange_failed`);
       return;
     }
@@ -358,7 +330,7 @@ microsoftCallbackRouter.get("/microsoft/callback", async (req: Request, res: Res
     } else {
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (!user) {
-        console.error(`[microsoft-oauth] User not found: ${userId}`);
+        log.error(`[microsoft-oauth] User not found: ${userId}`);
         res.redirect(`${frontendUrl}?microsoft_error=user_not_found`);
         return;
       }
@@ -374,10 +346,10 @@ microsoftCallbackRouter.get("/microsoft/callback", async (req: Request, res: Res
       });
     }
 
-    console.log(`[microsoft-oauth] Stored Microsoft credentials for user ${userId} via browser callback`);
+    log.info(`[microsoft-oauth] Stored Microsoft credentials for user ${userId} via browser callback`);
     res.redirect(`${frontendUrl}?microsoft_connected=true`);
   } catch (err) {
-    console.error("[microsoft-oauth] browser callback error:", err);
+    log.error("[microsoft-oauth] browser callback error:", err);
     res.redirect(`${frontendUrl}?microsoft_error=internal_error`);
   }
 });

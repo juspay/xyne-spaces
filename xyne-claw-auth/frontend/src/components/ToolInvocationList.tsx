@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ToolInvocation } from "../lib/api";
+import { formatToolResult } from "../lib/toolFormat";
 
 /**
  * Renders a flat list of tool invocations with nested subagent children folded
@@ -69,6 +70,10 @@ function ToolInvocationItem({
     catch { return String(invocation.args); }
   }, [invocation.args]);
 
+  // Producer ships results as compact JSON / content-block arrays — pretty-print
+  // and unwrap them so the <pre> below renders readable, multi-line output.
+  const resultFull = useMemo(() => formatToolResult(invocation.result), [invocation.result]);
+
   // Subagent rows get a distinct border + icon so nested structure reads.
   const isSubagent = children && children.length > 0;
 
@@ -99,7 +104,7 @@ function ToolInvocationItem({
           </div>
           <div>
             <div className="mb-0.5 text-zinc-500">Result</div>
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 font-mono text-zinc-300">{invocation.result || "(empty)"}</pre>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 font-mono text-zinc-300">{resultFull || "(empty)"}</pre>
           </div>
         </div>
       )}

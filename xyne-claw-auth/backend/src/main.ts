@@ -1,5 +1,12 @@
+import { createLogger } from "./logger.js";
+const log = createLogger("main");
+
+// Identify this process in structured logs (overridden by deployment env).
+process.env.SERVICE_NAME ||= "xyne-claw-auth";
+
 import express, { type Request, type Response } from "express";
 import { CONFIG } from "./config.js";
+import { requestLogger } from "./middleware/requestLogger.js";
 import { serversRouter } from "./routes/servers.js";
 import { connectionsRouter } from "./routes/connections.js";
 import { mcpRouter } from "./routes/mcp.js";
@@ -8,13 +15,17 @@ import { runStreamRouter, runStreamInternalRouter } from "./routes/run-stream.js
 import { usersRouter } from "./routes/users.js";
 import { gatewaysRouter } from "./routes/gateways.js";
 import { webhookRouter } from "./routes/webhook.js";
+import { flowActionRouter } from "./routes/flow-action.js";
 import { appCallbackRouter } from "./routes/app-callback.js";
 import { agentsRouter } from "./routes/agents.js";
 import { chainWorkflowsRouter } from "./routes/chain-workflows.js";
 import { spacesRouter } from "./routes/spaces.js";
 import { toolsRouter } from "./routes/tools.js";
+import { researchAgentRouter } from "./routes/research-agent.js";
 import { skillsRouter } from "./routes/skills.js";
+import { knowledgeBaseRouter } from "./routes/knowledge-base.js";
 import subagentsRouter from "./routes/subagents.js";
+import sandboxRouter from "./routes/sandbox.js";
 import { adminRouter } from "./routes/admin.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "./routes/admin-backfill-signing-secrets.js";
@@ -34,18 +45,26 @@ import { attioOAuthRouter, attioCallbackRouter } from "./routes/attio-oauth.js";
 import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "./routes/mailerlite-oauth.js";
 import { honeycombOAuthRouter, honeycombCallbackRouter } from "./routes/honeycomb-oauth.js";
 import { customerioOAuthRouter, customerioCallbackRouter } from "./routes/customerio-oauth.js";
+import { oauthTokenRouter } from "./routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "./routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "./routes/scheduled-jobs.js";
 import { pendingQuestionsRouter } from "./routes/pending-questions.js";
 import { settingsRouter } from "./routes/settings.js";
 import { runsRouter } from "./routes/runs.js";
+import { metricsRouter } from "./routes/metrics.js";
 import { memoryRouter } from "./routes/memory.js";
 import { digitalTwinRouter } from "./routes/digital-twin.js";
 import { controlCenterRouter } from "./routes/control-center.js";
+import { evalsRouter } from "./routes/evals/index.js";
+import { mcpGatewayRouter } from "./mcpgateway/index.js";
 import { initScheduledJobsWorker, closeWorker } from "./queue/scheduled-jobs-worker.js";
 import { closeQueue } from "./queue/scheduled-jobs-queue.js";
 import { initRunRecoveryWorker, closeRunRecoveryWorker } from "./queue/run-recovery-worker.js";
 import { initDigitalTwinBackfillWorker } from "./queue/digital-twin-backfill-worker.js";
+import { initEvalImportWorker, closeEvalImportWorker } from "./queue/eval-import-worker.js";
+import { initEvalGenerationWorker, closeEvalGenerationWorker } from "./queue/eval-generation-worker.js";
+import { initEvalJudgeWorker, closeEvalJudgeWorker } from "./queue/eval-judge-worker.js";
+import { initFailureCuratorWorker, closeFailureCuratorWorker } from "./services/failure-curator-worker.js";
 import { closeBackfillQueue } from "./queue/digital-twin-backfill-queue.js";
 import { bootstrapCustomTools } from "./bootstrap-tools.js";
 import { initMemoryCron } from "./services/memoryCronService.js";
@@ -55,7 +74,8 @@ import {
   stopBitbucketStatsBackgroundRefresh,
 } from "./services/bitbucket-stats.js";
 
-import { requireAuth, requireS2S } from "./middleware/require-auth.js";
+import { requireAuth, requireS2S, requireStrictS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
+import { requireClawAdmin } from "./middleware/agent-acl.js";
 import { redisService } from "./redis.js";
 
 const app = express();
@@ -71,30 +91,60 @@ app.use(express.json({
   },
 }));
 
+// Per-request structured log context (requestId) + request start/end.
+app.use(requestLogger);
+// Identity-header firewall (defense-in-depth). A browser/client request must
+// never assert its own identity: only an internal caller holding a valid S2S
+// key may pin `x-user-id`. For everyone else we strip inbound `x-user-id` here,
+// before any route or auth middleware runs, so a forged header can't reach a
+// handler even if some route forgets to re-derive identity. The auth middlewares
+// (requireAuth/requireUserAuth) set `x-user-id` from the verified Spaces session
+// downstream. NOTE: the public ingress should ALSO strip x-user-id/x-s2s-key on
+// inbound external traffic — this is the in-process backstop, not a replacement.
+// x-s2s-key is intentionally NOT stripped: internal callers need it and it is
+// already validated in constant time (see require-auth.ts).
+app.use((req, _res, next) => {
+  if (!s2sKeyMatches(req.headers["x-s2s-key"])) {
+    delete req.headers["x-user-id"];
+  }
+  next();
+});
+
 app.get("/claw/health", (_req: Request, res: Response) => {
   res.json({ status: "ok", service: "xyne-claw-auth", uptime: process.uptime() });
 });
 
 const BASE = "/claw/api/v1";
 
-app.use(`${BASE}/servers`, serversRouter);
+// MCP connector CRUD. requireUserAuth verifies a real Spaces session cookie and
+// sets x-user-id from it — so a client-supplied x-user-id header is ignored and
+// can't be forged. Was previously fully unauthenticated: anyone could POST a
+// stdio connector whose launch command the gateway then spawned (RCE).
+app.use(`${BASE}/servers`, requireUserAuth, serversRouter);
 app.use(`${BASE}/users`, requireAuth, usersRouter);
 app.use(`${BASE}/users`, requireAuth, connectionsRouter);
 app.use(`${BASE}/sessions`, mcpRouter);
-app.use(`${BASE}/gateways`, requireAuth, gatewaysRouter);
+app.use(`${BASE}/gateways`, requireAuth, requireClawAdmin, gatewaysRouter);
 app.use(`${BASE}/agents`, requireAuth, agentsRouter);
 app.use(`${BASE}/chain-workflows`, requireAuth, chainWorkflowsRouter);
 app.use(`${BASE}/spaces`, requireAuth, spacesRouter);
 app.use(`${BASE}/tools`, requireAuth, toolsRouter);
 app.use(`${BASE}/skills`, requireAuth, skillsRouter);
+app.use(`${BASE}/knowledge-base`, requireAuth, knowledgeBaseRouter);
 app.use(`${BASE}/subagents`, requireAuth, subagentsRouter);
+app.use(`${BASE}/sandbox`, requireAuth, sandboxRouter);
 app.use(`${BASE}/admin`, requireAuth, adminRouter);
 // TEMPORARY — delete this mount + the import above + the file after backfill.
 app.use(`${BASE}/admin`, requireAuth, adminBackfillSigningSecretsRouter);
 app.use(`${BASE}/dashboard`, requireAuth, dashboardRouter);
 app.use(`${BASE}/agent-chat`, requireAuth, agentChatRouter);
-app.use(`${BASE}/internal/agent-chat`, requireS2S, agentChatInternalRouter); // progress/callback from xyne-claw
-app.use(`${BASE}/internal/sessions`, requireS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS
+app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
+app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
+// Generic live OAuth-token read for every connector — GET /users/:userId/oauth/:provider/token.
+// Mounted before the per-provider routers (which now only serve authorize/callback)
+// so it owns the `/token` path. Same requireAuth guard; the handler additionally
+// requires the run's HMAC session token. See routes/oauth-token.ts.
+app.use(`${BASE}/users`, requireAuth, oauthTokenRouter);
 app.use(`${BASE}/users`, requireAuth, googleOAuthRouter);
 app.use(BASE, googleCallbackRouter);
 app.use(`${BASE}/users`, requireAuth, microsoftOAuthRouter);
@@ -130,21 +180,57 @@ app.use(BASE, honeycombCallbackRouter);
 app.use(`${BASE}/users`, requireAuth, customerioOAuthRouter);
 app.use(BASE, customerioCallbackRouter);
 app.use(`${BASE}/users`, requireAuth, rapidApiLinkedInRouter);
-app.use(BASE, runRouter);
+app.use(`${BASE}/internal`, requireStrictS2S, runRouter);
+// IMPORTANT: more-specific runStreamRouter MUST be mounted BEFORE the broader
+// runRouter at BASE. runRouter has `POST /run/:sessionId/cancel`, which would
+// otherwise match `POST /claw/api/v1/run/stream/cancel` with sessionId="stream"
+// and shadow the dedicated cancel handler in run-stream.ts. Mounting the
+// longer prefix first lets Express dispatch the right router.
 app.use(`${BASE}/run/stream`, runStreamRouter);
-app.use(`${BASE}/internal/run-stream`, requireS2S, runStreamInternalRouter);
+app.use(`${BASE}/internal/run-stream`, requireStrictS2S, runStreamInternalRouter);
+app.use(BASE, runRouter);
+// No mount-level auth on /webhook by design: it mixes auth schemes per route.
+// POST / , /result and /progress are S2S callbacks; POST /:agentSlug is hit
+// directly by Spaces and self-protects via verifySpacesSignature (per-agent
+// HMAC over the raw body). Any new route added to webhookRouter MUST carry
+// its own auth middleware explicitly.
 app.use(`${BASE}/webhook`, webhookRouter);
-app.use(`${BASE}/app`, appCallbackRouter);
+// Flow UI action webhook. Reached only via the signature-verified webhook
+// /:agentSlug proxy. requireStrictS2S keeps it unreachable by external/browser
+// callers, and the route itself re-verifies the forwarded Spaces signature
+// (see flow-action.ts) so the body-supplied userId is bound to a payload
+// Spaces signed — an S2S key alone is no longer enough to forge identity.
+app.use(`${BASE}/flow`, requireStrictS2S, flowActionRouter);
+// Legacy frontmatter button callbacks — clicked directly from the browser, so
+// require a real user session (requireAuth derives x-user-id from the Spaces
+// cookie). The handler treats that authenticated id as the caller identity
+// instead of the spoofable body field.
+app.use(`${BASE}/app`, requireAuth, appCallbackRouter);
 app.use(`${BASE}/scheduled-jobs`, requireAuth, scheduledJobsRouter);
-app.use(`${BASE}/pending-questions`, pendingQuestionsRouter);
+// Strict S2S: the only callers are services (ask-question tool POSTs with the
+// S2S key; flow-action/app-callback import the helpers directly, not HTTP).
+// The previous per-route requireS2S cookie fallback let any logged-in user
+// read other users' pending questions by ID.
+app.use(`${BASE}/pending-questions`, requireStrictS2S, pendingQuestionsRouter);
 app.use(`${BASE}/settings`, requireAuth, settingsRouter);
 app.use(`${BASE}/runs`, requireAuth, runsRouter);
-app.use(`${BASE}/memory`, memoryRouter);
-app.use(`${BASE}/digital-twin`, digitalTwinRouter);
+app.use(`${BASE}/metrics`, requireAuth, metricsRouter);
+// Mount-level baseline auth (defense-in-depth): every memory route also has
+// stricter per-route middleware (requireUserAuth / requireClawAdmin), but a
+// future route that forgets it must still fail closed at the mount. requireAuth
+// (not requireUserAuth) because /recall-hits is an S2S callback from xyne-claw.
+// The per-request memoization in require-auth.ts makes the second layer free.
+app.use(`${BASE}/memory`, requireAuth, memoryRouter);
+app.use(`${BASE}/digital-twin`, requireUserAuth, digitalTwinRouter);
 app.use(`${BASE}/control-center`, requireAuth, controlCenterRouter);
+app.use(`${BASE}/research-agent`, requireAuth, researchAgentRouter);
+app.use(`${BASE}/evals`, requireAuth, requireClawAdmin, evalsRouter);
+
+// MCP Gateway routes (for backend service registration)
+app.use(`${BASE}/gateway`, mcpGatewayRouter);
 
 const server = app.listen(CONFIG.port, () => {
-  console.log(`[xyne-claw-auth] Server listening on port ${CONFIG.port}`);
+  log.info(`[xyne-claw-auth] Server listening on port ${CONFIG.port}`);
   // npx cache scrub: prior deploys left half-installed package trees in
   // ~/.npm/_npx (e.g. node-fetch present, data-uri-to-buffer missing),
   // which made every stdio MCP spawn (github, etc.) die with
@@ -156,16 +242,20 @@ const server = app.listen(CONFIG.port, () => {
       const { homedir } = await import("node:os");
       const path = `${homedir()}/.npm/_npx`;
       await rm(path, { recursive: true, force: true });
-      console.log(`[boot] scrubbed npx cache at ${path}`);
+      log.info(`[boot] scrubbed npx cache at ${path}`);
     } catch (err) {
-      console.warn(`[boot] npx cache scrub failed:`, err);
+      log.warn(`[boot] npx cache scrub failed:`, err);
     }
   })();
   initScheduledJobsWorker();
   initRunRecoveryWorker();
   initDigitalTwinBackfillWorker();
+  initEvalImportWorker();
+  initEvalGenerationWorker();
+  initEvalJudgeWorker();
   initMemoryCron();
   initDigitalTwinDaily();
+  initFailureCuratorWorker();
   // Upsert custom tools from the shared registry so newly added tools (e.g.
   // google-sheets-create, google-forms-create) show up in the agent UI on
   // restart without needing a manual POST /tools/sync call.
@@ -179,10 +269,14 @@ const server = app.listen(CONFIG.port, () => {
 });
 
 async function shutdown(signal: string): Promise<void> {
-  console.log(`[xyne-claw-auth] ${signal}. Shutting down.`);
+  log.info(`[xyne-claw-auth] ${signal}. Shutting down.`);
   stopBitbucketStatsBackgroundRefresh();
   await closeWorker().catch(() => {});
   await closeRunRecoveryWorker().catch(() => {});
+  await closeEvalImportWorker().catch(() => {});
+  await closeEvalGenerationWorker().catch(() => {});
+  await closeEvalJudgeWorker().catch(() => {});
+  closeFailureCuratorWorker();
   await closeQueue().catch(() => {});
   await closeBackfillQueue().catch(() => {});
   await redisService.disconnect().catch(() => {});
@@ -194,13 +288,13 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 process.on("uncaughtException", (err: Error) => {
-  console.error("[xyne-claw-auth] Uncaught exception — draining connections:", err);
+  log.error("[xyne-claw-auth] Uncaught exception — draining connections:", err);
   server.close(() => process.exit(1));
   setTimeout(() => process.exit(1), 10_000).unref();
 });
 
 process.on("unhandledRejection", (reason: unknown) => {
-  console.error("[xyne-claw-auth] Unhandled rejection:", reason);
+  log.error("[xyne-claw-auth] Unhandled rejection:", reason);
 });
 
 export { app };

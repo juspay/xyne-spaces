@@ -6,9 +6,12 @@ import {
   WarningCircleIcon,
   SparkleIcon,
   CircleDashedIcon,
+  UploadSimpleIcon,
 } from "@phosphor-icons/react";
-import { createSubagent, listSkills } from "../../../lib/api";
-import type { Skill } from "../../../lib/api";
+import { createSubagent, listSkills, getAvailableTools } from "../../../lib/api";
+import type { Skill, AvailableTools, SubagentDef } from "../../../lib/api";
+import { SubagentToolsTab } from "../subagents/SubagentToolsTab";
+import { CreateSkillDialog } from "./CreateSkillDialog";
 import { Dialog } from "../ui/Dialog";
 import { TextField } from "../ui/TextField";
 import { Button } from "../ui/Button";
@@ -108,7 +111,7 @@ interface CreateSubagentDialogProps {
   existingNames: string[];
 }
 
-const STEPS = ["Identity", "Instructions", "Tools & Skills", "Review"];
+const STEPS = ["Identity", "Instructions", "Skills", "Tools", "Review"];
 
 const KEBAB_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -125,6 +128,8 @@ interface WizardState {
   selectedSkillIds: string[];
   availableSkills: Skill[];
   skillsLoading: boolean;
+  availableTools: AvailableTools | null;
+  toolsLoading: boolean;
   nameError: string | null;
   nameValid: boolean;
   creating: boolean;
@@ -144,6 +149,8 @@ const INIT: WizardState = {
   selectedSkillIds: [],
   availableSkills: [],
   skillsLoading: false,
+  availableTools: null,
+  toolsLoading: false,
   nameError: null,
   nameValid: false,
   creating: false,
@@ -179,6 +186,16 @@ export function CreateSubagentDialog({
         .finally(() => u({ skillsLoading: false }));
     }
   }, [w.step, w.availableSkills.length, u, userId]);
+
+  useEffect(() => {
+    if (w.step === 3 && w.availableTools === null && !w.toolsLoading) {
+      u({ toolsLoading: true });
+      getAvailableTools()
+        .then((d) => u({ availableTools: d }))
+        .catch(() => {})
+        .finally(() => u({ toolsLoading: false }));
+    }
+  }, [w.step, w.availableTools, w.toolsLoading, u]);
 
   useEffect(() => {
     u({ nameError: null, nameValid: false });
@@ -274,6 +291,24 @@ export function CreateSubagentDialog({
     }
   };
 
+  const [skillDialogOpen, setSkillDialogOpen] = useState(false);
+
+  // After creating skill(s) from an upload, refresh the list and auto-select
+  // whatever is new so the just-uploaded skill is attached to this subagent.
+  const handleSkillsCreated = useCallback(async () => {
+    const prevIds = new Set(w.availableSkills.map((s) => s.id));
+    try {
+      const updated = await listSkills(userId);
+      const newIds = updated.filter((s) => !prevIds.has(s.id)).map((s) => s.id);
+      u({
+        availableSkills: updated,
+        selectedSkillIds: [...new Set([...w.selectedSkillIds, ...newIds])],
+      });
+    } catch {
+      /* ignore — user can still pick existing skills */
+    }
+  }, [w.availableSkills, w.selectedSkillIds, u, userId]);
+
   const canNext =
     w.step === 0
       ? w.name.trim().length > 0 && w.nameValid && !w.nameError
@@ -282,6 +317,7 @@ export function CreateSubagentDialog({
         : true;
 
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(o) => {
@@ -471,15 +507,24 @@ export function CreateSubagentDialog({
           </div>
         )}
 
-        {/* Step 3: Tools & Skills */}
+        {/* Step 3: Skills */}
         {w.step === 2 && (
-          <div className="space-y-5">
-            {/* Skills */}
+          <div className="space-y-4">
             <div>
-              <h3 className="mb-2 flex items-center gap-1 text-[13px] font-medium text-xyne-fg-secondary">
-                Skills
-                <InfoIcon text={HINTS.skills} />
-              </h3>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-1 text-[13px] font-medium text-xyne-fg-secondary">
+                  Skills <span className="text-xyne-fg-muted">(optional)</span>
+                  <InfoIcon text={HINTS.skills} />
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setSkillDialogOpen(true)}
+                  className="flex items-center gap-1 rounded-lg border border-xyne-border px-2.5 py-1 text-[12px] text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+                >
+                  <UploadSimpleIcon size={14} />
+                  Upload / create skill
+                </button>
+              </div>
               {w.skillsLoading ? (
                 <p className="text-[14px] text-xyne-fg-muted">
                   Loading skills…
@@ -510,38 +555,42 @@ export function CreateSubagentDialog({
                 </>
               )}
             </div>
-
-            {/* Tools */}
-            <div className="space-y-3">
-              <h3 className="text-[13px] font-medium text-xyne-fg-secondary">
-                Tools
-              </h3>
-              <TextField
-                label="Direct tools"
-                info={HINTS.directTools}
-                hint="One per line or comma-separated"
-                multiline
-                rows={3}
-                placeholder="tool-name-1&#10;tool-name-2"
-                value={w.directToolsInput}
-                onChange={(e) => u({ directToolsInput: e.target.value })}
-              />
-              <TextField
-                label="Custom tools"
-                info={HINTS.customTools}
-                hint="One per line or comma-separated"
-                multiline
-                rows={3}
-                placeholder="custom-tool-1&#10;custom-tool-2"
-                value={w.customToolsInput}
-                onChange={(e) => u({ customToolsInput: e.target.value })}
-              />
-            </div>
           </div>
         )}
 
-        {/* Step 4: Review */}
+        {/* Step 4: Tools */}
         {w.step === 3 && (
+          <div className="space-y-3">
+            <SubagentToolsTab
+              subagent={{
+                source: "custom",
+                name: w.name,
+                description: w.description,
+                progressLabels: w.progressLabels,
+                systemPrompt: w.systemPrompt,
+                paramName: w.paramName,
+                paramDescription: w.paramDescription,
+                enabled: true,
+                skills: [],
+              } as SubagentDef}
+              isBuiltIn={false}
+              canEdit={true}
+              availableTools={w.availableTools}
+              toolsLoading={w.toolsLoading}
+              draftDirectTools={w.directToolsInput}
+              onDraftDirectToolsChange={(v) => u({ directToolsInput: v })}
+              draftCustomTools={w.customToolsInput}
+              onDraftCustomToolsChange={(v) => u({ customToolsInput: v })}
+            />
+            <p className="text-[12px] text-xyne-fg-muted">
+              Tools are optional — you can skip this and add them later from the
+              subagent's Tools tab.
+            </p>
+          </div>
+        )}
+
+        {/* Step 5: Review */}
+        {w.step === 4 && (
           <div className="space-y-4">
             <div>
               <h3 className="font-medium text-xyne-fg-primary">
@@ -655,5 +704,11 @@ export function CreateSubagentDialog({
         )}
       </div>
     </Dialog>
+    <CreateSkillDialog
+      open={skillDialogOpen}
+      onOpenChange={setSkillDialogOpen}
+      onCreated={handleSkillsCreated}
+    />
+    </>
   );
 }

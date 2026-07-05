@@ -30,6 +30,9 @@ import {
 } from "./docusign-config.js";
 import { evictSession } from "../mcp/runner.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("credentials-refresh");
+
 const REFRESH_BUFFER_MS = 60_000;
 
 // ── Egnyte ───────────────────────────────────────────────────────────────────────────────
@@ -42,18 +45,18 @@ async function refreshEgnyte(
   const clientId = process.env["EGNYTE_CLIENT_ID"];
   const clientSecret = process.env["EGNYTE_CLIENT_SECRET"];
   if (!clientId || !clientSecret) {
-    console.error("[credentials-refresh] Egnyte refresh aborted: missing EGNYTE_CLIENT_ID/SECRET");
+    log.error("[credentials-refresh] Egnyte refresh aborted: missing EGNYTE_CLIENT_ID/SECRET");
     return creds;
   }
 
   const refreshToken = creds["refreshToken"];
   const domain = creds["domain"];
   if (typeof refreshToken !== "string" || refreshToken.length === 0) {
-    console.error("[credentials-refresh] Egnyte refresh aborted: no stored refresh_token");
+    log.error("[credentials-refresh] Egnyte refresh aborted: no stored refresh_token");
     return creds;
   }
   if (typeof domain !== "string" || domain.length === 0) {
-    console.error("[credentials-refresh] Egnyte refresh aborted: no stored domain");
+    log.error("[credentials-refresh] Egnyte refresh aborted: no stored domain");
     return creds;
   }
 
@@ -69,7 +72,7 @@ async function refreshEgnyte(
   });
 
   if (!res.ok) {
-    console.error(`[credentials-refresh] Egnyte refresh failed: ${res.status} ${await res.text()}`);
+    log.error(`[credentials-refresh] Egnyte refresh failed: ${res.status} ${await res.text()}`);
     return creds;
   }
 
@@ -103,7 +106,7 @@ async function refreshDocuSign(
 
   const refreshToken = creds["refreshToken"];
   if (typeof refreshToken !== "string" || refreshToken.length === 0) {
-    console.error("[credentials-refresh] DocuSign refresh aborted: no stored refresh_token");
+    log.error("[credentials-refresh] DocuSign refresh aborted: no stored refresh_token");
     return creds;
   }
 
@@ -121,7 +124,7 @@ async function refreshDocuSign(
   });
 
   if (!res.ok) {
-    console.error(`[credentials-refresh] DocuSign refresh failed: ${res.status} ${await res.text()}`);
+    log.error(`[credentials-refresh] DocuSign refresh failed: ${res.status} ${await res.text()}`);
     return creds;
   }
 
@@ -154,7 +157,7 @@ async function refreshCalendly(
   const clientId = creds["clientId"];
   const refreshToken = creds["refreshToken"];
   if (typeof clientId !== "string" || typeof refreshToken !== "string") {
-    console.error("[credentials-refresh] Calendly refresh aborted: missing clientId or refresh_token");
+    log.error("[credentials-refresh] Calendly refresh aborted: missing clientId or refresh_token");
     return creds;
   }
 
@@ -169,7 +172,7 @@ async function refreshCalendly(
   });
 
   if (!res.ok) {
-    console.error(`[credentials-refresh] Calendly refresh failed: ${res.status} ${await res.text()}`);
+    log.error(`[credentials-refresh] Calendly refresh failed: ${res.status} ${await res.text()}`);
     return creds;
   }
 
@@ -198,7 +201,7 @@ async function refreshJotForm(
   const clientId = creds["clientId"];
   const refreshToken = creds["refreshToken"];
   if (typeof clientId !== "string" || typeof refreshToken !== "string") {
-    console.error("[credentials-refresh] JotForm refresh aborted: missing clientId or refresh_token");
+    log.error("[credentials-refresh] JotForm refresh aborted: missing clientId or refresh_token");
     return creds;
   }
 
@@ -213,7 +216,7 @@ async function refreshJotForm(
   });
 
   if (!res.ok) {
-    console.error(`[credentials-refresh] JotForm refresh failed: ${res.status} ${await res.text()}`);
+    log.error(`[credentials-refresh] JotForm refresh failed: ${res.status} ${await res.text()}`);
     return creds;
   }
 
@@ -242,7 +245,7 @@ async function refreshWebflow(
   const clientId = creds["clientId"];
   const refreshToken = creds["refreshToken"];
   if (typeof clientId !== "string" || typeof refreshToken !== "string") {
-    console.error("[credentials-refresh] Webflow refresh aborted: missing clientId or refresh_token");
+    log.error("[credentials-refresh] Webflow refresh aborted: missing clientId or refresh_token");
     return creds;
   }
 
@@ -257,7 +260,7 @@ async function refreshWebflow(
   });
 
   if (!res.ok) {
-    console.error(`[credentials-refresh] Webflow refresh failed: ${res.status} ${await res.text()}`);
+    log.error(`[credentials-refresh] Webflow refresh failed: ${res.status} ${await res.text()}`);
     return creds;
   }
 
@@ -286,7 +289,7 @@ async function refreshWix(
   const clientId = creds["clientId"];
   const refreshToken = creds["refreshToken"];
   if (typeof clientId !== "string" || typeof refreshToken !== "string") {
-    console.error("[credentials-refresh] Wix refresh aborted: missing clientId or refresh_token");
+    log.error("[credentials-refresh] Wix refresh aborted: missing clientId or refresh_token");
     return creds;
   }
 
@@ -301,7 +304,7 @@ async function refreshWix(
   });
 
   if (!res.ok) {
-    console.error(`[credentials-refresh] Wix refresh failed: ${res.status} ${await res.text()}`);
+    log.error(`[credentials-refresh] Wix refresh failed: ${res.status} ${await res.text()}`);
     return creds;
   }
 
@@ -331,7 +334,7 @@ async function refreshMiro(
   const clientSecret = creds["clientSecret"];
   const refreshToken = creds["refreshToken"];
   if (typeof clientId !== "string" || typeof clientSecret !== "string" || typeof refreshToken !== "string") {
-    console.error("[credentials-refresh] Miro refresh aborted: missing clientId, clientSecret, or refresh_token");
+    log.error("[credentials-refresh] Miro refresh aborted: missing clientId, clientSecret, or refresh_token");
     return creds;
   }
 
@@ -347,7 +350,7 @@ async function refreshMiro(
   });
 
   if (!res.ok) {
-    console.error(`[credentials-refresh] Miro refresh failed: ${res.status} ${await res.text()}`);
+    log.error(`[credentials-refresh] Miro refresh failed: ${res.status} ${await res.text()}`);
     return creds;
   }
 
@@ -376,7 +379,7 @@ async function refreshAttio(
   const clientId = creds["clientId"];
   const refreshToken = creds["refreshToken"];
   if (typeof clientId !== "string" || typeof refreshToken !== "string") {
-    console.error("[credentials-refresh] Attio refresh aborted: missing clientId or refresh_token");
+    log.error("[credentials-refresh] Attio refresh aborted: missing clientId or refresh_token");
     return creds;
   }
 
@@ -391,7 +394,7 @@ async function refreshAttio(
   });
 
   if (!res.ok) {
-    console.error(`[credentials-refresh] Attio refresh failed: ${res.status} ${await res.text()}`);
+    log.error(`[credentials-refresh] Attio refresh failed: ${res.status} ${await res.text()}`);
     return creds;
   }
 
@@ -420,7 +423,7 @@ async function refreshMailerLite(
   const clientId = creds["clientId"];
   const refreshToken = creds["refreshToken"];
   if (typeof clientId !== "string" || typeof refreshToken !== "string") {
-    console.error("[credentials-refresh] MailerLite refresh aborted: missing clientId or refresh_token");
+    log.error("[credentials-refresh] MailerLite refresh aborted: missing clientId or refresh_token");
     return creds;
   }
 
@@ -435,7 +438,7 @@ async function refreshMailerLite(
   });
 
   if (!res.ok) {
-    console.error(`[credentials-refresh] MailerLite refresh failed: ${res.status} ${await res.text()}`);
+    log.error(`[credentials-refresh] MailerLite refresh failed: ${res.status} ${await res.text()}`);
     return creds;
   }
 
@@ -464,7 +467,7 @@ async function refreshHoneycomb(
   const clientId = creds["clientId"];
   const refreshToken = creds["refreshToken"];
   if (typeof clientId !== "string" || typeof refreshToken !== "string") {
-    console.error("[credentials-refresh] Honeycomb refresh aborted: missing clientId or refresh_token");
+    log.error("[credentials-refresh] Honeycomb refresh aborted: missing clientId or refresh_token");
     return creds;
   }
 
@@ -480,7 +483,7 @@ async function refreshHoneycomb(
 
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[credentials-refresh] Honeycomb refresh failed (${res.status}): ${body} — user must reconnect Honeycomb`);
+    log.error(`[credentials-refresh] Honeycomb refresh failed (${res.status}): ${body} — user must reconnect Honeycomb`);
     return creds;
   }
 
@@ -492,7 +495,7 @@ async function refreshHoneycomb(
     expires: Date.now() + tokens.expires_in * 1000,
   };
 
-  console.log(`[credentials-refresh] Honeycomb token refreshed for conn ${connectionId}`);
+  log.info(`[credentials-refresh] Honeycomb token refreshed for conn ${connectionId}`);
   await persistCreds(connectionId, updated);
   await evictSession(userId, "honeycomb").catch(() => {});
   return updated;
@@ -510,7 +513,7 @@ async function refreshCustomerio(
   const clientId = creds["clientId"];
   const refreshToken = creds["refreshToken"];
   if (typeof clientId !== "string" || typeof refreshToken !== "string") {
-    console.error("[credentials-refresh] Customer.io refresh aborted: missing clientId or refresh_token");
+    log.error("[credentials-refresh] Customer.io refresh aborted: missing clientId or refresh_token");
     return creds;
   }
 
@@ -526,7 +529,7 @@ async function refreshCustomerio(
 
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[credentials-refresh] Customer.io refresh failed (${res.status}): ${body} — user must reconnect Customer.io`);
+    log.error(`[credentials-refresh] Customer.io refresh failed (${res.status}): ${body} — user must reconnect Customer.io`);
     return creds;
   }
 
@@ -538,7 +541,7 @@ async function refreshCustomerio(
     expires: Date.now() + tokens.expires_in * 1000,
   };
 
-  console.log(`[credentials-refresh] Customer.io token refreshed for conn ${connectionId}`);
+  log.info(`[credentials-refresh] Customer.io token refreshed for conn ${connectionId}`);
   await persistCreds(connectionId, updated);
   await evictSession(userId, "customerio").catch(() => {});
   return updated;
@@ -585,7 +588,7 @@ export async function getFreshCredentials(
     return creds; // still valid
   }
 
-  console.log(`[credentials-refresh] Token expired or near-expiry for ${serverType} (conn ${connectionId}), refreshing…`);
+  log.info(`[credentials-refresh] Token expired or near-expiry for ${serverType} (conn ${connectionId}), refreshing…`);
 
   switch (serverType) {
     case "docusign":   return refreshDocuSign(connectionId, userId, creds);

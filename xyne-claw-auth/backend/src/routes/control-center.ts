@@ -24,6 +24,9 @@ import { redisService } from "../redis.js";
 import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("control-center");
+
 const router = Router();
 const APPROVAL_PREFIX = "cc-approval:";
 const APPROVAL_TTL_ACTIVE = 86400 * 7;   // 7 days for pending
@@ -210,7 +213,7 @@ router.get("/metrics", requireClawAdmin, async (_req: Request, res: Response) =>
       },
     });
   } catch (err) {
-    console.error("[control-center] metrics error:", err);
+    log.error("[control-center] metrics error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -279,7 +282,7 @@ router.get("/agents", requireClawAdmin, async (req: Request, res: Response) => {
 
     res.json({ success: true, data: feed });
   } catch (err) {
-    console.error("[control-center] agents error:", err);
+    log.error("[control-center] agents error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -325,7 +328,7 @@ router.get("/failures", requireClawAdmin, async (req: Request, res: Response) =>
 
     res.json({ success: true, data: failures });
   } catch (err) {
-    console.error("[control-center] failures error:", err);
+    log.error("[control-center] failures error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -339,7 +342,7 @@ router.get("/approvals", requireClawAdmin, async (_req: Request, res: Response) 
     const all = await getAllApprovals();
     res.json({ success: true, data: all });
   } catch (err) {
-    console.error("[control-center] approvals list error:", err);
+    log.error("[control-center] approvals list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -389,7 +392,7 @@ router.post("/approvals", requireS2S, async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, data: { id } });
   } catch (err) {
-    console.error("[control-center] create approval error:", err);
+    log.error("[control-center] create approval error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -416,7 +419,7 @@ router.post(
         res.status(409).json({ success: false, error: "Approval already resolved" });
         return;
       }
-      console.error("[control-center] approve error:", err);
+      log.error("[control-center] approve error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },
@@ -439,7 +442,7 @@ router.post(
         res.status(409).json({ success: false, error: "Approval already resolved" });
         return;
       }
-      console.error("[control-center] reject error:", err);
+      log.error("[control-center] reject error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },
@@ -491,7 +494,7 @@ router.post(
         },
       });
     } catch (err) {
-      console.error("[control-center] retry error:", err);
+      log.error("[control-center] retry error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },
@@ -531,7 +534,7 @@ router.post(
 
       res.json({ success: true });
     } catch (err) {
-      console.error("[control-center] resolve error:", err);
+      log.error("[control-center] resolve error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },
@@ -566,7 +569,7 @@ router.get(
         },
       });
     } catch (err) {
-      console.error("[control-center] deep-link error:", err);
+      log.error("[control-center] deep-link error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },

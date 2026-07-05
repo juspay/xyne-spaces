@@ -24,6 +24,7 @@ import { CONFIG } from "../config.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { evictSession } from "../mcp/runner.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
 import {
   DOCUSIGN_AUTH_URL,
   DOCUSIGN_TOKEN_URL,
@@ -32,6 +33,9 @@ import {
   getDocuSignClientCredentials,
 } from "../lib/docusign-config.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-state.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("docusign-oauth");
 
 const DOCUSIGN_SCOPES = [
   "signature",
@@ -91,38 +95,21 @@ router.use("/:userId", pinUserIdParam);
 // ── Token endpoint ─────────────────────────────────────────────────────────
 
 /**
- * GET /:userId/oauth/docusign/token
- * Returns valid access token + accountId, refreshing if within 60s of expiry.
+ * Live DocuSign access-token provider for the shared `/oauth/:provider/token`
+ * route (see lib/oauth-token-endpoint.ts). DocuSign refreshes with HTTP Basic
+ * auth and the response surfaces accountId + baseUri alongside the token so the
+ * caller can route the per-account MCP URL.
  */
-router.get("/:userId/oauth/docusign/token", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
-
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: "docusign" } },
-      include: { mcpServer: true },
-    });
-
-    if (!connection) {
-      res.status(404).json({ success: false, error: "No DocuSign connection found for this user" });
-      return;
-    }
-
-    const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-    const creds = JSON.parse(decrypted) as DocuSignTokens;
-
-    if (Date.now() <= creds.expires - 60_000) {
-      res.json({
-        success: true,
-        data: {
-          accessToken: creds.accessToken,
-          accountId: creds.accountId,
-          baseUri: creds.baseUri,
-        },
-      });
-      return;
-    }
-
+export const docusignOAuthProvider: OAuthTokenProvider = {
+  serverType: "docusign",
+  label: "DocuSign",
+  responseData: (creds) => ({
+    accessToken: creds.accessToken,
+    accountId: creds.accountId,
+    baseUri: creds.baseUri,
+  }),
+  async refresh(creds) {
+    const c = creds as unknown as DocuSignTokens;
     const { clientId, clientSecret } = getDocuSignClientCredentials();
 
     const refreshRes = await fetch(DOCUSIGN_TOKEN_URL, {
@@ -134,15 +121,12 @@ router.get("/:userId/oauth/docusign/token", async (req: Request<{ userId: string
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: creds.refreshToken,
+        refresh_token: c.refreshToken,
       }),
     });
 
     if (!refreshRes.ok) {
-      const text = await refreshRes.text();
-      console.error(`[docusign-oauth] Token refresh failed for user ${userId}: ${refreshRes.status} ${text}`);
-      res.status(502).json({ success: false, error: "DocuSign token refresh failed" });
-      return;
+      throw new TokenRefreshError(502, `${refreshRes.status} ${await refreshRes.text()}`);
     }
 
     const tokens = (await refreshRes.json()) as {
@@ -151,35 +135,17 @@ router.get("/:userId/oauth/docusign/token", async (req: Request<{ userId: string
       expires_in: number;
     };
 
-    const newCreds: DocuSignTokens = {
+    return {
       accessToken: tokens.access_token,
       // Defend against responses that omit refresh_token so we don't wipe the
       // only credential that lets us recover.
-      refreshToken: tokens.refresh_token ?? creds.refreshToken,
-      accountId: creds.accountId,
-      baseUri: creds.baseUri,
+      refreshToken: tokens.refresh_token ?? c.refreshToken,
+      accountId: c.accountId,
+      baseUri: c.baseUri,
       expires: Date.now() + tokens.expires_in * 1000,
     };
-
-    const { ciphertext, iv, authTag } = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
-    await prisma.userMcpConnection.update({
-      where: { id: connection.id },
-      data: { encryptedCreds: ciphertext, iv, authTag },
-    });
-
-    res.json({
-      success: true,
-      data: {
-        accessToken: tokens.access_token,
-        accountId: creds.accountId,
-        baseUri: creds.baseUri,
-      },
-    });
-  } catch (err) {
-    console.error("[docusign-oauth] token error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+  },
+};
 
 // ── Authorize endpoint ─────────────────────────────────────────────────────
 
@@ -205,7 +171,7 @@ router.post("/:userId/oauth/docusign/authorize", async (req: Request<{ userId: s
 
     res.json({ success: true, data: { authUrl: authUrl.toString() } });
   } catch (err) {
-    console.error("[docusign-oauth] authorize error:", err);
+    log.error("[docusign-oauth] authorize error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -249,7 +215,7 @@ router.post("/:userId/oauth/docusign/callback", async (req: Request<{ userId: st
 
     res.json({ success: true, data: { message: "DocuSign account connected successfully" } });
   } catch (err) {
-    console.error("[docusign-oauth] callback error:", err);
+    log.error("[docusign-oauth] callback error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -273,7 +239,7 @@ docusignCallbackRouter.get("/docusign/callback", async (req: Request, res: Respo
     };
 
     if (oauthError) {
-      console.error(`[docusign-oauth] OAuth error: ${oauthError}`);
+      log.error(`[docusign-oauth] OAuth error: ${oauthError}`);
       res.redirect(`${frontendUrl}?docusign_error=${encodeURIComponent(oauthError)}`);
       return;
     }
@@ -288,7 +254,7 @@ docusignCallbackRouter.get("/docusign/callback", async (req: Request, res: Respo
       verified = verifyOAuthState(state);
     } catch (err) {
       const reason = err instanceof OAuthStateError ? err.reason : "malformed";
-      console.error(`[docusign-oauth] state ${reason}`);
+      log.error(`[docusign-oauth] state ${reason}`);
       res.redirect(`${frontendUrl}?docusign_error=invalid_state`);
       return;
     }
@@ -296,7 +262,7 @@ docusignCallbackRouter.get("/docusign/callback", async (req: Request, res: Respo
     const userId = verified.userId;
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      console.error(`[docusign-oauth] User not found: ${userId}`);
+      log.error(`[docusign-oauth] User not found: ${userId}`);
       res.redirect(`${frontendUrl}?docusign_error=user_not_found`);
       return;
     }
@@ -308,10 +274,10 @@ docusignCallbackRouter.get("/docusign/callback", async (req: Request, res: Respo
       return;
     }
 
-    console.log(`[docusign-oauth] Stored DocuSign credentials for user ${userId} (accountId: ${result.accountId})`);
+    log.info(`[docusign-oauth] Stored DocuSign credentials for user ${userId} (accountId: ${result.accountId})`);
     res.redirect(`${frontendUrl}?docusign_connected=true`);
   } catch (err) {
-    console.error("[docusign-oauth] browser callback error:", err);
+    log.error("[docusign-oauth] browser callback error:", err);
     res.redirect(`${frontendUrl}?docusign_error=internal_error`);
   }
 });
@@ -341,7 +307,7 @@ async function exchangeAndStore(userId: string, code: string, redirectUri: strin
 
   if (!tokenRes.ok) {
     const text = await tokenRes.text();
-    console.error(`[docusign-oauth] Token exchange failed: ${tokenRes.status} ${text}`);
+    log.error(`[docusign-oauth] Token exchange failed: ${tokenRes.status} ${text}`);
     return { ok: false, status: 502, code: "token_exchange_failed", error: "DocuSign token exchange failed" };
   }
 
@@ -359,7 +325,7 @@ async function exchangeAndStore(userId: string, code: string, redirectUri: strin
   });
 
   if (!userInfoRes.ok) {
-    console.error(`[docusign-oauth] userinfo fetch failed: ${userInfoRes.status}`);
+    log.error(`[docusign-oauth] userinfo fetch failed: ${userInfoRes.status}`);
     return { ok: false, status: 502, code: "userinfo_failed", error: "DocuSign /oauth/userinfo failed" };
   }
 
@@ -370,11 +336,11 @@ async function exchangeAndStore(userId: string, code: string, redirectUri: strin
 
   const account = userInfo.accounts.find(a => a.is_default) ?? userInfo.accounts[0];
   if (!account) {
-    console.error(`[docusign-oauth] No account found in userinfo for user ${userId}`);
+    log.error(`[docusign-oauth] No account found in userinfo for user ${userId}`);
     return { ok: false, status: 400, code: "no_account_found", error: "DocuSign returned no accounts" };
   }
   if (userInfo.accounts.length > 1) {
-    console.warn(`[docusign-oauth] User ${userId} has ${userInfo.accounts.length} DocuSign accounts; picked ${account.account_id}`);
+    log.warn(`[docusign-oauth] User ${userId} has ${userInfo.accounts.length} DocuSign accounts; picked ${account.account_id}`);
   }
 
   await storeDocuSignTokens(
@@ -428,7 +394,7 @@ async function storeDocuSignTokens(
 
   // Sync tools from the DocuSign MCP process into the DB.
   syncToolsForServer(userId, "docusign", server.name, { accessToken, refreshToken, accountId, baseUri }).catch((err) => {
-    console.error(`[docusign-oauth] tool sync failed for user ${userId}:`, err);
+    log.error(`[docusign-oauth] tool sync failed for user ${userId}:`, err);
   });
 }
 

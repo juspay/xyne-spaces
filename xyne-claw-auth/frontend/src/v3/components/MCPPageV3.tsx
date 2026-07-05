@@ -20,6 +20,7 @@ import {
   getCredentialFields,
   connectGoogle,
   connectMicrosoft,
+  connectOAuth,
   requestServerPublish,
 } from "../../lib/api";
 import { useMcpConnectors } from "../hooks/useMcpConnectors";
@@ -461,6 +462,13 @@ export function MCPPageV3({ userId }: Props) {
         window.location.href = await connectMicrosoft(userId);
         return;
       }
+      if (server?.oauth) {
+        // Generic OAuth connector (attio, honeycomb, …): redirect to consent
+        // instead of creating a credential-less (Unhealthy) connection.
+        setShowAddDialog(false);
+        window.location.href = await connectOAuth(userId, server.type);
+        return;
+      }
       try {
         await createConnection(userId, { mcpServerId, credentials });
         setShowAddDialog(false);
@@ -506,7 +514,7 @@ export function MCPPageV3({ userId }: Props) {
 
   const handleConnect = useCallback(
     (server: McpServer) => {
-      const isOAuth = server.type === "google" || server.type === "microsoft";
+      const isOAuth = server.type === "google" || server.type === "microsoft" || server.oauth === true;
       const isAutoConnect = server.type === "xyne-spaces";
       const hasCredentialFields =
         (credentialFields[server.type]?.length ?? 0) > 0 ||
@@ -586,7 +594,7 @@ export function MCPPageV3({ userId }: Props) {
       {/* Main list panel */}
       <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
         <PageListHeader
-          title="Integrations"
+          title="MCPs"
           subtitle="Connect external apps (Slack, GitHub, BigQuery…) so your agents can read from them and act on them."
           icon={<PlugsConnectedIcon size={18} />}
           stats={[
@@ -594,7 +602,7 @@ export function MCPPageV3({ userId }: Props) {
             { value: loading ? undefined : connectedCount, label: "Connected", highlight: "success" as const },
             { value: loading ? undefined : availableCount, label: "Available" },
           ]}
-          createLabel="Add integration"
+          createLabel="Add MCP"
           onCreateClick={() => setShowAddDialog(true)}
           searchValue={inputValue}
           onSearchChange={setInputValue}

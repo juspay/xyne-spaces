@@ -1,0 +1,17 @@
+-- Corrective fix for 20260531120000_scope_chain_binding_to_user.
+--
+-- That migration intended to swap the binding uniqueness from
+--   (channelId, entryAgentSlug)  →  (channelId, entryAgentSlug, userId)
+-- and removed the old one with:
+--   ALTER TABLE ... DROP CONSTRAINT IF EXISTS "..._channelId_entryAgentSlug_key";
+--
+-- But Prisma `@@unique` creates a unique INDEX, not a table CONSTRAINT, so the
+-- DROP CONSTRAINT silently no-op'd and BOTH uniques survived. The leftover
+-- 2-field unique index then blocks every userId-scoped binding (the reserved
+-- "*" channel-wide sentinel, or multiple users binding the same channel+agent)
+-- with a P2002 on (channelId, entryAgentSlug).
+--
+-- Drop the stale index explicitly. The correct 3-field unique
+-- (channelId, entryAgentSlug, userId) — which matches the Prisma schema — is
+-- left in place. Idempotent.
+DROP INDEX IF EXISTS "channel_agent_chain_bindings_channelId_entryAgentSlug_key";

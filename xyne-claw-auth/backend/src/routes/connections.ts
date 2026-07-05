@@ -9,6 +9,9 @@ import { evictSession } from "../mcp/runner.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("connections");
+
 const router = Router();
 
 router.use("/:userId", pinUserIdParam);
@@ -34,7 +37,7 @@ router.get("/:userId/connections", async (req: Request<{ userId: string }>, res:
 
     res.json({ success: true, data });
   } catch (err) {
-    console.error("[connections] list error:", err);
+    log.error("[connections] list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -94,11 +97,11 @@ router.post("/:userId/connections", async (req: Request<{ userId: string }>, res
     // etc.) without a respawn. Without this, Spaces' x-session-id refresh
     // path silently breaks because the cached child has the OLD env.
     await evictSession(userId, serverExists.type).catch((err) => {
-      console.error(`[connections] evictSession failed for ${serverExists.type}:`, err);
+      log.error(`[connections] evictSession failed for ${serverExists.type}:`, err);
     });
     if (await hasConnectorDefinition(serverExists.type)) {
       syncToolsForServer(userId, serverExists.type, serverExists.name, credentials as Record<string, unknown>).catch((err) => {
-        console.error(`[connections] tool sync failed for ${serverExists.type}:`, err);
+        log.error(`[connections] tool sync failed for ${serverExists.type}:`, err);
       });
     }
 
@@ -114,7 +117,7 @@ router.post("/:userId/connections", async (req: Request<{ userId: string }>, res
       },
     });
   } catch (err) {
-    console.error("[connections] create error:", err);
+    log.error("[connections] create error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -139,12 +142,12 @@ router.delete("/:userId/connections/:id", async (req: Request<{ userId: string; 
     // Drop any cached MCP client/transport for this (user, serverType) pair so
     // the next listTools/callTool doesn't hit a stale bearer token.
     await evictSession(userId, connection.mcpServer.type).catch((err) => {
-      console.error(`[connections] evictSession failed for ${connection.mcpServer.type}:`, err);
+      log.error(`[connections] evictSession failed for ${connection.mcpServer.type}:`, err);
     });
 
     res.json({ success: true });
   } catch (err) {
-    console.error("[connections] delete error:", err);
+    log.error("[connections] delete error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -259,13 +262,13 @@ router.get("/:userId/connections/:id/health", async (req: Request<{ userId: stri
         connection.mcpServer.name,
         credentials,
       ).catch((err) => {
-        console.error(`[connections] post-health tool sync failed for ${connection.mcpServer.type}:`, err);
+        log.error(`[connections] post-health tool sync failed for ${connection.mcpServer.type}:`, err);
       });
     }
 
     res.json({ success: true, data: result });
   } catch (err) {
-    console.error("[connections] health check error:", err);
+    log.error("[connections] health check error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -318,7 +321,7 @@ router.post("/:userId/connections/auto-connect-spaces", async (req: Request<{ us
     // session-refresh path is skipped entirely → 401 once the JWT expires.
     if (lastWorkspace) credentials["workspaceId"] = lastWorkspace;
     // TEMP [sid-debug] — remove after verifying
-    console.log(`[sid-debug] auto-connect-spaces storing credentials keys=[${Object.keys(credentials).join(",")}] (no values)`);
+    log.info(`[sid-debug] auto-connect-spaces storing credentials keys=[${Object.keys(credentials).join(",")}] (no values)`);
     const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
 
     const connection = await prisma.userMcpConnection.upsert({
@@ -334,18 +337,18 @@ router.post("/:userId/connections/auto-connect-spaces", async (req: Request<{ us
     // and Spaces 401s once the original token expires (sessionId never gets
     // sent because the child was spawned with an empty/stale one).
     await evictSession(userId, serverType).catch((err) => {
-      console.error(`[connections] evictSession failed for ${serverType}:`, err);
+      log.error(`[connections] evictSession failed for ${serverType}:`, err);
     });
     if (await hasConnectorDefinition(serverType)) {
       syncToolsForServer(userId, serverType, server.name, credentials).catch((err) => {
-        console.error(`[connections] tool sync failed for ${serverType}:`, err);
+        log.error(`[connections] tool sync failed for ${serverType}:`, err);
       });
     }
 
-    console.log(`[connections] Auto-connected xyne-spaces for user ${userId}`);
+    log.info(`[connections] Auto-connected xyne-spaces for user ${userId}`);
     res.json({ success: true, data: { id: connection.id, mcpServer: connection.mcpServer } });
   } catch (err) {
-    console.error("[connections] auto-connect-spaces error:", err);
+    log.error("[connections] auto-connect-spaces error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

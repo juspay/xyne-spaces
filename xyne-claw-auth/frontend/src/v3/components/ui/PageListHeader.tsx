@@ -24,7 +24,7 @@ export interface PageListHeaderProps {
   /**
    * One-line, plain-English description rendered directly under the title.
    * Tells a first-time visitor what the page is for in words the rest of
-   * the navigation doesn't (e.g. "Specialists" alone is jargon). Optional
+   * the navigation doesn't (e.g. "Subagents" alone is jargon). Optional
    * — pages that opted out keep their old single-line header.
    */
   subtitle?: ReactNode;
@@ -45,6 +45,8 @@ export interface PageListHeaderProps {
    */
   trailingFilters?: ReactNode;
   loading?: boolean;
+  /** When true, the search bar is absolutely centered in the filter bar regardless of tab/chip widths. */
+  centerSearch?: boolean;
 }
 
 /* ── Component ─────────────────────────────────────────────────────── */
@@ -64,6 +66,7 @@ export function PageListHeader({
   onTabChange,
   trailingFilters,
   loading = false,
+  centerSearch = false,
 }: PageListHeaderProps) {
   /* Stat block — used in two flavors:
        wide: stacked number-over-label, vertical dividers between
@@ -183,33 +186,14 @@ export function PageListHeader({
         </div>
       </div>
 
-      {/* Filter bar */}
-      <div className="flex items-center gap-[10px] px-[24px] py-[10px] bg-xyne-surface border-b border-xyne-border">
-        {/* Search */}
-        <div className="flex items-center gap-[8px] bg-xyne-surface border border-xyne-border rounded-[8px] px-[10px] py-[6px] w-[220px] flex-shrink-0 focus-within:border-xyne-brand transition-colors">
-          <MagnifyingGlassIcon
-            size={13}
-            className="text-xyne-fg-tertiary flex-shrink-0"
-          />
-          <input
-            value={searchValue}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder={searchPlaceholder}
-            className="flex-1 bg-transparent text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-tertiary focus:outline-none border-0 min-w-0 appearance-none focus:ring-0 ring-0 shadow-none"
-          />
-          {searchValue && (
-            <button
-              onClick={() => onSearchChange("")}
-              className="text-xyne-fg-tertiary hover:text-xyne-fg-primary flex-shrink-0 cursor-pointer"
-            >
-              <XIcon size={11} />
-            </button>
-          )}
-        </div>
+      {/* Filter bar: [tabs] [search] [trailing filters]
+          centerSearch=true → search is absolutely centered in the bar;
+          tabs and trailing filters sit at edges without affecting center. */}
+      <div className={`${centerSearch ? "relative" : "flex"} flex items-center gap-[10px] px-[24px] py-[10px] bg-xyne-surface border-b border-xyne-border`}>
 
-        {/* Tabs */}
+        {/* Tabs — scope selector on the left */}
         {tabs.length > 0 && onTabChange && (
-          <div className="flex items-center gap-[4px]">
+          <div className="flex items-center gap-[4px] flex-shrink-0 z-10">
             {tabs.map((tab) => (
               <button
                 key={tab.key}
@@ -226,14 +210,39 @@ export function PageListHeader({
           </div>
         )}
 
-        {/* Trailing filters (e.g. category chips). Divider only when scope
-            tabs precede them — otherwise it'd float next to the search box. */}
+        {/* Search */}
+        <div className={`flex items-center gap-[8px] border rounded-[10px] px-[14px] transition-[border-color,box-shadow] ${
+          centerSearch
+            ? "absolute left-1/2 -translate-x-1/2 w-[380px] bg-white dark:bg-xyne-surface py-[9px] border-xyne-border-strong shadow-[0_2px_8px_rgba(0,0,0,0.08)] focus-within:border-xyne-brand focus-within:shadow-[0_2px_12px_rgba(0,0,0,0.12)]"
+            : "flex-1 min-w-0 bg-xyne-surface py-[7px] border-xyne-border focus-within:border-xyne-brand"
+        }`}>
+          <MagnifyingGlassIcon
+            size={15}
+            className={`flex-shrink-0 ${centerSearch ? "text-xyne-fg-secondary" : "text-xyne-fg-tertiary"}`}
+          />
+          <input
+            value={searchValue}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder={searchPlaceholder}
+            className="flex-1 bg-transparent text-[13px] text-xyne-fg-primary placeholder:text-xyne-fg-tertiary focus:outline-none border-0 min-w-0 appearance-none focus:ring-0 ring-0 shadow-none"
+          />
+          {searchValue && (
+            <button
+              onClick={() => onSearchChange("")}
+              className="text-xyne-fg-tertiary hover:text-xyne-fg-primary flex-shrink-0 cursor-pointer"
+            >
+              <XIcon size={12} />
+            </button>
+          )}
+        </div>
+
+        {/* Trailing filters on the right */}
         {trailingFilters && (
           <>
-            {tabs.length > 0 && onTabChange && (
-              <div className="w-px h-[20px] bg-xyne-border mx-[4px] flex-shrink-0" />
+            {!centerSearch && tabs.length > 0 && onTabChange && (
+              <div className="w-px h-[20px] bg-xyne-border mx-[2px] flex-shrink-0" />
             )}
-            <div className="flex items-center gap-[4px] flex-wrap min-w-0">
+            <div className={`flex items-center gap-[4px] flex-wrap flex-shrink-0 z-10 ${centerSearch ? "ml-auto" : ""}`}>
               {trailingFilters}
             </div>
           </>

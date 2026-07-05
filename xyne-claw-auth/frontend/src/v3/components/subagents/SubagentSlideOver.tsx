@@ -270,7 +270,7 @@ export function SubagentSlideOver({
               icon={<BookOpenIcon size={14} />}
               label="Skills"
               count={subagent.skills?.length ?? 0}
-              hint="Reference material this specialist consults"
+              hint="Reference material this subagent consults"
               chips={
                 subagent.skills && subagent.skills.length > 0
                   ? subagent.skills.map((skill) => (
@@ -288,7 +288,7 @@ export function SubagentSlideOver({
               icon={<WrenchIcon size={14} />}
               label="Tools"
               count={toolCount}
-              hint="Actions this specialist can perform"
+              hint="Actions this subagent can perform"
               chips={
                 toolCount > 0
                   ? [
@@ -316,7 +316,7 @@ export function SubagentSlideOver({
                 delegating: a single argument with a name + description.
                 Shown as one chip (the paramName, mono) over a hint
                 line (paramDescription). High signal for "should I use
-                this specialist?" decisions. */}
+                this subagent?" decisions. */}
             <CapabilityRow
               icon={<BracketsCurlyIcon size={14} />}
               label="Parameter"

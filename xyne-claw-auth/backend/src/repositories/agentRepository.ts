@@ -1,5 +1,26 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
+import { randomBytes } from "node:crypto";
+
+/**
+ * Build a unique, schema-valid slug for a clone. Strips any prior "-copy…"
+ * suffix off the source slug, trims to leave room, and appends a short random
+ * token. Pre-checks the DB and retries a few times; the DB unique index is the
+ * real guard (caller catches P2002 and retries if we still race).
+ */
+async function buildCloneSlug(sourceSlug: string): Promise<string> {
+  const root = sourceSlug
+    .replace(/-copy(-[a-z0-9]+)?$/, "")
+    .slice(0, 40)
+    .replace(/-+$/, "") || "agent";
+  for (let i = 0; i < 6; i++) {
+    const token = randomBytes(3).toString("hex"); // 6 lowercase hex chars
+    const candidate = `${root}-copy-${token}`;
+    const clash = await prisma.agent.findUnique({ where: { slug: candidate } });
+    if (!clash) return candidate;
+  }
+  return `${root}-copy-${Date.now().toString(36)}`;
+}
 
 const INCLUDE_TOOLS_SKILLS = {
   tools: { include: { tool: true } },
@@ -10,6 +31,10 @@ const INCLUDE_TOOLS_SKILLS = {
   // a sibling file off the skill dir (e.g. fill-pdf-form looking for
   // cam-templates/template.pdf) gets ENOENT.
   skills: { include: { skill: { include: { files: true } } } },
+  // Knowledge Base grants — opaque foreign ids into the spaces backend. We
+  // pull them everywhere we pull skills so /mcp/tools and the agent-config
+  // editor can both render them without a second query.
+  collections: true,
 } as const;
 
 export const agentRepository = {
@@ -34,17 +59,113 @@ export const agentRepository = {
   findByNameInsensitive: (name: string) =>
     prisma.agent.findFirst({ where: { name: { equals: name, mode: "insensitive" } } }),
 
-  listVisible: (userId?: string) =>
+  /**
+   * Visibility rules:
+   *   - admin            → ALL agents, no filter
+   *   - authenticated    → global ∪ owned ∪ shared-with-me
+   *   - anonymous (no id) → only global
+   *
+   * Admin bypass: when `isAdmin` is set, NO filter — every agent is returned.
+   * NOTE: this bypass is OPT-IN at the route layer (GET /agents only sets
+   * isAdmin=true when `?scope=all` is passed — see routes/agents.ts). The
+   * default agent list (the main "My Agents" view) stays filtered to
+   * global ∪ owned ∪ shared even for admins; only the admin panel's
+   * "All Agents" view requests the full roster. (A blanket bypass on every
+   * listing — added 2026-06-06 — leaked every user's private agents into
+   * admins' normal list; that is the regression this gating reverts.)
+   */
+  listVisible: (opts: { userId?: string; isAdmin?: boolean } = {}) =>
     prisma.agent.findMany({
-      where: userId
-        ? { OR: [{ scope: "global" }, { ownerUserId: userId }, { shares: { some: { userId } } }] }
-        : { scope: "global" },
+      where: opts.isAdmin
+        ? {}
+        : opts.userId
+          ? { OR: [{ scope: "global" }, { ownerUserId: opts.userId }, { shares: { some: { userId: opts.userId } } }] }
+          : { scope: "global" },
       include: { ...INCLUDE_TOOLS_SKILLS, owner: true },
       orderBy: { name: "asc" as const },
     }),
 
   create: (data: Prisma.AgentCreateInput) =>
     prisma.agent.create({ data, include: INCLUDE_TOOLS_SKILLS }),
+
+  /**
+   * Clone an agent into a NEW personal agent owned by `newOwnerId`.
+   *
+   * Deliberately narrow copy scope (product decision): only the three fields
+   * that define the agent's *behaviour* are carried over —
+   *   1. systemPrompt (also seeded as prompt version v1)
+   *   2. tools        (AgentTool rows, including each tool's `permission`)
+   *   3. skills       (AgentSkill junction links)
+   * Everything else resets to defaults: no description, default color,
+   * empty modelId/config, COLLECTIONS kbScope with NO KB grants, no Spaces
+   * app identity / signing secret, no shares, no provider credentials, no MCP
+   * connections. This is an allow-list copy — we NEVER spread the source row,
+   * so a future secret-bearing column can't silently leak into clones.
+   *
+   * Returns the fully-hydrated clone (tools + skills + collections), or null
+   * if the source agent no longer exists.
+   */
+  cloneAgentForUser: async (
+    sourceId: string,
+    newOwnerId: string,
+    opts: { name?: string } = {},
+  ) => {
+    const source = await prisma.agent.findUnique({
+      where: { id: sourceId },
+      include: { tools: true, skills: true },
+    });
+    if (!source) return null;
+
+    const name = (opts.name?.trim() || `${source.name} (Copy)`).slice(0, 200);
+    const slug = await buildCloneSlug(source.slug);
+    const systemPrompt = source.systemPrompt;
+
+    return prisma.$transaction(async (tx) => {
+      const clone = await tx.agent.create({
+        data: {
+          slug,
+          name,
+          systemPrompt,
+          scope: "personal",
+          owner: { connect: { id: newOwnerId } },
+        },
+      });
+
+      if (source.tools.length > 0) {
+        await tx.agentTool.createMany({
+          data: source.tools.map((t) => ({
+            agentId: clone.id,
+            toolId: t.toolId,
+            permission: t.permission,
+          })),
+        });
+      }
+
+      if (source.skills.length > 0) {
+        await tx.agentSkill.createMany({
+          data: source.skills.map((sk) => ({ agentId: clone.id, skillId: sk.skillId })),
+        });
+      }
+
+      // Seed prompt history so the clone's version list isn't empty and the
+      // denormalized active-pointer fields are consistent with a real row.
+      const pv = await tx.agentPromptVersion.create({
+        data: {
+          agentId: clone.id,
+          version: 1,
+          systemPrompt,
+          note: `Cloned from ${source.slug}`,
+          createdByUserId: newOwnerId,
+        },
+      });
+
+      return tx.agent.update({
+        where: { id: clone.id },
+        data: { activePromptVersionId: pv.id, activePromptVersion: pv.version },
+        include: INCLUDE_TOOLS_SKILLS,
+      });
+    });
+  },
 
   update: (slug: string, data: Prisma.AgentUpdateInput) =>
     prisma.agent.update({ where: { slug }, data, include: INCLUDE_TOOLS_SKILLS }),
@@ -54,6 +175,76 @@ export const agentRepository = {
 
   delete: (slug: string) =>
     prisma.agent.delete({ where: { slug } }),
+
+  // ── Prompt versioning ──────────────────────────────────────────────
+  listPromptVersions: (agentId: string) =>
+    prisma.agentPromptVersion.findMany({
+      where: { agentId },
+      orderBy: { version: "desc" },
+    }),
+
+  /**
+   * Create a new prompt version for an agent and make it active, atomically.
+   * Computes the next monotonic version number under a transaction so two
+   * concurrent edits can't collide on the (agentId, version) unique index.
+   * Also denormalizes the new prompt + active pointers back onto the agent so
+   * every runtime read path (which reads agent.systemPrompt) sees it instantly.
+   */
+  createAndActivatePromptVersion: (input: {
+    agentId: string;
+    systemPrompt: string;
+    note?: string | null;
+    createdByUserId?: string | null;
+  }) =>
+    prisma.$transaction(async (tx) => {
+      const latest = await tx.agentPromptVersion.findFirst({
+        where: { agentId: input.agentId },
+        orderBy: { version: "desc" },
+        select: { version: true },
+      });
+      const nextVersion = (latest?.version ?? 0) + 1;
+      const created = await tx.agentPromptVersion.create({
+        data: {
+          agentId: input.agentId,
+          version: nextVersion,
+          systemPrompt: input.systemPrompt,
+          note: input.note ?? null,
+          createdByUserId: input.createdByUserId ?? null,
+        },
+      });
+      await tx.agent.update({
+        where: { id: input.agentId },
+        data: {
+          systemPrompt: input.systemPrompt,
+          activePromptVersionId: created.id,
+          activePromptVersion: created.version,
+        },
+      });
+      return created;
+    }),
+
+  /**
+   * Roll back: make an existing version active again. Copies that version's
+   * prompt into the denormalized agent.systemPrompt + repoints the active
+   * pointers. The historical row is reused as-is (no new version created), so
+   * the active pointer can move backwards — history stays append-only.
+   */
+  activatePromptVersion: (agentId: string, version: number) =>
+    prisma.$transaction(async (tx) => {
+      const target = await tx.agentPromptVersion.findUnique({
+        where: { agentId_version: { agentId, version } },
+      });
+      if (!target) return null;
+      await tx.agent.update({
+        where: { id: agentId },
+        data: {
+          systemPrompt: target.systemPrompt,
+          activePromptVersionId: target.id,
+          activePromptVersion: target.version,
+        },
+      });
+      return target;
+    }),
 
   // Skills (junction table)
   upsertSkill: (agentId: string, skillId: string) =>
@@ -72,6 +263,40 @@ export const agentRepository = {
 
   listSkills: (agentId: string) =>
     prisma.agentSkill.findMany({ where: { agentId }, include: { skill: true } }),
+
+  // ── Knowledge Base collections (junction) ──────────────────────────
+  listCollections: (agentId: string) =>
+    prisma.agentCollection.findMany({
+      where: { agentId },
+      orderBy: { createdAt: "asc" },
+    }),
+
+  /**
+   * Replace ALL KB grants on an agent with the provided set, atomically.
+   * Mirrors the "replace skills on PATCH" semantics at routes/agents.ts so
+   * the UI's submit payload is the source of truth for the agent's KB scope.
+   */
+  replaceCollections: (
+    agentId: string,
+    items: Array<{ collectionId: string; fileId?: string | null }>,
+  ) =>
+    prisma.$transaction(async (tx) => {
+      await tx.agentCollection.deleteMany({ where: { agentId } });
+      if (items.length === 0) return [];
+      // dedupe on (collectionId, fileId) so a sloppy client payload doesn't
+      // hit the unique index. createMany is one round-trip — preferred over
+      // a per-item upsert for what is fundamentally a bulk swap.
+      const seen = new Set<string>();
+      const data: Array<{ agentId: string; collectionId: string; fileId: string | null }> = [];
+      for (const it of items) {
+        const key = `${it.collectionId}::${it.fileId ?? ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        data.push({ agentId, collectionId: it.collectionId, fileId: it.fileId ?? null });
+      }
+      await tx.agentCollection.createMany({ data });
+      return tx.agentCollection.findMany({ where: { agentId } });
+    }),
 
   // Tools
   upsertTool: (agentId: string, toolId: string, permission: string) =>

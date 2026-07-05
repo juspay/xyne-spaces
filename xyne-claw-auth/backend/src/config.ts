@@ -24,6 +24,20 @@ export const CONFIG = {
     : Buffer.alloc(0),
   xyneClawUrl: process.env["XYNE_CLAW_URL"] ?? "http://localhost:3002",
   xyneClawS2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+  /**
+   * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
+   * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
+   * /internal/run and dispatches frames into the same pendingStreams /
+   * agentRunRepository wiring the legacy /progress handler used; the SSE
+   * response we write to the FRONTEND is byte-identical. Off → legacy POST
+   * path, preserved as the rollback.
+   *
+   * Accepts: "1", "true", "on", "yes" (case-insensitive). Default OFF until
+   * deployed callers can verify SSE locally.
+   */
+  clawSseTransport: ["1", "true", "on", "yes"].includes(
+    (process.env["CLAW_SSE_TRANSPORT"] ?? "").trim().toLowerCase(),
+  ),
   xyneSpacesCallbackUrl: process.env["XYNE_SPACES_CALLBACK_URL"] ?? "",
   spacesBackendUrl: process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
   // Cluster-internal Spaces URL — used for high-volume server-to-server API
@@ -64,23 +78,17 @@ export const CONFIG = {
   redisPort: Number(process.env["REDIS_PORT"] ?? 6379),
   redisPassword: process.env["REDIS_PASSWORD"] || undefined,
   redisTls: process.env["REDIS_TLS"] === "true",
-  /**
-   * Feature flag for the Desk autodraft clickable-citations pipeline.
-   * When true, claw-auth appends `[clf-<toolCallId>#<chunkIndex>]` tokens
-   * (built from each ToolInvocation's structured citations) so the Desk
-   * DraftSourcesPanel can render clickable source rows (e.g. Grafana Explore
-   * deep links). Inert when a run has no structured citations. Default off. */
-  clawInlineCitations: process.env["CLAW_INLINE_CITATIONS"] === "true",
-  /**
-   * Grafana base URL for Explore citation links. When set, citation deep-links
-   * use this base instead of the Grafana connection's credential `url` — so a
-   * single deployed Grafana can be the link target regardless of which
-   * connection ran the query. The actual log/metric/SQL query still uses the
-   * connection's credential `url`+`token`; this only affects the citation link.
-   * Empty → fall back to the credential `url`. */
-  grafanaBaseUrl: process.env["GRAFANA_BASE_URL"] ?? "",
+  // Fan out live run events (tool calls + progress labels) to v3 chat viewers
+  // over Redis pub/sub + an SSE endpoint. ON by default; set
+  // LIVE_TOOLCALLS_ENABLED=false to disable.
+  liveToolCallsEnabled: process.env["LIVE_TOOLCALLS_ENABLED"] !== "false",
   runRecoveryMaxRetries: Number(process.env["RUN_RECOVERY_MAX_RETRIES"] ?? 3),
-  runRecoveryTimeoutMs: Number(process.env["RUN_RECOVERY_TIMEOUT_MS"] ?? 900000),
+  // Must be > SESSION_LOCK_TTL_MS (15 min in xyne-claw) — when equal, a slow but
+  // progressing run keeps refreshing its lock on every message_end while the
+  // watchdog fires on the same cadence, so every recovery retry lands inside a
+  // still-locked window and burns through maxRetries before the original run
+  // releases (incident 2026-06-09 euler-doctor session dea1f67c).
+  runRecoveryTimeoutMs: Number(process.env["RUN_RECOVERY_TIMEOUT_MS"] ?? 1_200_000),
   runRecoveryBackoffMs: Number(process.env["RUN_RECOVERY_BACKOFF_MS"] ?? 30000),
   gcsProjectId: process.env["GCS_PROJECT_ID"] ?? "",
   gcsBucketName: process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
@@ -106,6 +114,22 @@ export const CONFIG = {
   bitbucketDashboardCacheTtlMs: Number(process.env["BITBUCKET_DASHBOARD_CACHE_TTL_MS"] ?? 15 * 60 * 1000),
   bitbucketDashboardBackgroundRefresh: process.env["BITBUCKET_DASHBOARD_BACKGROUND_REFRESH"] !== "false",
   /**
+   * Direct Vespa search — bypasses the Spaces backend /api/vespaSearch entirely.
+   * When enabled the spaces-search MCP tool builds and executes YQL against Vespa
+   * directly from claw-auth without a backend round-trip.
+   *
+   * Required companion env vars:
+   *   VESPA_QUERY_ENDPOINT  e.g. http://vespa:8081   (Vespa query port)
+   *   VESPA_NAMESPACE       e.g. namespace            (matches Spaces backend)
+   *   VESPA_CLUSTER         e.g. my_content           (matches Spaces backend)
+   */
+  directVespaSearch: ["1", "true", "on", "yes"].includes(
+    (process.env["DIRECT_VESPA_SEARCH"] ?? "").trim().toLowerCase(),
+  ),
+  vespaQueryEndpoint: (process.env["VESPA_QUERY_ENDPOINT"] ?? "http://localhost:8081").replace(/\/+$/, ""),
+  vespaNamespace: process.env["VESPA_NAMESPACE"] ?? "namespace",
+  vespaCluster: process.env["VESPA_CLUSTER"] ?? "my_content",
+  /**
    * BITBOT — Juspay PR-analysis service. The MCP adapter spawns a stdio
    * child (servers/bitbot-server.ts) that POSTs to {bitbotBaseUrl}/api/prs/bulk
    * to fetch PRs across Bitbucket repos. Access is gated by NAT-IP allowlist
@@ -121,4 +145,15 @@ export const CONFIG = {
     process.env["BITBOT_BASE_URL"] ??
     "<research-agent-url>"
   ).replace(/\/+$/, ""),
+
+  researchAgentBaseUrl: (
+    process.env["RESEARCH_AGENT_BASE_URL"] ??
+    "<research-agent-url>"
+  ).replace(/\/+$/, ""),
+  /** API key for Research Agent */
+  researchAgentApiKey: process.env["RESEARCH_AGENT_API_KEY"] ?? "",
+  /** API key used by the global research-agent-mcp stdio proxy. */
+  researchAgentMcpApiKey: process.env["RESEARCH_AGENT_MCP_API_KEY"]
+    ?? process.env["research_agent_mcp_api_key"]
+    ?? "",
 } as const;

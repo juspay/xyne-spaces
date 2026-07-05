@@ -11,7 +11,7 @@
  * `user_memory_candidates` with sourceRefs resolved from the input batch.
  */
 
-import type { Prisma } from "@prisma/client";
+import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
@@ -23,7 +23,12 @@ import type {
 } from "xyne-claw-shared";
 
 const logger = createLogger("user-memory-curator-client", createTraceId());
-const DISTILL_TIMEOUT_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 90_000);
+const DISTILL_TIMEOUT_MS = Number(
+  process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 90_000,
+);
+const TWIN_BANK_ID = bankIdForAgent("digital-twin");
+const memory = getMemoryProvider();
+const DEFAULT_AUTO_APPROVE_MIN_SCORE = 0.9;
 
 interface SourceRef {
   type: "message" | "call" | "canvas";
@@ -36,7 +41,9 @@ export async function distillUserMemoryViaClaw(
   req: UserMemoryDistillRequest,
 ): Promise<UserMemoryCandidatePayload[]> {
   if (!CONFIG.xyneClawS2sKey) {
-    logger.warn("[user-memory-curator-client] XYNE_CLAW_S2S_KEY not set — refusing call");
+    logger.warn(
+      "[user-memory-curator-client] XYNE_CLAW_S2S_KEY not set — refusing call",
+    );
     return [];
   }
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/distill`;
@@ -45,7 +52,10 @@ export async function distillUserMemoryViaClaw(
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: {
+        "Content-Type": "application/json",
+        "x-s2s-key": CONFIG.xyneClawS2sKey,
+      },
       body: JSON.stringify(req),
       signal: AbortSignal.timeout(DISTILL_TIMEOUT_MS),
     });
@@ -79,9 +89,10 @@ export async function distillUserMemoryViaClaw(
     logger.error("[user-memory-curator-client] call failed", {
       err: err instanceof Error ? err.message : String(err),
       name: err instanceof Error ? err.name : "unknown",
-      cause: err instanceof Error && (err as { cause?: unknown }).cause
-        ? String((err as { cause?: unknown }).cause)
-        : undefined,
+      cause:
+        err instanceof Error && (err as { cause?: unknown }).cause
+          ? String((err as { cause?: unknown }).cause)
+          : undefined,
       url,
       userId: req.userId,
       recordsCount: req.records.length,
@@ -119,7 +130,7 @@ export async function curateAndPersistBatch(args: {
 
   // Resolve groundedOnIds → sourceRefs using the input batch we sent.
   const byId = new Map(records.map((r) => [r.id, r]));
-  const rows = candidates.map((c) => {
+  const candidateRows = candidates.map((c) => {
     const refs: SourceRef[] = [];
     for (const id of c.groundedOnIds) {
       const r = byId.get(id);
@@ -135,23 +146,85 @@ export async function curateAndPersistBatch(args: {
       userId,
       subsystem: c.subsystem,
       text: c.text,
-      sourceRefs: refs as unknown as Prisma.InputJsonValue,
+      sourceRefs: refs,
       signalScore: c.signalScore,
-      status: "pending",
       source,
     };
   });
 
   // Skip if for some reason every candidate lost its grounding mid-flight.
-  const writable = rows.filter((r) => Array.isArray(r.sourceRefs) && (r.sourceRefs as unknown as SourceRef[]).length > 0);
+  const writable = candidateRows.filter(
+    (r) =>
+      Array.isArray(r.sourceRefs) &&
+      (r.sourceRefs as unknown as SourceRef[]).length > 0,
+  );
   if (writable.length === 0) return 0;
 
-  const result = await prisma.userMemoryCandidate.createMany({ data: writable });
+  const user = await (prisma.user.findUnique as any)({
+    where: { id: userId },
+    select: {
+      digitalTwinMemoryApprovalMode: true,
+      digitalTwinMemoryAutoApproveMinScore: true,
+    },
+  });
+  const autoApproveEnabled = user?.digitalTwinMemoryApprovalMode === "auto";
+  const minScore =
+    user?.digitalTwinMemoryAutoApproveMinScore ??
+    DEFAULT_AUTO_APPROVE_MIN_SCORE;
+  const now = new Date();
+
+  let autoApproved = 0;
+  const rows: Array<Record<string, unknown>> = [];
+
+  for (const row of writable) {
+    if (autoApproveEnabled && row.signalScore >= minScore) {
+      try {
+        const content = row.text.slice(0, 1500);
+        const tags = [
+          `user:${userId}`,
+          `subsystem:${row.subsystem}`,
+          "scope:user",
+        ];
+        const out = await memory.retain(TWIN_BANK_ID, [{ content, tags }]);
+        rows.push({
+          ...row,
+          status: "approved",
+          approvedAt: now,
+          hindsightMemoryId: out?.[0]?.id ?? null,
+        });
+        autoApproved += 1;
+        continue;
+      } catch (err) {
+        // Fail closed: if provider retention fails, keep the candidate in the
+        // normal human review queue rather than dropping it or marking it
+        // approved without a durable Hindsight memory.
+        logger.warn(
+          "[user-memory-curator-client] auto-approval retain failed; keeping pending",
+          {
+            userId,
+            source,
+            subsystem: row.subsystem,
+            signalScore: row.signalScore,
+            err: err instanceof Error ? err.message : String(err),
+          },
+        );
+      }
+    }
+
+    rows.push({ ...row, status: "pending" });
+  }
+
+  const result = await (prisma.userMemoryCandidate.createMany as any)({
+    data: rows,
+  });
   logger.info("[user-memory-curator-client] candidates persisted", {
     userId,
     source,
     received: candidates.length,
     inserted: result.count,
+    autoApproved,
+    approvalMode: user?.digitalTwinMemoryApprovalMode ?? "manual",
+    minScore,
   });
   return result.count;
 }

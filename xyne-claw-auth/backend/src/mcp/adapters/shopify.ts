@@ -22,7 +22,7 @@ export const shopifyAdapter: StdioMcpAdapter = {
     return {
       cmd: "npx",
       args: [
-        "-y", "shopify-mcp",
+        "-y", "shopify-mcp@1.0.8",
         `--accessToken=${accessToken}`,
         `--domain=${domain}`,
       ],

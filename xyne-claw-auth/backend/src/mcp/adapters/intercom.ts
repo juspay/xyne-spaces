@@ -14,7 +14,7 @@ export const intercomAdapter: StdioMcpAdapter = {
     return {
       cmd: "npx",
       args: [
-        "-y", "mcp-remote",
+        "-y", "mcp-remote@0.1.38",
         "https://mcp.intercom.com/mcp",
         "--header",
         `Authorization:Bearer ${accessToken}`,

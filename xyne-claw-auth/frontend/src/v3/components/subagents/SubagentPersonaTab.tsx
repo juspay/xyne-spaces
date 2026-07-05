@@ -1,5 +1,5 @@
 /**
- * SubagentPersonaTab — "who is this specialist".
+ * SubagentPersonaTab — "who is this subagent".
  *
  * Layout (top → bottom):
  *   1. Read-only banners      (built-in / view-only)
@@ -94,13 +94,13 @@ export function SubagentPersonaTab({
       )}
 
       {/* ── Name ──────────────────────────────────────────────────────
-          Immutable identifier — agents reference this specialist by name
+          Immutable identifier — agents reference this subagent by name
           in their config.tools.subagents array. Shown in monospace to
           signal "this is a slug / ID, not a label". */}
       <div className="flex flex-col gap-1 rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 pt-1.5 pb-2">
         <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.07em] text-xyne-fg-tertiary">
           Name
-          <InfoIcon text="Permanent — agents reference this specialist by name" />
+          <InfoIcon text="Permanent — agents reference this subagent by name" />
         </span>
         <span className="w-full text-[14px] font-medium font-mono text-xyne-fg-primary">
           {subagent.name}

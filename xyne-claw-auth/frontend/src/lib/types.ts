@@ -13,6 +13,10 @@ export interface McpServer {
   readonly description: string | null;
   readonly transport?: string;
   readonly enabled?: boolean;
+  /** True when this connector authenticates via per-user browser OAuth (set by
+   *  the backend from the canonical OAuth set / connectorMeta.authMethod). Such
+   *  connectors can't be pinned credential-less — they use the OAuth flow. */
+  readonly oauth?: boolean;
   readonly credentialForm?: { fields?: CredentialField[] } | null;
   readonly credentialSchema?: Record<string, unknown> | null;
   readonly launchConfigTemplate?: { cmd?: string; args?: string[]; env?: Record<string, string> } | null;
@@ -79,6 +83,17 @@ export interface AgentSkill {
   readonly skill: { readonly slug: string; readonly name: string; readonly description: string; readonly content: string };
 }
 
+/** Per-agent Knowledge Base grant — references a spaces Collection (and
+ *  optionally a single file). fileId = null grants the whole collection.
+ *  See AgentCollection in xyne-claw-auth's prisma schema. */
+export interface AgentCollection {
+  readonly id: string;
+  readonly agentId: string;
+  readonly collectionId: string;
+  readonly fileId: string | null;
+  readonly createdAt: string;
+}
+
 export interface AgentShare {
   readonly id: string;
   readonly userId: string;
@@ -92,6 +107,9 @@ export interface Agent {
   readonly name: string;
   readonly description: string;
   readonly systemPrompt?: string;
+  /** Active prompt version number (denormalized). See prompt versioning. */
+  readonly activePromptVersion?: number | null;
+  readonly activePromptVersionId?: string | null;
   readonly scope: string;
   readonly ownerUserId: string | null;
   readonly enabled: boolean;
@@ -103,6 +121,12 @@ export interface Agent {
   readonly spacesAppToken: string | null;
   readonly tools: AgentTool[];
   readonly skills?: AgentSkill[];
+  readonly collections?: AgentCollection[];
+  /** Knowledge Base scoping mode. "COLLECTIONS" (default) = per-agent
+   *  allowlist via `collections`. "USER" = inherits whatever the calling
+   *  user can access in spaces; `collections` is empty by construction
+   *  and the picker is locked in the UI. */
+  readonly kbScope?: "COLLECTIONS" | "USER";
   readonly shares?: AgentShare[];
   readonly createdAt: string;
   readonly updatedAt: string;

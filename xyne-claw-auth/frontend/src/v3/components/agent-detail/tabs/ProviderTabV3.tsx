@@ -10,6 +10,7 @@ import {
   ShieldCheckIcon,
   WarningCircleIcon,
   FloppyDiskIcon,
+  PencilSimpleIcon,
 } from "@phosphor-icons/react";
 import type { Agent } from "../../../../lib/types";
 import { useSnackbar } from "../../ui/Snackbar";
@@ -24,8 +25,10 @@ import {
   startAgentCodexOauth,
   exchangeAgentCodexOauth,
   listAgentCodexModels,
+  listClaudeModels,
   type AgentProviderCredentialStatus,
 } from "../../../../lib/api";
+import { SpacesDefaultRowV3 } from "./SpacesDefaultRowV3";
 
 /* ─────────────────────────────────────────────────────────────────────
  * Display dictionaries — translate the wire-level provider keys and
@@ -66,9 +69,10 @@ function formatRelativeTime(iso: string): string {
 
 interface Props {
   agent: Agent;
+  userId: string;
 }
 
-export function ProviderTabV3({ agent }: Props) {
+export function ProviderTabV3({ agent, userId }: Props) {
   // Provider preference order is now the single source of truth — first entry
   // serves as the parent (formerly "default provider"), subsequent entries
   // form the quota-fallback chain. Backwards compat: if no list is set we
@@ -86,6 +90,39 @@ export function ProviderTabV3({ agent }: Props) {
       Save only enables when `providerOrder` differs from this, so an empty
       → empty "save" doesn't fire and no "Saved ✓" flashes for a no-op. */
   const [savedOrder, setSavedOrder] = useState<string[]>(seedOrder);
+  /**
+   * Two policy modes for how the agent's premium provider is used:
+   *   `true`  (Always On) — agent's provider is the default for every run.
+   *                         Old behavior; backfill default so existing agents
+   *                         keep working without any opt-in.
+   *   `false` (On /upgrade) — runs default to the platform model (Kimi/Spaces);
+   *                          the agent's premium provider is used only when the
+   *                          user explicitly opts in via `/upgrade` or accepts
+   *                          the prompt after a failure / soft refusal.
+   *
+   * Stored at agent.config.providerAlwaysOn. Undefined = treated as true on
+   * the backend (see webhook.ts), so existing agents keep their behavior
+   * until an owner toggles this off.
+   */
+  const seedAlwaysOn = (agent.config as Record<string, unknown> | undefined)?.["providerAlwaysOn"] !== false;
+  const [alwaysOn, setAlwaysOn] = useState<boolean>(seedAlwaysOn);
+  const [savedAlwaysOn, setSavedAlwaysOn] = useState<boolean>(seedAlwaysOn);
+
+  /**
+   * Which provider the agent's SUBAGENTS run on, when they have no explicit
+   * per-subagent override:
+   *   "spaces" — subagents run on the Spaces platform default (LiteLLM). DEFAULT.
+   *   "parent" — subagents inherit this agent's resolved provider (uses more
+   *              tokens/credits on paid plans).
+   * Stored at agent.config.subagentProviderMode; undefined ⇒ "spaces".
+   */
+  const seedSubagentMode: "parent" | "spaces" =
+    (agent.config as Record<string, unknown> | undefined)?.["subagentProviderMode"] === "parent"
+      ? "parent"
+      : "spaces";
+  const [subagentMode, setSubagentMode] = useState<"parent" | "spaces">(seedSubagentMode);
+  const [savedSubagentMode, setSavedSubagentMode] = useState<"parent" | "spaces">(seedSubagentMode);
+
   const [orderSaving, setOrderSaving] = useState(false);
   const [orderSaved, setOrderSaved] = useState(false);
   /** Provider preference order explainer modal — the inline wall of
@@ -93,8 +130,12 @@ export function ProviderTabV3({ agent }: Props) {
       opens a modal with the full explanation. */
   const [infoOpen, setInfoOpen] = useState(false);
 
-  // Dirty check — JSON.stringify is fine for short string arrays.
-  const orderIsDirty = JSON.stringify(providerOrder) !== JSON.stringify(savedOrder);
+  // Dirty check — JSON.stringify is fine for short string arrays. Also true
+  // when the "Always On" toggle differs from what's persisted.
+  const orderIsDirty =
+    JSON.stringify(providerOrder) !== JSON.stringify(savedOrder) ||
+    alwaysOn !== savedAlwaysOn ||
+    subagentMode !== savedSubagentMode;
 
   const [creds, setCreds] = useState<AgentProviderCredentialStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,6 +146,11 @@ export function ProviderTabV3({ agent }: Props) {
     model: "",
     baseUrl: "",
     authType: "api_key" as "api_key" | "oauth_token",
+    // "" = provider default ("medium"). Stored on the credential row and
+    // applied by the runtime to reasoning-capable models (gpt-5.x/o*; for
+    // claude it maps to the thinking level). Agent-level
+    // config.modelSettings.thinkingLevel, when set, takes precedence.
+    reasoningEffort: "" as "" | "low" | "medium" | "high",
   });
   const { show: showSnackbar } = useSnackbar();
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +164,15 @@ export function ProviderTabV3({ agent }: Props) {
   const [codexCode, setCodexCode] = useState("");
   const [codexBusy, setCodexBusy] = useState(false);
   const [codexErr, setCodexErr] = useState<string | null>(null);
+
+  // Claude (Anthropic) browser-OAuth flow — mirrors the codex one. Captures the
+  // refreshable {access_token, refresh_token, expires_at} bundle so the token
+  // auto-refreshes instead of dying on expiry (the old paste-a-token path gave
+  // no refresh token). Only relevant when form.provider="claude" + oauth_token.
+  const [claudeFlow, setClaudeFlow] = useState<{ url: string; state: string } | null>(null);
+  const [claudeCode, setClaudeCode] = useState("");
+  const [claudeBusy, setClaudeBusy] = useState(false);
+  const [claudeErr, setClaudeErr] = useState<string | null>(null);
 
   // Codex model list — fetched after a codex credential exists on the agent.
   // The OAuth bundle is required to hit ChatGPT backend's /codex/models, so
@@ -151,6 +206,56 @@ export function ProviderTabV3({ agent }: Props) {
     return () => { cancelled = true; };
   }, [agent.slug, hasCodexCred]);
 
+  // Claude model list — same source the user-level Settings UI uses
+  // (listClaudeModels → /v1/models). Populates the model dropdown so you pick
+  // a valid id (claude-opus-4-8, …) instead of free-typing it (which let
+  // `claude-opus-4.8`-style typos through). Fetched with the just-typed key
+  // while adding, or against the saved cred afterwards. Debounced so we don't
+  // hit the API on every keystroke of the pasted token.
+  const [claudeModels, setClaudeModels] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [claudeModelsErr, setClaudeModelsErr] = useState<string | null>(null);
+  const hasClaudeCred = creds.some((c) => c.provider === "claude" && c.configured);
+  useEffect(() => {
+    if (form.provider !== "claude") {
+      setClaudeModels(null);
+      setClaudeModelsErr(null);
+      return;
+    }
+    const typedKey = form.apiKey.trim();
+    // Need *something* to authenticate the /v1/models call: either the key
+    // being typed now, or an already-saved Claude cred (resolved server-side).
+    if (!typedKey && !hasClaudeCred) {
+      setClaudeModels(null);
+      setClaudeModelsErr(null);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          // Pass authType so the backend uses Bearer (OAuth) vs x-api-key
+          // correctly when listing models with the just-typed key. Without it,
+          // an OAuth token is sent as x-api-key → 401 "invalid x-api-key".
+          const rows = await listClaudeModels(
+            agent.slug,
+            userId,
+            typedKey ? { apiKey: typedKey, authType: form.authType } : undefined,
+          );
+          if (!cancelled) {
+            setClaudeModels(rows.map((r) => ({ id: r.id, name: r.displayName ?? r.id })));
+            setClaudeModelsErr(null);
+          }
+        } catch (err) {
+          if (!cancelled) {
+            setClaudeModels(null);
+            setClaudeModelsErr(err instanceof Error ? err.message : "Failed to load Claude models");
+          }
+        }
+      })();
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [form.provider, form.apiKey, hasClaudeCred, agent.slug, userId]);
+
   const reload = async () => {
     setLoading(true);
     try {
@@ -180,10 +285,21 @@ export function ProviderTabV3({ agent }: Props) {
       // Retire the legacy single-pick field — preference order is now
       // canonical. Avoids drift where the two disagree.
       delete cfg.provider;
+      // Persist the "Always On" policy. Omit the key when it matches the
+      // backfill default (true) so the JSON config stays minimal; the
+      // backend treats undefined as true anyway.
+      if (alwaysOn) delete cfg.providerAlwaysOn;
+      else cfg.providerAlwaysOn = false;
+      // Subagent provider routing. Omit when "spaces" (the default) to keep the
+      // JSON config minimal — the backend/runtime treat undefined as "spaces".
+      if (subagentMode === "parent") cfg.subagentProviderMode = "parent";
+      else delete cfg.subagentProviderMode;
       await updateAgent(agent.slug, { config: cfg });
       // Mirror the just-saved state so future edits compute against it
       // and the dirty check clears (button returns to its quiet default).
       setSavedOrder([...providerOrder]);
+      setSavedAlwaysOn(alwaysOn);
+      setSavedSubagentMode(subagentMode);
       setOrderSaved(true);
       // The button morphs to "Saved" briefly, then this resets to false —
       // since the dirty check now reads clean, the button drops back to
@@ -231,9 +347,11 @@ export function ProviderTabV3({ agent }: Props) {
         ...(form.model.trim() ? { model: form.model.trim() } : {}),
         ...(form.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
         ...(form.authType ? { authType: form.authType } : {}),
+        // "" → null clears the override back to the provider default.
+        reasoningEffort: form.reasoningEffort || null,
       });
       setAdding(false);
-      setForm({ provider: "codex", apiKey: "", model: "", baseUrl: "", authType: "api_key" });
+      setForm({ provider: "codex", apiKey: "", model: "", baseUrl: "", authType: "api_key", reasoningEffort: "" });
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -281,6 +399,115 @@ export function ProviderTabV3({ agent }: Props) {
               Pick the providers that run this agent. They're tried in order — top first.
             </p>
           </div>
+        </div>
+
+        {/* Always On vs. On /upgrade — policy switch for when the agent's
+            premium provider is actually consumed. Defaults to Always On for
+            backfill (matches every existing agent's pre-feature behavior). */}
+        <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-xyne-fg-primary">When to use these providers</div>
+              <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
+                {alwaysOn
+                  ? "Always on — every run uses the first provider above."
+                  : "On /upgrade only — runs default to the Spaces model (Kimi). Users opt in by typing /upgrade or accepting the prompt after a failure."}
+              </p>
+            </div>
+            <div
+              role="radiogroup"
+              aria-label="When to use the agent's premium provider"
+              className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface p-0.5"
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={alwaysOn}
+                onClick={() => setAlwaysOn(true)}
+                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                  alwaysOn
+                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                }`}
+              >
+                Always on
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={!alwaysOn}
+                onClick={() => setAlwaysOn(false)}
+                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                  !alwaysOn
+                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                }`}
+              >
+                On /upgrade
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Subagent provider — which provider the agent's subagents run on when
+            they have no explicit per-subagent override. "Spaces default" (the
+            default) runs subagents on the cheaper platform model; "Follow parent"
+            inherits this agent's provider and uses more tokens on paid plans. */}
+        <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-xyne-fg-primary">Subagents</div>
+              <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
+                {subagentMode === "spaces"
+                  ? "Spaces default — subagents run on the Spaces platform model (cheaper/faster), even when this agent is on a premium provider."
+                  : "Follow parent — subagents run on the same provider as this agent."}
+                {" "}A per-subagent override, when set, always wins.
+              </p>
+            </div>
+            <div
+              role="radiogroup"
+              aria-label="Which provider subagents run on"
+              className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface p-0.5"
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={subagentMode === "spaces"}
+                onClick={() => setSubagentMode("spaces")}
+                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                  subagentMode === "spaces"
+                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                }`}
+              >
+                Spaces default
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={subagentMode === "parent"}
+                onClick={() => setSubagentMode("parent")}
+                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                  subagentMode === "parent"
+                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                }`}
+              >
+                Follow parent
+              </button>
+            </div>
+          </div>
+
+          {/* Cost warning — only when moving off the cheaper Spaces default. */}
+          {subagentMode === "parent" && (
+            <p className="mt-2.5 flex items-start gap-1.5 rounded-md border border-xyne-warning-border bg-xyne-warning-bg px-2.5 py-1.5 text-[11.5px] leading-relaxed text-xyne-warning-fg">
+              <WarningCircleIcon size={14} weight="fill" className="mt-px shrink-0" />
+              <span>
+                Subagents will run on this agent&apos;s provider. On paid / premium plans
+                this consumes noticeably more tokens and credits than the Spaces default.
+              </span>
+            </p>
+          )}
         </div>
 
         {/* Selected providers (the ordered list) */}
@@ -476,16 +703,24 @@ export function ProviderTabV3({ agent }: Props) {
           )}
         </div>
 
+        {/* Spaces is always present — the credential-less platform default
+            and terminal fallback. Pinned above the credential rows; the
+            pencil expands the full model-settings editor (model, temperature,
+            thinking, max tokens, JSON output). */}
+        <ul className="space-y-2.5">
+          <SpacesDefaultRowV3 agent={agent} />
+        </ul>
+
         {loading ? (
-          <div className="rounded-lg border border-dashed border-xyne-border bg-xyne-surface-subtle px-4 py-5 text-center text-[12px] text-xyne-fg-tertiary">
+          <div className="mt-2.5 rounded-lg border border-dashed border-xyne-border bg-xyne-surface-subtle px-4 py-5 text-center text-[12px] text-xyne-fg-tertiary">
             Loading credentials…
           </div>
         ) : creds.length === 0 && !adding ? (
-          <div className="rounded-lg border border-dashed border-xyne-border bg-xyne-surface-subtle px-4 py-5 text-center text-[12px] text-xyne-fg-tertiary">
-            No agent-level credentials yet. Users will fall through to their personal provider or the platform default.
+          <div className="mt-2.5 rounded-lg border border-dashed border-xyne-border bg-xyne-surface-subtle px-4 py-5 text-center text-[12px] text-xyne-fg-tertiary">
+            No agent-level credentials yet. Users will fall through to their personal provider or the Spaces default above.
           </div>
         ) : (
-          <ul className="space-y-2.5">
+          <ul className="mt-2.5 space-y-2.5">
             {creds.map((c) => (
               <li
                 key={c.provider}
@@ -524,21 +759,53 @@ export function ProviderTabV3({ agent }: Props) {
                         <span className="text-xyne-fg-primary font-mono truncate">{c.baseUrl}</span>
                       </>
                     )}
+                    {c.reasoningEffort && (
+                      <>
+                        <span className="text-xyne-fg-tertiary">Reasoning</span>
+                        <span className="text-xyne-fg-primary capitalize">{c.reasoningEffort}</span>
+                      </>
+                    )}
                   </div>
                   <div className="text-[11px] text-xyne-fg-tertiary">
                     Updated {formatRelativeTime(c.updatedAt)}
                     {c.createdByUserId ? ` · added by ${c.createdByUserId}` : ""}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void remove(c.provider)}
-                  title={`Remove ${PROVIDER_DISPLAY[c.provider] ?? c.provider} credentials`}
-                  className="shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md text-xyne-fg-tertiary hover:bg-xyne-error-bg hover:text-xyne-error-fg transition-colors"
-                  aria-label="Remove credential"
-                >
-                  <XIcon size={14} weight="bold" />
-                </button>
+                <div className="shrink-0 flex items-center gap-1">
+                  {/* Edit opens the same form prefilled — apiKey stays blank,
+                      which setAgentProviderCredential treats as "keep the
+                      stored key", so model/baseUrl/authType are editable
+                      without re-pasting the secret. */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError(null);
+                      setForm({
+                        provider: c.provider as "copilot" | "claude" | "codex" | "openrouter",
+                        apiKey: "",
+                        model: c.model ?? "",
+                        baseUrl: c.baseUrl ?? "",
+                        authType: (c.authType as "api_key" | "oauth_token" | undefined) ?? "api_key",
+                        reasoningEffort: c.reasoningEffort ?? "",
+                      });
+                      setAdding(true);
+                    }}
+                    title={`Edit ${PROVIDER_DISPLAY[c.provider] ?? c.provider} credential`}
+                    className="inline-flex items-center justify-center w-8 h-8 rounded-md text-xyne-fg-tertiary hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary transition-colors"
+                    aria-label="Edit credential"
+                  >
+                    <PencilSimpleIcon size={14} weight="bold" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void remove(c.provider)}
+                    title={`Remove ${PROVIDER_DISPLAY[c.provider] ?? c.provider} credentials`}
+                    className="inline-flex items-center justify-center w-8 h-8 rounded-md text-xyne-fg-tertiary hover:bg-xyne-error-bg hover:text-xyne-error-fg transition-colors"
+                    aria-label="Remove credential"
+                  >
+                    <XIcon size={14} weight="bold" />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -605,6 +872,87 @@ export function ProviderTabV3({ agent }: Props) {
                   ))}
                 </Menu>
               </div>
+              {/* Claude Pro/Max OAuth — point users at `claude setup-token` from
+                  Claude Code, mirroring the user-level Settings UI banner. */}
+              {form.provider === "claude" && form.authType === "oauth_token" && (
+                <div className="sm:col-span-2 space-y-2 rounded border border-xyne-brand/50 bg-xyne-brand-ghost px-3 py-2.5 text-xs text-xyne-brand">
+                  <p>
+                    Sign in with the team's Claude account in the browser. After authorizing, Anthropic shows a code — copy it (or the full redirect URL) and paste it below. This captures a <strong>refreshable</strong> token, so it won't silently expire like a pasted one. The team's Pro/Max quota will be used.
+                  </p>
+                  {!claudeFlow ? (
+                    <button
+                      type="button"
+                      disabled={claudeBusy}
+                      onClick={async () => {
+                        setClaudeBusy(true);
+                        setClaudeErr(null);
+                        try {
+                          const { startAgentClaudeOauth } = await import("../../../../lib/api");
+                          const flow = await startAgentClaudeOauth(agent.slug);
+                          setClaudeFlow({ url: flow.url, state: flow.state });
+                          window.open(flow.url, "_blank", "noopener,noreferrer");
+                        } catch (e) {
+                          setClaudeErr(e instanceof Error ? e.message : "Failed to start sign-in");
+                        } finally {
+                          setClaudeBusy(false);
+                        }
+                      }}
+                      className="rounded-md bg-xyne-brand px-3 py-1.5 text-xs font-medium text-xyne-fg-inverse hover:opacity-90 disabled:opacity-50"
+                    >
+                      {claudeBusy ? "Opening…" : "Sign in with Claude"}
+                    </button>
+                  ) : (
+                    <>
+                      <p>
+                        If the new tab didn't open,{" "}
+                        <a href={claudeFlow.url} target="_blank" rel="noopener noreferrer" className="underline text-xyne-brand hover:text-white">click here</a>.
+                      </p>
+                      <textarea
+                        value={claudeCode}
+                        onChange={(e) => setClaudeCode(e.target.value)}
+                        placeholder="Paste the code (or the full http://localhost:53692/callback?code=…&state=… URL)"
+                        rows={3}
+                        className="w-full rounded-md border border-xyne-brand bg-xyne-surface px-2 py-1.5 text-xs text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-brand focus:ring-1 focus:ring-xyne-brand"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={claudeBusy || !claudeCode.trim()}
+                          onClick={async () => {
+                            setClaudeBusy(true);
+                            setClaudeErr(null);
+                            try {
+                              const { exchangeAgentClaudeOauth } = await import("../../../../lib/api");
+                              await exchangeAgentClaudeOauth(agent.slug, { code: claudeCode.trim(), state: claudeFlow.state });
+                              setClaudeFlow(null);
+                              setClaudeCode("");
+                              await reload(); // cred saved → model dropdown becomes fetchable
+                            } catch (e) {
+                              setClaudeErr(e instanceof Error ? e.message : "Sign-in failed");
+                            } finally {
+                              setClaudeBusy(false);
+                            }
+                          }}
+                          className="rounded-md bg-xyne-brand px-3 py-1.5 text-xs font-medium text-xyne-fg-inverse hover:opacity-90 disabled:opacity-50"
+                        >
+                          {claudeBusy ? "Verifying…" : "Complete sign-in"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setClaudeFlow(null); setClaudeCode(""); setClaudeErr(null); }}
+                          className="rounded-md px-2 py-1.5 text-xs text-xyne-brand hover:text-xyne-brand"
+                        >
+                          Cancel sign-in
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {claudeErr && <p className="text-xyne-error">{claudeErr}</p>}
+                  <p className="text-[10px] text-xyne-brand/70">
+                    Prefer a long-lived token? Run <code className="rounded bg-xyne-surface px-1 font-mono">claude setup-token</code> in Claude Code and paste it in the API key field instead (no auto-refresh).
+                  </p>
+                </div>
+              )}
               {/* Codex ChatGPT browser-OAuth flow — replaces the raw paste-bundle path
                   with a "Sign in with ChatGPT" button that mirrors what the user-level
                   Settings UI uses. Stores the OAuth bundle (access + refresh + expiry)
@@ -705,18 +1053,32 @@ export function ProviderTabV3({ agent }: Props) {
                     className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 font-mono text-[13px] text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)]"
                   />
                   <p className="text-[12px] text-xyne-fg-tertiary">
-                    Encrypted the moment you save. Never returned by the API after upload.
+                    {creds.some((c) => c.provider === form.provider && c.configured)
+                      ? "A key is already stored for this provider — leave blank to keep it and update only the fields below."
+                      : "Encrypted the moment you save. Never returned by the API after upload."}
                   </p>
                 </div>
               )}
+              {(() => {
+                // Model dropdown sourced from /v1/models — for BOTH codex and
+                // claude (claude reuses the same listClaudeModels the user-level
+                // Settings UI uses). Free-text only when the list is unavailable.
+                const modelOptions =
+                  form.provider === "codex" ? codexModels :
+                  form.provider === "claude" ? claudeModels : null;
+                const modelOptionsErr =
+                  form.provider === "codex" ? codexModelsErr :
+                  form.provider === "claude" ? claudeModelsErr : null;
+                const providerLabel = PROVIDER_DISPLAY[form.provider] ?? form.provider;
+                return (
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-semibold text-xyne-fg-secondary">
                   Model
                   <span className="ml-1 text-[12px] font-normal text-xyne-fg-tertiary">
-                    {form.provider === "codex" && codexModels && codexModels.length > 0 ? "" : "(optional)"}
+                    {modelOptions && modelOptions.length > 0 ? "" : "(optional)"}
                   </span>
                 </label>
-                {form.provider === "codex" && codexModels && codexModels.length > 0 ? (
+                {modelOptions && modelOptions.length > 0 ? (
                   <Menu
                     align="start"
                     trigger={(triggerProps) => (
@@ -725,7 +1087,7 @@ export function ProviderTabV3({ agent }: Props) {
                         type="button"
                         className="flex w-full items-center justify-between gap-2 rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 text-[13px] text-xyne-fg-primary transition-colors hover:border-xyne-border-strong"
                       >
-                        <span>{form.model ? (codexModels.find((m) => m.id === form.model)?.name ?? form.model) : "Use default"}</span>
+                        <span>{form.model ? (modelOptions.find((m) => m.id === form.model)?.name ?? form.model) : "Use default"}</span>
                         <CaretDownIcon size={12} className="text-xyne-fg-tertiary" />
                       </button>
                     )}
@@ -737,7 +1099,7 @@ export function ProviderTabV3({ agent }: Props) {
                     >
                       Use default
                     </MenuItem>
-                    {codexModels.map((m) => (
+                    {modelOptions.map((m) => (
                       <MenuItem
                         key={m.id}
                         selected={form.model === m.id}
@@ -756,12 +1118,14 @@ export function ProviderTabV3({ agent }: Props) {
                     className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 text-[13px] text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)]"
                   />
                 )}
-                {form.provider === "codex" && codexModelsErr && (
+                {modelOptionsErr && (
                   <p className="text-[12px] text-xyne-warning-fg">
-                    Couldn't load Codex models — free-text is fine.
+                    Couldn't load {providerLabel} models — free-text is fine.
                   </p>
                 )}
               </div>
+                );
+              })()}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-semibold text-xyne-fg-secondary">
                   Base URL
@@ -775,6 +1139,41 @@ export function ProviderTabV3({ agent }: Props) {
                   placeholder="https://openrouter.ai/api/v1"
                   className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 text-[13px] text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)]"
                 />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[12px] font-semibold text-xyne-fg-secondary">
+                  Reasoning effort
+                  <span className="ml-1 text-[12px] font-normal text-xyne-fg-tertiary">
+                    (optional)
+                  </span>
+                </label>
+                <Menu
+                  align="start"
+                  trigger={(triggerProps) => (
+                    <button
+                      {...(triggerProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
+                      type="button"
+                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 text-[13px] text-xyne-fg-primary transition-colors hover:border-xyne-border-strong"
+                    >
+                      <span>{form.reasoningEffort ? form.reasoningEffort[0]!.toUpperCase() + form.reasoningEffort.slice(1) : "Default (medium)"}</span>
+                      <CaretDownIcon size={12} className="text-xyne-fg-tertiary" />
+                    </button>
+                  )}
+                >
+                  {([["", "Default (medium)"], ["low", "Low — fastest"], ["medium", "Medium"], ["high", "High — slowest, deepest"]] as const).map(([value, label]) => (
+                    <MenuItem
+                      key={value || "default"}
+                      selected={form.reasoningEffort === value}
+                      onSelect={() => setForm((p) => ({ ...p, reasoningEffort: value }))}
+                      trailing={form.reasoningEffort === value ? <CheckIcon size={12} weight="bold" /> : undefined}
+                    >
+                      {label}
+                    </MenuItem>
+                  ))}
+                </Menu>
+                <p className="text-[12px] text-xyne-fg-tertiary">
+                  How much the model thinks per step. Applies to reasoning models (gpt-5.x, o-series; thinking level for Claude). High adds 5–15s per tool call — it compounds fast in long sessions.
+                </p>
               </div>
             </div>
             {error && (

@@ -11,6 +11,10 @@ import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-state.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("google-oauth");
 
 const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
@@ -55,74 +59,39 @@ const router = Router();
 router.use("/:userId", pinUserIdParam);
 
 /**
- * GET /:userId/oauth/google/token
- * Returns a valid Google access token for the user (refreshes if expired).
- * Called by xyne-claw before running google-agent tasks.
+ * Live Google access-token provider for the shared `/oauth/:provider/token`
+ * route (see lib/oauth-token-endpoint.ts). Google does NOT rotate refresh
+ * tokens, so the stored refreshToken is carried forward unchanged.
  */
-router.get("/:userId/oauth/google/token", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
+export const googleOAuthProvider: OAuthTokenProvider = {
+  serverType: "google",
+  label: "Google",
+  async refresh(creds) {
+    const { clientId, clientSecret } = getGoogleCredentials();
 
-    // Ensure "google" server type exists
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: "google" } },
-      include: { mcpServer: true },
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: creds.refreshToken,
+        grant_type: "refresh_token",
+      }),
     });
 
-    if (!connection) {
-      res.status(404).json({ success: false, error: "No Google connection found for this user" });
-      return;
+    if (!response.ok) {
+      throw new TokenRefreshError(502, `${response.status} ${await response.text()}`);
     }
 
-    const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-    const creds = JSON.parse(decrypted) as GoogleTokens;
-
-    // Check if token is expired (with 60s buffer)
-    if (Date.now() > creds.expires - 60_000) {
-      const { clientId, clientSecret } = getGoogleCredentials();
-
-      const response = await fetch("https://oauth2.googleapis.com/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: clientId,
-          client_secret: clientSecret,
-          refresh_token: creds.refreshToken,
-          grant_type: "refresh_token",
-        }),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.error(`[google-oauth] Token refresh failed for user ${userId}: ${response.status} ${text}`);
-        res.status(502).json({ success: false, error: "Google token refresh failed" });
-        return;
-      }
-
-      const tokens = (await response.json()) as { access_token: string; expires_in: number };
-
-      // Update stored credentials with new access token
-      const newCreds: GoogleTokens = {
-        accessToken: tokens.access_token,
-        refreshToken: creds.refreshToken, // Google doesn't rotate refresh tokens
-        expires: Date.now() + tokens.expires_in * 1000,
-      };
-
-      const { ciphertext, iv, authTag } = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
-      await prisma.userMcpConnection.update({
-        where: { id: connection.id },
-        data: { encryptedCreds: ciphertext, iv, authTag },
-      });
-
-      res.json({ success: true, data: { accessToken: tokens.access_token } });
-    } else {
-      res.json({ success: true, data: { accessToken: creds.accessToken } });
-    }
-  } catch (err) {
-    console.error("[google-oauth] token error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+    const tokens = (await response.json()) as { access_token: string; expires_in: number };
+    return {
+      accessToken: tokens.access_token,
+      refreshToken: creds.refreshToken, // Google doesn't rotate refresh tokens
+      expires: Date.now() + tokens.expires_in * 1000,
+    };
+  },
+};
 
 /**
  * POST /:userId/oauth/google/authorize
@@ -150,7 +119,7 @@ router.post("/:userId/oauth/google/authorize", async (req: Request<{ userId: str
 
     res.json({ success: true, data: { authUrl: authUrl.toString() } });
   } catch (err) {
-    console.error("[google-oauth] authorize error:", err);
+    log.error("[google-oauth] authorize error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -185,7 +154,7 @@ router.post("/:userId/oauth/google/callback", async (req: Request<{ userId: stri
 
     if (!response.ok) {
       const text = await response.text();
-      console.error(`[google-oauth] Token exchange failed for user ${userId}: ${response.status} ${text}`);
+      log.error(`[google-oauth] Token exchange failed for user ${userId}: ${response.status} ${text}`);
       res.status(502).json({ success: false, error: "Google token exchange failed" });
       return;
     }
@@ -239,10 +208,10 @@ router.post("/:userId/oauth/google/callback", async (req: Request<{ userId: stri
       });
     }
 
-    console.log(`[google-oauth] Stored Google credentials for user ${userId}`);
+    log.info(`[google-oauth] Stored Google credentials for user ${userId}`);
     res.json({ success: true, data: { message: "Google account connected successfully" } });
   } catch (err) {
-    console.error("[google-oauth] callback error:", err);
+    log.error("[google-oauth] callback error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -266,7 +235,7 @@ googleCallbackRouter.get("/google/callback", async (req: Request, res: Response)
     };
 
     if (oauthError) {
-      console.error(`[google-oauth] OAuth error: ${oauthError}`);
+      log.error(`[google-oauth] OAuth error: ${oauthError}`);
       res.redirect(`${frontendUrl}?google_error=${encodeURIComponent(oauthError)}`);
       return;
     }
@@ -281,7 +250,7 @@ googleCallbackRouter.get("/google/callback", async (req: Request, res: Response)
       userId = verifyOAuthState(state).userId;
     } catch (err) {
       const reason = err instanceof OAuthStateError ? err.reason : "malformed";
-      console.error(`[google-oauth] state ${reason}`);
+      log.error(`[google-oauth] state ${reason}`);
       res.redirect(`${frontendUrl}?google_error=invalid_state`);
       return;
     }
@@ -305,7 +274,7 @@ googleCallbackRouter.get("/google/callback", async (req: Request, res: Response)
 
     if (!response.ok) {
       const text = await response.text();
-      console.error(`[google-oauth] Token exchange failed: ${response.status} ${text}`);
+      log.error(`[google-oauth] Token exchange failed: ${response.status} ${text}`);
       res.redirect(`${frontendUrl}?google_error=token_exchange_failed`);
       return;
     }
@@ -351,7 +320,7 @@ googleCallbackRouter.get("/google/callback", async (req: Request, res: Response)
       // Ensure user exists
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (!user) {
-        console.error(`[google-oauth] User not found: ${userId}`);
+        log.error(`[google-oauth] User not found: ${userId}`);
         res.redirect(`${frontendUrl}?google_error=user_not_found`);
         return;
       }
@@ -367,10 +336,10 @@ googleCallbackRouter.get("/google/callback", async (req: Request, res: Response)
       });
     }
 
-    console.log(`[google-oauth] Stored Google credentials for user ${userId} via browser callback`);
+    log.info(`[google-oauth] Stored Google credentials for user ${userId} via browser callback`);
     res.redirect(`${frontendUrl}?google_connected=true`);
   } catch (err) {
-    console.error("[google-oauth] browser callback error:", err);
+    log.error("[google-oauth] browser callback error:", err);
     res.redirect(`${frontendUrl}?google_error=internal_error`);
   }
 });

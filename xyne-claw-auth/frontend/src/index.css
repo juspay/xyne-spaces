@@ -110,6 +110,18 @@
 }
 
 /* ================================================================
+   Wizard step transition — soft fade + rise when step content mounts.
+   Apply .step-enter to any element that should animate in on mount.
+================================================================ */
+@keyframes step-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.step-enter {
+  animation: step-enter 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ================================================================
    Studio empty-state — staggered entrance
    ----------------------------------------------------------------
    Cinematic reveal for the Studio hero + agent cards + their prompt

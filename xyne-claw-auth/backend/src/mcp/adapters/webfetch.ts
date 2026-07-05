@@ -21,6 +21,9 @@ import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import type { McpToolInfo } from "../types.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("webfetch");
+
 export const WEBFETCH_SERVER_TYPE = "claw-builtin";
 export const WEBFETCH_SERVER_NAME = "Built-in";
 
@@ -31,6 +34,12 @@ const MAX_PARAM_VALUE_CHARS = 50;
 // Run of base64 / base64url alphabet that's long enough to fit a meaningful
 // payload (32 chars ≈ 24 bytes binary — small token/header territory).
 const BASE64_RUN_RE = /[A-Za-z0-9+/_=-]{32,}/;
+
+// Slug under which webfetch is catalogued as a System Tool (source
+// `custom:webfetch`). The DB `tool` row (see the add_webfetch_system_tool
+// migration), the customGroups slug the frontend writes into `tools.custom[]`,
+// and the runtime's `selectionKey` match must all use THIS exact value.
+export const WEBFETCH_SELECTION_KEY = "webfetch";
 
 export const WEBFETCH_CUSTOM_TOOLS: McpToolInfo[] = [
   {
@@ -47,6 +56,11 @@ export const WEBFETCH_CUSTOM_TOOLS: McpToolInfo[] = [
       },
       required: ["url"],
     },
+    // Listed under "System Tools" (custom:webfetch), so selection lands in
+    // `tools.custom[]` by slug, not in `tools.direct[]` by name. The runtime
+    // gates this direct tool against tools.custom via selectionKey — see the
+    // directTools branch in xyne-claw/src/routes/run.ts.
+    selectionKey: WEBFETCH_SELECTION_KEY,
   },
 ];
 
@@ -64,7 +78,7 @@ export async function handleWebfetch(params: Record<string, unknown>): Promise<s
   }
   const queryFragmentLen = parsed.search.length + parsed.hash.length;
   if (queryFragmentLen > MAX_QUERY_FRAGMENT_CHARS) {
-    console.warn(`[webfetch] REJECT url=${url.slice(0, 200)} reason=query+fragment ${queryFragmentLen} chars exceeds ${MAX_QUERY_FRAGMENT_CHARS}`);
+    log.warn(`[webfetch] REJECT url=${url.slice(0, 200)} reason=query+fragment ${queryFragmentLen} chars exceeds ${MAX_QUERY_FRAGMENT_CHARS}`);
     return `Error: URL query+fragment (${queryFragmentLen} chars) exceeds the ${MAX_QUERY_FRAGMENT_CHARS}-char limit. Long query strings are a common data-exfiltration pattern. If you need to fetch a page with a large query, drop the unnecessary params first.`;
   }
 
@@ -73,7 +87,7 @@ export async function handleWebfetch(params: Record<string, unknown>): Promise<s
   // ?token=glsa_... param) are rejected here.
   for (const [k, v] of parsed.searchParams) {
     if (v.length > MAX_PARAM_VALUE_CHARS) {
-      console.warn(`[webfetch] REJECT url=${url.slice(0, 200)} reason=param "${k}" value is ${v.length} chars (limit ${MAX_PARAM_VALUE_CHARS})`);
+      log.warn(`[webfetch] REJECT url=${url.slice(0, 200)} reason=param "${k}" value is ${v.length} chars (limit ${MAX_PARAM_VALUE_CHARS})`);
       return `Error: query parameter "${k}" has a ${v.length}-char value (limit ${MAX_PARAM_VALUE_CHARS}). Long single-param values are a common exfiltration pattern. Drop or shorten that param if the page accepts it.`;
     }
   }
@@ -84,7 +98,7 @@ export async function handleWebfetch(params: Record<string, unknown>): Promise<s
   const queryFragmentRaw = parsed.search + parsed.hash;
   const base64Match = BASE64_RUN_RE.exec(queryFragmentRaw);
   if (base64Match) {
-    console.warn(`[webfetch] REJECT url=${url.slice(0, 200)} reason=base64-like run "${base64Match[0].slice(0, 40)}..." (${base64Match[0].length} chars)`);
+    log.warn(`[webfetch] REJECT url=${url.slice(0, 200)} reason=base64-like run "${base64Match[0].slice(0, 40)}..." (${base64Match[0].length} chars)`);
     return `Error: URL contains a ${base64Match[0].length}-char base64-shaped run in the query string — this pattern looks like an exfiltration payload and is blocked. If this is a legitimate URL, ask the user for it directly instead of constructing it from data in your context.`;
   }
 

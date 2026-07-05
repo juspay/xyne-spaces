@@ -29,6 +29,9 @@ import {
 } from "../lib/subagent-resolver.js";
 import { SUBAGENT_DEFINITIONS } from "xyne-claw-shared";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("subagents");
+
 const router = Router();
 
 // ── Response shapes ──────────────────────────────────────────────────────
@@ -46,13 +49,19 @@ function builtinAsListItem(d: typeof SUBAGENT_DEFINITIONS[number]) {
     enabled: true,
     skills: [] as Array<{ id: string; slug: string; name: string }>,
     createdByUserId: null as string | null,
+    createdByName: null as string | null,
+    createdByEmail: null as string | null,
     shares: [] as Array<{ userId: string; role: string; name: string; email: string }>,
   };
 }
 
 type DbRow = Awaited<ReturnType<typeof subagentDefinitionRepository.findByName>>;
 
-function dbRowAsListItem(row: NonNullable<DbRow>, shares: Awaited<ReturnType<typeof subagentShareRepository.listBySubagent>> = []) {
+function dbRowAsListItem(
+  row: NonNullable<DbRow>,
+  shares: Awaited<ReturnType<typeof subagentShareRepository.listBySubagent>> = [],
+  creator: { name: string | null; email: string | null } | null = null,
+) {
   return {
     source: "custom" as const,
     id: row.id,
@@ -69,6 +78,10 @@ function dbRowAsListItem(row: NonNullable<DbRow>, shares: Awaited<ReturnType<typ
     mcpInstanceMap: row.mcpInstanceMap ?? {},
     enabled: row.enabled,
     createdByUserId: row.createdByUserId,
+    // Resolved display name/email of the creator (createdByUserId is a bare
+    // column with no User relation, so callers batch-resolve and pass it in).
+    createdByName: creator?.name ?? null,
+    createdByEmail: creator?.email ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     skills: row.skills.map((s) => ({
@@ -117,13 +130,21 @@ router.get("/", async (_req: Request, res: Response) => {
       const rows = await subagentShareRepository.listBySubagent(c.id);
       sharesByDef.set(c.id, rows);
     }
+    // Batch-resolve creator names (createdByUserId has no User relation).
+    const creatorIds = [...new Set(customs.map((c) => c.createdByUserId).filter((x): x is string => !!x))];
+    const creators = creatorIds.length
+      ? await prisma.user.findMany({ where: { id: { in: creatorIds } }, select: { id: true, name: true, email: true } })
+      : [];
+    const creatorById = new Map(creators.map((u) => [u.id, u]));
     const items = [
       ...SUBAGENT_DEFINITIONS.map(builtinAsListItem),
-      ...customs.map((c) => dbRowAsListItem(c, sharesByDef.get(c.id) ?? [])),
+      ...customs.map((c) =>
+        dbRowAsListItem(c, sharesByDef.get(c.id) ?? [], c.createdByUserId ? creatorById.get(c.createdByUserId) ?? null : null),
+      ),
     ];
     res.json({ success: true, data: items });
   } catch (err) {
-    console.error("[subagents] list error:", err);
+    log.error("[subagents] list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -140,10 +161,13 @@ router.get("/:name", async (req: Request, res: Response) => {
     const row = await subagentDefinitionRepository.findByName(name);
     if (!row) return res.status(404).json({ success: false, error: "subagent not found" });
     const shares = await subagentShareRepository.listBySubagent(row.id);
+    const creator = row.createdByUserId
+      ? await prisma.user.findUnique({ where: { id: row.createdByUserId }, select: { name: true, email: true } })
+      : null;
 
-    return res.json({ success: true, data: dbRowAsListItem(row, shares) });
+    return res.json({ success: true, data: dbRowAsListItem(row, shares, creator) });
   } catch (err) {
-    console.error("[subagents] get error:", err);
+    log.error("[subagents] get error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -183,7 +207,7 @@ router.post("/", async (req: Request, res: Response) => {
     return res.status(201).json({ success: true, data: dbRowAsListItem(created, []) });
   } catch (err) {
     if (sendValidationError(res, err)) return;
-    console.error("[subagents] create error:", err);
+    log.error("[subagents] create error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -245,7 +269,7 @@ router.put("/:name", async (req: Request, res: Response) => {
     return res.json({ success: true, data: dbRowAsListItem(refreshed!, shares) });
   } catch (err) {
     if (sendValidationError(res, err)) return;
-    console.error("[subagents] update error:", err);
+    log.error("[subagents] update error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -276,7 +300,7 @@ router.delete("/:name", async (req: Request, res: Response) => {
     await subagentDefinitionRepository.disable(name);
     return res.json({ success: true });
   } catch (err) {
-    console.error("[subagents] delete error:", err);
+    log.error("[subagents] delete error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -305,7 +329,7 @@ router.post("/:name/enable", async (req: Request, res: Response) => {
     const shares = await subagentShareRepository.listBySubagent(updated.id);
     return res.json({ success: true, data: dbRowAsListItem(updated, shares) });
   } catch (err) {
-    console.error("[subagents] enable error:", err);
+    log.error("[subagents] enable error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -334,7 +358,7 @@ router.get("/:name/shares", async (req: Request, res: Response) => {
       })),
     });
   } catch (err) {
-    console.error("[subagents] list shares error:", err);
+    log.error("[subagents] list shares error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -393,7 +417,7 @@ router.post("/:name/shares", async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    console.error("[subagents] add share error:", err);
+    log.error("[subagents] add share error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -420,7 +444,7 @@ router.delete("/:name/shares/:userId", async (req: Request, res: Response) => {
     await subagentShareRepository.delete(row.id, userId).catch(() => undefined);
     return res.json({ success: true });
   } catch (err) {
-    console.error("[subagents] remove share error:", err);
+    log.error("[subagents] remove share error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

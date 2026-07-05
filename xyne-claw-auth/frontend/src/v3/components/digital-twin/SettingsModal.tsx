@@ -15,7 +15,13 @@ interface SettingsModalProps {
  *  ("X / MAX_SUFFIX_LEN") never gets out of sync with what's actually allowed. */
 const MAX_SUFFIX_LEN = 500;
 
-export function SettingsModal({ userId, open, initialSuffix, onClose, onSaved }: SettingsModalProps) {
+export function SettingsModal({
+  userId,
+  open,
+  initialSuffix,
+  onClose,
+  onSaved,
+}: SettingsModalProps) {
   const [suffix, setSuffix] = useState(initialSuffix);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);

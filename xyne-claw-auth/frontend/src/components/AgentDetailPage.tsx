@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Trash2, ChevronDown, ChevronRight, Link2, Save, X, Plus, Settings, Sparkles, Loader2, Share2, UserPlus, Brain, Plug, Cpu } from "lucide-react";
-import { listAgents, getAgentDetail, updateAgent, listScheduledJobs, deleteScheduledJob, updateScheduledJob, listScheduledJobRuns, getUserChainConfig, setUserChainConfig, listAgentShares, addAgentShare, removeAgentShare } from "../lib/api";
+import { listAgents, getAgentDetail, updateAgent, listScheduledJobs, deleteScheduledJob, updateScheduledJob, listScheduledJobRuns, getUserChainConfig, setUserChainConfig, listAgentShares, addAgentShare, removeAgentShare, listSandboxRepos, type SandboxRepoOption } from "../lib/api";
+import { PromptVersionHistory } from "./PromptVersionHistory";
 import { ChainWorkflowEditor } from "./ChainWorkflowEditor";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { MemoryTab } from "../v2/components/MemoryTab";
 import { AgentMcpTab } from "./AgentMcpTab";
+import { KnowledgeBasePicker } from "../v3/components/KnowledgeBasePicker";
 import type { Agent, AgentSkill, ScheduledJob, ScheduledJobRun } from "../lib/types";
 
 interface Props {
@@ -1897,6 +1899,17 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(
     agent.skills?.map((s) => s.skillId) ?? [],
   );
+  // Knowledge Base grants — initialized from the agent's existing AgentCollection
+  // rows. Storing fileId as null in the form mirrors the DB and the request
+  // payload's `knowledgeBase` field.
+  const [selectedKbResources, setSelectedKbResources] = useState<import("../v3/components/KnowledgeBasePicker").KbSelection[]>(
+    agent.collections?.map((c) => ({ collectionId: c.collectionId, fileId: c.fileId })) ?? [],
+  );
+  // KB scoping mode — "COLLECTIONS" uses the picker selection above;
+  // "USER" inherits the running user's spaces access and hides the picker.
+  const [selectedKbScope, setSelectedKbScope] = useState<"COLLECTIONS" | "USER">(
+    agent.kbScope === "USER" ? "USER" : "COLLECTIONS",
+  );
   const [subagents, setSubagents] = useState<string[]>(configTools.subagents ?? []);
   const [saSkills, setSaSkills] = useState<Record<string, string[]>>(configSubagentSkills);
   const [direct, setDirect] = useState<string[]>(configTools.direct ?? []);
@@ -1912,16 +1925,28 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
   const [skillTriggers, setSkillTriggers] = useState<Array<{ toolName: string; skillSlug: string; when: "before" | "after"; prompt: string }>>(
     (agent.config?.skillTriggers as Array<{ toolName: string; skillSlug: string; when: string; prompt?: string }> ?? []).map((t) => ({ ...t, when: t.when as "before" | "after", prompt: t.prompt ?? "" })),
   );
-  // Dedicated input for `config.repoUrl` — the agent's git URL. Surfaced as
-  // its own labelled field instead of buried inside the generic key/value
-  // editor so admins discover it. Excluded from the scalar editor below to
-  // avoid the same value appearing in two places.
-  const [repoUrl, setRepoUrl] = useState<string>((agent.config?.repoUrl as string | undefined) ?? "");
+  // Which sandbox repo setup (REPO_CONFIGS key) this agent is pinned to. When
+  // set, the runtime forces sandbox-repo-setup onto this repo so the LLM can't
+  // pick the wrong one (xyne-spaces vs hyperswitch). "" = not pinned.
+  const [sandboxRepo, setSandboxRepo] = useState<string>((agent.config?.sandboxRepo as string | undefined) ?? "");
+  const [sandboxRepoOptions, setSandboxRepoOptions] = useState<SandboxRepoOption[]>([]);
+  useEffect(() => { listSandboxRepos().then(setSandboxRepoOptions).catch(() => {}); }, []);
+  // Citation reflection — opt-in post-response nudge (see xyne-claw agent.ts).
+  // Stored as a real boolean in config.citationReflection (accepts legacy "true").
+  const [citationReflection, setCitationReflection] = useState<boolean>(
+    agent.config?.citationReflection === true || agent.config?.citationReflection === "true",
+  );
+  // Auto-citations — opt-in: chunk + inline-tokenize EVERY tool result so the
+  // model can cite any tool's output (see xyne-claw auto-citations.ts). Stored
+  // as a real boolean in config.autoToolCitations (accepts legacy "true").
+  const [autoToolCitations, setAutoToolCitations] = useState<boolean>(
+    agent.config?.autoToolCitations === true || agent.config?.autoToolCitations === "true",
+  );
   const [aiIntent, setAiIntent] = useState("");
   const [generating, setGenerating] = useState(false);
 
   // Free-form scalar config (env-style key/value), excludes structured keys managed above.
-  const STRUCTURED_KEYS = new Set(["tools", "subagentSkills", "skillTriggers", "promptInjections", "repoUrl"]);
+  const STRUCTURED_KEYS = new Set(["tools", "subagentSkills", "skillTriggers", "promptInjections", "sandboxRepo", "citationReflection", "autoToolCitations"]);
   const initialCustomConfig: Record<string, string> = {};
   for (const [k, v] of Object.entries(agent.config ?? {})) {
     if (STRUCTURED_KEYS.has(k)) continue;
@@ -2034,10 +2059,21 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
       for (const [k, v] of Object.entries(customConfig)) {
         existingConfig[k] = v;
       }
-      // Empty input preserves the previous value rather than wiping it.
-      const trimmedRepoUrl = repoUrl.trim();
-      if (trimmedRepoUrl) existingConfig.repoUrl = trimmedRepoUrl;
-      await updateAgent(agent.slug, { systemPrompt: prompt, skills: selectedSkillIds, config: existingConfig });
+      if (sandboxRepo) existingConfig.sandboxRepo = sandboxRepo;
+      else delete existingConfig.sandboxRepo;
+      if (citationReflection) existingConfig.citationReflection = true;
+      else delete existingConfig.citationReflection;
+      if (autoToolCitations) existingConfig.autoToolCitations = true;
+      else delete existingConfig.autoToolCitations;
+      await updateAgent(agent.slug, {
+        systemPrompt: prompt,
+        skills: selectedSkillIds,
+        // In USER scope the server ignores knowledgeBase[] and clears any
+        // stored grants; skip the field so the payload reflects intent.
+        ...(selectedKbScope === "COLLECTIONS" ? { knowledgeBase: selectedKbResources } : {}),
+        kbScope: selectedKbScope,
+        config: existingConfig,
+      });
       setSaved(true);
       onSave();
       setTimeout(() => setSaved(false), 3000);
@@ -2051,6 +2087,16 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
   const toggleItem = (list: string[], setList: (v: string[]) => void, val: string) => {
     setList(list.includes(val) ? list.filter((x) => x !== val) : [...list, val]);
   };
+
+  // Slug-aware toggle for MCP server tools. Two servers can expose a tool with
+  // the same `name`, so we key selection on the unique `slug` (keying on `name`
+  // made same-named pills toggle together). We also strip any legacy bare-name
+  // entry so re-saving migrates the stored id name → slug.
+  const toggleDirectSlug = (t: { slug: string; name: string }) => {
+    const cleaned = direct.filter((d) => d !== t.name);
+    setDirect(cleaned.includes(t.slug) ? cleaned.filter((d) => d !== t.slug) : [...cleaned, t.slug]);
+  };
+  const isDirectSel = (t: { slug: string; name: string }) => direct.includes(t.slug) || direct.includes(t.name);
 
   return (
     // When readOnly is true, the outer fieldset disables every <input>,
@@ -2096,6 +2142,12 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
           className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
         />
         <p className="mt-1 text-xs text-zinc-600">{prompt.length} characters</p>
+        <PromptVersionHistory
+          agentSlug={agent.slug}
+          activeVersion={agent.activePromptVersion}
+          readOnly={readOnly}
+          onActivated={(restored) => { setPrompt(restored); onSave(); }}
+        />
       </div>
 
       {/* Tools */}
@@ -2132,7 +2184,9 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
               }))
               .filter((g) => g.tools.length > 0);
             const serverToolNames = new Set(
-              serverGroups.flatMap((g) => g.tools.map((t) => t.name)),
+              // slug + name so the badge count is correct whether a tool was
+              // stored by its new unique slug or a legacy bare name.
+              serverGroups.flatMap((g) => g.tools.flatMap((t) => [t.slug, t.name])),
             );
             const selectedWriteCount = direct.filter((n) => writeToolNames.has(n)).length;
             const selectedServerCount = direct.filter((n) => serverToolNames.has(n)).length;
@@ -2230,8 +2284,8 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
                     <p className="mb-1 text-xs text-zinc-500">{g.source}</p>
                     <div className="flex flex-wrap gap-2">
                       {g.tools.map((t) => (
-                        <button key={t.slug} onClick={() => toggleItem(direct, setDirect, t.name)}
-                          className={`rounded-lg border px-3 py-1.5 text-sm transition ${direct.includes(t.name) ? "border-green-500 bg-green-950/30 text-green-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}>
+                        <button key={t.slug} onClick={() => toggleDirectSlug(t)}
+                          className={`rounded-lg border px-3 py-1.5 text-sm transition ${isDirectSel(t) ? "border-green-500 bg-green-950/30 text-green-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}>
                           {t.name}
                         </button>
                       ))}
@@ -2293,22 +2347,117 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
         )}
       </div>
 
-      {/* Git Repository URL */}
+      {/* Knowledge Base — two scoping modes:
+            COLLECTIONS — picker selects an explicit allowlist (same for everyone).
+            USER        — agent inherits the calling user's spaces access at runtime. */}
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
-        <h3 className="mb-3 text-sm font-semibold text-zinc-200">Git Repository URL</h3>
+        <h3 className="mb-3 text-sm font-semibold text-zinc-200">Knowledge Base</h3>
         <p className="mb-3 text-xs text-zinc-500">
-          Optional. The git URL this agent's session should clone/checkout into its working directory.
-          Format: <code className="font-mono text-zinc-400">ssh://git@host/org/repo.git</code> or <code className="font-mono text-zinc-400">https://host/org/repo.git</code>.
-          Leave blank for non-repo agents. URLs not in the warmpool will incur a slow first-clone (~30s).
+          Attach spaces collections or specific files, or have the agent match whoever's running it.
         </p>
-        <input
-          value={repoUrl}
-          onChange={(e) => setRepoUrl(e.target.value)}
-          placeholder="ssh://git@github.com/example-org/arya.git"
-          spellCheck={false}
-          autoComplete="off"
-          className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
-        />
+
+        <fieldset className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2" disabled={readOnly}>
+          {([
+            { value: "COLLECTIONS" as const, label: "Selected collections & files", hint: "Explicit allowlist — same for every user." },
+            { value: "USER" as const, label: "Match my access", hint: "Inherits the running user's spaces access." },
+          ]).map((opt) => {
+            const selected = selectedKbScope === opt.value;
+            return (
+              <label
+                key={opt.value}
+                className={`flex cursor-pointer flex-col gap-1 rounded-md border px-3 py-2 text-xs ${
+                  selected ? "border-blue-500 bg-blue-500/10" : "border-zinc-700 hover:border-zinc-600"
+                } ${readOnly ? "cursor-not-allowed opacity-60" : ""}`}
+              >
+                <span className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="kb-scope-v2"
+                    value={opt.value}
+                    checked={selected}
+                    onChange={() => !readOnly && setSelectedKbScope(opt.value)}
+                  />
+                  <span className="font-medium text-zinc-200">{opt.label}</span>
+                </span>
+                <span className="pl-5 text-zinc-500">{opt.hint}</span>
+              </label>
+            );
+          })}
+        </fieldset>
+
+        {selectedKbScope === "USER" ? (
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-400">
+            This agent is scoped at the user level — KB reach is whatever the running user can see in spaces. The per-collection picker is disabled.
+          </div>
+        ) : (
+          <>
+            <KnowledgeBasePicker
+              value={selectedKbResources}
+              onChange={setSelectedKbResources}
+            />
+            {selectedKbResources.length > 0 && (
+              <p className="mt-2 text-xs text-zinc-500">{selectedKbResources.length} KB grant(s) selected</p>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Sandbox repository — pins which REPO_CONFIGS setup the sandbox uses */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+        <h3 className="mb-3 text-sm font-semibold text-zinc-200">Sandbox repository</h3>
+        <p className="mb-3 text-xs text-zinc-500">
+          Optional. Pin this agent to a specific sandbox setup. When set, the runtime forces
+          <code className="font-mono text-zinc-400"> sandbox-repo-setup</code> onto this repo — the agent
+          can no longer pick the wrong one. Leave as "None" to let the agent choose.
+        </p>
+        <select
+          value={sandboxRepo}
+          onChange={(e) => setSandboxRepo(e.target.value)}
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none"
+        >
+          <option value="">None (agent chooses)</option>
+          {sandboxRepoOptions.map((r) => (
+            <option key={r.key} value={r.key}>{r.name} ({r.key})</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Citations — post-response citation enforcement */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+        <h3 className="mb-3 text-sm font-semibold text-zinc-200">Citations</h3>
+        <p className="mb-3 text-xs text-zinc-500">
+          Enforce inline citations. After the agent answers, if it drew on citeable sources
+          (search / KB / subagents that return <code className="font-mono text-zinc-400">[clf-…]</code> tokens)
+          but cited none, the runtime nudges it once to rewrite the answer with verbatim inline citations.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-zinc-200">
+          <input
+            type="checkbox"
+            checked={citationReflection}
+            onChange={(e) => setCitationReflection(e.target.checked)}
+            disabled={readOnly}
+            className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 accent-purple-500"
+          />
+          Enforce citations (post-response reflection)
+        </label>
+        <label className="mt-3 flex items-start gap-2 text-sm text-zinc-200">
+          <input
+            type="checkbox"
+            checked={autoToolCitations}
+            onChange={(e) => setAutoToolCitations(e.target.checked)}
+            disabled={readOnly}
+            className="mt-0.5 h-4 w-4 rounded border-zinc-600 bg-zinc-900 accent-purple-500"
+          />
+          <span>
+            Auto-cite all tools
+            <span className="mt-0.5 block text-xs text-zinc-500">
+              Chunk every tool result — every MCP, sandbox, and built-in tool — and
+              inject <code className="font-mono text-zinc-400">[clf-…]</code> tokens so the
+              model can cite any output. Tools that already emit their own citations are
+              left untouched.
+            </span>
+          </span>
+        </label>
       </div>
 
       {/* Skill Triggers */}

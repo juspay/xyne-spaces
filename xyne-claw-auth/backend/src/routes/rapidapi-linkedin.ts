@@ -24,6 +24,10 @@ import { CONFIG } from "../config.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { evictSession } from "../mcp/runner.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { requireSessionTokenForUserParam } from "../middleware/require-session-token.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("rapidapi-linkedin");
 
 const RAPIDAPI_HOST = "fresh-linkedin-profile-data.p.rapidapi.com";
 const RAPIDAPI_BASE_URL = `https://${RAPIDAPI_HOST}`;
@@ -83,7 +87,7 @@ async function storeApiKey(userId: string, apiKey: string): Promise<void> {
 
   syncToolsForServer(userId, "rapidapi-linkedin", server.name, { apiKey }).catch(
     (err) => {
-      console.error(
+      log.error(
         `[rapidapi-linkedin] tool sync failed for user ${userId}:`,
         err,
       );
@@ -104,6 +108,7 @@ router.use("/:userId", pinUserIdParam);
  */
 router.get(
   "/:userId/oauth/rapidapi-linkedin/token",
+  requireSessionTokenForUserParam,
   async (req: Request<{ userId: string }>, res: Response) => {
     try {
       const { userId } = req.params;
@@ -131,7 +136,7 @@ router.get(
 
       res.json({ success: true, data: { accessToken: creds.apiKey } });
     } catch (err) {
-      console.error("[rapidapi-linkedin] token error:", err);
+      log.error("[rapidapi-linkedin] token error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },
@@ -172,13 +177,13 @@ router.post(
 
       await storeApiKey(userId, trimmedKey);
 
-      console.log(`[rapidapi-linkedin] Stored API key for user ${userId}`);
+      log.info(`[rapidapi-linkedin] Stored API key for user ${userId}`);
       res.json({
         success: true,
         data: { message: "LinkedIn (RapidAPI) connected successfully." },
       });
     } catch (err) {
-      console.error("[rapidapi-linkedin] connect error:", err);
+      log.error("[rapidapi-linkedin] connect error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },

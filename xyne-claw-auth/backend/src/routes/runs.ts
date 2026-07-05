@@ -1,7 +1,11 @@
 import { Router, type Request, type Response } from "express";
 import { agentRunRepository, agentRepository } from "../repositories/index.js";
-import { getRequesterId } from "../middleware/agent-acl.js";
+import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { requireS2S } from "../middleware/require-auth.js";
 import { renderClaudeCodeJsonl, renderMarkdown, renderClaudeProjectZip, type SessionExportRun } from "../lib/session-export.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("runs");
 
 const router = Router();
 
@@ -17,6 +21,29 @@ router.get("/", async (req: Request, res: Response) => {
     const conversationId = typeof req.query["conversationId"] === "string" ? req.query["conversationId"] : undefined;
     const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
     const limit = typeof req.query["limit"] === "string" ? Math.min(parseInt(req.query["limit"], 10) || 50, 200) : 50;
+
+    // Admin "All Runs": every user's runs of a single agent, ACL-filtered
+    // (your own always; other users' only when usedUserToken=false). Requires
+    // an agentSlug (scoped to one agent) and claw-admin.
+    const scopeAll = req.query["scope"] === "all";
+    if (scopeAll) {
+      if (!agentSlug) {
+        res.status(400).json({ success: false, error: "agentSlug is required for scope=all" });
+        return;
+      }
+      if (!(await isClawAdmin(userId))) {
+        res.status(403).json({ success: false, error: "Admin only" });
+        return;
+      }
+      const allRuns = await agentRunRepository.listAllForAgent(agentSlug, userId, {
+        ...(status ? { status } : {}),
+        ...(conversationId ? { conversationId } : {}),
+        limit,
+      });
+      res.json({ success: true, data: allRuns });
+      return;
+    }
+
     const runs = await agentRunRepository.listByUser(userId, {
       ...(status ? { status } : {}),
       ...(conversationId ? { conversationId } : {}),
@@ -25,7 +52,7 @@ router.get("/", async (req: Request, res: Response) => {
     });
     res.json({ success: true, data: runs });
   } catch (err) {
-    console.error("[runs] list error:", err);
+    log.error("[runs] list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -67,7 +94,68 @@ router.get("/light", async (req: Request, res: Response) => {
     });
     res.json({ success: true, data: runs });
   } catch (err) {
-    console.error("[runs] /light error:", err);
+    log.error("[runs] /light error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// GET /runs/by-agent/:slug — cross-user run history for one agent.
+//
+// Powers the `get-agent-runs` system tool. S2S-gated so it's only reachable
+// from inside the cluster (claw-pod custom tools call it with the shared
+// x-s2s-key), not from public clients. No per-user auth — any agent can ask
+// about any agent's run history, by design (stats are openly inspectable).
+//
+// Query params:
+//   - sinceDays: 1-365, defaults 30
+//   - limit: 1-200, defaults 50
+//   - status: optional filter (running / completed / failed / cancelled)
+//
+// Must be declared BEFORE /:sessionId so the literal path takes precedence.
+router.get("/by-agent/:slug", requireS2S, async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const slug = req.params.slug;
+    if (!slug || typeof slug !== "string") {
+      res.status(400).json({ success: false, error: "slug is required" });
+      return;
+    }
+    const sinceDaysRaw = typeof req.query["sinceDays"] === "string" ? parseInt(req.query["sinceDays"], 10) : NaN;
+    const sinceDays = Number.isFinite(sinceDaysRaw) ? Math.min(Math.max(sinceDaysRaw, 1), 365) : 30;
+    const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
+    const limit = typeof req.query["limit"] === "string"
+      ? Math.min(Math.max(parseInt(req.query["limit"], 10) || 50, 1), 200)
+      : 50;
+    const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
+
+    // Existence check — return 404 instead of empty array so the agent can
+    // distinguish "this agent doesn't exist" (typo) from "no recent runs"
+    // (real but quiet agent).
+    const agent = await agentRepository.findBySlug(slug);
+    if (!agent) {
+      res.status(404).json({ success: false, error: `agent "${slug}" not found` });
+      return;
+    }
+
+    const runs = await agentRunRepository.listByAgentSlug(slug, {
+      since,
+      limit,
+      ...(status ? { status } : {}),
+    });
+
+    res.json({
+      success: true,
+      data: {
+        agentSlug: slug,
+        agentName: agent.name,
+        sinceDays,
+        limit,
+        ...(status ? { statusFilter: status } : {}),
+        totalReturned: runs.length,
+        runs,
+      },
+    });
+  } catch (err) {
+    log.error("[runs] /by-agent error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -160,7 +248,7 @@ router.get("/session/export", async (req: Request, res: Response) => {
     res.setHeader("Content-Disposition", `attachment; filename="${canonicalSessionId}.jsonl"`);
     res.send(body);
   } catch (err) {
-    console.error("[runs] session export error:", err);
+    log.error("[runs] session export error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -184,7 +272,7 @@ router.get("/:sessionId", async (req: Request<{ sessionId: string }>, res: Respo
     }
     res.json({ success: true, data: run });
   } catch (err) {
-    console.error("[runs] get error:", err);
+    log.error("[runs] get error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -214,7 +302,7 @@ router.post("/:sessionId/rate", async (req: Request<{ sessionId: string }>, res:
     await agentRunRepository.rate(req.params.sessionId, userId, rating, comment ?? null);
     res.json({ success: true });
   } catch (err) {
-    console.error("[runs] rate error:", err);
+    log.error("[runs] rate error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

@@ -9,6 +9,9 @@ import { CONFIG } from "../config.js";
 import { evictSession } from "../mcp/runner.js";
 import { getDoctorBitbucketStats } from "../services/bitbucket-stats.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("admin");
+
 const router = Router();
 
 router.get("/roles", requireClawAdmin, async (_req: Request, res: Response) => {
@@ -16,7 +19,7 @@ router.get("/roles", requireClawAdmin, async (_req: Request, res: Response) => {
     const roles = await userRoleRepository.listByRole("CLAW_ADMIN");
     res.json({ success: true, data: roles });
   } catch (err) {
-    console.error("[admin] list roles error:", err);
+    log.error("[admin] list roles error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -49,10 +52,10 @@ router.post("/roles", requireClawAdmin, async (req: Request, res: Response) => {
       description: `CLAW_ADMIN granted to ${targetUser.email}`,
       metadata: { targetEmail: targetUser.email },
     });
-    console.log(`[admin] CLAW_ADMIN granted to ${targetUser.email} by ${requesterId}`);
+    log.info(`[admin] CLAW_ADMIN granted to ${targetUser.email} by ${requesterId}`);
     res.status(201).json({ success: true, data: role });
   } catch (err) {
-    console.error("[admin] grant role error:", err);
+    log.error("[admin] grant role error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -68,14 +71,14 @@ router.delete("/roles/:userId", requireClawAdmin, async (req: Request<{ userId: 
 
     await userRoleRepository.delete(userId, "CLAW_ADMIN");
     await writeAuditLog({ actorUserId: requesterId, eventType: "ROLE_REVOKED", targetId: userId, description: `CLAW_ADMIN revoked from ${targetUser.email}`, metadata: { targetEmail: targetUser.email } });
-    console.log(`[admin] CLAW_ADMIN revoked from ${targetUser.email} by ${requesterId}`);
+    log.info(`[admin] CLAW_ADMIN revoked from ${targetUser.email} by ${requesterId}`);
     res.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "P2025") {
       res.status(404).json({ success: false, error: "User does not have CLAW_ADMIN role" });
       return;
     }
-    console.error("[admin] revoke role error:", err);
+    log.error("[admin] revoke role error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -95,7 +98,7 @@ router.get("/roles/check/:userId", async (req: Request<{ userId: string }>, res:
     const admin = await isClawAdmin(requesterId);
     res.json({ success: true, data: { isAdmin: admin } });
   } catch (err) {
-    console.error("[admin] check role error:", err);
+    log.error("[admin] check role error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -112,7 +115,7 @@ router.get("/audit-logs", requireClawAdmin, async (req: Request, res: Response) 
     ]);
     res.json({ success: true, data: logs, total, limit, offset });
   } catch (err) {
-    console.error("[admin] audit-logs error:", err);
+    log.error("[admin] audit-logs error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -134,7 +137,7 @@ router.get("/ratings/stats", requireClawAdmin, async (req: Request, res: Respons
     const stats = await agentRunRepository.ratingStatsByAgent(cutoff);
     res.json({ success: true, data: stats });
   } catch (err) {
-    console.error("[admin] ratings/stats error:", err);
+    log.error("[admin] ratings/stats error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -146,7 +149,7 @@ router.get("/ratings/recent-downs", requireClawAdmin, async (req: Request, res: 
     const rows = await agentRunRepository.recentDownRuns(cutoff, limit);
     res.json({ success: true, data: rows });
   } catch (err) {
-    console.error("[admin] ratings/recent-downs error:", err);
+    log.error("[admin] ratings/recent-downs error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -159,7 +162,7 @@ router.get("/usage/stats", requireClawAdmin, async (req: Request, res: Response)
     const stats = await agentRunRepository.usageStatsByAgent(cutoff);
     res.json({ success: true, data: stats });
   } catch (err) {
-    console.error("[admin] usage/stats error:", err);
+    log.error("[admin] usage/stats error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -207,7 +210,7 @@ router.get("/scheduled-jobs", requireClawAdmin, async (req: Request, res: Respon
       },
     });
   } catch (err) {
-    console.error("[admin] scheduled-jobs error:", err);
+    log.error("[admin] scheduled-jobs error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -235,7 +238,7 @@ router.get("/mcp-servers", requireClawAdmin, async (_req: Request, res: Response
       })),
     });
   } catch (err) {
-    console.error("[admin] list mcp-servers error:", err);
+    log.error("[admin] list mcp-servers error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -260,7 +263,7 @@ router.put("/mcp-servers/:type/global-fallback", requireClawAdmin, async (req: R
     });
     res.json({ success: true, data: { type: server.type, allowGlobalFallback: allow } });
   } catch (err) {
-    console.error("[admin] toggle global-fallback error:", err);
+    log.error("[admin] toggle global-fallback error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -318,7 +321,7 @@ router.put("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req
       },
     });
   } catch (err) {
-    console.error("[admin] put global-credentials error:", err);
+    log.error("[admin] put global-credentials error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -342,7 +345,7 @@ router.delete("/mcp-servers/:type/global-credentials", requireClawAdmin, async (
     });
     res.json({ success: true });
   } catch (err) {
-    console.error("[admin] delete global-credentials error:", err);
+    log.error("[admin] delete global-credentials error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -378,16 +381,20 @@ router.get("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req
       },
     });
   } catch (err) {
-    console.error("[admin] get global-credentials error:", err);
+    log.error("[admin] get global-credentials error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
 
 // ── Agent Dashboard (single payload endpoint) ───────────────────────────────
 
-// Open to any authenticated user (not gated by requireClawAdmin) — the
-// org-wide agent dashboard is meant for everyone with a Spaces login, not
-// just admins. Mount-level requireAuth still applies.
+// Open to any authenticated user (not gated by requireClawAdmin) — DELIBERATE.
+// The org-wide agent dashboard is a core surface for everyone with a Spaces
+// login: /v3/home (insight strip, needs-attention, recent runs) and
+// /v3/dashboard are built on these endpoints for non-admins. Mount-level
+// requireAuth still applies. Restricting these to admins is a product
+// decision, not an auth fix — don't add requireClawAdmin here without also
+// reworking those frontend surfaces.
 router.get("/dashboard", async (req: Request, res: Response) => {
   try {
     const window = windowFromDays(req.query["days"] ?? "30");
@@ -510,7 +517,7 @@ router.get("/dashboard", async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    console.error("[admin] dashboard error:", err);
+    log.error("[admin] dashboard error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -526,7 +533,7 @@ router.get("/dashboard/projects", async (req: Request, res: Response) => {
     const projects = await agentRunRepository.listProjectsForDashboard(cutoff);
     res.json({ success: true, data: projects });
   } catch (err) {
-    console.error("[admin] dashboard/projects error:", err);
+    log.error("[admin] dashboard/projects error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -565,7 +572,7 @@ router.get("/dashboard/project-insights", async (req: Request, res: Response) =>
       data: { projectId, agentUsage: enrichedAgentUsage, topUsers, skillUsage, subagentUsage },
     });
   } catch (err) {
-    console.error("[admin] dashboard/project-insights error:", err);
+    log.error("[admin] dashboard/project-insights error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -582,7 +589,7 @@ router.get("/dashboard/bitbucket-stats", async (_req: Request, res: Response) =>
     const data = await getDoctorBitbucketStats();
     res.json({ success: true, data });
   } catch (err) {
-    console.error("[admin] bitbucket-stats error:", err);
+    log.error("[admin] bitbucket-stats error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

@@ -19,7 +19,7 @@ export const asanaAdapter: StdioMcpAdapter = {
 
     return {
       cmd: "npx",
-      args: ["-y", "@roychri/mcp-server-asana"],
+      args: ["-y", "@roychri/mcp-server-asana@1.8.0"],
       env: {
         ASANA_ACCESS_TOKEN: accessToken,
       },

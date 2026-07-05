@@ -14,12 +14,20 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 // `find / -name .env\*`, etc. are all reachable because path arguments to
 // these commands are NOT gated to the session working directory.
 //
-// All five filesystem tools below (read/write/grep/find/ls) are path-gated
-// to the session working directory. Pi v0.75+ factories now take a `cwd`
-// argument and gate themselves at the tool layer; the gatePathParam wrapper
-// here is defense-in-depth (catches absolute paths that bypass pi's relative
-// resolution) plus a uniform error shape across both layers. Without ANY
-// gating, `grep -r LITELLM_API_KEY /` would walk the whole claw container.
+// All five filesystem tools below (read/write/grep/find/ls) are path-gated.
+// pi's own factories do NOT contain absolute paths (createReadTool's `cwd` is
+// only the base for RELATIVE paths — verified in pi path-utils.resolveToCwd),
+// so the gatePathParam wrapper here is the SOLE enforcement. Without it,
+// `grep -r LITELLM_API_KEY /` would walk the whole claw container.
+//
+// Each tool gates against one or more allowed roots:
+//   - WRITE is confined to the session working directory ONLY.
+//   - READ/GREP/FIND/LS are confined to the working directory PLUS any
+//     `readonlyRoots` (skill directories). Skills live OUTSIDE the working dir
+//     — bundled skills under the repo `skills/` dir and session skills under
+//     <dataDir>/session-skills/<id> — and pi advertises them to the model with
+//     absolute paths, so the model must be able to READ (but not write) them.
+//     readonlyRoots default to [] so a confined-only caller is unchanged.
 
 type CodingTool = AgentTool<any>;
 
@@ -38,15 +46,17 @@ interface GateOptions {
 }
 
 function denyOutside(
-  workingDir: string,
+  roots: string[],
   raw: unknown,
   opts: GateOptions,
 ): string | null {
   if (typeof raw !== "string" || !raw) {
     return opts.allowMissingPath ? null : `path is required`;
   }
-  const absolute = isAbsolute(raw) ? resolvePath(raw) : resolvePath(workingDir, raw);
-  if (!isWithin(absolute, workingDir)) {
+  // Relative paths resolve against the primary root (the session working dir,
+  // always roots[0]); absolute paths are checked as-is against every allowed root.
+  const absolute = isAbsolute(raw) ? resolvePath(raw) : resolvePath(roots[0]!, raw);
+  if (!roots.some((root) => isWithin(absolute, root))) {
     return `path ${raw} is outside the session working directory`;
   }
   return null;
@@ -54,14 +64,14 @@ function denyOutside(
 
 function gatePathParam<T extends AgentTool<any, any>>(
   inner: T,
-  workingDir: string,
+  roots: string[],
   opts: GateOptions = {},
 ): T {
   const originalExecute = inner.execute.bind(inner);
   const wrapped: AgentTool<any, any> = {
     ...inner,
     execute: async (toolCallId, params, signal, onUpdate) => {
-      const err = denyOutside(workingDir, (params as Record<string, unknown>)?.["path"], opts);
+      const err = denyOutside(roots, (params as Record<string, unknown>)?.["path"], opts);
       if (err) {
         return {
           content: [{ type: "text", text: `Error: ${err}` }],
@@ -74,14 +84,16 @@ function gatePathParam<T extends AgentTool<any, any>>(
   return wrapped as T;
 }
 
-export function createScopedTools(workingDir: string): CodingTool[] {
+export function createScopedTools(workingDir: string, readonlyRoots: string[] = []): CodingTool[] {
   const root = resolvePath(workingDir);
+  // Read-only ops may also reach the skill dirs; write stays confined to root.
+  const readRoots = [root, ...readonlyRoots.map((r) => resolvePath(r))];
   return [
-    gatePathParam(createReadTool(root), root),
-    gatePathParam(createWriteTool(root), root),
-    gatePathParam(createGrepTool(root), root, { allowMissingPath: true }),
-    gatePathParam(createFindTool(root), root, { allowMissingPath: true }),
-    gatePathParam(createLsTool(root), root, { allowMissingPath: true }),
+    gatePathParam(createReadTool(root), readRoots),
+    gatePathParam(createWriteTool(root), [root]),
+    gatePathParam(createGrepTool(root), readRoots, { allowMissingPath: true }),
+    gatePathParam(createFindTool(root), readRoots, { allowMissingPath: true }),
+    gatePathParam(createLsTool(root), readRoots, { allowMissingPath: true }),
   ] as CodingTool[];
 }
 
@@ -92,13 +104,18 @@ export function createScopedTools(workingDir: string): CodingTool[] {
  * built-ins under the SAME names (read/write/grep/find/ls). The LLM still
  * sees the standard tool names.
  */
-export function createScopedToolMap(workingDir: string): Record<string, CodingTool> {
+export function createScopedToolMap(
+  workingDir: string,
+  readonlyRoots: string[] = [],
+): Record<string, CodingTool> {
   const root = resolvePath(workingDir);
+  // Read-only ops may also reach the skill dirs; write stays confined to root.
+  const readRoots = [root, ...readonlyRoots.map((r) => resolvePath(r))];
   return {
-    read: gatePathParam(createReadTool(root), root),
-    write: gatePathParam(createWriteTool(root), root),
-    grep: gatePathParam(createGrepTool(root), root, { allowMissingPath: true }),
-    find: gatePathParam(createFindTool(root), root, { allowMissingPath: true }),
-    ls: gatePathParam(createLsTool(root), root, { allowMissingPath: true }),
+    read: gatePathParam(createReadTool(root), readRoots),
+    write: gatePathParam(createWriteTool(root), [root]),
+    grep: gatePathParam(createGrepTool(root), readRoots, { allowMissingPath: true }),
+    find: gatePathParam(createFindTool(root), readRoots, { allowMissingPath: true }),
+    ls: gatePathParam(createLsTool(root), readRoots, { allowMissingPath: true }),
   };
 }

@@ -28,7 +28,7 @@ export const databricksAdapter: StdioMcpAdapter = {
 
     return {
       cmd: "uvx",
-      args: ["databricks-mcp-server"],
+      args: ["databricks-mcp-server==0.4.4"],
       env,
     };
   },

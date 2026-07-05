@@ -10,6 +10,9 @@ import {
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("provision");
+
 /**
  * Hardened provisioner for `npx`-launched MCP servers.
  *
@@ -265,7 +268,7 @@ export async function provisionStdioCommand(
     const entrypoint = resolveEntrypoint(pkgDir, name);
     return { command: "node", args: [entrypoint, ...parsed.serverArgs] };
   } catch (err) {
-    console.warn(
+    log.warn(
       `[mcp/provision] ${parsed.spec}: provisioning failed, falling back to npx — ${
         err instanceof Error ? err.message : String(err)
       }`,
@@ -291,10 +294,10 @@ export async function prewarmSpec(spec: string): Promise<boolean> {
   const key = storeKey(name, version);
   try {
     await ensureProvisioned(name, version, key);
-    console.log(`[mcp/provision] prewarmed ${spec}`);
+    log.info(`[mcp/provision] prewarmed ${spec}`);
     return true;
   } catch (err) {
-    console.error(
+    log.error(
       `[mcp/provision] prewarm FAILED for ${spec}: ${err instanceof Error ? err.message : String(err)}`,
     );
     return false;

@@ -37,21 +37,152 @@ import {
 import {
   createChainWorkflow,
   listSpacesChannels,
+  listSpacesBoards,
+  listSpacesProjects,
   updateChainWorkflow,
   upsertChannelChainBinding,
   deleteChannelChainBinding,
+  listSpacesTriggers,
+  getSpacesTriggerSchema,
   type ChainWorkflow,
   type ChainWorkflowDefinition,
   type ChainWorkflowEdge as ApiEdge,
   type ChainWorkflowNode as ApiNode,
+  type SpacesBoard,
   type SpacesChannel,
+  type SpacesProject,
+  type SpacesTriggerSummary,
+  type SpacesTriggerSchema,
+  type SpacesTriggerPropertySchema,
 } from "../../lib/api";
 import type { Agent } from "../../lib/types";
 import { Button } from "./ui/Button";
+import { Dialog } from "./ui/Dialog";
+import { useSnackbar } from "./ui/Snackbar";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
 /* ------------------------------------------------------------------ */
+
+/** Claw-defined VCS trigger templates. Not native Spaces triggers — the
+ *  backend (chain-workflows.ts buildSpacesConfig) compiles these to a generic
+ *  WEBHOOK automation + RUN_AGENT step and issues a webhook URL to paste into
+ *  the repo. Surfaced alongside Spaces' native trigger catalog. */
+const VCS_TEMPLATE_TRIGGERS: SpacesTriggerSummary[] = [
+  { type: "GITHUB_EVENT", name: "GitHub event (webhook)", description: "Fires when GitHub POSTs a repo event to the generated webhook URL. Paste the URL into your repo's webhook settings." },
+  { type: "BITBUCKET_EVENT", name: "Bitbucket event (webhook)", description: "Fires when Bitbucket POSTs a repo event to the generated webhook URL. Paste the URL into your repo's webhook settings." },
+];
+
+const VCS_TEMPLATE_CONFIG_FIELDS: Record<string, {
+  props: Record<string, SpacesTriggerPropertySchema>;
+  required: string[];
+}> = {
+  GITHUB_EVENT: {
+    props: {
+      eventTypes: {
+        type: "array",
+        description: "push, pull_request, issues, issue_comment, release, workflow_run",
+        items: { type: "string" },
+      },
+      repoName: {
+        type: "string",
+        description: "owner/repository, for example juspay/xyne-spaces",
+      },
+    },
+    required: [],
+  },
+  BITBUCKET_EVENT: {
+    props: {
+      eventTypes: {
+        type: "array",
+        description: "repo:push, pullrequest:created, pullrequest:updated, pullrequest:fulfilled",
+        items: { type: "string" },
+      },
+      repoName: {
+        type: "string",
+        description: "repository slug or full name",
+      },
+    },
+    required: [],
+  },
+};
+
+const VCS_EVENT_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  GITHUB_EVENT: [
+    { value: "push", label: "Push" },
+    { value: "pull_request", label: "Pull request" },
+    { value: "issues", label: "Issues" },
+    { value: "issue_comment", label: "Issue comments" },
+    { value: "release", label: "Releases" },
+    { value: "workflow_run", label: "Workflow runs" },
+  ],
+  BITBUCKET_EVENT: [
+    { value: "repo:push", label: "Push" },
+    { value: "pullrequest:created", label: "Pull request created" },
+    { value: "pullrequest:updated", label: "Pull request updated" },
+    { value: "pullrequest:fulfilled", label: "Pull request merged" },
+    { value: "pullrequest:rejected", label: "Pull request declined" },
+  ],
+};
+
+/** A draft event trigger being edited in the modal. `dbId` is set when editing
+ *  an existing trigger so the backend updates rather than recreates it.
+ *  Channels are NOT stored here — triggers reuse the workflow's channel binding. */
+interface TriggerDraft {
+  id: string;            // client-side row id (for React keys)
+  dbId?: string;         // existing trigger id (edit mode)
+  type: string;
+  configValues: Record<string, string>;
+}
+
+/** Extract the config field map + required list from a trigger schema,
+ *  resolving the zod-to-json-schema `$ref → definitions.config` indirection. */
+function triggerSchemaFields(
+  schema: SpacesTriggerSchema | undefined,
+  triggerType?: string,
+): { props: Record<string, SpacesTriggerPropertySchema>; required: string[] } {
+  if (triggerType && VCS_TEMPLATE_CONFIG_FIELDS[triggerType]) {
+    return VCS_TEMPLATE_CONFIG_FIELDS[triggerType];
+  }
+  if (!schema) return { props: {}, required: [] };
+  const cs = schema.configSchema;
+  if (cs.properties && Object.keys(cs.properties).length > 0) {
+    return { props: cs.properties, required: cs.required ?? [] };
+  }
+  const refName = cs.$ref?.split("/").pop();
+  const def = refName ? cs.definitions?.[refName] : undefined;
+  return { props: def?.properties ?? {}, required: def?.required ?? [] };
+}
+
+/**
+ * Flatten a trigger's OUTPUT schema into the `{{trigger.*}}` paths a user can
+ * reference in the Context box — one level into nested objects (e.g. message →
+ * message.content). Resolves the zodToJsonSchema $ref/definitions wrapping.
+ */
+function triggerOutputRefs(schema: SpacesTriggerSchema | undefined): string[] {
+  const out = schema?.outputSchema;
+  if (!out) return [];
+  const defs = out.definitions ?? {};
+  const rootProps =
+    out.properties && Object.keys(out.properties).length > 0
+      ? out.properties
+      : (out.$ref?.split("/").pop() ? defs[out.$ref.split("/").pop()!]?.properties : undefined) ?? {};
+  const deref = (p: SpacesTriggerPropertySchema): SpacesTriggerPropertySchema => {
+    const refName = p.$ref?.split("/").pop();
+    return (refName ? (defs[refName] as SpacesTriggerPropertySchema | undefined) : undefined) ?? p;
+  };
+  const paths: string[] = [];
+  for (const [key, raw] of Object.entries(rootProps)) {
+    const p = deref(raw);
+    const nested = p.properties;
+    if (nested && Object.keys(nested).length > 0) {
+      for (const sub of Object.keys(nested)) paths.push(`${key}.${sub}`);
+    } else {
+      paths.push(key);
+    }
+  }
+  return paths;
+}
 
 interface Props {
   open: boolean;
@@ -102,6 +233,21 @@ const randomId = (): string =>
 
 const fromCsv = (value: string): string[] =>
   value.split(",").map((v) => v.trim()).filter((v) => v.length > 0);
+
+const toCsv = (values: string[]): string => values.join(", ");
+
+function eventTypeLabel(triggerType: string, value: string): string {
+  return VCS_EVENT_OPTIONS[triggerType]?.find((o) => o.value === value)?.label ?? value;
+}
+
+const TRIGGER_FIELD_LABELS: Record<string, string> = {
+  boardIds: "Boards",
+  projectIds: "Projects",
+};
+
+function triggerFieldLabel(key: string, required: boolean): string {
+  return `${TRIGGER_FIELD_LABELS[key] ?? key}${required ? " *" : ""}`;
+}
 
 /* ------------------------------------------------------------------ */
 /*  AgentPicker — elegant custom dropdown shared by modal + nodes       */
@@ -252,6 +398,158 @@ function AgentPicker({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Spaces entity picker for native trigger filters                     */
+/* ------------------------------------------------------------------ */
+
+type SpacesEntityKind = "boards" | "projects";
+
+interface SpacesEntityOption {
+  id: string;
+  label: string;
+  subtitle?: string | null;
+}
+
+interface SpacesEntityMultiSelectProps {
+  kind: SpacesEntityKind;
+  value: string[];
+  onChange: (next: string[]) => void;
+}
+
+function SpacesEntityMultiSelect({ kind, value, onChange }: SpacesEntityMultiSelectProps) {
+  const [search, setSearch] = useState("");
+  const [options, setOptions] = useState<SpacesEntityOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError(null);
+      const load =
+        kind === "boards"
+          ? listSpacesBoards(search, 50).then((rows: SpacesBoard[]) =>
+              rows.map((row) => ({
+                id: row.id,
+                label: row.name || row.id,
+                subtitle: row.projectName,
+              })),
+            )
+          : listSpacesProjects(search, 50).then((rows: SpacesProject[]) =>
+              rows.map((row) => ({
+                id: row.id,
+                label: row.name || row.id,
+                subtitle: row.description,
+              })),
+            );
+
+      load
+        .then((nextOptions) => {
+          if (!cancelled) setOptions(nextOptions);
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setError(err instanceof Error ? err.message : `Failed to load ${kind}`);
+            setOptions([]);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [kind, search]);
+
+  const selectedOptions = value.map(
+    (id) => options.find((option) => option.id === id) ?? { id, label: id },
+  );
+
+  const toggle = (id: string) => {
+    onChange(value.includes(id) ? value.filter((nextId) => nextId !== id) : [...value, id]);
+  };
+
+  const emptyLabel = kind === "boards" ? "No boards found." : "No projects found.";
+  const placeholder = kind === "boards" ? "Search boards..." : "Search projects...";
+
+  return (
+    <div className="mt-1 rounded-lg border border-xyne-border bg-xyne-surface">
+      {selectedOptions.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 border-b border-xyne-border px-2.5 py-2">
+          {selectedOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => toggle(option.id)}
+              className="flex max-w-full items-center gap-1 rounded-md border border-xyne-border bg-xyne-surface-sunken px-2 py-1 text-[11px] text-xyne-fg-secondary hover:border-xyne-border-strong"
+              title={option.id}
+            >
+              <span className="min-w-0 truncate">{option.label}</span>
+              <XIcon size={10} className="shrink-0 text-xyne-fg-tertiary" />
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="relative border-b border-xyne-border">
+        <MagnifyingGlassIcon
+          size={12}
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xyne-fg-tertiary"
+        />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={placeholder}
+          className="h-9 w-full rounded-t-lg bg-transparent pl-8 pr-3 text-[13px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder outline-none"
+        />
+      </div>
+      <div className="max-h-44 overflow-y-auto p-1">
+        {error ? (
+          <div className="px-2 py-2 text-[12px] text-rose-400">{error}</div>
+        ) : loading ? (
+          <div className="px-2 py-2 text-[12px] text-xyne-fg-muted">Loading...</div>
+        ) : options.length === 0 ? (
+          <div className="px-2 py-2 text-[12px] text-xyne-fg-muted">{emptyLabel}</div>
+        ) : (
+          options.map((option) => {
+            const checked = value.includes(option.id);
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => toggle(option.id)}
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[12px] text-xyne-fg-secondary hover:bg-xyne-surface-subtle"
+                title={option.id}
+              >
+                <span
+                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                    checked
+                      ? "border-xyne-brand bg-xyne-brand text-white"
+                      : "border-xyne-border bg-xyne-surface-sunken"
+                  }`}
+                >
+                  {checked && <CheckIcon size={10} weight="bold" />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{option.label}</span>
+                  {option.subtitle && (
+                    <span className="block truncate text-[11px] text-xyne-fg-tertiary">
+                      {option.subtitle}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
@@ -550,8 +848,11 @@ function ChainWorkflowModalInner({
 
   const [name, setName] = useState("New Channel Workflow");
   const [isPublished, setIsPublished] = useState(true);
+  // Owner consent: run triggered executions with the creator's own creds.
+  const [useCreatorCredentials, setUseCreatorCredentials] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const { show: showSnackbar } = useSnackbar();
   const [nodes, setNodes] = useState<Node<AgentNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge<ChainEdgeData>[]>([]);
 
@@ -559,13 +860,105 @@ function ChainWorkflowModalInner({
   // via the "*" sentinel; otherwise each selected channel becomes its own row.
   const [selectedChannels, setSelectedChannels] = useState<SpacesChannel[]>([]);
   const [allChannels, setAllChannels] = useState<boolean>(false);
-  const [entryAgentSlug, setEntryAgentSlug] = useState<string>(agents[0]?.slug ?? "");
+  const [entryAgentSlug, setEntryAgentSlug] = useState<string>("");
   const [channelSearch, setChannelSearch] = useState<string>("");
   const [channelOptions, setChannelOptions] = useState<SpacesChannel[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [channelListOpen, setChannelListOpen] = useState(false);
   const channelSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const channelComboRef = useRef<HTMLDivElement | null>(null);
+
+  // ── Event triggers (optional) ──────────────────────────────────────
+  // Each trigger fires the workflow on the channel(s) bound above, in
+  // response to a Spaces automation event (e.g. a Bitbucket push).
+  //
+  // ENABLED: Spaces ships the automation CRUD endpoints (POST/PUT/DELETE
+  // /api/automations) and claw-auth's bridge creates + submits each trigger
+  // for admin approval (chain-workflows.ts createAndSubmitSpacesAutomation).
+  // A created trigger is DRAFT→PENDING_APPROVAL and only fires once an
+  // automations admin approves it — the save handler surfaces that to the user.
+  const SPACES_AUTOMATIONS_ENABLED = true;
+  const [triggerOptions, setTriggerOptions] = useState<SpacesTriggerSummary[]>([]);
+  const [triggersLoading, setTriggersLoading] = useState(false);
+  const [triggersError, setTriggersError] = useState<string | null>(null);
+  const [triggers, setTriggers] = useState<TriggerDraft[]>([]);
+  const [schemaCache, setSchemaCache] = useState<Record<string, SpacesTriggerSchema>>({});
+  const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
+
+  // Load available trigger types when the modal opens. GitHub/Bitbucket aren't
+  // native Spaces triggers (and won't be added) — claw offers them as templates
+  // that compile to a generic WEBHOOK automation server-side, so we prepend them
+  // to whatever Spaces' catalog returns.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setTriggersLoading(true);
+    setTriggersError(null);
+    listSpacesTriggers()
+      .then((opts) => { if (!cancelled) setTriggerOptions([...VCS_TEMPLATE_TRIGGERS, ...opts]); })
+      .catch(() => {
+        // Even if the Spaces catalog fetch fails, the VCS templates still work
+        // (they're claw-side) — surface them rather than blocking.
+        if (!cancelled) {
+          setTriggerOptions([...VCS_TEMPLATE_TRIGGERS]);
+          setTriggersError("Could not load Spaces trigger catalog; webhook templates still available.");
+        }
+      })
+      .finally(() => { if (!cancelled) setTriggersLoading(false); });
+    return () => { cancelled = true; };
+  }, [open]);
+
+  // Lazily load + cache the config schema for each trigger type in use.
+  useEffect(() => {
+    const wanted = [...new Set(triggers.map((t) => t.type).filter(Boolean))];
+    for (const type of wanted) {
+      if (VCS_TEMPLATE_CONFIG_FIELDS[type]) continue;
+      if (schemaCache[type]) continue;
+      getSpacesTriggerSchema(type)
+        .then((schema) => setSchemaCache((prev) => (prev[type] ? prev : { ...prev, [type]: schema })))
+        .catch(() => { /* leave uncached — fields just won't render */ });
+    }
+  }, [triggers, schemaCache]);
+
+  const addTrigger = useCallback(() => {
+    setTriggers((prev) => [...prev, { id: crypto.randomUUID(), type: "", configValues: {} }]);
+    setTriggerDialogOpen(true);
+  }, []);
+  const removeTrigger = useCallback((id: string) => {
+    setTriggers((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+  const setTriggerType = useCallback((id: string, type: string) => {
+    setTriggers((prev) => prev.map((t) => (t.id === id ? { ...t, type, configValues: {} } : t)));
+  }, []);
+  const setTriggerConfig = useCallback((id: string, key: string, value: string) => {
+    setTriggers((prev) => prev.map((t) => (t.id === id ? { ...t, configValues: { ...t.configValues, [key]: value } } : t)));
+  }, []);
+  const setTriggerEventEnabled = useCallback((id: string, eventType: string, enabled: boolean) => {
+    setTriggers((prev) => prev.map((t) => {
+      if (t.id !== id) return t;
+      const current = new Set(fromCsv(t.configValues["eventTypes"] ?? ""));
+      if (enabled) current.add(eventType);
+      else current.delete(eventType);
+      return {
+        ...t,
+        configValues: { ...t.configValues, eventTypes: toCsv([...current]) },
+      };
+    }));
+  }, []);
+  const triggerOptionName = useCallback((type: string): string => {
+    return triggerOptions.find((o) => o.type === type)?.name ?? type;
+  }, [triggerOptions]);
+  const triggerSummary = useMemo(() => {
+    const configured = triggers.filter((t) => t.type);
+    if (configured.length === 0) return "No event triggers";
+    return configured.map((t) => {
+      const events = fromCsv(t.configValues["eventTypes"] ?? "")
+        .slice(0, 2)
+        .map((v) => eventTypeLabel(t.type, v));
+      const suffix = events.length > 0 ? `: ${events.join(", ")}${fromCsv(t.configValues["eventTypes"] ?? "").length > 2 ? "…" : ""}` : "";
+      return `${triggerOptionName(t.type)}${suffix}`;
+    }).join(" · ");
+  }, [triggers, triggerOptionName]);
 
   // Close channel list on outside click
   useEffect(() => {
@@ -633,9 +1026,9 @@ function ChainWorkflowModalInner({
     const offset = nodes.length * 40;
     setNodes((prev) => [
       ...prev,
-      buildNode(agents[0]?.slug ?? "", 80 + offset, 80 + offset),
+      buildNode("", 80 + offset, 80 + offset),
     ]);
-  }, [agents, buildNode, nodes.length]);
+  }, [buildNode, nodes.length]);
 
   // Auto-create entry agent node
   useEffect(() => {
@@ -677,6 +1070,7 @@ function ChainWorkflowModalInner({
 
     setName(editingWorkflow.name);
     setIsPublished(editingWorkflow.isPublished);
+    setUseCreatorCredentials(editingWorkflow.credentialUserId != null);
 
     const def = editingWorkflow.definition;
     const COLS = 3;
@@ -718,14 +1112,17 @@ function ChainWorkflowModalInner({
 
     const bindings = editingWorkflow.bindings ?? [];
     if (bindings.length > 0) {
-      setEntryAgentSlug(bindings[0]!.entryAgentSlug);
+      const primaryBinding = bindings.find((b) => b.userId !== "*") ?? bindings[0]!;
+      setEntryAgentSlug(primaryBinding.entryAgentSlug);
       setAllChannels(bindings.some((b) => b.channelId === "*"));
+      const uniqueChannelIds = [
+        ...new Set(bindings.filter((b) => b.channelId !== "*").map((b) => b.channelId)),
+      ];
       setSelectedChannels(
-        bindings
-          .filter((b) => b.channelId !== "*")
-          .map((b) => ({
-            id: b.channelId,
-            name: b.channelId,
+        uniqueChannelIds
+          .map((channelId) => ({
+            id: channelId,
+            name: channelId,
             scopeType: "default",
             visibility: "",
             participantCount: 0,
@@ -734,6 +1131,18 @@ function ChainWorkflowModalInner({
           })),
       );
     }
+
+    // Hydrate existing event triggers (carry their dbId so the backend updates
+    // rather than recreates). Channels aren't restored here — triggers reuse
+    // the workflow's channel binding above.
+    setTriggers(
+      (editingWorkflow.triggers ?? []).map((t) => ({
+        id: t.id,
+        dbId: t.id,
+        type: t.type,
+        configValues: t.configValues ?? {},
+      })),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editingWorkflow]);
 
@@ -779,13 +1188,15 @@ function ChainWorkflowModalInner({
   const reset = () => {
     setName("New Channel Workflow");
     setIsPublished(true);
+    setUseCreatorCredentials(false);
     setNodes([]);
     setEdges([]);
     setMessage(null);
     setSelectedChannels([]);
     setAllChannels(false);
     setChannelListOpen(false);
-    setEntryAgentSlug(agents[0]?.slug ?? "");
+    setTriggers([]);
+    setEntryAgentSlug("");
     setChannelSearch("");
   };
 
@@ -813,7 +1224,27 @@ function ChainWorkflowModalInner({
       return;
     }
 
-    const validIds = new Set(apiNodes.map((n) => n.id));
+    const channelIds = allChannels ? ["*"] : selectedChannels.map((c) => c.id);
+    if (channelIds.length === 0) {
+      setMessage("Pick at least one channel, or choose All channels.");
+      return;
+    }
+    if (!entryAgentSlug) {
+      setMessage("Pick an entry agent for the channel binding.");
+      return;
+    }
+
+    if (!apiNodes.some((n) => n.agentSlug === entryAgentSlug)) {
+      setMessage(`Entry agent "${entryAgentSlug}" must appear as a node in the workflow.`);
+      return;
+    }
+
+    const orderedApiNodes = [
+      ...apiNodes.filter((n) => n.agentSlug === entryAgentSlug),
+      ...apiNodes.filter((n) => n.agentSlug !== entryAgentSlug),
+    ];
+
+    const validIds = new Set(orderedApiNodes.map((n) => n.id));
     const apiEdges: ApiEdge[] = edges
       .filter((e) => e.source && e.target && validIds.has(e.source) && validIds.has(e.target))
       .map((e) => {
@@ -836,24 +1267,22 @@ function ChainWorkflowModalInner({
 
     const definition: ChainWorkflowDefinition = {
       version: 1,
-      nodes: apiNodes,
+      nodes: orderedApiNodes,
       edges: apiEdges,
     };
 
-    const channelIds = allChannels ? ["*"] : selectedChannels.map((c) => c.id);
-    if (channelIds.length === 0) {
-      setMessage("Pick at least one channel, or choose All channels.");
-      return;
-    }
-    if (!entryAgentSlug) {
-      setMessage("Pick an entry agent for the channel binding.");
-      return;
-    }
-
-    if (!apiNodes.some((n) => n.agentSlug === entryAgentSlug)) {
-      setMessage(`Entry agent "${entryAgentSlug}" must appear as a node in the workflow.`);
-      return;
-    }
+    // Event triggers (optional). They reuse the workflow's channel binding —
+    // each enabled trigger fires the workflow on the same channel(s) picked
+    // above. configValues carries the trigger-type's schema fields as strings
+    // (the backend splits comma-separated array fields like eventTypes).
+    const triggersPayload = triggers
+      .filter((t) => t.type.trim())
+      .map((t) => ({
+        ...(t.dbId ? { id: t.dbId } : {}),
+        type: t.type,
+        channelIds,
+        configValues: t.configValues,
+      }));
 
     setSaving(true);
     setMessage(null);
@@ -864,11 +1293,15 @@ function ChainWorkflowModalInner({
               name: name.trim(),
               definition,
               isPublished,
+              triggers: triggersPayload,
+              useCreatorCredentials,
             })
           : await createChainWorkflow({
               name: name.trim(),
               definition,
               isPublished,
+              ...(triggersPayload.length > 0 ? { triggers: triggersPayload } : {}),
+              useCreatorCredentials,
             });
 
       await upsertChannelChainBinding({
@@ -888,6 +1321,29 @@ function ChainWorkflowModalInner({
         );
       }
 
+      // Event triggers are created as DRAFT and submitted for admin approval
+      // (claw-auth bridge → Spaces). They only start firing once an automations
+      // admin approves. Webhook-backed (GitHub/Bitbucket) triggers also return a
+      // URL to paste into the repo — surface it in a copyable dialog since the
+      // user must act on it, plus the approval note.
+      const webhookUrls = (saved.triggers ?? [])
+        .flatMap((t) => t.channels.map((c) => c.webhookUrl))
+        .filter((u): u is string => Boolean(u));
+      if (webhookUrls.length > 0) {
+        window.alert(
+          "Trigger submitted for approval — an automations admin will review it. You can ask in the #xyne-spaces channel.\n\n" +
+            "Paste this webhook URL into your GitHub/Bitbucket repo's webhook settings:\n\n" +
+            webhookUrls.join("\n"),
+        );
+      } else if (triggersPayload.length > 0) {
+        showSnackbar({
+          variant: "info",
+          title: "Trigger submitted for approval",
+          description: "An automations admin will review it — you can ask in the #xyne-spaces channel.",
+          duration: 8000,
+        });
+      }
+
       onSaved();
       close();
     } catch (err) {
@@ -900,6 +1356,7 @@ function ChainWorkflowModalInner({
   };
 
   return (
+    <>
     <div
       data-id="chain-workflow-modal"
       className="fixed inset-0 z-[var(--comp-z-modal)] flex items-center justify-center bg-black/70 p-4"
@@ -1072,8 +1529,50 @@ function ChainWorkflowModalInner({
           </div>
         </div>
 
+        {/* Event triggers — HIDDEN while Spaces automations are undeployed
+            (creating one 404s on POST /api/automations). Gated by
+            SPACES_AUTOMATIONS_ENABLED above. */}
+        {SPACES_AUTOMATIONS_ENABLED && (
+        <div className="shrink-0 border-b border-xyne-border px-5 py-3">
+          <div className="mb-2 flex items-center justify-between">
+            <label className="block text-[11px] font-medium uppercase tracking-[0.04em] text-xyne-fg-tertiary">
+              Event triggers{" "}
+              <span className="normal-case text-xyne-fg-muted">(optional — also fire on Spaces events)</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                if (triggers.length === 0) addTrigger();
+                else setTriggerDialogOpen(true);
+              }}
+              disabled={triggersLoading || triggerOptions.length === 0}
+              className="inline-flex items-center gap-1 rounded-full border border-xyne-border px-2.5 py-1 text-[11px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary disabled:opacity-50"
+            >
+              <PlusIcon size={11} /> {triggers.length === 0 ? "Add trigger" : "Configure"}
+            </button>
+          </div>
+          {triggersError && <p className="text-[11px] text-rose-400">{triggersError}</p>}
+          <button
+            type="button"
+            onClick={() => setTriggerDialogOpen(true)}
+            className="flex w-full items-center justify-between rounded-lg border border-xyne-border bg-xyne-surface-subtle/40 px-3 py-2 text-left hover:border-xyne-border-focus"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-[12px] font-medium text-xyne-fg-primary">{triggerSummary}</span>
+              <span className="mt-0.5 block truncate text-[11px] text-xyne-fg-muted">
+                {triggers.length === 0
+                  ? "Workflow still runs on @mention in the bound channel(s)."
+                  : "Edit provider, events, repository filters, and native trigger fields."}
+              </span>
+            </span>
+            <span className="ml-3 shrink-0 text-[11px] font-medium text-xyne-fg-secondary">Configure</span>
+          </button>
+        </div>
+        )}
+
         {/* Toolbar: status toggle + canvas actions */}
         <div className="flex items-center justify-between border-b border-xyne-border bg-xyne-surface-subtle/40 px-5 py-2">
+          <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setIsPublished(!isPublished)}
@@ -1096,6 +1595,30 @@ function ChainWorkflowModalInner({
             />
             {isPublished ? "Active" : "Draft"}
           </button>
+
+          <button
+            type="button"
+            onClick={() => setUseCreatorCredentials((v) => !v)}
+            aria-pressed={useCreatorCredentials}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              useCreatorCredentials
+                ? "border-xyne-info-border bg-xyne-info-bg text-xyne-info-fg"
+                : "border-xyne-border bg-xyne-surface text-xyne-fg-tertiary hover:text-xyne-fg-secondary"
+            }`}
+            title={
+              useCreatorCredentials
+                ? "Triggered runs use YOUR connected credentials (MCP/tools) for this workflow. Only you (the owner) can change this. Click to switch back to the agent's identity."
+                : "Triggered runs use the agent's app identity. Click to run them with YOUR credentials instead (consent to lend your creds)."
+            }
+          >
+            <span
+              className={`flex h-1.5 w-1.5 rounded-full ${
+                useCreatorCredentials ? "bg-xyne-info-fg" : "bg-xyne-fg-muted"
+              }`}
+            />
+            {useCreatorCredentials ? "My credentials" : "Agent credentials"}
+          </button>
+          </div>
 
           <Button
             variant="secondary"
@@ -1225,6 +1748,237 @@ function ChainWorkflowModalInner({
         </div>
       </div>
     </div>
+    {SPACES_AUTOMATIONS_ENABLED && (
+      <Dialog
+        open={triggerDialogOpen}
+        onOpenChange={setTriggerDialogOpen}
+        title="Configure Event Triggers"
+        description="Choose external events that should also start this workflow."
+        maxWidth={780}
+        maxHeight="82vh"
+        footer={
+          <Button variant="primary" size="sm" onClick={() => setTriggerDialogOpen(false)}>
+            Done
+          </Button>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium text-xyne-fg-primary">{triggerSummary}</p>
+              <p className="mt-0.5 text-[11px] text-xyne-fg-muted">
+                GitHub and Bitbucket triggers create a generated webhook URL after save.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={addTrigger}
+              disabled={triggersLoading || triggerOptions.length === 0}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-xyne-border px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary disabled:opacity-50"
+            >
+              <PlusIcon size={12} /> Add trigger
+            </button>
+          </div>
+
+          {triggersError && <p className="text-[12px] text-rose-400">{triggersError}</p>}
+
+          {triggers.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-xyne-border bg-xyne-surface-subtle/30 px-4 py-6 text-center">
+              <p className="text-[13px] text-xyne-fg-secondary">No event triggers configured.</p>
+              <p className="mt-1 text-[12px] text-xyne-fg-muted">
+                The workflow will still run on @mention in the bound channel(s).
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {triggers.map((t) => {
+                const { props, required } = triggerSchemaFields(schemaCache[t.type], t.type);
+                const configKeys = Object.keys(props).filter((k) => k !== "channelIds");
+                const vcsEvents = VCS_EVENT_OPTIONS[t.type] ?? [];
+                const selectedEvents = new Set(fromCsv(t.configValues["eventTypes"] ?? ""));
+                const isVcs = vcsEvents.length > 0;
+
+                return (
+                  <div key={t.id} className="rounded-lg border border-xyne-border bg-xyne-surface-subtle/40 p-3">
+                    <div className="flex items-center gap-2">
+                      <label className="min-w-0 flex-1">
+                        <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.04em] text-xyne-fg-tertiary">
+                          Provider
+                        </span>
+                        <select
+                          value={t.type}
+                          onChange={(e) => setTriggerType(t.id, e.target.value)}
+                          className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-2.5 py-2 text-[13px] text-xyne-fg-primary outline-none focus:border-xyne-border-focus"
+                        >
+                          <option value="">Select event type…</option>
+                          {triggerOptions.map((o) => (
+                            <option key={o.type} value={o.type}>{o.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeTrigger(t.id)}
+                        title="Remove trigger"
+                        className="mt-5 rounded p-2 text-xyne-fg-tertiary hover:text-rose-400"
+                      >
+                        <TrashIcon size={15} />
+                      </button>
+                    </div>
+
+                    {isVcs && (
+                      <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[1.4fr_1fr]">
+                        <div>
+                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-[0.04em] text-xyne-fg-tertiary">
+                            Events
+                          </span>
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            {vcsEvents.map((event) => (
+                              <label
+                                key={event.value}
+                                className="flex min-h-9 items-center gap-2 rounded-lg border border-xyne-border bg-xyne-surface px-2.5 py-1.5 text-[12px] text-xyne-fg-secondary"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedEvents.has(event.value)}
+                                  onChange={(e) => setTriggerEventEnabled(t.id, event.value, e.target.checked)}
+                                  className="h-3.5 w-3.5 accent-xyne-accent"
+                                />
+                                <span>{event.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <label className="block">
+                          <span className="mb-2 block text-[11px] font-medium uppercase tracking-[0.04em] text-xyne-fg-tertiary">
+                            Repository filter
+                          </span>
+                          <input
+                            type="text"
+                            value={t.configValues["repoName"] ?? ""}
+                            onChange={(e) => setTriggerConfig(t.id, "repoName", e.target.value)}
+                            placeholder={t.type === "GITHUB_EVENT" ? "owner/repository" : "repository slug or full name"}
+                            className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-2.5 py-2 text-[13px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder outline-none focus:border-xyne-border-focus"
+                          />
+                          <p className="mt-1 text-[11px] text-xyne-fg-muted">
+                            Leave blank to accept events from any repository using this webhook URL.
+                          </p>
+                        </label>
+                      </div>
+                    )}
+
+                    {!isVcs && t.type && configKeys.length > 0 && (
+                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {configKeys.map((key) => {
+                          const p = props[key]!;
+                          const isRequired = required.includes(key);
+                          const label = triggerFieldLabel(key, isRequired);
+                          if (key === "boardIds" || key === "projectIds") {
+                            const kind = key === "boardIds" ? "boards" : "projects";
+                            return (
+                              <label key={key} className="block text-[11px] text-xyne-fg-tertiary">
+                                {label}
+                                <SpacesEntityMultiSelect
+                                  kind={kind}
+                                  value={fromCsv(t.configValues[key] ?? "")}
+                                  onChange={(next) => setTriggerConfig(t.id, key, toCsv(next))}
+                                />
+                                <span className="mt-1 block text-[11px] text-xyne-fg-muted">
+                                  Empty matches all {kind}.
+                                </span>
+                              </label>
+                            );
+                          }
+                          if (p.enum && p.enum.length > 0) {
+                            return (
+                              <label key={key} className="block text-[11px] text-xyne-fg-tertiary">
+                                {label}
+                                <select
+                                  value={t.configValues[key] ?? ""}
+                                  onChange={(e) => setTriggerConfig(t.id, key, e.target.value)}
+                                  className="mt-1 w-full rounded-lg border border-xyne-border bg-xyne-surface px-2.5 py-2 text-[13px] text-xyne-fg-primary outline-none focus:border-xyne-border-focus"
+                                >
+                                  <option value="">—</option>
+                                  {p.enum.map((v) => <option key={v} value={v}>{v}</option>)}
+                                </select>
+                              </label>
+                            );
+                          }
+                          const isArray = p.type === "array";
+                          return (
+                            <label key={key} className="block text-[11px] text-xyne-fg-tertiary">
+                              {label}{isArray ? " (comma-separated)" : ""}
+                              <input
+                                type="text"
+                                value={t.configValues[key] ?? ""}
+                                onChange={(e) => setTriggerConfig(t.id, key, e.target.value)}
+                                placeholder={p.description ?? (isArray && p.items?.enum ? p.items.enum.join(", ") : "")}
+                                className="mt-1 w-full rounded-lg border border-xyne-border bg-xyne-surface px-2.5 py-2 text-[13px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder outline-none focus:border-xyne-border-focus"
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {t.type && (
+                      <label className="mt-3 block">
+                        <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.04em] text-xyne-fg-tertiary">
+                          Context for the agent (optional)
+                        </span>
+                        <textarea
+                          value={t.configValues["context"] ?? ""}
+                          onChange={(e) => setTriggerConfig(t.id, "context", e.target.value)}
+                          rows={4}
+                          placeholder={
+                            t.type === "MESSAGE_RECEIVED"
+                              ? 'e.g. A new message was posted:\n"{{trigger.message.content}}"\nFrom {{trigger.author.name}}. Summarize it and file a bug if needed.'
+                              : "What the agent should do. Use {{trigger.…}} to inject fields from the event."
+                          }
+                          className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-2.5 py-2 text-[13px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder outline-none focus:border-xyne-border-focus"
+                        />
+                        <p className="mt-1 text-[11px] text-xyne-fg-muted">
+                          Becomes the agent&apos;s prompt. Click a field below to insert its{" "}
+                          <code className="rounded bg-xyne-surface px-1 text-xyne-fg-secondary">{"{{trigger.…}}"}</code>{" "}
+                          reference. Leave blank to use the default.
+                        </p>
+                        {(() => {
+                          const refs = triggerOutputRefs(schemaCache[t.type]);
+                          if (refs.length === 0) return null;
+                          return (
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              <span className="text-[11px] text-xyne-fg-tertiary">Available fields:</span>
+                              {refs.map((r) => (
+                                <button
+                                  key={r}
+                                  type="button"
+                                  onClick={() =>
+                                    setTriggerConfig(
+                                      t.id,
+                                      "context",
+                                      `${t.configValues["context"] ?? ""}{{trigger.${r}}}`,
+                                    )
+                                  }
+                                  title={`Insert {{trigger.${r}}}`}
+                                  className="rounded border border-xyne-border bg-xyne-surface px-1.5 py-0.5 font-mono text-[10.5px] text-xyne-fg-secondary hover:border-xyne-border-focus hover:text-xyne-fg-primary"
+                                >
+                                  {`{{trigger.${r}}}`}
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </label>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </Dialog>
+    )}
+    </>
   );
 }
 

@@ -1,6 +1,9 @@
 import { createBashTool } from "@earendil-works/pi-coding-agent";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 
+import { createLogger } from "./logger.js";
+const log = createLogger("scoped-bash-tool");
+
 const DEFAULT_ALLOWLIST = new Set([
   "ls", "cat", "head", "tail", "wc", "stat", "file",
   "find", "grep", "rg", "ag",
@@ -94,7 +97,7 @@ export function createScopedBashTool(cwd: string): AgentTool<any, any> {
       const command = (params as { command?: string }).command ?? "";
       const verdict = validateCommand(command);
       if (!verdict.allowed) {
-        console.warn(`[bash-allowlist] REJECT cmd=${JSON.stringify(command).slice(0, 300)} reason=${verdict.reason}`);
+        log.warn(`[bash-allowlist] REJECT cmd=${JSON.stringify(command).slice(0, 300)} reason=${verdict.reason}`);
         return {
           content: [{ type: "text", text: `Error: ${verdict.reason}` }],
           details: undefined as never,

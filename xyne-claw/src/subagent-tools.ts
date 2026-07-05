@@ -21,11 +21,128 @@ import {
 import { workspacePath } from "./workspace.js";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, SERVER } from "./config.js";
-import { SUBAGENT_DEFINITIONS, getSandboxSession, probeSession, REPO_CONFIGS, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
+import { ensureSessionDebugDir } from "./session-store.js";
+import { SUBAGENT_DEFINITIONS, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
-import { resolveModel, applyCopilotProxyIfNeeded, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type ToolInvocation } from "./agent.js";
+import { resolveModel, applyCopilotProxyIfNeeded, capCustomToolOutput, pushDebugProgress, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type DebugEventRecord, type ProgressDest, type ToolInvocation } from "./agent.js";
+import { compactionExtension } from "./compaction-extension.js";
+import { installMidTurnCompaction } from "./mid-turn-compaction.js";
+import { createScopedToolMap } from "./scoped-tools.js";
+import type { ClawStreamMeta } from "xyne-claw-shared";
 import { takeCitations, recordCitations } from "./citations.js";
-import { writeSessionSkills } from "./session-skills.js";
+import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
+import crypto from "node:crypto";
+import { dirname, isAbsolute } from "node:path";
+
+import { createLogger } from "./logger.js";
+const log = createLogger("subagent-tools");
+
+/**
+ * Per-parent-run subagent result cache (D).
+ *
+ * Key: parentSessionId → (subagentName + normalized question hash) → in-flight Promise.
+ *
+ * Why a Promise (not the resolved value): if the parent emits two identical
+ * subagent calls in the same turn (concurrent tool_use blocks), we want both
+ * callers to share ONE underlying execution. Caching the resolved value only
+ * helps when the second call comes after the first finished.
+ *
+ * Lifetime: 30 minutes per entry. A parent run that's still active after 30
+ * min is exceptional; this is a safety eviction so the Map can't leak.
+ * Without a parentSessionId we skip caching (cross-run pollution risk).
+ */
+const SUBAGENT_CACHE_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * Per-call timeout for stdio MCPs spawned from xyne-claw (deepwiki, context7,
+ * playwright). The `@modelcontextprotocol/sdk` runs an internal timer
+ * initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC` (60s) on
+ * every request — without passing `timeout` here, slow trace/research calls
+ * abort at exactly 60s regardless of any AbortSignal we attach.
+ *
+ * Matches MCP_REQUEST_TIMEOUT_MS in xyne-claw-auth/backend/src/mcp/runner.ts.
+ * Keep them in sync — both layers' MCP calls have the same product semantics
+ * (a tool that needs longer than 10 min has a different problem).
+ */
+const MCP_REQUEST_TIMEOUT_MS = 600_000;
+type SubagentExecResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
+type CachedEntry = { promise: Promise<SubagentExecResult>; insertedAt: number };
+const subagentResultCache = new Map<string, Map<string, CachedEntry>>();
+type SubagentDebugEvent = {
+  seq: number;
+  at: string;
+  kind: string;
+  toolCallId?: string;
+  data: Record<string, unknown>;
+};
+
+function normalizeQuestion(q: string): string {
+  return q.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function subagentCacheKey(subagentName: string, question: string): string {
+  const norm = normalizeQuestion(question);
+  // Hash so the key stays bounded even for very long prompts. SHA-1 because
+  // it's faster than SHA-256 and we don't need cryptographic strength.
+  const h = crypto.createHash("sha1").update(`${subagentName}::${norm}`).digest("hex");
+  return h;
+}
+
+function sweepSubagentCache(): void {
+  const now = Date.now();
+  for (const [sid, sub] of subagentResultCache) {
+    for (const [k, v] of sub) {
+      if (now - v.insertedAt > SUBAGENT_CACHE_TTL_MS) sub.delete(k);
+    }
+    if (sub.size === 0) subagentResultCache.delete(sid);
+  }
+}
+setInterval(sweepSubagentCache, 5 * 60 * 1000).unref();
+
+/**
+ * Subagent system-prompt preamble (C).
+ *
+ * Prepended to every subagent's `def.systemPrompt` at execute time. Two
+ * goals: (1) reduce inner-turn count by pushing the subagent toward
+ * "issue all the tool calls you need in ONE turn", (2) reduce inner work
+ * by emphasising concision in the returned text.
+ *
+ * Kept SHORT — every byte here ships with every subagent invocation and
+ * counts against the inner context budget.
+ */
+const SUBAGENT_PREAMBLE = [
+  "## Operating Principles",
+  "",
+  "**Parallelism.** If you need to call MULTIPLE tools to answer the question, emit ALL of them in ONE assistant turn (multiple tool_use blocks side-by-side). The framework runs them concurrently. Do NOT emit one tool, wait for the result, then emit the next — that triples wall-clock time. Only chain sequentially when a later tool's input genuinely depends on an earlier tool's output.",
+  "",
+  "**Concision.** You are a subagent serving a parent agent. Return only the answer the parent needs, not your reasoning. 1-3 short sections of findings. No preambles like \"Based on my search...\" — the parent doesn't see your search.",
+  "",
+  "**Single sweep.** Decide your tool plan up front from the question alone. Resist the urge to re-query with refined parameters after seeing partial results — that's a slow loop and the parent can ask a follow-up if needed.",
+  "",
+  "---",
+  "",
+].join("\n");
+
+/**
+ * Variant preamble for retrieval subagents (def.allowRequery === true). Same
+ * parallelism + concision guidance, but the single-sweep clause is replaced
+ * with explicit permission to iterate: hard lookups often need a second refined
+ * query (broader keywords, a different channel, a wider window) before the
+ * answer exists, and Vespa search returns shallow chunks that must be drilled
+ * into. Capping at one sweep silently drops those hits.
+ */
+const SUBAGENT_REQUERY_PREAMBLE = [
+  "## Operating Principles",
+  "",
+  "**Parallelism.** If you need to call MULTIPLE tools to answer the question, emit ALL of them in ONE assistant turn (multiple tool_use blocks side-by-side). The framework runs them concurrently. Do NOT emit one tool, wait for the result, then emit the next — that triples wall-clock time. Only chain sequentially when a later tool's input genuinely depends on an earlier tool's output.",
+  "",
+  "**Concision.** You are a subagent serving a parent agent. Return only the answer the parent needs, not your reasoning. 1-3 short sections of findings. No preambles like \"Based on my search...\" — the parent doesn't see your search.",
+  "",
+  "**Iterate when retrieval is thin.** Start with a parallel sweep of your best queries, then DRILL DOWN: search returns shallow chunks, so fetch the full content of your top hits before concluding. If results are empty or clearly miss what was asked, you MAY re-query ONCE or TWICE with refined parameters (broader/narrower keywords, a different channel or user, a wider date window). Stop as soon as you have enough to answer — do NOT loop indefinitely or re-run identical queries.",
+  "",
+  "---",
+  "",
+].join("\n");
 
 /**
  * Build a punchy spinner label for any subagent's child-tool call so chat
@@ -169,8 +286,14 @@ function summarizeChildToolCall(toolName: string, args: unknown): string | null 
  * no new exports. Used by every subagent to overlay live child-tool activity
  * on top of the parent's static cycling label.
  */
-function pushChildLabel(progressUrl: string | undefined, sessionId: string, toolLabel: string): void {
+function pushChildLabel(progressUrl: ProgressDest, sessionId: string, toolLabel: string): void {
   if (!progressUrl) return;
+  if (typeof progressUrl !== "string") {
+    try { progressUrl.progressLabel(sessionId, toolLabel, {} as ClawStreamMeta); } catch (err) {
+      log.warn(`[child-progress] label emit failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
   fetch(progressUrl, {
     method: "POST",
     headers: {
@@ -180,7 +303,7 @@ function pushChildLabel(progressUrl: string | undefined, sessionId: string, tool
     body: JSON.stringify({ sessionId, toolLabel }),
     signal: AbortSignal.timeout(5_000),
   }).catch((err) => {
-    console.warn(`[child-progress] label push failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[child-progress] label push failed: ${err instanceof Error ? err.message : String(err)}`);
   });
 }
 
@@ -194,13 +317,22 @@ function pushChildLabel(progressUrl: string | undefined, sessionId: string, tool
  * `Bitbucket__create_pull_request`, not just the wrapper name `bitbucket`.
  */
 export interface SubagentProgressCtx {
-  progressUrl?: string;
+  progressUrl?: ProgressDest;
   parentSessionId: string;
+  /** Persistent parent agent session key used for filesystem debug artifacts. */
+  parentDebugSessionId?: string;
   parentToolsUsed?: string[];
   /** Parent agent's conversationId/agentSlug — used by the sandbox subagent to
    *  look up an existing kata session for this conversation and surface it to
    *  the cold-started child LLM via a system reminder. */
-  parentMeta?: { conversationId?: string; agentSlug?: string };
+  parentMeta?: { userId?: string; conversationId?: string; agentSlug?: string };
+  /** Propagated from the parent run's AbortController. When the user hits the
+   *  Stop button on the chat UI, the parent's abortSignal fires; the subagent
+   *  observes it inside its pi-session lifecycle (see executeSubagent) and
+   *  aborts its own session.prompt() promptly instead of running to
+   *  completion. Without this wire, parent-side cancel only stops the parent
+   *  LLM loop — child sessions keep burning tokens and tool calls. */
+  abortSignal?: AbortSignal;
 }
 
 // ── Shared MCP loader helper ──────────────────────────────────────────────
@@ -221,14 +353,27 @@ async function loadMcpTools(
   const client = new Client({ name: "xyne-claw", version: "1.0.0" }, { capabilities: {} });
   await client.connect(transport);
 
-  const { tools } = await client.listTools();
+  // Must pass BOTH `timeout` AND `signal`: the SDK runs its own timer
+  // initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC` (60s).
+  // Without `timeout`, that internal 60s default wins the race even if we
+  // attach a generous AbortSignal. See @modelcontextprotocol/sdk
+  // shared/protocol.js:712.
+  const { tools } = await client.listTools(undefined, {
+    timeout: MCP_REQUEST_TIMEOUT_MS,
+    signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
+  });
   const toolDefs: ToolDefinition[] = tools.map((t) => ({
     name: `${prefix}__${t.name}`,
     label: `${prefix} / ${t.name}`,
     description: t.description ?? `${prefix} tool: ${t.name}`,
     parameters: Type.Unsafe(t.inputSchema ?? { type: "object", properties: {} }),
     async execute(_toolCallId: string, params: unknown) {
-      const result = await client.callTool({ name: t.name, arguments: params as Record<string, unknown> });
+      // Same dual-timeout pattern as listTools above — see comment there for why.
+      const result = await client.callTool(
+        { name: t.name, arguments: params as Record<string, unknown> },
+        undefined,
+        { timeout: MCP_REQUEST_TIMEOUT_MS, signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) },
+      );
       const content = (result.content as Array<{ type: string; text?: string }>);
       const text = content
         .filter((c) => c.type === "text")
@@ -290,7 +435,7 @@ function resolveProviderForSubagent(
   // override exists. Avoids the plan→credits spillover that consistently
   // breaks subagents on this path.
   if (parentIsAnthropicOAuth && !explicit && !followParent) {
-    console.log(`[${def.name}] parent is Anthropic OAuth — routing subagent inner LLM through LiteLLM (set XYNE_SUBAGENT_FOLLOW_PARENT=1 to disable)`);
+    log.info(`[${def.name}] parent is Anthropic OAuth — routing subagent inner LLM through LiteLLM (set XYNE_SUBAGENT_FOLLOW_PARENT=1 to disable)`);
     return undefined;
   }
 
@@ -310,21 +455,150 @@ function resolveProviderForSubagent(
 
 function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skillTriggers?: SkillTrigger[], skills?: Array<{ slug?: string; name: string; description?: string; content: string }>, providerResolution?: SubagentProviderResolution, progressCtx?: SubagentProgressCtx): ToolDefinition {
   const resolvedProvider = resolveProviderForSubagent(def, providerResolution);
+  // Tag the description so the parent LLM can tell subagent wrappers apart
+  // from direct MCP tools. The "[Subagent]" marker is what the parent's
+  // PARENT_PARALLELISM_PREAMBLE refers to when it says "subagent calls are
+  // expensive" — without the tag the rule has no concrete anchor.
+  const taggedDescription =
+    `[Subagent — nested LLM run, expensive] ${def.description} ` +
+    `(If you have multiple independent questions for this subagent, batch them into ONE call with a single combined question; ` +
+    `if you must fire it more than once, fire ALL the calls in the SAME assistant turn so they run in parallel.)`;
   const tool: ToolDefinition & { progressLabels?: string[] } = {
     name: def.name,
     label: def.name,
-    description: def.description,
+    description: taggedDescription,
     progressLabels: def.progressLabels,
     parameters: Type.Object({
       [def.paramName]: Type.String({ description: def.paramDescription }),
     }),
     async execute(_toolCallId: string, params: unknown) {
       const question = (params as Record<string, string>)[def.paramName] ?? "";
-      console.log(`[${def.name}] Subagent: ${question.slice(0, 100)}`);
+      const execStartedAt = Date.now();
+      log.info(`[${def.name}] Subagent start t=${execStartedAt} call=${_toolCallId.slice(0,8)}: ${question.slice(0, 100)}`);
+
+      // ── (D) Memoization: identical (subagent, question) inside the same
+      // parent run resolves to the SAME promise, so concurrent duplicate
+      // calls share one execution and sequential duplicates skip the work
+      // entirely. Skipped when there is no parentSessionId — without a
+      // bounded scope we'd risk cross-run pollution.
+      const parentSid = progressCtx?.parentSessionId;
+      if (parentSid) {
+        const subMap = subagentResultCache.get(parentSid) ?? new Map<string, CachedEntry>();
+        if (!subagentResultCache.has(parentSid)) subagentResultCache.set(parentSid, subMap);
+        const key = subagentCacheKey(def.name, question);
+        const existing = subMap.get(key);
+        if (existing) {
+          log.info(`[${def.name}] Cache hit (parent=${parentSid.slice(0,8)} key=${key.slice(0,8)}) — sharing in-flight/completed result`);
+          return existing.promise;
+        }
+        // Stash the in-flight promise BEFORE awaiting so a concurrent caller
+        // with the same key sees it. The real execution continues below; we
+        // wrap it in an inner async IIFE so we can await it as the cached promise.
+        const exec = (async (): Promise<SubagentExecResult> => {
+          return await doExecute();
+        })();
+        subMap.set(key, { promise: exec, insertedAt: Date.now() });
+        return exec;
+      }
+      return await doExecute();
+
+      // The body below — extracted as a closure so the cache wrapper can call
+      // it once and share the resulting promise. No behaviour change inside.
+      async function doExecute(): Promise<SubagentExecResult> {
 
       // Sticky-label state hoisted out of the try block so the catch handler
       // can clear the timer on early failures without leaking the interval.
       let stickyLabel: string | null = null;
+      let sessionRef: unknown = null;
+      // Hoisted so the finally can clean it up regardless of success/error.
+      let childSkillScope: string | null = null;
+      const toolsUsed: string[] = [];
+      // Raw child tool outputs that contain inline citation tokens — appended
+      // verbatim to the returned text (below) so the parent always has the exact
+      // [clf-…#n] tokens to cite, independent of how the inner LLM summarized.
+      const citedToolOutputs: string[] = [];
+      let turnStartedAt: number | null = null;
+      let firstDeltaAt: number | null = null;
+      let turnStreamChars = 0;
+      let turnStreamThinkingChars = 0;
+      let turnStreamTextChars = 0;
+      let turnStreamCount = 0;
+      let streamWindowCount = 0;
+      let streamWindowStartedAt: number | null = null;
+      let streamRateTimer: ReturnType<typeof setInterval> | null = null;
+      let turnStreamRateSamples: Array<{ offsetMs: number; streamsPerSec: number; streamsCollected: number }> = [];
+      let lastStreamCharsPerSec: number | undefined;
+      let lastAssistantStreamSummary: {
+        streamChars?: number;
+        streamThinkingChars?: number;
+        streamTextChars?: number;
+        streamCharsPerSec?: number;
+        streamsCollected?: number;
+        streamRateSamples?: Array<{ offsetMs: number; streamsPerSec: number; streamsCollected: number }>;
+      } | null = null;
+      const debugEvents: SubagentDebugEvent[] = [];
+      let debugSeq = 0;
+      let providerError: string | null = null;
+      const pushDebugEvent = (kind: string, data: Record<string, unknown> = {}, toolCallId?: string): void => {
+        const event = {
+          seq: ++debugSeq,
+          at: new Date().toISOString(),
+          kind,
+          ...(toolCallId ? { toolCallId } : {}),
+          data,
+        };
+        debugEvents.push(event);
+        if (progressCtx) {
+          pushDebugProgress(progressCtx.progressUrl, progressCtx.parentSessionId, {
+            ...event,
+            kind: kind as DebugEventRecord["kind"],
+            parentToolCallId: _toolCallId,
+            subagentName: def.name,
+          });
+        }
+      };
+      const pushLiveStreamRate = (streamsPerSec: number, active: boolean): void => {
+        if (!progressCtx) return;
+        pushDebugProgress(progressCtx.progressUrl, progressCtx.parentSessionId, {
+          seq: ++debugSeq,
+          at: new Date().toISOString(),
+          kind: "stream_rate",
+          parentToolCallId: _toolCallId,
+          subagentName: def.name,
+          data: { streamsPerSec, streamsCollected: turnStreamCount, active },
+        });
+      };
+      const flushStreamRate = (active: boolean): void => {
+        if (streamWindowStartedAt == null || firstDeltaAt == null) return;
+        const now = Date.now();
+        const elapsedMs = Math.max(1, now - streamWindowStartedAt);
+        const streamsPerSec = Math.round((streamWindowCount / (elapsedMs / 1000)) * 10) / 10;
+        if (streamWindowCount > 0) {
+          turnStreamRateSamples.push({ offsetMs: now - firstDeltaAt, streamsPerSec, streamsCollected: turnStreamCount });
+        }
+        pushLiveStreamRate(streamsPerSec, active);
+        streamWindowCount = 0;
+        streamWindowStartedAt = now;
+      };
+      const startStreamRateTimer = (): void => {
+        if (streamRateTimer) return;
+        streamWindowStartedAt = Date.now();
+        streamRateTimer = setInterval(() => flushStreamRate(true), 1_000);
+      };
+      const stopStreamRateTimer = (): void => {
+        if (streamRateTimer) clearInterval(streamRateTimer);
+        streamRateTimer = null;
+        flushStreamRate(false);
+        streamWindowStartedAt = null;
+      };
+      const snapshotMessages = (): unknown[] => {
+        const messages = (sessionRef as { messages?: unknown[] } | null)?.messages ?? [];
+        try {
+          return JSON.parse(JSON.stringify(messages)) as unknown[];
+        } catch {
+          return messages;
+        }
+      };
       const stickyTimer = progressCtx?.progressUrl
         ? setInterval(() => {
             if (stickyLabel && progressCtx.progressUrl) {
@@ -340,7 +614,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // Apply copilot proxy (no-op for other providers) then register model via the same helper the parent uses
         const effectiveConfig = await applyCopilotProxyIfNeeded(resolvedProvider?.provider, resolvedProvider?.config);
         const model = resolveModel(modelRegistry, resolvedProvider?.provider, effectiveConfig);
-        console.log(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? "shared"}`);
+        log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? "shared"}`);
 
         // Materialize skills onto disk so the child session loads them as
         // proper pi resources (same path the parent takes in agent.ts),
@@ -348,7 +622,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // triggers + the skill-resource API available inside the child
         // model loop. Scope by parent session + this tool call so
         // concurrent subagent invocations don't stomp on each other.
-        const childSkillScope = `${progressCtx?.parentSessionId ?? "subagent"}-${def.name}-${_toolCallId.slice(0, 8)}`;
+        childSkillScope = `${progressCtx?.parentSessionId ?? "subagent"}-${def.name}-${_toolCallId.slice(0, 8)}`;
         const childSkillsDir = skills && skills.length > 0
           ? await writeSessionSkills(childSkillScope, skills)
           : null;
@@ -358,17 +632,30 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         const childResourceLoader = new DefaultResourceLoader({
           cwd: process.cwd(),
           agentDir: `${process.env["HOME"] ?? "."}/.pi/agent`,
+          // Same compaction policy the parent installs (agent.ts): the fresh-start
+          // correction + copilot-context preservation. Subagents are the WORST
+          // case for pi's keep-whole-window thrash — their context is dominated by
+          // huge spaces-search/tool results with no user/assistant cut point in the
+          // keep-recent budget, so without this they re-compact almost immediately.
+          extensionFactories: [compactionExtension],
           ...(childSkillsDir ? { additionalSkillPaths: [childSkillsDir] } : {}),
         });
         await childResourceLoader.reload();
-        if (childSkillsDir) {
-          const loaded = childResourceLoader.getSkills();
-          console.log(`[${def.name}] [skill-debug] child resourceLoader loaded ${loaded.skills.length} skill(s):`,
-            loaded.skills.map((s) => ({ name: s.name, filePath: s.filePath })));
-          if (loaded.diagnostics.length > 0) {
-            console.log(`[${def.name}] [skill-debug] child resourceLoader diagnostics:`, loaded.diagnostics);
-          }
-        }
+
+        // Skills live outside childWorkingDir; allow each loaded skill's dir (+
+        // the session-skills dir) as READ-ONLY roots so the subagent can read
+        // SKILL.md without the gate denying it. Mirrors agent.ts. Write stays
+        // confined to childWorkingDir.
+        const childSkillReadRoots = Array.from(
+          new Set<string>([
+            ...(childSkillsDir ? [childSkillsDir] : []),
+            ...childResourceLoader
+              .getSkills()
+              .skills.map((s) => (s as { filePath?: string }).filePath)
+              .filter((p): p is string => typeof p === "string" && isAbsolute(p))
+              .map((p) => dirname(p)),
+          ]),
+        );
 
         const parentSessionId = progressCtx?.parentSessionId;
         const childWorkingDir = parentSessionId ? workspacePath(parentSessionId) : process.cwd();
@@ -379,26 +666,50 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         const subagentCustomNames = (tools ?? []).map((t) => t.name);
         const { session } = await createAgentSession({
           model,
-          thinkingLevel: AGENT.thinkingLevel as ThinkingLevel,
+          // Per-subagent reasoning override (def.thinkingLevel) wins over the
+          // global AGENT.thinkingLevel — retrieval subagents ask for "high",
+          // cheap structured-fetch ones can stay low. Falls back to the global
+          // default when the def doesn't pin a level.
+          thinkingLevel: (def.thinkingLevel ?? AGENT.thinkingLevel) as ThinkingLevel,
           // Subagent gets the same restricted built-in set as the parent
-          // (no bash) PLUS every customTool name so they aren't filtered.
+          // (no bash) PLUS every customTool name so they aren't filtered. The
+          // file-tool names are served by cwd-GATED versions registered in
+          // customTools below (NOT pi's unscoped built-ins) — see agent.ts for
+          // the cross-session-read rationale. Critical here too: childWorkingDir
+          // falls back to process.cwd() (the container root), so without gating
+          // a subagent's read/grep could walk the whole container.
           tools: ["read", "write", "grep", "find", "ls", ...subagentCustomNames],
           cwd: childWorkingDir,
           sessionManager: SessionManager.inMemory(),
           authStorage,
           modelRegistry,
-          customTools: tools,
+          // cwd-scoped file tools (override pi's unscoped read/write/grep/find/
+          // ls built-ins — the cross-session-read fix) FIRST, then the
+          // subagent's MCP/custom tools with oversized-output capping. The
+          // scoped file tools are primitives and must NOT be capped.
+          customTools: [
+            ...Object.values(createScopedToolMap(childWorkingDir, childSkillReadRoots)),
+            ...capCustomToolOutput(tools, childWorkingDir),
+          ] as ToolDefinition[],
           resourceLoader: childResourceLoader,
         });
+        sessionRef = session;
 
-        const toolsUsed: string[] = [];
+        // Mid-turn compaction + the assistant-tail resume guard (mirrors agent.ts).
+        // Without this the child never checks the tool_result that just landed
+        // before the NEXT prompt, and a false-overflow resume can crash the child
+        // with "Cannot continue from message role: assistant". See mid-turn-compaction.ts.
+        installMidTurnCompaction(session);
+
+        pushDebugEvent("session_start", {
+          parentSessionId,
+          parentToolCallId: _toolCallId,
+          subagentName: def.name,
+          question,
+          questionChars: question.length,
+        });
         // Track in-flight child tool calls so we can emit full ToolInvocation objects on _end.
         const childInflight = new Map<string, { toolName: string; args: unknown; startedAt: number }>();
-        // Capture any provider error from the inner session so we can return
-        // a real error message to the parent instead of silently falling back
-        // to "(No findings)". Populated from message.errorMessage when the
-        // session emits stopReason="error" (Anthropic 400s, quota, schema, etc.).
-        let providerError: string | null = null;
         session.subscribe((event) => {
           // Capture provider errors so a failed inner LLM call (Anthropic 400,
           // quota, schema, auth, etc.) surfaces back to the parent instead of
@@ -414,8 +725,17 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             // ignore
           }
           if (event.type === "tool_execution_start") {
-            console.log(`[${def.name}] Tool: ${event.toolName}`);
+            turnStartedAt = null;
+            firstDeltaAt = null;
+            log.info(`[${def.name}] Tool: ${event.toolName}`);
             childInflight.set(event.toolCallId, { toolName: event.toolName, args: event.args, startedAt: Date.now() });
+            pushDebugEvent("tool_execution_start", {
+              toolName: event.toolName,
+              args: (() => {
+                try { return JSON.parse(JSON.stringify(event.args ?? {})); }
+                catch { return event.args ?? {}; }
+              })(),
+            }, event.toolCallId);
             // Overlay a punchy live label on the parent's spinner so chat
             // shows what's actually running. The sticky timer above keeps
             // re-pushing this label so it survives the parent's 10s keep-alive.
@@ -462,11 +782,34 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
               recordCitations(_toolCallId, childCitations);
             }
 
+            // Capture the raw text of any child tool result that carries inline
+            // citation tokens (e.g. `[clf-abc123#14]`). The text we return to
+            // the parent below is only getLastAssistantText() — the inner LLM's
+            // summary, which can paraphrase away or mangle tokens. Stash the
+            // verbatim token-bearing chunks so we can append the ones the
+            // summary dropped, guaranteeing the parent has exact tokens to cite.
+            try {
+              const resStr =
+                typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+              // Charset matches agent.ts CITE_RE: real toolCallIds carry `.`,
+              // `_` and `:` (e.g. functions.Xyne_Spaces__spaces-tickets:2) —
+              // a narrower class silently drops those tokens.
+              if (resStr && /\[clf-[a-z0-9._:-]+#\d+\]/i.test(resStr)) {
+                citedToolOutputs.push(resStr);
+              }
+            } catch { /* ignore non-serializable results */ }
+
             // Tier 2: stream nested child invocation up to the parent's progressUrl
             // so the frontend can render it under the subagent row.
             if (progressCtx) {
               const started = childInflight.get(event.toolCallId);
               if (started) {
+                // Persist exactly what the child model saw. Subagent inner
+                // tools already go through capCustomToolOutput/promoteIfOversized
+                // (see the customTools wiring above), so the result is bounded
+                // in-execute. No second persist-only slice here — that re-cut the
+                // already-capped result, shrinking the DB/UI copy below what the
+                // model reasoned over and corrupting the MCP JSON envelope.
                 const resultStr = (() => {
                   try {
                     if (typeof event.result === "string") return event.result;
@@ -475,13 +818,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
                     return String(event.result);
                   }
                 })();
-                const truncated = resultStr.length > 10_000
-                  ? `${resultStr.slice(0, 10_000)}\n…[truncated ${resultStr.length - 10_000} chars]`
-                  : resultStr;
                 const childInv: ToolInvocation = {
                   toolName: event.toolName,
                   args: started.args,
-                  result: truncated,
+                  result: resultStr,
                   isError: event.isError,
                   startedAt: new Date(started.startedAt).toISOString(),
                   durationMs: Date.now() - started.startedAt,
@@ -492,9 +832,115 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
                   ...(childCitations ? { citations: childCitations } : {}),
                 };
                 pushInvocation(progressCtx.progressUrl, progressCtx.parentSessionId, childInv);
-                childInflight.delete(event.toolCallId);
               }
             }
+            const started = childInflight.get(event.toolCallId);
+            turnStartedAt = Date.now();
+            firstDeltaAt = null;
+            pushDebugEvent("tool_execution_end", {
+              toolName: event.toolName,
+              args: (() => {
+                try { return JSON.parse(JSON.stringify(started?.args ?? {})); }
+                catch { return started?.args ?? {}; }
+              })(),
+              result: (() => {
+                try {
+                  return typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+                } catch {
+                  return String(event.result);
+                }
+              })(),
+              isError: event.isError,
+              durationMs: started ? Date.now() - started.startedAt : undefined,
+            }, event.toolCallId);
+            childInflight.delete(event.toolCallId);
+          }
+          if (event.type === "message_update") {
+            const ame = (event as { assistantMessageEvent?: { type?: string; delta?: string } }).assistantMessageEvent;
+            if (ame && typeof ame.delta === "string" && ame.delta.length > 0) {
+              if (firstDeltaAt == null && turnStartedAt != null) {
+                firstDeltaAt = Date.now();
+              }
+              if (ame.type === "thinking_delta") {
+                turnStreamCount += 1;
+                streamWindowCount += 1;
+                startStreamRateTimer();
+                turnStreamThinkingChars += ame.delta.length;
+                turnStreamChars += ame.delta.length;
+              } else if (ame.type === "text_delta") {
+                turnStreamCount += 1;
+                streamWindowCount += 1;
+                startStreamRateTimer();
+                turnStreamTextChars += ame.delta.length;
+                turnStreamChars += ame.delta.length;
+              }
+            }
+          }
+          if (event.type === "message_end") {
+            const msg = (event as { message?: { role?: string; usage?: unknown; stopReason?: string; errorMessage?: string } }).message;
+            if (msg?.role === "assistant") {
+              stopStreamRateTimer();
+              if (firstDeltaAt != null && turnStreamChars > 0) {
+                const elapsed = Math.max(0.001, (Date.now() - firstDeltaAt) / 1000);
+                lastStreamCharsPerSec = Math.round(turnStreamChars / elapsed);
+              }
+              pushDebugEvent("assistant_turn_end", {
+                message: (() => {
+                  try { return JSON.parse(JSON.stringify(msg)); }
+                  catch { return msg ?? {}; }
+                })(),
+                usage: (() => {
+                  try { return JSON.parse(JSON.stringify(msg.usage ?? {})); }
+                  catch { return msg?.usage ?? {}; }
+                })(),
+                assistantText: session.getLastAssistantText() ?? "",
+                stopReason: msg.stopReason,
+                errorMessage: msg.errorMessage,
+                streamChars: turnStreamChars,
+                streamThinkingChars: turnStreamThinkingChars,
+                streamTextChars: turnStreamTextChars,
+                ...(lastStreamCharsPerSec != null ? { streamCharsPerSec: lastStreamCharsPerSec } : {}),
+                streamsCollected: turnStreamCount,
+                streamRateSamples: turnStreamRateSamples,
+                messages: snapshotMessages(),
+              });
+              lastAssistantStreamSummary = {
+                streamChars: turnStreamChars,
+                streamThinkingChars: turnStreamThinkingChars,
+                streamTextChars: turnStreamTextChars,
+                ...(lastStreamCharsPerSec != null ? { streamCharsPerSec: lastStreamCharsPerSec } : {}),
+                streamsCollected: turnStreamCount,
+                streamRateSamples: turnStreamRateSamples,
+              };
+              turnStartedAt = null;
+              firstDeltaAt = null;
+              turnStreamChars = 0;
+              turnStreamThinkingChars = 0;
+              turnStreamTextChars = 0;
+              turnStreamCount = 0;
+              streamWindowCount = 0;
+              turnStreamRateSamples = [];
+              lastStreamCharsPerSec = undefined;
+            }
+          }
+          if (event.type === "compaction_start") {
+            pushDebugEvent("compaction_start", {
+              reason: (event as { reason?: string }).reason,
+            });
+          }
+          if (event.type === "compaction_end") {
+            pushDebugEvent("compaction_end", {
+              aborted: (event as { aborted?: boolean }).aborted,
+              willRetry: (event as { willRetry?: boolean }).willRetry,
+              errorMessage: (event as { errorMessage?: string }).errorMessage,
+            });
+          }
+          if (event.type === "auto_retry_start") {
+            pushDebugEvent("auto_retry_start", {
+              attempt: (event as { attempt?: number }).attempt,
+              maxAttempts: (event as { maxAttempts?: number }).maxAttempts,
+              errorMessage: (event as { errorMessage?: string }).errorMessage,
+            });
           }
         });
 
@@ -502,7 +948,14 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // same path the parent uses). Do NOT inline them here — duplicating
         // them in the system prompt was the old approach and bloats every
         // model call in the child loop.
-        let systemPrompt = def.systemPrompt;
+        //
+        // (C) Prepend the system-level subagent preamble — parallelism +
+        // concision guidance applied uniformly across all subagents, not
+        // per-def. Subagents flagged allowRequery (retrieval: spaces) get the
+        // requery-permitting variant so the single-sweep cap doesn't choke hard
+        // lookups; every other subagent keeps SUBAGENT_PREAMBLE unchanged.
+        const preamble = def.allowRequery ? SUBAGENT_REQUERY_PREAMBLE : SUBAGENT_PREAMBLE;
+        let systemPrompt = `${preamble}${def.systemPrompt}`;
 
         // For sandbox subagent: surface every configured repo (workdir, ports,
         // setup steps) so the child LLM knows where things live and what's
@@ -527,8 +980,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             for (const ds of devservers) setupLines.push(`  - dev server: ${ds}`);
             blocks.push(
               `### ${name}\n` +
-                `- Repo: \`${cfg.repoUrl}\`\n` +
-                `- Default base branch: \`${cfg.defaultBranch}\`\n` +
+                (cfg.repoUrl
+                  ? `- Repo: \`${cfg.repoUrl}\`\n` +
+                    `- Default base branch: \`${cfg.defaultBranch}\`\n`
+                  : `- No repository — browser-only sandbox (headless chromium + CDP + noVNC).\n`) +
                 `- Workdir in VM: \`${cfg.workDir}\`\n` +
                 `- Template: \`${cfg.template}\`\n` +
                 (setupLines.length > 0 ? `- \`sandbox-repo-setup\` auto-runs:\n${setupLines.join("\n")}\n` : "") +
@@ -537,7 +992,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           }
           if (blocks.length > 0) {
             systemPrompt += `\n\n## Available Repos for sandbox-repo-setup\n${blocks.join("\n\n")}\n\nWhen working on a configured repo, ALWAYS use its listed workdir (e.g. \`/workspace/xyne-spaces\`) — never \`/home/user/\` or \`/tmp\`. Dependencies are installed by \`sandbox-repo-setup\`; \`npm test\` / \`npx tsc\` / \`npm run build\` should just work without re-installing.`;
-            console.log(`[${def.name}] Repo configs injected: ${Object.keys(REPO_CONFIGS).join(", ")}`);
+            log.info(`[${def.name}] Repo configs injected: ${Object.keys(REPO_CONFIGS).join(", ")}`);
           }
         }
 
@@ -557,10 +1012,11 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // work — if one is cached, ignore it so the LLM is forced to call
         // sandbox-repo-setup.
         if (def.serverType === "custom:sandbox" && progressCtx?.parentMeta?.conversationId) {
+          const userId = progressCtx.parentMeta.userId;
           const conversationId = progressCtx.parentMeta.conversationId;
           const agentSlug = progressCtx.parentMeta.agentSlug ?? "";
-          const storeKey = agentSlug ? `${conversationId}_${agentSlug}` : conversationId;
-          const existing = getSandboxSession(storeKey);
+          const storeKey = buildSandboxStoreKey(userId, conversationId, agentSlug);
+          const existing = storeKey ? getSandboxSession(storeKey) : undefined;
           const isRepoTemplate = !!existing && (
             existing.id.includes("agent-workspace") || existing.id.includes("docker-dev")
           );
@@ -568,17 +1024,51 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             const alive = await probeSession(existing, storeKey).catch(() => false);
             if (alive) {
               systemPrompt += `\n\n## Active Session\nSandbox session \`${existing.id}\` is already provisioned for this conversation. Repo is at \`/workspace/xyne-spaces\` (shallow clone of default branch) and Nix-managed services (postgres :5433, redis :6379, livekit :7880, zero :4848, fake-gcs :4443, y-sweet :8080) are already pre-realized in /nix/store from the pod's prebake step.\nUse \`sandbox-run\` with \`sessionId="${existing.id}"\` for ALL commands. DO NOT call \`sandbox-repo-setup\` again unless the session has died.`;
-              console.log(`[${def.name}] Active session injected: ${existing.id}`);
+              log.info(`[${def.name}] Active session injected: ${existing.id}`);
             }
           } else if (existing) {
-            console.log(`[${def.name}] Skipping injection: cached session ${existing.id} is not a repo-template`);
+            log.info(`[${def.name}] Skipping injection: cached session ${existing.id} is not a repo-template`);
           }
         }
 
-        await session.prompt(`${systemPrompt}\n\n## Question\n${question}`);
+        const childPrompt = `${systemPrompt}\n\n## Question\n${question}`;
+        pushDebugEvent("session_prompt", {
+          prompt: childPrompt,
+          messages: snapshotMessages(),
+        });
+        turnStartedAt = Date.now();
+        firstDeltaAt = null;
 
-        const sq = session as unknown as { _agentEventQueue?: Promise<void> };
-        if (sq._agentEventQueue) await sq._agentEventQueue;
+        // Honour the parent run's AbortSignal. If the user cancelled before
+        // we even started, stop now. Otherwise race the prompt against the
+        // signal: when it fires (parent loop aborted by /cancel or client
+        // disconnect), abort this child session so its pi loop unwinds and
+        // any inner MCP/customTool call short-circuits at its next await
+        // point. Without this, child sessions keep running past parent
+        // cancel — burning tokens, spawning more inner tool calls.
+        const subagentAbortSignal = progressCtx?.abortSignal;
+        if (subagentAbortSignal?.aborted) {
+          try {
+            await (session as { abort?: () => Promise<void> | void }).abort?.();
+          } catch { /* ignore */ }
+          throw new Error(`${def.name} subagent cancelled before start`);
+        }
+        const sessionAbort = (session as { abort?: () => Promise<void> | void }).abort?.bind(session);
+        const onParentAbort = () => {
+          // Best-effort. The pi session has its own listener machinery; abort
+          // returns whenever the SDK acknowledges. We don't await here — we
+          // want the parent's catch path to take over immediately.
+          try { void sessionAbort?.(); } catch { /* ignore */ }
+        };
+        subagentAbortSignal?.addEventListener("abort", onParentAbort, { once: true });
+        try {
+          await session.prompt(childPrompt);
+
+          const sq = session as unknown as { _agentEventQueue?: Promise<void> };
+          if (sq._agentEventQueue) await sq._agentEventQueue;
+        } finally {
+          subagentAbortSignal?.removeEventListener("abort", onParentAbort);
+        }
 
         // If the inner provider raised an error AND produced no assistant text,
         // surface that error to the parent instead of pretending the search
@@ -595,7 +1085,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           const raw: string = providerError;
           const match = /"message"\s*:\s*"([^"]+)"/.exec(raw);
           const human: string = match && match[1] ? match[1] : raw;
-          console.error(`[${def.name}] Provider error: ${human}`);
+          log.error(`[${def.name}] Provider error: ${human}`);
           text = `${def.name} subagent failed before producing any output. Provider error: ${human}`;
         } else {
           // Genuinely empty session (no tool calls, no text, no error) —
@@ -603,6 +1093,33 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           // that special-case "(No findings)" don't regress.
           text = "(No findings)";
         }
+
+        // Citation-token safety net: surface any `[clf-…#n]` token from the raw
+        // child tool results that the inner LLM's summary omitted, so the parent
+        // can always cite verbatim even if the summary paraphrased the tokens
+        // away. Self-limiting: citedToolOutputs only fills when child results
+        // carried tokens (the retrieval case), so this is a no-op otherwise.
+        if (citedToolOutputs.length > 0) {
+          // Charset matches agent.ts CITE_RE ([a-z0-9._:-]) — see the capture
+          // site above for why the wider class matters.
+          const tokenRe = /\[clf-[a-z0-9._:-]+#\d+\]/gi;
+          const seenInText = new Set((text.match(tokenRe) ?? []).map((t) => t.toLowerCase()));
+          const missing: string[] = [];
+          for (const chunk of citedToolOutputs) {
+            for (const tok of chunk.match(tokenRe) ?? []) {
+              if (!seenInText.has(tok.toLowerCase())) {
+                missing.push(tok);
+                seenInText.add(tok.toLowerCase());
+              }
+            }
+          }
+          if (missing.length > 0) {
+            const list = missing.slice(0, 40).join(" ");
+            text += `\n\n---\n**Citation tokens available from retrieved chunks** (copy verbatim when citing; do NOT invent or range): ${list}`;
+            log.info(`[${def.name}] Appended ${missing.length} citation token(s) not present in summary text`);
+          }
+        }
+
         session.dispose();
         if (stickyTimer) clearInterval(stickyTimer);
         stickyLabel = null;
@@ -614,7 +1131,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             if (!trigger.toolName.startsWith(prefix)) continue;
             const innerTool = trigger.toolName.slice(prefix.length);
             if (toolsUsed.includes(innerTool)) {
-              console.log(`[${def.name}] Skill trigger: ${trigger.skillSlug} fired (inner tool ${innerTool} was used)`);
+              log.info(`[${def.name}] Skill trigger: ${trigger.skillSlug} fired (inner tool ${innerTool} was used)`);
               text += `\n\n---\n**[Skill Injected: ${trigger.skillSlug}]** _(configured by user in agent settings)_`;
               if (trigger.prompt) text += `\nInstruction: ${trigger.prompt}`;
               text += `\n\n${trigger.skillContent}\n---`;
@@ -622,14 +1139,88 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           }
         }
 
-        console.log(`[${def.name}] Done: ${toolsUsed.length} tools, ${text.length} chars`);
+        const execDurationMs = Date.now() - execStartedAt;
+        log.info(`[${def.name}] Subagent end t=${Date.now()} call=${_toolCallId.slice(0,8)} duration=${execDurationMs}ms innerTools=${toolsUsed.length} chars=${text.length}`);
+        pushDebugEvent("session_end", {
+          durationMs: execDurationMs,
+          textLength: text.length,
+          toolsUsed,
+          providerError,
+          ...(lastAssistantStreamSummary ?? {}),
+        });
+        if (parentSessionId) {
+          try {
+            const debugDir = await ensureSessionDebugDir(progressCtx?.parentDebugSessionId ?? parentSessionId);
+            const { writeFile } = await import("node:fs/promises");
+            const safeToolCallId = _toolCallId.replace(/[^a-zA-Z0-9_-]/g, "-");
+            const safeName = `${def.name}-${safeToolCallId}`;
+            const childSnapshot = {
+              schemaVersion: 1,
+              parentSessionId,
+              parentToolCallId: _toolCallId,
+              subagentName: def.name,
+              question,
+              provider: resolvedProvider?.provider ?? "litellm",
+              model: resolvedProvider?.config.model ?? "shared",
+              startedAt: new Date(execStartedAt).toISOString(),
+              finishedAt: new Date().toISOString(),
+              text,
+              toolsUsed,
+              providerError,
+              messages: snapshotMessages(),
+              events: debugEvents,
+              ...(lastAssistantStreamSummary ?? {}),
+            };
+            await writeFile(`${debugDir}/subagents-${safeName}.json`, JSON.stringify(childSnapshot, null, 2), "utf8");
+          } catch (err) {
+            log.warn(`[${def.name}] Failed to write child debug artifact: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
         return { content: [{ type: "text" as const, text }], details: {} };
       } catch (err) {
         if (stickyTimer) clearInterval(stickyTimer);
+        stopStreamRateTimer();
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[${def.name}] Failed:`, msg);
+        log.error(`[${def.name}] Failed:`, msg);
+        pushDebugEvent("session_error", { error: msg });
+        if (progressCtx?.parentSessionId) {
+          try {
+            const debugDir = await ensureSessionDebugDir(progressCtx.parentDebugSessionId ?? progressCtx.parentSessionId);
+            const { writeFile } = await import("node:fs/promises");
+            const safeToolCallId = _toolCallId.replace(/[^a-zA-Z0-9_-]/g, "-");
+            const safeName = `${def.name}-${safeToolCallId}`;
+            const childSnapshot = {
+              schemaVersion: 1,
+              parentSessionId: progressCtx.parentSessionId,
+              parentToolCallId: _toolCallId,
+              subagentName: def.name,
+              question,
+              provider: resolvedProvider?.provider ?? "litellm",
+              model: resolvedProvider?.config.model ?? "shared",
+              startedAt: new Date(execStartedAt).toISOString(),
+              finishedAt: new Date().toISOString(),
+              error: msg,
+              toolsUsed,
+              providerError,
+              messages: snapshotMessages(),
+              events: debugEvents,
+            };
+            await writeFile(`${debugDir}/subagents-${safeName}.json`, JSON.stringify(childSnapshot, null, 2), "utf8");
+          } catch {
+            // ignore
+          }
+        }
         return { content: [{ type: "text" as const, text: `${def.name} subagent failed: ${msg}` }], details: {} };
+      } finally {
+        // Dispose the child session even on the error path — the success path
+        // already disposed it (dispose() is idempotent), but the catch path
+        // didn't, leaking the session's listeners/extension context on every
+        // failed subagent. Best-effort.
+        try { (sessionRef as { dispose?: () => void } | null)?.dispose?.(); } catch { /* ignore */ }
+        // Delete the per-invocation skills dir so it doesn't accumulate on disk.
+        if (childSkillScope) await deleteSessionSkills(childSkillScope);
       }
+      } // close doExecute
     },
   };
   return tool;
@@ -849,12 +1440,12 @@ export function buildSubagentTools(
     const builtinNames = new Set(SUBAGENT_DEFINITIONS.map((d) => d.name));
     for (const spec of customSubagents) {
       if (builtinNames.has(spec.name)) {
-        console.warn(`[buildSubagentTools] Ignoring custom subagent "${spec.name}" — name collides with a built-in (built-in wins)`);
+        log.warn(`[buildSubagentTools] Ignoring custom subagent "${spec.name}" — name collides with a built-in (built-in wins)`);
         continue;
       }
       const palette = resolveCustomSubagentTools(spec.tools, groups, customTools);
       if (palette.length === 0) {
-        console.warn(`[buildSubagentTools] Custom subagent "${spec.name}" resolved to 0 tools — skipping (check its tools config against live MCP groups)`);
+        log.warn(`[buildSubagentTools] Custom subagent "${spec.name}" resolved to 0 tools — skipping (check its tools config against live MCP groups)`);
         continue;
       }
       const syntheticDef: SubagentDefinition = {
@@ -895,10 +1486,10 @@ export async function loadDeepwikiTools(): Promise<McpToolGroup | null> {
   try {
     const { tools } = await loadMcpTools("npx", ["-y", "deepwiki-mcp"], "deepwiki");
     cachedDeepwikiTools = { serverType: "deepwiki", serverName: "deepwiki", tools, writeTools: [] };
-    console.log(`[deepwiki] Loaded ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
+    log.info(`[deepwiki] Loaded ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
     return cachedDeepwikiTools;
   } catch (err) {
-    console.warn(`[deepwiki] Failed to load tools: ${err instanceof Error ? err.message : err}`);
+    log.warn(`[deepwiki] Failed to load tools: ${err instanceof Error ? err.message : err}`);
     return null;
   }
 }
@@ -910,10 +1501,10 @@ export async function loadContext7Tools(): Promise<McpToolGroup | null> {
   try {
     const { tools } = await loadMcpTools("npx", ["-y", "@upstash/context7-mcp@latest"], "context7");
     cachedContext7Tools = { serverType: "context7", serverName: "context7", tools, writeTools: [] };
-    console.log(`[context7] Loaded ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
+    log.info(`[context7] Loaded ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
     return cachedContext7Tools;
   } catch (err) {
-    console.warn(`[context7] Failed to load tools: ${err instanceof Error ? err.message : err}`);
+    log.warn(`[context7] Failed to load tools: ${err instanceof Error ? err.message : err}`);
     return null;
   }
 }
@@ -950,10 +1541,10 @@ export async function loadPlaywrightTools(): Promise<McpToolGroup | null> {
       "playwright",
     );
     cachedPlaywrightTools = { serverType: "playwright", serverName: "playwright", tools, writeTools: [] };
-    console.log(`[playwright] Loaded ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
+    log.info(`[playwright] Loaded ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
     return cachedPlaywrightTools;
   } catch (err) {
-    console.warn(`[playwright] Failed to load tools: ${err instanceof Error ? err.message : err}`);
+    log.warn(`[playwright] Failed to load tools: ${err instanceof Error ? err.message : err}`);
     return null;
   }
 }

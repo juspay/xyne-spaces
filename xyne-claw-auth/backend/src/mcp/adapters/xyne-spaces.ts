@@ -11,7 +11,13 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
   transport: "stdio",
   type: "xyne-spaces",
   healthCheck: { name: "spaces-channels", params: { limit: 1 } },
-  writeTools: ["spaces-create-ticket", "spaces-update-ticket", "spaces-schedule-call", "spaces-memory-create", "spaces-create-canvas", "spaces-edit-canvas"],
+  // Tools listed here are gated by the HITL (write-action) approval flow —
+  // the agent emits a Approve/Decline card in the thread and the user must
+  // click Approve before the tool executes. user-send-message posts a
+  // message AS THE USER, so it must require explicit consent before sending.
+  // apps-send-message (in the sibling xyne-spaces-app-tools MCP) is NOT
+  // gated by design — that one acts as the bot identity, autonomously.
+  writeTools: ["spaces-create-ticket", "spaces-update-ticket", "spaces-schedule-call", "spaces-create-canvas", "spaces-edit-canvas", "user-send-message"],
   credentialFields: [
     { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: "https://app.spaces.xyne.juspay.net" },
     { name: "token", label: "Google Auth Token", type: "password", placeholder: "Paste your google_access_token" },
@@ -22,6 +28,11 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
     const sessionId = (credentials["sessionId"] as string | undefined) ?? "";
     const workspaceId = (credentials["workspaceId"] as string | undefined) ?? "";
     const userId = (credentials["userId"] as string | undefined) ?? "";
+    // "app" when the run is an agent's app user (no login session): `token` is
+    // the agent's app token and the server routes tools to the /api/apps/*
+    // routes. Defaults to "user" (session token → /api/query). Set by the
+    // runner's app-user fallback.
+    const authMode = (credentials["authMode"] as string | undefined) === "app" ? "app" : "user";
     return {
       cmd: "node",
       args: ["--import", "tsx/esm", SERVER_PATH],
@@ -30,6 +41,7 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
         XYNE_SPACES_TOKEN: token,
         XYNE_SPACES_SESSION_ID: sessionId,
         XYNE_SPACES_WORKSPACE_ID: workspaceId,
+        XYNE_SPACES_AUTH_MODE: authMode,
         INTERNAL_S2S_KEY: process.env["INTERNAL_S2S_KEY"] ?? "",
         XYNE_USER_ID: userId,
       },

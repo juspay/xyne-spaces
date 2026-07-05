@@ -1,13 +1,16 @@
 import type { StdioMcpAdapter, McpToolInfo } from "../types.js";
 import type { Citation } from "xyne-claw-shared";
-import { CONFIG } from "../../config.js";
 
-/** Base URL for the Explore citation link. Prefers the `GRAFANA_BASE_URL`
- *  env override so a single deployed Grafana can be the link target; falls
- *  back to the connection's credential `url` (the same URL the query uses). */
-function citationBaseUrl(credentialUrl: string): string {
-  return CONFIG.grafanaBaseUrl.trim() || credentialUrl;
-}
+// Explicit tool set for `mcp-grafana`. Without `--enabled-tools` the server
+// falls back to its built-in default set — yesterday's release dropped this
+// flag, which silently changed which Grafana tools were available. Pin the full
+// intended list so the surface is deterministic across mcp-grafana versions.
+const GRAFANA_ENABLED_TOOLS = [
+  "search", "datasource", "incident", "prometheus", "loki", "alerting",
+  "dashboard", "folder", "oncall", "asserts", "sift", "pyroscope",
+  "navigation", "proxied", "annotations", "rendering", "runpanelquery",
+  "examples", "cloudwatch", "elasticsearch", "clickhouse",
+].join(",");
 
 export const grafanaAdapter: StdioMcpAdapter = {
   transport: "stdio",
@@ -22,7 +25,7 @@ export const grafanaAdapter: StdioMcpAdapter = {
     const token = credentials["token"] as string;
     return {
       cmd: "uvx",
-      args: ["mcp-grafana"],
+      args: ["mcp-grafana==0.15.2", "--enabled-tools", GRAFANA_ENABLED_TOOLS],
       env: {
         GRAFANA_URL: url,
         GRAFANA_SERVICE_ACCOUNT_TOKEN: token,
@@ -65,7 +68,7 @@ export const GRAFANA_CUSTOM_TOOLS: McpToolInfo[] = [
         },
         datasourceType: {
           type: "string",
-          description: 'Optional datasource type for the citation link (default "victorialogs").',
+          description: 'Optional datasource type for the citation link (default "victoriametrics-logs-datasource").',
         },
       },
       required: ["query", "start"],
@@ -97,6 +100,16 @@ export const GRAFANA_CUSTOM_TOOLS: McpToolInfo[] = [
         end: { type: "string", description: "End time — ISO timestamp. Defaults to now." },
         step: { type: "string", description: 'Resolution step for range queries (default "60s")' },
         queryType: { type: "string", description: '"range" (default) or "instant"' },
+        datasourceUid: {
+          type: "string",
+          description:
+            "Optional VictoriaMetrics datasource UID for building an Explore citation link. " +
+            "Defaults to the configured VictoriaMetrics proxy datasource.",
+        },
+        datasourceType: {
+          type: "string",
+          description: 'Optional datasource type for the citation link (default "victoriametrics-datasource").',
+        },
       },
       required: ["query", "start"],
     },
@@ -147,12 +160,17 @@ async function grafanaFetch(baseUrl: string, token: string, path: string, option
   });
 }
 
-/**
- * Build a Grafana Explore deep link. The query is carried as a URL-encoded
- * JSON `panes` data parameter — it can never alter the host/path (F1). Base
- * URL comes from the Grafana connection's credential `url` (server-side, never
- * the model). `expr` for logs/prometheus, `rawSql` for SQL datasources.
- */
+/** Build a Grafana Explore deep link. The query is carried as a URL-encoded
+ *  JSON `panes` data parameter — it can never alter the host/path. Base URL
+ *  is the connection's credential `url` (normalized in mcp.ts as
+ *  `url ?? baseUrl ?? grafanaUrl`): the same Grafana the query ran against, so
+ *  the Explore link always opens the right instance. Server-side, never the
+ *  model. Query field is chosen by datasource type: `rawSql` for SQL datasources,
+ *  `query` for Lucene/KQL datasources (elasticsearch, loki), `expr` otherwise
+ *  (prometheus/victoriametrics). Pane shape matches Grafana's own "Share"
+ *  output: pane-level `datasource` is the bare uid STRING, per-query
+ *  `datasource` is the {type, uid} object. `orgId=1` is required when orgs are
+ *  enabled. */
 function buildGrafanaExploreUrl(baseUrl: string, opts: {
   datasourceUid: string;
   datasourceType: string;
@@ -162,11 +180,7 @@ function buildGrafanaExploreUrl(baseUrl: string, opts: {
 }): string {
   const base = baseUrl.replace(/\/+$/, "");
   const type = opts.datasourceType.toLowerCase();
-  const queryField = /postgres|mysql|mssql|clickhouse|sql/.test(type) ? "rawSql" : "expr";
-  // Pane shape matches what Grafana's own "Share" emits: the pane-level
-  // `datasource` is the bare uid STRING, and the per-query `datasource` is the
-  // {type, uid} object. The query goes under `expr` (logs/prometheus) or
-  // `rawSql` (SQL). `orgId=1` is required by Grafana when orgs are enabled.
+  const queryField = grafanaExploreQueryField(type);
   const panes = {
     xyne: {
       datasource: opts.datasourceUid,
@@ -193,9 +207,97 @@ function grafanaFromTime(start: string | undefined): string | undefined {
   return start;
 }
 
-/** Build a Desk-readable citation label for an Explore link. Mirrors the
- *  label-enrichment step spaces-tools does via applyChannelInfo: centralize
- *  the label construction so every handler produces the same shape. */
+/** Pick the Explore pane query field for a datasource type: `rawSql` for SQL
+ *  datasources, `query` for Lucene/KQL ones (elasticsearch, loki), `expr`
+ *  otherwise (prometheus/victoriametrics). Exported so the upstream-citation
+ *  builder (which has only the tool name, not a handler) reuses the same rule. */
+export function grafanaExploreQueryField(datasourceType: string): "rawSql" | "query" | "expr" {
+  const t = datasourceType.toLowerCase();
+  if (/postgres|mysql|mssql|clickhouse|sql/.test(t)) return "rawSql";
+  if (/elasticsearch|loki/.test(t)) return "query";
+  return "expr";
+}
+
+// ── Upstream mcp-grafana tools (query_elasticsearch, …) ────────────────────
+// These run through the generic stdio `callTool` path (mcp.ts:callTool), NOT
+// the local `grafana-*` switch — so they get no Explore link by default. They
+// return only their result text from mcp-grafana; we can't inject an inline
+// `[clf-…#N]` token into the model's own answer, so we attach the Explore link
+// as a single `external` citation (chunkIndex 1) that mcp.ts merges into the
+// call result. Rendering is the same surface the local tools' citations use.
+//
+// The map is keyed by the UPSTREAM tool name (the part after `Server__` in the
+// agent-facing name, e.g. `Grafana__query_elasticsearch` → `query_elasticsearch`).
+// Each entry infers the datasource TYPE from the tool name (the upstream input
+// carries `datasourceUid` but not `datasourceType`), and names the params field
+// that holds the query text. Adding another upstream tool is one entry here.
+const UPSTREAM_GRAFANA_QUERY_TOOLS: Record<string, {
+  datasourceType: string;
+  queryParam: string;
+  label: "logs" | "metrics" | "sql";
+}> = {
+  // Elasticsearch input: { index, limit, query, datasourceUid } — no type, no
+  // time range. Type inferred as "elasticsearch"; range defaults to now-1h.
+  query_elasticsearch: { datasourceType: "elasticsearch", queryParam: "query", label: "logs" },
+};
+
+/** Build an Explore citation for an UPSTREAM mcp-grafana query tool (one not
+ *  handled by the local grafana-* switch). Returns null when the tool isn't a
+ *  known query tool, has no usable query text, or lacks a datasourceUid — in
+ *  which case mcp.ts just forwards the result unchanged. `datasourceType` is
+ *  taken from params when present, else inferred from the tool name. Mirrors
+ *  the local handlers' citation shape exactly so the same frontend surface
+ *  resolves it. */
+export function buildUpstreamGrafanaCitation(
+  baseUrl: string,
+  tool: string,
+  params: Record<string, unknown>,
+): Citation | null {
+  const spec = UPSTREAM_GRAFANA_QUERY_TOOLS[tool];
+  if (!spec) return null;
+  const query = typeof params[spec.queryParam] === "string" ? (params[spec.queryParam] as string) : "";
+  if (!query.trim()) return null;
+  const datasourceUid = (params["datasourceUid"] as string | undefined) ?? "";
+  if (!datasourceUid) return null;
+  const datasourceType = (params["datasourceType"] as string | undefined) ?? spec.datasourceType;
+  const url = buildGrafanaExploreUrl(baseUrl, {
+    datasourceUid,
+    datasourceType,
+    query,
+    from: grafanaFromTime((params["start"] as string | undefined) ?? (params["from"] as string | undefined)),
+    to: (params["end"] as string | undefined) ?? (params["to"] as string | undefined),
+  });
+  return { kind: "external", url, chunkIndex: 1, label: grafanaCitationLabel(spec.label, query) };
+}
+
+// ── Citation emission (mirrors xyne-spaces-tools.ts) ───────────────────────
+// This branch's citation model is INLINE `[clf-<toolCallId>#N]` tokens: the
+// tool emits `[clf-__TOOL_CALL_ID__#N]` inside its result text (one per
+// result chunk) and a matching `Citation` with `chunkIndex: N` via `okCited`.
+// claw's mcp.ts replaces the `__TOOL_CALL_ID__` placeholder with the real
+// toolCallId before the agent sees the result; the agent copies the token
+// verbatim into its answer, and the frontend resolves it against
+// `ToolInvocation.citations` by exact `chunkIndex` match. We do NOT append a
+// citations section at the end (the run prompt forbids it). One Explore link
+// per query → one chunk → chunkIndex 1.
+
+const TOOL_CALL_ID_PLACEHOLDER = "__TOOL_CALL_ID__";
+
+/** `[clf-__TOOL_CALL_ID__#chunkIndex]` — replaced with the real toolCallId by
+ *  claw's mcp.ts injectToolCallIdIntoClawCitations. Mirrors spaces-tools. */
+function inlineCitationToken(chunkIndex: number): string {
+  return `[clf-${TOOL_CALL_ID_PLACEHOLDER}#${chunkIndex}]`;
+}
+
+/** Prepend the chunk's inline citation token to the result's first line.
+ *  Mirrors spaces-tools' prefixChunk so the agent copies a clickable token. */
+function prefixChunk(chunkIndex: number, text: string): string {
+  const lines = text.split("\n");
+  return [`${inlineCitationToken(chunkIndex)} ${lines[0]}`, ...lines.slice(1)].join("\n");
+}
+
+/** Build a Desk-readable citation label for an Explore link. Centralizes the
+ *  label construction so every handler produces the same shape. */
 function grafanaCitationLabel(kind: "logs" | "metrics" | "sql", query: string): string {
   const trimmed = query.trim().replace(/\s+/g, " ").slice(0, 60);
   const prefix =
@@ -203,27 +305,24 @@ function grafanaCitationLabel(kind: "logs" | "metrics" | "sql", query: string): 
   return trimmed ? `${prefix}: ${trimmed}` : prefix;
 }
 
-/** Push an `external`-kind citation into `out`, deduped by URL. Mirrors the
- *  pushThreadCitation/pushCanvasCitation(out, seen, ...) pattern in
- *  xyne-spaces-tools.ts so external-connector citations flow through the same
- *  dedupe shape. `chunkIndex` defaults to 1 — Desk's findCitationForChunk
- *  matches it exactly against the `[clf-<toolCallId>#1]` token. */
+/** Push an `external`-kind citation for chunk `chunkIndex` into `out`. Matches
+ *  spaces-tools' pushThreadCitation/pushCanvasCitation shape (one Citation per
+ *  chunk, tagged with its chunkIndex) — the frontend resolves the matching
+ *  `[clf-<toolCallId>#chunkIndex]` token to this citation. */
 function pushExternalCitation(
   out: Citation[],
-  seen: Set<string>,
   url: string | undefined | null,
+  chunkIndex: number,
   label?: string,
-  chunkIndex = 1,
 ): void {
-  if (!url || seen.has(url)) return;
-  seen.add(url);
-  out.push({ kind: "external", url, ...(label ? { label } : {}), chunkIndex });
+  if (!url) return;
+  out.push({ kind: "external", url, chunkIndex, ...(label ? { label } : {}) });
 }
 
-/** Attach citations to a handler result only when non-empty. Mirrors the
- *  okCited(text, citations) wrapper in xyne-spaces-tools.ts — local handlers
- *  return { content, citations? } (no MCP _meta transport) consumed by the
- *  mcp.ts unwrap() dispatch. */
+/** Attach citations to a handler result only when non-empty. Local Grafana
+ *  handlers return { content, citations? } (no MCP _meta transport — they're
+ *  handled in mcp.ts, not via the runner); mcp.ts unwrap() forwards `citations`
+ *  so claw stashes them on the ToolInvocation. Mirrors spaces-tools' okCited. */
 function okCited(content: string, citations: Citation[]): { content: string; citations?: Citation[] } {
   return citations.length > 0 ? { content, citations } : { content };
 }
@@ -284,7 +383,7 @@ export async function handleGrafanaQueryLogs(
 
   const datasourceUid = (params["datasourceUid"] as string | undefined) ?? "victoria-logs";
   const datasourceType = (params["datasourceType"] as string | undefined) ?? "victoriametrics-logs-datasource";
-  const url = buildGrafanaExploreUrl(citationBaseUrl(baseUrl), {
+  const url = buildGrafanaExploreUrl(baseUrl, {
     datasourceUid,
     datasourceType,
     query,
@@ -292,9 +391,8 @@ export async function handleGrafanaQueryLogs(
     to: end,
   });
   const citations: Citation[] = [];
-  const seen = new Set<string>();
-  pushExternalCitation(citations, seen, url, grafanaCitationLabel("logs", query));
-  return okCited(result, citations);
+  pushExternalCitation(citations, url, 1, grafanaCitationLabel("logs", query));
+  return okCited(prefixChunk(1, result), citations);
 }
 
 export async function handleGrafanaListMetrics(
@@ -380,11 +478,10 @@ export async function handleGrafanaQueryMetrics(
   }
 
   // Read datasource uid/type from params (defaults match the xyne Grafana's
-  // VictoriaMetrics datasource) so callers can override per-instance — fixes
-  // the inconsistency the logs handler already had.
+  // VictoriaMetrics datasource) so callers can override per-instance.
   const datasourceUid = (params["datasourceUid"] as string | undefined) ?? "victoria-metrics";
   const datasourceType = (params["datasourceType"] as string | undefined) ?? "victoriametrics-datasource";
-  const url = buildGrafanaExploreUrl(citationBaseUrl(baseUrl), {
+  const url = buildGrafanaExploreUrl(baseUrl, {
     datasourceUid,
     datasourceType,
     query,
@@ -392,9 +489,8 @@ export async function handleGrafanaQueryMetrics(
     to: end,
   });
   const citations: Citation[] = [];
-  const seen = new Set<string>();
-  pushExternalCitation(citations, seen, url, grafanaCitationLabel("metrics", query));
-  return okCited(output, citations);
+  pushExternalCitation(citations, url, 1, grafanaCitationLabel("metrics", query));
+  return okCited(prefixChunk(1, output), citations);
 }
 
 export async function handleGrafanaQueryDatabase(
@@ -457,8 +553,8 @@ export async function handleGrafanaQueryDatabase(
 
   // SQL Explore deep-links are plugin-dependent; rawSql is used for SQL
   // datasources. Where the plugin ignores it the link still opens Explore on
-  // the right datasource. The SQL is data only (F1).
-  const url = buildGrafanaExploreUrl(citationBaseUrl(baseUrl), {
+  // the right datasource. The SQL is data only (can't alter host/path).
+  const url = buildGrafanaExploreUrl(baseUrl, {
     datasourceUid,
     datasourceType,
     query: sql,
@@ -466,7 +562,6 @@ export async function handleGrafanaQueryDatabase(
     to: "now",
   });
   const citations: Citation[] = [];
-  const seen = new Set<string>();
-  pushExternalCitation(citations, seen, url, grafanaCitationLabel("sql", sql));
-  return okCited(output, citations);
+  pushExternalCitation(citations, url, 1, grafanaCitationLabel("sql", sql));
+  return okCited(prefixChunk(1, output), citations);
 }

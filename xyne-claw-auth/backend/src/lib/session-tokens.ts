@@ -48,6 +48,23 @@ export function mintSessionToken(
 
 export type VerifyError = "malformed" | "bad-signature" | "bad-version" | "expired" | "bad-payload";
 
+/**
+ * Check a result-callback's `x-session-token` against the sessionId the callback
+ * claims to be for. The pod attaches the run's sessionToken on every result
+ * callback; the token's `sid` MUST equal the run's sessionId. This is what makes
+ * a result spoof-resistant per-run rather than relying on the shared S2S key
+ * alone. The /result endpoints reject (401) when this fails.
+ */
+export function checkResultCallbackToken(
+  rawToken: string | undefined,
+  expectedSessionId: string,
+): { ok: true } | { ok: false; reason: string } {
+  const r = verifySessionToken(rawToken);
+  if (typeof r === "string") return { ok: false, reason: r };
+  if (!expectedSessionId || r.sid !== expectedSessionId) return { ok: false, reason: "sid-mismatch" };
+  return { ok: true };
+}
+
 export function verifySessionToken(raw: string | undefined): SessionTokenPayload | VerifyError {
   if (!raw || typeof raw !== "string") return "malformed";
   const dot = raw.indexOf(".");

@@ -20,6 +20,9 @@
 
 import { CONFIG } from "../config.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("bitbucket-stats");
+
 export interface DoctorBitbucketStats {
   prsCreated: number | null;
   commitsCreated: number | null;
@@ -161,7 +164,7 @@ async function fetchPrCountByAuthor(): Promise<number> {
     }
   }
   if (exhaustedCap) {
-    console.warn(
+    log.warn(
       `[bitbucket-stats] PR scan capped at MAX_PAGES=${MAX_PAGES} (${MAX_PAGES * PAGE_SIZE} PRs) — count may under-report. Raise MAX_PAGES or narrow the date range.`,
     );
   }
@@ -193,7 +196,7 @@ async function fetchCommitCountByAuthor(): Promise<number> {
     start = typeof body.nextPageStart === "number" ? body.nextPageStart : start + values.length;
   }
   if (exhaustedCap) {
-    console.warn(
+    log.warn(
       `[bitbucket-stats] commit scan capped at MAX_PAGES=${MAX_PAGES} (${MAX_PAGES * PAGE_SIZE} commits) — count may under-report. Raise MAX_PAGES or narrow the branch range.`,
     );
   }
@@ -214,7 +217,7 @@ async function refreshNow(): Promise<CacheEntry> {
     expiresAt: Date.now() + CONFIG.bitbucketDashboardCacheTtlMs,
   };
   cache = entry;
-  console.log(
+  log.info(
     `[bitbucket-stats] refreshed prs=${prsCreated} commits=${commitsCreated} in ${
       Date.now() - startedAt
     }ms`,
@@ -270,7 +273,7 @@ export async function getDoctorBitbucketStats(): Promise<DoctorBitbucketStats> {
     return envelope(entry);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[bitbucket-stats] refresh failed:", msg);
+    log.error("[bitbucket-stats] refresh failed:", msg);
     // Serve stale cache if available so the dashboard isn't a black hole during
     // a transient Bitbucket outage.
     if (cache) return envelope(cache, "fetch_failed", msg);
@@ -294,12 +297,12 @@ export function startBitbucketStatsBackgroundRefresh(): void {
   if (backgroundTimer) return;
   if (!CONFIG.bitbucketDashboardBackgroundRefresh) return;
   if (!isBitbucketDashboardConfigured()) {
-    console.log(
+    log.info(
       "[bitbucket-stats] background refresh disabled — BITBUCKET_DASHBOARD_TOKEN unset",
     );
     return;
   }
-  console.log("[bitbucket-stats] background refresh scheduled daily at 2 AM IST (20:30 UTC)");
+  log.info("[bitbucket-stats] background refresh scheduled daily at 2 AM IST (20:30 UTC)");
   scheduleNextDailyRefresh();
 }
 
@@ -311,7 +314,7 @@ function scheduleNextDailyRefresh(): void {
     nextRunUTC.setUTCDate(nextRunUTC.getUTCDate() + 1);
   }
   const msUntilRun = nextRunUTC.getTime() - now.getTime();
-  console.log(
+  log.info(
     `[bitbucket-stats] next refresh at ${nextRunUTC.toISOString()} (in ${msUntilRun}ms)`,
   );
   backgroundTimer = setTimeout(async () => {
@@ -319,7 +322,7 @@ function scheduleNextDailyRefresh(): void {
       await refreshNow();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[bitbucket-stats] daily refresh failed:", msg);
+      log.error("[bitbucket-stats] daily refresh failed:", msg);
     } finally {
       backgroundTimer = null;
       scheduleNextDailyRefresh();

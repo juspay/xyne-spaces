@@ -28,6 +28,46 @@ interface Props {
   userId: string;
 }
 
+type WorkflowBinding = NonNullable<ChainWorkflow["bindings"]>[number];
+
+interface DisplayBinding {
+  ids: string[];
+  channelId: string;
+  entryAgentSlug: string;
+  enabled: boolean;
+  hasUserScope: boolean;
+  hasEventScope: boolean;
+}
+
+function groupBindings(bindings: WorkflowBinding[] = []): DisplayBinding[] {
+  const grouped = new Map<string, DisplayBinding>();
+  for (const binding of bindings) {
+    const key = `${binding.channelId}\u0000${binding.entryAgentSlug}\u0000${binding.enabled}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.ids.push(binding.id);
+      existing.hasEventScope ||= binding.userId === "*";
+      existing.hasUserScope ||= binding.userId !== "*";
+      continue;
+    }
+    grouped.set(key, {
+      ids: [binding.id],
+      channelId: binding.channelId,
+      entryAgentSlug: binding.entryAgentSlug,
+      enabled: binding.enabled,
+      hasEventScope: binding.userId === "*",
+      hasUserScope: binding.userId !== "*",
+    });
+  }
+  return [...grouped.values()];
+}
+
+function bindingScopeLabel(binding: DisplayBinding): string {
+  if (binding.hasUserScope && binding.hasEventScope) return "User + events";
+  if (binding.hasEventScope) return "Events";
+  return "User";
+}
+
 /* ------------------------------------------------------------------ */
 /*  Loading skeleton                                                  */
 /* ------------------------------------------------------------------ */
@@ -100,7 +140,8 @@ function WorkflowCard({
 }) {
   const nodeCount = workflow.definition.nodes.length;
   const edgeCount = workflow.definition.edges.length;
-  const bindingCount = workflow.bindings?.length ?? 0;
+  const displayBindings = useMemo(() => groupBindings(workflow.bindings), [workflow.bindings]);
+  const bindingCount = displayBindings.length;
   const isOwner = workflow.createdByUserId === userId;
   const canRequestGlobal = isOwner && !workflow.global;
 
@@ -176,9 +217,9 @@ function WorkflowCard({
             Bindings ({bindingCount})
           </p>
           <div className="flex flex-wrap gap-2">
-            {workflow.bindings?.map((binding) => (
+            {displayBindings.map((binding) => (
               <div
-                key={binding.id}
+                key={`${binding.channelId}:${binding.entryAgentSlug}:${binding.enabled}`}
                 className="flex items-center gap-2 rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle px-3 py-1.5"
               >
                 <span className="h-2 w-2 shrink-0 rounded-full bg-xyne-success" />
@@ -189,13 +230,14 @@ function WorkflowCard({
                 <span className="text-[12px] font-medium text-xyne-fg-primary">
                   {binding.entryAgentSlug}
                 </span>
+                <Badge label={bindingScopeLabel(binding)} variant="neutral" size="sm" as="span" />
                 {binding.enabled ? (
                   <Badge label="Active" variant="success" size="sm" as="span" />
                 ) : (
                   <Badge label="Inactive" variant="neutral" size="sm" as="span" />
                 )}
                 <button
-                  onClick={() => onDeleteBinding(binding.id, workflow.id)}
+                  onClick={() => binding.ids.forEach((id) => onDeleteBinding(id, workflow.id))}
                   className="ml-1 rounded p-[3px] text-xyne-fg-muted hover:bg-xyne-error-bg hover:text-xyne-error-fg transition-colors"
                   title="Remove binding"
                 >

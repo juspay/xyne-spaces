@@ -18,6 +18,7 @@ import { Tooltip } from "../ui/Tooltip";
 import {
   listDigitalTwinClusters,
   getDigitalTwinCluster,
+  approveDigitalTwinCluster,
 } from "../../../lib/api";
 import type { DigitalTwinClusterPreview, DigitalTwinCandidate } from "../../../lib/api";
 import { useSnackbar } from "../ui/Snackbar";
@@ -61,6 +62,7 @@ export function ReviewPanel({ userId, refreshKey, onApproved, onBackfill, onUplo
 
   const [clusters, setClusters] = useState<DigitalTwinClusterPreview[] | null>(null);
   const [loading, setLoading]   = useState(false);
+  const [bulkApproving, setBulkApproving] = useState(false);
 
   /* Candidate data fetched on demand, cached by subsystem */
   const clusterCacheRef = useRef<Map<string, DigitalTwinCandidate[]>>(new Map());
@@ -145,6 +147,28 @@ export function ReviewPanel({ userId, refreshKey, onApproved, onBackfill, onUplo
     removeFromList(candidateId);
   }, [removeFromList]);
 
+  /* ── Approve all pending proposals across every subsystem ──
+     Each subsystem is approved via /clusters/:subsystem/approve, which retains
+     every pending candidate to Hindsight in the background (returns 202). We
+     optimistically clear the list; the parent's onApproved re-syncs other tiles. */
+  const handleApproveAll = useCallback(async () => {
+    const subsystems = (clusters ?? []).map((cl) => cl.subsystem);
+    if (subsystems.length === 0 || bulkApproving) return;
+    setBulkApproving(true);
+    try {
+      await Promise.all(subsystems.map((s) => approveDigitalTwinCluster(userId, s)));
+      showSnackbar({ variant: "success", title: `Approving all ${totalPending} proposals \u2014 saving to Hindsight` });
+      setClusters([]);
+      clusterCacheRef.current.clear();
+      onApproved?.();
+    } catch {
+      showSnackbar({ variant: "error", title: "Some proposals failed to approve" });
+      void load();
+    } finally {
+      setBulkApproving(false);
+    }
+  }, [clusters, bulkApproving, userId, totalPending, showSnackbar, onApproved, load]);
+
   /* ── All caught up ── */
   if (!loading && totalPending === 0 && clusters !== null) {
     return (
@@ -178,7 +202,22 @@ export function ReviewPanel({ userId, refreshKey, onApproved, onBackfill, onUplo
               {totalPending}
             </span>
           )}
-          <div className="ml-auto flex items-center gap-[2px]">
+          <div className="ml-auto flex items-center gap-[6px]">
+            {!loading && totalPending > 0 && (
+              <Tooltip content={`Approve all ${totalPending} proposals`} side="bottom">
+                <button
+                  onClick={handleApproveAll}
+                  disabled={bulkApproving}
+                  className="flex h-[28px] items-center gap-[5px] rounded-full border border-xyne-success-border bg-xyne-success-bg px-[10px] text-[11px] font-semibold text-xyne-success-fg shadow-sm transition hover:opacity-80 disabled:opacity-40"
+                  aria-label="Approve all proposals"
+                >
+                  {bulkApproving
+                    ? <SpinnerGapIcon size={13} className="animate-spin" />
+                    : <CheckCircleIcon size={13} weight="duotone" />}
+                  Approve all
+                </button>
+              </Tooltip>
+            )}
             {onBackfill && (
               <Tooltip content="Backfill history" side="bottom">
                 <button

@@ -281,6 +281,7 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsRange, setStatsRange] = useState<"7d" | "30d" | "90d">("7d");
   const [showBackfill, setShowBackfill] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
   const [status, setStatus] = useState<MemoryStatusFlags | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
@@ -407,6 +408,15 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
             >
               <History size={12} /> Backfill
             </button>
+            {canDelete && (
+              <button
+                onClick={() => setShowUpload(true)}
+                title="Upload a .md document — the curator extracts candidate memories for review"
+                className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
+              >
+                <Inbox size={12} /> Upload .md
+              </button>
+            )}
             <button
               onClick={loadStats}
               disabled={statsLoading}
@@ -559,6 +569,134 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
           }}
         />
       )}
+      {showUpload && (
+        <UploadMdModal
+          agentSlug={agentSlug}
+          onClose={() => setShowUpload(false)}
+          onDone={() => {
+            setShowUpload(false);
+            setSub("pending");
+            loadStats();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Upload a .md document to seed the agent's memory bank. Owner/admin only
+ * (the button is gated by canDelete, the endpoint re-checks). The curator
+ * extracts candidate memories that land in the PENDING review queue — nothing
+ * is retained to the live bank until approved.
+ */
+function UploadMdModal({
+  agentSlug,
+  onClose,
+  onDone,
+}: {
+  agentSlug: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [filename, setFilename] = useState("");
+  const [content, setContent] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<{ candidatesCreated: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!/\.(md|markdown)$/i.test(file.name)) {
+      setErr("Only .md / .markdown files are supported.");
+      return;
+    }
+    setErr(null);
+    setFilename(file.name);
+    setContent((await file.text()).slice(0, 200_000));
+  }
+
+  async function run(): Promise<void> {
+    setUploading(true);
+    setErr(null);
+    setResult(null);
+    try {
+      const res = await fetch(`/claw/api/v1/memory/banks/${encodeURIComponent(agentSlug)}/upload-md`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ filename: filename.trim(), content: content.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setErr(data.error ?? `Upload failed: ${res.status}`);
+      } else {
+        setResult(data.data);
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border border-xyne-border bg-xyne-surface p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center gap-2">
+          <Inbox size={16} className="text-xyne-fg-secondary" />
+          <h3 className="text-[14px] font-semibold text-xyne-fg-primary">Upload .md to memory</h3>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="ml-auto rounded-md p-1 text-xyne-fg-tertiary hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {result ? (
+          <div className="space-y-3 text-[13px] text-xyne-fg-secondary">
+            <p className="flex items-center gap-2 text-emerald-500">
+              <Check size={14} /> Extracted <b>{result.candidatesCreated}</b> candidate memor{result.candidatesCreated === 1 ? "y" : "ies"}.
+            </p>
+            <p className="text-xyne-fg-tertiary">
+              They're in the <b>Pending</b> queue for review — approve them there to add them to the agent's memory.
+            </p>
+            <button
+              onClick={onDone}
+              className="w-full rounded-lg bg-xyne-accent px-3 py-2 text-[13px] font-medium text-white hover:opacity-90"
+            >
+              View pending
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-[12px] text-xyne-fg-tertiary">
+              The curator extracts candidate memories from the document. Nothing is added to the agent's live
+              memory until you approve them in the Pending queue.
+            </p>
+            <input type="file" accept=".md,.markdown,text/markdown" onChange={(e) => void onPickFile(e)} className="block w-full text-[12px] text-xyne-fg-secondary" />
+            {filename && (
+              <p className="text-[12px] text-xyne-fg-secondary">
+                <b>{filename}</b> · {(content.length / 1024).toFixed(1)} KB
+              </p>
+            )}
+            {err && <p className="text-[12px] text-rose-500">{err}</p>}
+            <button
+              onClick={() => void run()}
+              disabled={!filename || !content.trim() || uploading}
+              className="w-full rounded-lg bg-xyne-accent px-3 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {uploading ? "Extracting…" : "Upload & extract"}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

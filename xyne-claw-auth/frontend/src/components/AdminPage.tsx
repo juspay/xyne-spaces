@@ -70,7 +70,8 @@ export function AdminPage({ userId }: Props) {
     setLoading(true);
     try {
       const [a, r, reqs] = await Promise.all([
-        listAgents(userId),
+        // Admin panel: the full roster across all users (server enforces admin).
+        listAgents(userId, true),
         listAdminRoles(userId).catch(() => []),
         listPendingRequests(userId).catch(() => []),
       ]);

@@ -53,6 +53,7 @@ import {
   createAgentApp,
   installAgentApp,
   configureAgentWebhook,
+  grantAgentPermissions,
   uploadAgentPicture,
   getAgentDetail,
   listAgentUsageStats,
@@ -108,6 +109,8 @@ interface SpacesFlow {
     | "install"
     | "configuring"
     | "configure"
+    | "granting"
+    | "grant"
     | "upload"
     | "uploading"
     | "done";
@@ -204,7 +207,8 @@ export function AdminPageV3({ userId }: Props) {
     setLoading(true);
     try {
       const [a, r, reqs] = await Promise.all([
-        listAgents(userId),
+        // Admin panel: the full roster across all users (server enforces admin).
+        listAgents(userId, true),
         listAdminRoles(userId).catch(() => []),
         listPendingRequests(userId).catch(() => []),
       ]);
@@ -644,23 +648,18 @@ export function AdminPageV3({ userId }: Props) {
   );
 
   const handleSpacesStep = useCallback(
-    async (step: "create" | "install" | "configure") => {
+    async (step: "create" | "install" | "configure" | "grant") => {
       if (!spacesFlow) return;
       const { agentSlug } = spacesFlow;
-      setSpacesFlow((f) =>
-        f
-          ? {
-              ...f,
-              step:
-                step === "create"
-                  ? "creating"
-                  : step === "install"
-                    ? "installing"
-                    : "configuring",
-              error: undefined,
-            }
-          : f,
-      );
+      const loadingStep =
+        step === "create"
+          ? "creating"
+          : step === "install"
+            ? "installing"
+            : step === "configure"
+              ? "configuring"
+              : "granting";
+      setSpacesFlow((f) => (f ? { ...f, step: loadingStep, error: undefined } : f));
       try {
         if (step === "create") {
           await createAgentApp(agentSlug);
@@ -668,8 +667,11 @@ export function AdminPageV3({ userId }: Props) {
         } else if (step === "install") {
           await installAgentApp(agentSlug);
           setSpacesFlow((f) => (f ? { ...f, step: "configure" } : f));
-        } else {
+        } else if (step === "configure") {
           await configureAgentWebhook(agentSlug);
+          setSpacesFlow((f) => (f ? { ...f, step: "grant" } : f));
+        } else {
+          await grantAgentPermissions(agentSlug);
           setSpacesFlow((f) => (f ? { ...f, step: "upload" } : f));
         }
         load();
@@ -716,6 +718,12 @@ export function AdminPageV3({ userId }: Props) {
 
   const handleSkipUpload = useCallback(() => {
     setSpacesFlow((f) => (f ? { ...f, step: "done" } : f));
+  }, []);
+
+  // Grant is recommended but skippable — a failed/deferred grant must not strand
+  // the admin on the step. Skipping proceeds to the (optional) picture upload.
+  const handleSkipGrant = useCallback(() => {
+    setSpacesFlow((f) => (f ? { ...f, step: "upload" } : f));
   }, []);
 
   const openRowPicturePicker = useCallback((slug: string) => {
@@ -867,6 +875,7 @@ export function AdminPageV3({ userId }: Props) {
                     onSpacesStep={handleSpacesStep}
                     onPictureClick={() => pictureInputRef.current?.click()}
                     onSkipUpload={handleSkipUpload}
+                    onSkipGrant={handleSkipGrant}
                     onDismissSpaces={() => setSpacesFlow(null)}
                     pictureInputRef={pictureInputRef}
                     onPictureChange={handlePictureFileChange}
@@ -1154,6 +1163,7 @@ function RequestsTab({
   onSpacesStep,
   onPictureClick,
   onSkipUpload,
+  onSkipGrant,
   onDismissSpaces,
   pictureInputRef,
   onPictureChange,
@@ -1164,9 +1174,10 @@ function RequestsTab({
   onApproveSkill: (id: string) => void | Promise<void>;
   onStartSpacesFlow: (id: string, slug: string) => void;
   onReject: (id: string) => void;
-  onSpacesStep: (step: "create" | "install" | "configure") => void | Promise<void>;
+  onSpacesStep: (step: "create" | "install" | "configure" | "grant") => void | Promise<void>;
   onPictureClick: () => void;
   onSkipUpload: () => void;
+  onSkipGrant: () => void;
   onDismissSpaces: () => void;
   pictureInputRef: React.RefObject<HTMLInputElement | null>;
   onPictureChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -1264,6 +1275,7 @@ function RequestsTab({
           onStep={onSpacesStep}
           onPictureClick={onPictureClick}
           onSkipUpload={onSkipUpload}
+          onSkipGrant={onSkipGrant}
           onDismiss={onDismissSpaces}
           showUploadStep
           pictureInputRef={pictureInputRef}
@@ -1279,15 +1291,17 @@ function SpacesFlowCard({
   onStep,
   onPictureClick,
   onSkipUpload,
+  onSkipGrant,
   onDismiss,
   showUploadStep,
   pictureInputRef,
   onPictureChange,
 }: {
   flow: SpacesFlow;
-  onStep: (step: "create" | "install" | "configure") => void | Promise<void>;
+  onStep: (step: "create" | "install" | "configure" | "grant") => void | Promise<void>;
   onPictureClick?: () => void;
   onSkipUpload?: () => void;
+  onSkipGrant?: () => void;
   onDismiss: () => void;
   showUploadStep?: boolean;
   pictureInputRef?: React.RefObject<HTMLInputElement | null>;
@@ -1353,12 +1367,35 @@ function SpacesFlowCard({
               ? "active"
               : flow.step === "configuring"
                 ? "loading"
-                : isDone(flow.step, ["upload", "uploading", "done"])
+                : isDone(flow.step, ["grant", "granting", "upload", "uploading", "done"])
                   ? "done"
                   : "idle"
           }
           onClick={() => onStep("configure")}
         />
+        <span className="text-xyne-fg-muted">→</span>
+        <StepButton
+          label="4. Grant Permissions"
+          doneLabel="Permissions Granted"
+          state={
+            flow.step === "grant"
+              ? "active"
+              : flow.step === "granting"
+                ? "loading"
+                : isDone(flow.step, ["upload", "uploading", "done"])
+                  ? "done"
+                  : "idle"
+          }
+          onClick={() => onStep("grant")}
+        />
+        {flow.step === "grant" && (
+          <button
+            onClick={onSkipGrant}
+            className="rounded-full px-3 py-2 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-primary"
+          >
+            Skip
+          </button>
+        )}
         {showUploadStep && (
           <>
             <span className="text-xyne-fg-muted">→</span>
@@ -1370,7 +1407,7 @@ function SpacesFlowCard({
               onChange={onPictureChange}
             />
             <StepButton
-              label="4. Upload Picture"
+              label="5. Upload Picture"
               doneLabel="Picture Set"
               state={
                 flow.step === "upload"
@@ -1678,7 +1715,7 @@ function AgentsTab({
   onPromote: (a: Agent) => void;
   onDemote: (a: Agent) => void;
   onDelete: (a: Agent) => void;
-  onSpacesStep: (step: "create" | "install" | "configure") => void | Promise<void>;
+  onSpacesStep: (step: "create" | "install" | "configure" | "grant") => void | Promise<void>;
   onDismissSpaces: () => void;
 }) {
   return (
@@ -2490,7 +2527,7 @@ function GlobalMcpTab({
 function ViewAgentBody({ agent }: { agent: Agent }) {
   const cfgTools = (
     agent.config as
-      | { tools?: { subagents?: string[]; direct?: string[]; custom?: string[] } }
+      | { tools?: { subagents?: string[]; direct?: string[]; custom?: string[]; gateway?: string[] } }
       | undefined
   )?.tools;
   const subagents = cfgTools?.subagents ?? [];

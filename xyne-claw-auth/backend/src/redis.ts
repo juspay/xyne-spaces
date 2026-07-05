@@ -12,6 +12,9 @@
 import { Redis } from "ioredis";
 import { CONFIG } from "./config.js";
 
+import { createLogger } from "./logger.js";
+const log = createLogger("redis");
+
 class RedisService {
   private redis: Redis | null = null;
 
@@ -32,16 +35,16 @@ class RedisService {
       this.redis = new Redis(this.getRedisConfig());
 
       this.redis.on("connect", () => {
-        console.log("[redis] Connected successfully");
+        log.info("[redis] Connected successfully");
       });
 
       this.redis.on("error", (err: Error) => {
-        console.error("[redis] Connection error:", err.message);
+        log.error("[redis] Connection error:", err.message);
       });
 
       await this.redis.connect();
     } catch (err) {
-      console.error("[redis] Failed to initialize:", err);
+      log.error("[redis] Failed to initialize:", err);
     }
   }
 
@@ -49,7 +52,7 @@ class RedisService {
     if (this.redis) {
       await this.redis.quit();
       this.redis = null;
-      console.log("[redis] Disconnected");
+      log.info("[redis] Disconnected");
     }
   }
 
@@ -58,7 +61,7 @@ class RedisService {
     if (!this.redis) {
       this.redis = new Redis(this.getRedisConfig());
       this.redis.on("error", (err: Error) => {
-        console.error("[redis] Connection error:", err.message);
+        log.error("[redis] Connection error:", err.message);
       });
     }
     return this.redis;

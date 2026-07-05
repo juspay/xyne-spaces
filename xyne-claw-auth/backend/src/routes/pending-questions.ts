@@ -2,12 +2,20 @@
  * Pending questions — Redis-backed ephemeral store.
  *
  * POST /pending-questions  — store a question (called by ask-user-question tool)
- * GET  /pending-questions/:id — retrieve a question (called by app-callback)
+ * GET  /pending-questions/:id — retrieve a question (called by flow-action / app-callback)
+ *
+ * Auth: strict S2S only (also enforced at the mount in main.ts). Questions
+ * carry another user's prompt context, and the question ID is the only lookup
+ * key — the old requireS2S cookie fallback let any logged-in user who learned
+ * an ID read or overwrite someone else's pending question.
  */
 
 import { Router, type Request, type Response } from "express";
 import { redisService } from "../redis.js";
-import { requireS2S } from "../middleware/require-auth.js";
+import { requireStrictS2S } from "../middleware/require-auth.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("pending-questions");
 
 const router = Router();
 const PREFIX = "pending-question:";
@@ -36,7 +44,7 @@ export async function deleteQuestion(questionId: string): Promise<void> {
 }
 
 // POST / — store a pending question
-router.post("/", requireS2S, async (req: Request, res: Response) => {
+router.post("/", requireStrictS2S, async (req: Request, res: Response) => {
   try {
     const { questionId, userId, agentSlug, channelId, conversationId, question, options } = req.body as {
       questionId?: string;
@@ -66,16 +74,16 @@ router.post("/", requireS2S, async (req: Request, res: Response) => {
     const redis = redisService.getConnection();
     await redis.set(`${PREFIX}${questionId}`, JSON.stringify(data), "EX", TTL);
 
-    console.log(`[pending-questions] Stored question ${questionId}: "${question}" (${options.length} options)`);
+    log.info(`[pending-questions] Stored question ${questionId}: "${question}" (${options.length} options)`);
     res.json({ success: true });
   } catch (err) {
-    console.error("[pending-questions] Store error:", err);
+    log.error("[pending-questions] Store error:", err);
     res.status(500).json({ success: false, error: "Failed to store question" });
   }
 });
 
 // GET /:id — retrieve a pending question
-router.get("/:id", requireS2S, async (req: Request<{ id: string }>, res: Response) => {
+router.get("/:id", requireStrictS2S, async (req: Request<{ id: string }>, res: Response) => {
   try {
     const data = await getQuestion(req.params.id);
     if (!data) {
@@ -84,7 +92,7 @@ router.get("/:id", requireS2S, async (req: Request<{ id: string }>, res: Respons
     }
     res.json({ success: true, data });
   } catch (err) {
-    console.error("[pending-questions] Get error:", err);
+    log.error("[pending-questions] Get error:", err);
     res.status(500).json({ success: false, error: "Failed to retrieve question" });
   }
 });

@@ -54,6 +54,7 @@ function suggestionToSelection(
     subagents: Array.from(subagentSet),
     direct: Array.from(directSet),
     custom: Array.from(customSet),
+    gateway: [],
   };
 }
 

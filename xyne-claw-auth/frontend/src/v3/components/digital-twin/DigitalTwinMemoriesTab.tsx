@@ -23,12 +23,15 @@ import {
   type Edge as RFEdge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import dagre from "@dagrejs/dagre";
 import {
   listDigitalTwinMemories,
   deleteDigitalTwinMemory,
   getDigitalTwinStats,
   recallDigitalTwinMemory,
   getDigitalTwinSubsystemGraph,
+  type DigitalTwinSubsystemNode,
+  type DigitalTwinSubsystemEdge,
 } from "../../../lib/api";
 import type {
   MemoryBankMemory,
@@ -399,7 +402,7 @@ function AllSubtab({ userId }: { userId: string }) {
       )}
       <div className="flex flex-col gap-[6px]">
         {filtered.map((memory) => (
-          <MemoryCard key={memory.hindsightMemoryId} memory={memory} onDelete={handleDelete} />
+          <MemoryCard key={memory.hindsightMemoryId} memory={memory} onDelete={handleDelete} userId={userId} />
         ))}
       </div>
     </div>
@@ -409,9 +412,11 @@ function AllSubtab({ userId }: { userId: string }) {
 function MemoryCard({
   memory,
   onDelete,
+  userId,
 }: {
   memory: MemoryBankMemory;
   onDelete: (id: string) => void;
+  userId?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showReasoning, setShowReasoning] = useState(false);
@@ -468,13 +473,15 @@ function MemoryCard({
             </div>
           )}
         </div>
-        <button
-          onClick={() => onDelete(memory.hindsightMemoryId)}
-          className="shrink-0 text-xyne-fg-tertiary hover:text-xyne-error-fg"
-          title="Delete memory"
-        >
-          <TrashIcon size={14} />
-        </button>
+        <div className="flex shrink-0 items-center gap-[6px]">
+          <button
+            onClick={() => onDelete(memory.hindsightMemoryId)}
+            className="text-xyne-fg-tertiary hover:text-xyne-error-fg"
+            title="Delete memory"
+          >
+            <TrashIcon size={14} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -712,9 +719,8 @@ function GraphSubtab({ userId }: { userId: string }) {
     setLoading(true);
     getDigitalTwinSubsystemGraph(userId)
       .then((data) => {
-        const layouted = layoutGraph(data?.nodes ?? [], data?.edges ?? []);
-        setNodes(layouted.nodes);
-        setEdges(layouted.edges);
+        setNodes(layoutSubsystems(data.subsystems, data.edges));
+        setEdges(makeSubsystemEdges(data.edges));
       })
       .catch(() => showSnackbar({ variant: "error", title: "Failed to load graph" }))
       .finally(() => setLoading(false));
@@ -844,35 +850,95 @@ function SubsystemMemoriesPanel({
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// Simple grid layout helper
+// Subsystem graph layout (dagre) — matches V1/V2's GraphView.
+//
+// The backend returns { subsystems, edges }; each node is a curated
+// subsystem and each edge connects subsystems that share source sessions.
+// We use dagre for a left-to-right hierarchical layout (far more readable
+// than a naive grid) and scale node saturation by memory count.
 
+const NODE_WIDTH = 220;
+const NODE_HEIGHT = 88;
 
-// ── Simple grid layout helper ─────────────────────────────────────────
+function layoutSubsystems(
+  subsystems: DigitalTwinSubsystemNode[],
+  edges: DigitalTwinSubsystemEdge[],
+): RFNode[] {
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: "LR", nodesep: 60, ranksep: 120, marginx: 24, marginy: 24 });
+  g.setDefaultEdgeLabel(() => ({}));
+  subsystems.forEach((s) => g.setNode(s.name, { width: NODE_WIDTH, height: NODE_HEIGHT }));
+  edges.forEach((e) => {
+    if (g.hasNode(e.source) && g.hasNode(e.target)) g.setEdge(e.source, e.target);
+  });
+  dagre.layout(g);
 
-function layoutGraph(
-  rawNodes: Array<Record<string, unknown>>,
-  rawEdges: Array<Record<string, unknown>>,
-): { nodes: RFNode[]; edges: RFEdge[] } {
-  const cols = Math.max(1, Math.ceil(Math.sqrt(rawNodes.length)));
-  const nodes: RFNode[] = rawNodes.map((node, i) => ({
-    id: String(node.id),
-    position: { x: (i % cols) * 200, y: Math.floor(i / cols) * 120 },
-    data: { label: String(node.label ?? node.id) },
-    ...(node.type ? { type: String(node.type) } : {}),
-    ...(node.style && typeof node.style === "object"
-      ? { style: node.style as React.CSSProperties }
-      : {}),
+  const maxMemoryCount = Math.max(1, ...subsystems.map((s) => s.memoryCount));
+
+  return subsystems.map((s) => {
+    const pos = g.node(s.name);
+    const sat = 0.4 + 0.5 * (s.memoryCount / maxMemoryCount);
+    return {
+      id: s.name,
+      position: { x: (pos?.x ?? 0) - NODE_WIDTH / 2, y: (pos?.y ?? 0) - NODE_HEIGHT / 2 },
+      data: {
+        label: (
+          <div style={{ textAlign: "left", lineHeight: 1.25 }}>
+            <div style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</div>
+            <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2 }}>
+              {s.memoryCount} {s.memoryCount === 1 ? "memory" : "memories"} · {s.sessionCount}{" "}
+              {s.sessionCount === 1 ? "session" : "sessions"}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                opacity: 0.55,
+                marginTop: 4,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical" as const,
+              }}
+            >
+              {s.sampleContent}
+            </div>
+          </div>
+        ),
+      },
+      style: {
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+        background: `rgba(99,102,241,${0.12 + 0.18 * sat})`,
+        border: `1.5px solid rgba(165,180,252,${sat})`,
+        borderRadius: 10,
+        padding: "8px 12px",
+        display: "flex",
+        alignItems: "flex-start",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+        cursor: "pointer",
+      },
+    };
+  });
+}
+
+function makeSubsystemEdges(edges: DigitalTwinSubsystemEdge[]): RFEdge[] {
+  if (edges.length === 0) return [];
+  const maxShared = Math.max(1, ...edges.map((e) => e.sharedSessions));
+  return edges.map((e) => ({
+    id: `${e.source}::${e.target}`,
+    source: e.source,
+    target: e.target,
+    type: "smoothstep",
+    animated: false,
+    style: {
+      stroke: "rgba(165,180,252,0.55)",
+      strokeWidth: Math.max(1.5, (e.sharedSessions / maxShared) * 3.5),
+    },
+    label: `${e.sharedSessions} shared`,
+    labelStyle: { fontSize: 10, fill: "rgb(165,180,252)" },
+    labelBgStyle: { fill: "rgb(24,24,27)", fillOpacity: 0.85 },
+    labelBgPadding: [4, 4] as [number, number],
+    labelBgBorderRadius: 4,
   }));
-
-  const edges: RFEdge[] = rawEdges
-    .filter((edge) => edge.source != null && edge.target != null)
-    .map((edge, i) => ({
-      id: String(edge.id ?? `e-${i}`),
-      source: String(edge.source),
-      target: String(edge.target),
-      ...(edge.label ? { label: String(edge.label) } : {}),
-      ...(edge.type ? { type: String(edge.type) } : {}),
-    }));
-
-  return { nodes, edges };
 }

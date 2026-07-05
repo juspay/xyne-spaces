@@ -7,6 +7,9 @@ import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { respondToUser, type PendingResponse, type ToolExecutionContext } from "xyne-claw-shared";
 
+import { createLogger } from "./logger.js";
+const log = createLogger("copilot");
+
 /**
  * Builds a pi-coding-agent ToolDefinition for respond-to-user,
  * wired to the shared pendingResponses collector.
@@ -36,14 +39,14 @@ export function buildCopilotTool(
       // value, not the user-visible content — that one is in params.message.
       const message = (params as Record<string, unknown> | undefined)?.["message"];
       const preview = typeof message === "string" ? message : "(non-string message)";
-      console.log(
+      log.info(
         `[copilot] respond-to-user message (${typeof message === "string" ? message.length : 0} chars): ${preview.slice(0, 300).replace(/\n/g, " ")}`,
       );
       const result = await respondToUser.execute(
         params as Record<string, unknown>,
         context,
       );
-      console.log(`[copilot] respond-to-user tool returned: ${result.slice(0, 200)}`);
+      log.info(`[copilot] respond-to-user tool returned: ${result.slice(0, 200)}`);
       return {
         content: [{ type: "text" as const, text: result }],
         details: {},

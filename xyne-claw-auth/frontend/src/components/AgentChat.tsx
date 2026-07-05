@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactElement } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ChevronLeft, Send, Square, Loader2, Plus, MessageSquare, ImagePlus, X, AtSign, Hash, Ticket, FileText, Phone } from "lucide-react";
+import { Bug, ChevronLeft, Send, Square, Loader2, Plus, MessageSquare, ImagePlus, X, AtSign, Hash, Ticket, FileText, Phone, RefreshCw } from "lucide-react";
 import {
   sendChatMessage,
   pollChatMessages,
@@ -22,6 +22,7 @@ import {
   type ConversationSummary,
   type AgentRun,
   type ToolInvocation,
+  type DebugEventRecord,
   type UserAgentConfig,
   type ProviderCredential,
   type PendingAction,
@@ -29,11 +30,20 @@ import {
   type ContextSearchType,
 } from "../lib/api";
 import type { Agent } from "../lib/types";
+import { resolveEffectiveParents } from "../lib/branching";
 import { MessageBubble } from "./MessageBubble";
 import { ContextPicker } from "./ContextPicker";
+import { DebugDrawer } from "./DebugDrawer";
 
 interface Props {
   userId: string;
+}
+
+function isCurrentAssistantTurn(messages: ChatMsg[], turnIndex: number, streamingMsgId: string | null): boolean {
+  if (!streamingMsgId) return false;
+  const streamingIndex = messages.findIndex((message) => message.id === streamingMsgId && message.role === "assistant");
+  if (streamingIndex < 0) return false;
+  return messages.slice(0, streamingIndex + 1).filter((message) => message.role === "assistant").length - 1 === turnIndex;
 }
 
 interface ProviderOption {
@@ -51,6 +61,33 @@ const PROVIDERS: ProviderOption[] = [
 
 const MAX_CONTEXT_TOTAL = 20;
 const MAX_CONTEXT_PER_TYPE = 5;
+
+/** Re-key a Map<string, T> after an optimistic id is swapped for the persisted
+ *  one. Used to keep per-message reasoning / streaming-attachment maps stable
+ *  across the local→persisted id transition. */
+function replaceMessageIdInMap<T>(map: Map<string, T>, localId: string, persistedId: string): Map<string, T> {
+  if (!persistedId || persistedId === localId || !map.has(localId)) return map;
+  const next = new Map(map);
+  const value = next.get(localId)!;
+  next.delete(localId);
+  next.set(persistedId, value);
+  return next;
+}
+
+/** Re-key the branchSelections map so a parentId/selectedId that referenced
+ *  the old optimistic id continues to point at the persisted one. */
+function replaceMessageIdInSelections(
+  map: Map<string, string>,
+  localId: string,
+  persistedId: string,
+): Map<string, string> {
+  if (!persistedId || persistedId === localId) return map;
+  const next = new Map<string, string>();
+  for (const [parentId, selectedId] of map.entries()) {
+    next.set(parentId === localId ? persistedId : parentId, selectedId === localId ? persistedId : selectedId);
+  }
+  return next;
+}
 
 export function AgentChat({ userId }: Props) {
   const navigate = useNavigate();
@@ -89,6 +126,8 @@ export function AgentChat({ userId }: Props) {
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
   const [liveInvocations, setLiveInvocations] = useState<ToolInvocation[]>([]);
   const [liveReasoning, setLiveReasoning] = useState<string>("");
+  const [liveDebugEvents, setLiveDebugEvents] = useState<DebugEventRecord[]>([]);
+  const [debugArtifactsReadyVersion, setDebugArtifactsReadyVersion] = useState(0);
   // Per-message reasoning (client-side only — the backend doesn't persist it yet).
   // Survives after streaming ends so the collapsible "Thought" block stays on the bubble.
   // Keyed by assistant message id; cleared when the conversation is switched.
@@ -100,6 +139,11 @@ export function AgentChat({ userId }: Props) {
   // pointing at base64 payloads in memory). Cleared on finalize — the final
   // `done` event ships canonical GCS-backed attachments on the message itself.
   const [streamingAttachmentsByMsgId, setStreamingAttachmentsByMsgId] = useState<Map<string, Array<{ id: string; mimeType: string; originalFilename: string; size: number; blobUrl: string }>>>(new Map());
+  // Branching: parentId → selected childId. Drives the visible path projection.
+  // Persisted to localStorage so navigating away and back keeps the same branch.
+  const [branchSelections, setBranchSelections] = useState<Map<string, string>>(new Map());
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingUserText, setEditingUserText] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [pendingFiles, setPendingFiles] = useState<Array<{ file: File; previewUrl: string }>>([]);
   const [showContextPicker, setShowContextPicker] = useState(false);
@@ -110,6 +154,20 @@ export function AgentChat({ userId }: Props) {
   const contextToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [localPreviews, setLocalPreviews] = useState<Map<string, string>>(new Map());
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [showDebugger, setShowDebugger] = useState(false);
+  const [debugTurnIndex, setDebugTurnIndex] = useState<number | null>(null);
+  // Branching-safe selector: pins debug drawer to the run with this sessionId.
+  // Chronological turn order diverges from visible-path order once a turn has
+  // siblings (regen / edit-user), so we look up via runByAssistantMsgId.
+  const [debugSessionId, setDebugSessionId] = useState<string | null>(null);
+  const [debuggerWidth, setDebuggerWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("legacy-chat-debugger-width");
+      return saved ? parseInt(saved, 10) : 420;
+    } catch {
+      return 420;
+    }
+  });
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeAbortRef = useRef<AbortController | null>(null);
@@ -146,7 +204,9 @@ export function AgentChat({ userId }: Props) {
     setStreamingMsgId(null);
     setLiveReasoning("");
     setLiveInvocations([]);
+    setLiveDebugEvents([]);
     setReasoningByMsgId(new Map());
+    setDebugSessionId(null);
     setShowContextPicker(false);
     setContextQuery("");
     setContextTab("all");
@@ -176,6 +236,35 @@ export function AgentChat({ userId }: Props) {
 
   // Scroll to bottom on new messages
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  // Load saved branch selections when the conversation changes; persist on
+  // change. Keeps the user on the same branch across refresh / re-open.
+  useEffect(() => {
+    if (!convId) {
+      setBranchSelections(new Map());
+      return;
+    }
+    const saved = localStorage.getItem(`xyne-ai-branch:${convId}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as [string, string][];
+        setBranchSelections(new Map(parsed));
+      } catch {
+        setBranchSelections(new Map());
+      }
+    } else {
+      setBranchSelections(new Map());
+    }
+  }, [convId]);
+
+  useEffect(() => {
+    if (!convId) return;
+    if (branchSelections.size > 0) {
+      localStorage.setItem(`xyne-ai-branch:${convId}`, JSON.stringify([...branchSelections]));
+    } else {
+      localStorage.removeItem(`xyne-ai-branch:${convId}`);
+    }
+  }, [branchSelections, convId]);
 
   useEffect(() => {
     return () => {
@@ -207,6 +296,7 @@ export function AgentChat({ userId }: Props) {
     if (!slug) return;
     setConvId(id);
     setReasoningByMsgId(new Map()); // reasoning is per-session, not persisted in DB
+    setLiveDebugEvents([]);
     try {
       const [history, runList] = await Promise.all([
         pollChatMessages(slug, id),
@@ -248,6 +338,29 @@ export function AgentChat({ userId }: Props) {
     });
   }, []);
 
+  const handleDebuggerResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = debuggerWidth;
+    let currentWidth = startWidth;
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = startX - ev.clientX;
+      currentWidth = Math.max(320, Math.min(760, startWidth + delta));
+      setDebuggerWidth(currentWidth);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try {
+        localStorage.setItem("legacy-chat-debugger-width", String(currentWidth));
+      } catch {}
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [debuggerWidth]);
+
   const refreshRuns = useCallback(async (id: string) => {
     if (!slug) return;
     try {
@@ -258,14 +371,77 @@ export function AgentChat({ userId }: Props) {
 
   const runByAssistantMsgId = useMemo(() => {
     const map = new Map<string, AgentRun>();
-    const assistantIds: string[] = messages.filter((m) => m.role === "assistant").map((m) => m.id);
-    const orderedRuns = runs.slice().sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
-    assistantIds.forEach((id, i) => {
-      const r = orderedRuns[i];
-      if (r) map.set(id, r);
-    });
+    // Direct linkage via chatMessageId (set by the chat callback). Required
+    // for branching — chronology pairing breaks once a user message has
+    // multiple assistant siblings.
+    for (const run of runs) {
+      if (run.chatMessageId) map.set(run.chatMessageId, run);
+    }
+    // Fallback for legacy rows missing chatMessageId. Filter both lists on
+    // the SAME predicate so positions match.
+    const mappedIds = new Set(map.keys());
+    const unmappedAssistants = messages
+      .filter((m) => m.role === "assistant" && !mappedIds.has(m.id))
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const unmappedRuns = runs
+      .filter((r) => !r.chatMessageId)
+      .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+    const pairCount = Math.min(unmappedAssistants.length, unmappedRuns.length);
+    for (let i = 0; i < pairCount; i++) {
+      map.set(unmappedAssistants[i]!.id, unmappedRuns[i]!);
+    }
     return map;
   }, [messages, runs]);
+
+  // Legacy conversations (pre-branching migration) have a null parentId on every
+  // message; reconstruct effective parents so they project as a linear thread
+  // instead of collapsing into one message with <x/y> variant pages. Shared by
+  // both the adjacency build and the per-message sibling lookup in render.
+  const effectiveParentById = useMemo(() => resolveEffectiveParents(messages), [messages]);
+
+  // Tree-projection: build adjacency, then walk the selected path from root.
+  const childrenByParent = useMemo(() => {
+    const map = new Map<string, ChatMsg[]>();
+    for (const msg of messages) {
+      const parentId = effectiveParentById.get(msg.id) ?? "root";
+      const siblings = map.get(parentId) ?? [];
+      siblings.push(msg);
+      siblings.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      map.set(parentId, siblings);
+    }
+    return map;
+  }, [messages, effectiveParentById]);
+
+  const activePath = useMemo(() => {
+    const path: ChatMsg[] = [];
+    let currentParentId = "root";
+    const seen = new Set<string>();
+    while (true) {
+      const children = childrenByParent.get(currentParentId);
+      if (!children || children.length === 0) break;
+      const selectedId = branchSelections.get(currentParentId);
+      const activeChild = selectedId ? children.find((c) => c.id === selectedId) : undefined;
+      const child = activeChild ?? children[children.length - 1];
+      if (!child || seen.has(child.id)) break;
+      path.push(child);
+      seen.add(child.id);
+      currentParentId = child.id;
+    }
+    return path;
+  }, [childrenByParent, branchSelections]);
+
+  const latestAssistantMsgId = useMemo(() => {
+    for (let i = activePath.length - 1; i >= 0; i--) {
+      if (activePath[i]!.role === "assistant") return activePath[i]!.id;
+    }
+    return null;
+  }, [activePath]);
+  const latestUserMsgId = useMemo(() => {
+    for (let i = activePath.length - 1; i >= 0; i--) {
+      if (activePath[i]!.role === "user") return activePath[i]!.id;
+    }
+    return null;
+  }, [activePath]);
 
   const startNewChat = () => {
     activeAbortRef.current?.abort();
@@ -281,6 +457,7 @@ export function AgentChat({ userId }: Props) {
     setContextQuery("");
     setContextTab("all");
     setContextToast(null);
+    setLiveDebugEvents([]);
   };
 
   const refreshConversations = useCallback(() => {
@@ -398,6 +575,7 @@ export function AgentChat({ userId }: Props) {
     setStreamingMsgId(null);
     setLiveReasoning("");
     setLiveInvocations([]);
+    setLiveDebugEvents([]);
 
     refreshConversations();
     if (conversationIdForRefresh) {
@@ -408,6 +586,255 @@ export function AgentChat({ userId }: Props) {
       }, 1000);
     }
   }, [waiting, slug, convId, userId, streamingMsgId, refreshConversations, refreshRuns, loadConversation]);
+
+  // Branching: regenerate the latest visible assistant. Creates a sibling
+  // assistant under the same user parent (driven server-side via /clone-session
+  // + isRegenerate). The selected branch is moved to the new assistant so the
+  // pager shows the fresh attempt by default.
+  const handleRegenerate = useCallback(async () => {
+    const originalConvId = convId;
+    if (!slug || !originalConvId || waiting) return;
+
+    const assistantToRegenerate = latestAssistantMsgId
+      ? activePath.find((m) => m.id === latestAssistantMsgId && m.role === "assistant")
+      : null;
+    const parentUserMessageId = assistantToRegenerate?.parentId ?? null;
+    const replayMessage = parentUserMessageId
+      ? messages.find((m) => m.id === parentUserMessageId && m.role === "user")?.content
+      : undefined;
+    if (!assistantToRegenerate || !parentUserMessageId || !replayMessage) return;
+
+    setWaiting(true);
+    setProgress(null);
+
+    const asstId = `asst-${Date.now()}`;
+    setStreamingMsgId(asstId);
+    setMessages((prev) => [
+      ...prev,
+      { id: asstId, conversationId: originalConvId, role: "assistant", content: "", status: "running", createdAt: new Date().toISOString(), parentId: parentUserMessageId },
+    ]);
+    setBranchSelections((prev) => new Map(prev).set(parentUserMessageId, asstId));
+
+    setLiveInvocations([]);
+    setLiveReasoning("");
+
+    const controller = new AbortController();
+    activeAbortRef.current = controller;
+    activeSessionIdRef.current = null;
+
+    sendChatMessage(slug, replayMessage, userId, originalConvId, {
+      onRunMeta: ({ sessionId }) => { activeSessionIdRef.current = sessionId; },
+      onProgress: (toolLabel) => setProgress(toolLabel),
+      onInvocation: (inv) => setLiveInvocations((prev) => {
+        if (!inv.toolCallId) return [...prev, inv];
+        const idx = prev.findIndex((p) => p.toolCallId === inv.toolCallId);
+        if (idx === -1) return [...prev, inv];
+        const next = prev.slice();
+        next[idx] = inv;
+        return next;
+      }),
+      onReasoningDelta: (delta) => {
+        setLiveReasoning((prev) => prev + delta);
+        setReasoningByMsgId((prev) => {
+          const next = new Map(prev);
+          next.set(asstId, (next.get(asstId) ?? "") + delta);
+          return next;
+        });
+      },
+      onTextDelta: (delta) => {
+        setMessages((prev) => prev.map((m) => m.id === asstId ? { ...m, content: m.content + delta } : m));
+      },
+    }, undefined, undefined, true, parentUserMessageId, assistantToRegenerate.id, controller.signal).then(async (res) => {
+      // Pass assistantToRegenerate.id as `parentAssistantMessageId` so the
+      // backend resolves the source PI session from the assistant being
+      // replaced — not the parent user. Without this, regenerating after an
+      // edit-user clones from the original conversation and the new turn
+      // replays every user variant.
+      setProgress(null);
+      refreshConversations();
+      await refreshRuns(res.conversationId);
+
+      const persistedAssistantId = res.reply?.id ?? asstId;
+      setMessages((prev) => prev.map((m) => {
+        if (m.id !== asstId) return m;
+        return {
+          ...m,
+          id: persistedAssistantId,
+          content: res.reply?.content ?? m.content,
+          status: (res.reply?.status as "completed" | "failed" | "cancelled" | undefined) ?? "completed",
+          parentId: res.reply?.parentId ?? m.parentId,
+          ...(res.reply?.attachments?.length ? { attachments: res.reply.attachments } : {}),
+        };
+      }));
+      setBranchSelections((prev) => replaceMessageIdInSelections(prev, asstId, persistedAssistantId));
+      setReasoningByMsgId((prev) => replaceMessageIdInMap(prev, asstId, persistedAssistantId));
+      setStreamingAttachmentsByMsgId((prev) => replaceMessageIdInMap(prev, asstId, persistedAssistantId));
+
+      if (res.reply?.pendingActions?.length) {
+        setPendingActionsByMsgId((prev) => {
+          const next = new Map(prev);
+          next.set(persistedAssistantId, res.reply!.pendingActions!);
+          return next;
+        });
+      }
+      activeAbortRef.current = null;
+      activeSessionIdRef.current = null;
+      setStreamingMsgId(null);
+      setWaiting(false);
+      setLiveReasoning("");
+      setLiveInvocations([]);
+    }).catch((err) => {
+      activeAbortRef.current = null;
+      activeSessionIdRef.current = null;
+      setProgress(null);
+      setWaiting(false);
+      setStreamingMsgId(null);
+      setLiveReasoning("");
+      setLiveInvocations([]);
+
+      if (isAbortError(err)) {
+        setMessages((prev) => prev.map((m) => m.id === asstId ? { ...m, status: "cancelled" } : m));
+        return;
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, conversationId: originalConvId, role: "assistant", content: "Failed to get response", status: "failed", createdAt: new Date().toISOString() },
+      ]);
+    });
+  }, [slug, userId, convId, waiting, latestAssistantMsgId, activePath, messages, refreshConversations, refreshRuns, isAbortError]);
+
+  // Branching: replace the latest visible user message with edited text and
+  // run a new turn as a sibling branch.
+  const handleEditLatestUser = useCallback(async (userMessageId: string, text: string) => {
+    const originalConvId = convId;
+    const nextText = text.trim();
+    if (!slug || !originalConvId || waiting || !nextText) return;
+
+    const latestUser = activePath.find((m) => m.id === userMessageId && m.role === "user");
+    const originalUser = messages.find((m) => m.id === userMessageId && m.role === "user");
+    if (!latestUser || latestUser.id !== latestUserMsgId || !originalUser || originalUser.content.trim() === nextText) return;
+
+    setWaiting(true);
+    setProgress(null);
+
+    const userIdLocal = `tmp-${Date.now()}`;
+    const asstId = `asst-${Date.now()}`;
+    setStreamingMsgId(asstId);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: userIdLocal,
+        conversationId: originalConvId,
+        role: "user",
+        content: nextText,
+        status: "completed",
+        createdAt: new Date().toISOString(),
+        parentId: originalUser.parentId ?? null,
+      },
+      {
+        id: asstId,
+        conversationId: originalConvId,
+        role: "assistant",
+        content: "",
+        status: "running",
+        createdAt: new Date().toISOString(),
+        parentId: userIdLocal,
+      },
+    ]);
+    setBranchSelections((prev) => new Map(prev).set(originalUser.parentId ?? "root", userIdLocal));
+    setLiveInvocations([]);
+    setLiveReasoning("");
+
+    const controller = new AbortController();
+    activeAbortRef.current = controller;
+    activeSessionIdRef.current = null;
+
+    sendChatMessage(slug, nextText, userId, originalConvId, {
+      onRunMeta: ({ sessionId }) => { activeSessionIdRef.current = sessionId; },
+      onProgress: (toolLabel) => setProgress(toolLabel),
+      onInvocation: (inv) => setLiveInvocations((prev) => {
+        if (!inv.toolCallId) return [...prev, inv];
+        const idx = prev.findIndex((p) => p.toolCallId === inv.toolCallId);
+        if (idx === -1) return [...prev, inv];
+        const next = prev.slice();
+        next[idx] = inv;
+        return next;
+      }),
+      onReasoningDelta: (delta) => {
+        setLiveReasoning((prev) => prev + delta);
+        setReasoningByMsgId((prev) => {
+          const next = new Map(prev);
+          next.set(asstId, (next.get(asstId) ?? "") + delta);
+          return next;
+        });
+      },
+      onTextDelta: (delta) => {
+        setMessages((prev) => prev.map((m) => m.id === asstId ? { ...m, content: m.content + delta } : m));
+      },
+    }, undefined, undefined, undefined, undefined, originalUser.parentId ?? undefined, true, originalUser.id, controller.signal).then(async (res) => {
+      setProgress(null);
+      refreshConversations();
+      await refreshRuns(res.conversationId);
+
+      const persistedUserId = res.reply?.userMessageId ?? userIdLocal;
+      const persistedAssistantId = res.reply?.id ?? asstId;
+      setMessages((prev) => prev.map((m) => {
+        if (m.id === userIdLocal) return { ...m, id: persistedUserId, conversationId: res.conversationId };
+        if (m.id === asstId) {
+          return {
+            ...m,
+            id: persistedAssistantId,
+            conversationId: res.conversationId,
+            content: res.reply?.content ?? m.content,
+            status: (res.reply?.status as "completed" | "failed" | "cancelled" | undefined) ?? "completed",
+            parentId: res.reply?.parentId ?? persistedUserId,
+            ...(res.reply?.attachments?.length ? { attachments: res.reply.attachments } : {}),
+          };
+        }
+        return {
+          ...m,
+          parentId: m.parentId === userIdLocal ? persistedUserId : m.parentId === asstId ? persistedAssistantId : m.parentId,
+        };
+      }));
+      setBranchSelections((prev) =>
+        replaceMessageIdInSelections(replaceMessageIdInSelections(prev, userIdLocal, persistedUserId), asstId, persistedAssistantId),
+      );
+      setReasoningByMsgId((prev) => replaceMessageIdInMap(prev, asstId, persistedAssistantId));
+
+      if (res.reply?.pendingActions?.length) {
+        setPendingActionsByMsgId((prev) => {
+          const next = new Map(prev);
+          next.set(persistedAssistantId, res.reply!.pendingActions!);
+          return next;
+        });
+      }
+      activeAbortRef.current = null;
+      activeSessionIdRef.current = null;
+      setStreamingMsgId(null);
+      setWaiting(false);
+      setLiveReasoning("");
+      setLiveInvocations([]);
+    }).catch((err) => {
+      activeAbortRef.current = null;
+      activeSessionIdRef.current = null;
+      setProgress(null);
+      setWaiting(false);
+      setStreamingMsgId(null);
+      setLiveReasoning("");
+      setLiveInvocations([]);
+
+      if (isAbortError(err)) {
+        setMessages((prev) => prev.map((m) => m.id === asstId ? { ...m, status: "cancelled" } : m));
+        return;
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, conversationId: originalConvId, role: "assistant", content: "Failed to get response", status: "failed", createdAt: new Date().toISOString() },
+      ]);
+    });
+  }, [slug, userId, convId, waiting, activePath, messages, latestUserMsgId, refreshConversations, refreshRuns, isAbortError]);
 
   const handleSend = useCallback(async () => {
     if ((!input.trim() && pendingFiles.length === 0 && selectedContext.length === 0) || !slug || waiting) return;
@@ -459,6 +886,10 @@ export function AgentChat({ userId }: Props) {
       previews.forEach((u) => URL.revokeObjectURL(u));
     }
 
+    // Branching: stitch the new user message under the visible last assistant.
+    // The backend reads parentAssistantMessageId to decide which subtree to
+    // extend (this mirrors V3 / useChat.send).
+    const parentAssistantMessageId = latestAssistantMsgId ?? undefined;
     const tempId = `tmp-${Date.now()}`;
     const tempUser: ChatMsg = {
       id: tempId,
@@ -467,6 +898,7 @@ export function AgentChat({ userId }: Props) {
       content: msg,
       status: "completed",
       createdAt: new Date().toISOString(),
+      parentId: parentAssistantMessageId ?? null,
       ...(contextToSend.length > 0 ? { contextItems: contextToSend } : {}),
       ...(uploaded.length ? { attachments: uploaded } : {}),
     };
@@ -477,10 +909,11 @@ export function AgentChat({ userId }: Props) {
     // via live state that's keyed to this id while `streamingMsgId === asstId`.
     const asstId = `asst-${Date.now()}`;
     setStreamingMsgId(asstId);
+    setLiveDebugEvents([]);
     setMessages((prev) => [
       ...prev,
       tempUser,
-      { id: asstId, conversationId: convId ?? "", role: "assistant", content: "", status: "running", createdAt: new Date().toISOString() },
+      { id: asstId, conversationId: convId ?? "", role: "assistant", content: "", status: "running", createdAt: new Date().toISOString(), parentId: tempUser.id },
     ]);
 
     // Reset streaming state for the new request.
@@ -495,6 +928,10 @@ export function AgentChat({ userId }: Props) {
     sendChatMessage(slug, msg, userId, convId ?? undefined, {
       onRunMeta: ({ sessionId }) => {
         activeSessionIdRef.current = sessionId;
+      },
+      onConversationId: (conversationId) => {
+        setConvId(conversationId);
+        refreshConversations();
       },
       onProgress: (toolLabel) => setProgress(toolLabel),
       onInvocation: (inv) => setLiveInvocations((prev) => {
@@ -556,7 +993,13 @@ export function AgentChat({ userId }: Props) {
           console.warn("[chat] streamed attachment decode failed:", err);
         }
       },
-    }, attachmentIds.length > 0 ? attachmentIds : undefined, contextToSend.length > 0 ? contextToSend : undefined, controller.signal).then(async (res) => {
+      onDebugEvent: (event) => {
+        setLiveDebugEvents((prev) => [...prev, event]);
+      },
+      onDebugArtifactsReady: () => {
+        setDebugArtifactsReadyVersion((version) => version + 1);
+      },
+    }, attachmentIds.length > 0 ? attachmentIds : undefined, contextToSend.length > 0 ? contextToSend : undefined, undefined, undefined, parentAssistantMessageId, controller.signal).then(async (res) => {
       setConvId(res.conversationId);
       setProgress(null);
       refreshConversations();
@@ -567,23 +1010,44 @@ export function AgentChat({ userId }: Props) {
 
       // Finalize the placeholder IN-PLACE: same id, updated content + status.
       // The bubble stays mounted; only its content/status/footer re-render.
+      // Branching: swap optimistic ids → persisted ids so parent/child links,
+      // branch selections, and invocation maps stay coherent across reload.
+      const persistedUserId = res.reply?.userMessageId ?? tempUser.id;
+      const persistedAssistantId = res.reply?.id ?? asstId;
       setMessages((prev) => prev.map((m) => {
-        if (m.id !== asstId) return m;
+        if (m.id === tempUser.id) {
+          return { ...m, id: persistedUserId, conversationId: res.conversationId };
+        }
+        if (m.id === asstId) {
+          return {
+            ...m,
+            id: persistedAssistantId,
+            conversationId: res.conversationId,
+            content: res.reply?.content ?? m.content,
+            status: (res.reply?.status as "completed" | "failed" | "cancelled" | undefined) ?? "completed",
+            parentId: res.reply?.parentId ?? persistedUserId,
+            ...(res.reply?.attachments?.length ? { attachments: res.reply.attachments } : {}),
+          };
+        }
+        // Other rows may have referenced the temp ids as parents (rare on
+        // V1 since we don't track follow-ups mid-stream, but harmless).
         return {
           ...m,
-          conversationId: res.conversationId,
-          content: res.reply?.content ?? m.content,
-          status: (res.reply?.status as "completed" | "failed" | "cancelled" | undefined) ?? "completed",
-          ...(res.reply?.attachments?.length ? { attachments: res.reply.attachments } : {}),
+          parentId: m.parentId === tempUser.id ? persistedUserId : m.parentId === asstId ? persistedAssistantId : m.parentId,
         };
-      }).map((m) => m.id === tempUser.id ? { ...m, conversationId: res.conversationId } : m));
+      }));
+      setBranchSelections((prev) =>
+        replaceMessageIdInSelections(replaceMessageIdInSelections(prev, tempUser.id, persistedUserId), asstId, persistedAssistantId),
+      );
+      setReasoningByMsgId((prev) => replaceMessageIdInMap(prev, asstId, persistedAssistantId));
+      setStreamingAttachmentsByMsgId((prev) => replaceMessageIdInMap(prev, asstId, persistedAssistantId));
       // Attach any pending write-tool approvals to this message so MessageBubble
       // can render Approve/Decline cards under the reply. Same pattern Spaces
       // uses for its thread-message approval buttons.
       if (res.reply?.pendingActions?.length) {
         setPendingActionsByMsgId((prev) => {
           const next = new Map(prev);
-          next.set(asstId, res.reply!.pendingActions!);
+          next.set(persistedAssistantId, res.reply!.pendingActions!);
           return next;
         });
       }
@@ -593,15 +1057,18 @@ export function AgentChat({ userId }: Props) {
       setWaiting(false);
       setLiveReasoning("");
       setLiveInvocations([]);
+      setLiveDebugEvents([]);
       // Streamed attachments are now redundant (the canonical persisted
       // versions rode in on res.reply.attachments and were merged onto the
-      // assistant message). Revoke the blob URLs and drop the entry.
+      // assistant message). Revoke the blob URLs and drop the entry. NB:
+      // the map was re-keyed above (replaceMessageIdInMap), so the entry now
+      // lives under persistedAssistantId, not asstId.
       setStreamingAttachmentsByMsgId((prev) => {
-        const list = prev.get(asstId);
+        const list = prev.get(persistedAssistantId);
         if (!list) return prev;
         list.forEach((e) => URL.revokeObjectURL(e.blobUrl));
         const next = new Map(prev);
-        next.delete(asstId);
+        next.delete(persistedAssistantId);
         return next;
       });
     }).catch((err) => {
@@ -612,6 +1079,7 @@ export function AgentChat({ userId }: Props) {
       setStreamingMsgId(null);
       setLiveReasoning("");
       setLiveInvocations([]);
+      setLiveDebugEvents([]);
       setStreamingAttachmentsByMsgId((prev) => {
         const list = prev.get(asstId);
         if (!list) return prev;
@@ -633,7 +1101,7 @@ export function AgentChat({ userId }: Props) {
         { id: `err-${Date.now()}`, conversationId: convId ?? "", role: "assistant", content: "Failed to get response", status: "failed", createdAt: new Date().toISOString() },
       ]);
     });
-  }, [input, pendingFiles, selectedContext, slug, userId, convId, waiting, refreshConversations, refreshRuns, isAbortError]);
+  }, [input, pendingFiles, selectedContext, slug, userId, convId, waiting, latestAssistantMsgId, refreshConversations, refreshRuns, isAbortError]);
 
   const selectedContextKeys = useMemo(
     () => new Set(selectedContext.map((item) => `${item.type}:${item.id}`)),
@@ -694,6 +1162,7 @@ export function AgentChat({ userId }: Props) {
   }
 
   return (
+    <>
     <div className="flex h-[calc(100vh-120px)] flex-col">
       {/* Header: back, agent picker, provider picker */}
       <div className="flex items-center gap-3 border-b border-zinc-800 pb-4">
@@ -778,6 +1247,16 @@ export function AgentChat({ userId }: Props) {
             {(savingModel || modelsLoading) && <Loader2 size={12} className="animate-spin text-zinc-400" />}
           </div>
         )}
+
+        <button
+          type="button"
+          onClick={() => { setDebugTurnIndex(null); setDebugSessionId(null); setShowDebugger(true); }}
+          disabled={!convId && !waiting}
+          className="ml-auto rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm font-medium text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Open debugger"
+        >
+          Debug
+        </button>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -815,7 +1294,7 @@ export function AgentChat({ userId }: Props) {
         </div>
 
         {/* Chat area */}
-        <div className="flex flex-1 flex-col min-w-0">
+        <div className="flex min-w-0 flex-1 flex-col">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {messages.length === 0 && !waiting && (
@@ -825,8 +1304,14 @@ export function AgentChat({ userId }: Props) {
             )}
 
             <div className="space-y-3">
-              {messages.map((m) => {
+              {/* Branching: render the projected visible path (selected branch
+                  through the tree), not the raw message list. The unprojected
+                  list lives in `messages` for parent/sibling lookups. */}
+              {activePath.map((m, messageIndex) => {
                 const isStreaming = m.id === streamingMsgId;
+                const assistantTurnIndex = m.role === "assistant"
+                  ? activePath.slice(0, messageIndex + 1).filter((message) => message.role === "assistant").length - 1
+                  : -1;
                 // Invocation source: live while streaming, persisted after.
                 const run = runByAssistantMsgId.get(m.id);
                 const msgInvocations = isStreaming ? liveInvocations : (run?.toolInvocations ?? []);
@@ -862,28 +1347,141 @@ export function AgentChat({ userId }: Props) {
                 const allFileAttachments = [...fileAttachments, ...streamingEntries];
 
                 const msgPending = pendingActionsByMsgId.get(m.id);
+                // Branch / regenerate / edit affordances are gated by:
+                //   - not currently streaming (no in-flight runs)
+                //   - position on the active path (only the latest visible user
+                //     gets edit; only the latest assistant gets regenerate)
+                //   - sibling presence in the underlying tree (drives the pager)
+                const showRegenerate = !waiting && !streamingMsgId && m.role === "assistant" && m.id === latestAssistantMsgId && m.status === "completed";
+                const showEditUser = !waiting && !streamingMsgId && m.role === "user" && m.id === latestUserMsgId;
+                const isEditingUser = editingUserId === m.id;
+                const parentId = effectiveParentById.get(m.id) ?? "root";
+                const siblings = childrenByParent.get(parentId) ?? [];
+                const currentIndex = siblings.findIndex((s) => s.id === m.id);
+                const showVersionNav = (m.role === "assistant" || m.role === "user") && siblings.length > 1 && currentIndex >= 0;
                 return (
-                  <MessageBubble
-                    key={m.id}
-                    message={{
-                      id: m.id,
-                      role: m.role as "user" | "assistant",
-                      content: m.content,
-                      status: m.status as "completed" | "failed" | "running" | "cancelled" | undefined,
-                      ...(m.contextItems?.length ? { contextItems: m.contextItems } : {}),
-                      ...(imageUrls?.length ? { images: imageUrls } : {}),
-                      ...(allFileAttachments.length ? { files: allFileAttachments } : {}),
-                      ...(msgReasoning ? { reasoning: msgReasoning } : {}),
-                      ...(msgInvocations.length > 0 ? { invocations: msgInvocations } : {}),
-                      ...(isStreaming ? { streaming: true } : {}),
-                      ...(msgPending?.length ? {
-                        pendingActions: msgPending,
-                        onApproveAction: (pa) => handleApproveAction(m.id, pa),
-                        onDeclineAction: (pa) => handleDeclineAction(m.id, pa),
-                      } : {}),
-                    }}
-                    userId={userId}
-                  />
+                  <div key={m.id}>
+                    <MessageBubble
+                      message={{
+                        id: m.id,
+                        role: m.role as "user" | "assistant",
+                        content: m.content,
+                        status: m.status as "completed" | "failed" | "running" | "cancelled" | undefined,
+                        ...(m.contextItems?.length ? { contextItems: m.contextItems } : {}),
+                        ...(imageUrls?.length ? { images: imageUrls } : {}),
+                        ...(allFileAttachments.length ? { files: allFileAttachments } : {}),
+                        ...(msgReasoning ? { reasoning: msgReasoning } : {}),
+                        ...(msgInvocations.length > 0 ? { invocations: msgInvocations } : {}),
+                        ...(isStreaming ? { streaming: true } : {}),
+                        ...(m.role === "assistant" ? {
+                          footer: (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // Branching-safe: pin to this assistant's run by
+                                // sessionId rather than chronological index.
+                                setDebugTurnIndex(assistantTurnIndex);
+                                setDebugSessionId(runByAssistantMsgId.get(m.id)?.sessionId ?? null);
+                                setShowDebugger(true);
+                              }}
+                              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+                            >
+                              <Bug size={11} /> Debug this response
+                            </button>
+                          ),
+                        } : {}),
+                        ...(msgPending?.length ? {
+                          pendingActions: msgPending,
+                          onApproveAction: (pa) => handleApproveAction(m.id, pa),
+                          onDeclineAction: (pa) => handleDeclineAction(m.id, pa),
+                        } : {}),
+                      }}
+                      userId={userId}
+                    />
+                    {showEditUser && (
+                      <div className="mt-1 flex justify-end">
+                        {isEditingUser ? (
+                          <div className="flex w-full max-w-xl flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-900 p-2">
+                            <textarea
+                              value={editingUserText}
+                              onChange={(e) => setEditingUserText(e.target.value)}
+                              className="min-h-[76px] resize-y rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 outline-none"
+                              autoFocus
+                            />
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                className="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                                onClick={() => {
+                                  setEditingUserId(null);
+                                  setEditingUserText("");
+                                }}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded bg-purple-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                                disabled={!editingUserText.trim() || editingUserText.trim() === m.content.trim()}
+                                onClick={() => {
+                                  handleEditLatestUser(m.id, editingUserText);
+                                  setEditingUserId(null);
+                                  setEditingUserText("");
+                                }}
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingUserId(m.id);
+                              setEditingUserText(m.content);
+                            }}
+                            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+                            title="Edit message"
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {showRegenerate && (
+                      <div className="mt-1 flex">
+                        <button
+                          onClick={handleRegenerate}
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+                          title="Regenerate response"
+                        >
+                          <RefreshCw size={12} />
+                          Regenerate
+                        </button>
+                      </div>
+                    )}
+                    {showVersionNav && (
+                      <div className="mt-1 flex items-center gap-2">
+                        <button
+                          onClick={() => setBranchSelections(prev => new Map(prev).set(parentId, siblings[currentIndex - 1]!.id))}
+                          disabled={currentIndex === 0}
+                          className="rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-30"
+                          title="Previous branch"
+                        >
+                          &lt;
+                        </button>
+                        <span className="min-w-[42px] text-center text-xs text-zinc-500">{currentIndex + 1}/{siblings.length}</span>
+                        <button
+                          onClick={() => setBranchSelections(prev => new Map(prev).set(parentId, siblings[currentIndex + 1]!.id))}
+                          disabled={currentIndex === siblings.length - 1}
+                          className="rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-30"
+                          title="Next branch"
+                        >
+                          &gt;
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
 
@@ -1018,8 +1616,35 @@ export function AgentChat({ userId }: Props) {
             </div>
           </div>
         </div>
+
+        {showDebugger && (
+          <>
+            <div
+              data-id="legacy-chat-debugger-resizer"
+              className="group relative flex w-1 shrink-0 cursor-col-resize items-center justify-center"
+              onMouseDown={handleDebuggerResizeStart}
+            >
+              <div className="h-full w-px bg-zinc-800 group-hover:w-0.5 group-hover:bg-zinc-700 transition-all" />
+            </div>
+            <DebugDrawer
+              open={showDebugger}
+              inline
+              width={debuggerWidth}
+              agentSlug={slug}
+              conversationId={convId}
+              liveEvents={liveDebugEvents}
+              running={waiting}
+              artifactsReadyVersion={debugArtifactsReadyVersion}
+              selectedTurnIndex={debugTurnIndex}
+              selectedTurnLive={debugTurnIndex != null && isCurrentAssistantTurn(activePath, debugTurnIndex, streamingMsgId)}
+              selectedSessionId={debugSessionId}
+              onClose={() => setShowDebugger(false)}
+            />
+          </>
+        )}
       </div>
     </div>
+    </>
   );
 }
 

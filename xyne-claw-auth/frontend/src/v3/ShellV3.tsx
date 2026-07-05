@@ -26,6 +26,7 @@ import {
   SparkleIcon,
   ChartBarIcon,
   BrainIcon,
+  FlaskIcon,
   ShieldCheckIcon,
   SignOutIcon,
   SunIcon,
@@ -83,12 +84,7 @@ interface FlyoutState {
 /* ── Config ────────────────────────────────────────────────────────── */
 
 const RAIL_DESTINATIONS: RailDestination[] = [
-  // "Studio" replaces the old "Chat" label — frames this surface as a roster of
-  // AI specialists you brief, not a generic chatbot. URL stays /v3/chat for
-  // back-compat with bookmarks; only the user-facing label + icon change.
-  //
-  // Projects used to live at /v3/projects; merged into Dashboard.
-  { label: "Studio",       path: "/v3/chat",         icon: SparkleIcon },
+  { label: "Chat with agents", path: "/v3/chat",     icon: SparkleIcon },
   { label: "Dashboard",    path: "/v3/dashboard",    icon: ChartBarIcon },
   { label: "Digital Twin", path: "/v3/digital-twin", icon: BrainIcon },
   // Escape hatch to the legacy V1 surface. Lives in the top rail
@@ -108,11 +104,18 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
     label: "Build",
     items: [
       { label: "Agents",    path: "/v3/agents",    icon: RobotIcon },
-      { label: "Integrations", path: "/v3/mcp",       icon: PlugsConnectedIcon },
+      { label: "MCPs",          path: "/v3/mcp",       icon: PlugsConnectedIcon },
       { label: "Skills",       path: "/v3/skills",    icon: WrenchIcon },
-      { label: "Specialists",  path: "/v3/subagents", icon: TreeStructureIcon },
+      { label: "Subagents",  path: "/v3/subagents", icon: TreeStructureIcon },
       { label: "Channels",     path: "/v3/gateways",  icon: ShareNetworkIcon },
       { label: "Workflows", path: "/v3/workflows", icon: GitBranchIcon },
+    ],
+  },
+  {
+    label: "Observe",
+    items: [
+      { label: "Metrics", path: "/v3/metrics", icon: ChartBarIcon },
+      { label: "Evals", path: "/v3/evals", icon: FlaskIcon },
     ],
   },
   {
@@ -283,9 +286,10 @@ function SidebarFlyout({
 
 export function ShellV3({ children, isAdmin = false }: ShellV3Props) {
   // Admin section appended only for users with CLAW_ADMIN
-  const sidebarGroups: SidebarGroupConfig[] = isAdmin
+  const sidebarGroups: SidebarGroupConfig[] = (isAdmin
     ? [...SIDEBAR_GROUPS, ADMIN_GROUP]
-    : SIDEBAR_GROUPS;
+    : SIDEBAR_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => i.path !== "/v3/evals") }))
+  ).filter((g) => g.items.length > 0);
   const auth = useAuth();
   const location = useLocation();
   const navigate = useNavigate();

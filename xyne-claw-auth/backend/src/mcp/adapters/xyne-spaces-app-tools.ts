@@ -21,6 +21,11 @@ export const xyneSpacesAppToolsAdapter: StdioMcpAdapter = {
   type: "xyne-spaces-app-tools",
   healthCheck: { name: "ping", params: {} },
   writeTools: [],
+  // Surfaces the bot tool in the agent-config picker without requiring a
+  // per-user tool-sync. See routes/tools.ts:185-196 — the picker unions
+  // adapter writeTools + staticTools. NOT a HITL gate; this tool stays
+  // autonomous (the whole point of the app-tools server).
+  staticTools: ["apps-send-message"],
   credentialFields: [],
   buildCommand(credentials) {
     const appToken = (credentials["app_token"] as string | undefined) ?? "";

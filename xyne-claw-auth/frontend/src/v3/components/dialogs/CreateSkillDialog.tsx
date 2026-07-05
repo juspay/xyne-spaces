@@ -4,7 +4,7 @@ import { Dialog } from "../ui/Dialog";
 import { Button } from "../ui/Button";
 import { TextField } from "../ui/TextField";
 import { createSkill, replaceSkillFiles } from "../../../lib/api";
-import { readSkillBundleFromFileList, type PendingSkillFile } from "../../../lib/skillFileUtils";
+import { readMultipleSkillBundles, type PendingSkillFile, type NamedSkillBundle } from "../../../lib/skillFileUtils";
 
 interface Props {
   open: boolean;
@@ -31,6 +31,11 @@ export function CreateSkillDialog({ open, onOpenChange, onCreated }: Props) {
   const [description, setDescription] = useState("");
   const [content, setContent] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingSkillFile[]>([]);
+  // Set when the pick contains more than one skill (folder-of-folders and/or
+  // several loose .md files). In batch mode the single-skill form is hidden and
+  // we create one skill per bundle on submit.
+  const [batch, setBatch] = useState<NamedSkillBundle[] | null>(null);
+  const [skipped, setSkipped] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dirInputRef = useRef<HTMLInputElement>(null);
@@ -39,6 +44,7 @@ export function CreateSkillDialog({ open, onOpenChange, onCreated }: Props) {
   function reset() {
     setName(""); setSlug(""); setSlugDirty(false);
     setDescription(""); setContent(""); setPendingFiles([]);
+    setBatch(null); setSkipped([]);
     setSubmitting(false); setError(null);
     if (dirInputRef.current) dirInputRef.current.value = "";
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -47,32 +53,72 @@ export function CreateSkillDialog({ open, onOpenChange, onCreated }: Props) {
   async function handleFilePick(browserFiles: FileList | null) {
     if (!browserFiles || browserFiles.length === 0) return;
     setError(null);
-    const bundle = await readSkillBundleFromFileList(browserFiles);
-    if (bundle.mainContent !== null) setContent(bundle.mainContent);
-    if (bundle.folderSlug && !slugDirty) {
-      setSlug(bundle.folderSlug);
-      if (!name) setName(bundle.folderSlug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()));
+    const { bundles, skipped: skippedPaths } = await readMultipleSkillBundles(browserFiles);
+    setSkipped(skippedPaths);
+    if (bundles.length === 0) {
+      setError("No skill files found. Pick one or more .md files, or a folder containing SKILL.md.");
+      return;
     }
-    setPendingFiles(bundle.files);
+    if (bundles.length === 1) {
+      // Single skill → keep the editable form, pre-filled from the file
+      // (including name/description lifted out of its frontmatter).
+      setBatch(null);
+      const b = bundles[0]!;
+      setContent(b.mainContent);
+      if (!slugDirty) { setSlug(b.slug); if (!name) setName(b.name); }
+      if (b.description && !description) setDescription(b.description);
+      setPendingFiles(b.files);
+      return;
+    }
+    // Multiple skills → batch mode.
+    setBatch(bundles);
+    setPendingFiles([]);
+  }
+
+  async function createOne(b: { slug: string; name?: string; description?: string; content: string; files: PendingSkillFile[] }) {
+    await createSkill({
+      slug: b.slug,
+      name: b.name || undefined,
+      description: b.description || undefined,
+      content: b.content,
+      source: "user-created",
+    });
+    if (b.files.length > 0) {
+      await replaceSkillFiles(b.slug, b.files.map(({ relativePath, content: c, contentType }) => ({
+        relativePath, content: c, ...(contentType ? { contentType } : {}),
+      })));
+    }
   }
 
   async function handleSubmit() {
     setError(null);
+
+    // Batch mode: create one skill per detected bundle; report per-skill failures.
+    if (batch) {
+      setSubmitting(true);
+      const failures: string[] = [];
+      for (const b of batch) {
+        try {
+          await createOne({ slug: b.slug, name: b.name, description: b.description, content: b.mainContent, files: b.files });
+        } catch (err) {
+          failures.push(`${b.slug}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (failures.length > 0) {
+        setError(`Created ${batch.length - failures.length}/${batch.length}. Failed:\n${failures.join("\n")}`);
+        setSubmitting(false);
+        return;
+      }
+      onCreated?.();
+      onOpenChange(false);
+      reset();
+      return;
+    }
+
     if (!slug || !content) { setError("Slug and content are required"); return; }
     setSubmitting(true);
     try {
-      await createSkill({
-        slug,
-        name: name || undefined,
-        description: description || undefined,
-        content,
-        source: "user-created",
-      });
-      if (pendingFiles.length > 0) {
-        await replaceSkillFiles(slug, pendingFiles.map(({ relativePath, content: c, contentType }) => ({
-          relativePath, content: c, ...(contentType ? { contentType } : {}),
-        })));
-      }
+      await createOne({ slug, name, description, content, files: pendingFiles });
       onCreated?.();
       onOpenChange(false);
       reset();
@@ -95,12 +141,35 @@ export function CreateSkillDialog({ open, onOpenChange, onCreated }: Props) {
             Cancel
           </Button>
           <Button variant="primary" onClick={handleSubmit} disabled={submitting}>
-            {submitting ? "Creating…" : "Create skill"}
+            {submitting ? "Creating…" : batch ? `Create ${batch.length} skills` : "Create skill"}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-[10px]">
+      {batch ? (
+        /* Multi-skill batch: one skill per detected bundle. */
+        <div className="flex flex-col gap-[6px]">
+          <span className="text-[12px] font-medium text-xyne-fg-secondary">
+            {batch.length} skills detected — each will be created separately
+          </span>
+          <div className="flex flex-col gap-[4px] max-h-[220px] overflow-auto rounded-[8px] border border-xyne-border p-[8px]">
+            {batch.map((b) => (
+              <div key={b.slug} className="flex items-center justify-between text-[12px]">
+                <span className="font-mono text-xyne-fg-primary">{b.slug}</span>
+                <span className="text-xyne-fg-tertiary">
+                  {b.mainContent.length.toLocaleString()} chars
+                  {b.files.length > 0 ? ` · ${b.files.length} file${b.files.length !== 1 ? "s" : ""}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={reset} className="self-start text-[11px] text-xyne-fg-muted hover:text-xyne-fg-primary">
+            Clear selection
+          </button>
+        </div>
+      ) : (
+      <>
       {/* Name + Slug side by side */}
       <div className="grid grid-cols-2 gap-[12px]">
         <TextField
@@ -137,9 +206,15 @@ export function CreateSkillDialog({ open, onOpenChange, onCreated }: Props) {
         value={content}
         onChange={(e) => setContent(e.target.value)}
       />
+      </>
+      )}
       {/* ── File / folder upload ───────────────────────────────── */}
       <div className="flex flex-col gap-[6px]">
-        <span className="text-[12px] font-medium text-xyne-fg-secondary">Attach files (optional)</span>
+        <span className="text-[12px] font-medium text-xyne-fg-secondary">Upload skill files</span>
+        <span className="text-[11px] leading-snug text-xyne-fg-tertiary">
+          Drop one <code>.md</code> to fill the form, several <code>.md</code> files to create one skill each,
+          or a folder of <code>SKILL.md</code> sub-folders (with their sibling files).
+        </span>
         <div className="flex items-center gap-[8px]">
           <input
             ref={dirInputRef}
@@ -183,7 +258,12 @@ export function CreateSkillDialog({ open, onOpenChange, onCreated }: Props) {
         )}
       </div>
 
-      {error && <p className="text-[12px] text-xyne-error-fg">{error}</p>}
+      {skipped.length > 0 && (
+        <p className="text-[11px] text-xyne-fg-tertiary">
+          Skipped {skipped.length} non-skill file{skipped.length !== 1 ? "s" : ""} (not a .md or SKILL.md sibling): {skipped.slice(0, 5).join(", ")}{skipped.length > 5 ? "…" : ""}
+        </p>
+      )}
+      {error && <p className="whitespace-pre-line text-[12px] text-xyne-error-fg">{error}</p>}
       </div>
     </Dialog>
   );

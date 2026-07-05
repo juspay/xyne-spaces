@@ -40,6 +40,11 @@ import { CONFIG } from "../config.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { evictSession } from "../mcp/runner.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
+import { signOAuthState, verifyOAuthState } from "../lib/oauth-state.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("customerio-oauth");
 
 const CUSTOMERIO_REGISTER_URL = "https://mcp.customer.io/oauth2/register";
 const CUSTOMERIO_AUTH_URL = "https://mcp.customer.io/oauth2/authorize";
@@ -59,12 +64,17 @@ interface StatePayload {
   redirectUri: string;
 }
 
+// HMAC-signed state — prevents an attacker from forging state={userId:victim}
+// to bind their provider account to a victim (or capture victim tokens).
 function encodeState(payload: StatePayload): string {
-  return Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const { userId, ...extra } = payload;
+  return signOAuthState(userId, extra);
 }
 
 function decodeState(state: string): StatePayload {
-  return JSON.parse(Buffer.from(state, "base64url").toString()) as StatePayload;
+  // Throws OAuthStateError on tampered/expired state; callers try/catch this.
+  const verified = verifyOAuthState(state);
+  return { userId: verified.userId, ...(verified.extra ?? {}) } as StatePayload;
 }
 
 /** Generates a PKCE code verifier (43 random url-safe bytes). */
@@ -140,47 +150,28 @@ router.use("/:userId", pinUserIdParam);
 // ── Token endpoint ─────────────────────────────────────────────────────────
 
 /**
- * GET /:userId/oauth/customerio/token
- * Returns a valid Customer.io access token, refreshing if within 60 s of expiry.
+ * Live Customer.io access-token provider for the shared `/oauth/:provider/token`
+ * route (see lib/oauth-token-endpoint.ts). Public client (DCR) — the per-connection
+ * clientId is sent in the refresh body, no secret.
  */
-router.get("/:userId/oauth/customerio/token", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
+export const customerioOAuthProvider: OAuthTokenProvider = {
+  serverType: "customerio",
+  label: "Customer.io",
+  async refresh(creds) {
+    const c = creds as unknown as CustomerioTokens;
 
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: "customerio" } },
-      include: { mcpServer: true },
-    });
-
-    if (!connection) {
-      res.status(404).json({ success: false, error: "No Customer.io connection found for this user" });
-      return;
-    }
-
-    const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-    const creds = JSON.parse(decrypted) as CustomerioTokens;
-
-    if (Date.now() <= creds.expires - 60_000) {
-      res.json({ success: true, data: { accessToken: creds.accessToken } });
-      return;
-    }
-
-    // Refresh — Customer.io is a public client (DCR); send client_id in body, no secret.
     const refreshRes = await fetch(CUSTOMERIO_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        client_id: creds.clientId,
-        refresh_token: creds.refreshToken,
+        client_id: c.clientId,
+        refresh_token: c.refreshToken,
       }),
     });
 
     if (!refreshRes.ok) {
-      const text = await refreshRes.text();
-      console.error(`[customerio-oauth] Token refresh failed for user ${userId}: ${refreshRes.status} ${text}`);
-      res.status(502).json({ success: false, error: "Customer.io token refresh failed" });
-      return;
+      throw new TokenRefreshError(502, `${refreshRes.status} ${await refreshRes.text()}`);
     }
 
     const tokens = (await refreshRes.json()) as {
@@ -189,25 +180,14 @@ router.get("/:userId/oauth/customerio/token", async (req: Request<{ userId: stri
       expires_in: number;
     };
 
-    const newCreds: CustomerioTokens = {
-      clientId: creds.clientId,
+    return {
+      clientId: c.clientId,
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token ?? creds.refreshToken,
+      refreshToken: tokens.refresh_token ?? c.refreshToken,
       expires: Date.now() + tokens.expires_in * 1000,
     };
-
-    const { ciphertext, iv, authTag } = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
-    await prisma.userMcpConnection.update({
-      where: { id: connection.id },
-      data: { encryptedCreds: ciphertext, iv, authTag },
-    });
-
-    res.json({ success: true, data: { accessToken: tokens.access_token } });
-  } catch (err) {
-    console.error("[customerio-oauth] token error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+  },
+};
 
 // ── Authorize endpoint ─────────────────────────────────────────────────────
 
@@ -243,7 +223,7 @@ router.post("/:userId/oauth/customerio/authorize", async (req: Request<{ userId:
 
     res.json({ success: true, data: { authUrl: authUrl.toString() } });
   } catch (err) {
-    console.error("[customerio-oauth] authorize error:", err);
+    log.error("[customerio-oauth] authorize error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -293,7 +273,7 @@ router.post("/:userId/oauth/customerio/callback", async (req: Request<{ userId: 
 
     if (!tokenRes.ok) {
       const text = await tokenRes.text();
-      console.error(`[customerio-oauth] Token exchange failed for user ${userId}: ${tokenRes.status} ${text}`);
+      log.error(`[customerio-oauth] Token exchange failed for user ${userId}: ${tokenRes.status} ${text}`);
       res.status(502).json({ success: false, error: "Customer.io token exchange failed" });
       return;
     }
@@ -306,10 +286,10 @@ router.post("/:userId/oauth/customerio/callback", async (req: Request<{ userId: 
 
     await storeCustomerioTokens(userId, clientId, tokens.access_token, tokens.refresh_token, tokens.expires_in);
 
-    console.log(`[customerio-oauth] Stored Customer.io credentials for user ${userId}`);
+    log.info(`[customerio-oauth] Stored Customer.io credentials for user ${userId}`);
     res.json({ success: true, data: { message: "Customer.io account connected successfully" } });
   } catch (err) {
-    console.error("[customerio-oauth] callback error:", err);
+    log.error("[customerio-oauth] callback error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -333,7 +313,7 @@ customerioCallbackRouter.get("/customerio/callback", async (req: Request, res: R
     };
 
     if (oauthError) {
-      console.error(`[customerio-oauth] OAuth error: ${oauthError}`);
+      log.error(`[customerio-oauth] OAuth error: ${oauthError}`);
       res.redirect(`${frontendUrl}?customerio_error=${encodeURIComponent(oauthError)}`);
       return;
     }
@@ -367,7 +347,7 @@ customerioCallbackRouter.get("/customerio/callback", async (req: Request, res: R
 
     if (!tokenRes.ok) {
       const text = await tokenRes.text();
-      console.error(`[customerio-oauth] Browser callback token exchange failed: ${tokenRes.status} ${text}`);
+      log.error(`[customerio-oauth] Browser callback token exchange failed: ${tokenRes.status} ${text}`);
       res.redirect(`${frontendUrl}?customerio_error=token_exchange_failed`);
       return;
     }
@@ -380,17 +360,17 @@ customerioCallbackRouter.get("/customerio/callback", async (req: Request, res: R
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      console.error(`[customerio-oauth] User not found: ${userId}`);
+      log.error(`[customerio-oauth] User not found: ${userId}`);
       res.redirect(`${frontendUrl}?customerio_error=user_not_found`);
       return;
     }
 
     await storeCustomerioTokens(userId, clientId, tokens.access_token, tokens.refresh_token, tokens.expires_in);
 
-    console.log(`[customerio-oauth] Stored Customer.io credentials for user ${userId} via browser callback`);
+    log.info(`[customerio-oauth] Stored Customer.io credentials for user ${userId} via browser callback`);
     res.redirect(`${frontendUrl}?customerio_connected=true`);
   } catch (err) {
-    console.error("[customerio-oauth] browser callback error:", err);
+    log.error("[customerio-oauth] browser callback error:", err);
     res.redirect(`${frontendUrl}?customerio_error=internal_error`);
   }
 });
@@ -434,7 +414,7 @@ async function storeCustomerioTokens(
 
   // Sync tools from the Customer.io MCP server into the DB so the agent can use them.
   syncToolsForServer(userId, "customerio", server.name, { accessToken, refreshToken, clientId }).catch((err) => {
-    console.error(`[customerio-oauth] tool sync failed for user ${userId}:`, err);
+    log.error(`[customerio-oauth] tool sync failed for user ${userId}:`, err);
   });
 }
 

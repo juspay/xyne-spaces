@@ -86,6 +86,7 @@ export function SkillSlideOver({
   const [filesLoading, setFilesLoading] = useState(false);
   const dirInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mdInputRef = useRef<HTMLInputElement>(null);
 
   /* Saving */
   const [saving, setSaving] = useState(false);
@@ -174,6 +175,26 @@ export function SkillSlideOver({
       setSaving(false);
     }
   }, [skill, saving, editContent, onUpdated, showSnackbar]);
+
+  // Upload a markdown file to populate the skill's content (SKILL.md body).
+  // Loads it into the editor so the user can review/tweak before saving.
+  const handleMdUpload = useCallback(
+    async (browserFiles: FileList | null, inputEl: HTMLInputElement | null) => {
+      try {
+        const file = browserFiles?.[0];
+        if (!file) return;
+        const text = await file.text();
+        setEditContent(text);
+        setEditingContent(true);
+        showSnackbar({ variant: "success", title: `Loaded ${file.name} — review and Save` });
+      } catch {
+        showSnackbar({ variant: "error", title: "Failed to read markdown file" });
+      } finally {
+        if (inputEl) inputEl.value = "";
+      }
+    },
+    [showSnackbar],
+  );
 
   const handleFilePick = useCallback(
     async (browserFiles: FileList | null, inputEl: HTMLInputElement | null) => {
@@ -368,6 +389,20 @@ export function SkillSlideOver({
           <SectionLabel>Details</SectionLabel>
           <div className="divide-y divide-xyne-border-subtle text-[13px]">
             <div className="flex items-center justify-between py-[8px]">
+              <span className="text-xyne-fg-tertiary">Owner</span>
+              <span className="text-xyne-fg-primary">
+                {skill.owner?.name ?? skill.owner?.email ?? (skill.ownerUserId ? "Unknown user" : "Xyne (system)")}
+              </span>
+            </div>
+            {skill.owner?.email && skill.owner?.name ? (
+              <div className="flex items-center justify-between py-[8px]">
+                <span className="text-xyne-fg-tertiary">Contact</span>
+                <a className="text-xyne-brand hover:underline" href={`mailto:${skill.owner.email}`}>
+                  {skill.owner.email}
+                </a>
+              </div>
+            ) : null}
+            <div className="flex items-center justify-between py-[8px]">
               <span className="text-xyne-fg-tertiary">Created</span>
               <span className="text-xyne-fg-primary">{formatDate(skill.createdAt)}</span>
             </div>
@@ -386,6 +421,14 @@ export function SkillSlideOver({
               {(editingContent ? editContent : skill.content)?.length ?? 0} chars
             </span>
           </div>
+          {/* Hidden input for uploading a .md file as the skill content */}
+          <input
+            ref={mdInputRef}
+            type="file"
+            accept=".md,.markdown,.txt,text/markdown,text/plain"
+            className="hidden"
+            onChange={(e) => handleMdUpload(e.target.files, mdInputRef.current)}
+          />
           {editingContent ? (
             <div>
               <textarea
@@ -407,6 +450,9 @@ export function SkillSlideOver({
                 >
                   Cancel
                 </Button>
+                <Button variant="ghost" size="sm" onClick={() => mdInputRef.current?.click()}>
+                  <UploadSimpleIcon size={14} /> Upload .md
+                </Button>
               </div>
             </div>
           ) : (
@@ -423,12 +469,20 @@ export function SkillSlideOver({
                 )}
               </div>
               {canEdit && (
-                <button
-                  onClick={() => setEditingContent(true)}
-                  className="mt-[8px] flex items-center gap-[4px] text-[11px] text-xyne-fg-tertiary hover:text-xyne-fg-secondary"
-                >
-                  <PencilSimpleIcon size={12} /> Edit
-                </button>
+                <div className="mt-[8px] flex items-center gap-[12px]">
+                  <button
+                    onClick={() => setEditingContent(true)}
+                    className="flex items-center gap-[4px] text-[11px] text-xyne-fg-tertiary hover:text-xyne-fg-secondary"
+                  >
+                    <PencilSimpleIcon size={12} /> Edit
+                  </button>
+                  <button
+                    onClick={() => mdInputRef.current?.click()}
+                    className="flex items-center gap-[4px] text-[11px] text-xyne-fg-tertiary hover:text-xyne-fg-secondary"
+                  >
+                    <UploadSimpleIcon size={12} /> Upload .md
+                  </button>
+                </div>
               )}
             </div>
           )}

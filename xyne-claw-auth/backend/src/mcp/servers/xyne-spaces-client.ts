@@ -27,6 +27,22 @@ function resolveBaseUrl(override?: string): string {
   return raw.replace(/\/+$/, "");
 }
 
+// Extract Spaces userId from the JWT token's `sub` claim (user tokens)
+// or `userId` claim (app tokens)
+function extractUserIdFromToken(token: string): string {
+  try {
+    const parts = token.split(".");
+    if (!parts[1]) return "";
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+    return payload.sub ?? payload.userId ?? "";
+  } catch {
+    return "";
+  }
+}
+
+const DEFAULT_TOKEN = process.env["XYNE_SPACES_TOKEN"] ?? "";
+
+export const CURRENT_USER_ID = extractUserIdFromToken(DEFAULT_TOKEN);
 
 export async function spacesFetch(path: string, init?: RequestInit, auth?: SpacesAuthContext): Promise<unknown> {
   const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
@@ -62,27 +78,79 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
   if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
   const cookieHeader = cookieParts.join("; ");
 
-  const url = new URL(path, `${baseUrl}/`).toString();
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(sessionId ? { "x-session-id": sessionId } : {}),
-      ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-      ...(auth?.s2sKey ? { "x-s2s-key": auth.s2sKey } : {}),
-      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-      ...(init?.headers as Record<string, string> | undefined),
-    },
-    signal: init?.signal ?? AbortSignal.timeout(30_000),
-  });
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    ...(sessionId ? { "x-session-id": sessionId } : {}),
+    ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
+    ...(auth?.s2sKey ? { "x-s2s-key": auth.s2sKey } : {}),
+    ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    ...(init?.headers as Record<string, string> | undefined),
+  };
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Spaces API ${response.status}: ${text.slice(0, 500)}`);
+  type Attempt =
+    | { ok: true; json: unknown }
+    | { ok: false; status: number | null; text: string };
+
+  const attempt = async (p: string): Promise<Attempt> => {
+    const url = new URL(p, `${baseUrl}/`).toString();
+    try {
+      // Fresh timeout signal per attempt (unless the caller supplied one) so a
+      // first-attempt timeout doesn't instantly fail the fallback.
+      const response = await fetch(url, {
+        ...init,
+        headers,
+        signal: init?.signal ?? AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        return { ok: false, status: response.status, text };
+      }
+      return { ok: true, json: await response.json() };
+    } catch (err) {
+      // Network error / timeout — the endpoint is unreachable.
+      return { ok: false, status: null, text: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  let res = await attempt(path);
+
+  // Resilience: the `/claw` endpoints are newer and may not exist (or be
+  // method-mismatched) in every environment / deploy. Fall back to the original
+  // (non-/claw) endpoint — battle-tested and also user-token-capable — on any
+  // signal that the /claw ROUTE itself is the problem:
+  //   - network error / timeout  (status null) — unreachable
+  //   - 404 Not Found            — the /claw route isn't mounted
+  //   - 405 Method Not Allowed   — route exists but not for this verb
+  //   - 502 / 503 / 504          — gateway down / rolling
+  // This is SAFE for 404: if it's a route-missing 404 the original serves the
+  // request; if it's a genuine resource-not-found the original ALSO 404s, so we
+  // just return the same result (one extra request, no behaviour change).
+  // We do NOT fall back on 400/401/403 — those are real request-level responses
+  // (validation/auth) the original would return identically. Strips the `/claw`
+  // segment wherever it sits, e.g. /api/query/claw → /api/query,
+  // /api/memory/claw/search → /api/memory/search.
+  const clawless = path.replace(/\/claw(?=\/|$)/, "");
+  if (
+    !res.ok &&
+    clawless !== path &&
+    (res.status === null ||
+      res.status === 404 ||
+      res.status === 405 ||
+      res.status === 502 ||
+      res.status === 503 ||
+      res.status === 504)
+  ) {
+    console.warn(
+      `[spaces-client] /claw route unavailable (${res.status ?? "network"}) for ${path} — falling back to ${clawless}`,
+    );
+    res = await attempt(clawless);
   }
 
-  return response.json();
+  if (!res.ok) {
+    throw new Error(`Spaces API ${res.status ?? "network error"}: ${res.text.slice(0, 500)}`);
+  }
+  return res.json;
 }
 
 /**
@@ -127,6 +195,74 @@ export async function spacesFetchBuffer(
   return { buffer, contentType: response.headers.get("content-type") ?? "application/octet-stream" };
 }
 
+/** Plain-text variant of spacesFetch — returns the response body as a string. */
+export async function spacesFetchText(path: string, auth?: SpacesAuthContext): Promise<string> {
+  const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
+  const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
+  const workspaceId = auth?.workspaceId ?? process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "";
+  const baseUrl = resolveBaseUrl(auth?.baseUrl);
+  if (!baseUrl) throw new Error("Spaces base URL not configured");
+  if (!token) throw new Error("Spaces auth token missing");
+
+  const cookieParts: string[] = [];
+  if (sessionId) {
+    cookieParts.push(`xyne_session=${sessionId}`);
+    cookieParts.push(`user_session_id=${sessionId}`);
+  }
+  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+  const cookieHeader = cookieParts.join("; ");
+
+  const url = new URL(path, `${baseUrl}/`).toString();
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(sessionId ? { "x-session-id": sessionId } : {}),
+      ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    },
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Spaces API ${response.status}: ${text.slice(0, 300)}`);
+  }
+  return response.text();
+}
+
+/**
+ * App-token variant of spacesFetch. Hits the `/api/apps/*` routes (gated by
+ * Spaces' `authenticateApp` middleware) using the agent's app token as Bearer.
+ *
+ * Used by tool `appHandler`s when the spaces MCP runs in APP MODE — i.e. the
+ * run is attributed to an agent's app user, which has no Spaces login session
+ * but does have a valid app token. The app routes resolve the acting user from
+ * the app token itself, so no session id / workspace id is needed.
+ */
+export async function appFetch(path: string, init?: RequestInit, auth?: SpacesAuthContext): Promise<unknown> {
+  const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
+  const baseUrl = resolveBaseUrl(auth?.baseUrl);
+  if (!baseUrl) throw new Error("Spaces base URL is not configured.");
+  if (!token) throw new Error("Spaces app token is missing for this request.");
+
+  const url = `${baseUrl}/api/apps${path}`;
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(init?.headers as Record<string, string> | undefined),
+    },
+    signal: init?.signal ?? AbortSignal.timeout(30_000),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Spaces app API ${response.status}: ${text.slice(0, 500)}`);
+  }
+  return response.json();
+}
+
 export interface QueryAST {
   model: string;
   operation: "findMany" | "count";
@@ -140,8 +276,8 @@ export interface QueryAST {
 
 export async function interact(ast: QueryAST, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(ast);
-  console.error(`[spaces-client] POST /api/query ${payload}`);
-  const result = (await spacesFetch("/api/query", {
+  console.error(`[spaces-client] POST /api/query/claw ${payload}`);
+  const result = (await spacesFetch("/api/query/claw", {
     method: "POST",
     body: payload,
   }, auth)) as { data: unknown };
@@ -150,14 +286,14 @@ export async function interact(ast: QueryAST, auth?: SpacesAuthContext): Promise
 
 export async function search(params: Record<string, string>, auth?: SpacesAuthContext): Promise<unknown> {
   const qs = new URLSearchParams(params).toString();
-  console.error(`[spaces-client] GET /api/search?${qs}`);
-  return spacesFetch(`/api/vespaSearch?${qs}`, undefined, auth);
+  console.error(`[spaces-client] GET /api/vespaSearch/claw?${qs}`);
+  return spacesFetch(`/api/vespaSearch/claw?${qs}`, undefined, auth);
 }
 
 export async function memorySearch(body: Record<string, unknown>, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(body);
-  console.error(`[spaces-client] POST /api/memory/search ${payload}`);
-  return spacesFetch("/api/memory/search", {
+  console.error(`[spaces-client] POST /api/memory/claw/search ${payload}`);
+  return spacesFetch("/api/memory/claw/search", {
     method: "POST",
     body: payload,
   }, auth);

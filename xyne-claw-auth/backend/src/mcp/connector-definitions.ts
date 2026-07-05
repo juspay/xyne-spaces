@@ -1,4 +1,5 @@
-import type { McpServer } from "@prisma/client";
+ 
+ import type { McpServer } from "@prisma/client";
 import { prisma } from "../db.js";
 import type {
   CredentialField,
@@ -9,6 +10,9 @@ import type {
   WriteToolPolicy,
 } from "./types.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("connector-definitions");
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -91,6 +95,8 @@ function buildDynamicDefinition(row: McpServer): ResolvedConnectorDefinition {
     credentialFields,
     healthCheck,
     writeTools: writeToolsFromPolicy(writePolicy),
+    staticTools: [],
+    forwardFiles: row.forwardFiles === true,
     buildStdioCommand(credentials) {
       const envTemplate = asRecord(launch["env"]);
       const args = Array.isArray(launch["args"]) ? launch["args"].map((a) => applyTemplate(String(a), credentials)) : [];
@@ -123,6 +129,10 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
     credentialFields: [...adapter.credentialFields],
     healthCheck: adapter.healthCheck,
     writeTools: adapter.writeTools ?? [],
+    staticTools: adapter.staticTools ?? [],
+    // Code-defined adapters don't forward files (none return binary today). Add
+    // a flag to StdioMcpAdapter if one ever needs it.
+    forwardFiles: false,
     buildStdioCommand(credentials): StdioLaunchConfig {
       if (adapter.transport !== "stdio") return { cmd: "", args: [], env: {} };
       const cmd = adapter.buildCommand(credentials);
@@ -135,7 +145,28 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
   };
 }
 
+/**
+ * Server types that should resolve via the STATIC adapter even when an
+ * mcp_servers row with launchConfigTemplate / httpConfigTemplate exists.
+ *
+ * Historically the resolver tried the DB row first and fell back to static.
+ * f062581da5 ("XYNE-14952 linkdin mcp fix") flipped this globally — which
+ * unblocked LinkedIn but silently shadowed the per-server DB customizations
+ * for every other adapter (e.g. grafana lost tools for ppi-grafana-v2).
+ *
+ * Keep the static-first list narrow: only adapters that genuinely cannot be
+ * driven from the DB row (custom buildCommand logic, env preprocessing, etc.).
+ * Everything else falls through to DB-first, preserving the pre-XYNE-14952
+ * behaviour.
+ */
+const STATIC_FIRST_TYPES = new Set<string>(["rapidapi-linkedin"]);
+
 export async function resolveConnectorDefinition(serverType: string): Promise<ResolvedConnectorDefinition | undefined> {
+  if (STATIC_FIRST_TYPES.has(serverType)) {
+    const staticDef = fromStaticAdapter(serverType);
+    if (staticDef) return staticDef;
+  }
+
   const row = await prisma.mcpServer.findUnique({ where: { type: serverType } });
   if (row && row.enabled) {
     // Only use the dynamic (DB-driven) path when the row has an actual launch
@@ -144,7 +175,24 @@ export async function resolveConnectorDefinition(serverType: string): Promise<Re
     // the UI form but the static adapter may still provide the buildCommand()
     // logic (e.g. BigQuery writes a temp key file before spawning).
     const hasLaunchConfig = row.launchConfigTemplate !== null || row.httpConfigTemplate !== null;
-    if (hasLaunchConfig) return buildDynamicDefinition(row);
+    if (hasLaunchConfig) {
+      // SECURITY: never build a stdio launch command from a DB row. A stdio
+      // connector spawns a child process inside this (secrets-holding) gateway,
+      // so its command must be code-reviewed. stdio types resolve via the
+      // code-defined static adapter ONLY — the adapter's cmd/args are constant
+      // and per-connection values (URLs, tokens) still flow through credentials,
+      // so this does not drop legitimate per-server config. A DB-stored stdio
+      // launchConfigTemplate (pre-existing or injected) is therefore inert.
+      // http connectors don't spawn a local process, so DB-driven http stays.
+      if (row.transport === "http") {
+        return buildDynamicDefinition(row);
+      }
+      const staticDef = fromStaticAdapter(serverType);
+      if (!staticDef) {
+        log.warn(`[connector] ignoring DB stdio launchConfig for type=${serverType} — no code-reviewed static adapter exists; refusing to spawn`);
+      }
+      return staticDef;
+    }
   }
   return fromStaticAdapter(serverType);
 }

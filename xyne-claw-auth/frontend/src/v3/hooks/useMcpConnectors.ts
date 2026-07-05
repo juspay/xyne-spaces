@@ -8,6 +8,7 @@ import {
   autoConnectSpaces,
   connectGoogle,
   connectMicrosoft,
+  connectOAuth,
   checkConnectionHealth,
 } from "../../lib/api";
 
@@ -76,6 +77,11 @@ export function useMcpConnectors(userId: string): UseMcpConnectorsReturn {
         window.location.href = await connectGoogle(userId);
       } else if (server.type === "microsoft") {
         window.location.href = await connectMicrosoft(userId);
+      } else if (server.oauth) {
+        // Generic OAuth connector (attio, honeycomb, …): kick off the consent
+        // flow and redirect, instead of creating a credential-less connection
+        // (which would land as a permanently "Unhealthy" row with no tokens).
+        window.location.href = await connectOAuth(userId, server.type);
       } else {
         await createConnection(userId, { mcpServerId: server.id, credentials: {} });
         reload();

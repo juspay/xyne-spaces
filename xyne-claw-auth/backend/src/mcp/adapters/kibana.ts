@@ -17,7 +17,7 @@ export const kibanaAdapter: StdioMcpAdapter = {
         "run", "--rm", "-i",
         "-e", "ES_URL",
         "-e", "ES_API_KEY",
-        "docker.elastic.co/mcp/elasticsearch",
+        "docker.elastic.co/mcp/elasticsearch:0.4.6",
         "stdio",
       ],
       env: {

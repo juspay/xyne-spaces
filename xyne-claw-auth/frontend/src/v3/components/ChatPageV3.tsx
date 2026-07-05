@@ -19,7 +19,6 @@ import {
   AtIcon,
   WrenchIcon,
   GearSixIcon,
-  ArrowSquareOutIcon,
   ClockIcon,
   XIcon,
   MagnifyingGlassIcon,
@@ -33,9 +32,11 @@ import {
   RobotIcon,
   SparkleIcon,
   BrainIcon,
+  ArrowsClockwiseIcon,
 } from "@phosphor-icons/react";
 import { useAuth } from "../../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
+import type { MessageBranchInfo } from "../hooks/useChat";
 import { useAgents } from "../hooks/useAgents";
 import { useConversationMeta } from "../hooks/useConversationMeta";
 import {
@@ -43,18 +44,22 @@ import {
   listChatConversations,
   listRuns,
   pollChatMessages,
+  subscribeLiveConversation,
   listProviderCredentials,
   setUserAgentConfig,
+  approveChatAction,
   uploadChatAttachments,
   type AttachedContextRef,
   type ContextItem,
   type ContextSearchType,
   type ConversationSummary,
   type ChatMsg,
+  type PendingAction,
   type ProviderCredential,
   type ToolInvocation,
 } from "../../lib/api";
 import { ContextPicker } from "../../components/ContextPicker";
+import { DebugDrawer } from "../../components/DebugDrawer";
 import type { Agent } from "../../lib/types";
 import { Avatar, nameToHsl } from "./ui/Avatar";
 import { Dialog } from "./ui/Dialog";
@@ -63,6 +68,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Menu, MenuItem } from "./ui/Menu";
 import { Menu as BaseMenu } from "@base-ui-components/react/menu";
 import { Badge } from "./ui/Badge";
+import { SidePanel } from "./ui/SidePanel";
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 
@@ -197,6 +203,549 @@ function humanizeToolName(raw: string): string {
     .filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(" ");
+}
+
+// Tolerant citation token regex.
+// Accepts:
+//   [clf-abc123#1]  – canonical with clf- prefix and # separator
+//   [abc123#1]      – missing clf- prefix
+//   [clf-abc123_1]  – underscore separator instead of #
+//   [abc123_1]      – missing clf- prefix + underscore separator
+//   【clf-abc123#1】 – full-width brackets ( tolerated )
+// The tool-call id character class allows `.` and `:` in addition to the
+// usual `[A-Za-z0-9_-]`.
+const CLAW_CITATION_TOKEN_RE = /([【\[\u27e6])((?:clf-)?[A-Za-z0-9_.:-]+[#_]\d+)([】\]\u27e7])/g;
+const CLAW_CITATION_HREF_RE = /^cite:((?:clf-)?[A-Za-z0-9_.:-]+)#(\d+)$/;
+/**
+ * Catch-all for malformed clf tokens the LLM sometimes hallucinates.
+ * Example: [clf-functions.Xyne_Spaces__spaces-messages:#6#25]
+ * Anything bracketed that starts with "clf-" but doesn't match the strict
+ * CLAW_CITATION_TOKEN_RE is stripped outright so it never leaks into the UI.
+ */
+const CLAW_CITATION_MALFORMED_RE = /[【\[\u27e6]\s*clf-[^】\]\u27e7]*[】\]\u27e7]/g;
+
+function stripMalformedCitations(text: string): string {
+  return text.replace(CLAW_CITATION_MALFORMED_RE, "");
+}
+
+interface CitationRef {
+  toolCallId: string;
+  chunkIndex: number;
+  key: string;
+  token: string;
+}
+
+interface CitationChunk {
+  key: string;
+  token: string;
+  toolCallId: string;
+  chunkIndex: number;
+  text: string;
+  title: string;
+}
+
+interface CitationLookup {
+  invocation: ToolInvocation;
+  messageId: string;
+  chunk: CitationChunk;
+  chunks: CitationChunk[];
+}
+
+interface CitationSelection {
+  key: string;
+  ref: CitationRef;
+  citationNumber: number;
+  /** The originating message's full citation-number map, carried so the panel
+   *  can resolve the sequential number for sibling ("other") chunks exactly the
+   *  way the inline chips do. */
+  numbers: Map<string, number>;
+}
+
+function normalizeCitationToolCallId(toolCallId: string): string {
+  return toolCallId.startsWith("clf-") ? toolCallId.slice(4) : toolCallId;
+}
+
+function buildCitationKey(toolCallId: string, chunkIndex: number): string {
+  return `${toolCallId}#${chunkIndex}`;
+}
+
+/**
+ * Stable key for the sequential citation-number map. A "distinct source" is one
+ * cited (toolCallId, chunkIndex) pair, keyed on the NORMALIZED tool-call id so
+ * `clf-`-prefixed and bare forms of the same id collapse to one entry and reuse
+ * the same number.
+ */
+function citationNumberKey(toolCallId: string, chunkIndex: number): string {
+  return `${normalizeCitationToolCallId(toolCallId)}#${chunkIndex}`;
+}
+
+function buildCitationKeyAliases(toolCallId: string, chunkIndex: number): string[] {
+  const raw = normalizeCitationToolCallId(toolCallId);
+  const prefixed = toolCallId.startsWith("clf-") ? toolCallId : `clf-${toolCallId}`;
+  return Array.from(new Set([
+    buildCitationKey(toolCallId, chunkIndex),
+    buildCitationKey(raw, chunkIndex),
+    buildCitationKey(prefixed, chunkIndex),
+  ]));
+}
+
+function parseClawCitationRef(input: string): CitationRef | null {
+  const trimmed = input.trim();
+
+  // ── 1. Try the href form (cite:…) first ───────────────────────────────
+  const hrefMatch = trimmed.match(CLAW_CITATION_HREF_RE);
+  if (hrefMatch) {
+    const toolCallId = ensureClfPrefix(hrefMatch[1]!);
+    const chunkIndex = Number(hrefMatch[2]!);
+    if (Number.isNaN(chunkIndex)) return null;
+    return {
+      toolCallId,
+      chunkIndex,
+      key: buildCitationKey(toolCallId, chunkIndex),
+      token: `[${toolCallId}#${chunkIndex}]`,
+    };
+  }
+
+  // ── 2. Strip surrounding brackets / full-width brackets ──────────────
+  const cleaned = trimmed
+    .replace(/^[【\[\u27e6]/, "")
+    .replace(/[】\]\u27e7]$/, "");
+
+  // ── 3. Try canonical strict form: clf-<id>#<chunk> ───────────────────
+  let match = cleaned.match(/^(clf-[A-Za-z0-9_.:-]+)#(\d+)$/);
+  if (match) {
+    const toolCallId = match[1]!;
+    const chunkIndex = Number(match[2]!);
+    if (Number.isNaN(chunkIndex)) return null;
+    return {
+      toolCallId,
+      chunkIndex,
+      key: buildCitationKey(toolCallId, chunkIndex),
+      token: `[${toolCallId}#${chunkIndex}]`,
+    };
+  }
+
+  // ── 4. Fallback: missing clf- prefix ─────────────────────────────────
+  // e.g. "abc123#14" or "abc123_14"
+  match = cleaned.match(/^([A-Za-z0-9_.:-]+)[#_](\d+)$/);
+  if (match) {
+    const rawId = match[1]!;
+    // Don't double-prefix if the id already starts with clf-
+    const toolCallId = rawId.startsWith("clf-") ? rawId : `clf-${rawId}`;
+    const chunkIndex = Number(match[2]!);
+    if (Number.isNaN(chunkIndex)) return null;
+    return {
+      toolCallId,
+      chunkIndex,
+      key: buildCitationKey(toolCallId, chunkIndex),
+      token: `[${toolCallId}#${chunkIndex}]`,
+    };
+  }
+
+  return null;
+}
+
+/** Guarantees every tool-call id starts with the "clf-" prefix. */
+function ensureClfPrefix(id: string): string {
+  return id.startsWith("clf-") ? id : `clf-${id}`;
+}
+
+/**
+ * Assign a flat, sequential citation number to each DISTINCT cited source
+ * (normalized tool-call id + chunk index), in order of first appearance. Repeat
+ * references to the same source reuse its number, so the reader sees [1], [2],
+ * [3]… instead of the old `tool.chunk` composite. Tokens whose tool call isn't
+ * in `knownToolCallIds` are skipped (and later stripped by linkify), so the
+ * sequence stays gap-free.
+ */
+function buildCitationNumbers(text: string, knownToolCallIds?: Set<string>): Map<string, number> {
+  const numbers = new Map<string, number>();
+  for (const match of text.matchAll(CLAW_CITATION_TOKEN_RE)) {
+    const citation = parseClawCitationRef(match[0]);
+    if (!citation) continue;
+    if (knownToolCallIds && !knownToolCallIds.has(normalizeCitationToolCallId(citation.toolCallId))) continue;
+    const key = citationNumberKey(citation.toolCallId, citation.chunkIndex);
+    if (!numbers.has(key)) numbers.set(key, numbers.size + 1);
+  }
+  return numbers;
+}
+
+function linkifyClawCitations(text: string, numbers: Map<string, number>): string {
+  return text.replace(CLAW_CITATION_TOKEN_RE, (_match, open, ref, close) => {
+    const citation = parseClawCitationRef(`${open}${ref}${close}`);
+    if (!citation) return `${open}${ref}${close}`;
+    const number = numbers.get(citationNumberKey(citation.toolCallId, citation.chunkIndex));
+    if (number === undefined) return "";
+    return `[${number}](cite:${citation.key})`;
+  });
+}
+
+/** Manual, never-throws un-escape of a JSON string body (no surrounding quotes). */
+function unescapeJsonStringBody(s: string): string {
+  return s.replace(/\\(?:u([0-9a-fA-F]{4})|(.))/g, (_m, u: string | undefined, c: string | undefined) => {
+    if (u) return String.fromCharCode(parseInt(u, 16));
+    switch (c) {
+      case "n": return "\n";
+      case "t": return "\t";
+      case "r": return "\r";
+      case "b": return "\b";
+      case "f": return "\f";
+      default: return c ?? "";
+    }
+  });
+}
+
+/**
+ * Recover the inner text of an MCP `{"content":[{"type":"text","text":"…"}]}`
+ * envelope that JSON.parse couldn't handle — i.e. legacy rows persisted before
+ * the single-source fix, where the old 50K persist-only slice cut the JSON
+ * mid-string. Scans each `"text":"…"` body (tolerating a truncated final one)
+ * and un-escapes it so line/chunk/citation parsing works on historical data.
+ */
+function recoverTruncatedResultText(result: string): string {
+  const parts: string[] = [];
+  // `(?:[^"\\]|\\.)*` stops at the block's unescaped closing quote OR end of
+  // input (truncated tail), so it captures complete and partial bodies alike.
+  const re = /"text"\s*:\s*"((?:[^"\\]|\\.)*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(result)) !== null) {
+    if (m[1]) parts.push(unescapeJsonStringBody(m[1]));
+  }
+  return parts.join("\n\n");
+}
+
+function extractInvocationResultText(result: string): string {
+  if (!result) return "";
+  try {
+    const parsed = JSON.parse(result) as {
+      content?: Array<{ type?: string; text?: string }>;
+    };
+    const textParts = (parsed.content ?? [])
+      .filter((item) => item?.type === "text" && typeof item.text === "string")
+      .map((item) => item.text ?? "");
+    if (textParts.length > 0) return textParts.join("\n\n");
+  } catch {
+    // Legacy rows were truncated mid-JSON by the old persist-only slice, so
+    // JSON.parse fails — recover the inner text so citations still resolve.
+    const recovered = recoverTruncatedResultText(result);
+    if (recovered) return recovered;
+    // Otherwise fall back to the raw string (already plain text).
+  }
+  return result;
+}
+
+function parseInvocationCitationChunks(invocation: ToolInvocation): CitationChunk[] {
+  const lines = extractInvocationResultText(invocation.result ?? "").split(/\r?\n/);
+  const chunks: CitationChunk[] = [];
+  let current: CitationChunk | null = null;
+
+  const pushCurrent = () => {
+    if (!current) return;
+    current.text = current.text.trim();
+    current.title = current.title.trim() || `Chunk #${current.chunkIndex}`;
+    chunks.push(current);
+    current = null;
+  };
+
+  for (const line of lines) {
+    // Tolerant chunk-header regex: accepts clf- prefix (optional), # or _ separator.
+    const match = line.match(/^\s*([【\[\u27e6])((?:clf-)?[A-Za-z0-9_.:-]+)[#_](\d+)([】\]\u27e7])\s*(.*)$/);
+    if (match) {
+      pushCurrent();
+      const toolCallId = ensureClfPrefix(match[2]!);
+      const chunkIndex = Number(match[3]!);
+      const remainder = match[5] ?? "";
+      const key = buildCitationKey(toolCallId, chunkIndex);
+      current = {
+        key,
+        token: `[${toolCallId}#${chunkIndex}]`,
+        toolCallId,
+        chunkIndex,
+        text: remainder,
+        title: remainder.split(/\r?\n/)[0] ?? "",
+      };
+      continue;
+    }
+    if (current) {
+      current.text += (current.text ? "\n" : "") + line;
+      if (!current.title && line.trim()) current.title = line.trim();
+    }
+  }
+
+  pushCurrent();
+  return chunks;
+}
+
+function CitationChip({
+  citation,
+  citationNumber,
+  selected,
+  onOpen,
+}: {
+  citation: CitationRef;
+  citationNumber: number;
+  selected: boolean;
+  onOpen: (citation: CitationRef, citationNumber: number) => void;
+}) {
+  const open = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onOpen(citation, citationNumber);
+  };
+
+  return (
+    <button
+      type="button"
+      title={`Open source · ${citation.toolCallId} · chunk ${citation.chunkIndex}`}
+      aria-label={`Open citation ${citationNumber}`}
+      onMouseDown={open}
+      onPointerDown={open}
+      onClick={open}
+      aria-pressed={selected}
+      className={`mx-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-md border px-1 align-baseline text-[11px] font-medium tabular-nums no-underline transition hover:cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-xyne-brand/30 ${
+        selected
+          ? "border-xyne-fg-primary bg-xyne-fg-primary text-xyne-fg-inverse shadow-sm"
+          : "border-xyne-border-strong bg-xyne-surface-sunken text-xyne-fg-primary hover:border-xyne-brand/60 hover:bg-xyne-brand-ghost hover:text-xyne-brand"
+      }`}
+    >
+      {citationNumber}
+    </button>
+  );
+}
+
+function CitationMarkdown({
+  content,
+  invocations,
+  selectedCitationKey,
+  onOpenCitation,
+}: {
+  content: string;
+  invocations: ToolInvocation[];
+  selectedCitationKey: string | null;
+  onOpenCitation: (citation: CitationRef, citationNumber: number, numbers: Map<string, number>) => void;
+}) {
+  const knownToolCallIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const inv of invocations) {
+      if (inv.toolCallId) ids.add(normalizeCitationToolCallId(inv.toolCallId));
+    }
+    return ids;
+  }, [invocations]);
+  const citationNumbers = useMemo(
+    () => buildCitationNumbers(content, knownToolCallIds),
+    [content, knownToolCallIds]
+  );
+  const linkedContent = useMemo(
+    () => linkifyClawCitations(content, citationNumbers),
+    [content, citationNumbers]
+  );
+  const cleanedContent = useMemo(
+    () => stripMalformedCitations(linkedContent),
+    [linkedContent]
+  );
+
+  return (
+    <Markdown
+      remarkPlugins={[remarkGfm]}
+      urlTransform={(url) => url}
+      components={{
+        a: ({ href, children, ...props }) => {
+          if (href?.startsWith("cite:")) {
+            const ref = parseClawCitationRef(href);
+            if (!ref) return <>{children}</>;
+            const citationNumber = citationNumbers.get(citationNumberKey(ref.toolCallId, ref.chunkIndex)) ?? 1;
+            return (
+              <CitationChip
+                citation={ref}
+                citationNumber={citationNumber}
+                selected={selectedCitationKey === ref.key}
+                onOpen={(c, n) => onOpenCitation(c, n, citationNumbers)}
+              />
+            );
+          }
+          return (
+            <a {...props} href={href} target="_blank" rel="noreferrer" className="underline decoration-xyne-border hover:text-xyne-brand">
+              {children}
+            </a>
+          );
+        },
+      }}
+    >
+      {cleanedContent}
+    </Markdown>
+  );
+}
+
+function CitationPanel({
+  selection,
+  citation,
+  width,
+  onClose,
+  onOpenCitation,
+}: {
+  selection: CitationSelection;
+  citation: CitationLookup | null;
+  width: number;
+  onClose: () => void;
+  onOpenCitation: (citation: CitationRef, citationNumber: number, numbers: Map<string, number>) => void;
+}) {
+  if (!citation) {
+    return (
+      <SidePanel
+        onClose={onClose}
+        icon={<InfoIcon size={18} className="text-xyne-brand" />}
+        title="Citation"
+        subtitle={`${selection.ref.token} · source unavailable`}
+        width={width}
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-100">
+            The citation panel opened, but no matching tool-result chunk was found for this citation.
+          </div>
+          <div className="rounded-xl border border-xyne-border-subtle bg-xyne-surface-subtle px-4 py-3">
+            <div className="grid gap-2 text-[12px] text-xyne-fg-secondary">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xyne-fg-tertiary">Citation token</span>
+                <span className="min-w-0 break-all text-right font-mono text-[11px]">{selection.ref.token}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xyne-fg-tertiary">Tool call id</span>
+                <span className="min-w-0 break-all text-right font-mono text-[11px]">{selection.ref.toolCallId}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xyne-fg-tertiary">Chunk</span>
+                <span className="font-mono text-[11px]">#{selection.ref.chunkIndex}</span>
+              </div>
+            </div>
+          </div>
+          <div className="text-[12px] leading-relaxed text-xyne-fg-tertiary">
+            This panel resolves data only from the conversation's `invocationsByMsgId` payload returned by the `/messages` endpoint. If the cited tool call is absent there, or the tool result text does not contain the cited chunk token, the panel has nothing to render yet.
+          </div>
+        </div>
+      </SidePanel>
+    );
+  }
+
+  const { invocation, chunk, chunks } = citation;
+
+  const argsText = (() => {
+    try {
+      return JSON.stringify(invocation.args ?? {}, null, 2);
+    } catch {
+      return String(invocation.args ?? "");
+    }
+  })();
+
+  return (
+    <SidePanel
+      onClose={onClose}
+      icon={<InfoIcon size={18} className="text-xyne-brand" />}
+      title="Citation"
+      subtitle={`${humanizeToolName(invocation.toolName)} · chunk #${chunk.chunkIndex}`}
+      width={width}
+    >
+      <div className="flex h-full min-h-0 flex-col gap-3">
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-xyne-fg-muted">
+                Source
+              </p>
+              <p className="mt-1 text-[13px] font-semibold text-xyne-fg-primary">
+                {humanizeToolName(invocation.toolName)}
+              </p>
+            </div>
+            <span className="min-w-0 break-all rounded-md border border-xyne-border-subtle bg-xyne-surface px-2 py-0.5 text-right font-mono text-[11px] text-xyne-fg-tertiary">
+              {chunk.token}
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2 text-[12px] text-xyne-fg-secondary">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xyne-fg-tertiary">Tool call</span>
+              <span className="font-mono text-[11px]">{invocation.toolCallId ?? "(missing)"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xyne-fg-tertiary">Duration</span>
+              <span className="font-mono text-[11px]">{invocation.durationMs}ms</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xyne-fg-tertiary">Status</span>
+              <span className={`rounded-full px-2 py-0.5 text-[11px] ${invocation.isError ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"}`}>
+                {invocation.isError ? "error" : invocation.status ?? "completed"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {chunks.length > 1 && (
+          <details className="group shrink-0 border-b border-xyne-border-subtle">
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-xyne-fg-muted">
+              <CaretRightIcon size={11} className="transition-transform group-open:rotate-90" />
+              Other chunks
+              <span className="ml-auto rounded-full bg-xyne-surface px-1.5 py-0.5 font-mono text-[10px] text-xyne-fg-tertiary">
+                {chunks.length}
+              </span>
+            </summary>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {chunks.map((c) => {
+                // Sibling chunks each carry their own sequential number when
+                // they were cited inline; uncited chunks have none, so fall
+                // back to their raw chunk index for the label.
+                const n = selection.numbers.get(citationNumberKey(c.toolCallId, c.chunkIndex));
+                return (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => {
+                      const ref = parseClawCitationRef(c.token);
+                      if (ref) onOpenCitation(ref, n ?? 0, selection.numbers);
+                    }}
+                    className={`rounded-md border px-2 py-1 text-[11px] font-medium tabular-nums transition-colors ${
+                      c.key === chunk.key
+                        ? "border-xyne-brand bg-xyne-brand text-xyne-fg-inverse shadow-sm"
+                        : "border-xyne-border-subtle bg-xyne-surface-subtle text-xyne-fg-secondary hover:border-xyne-border hover:bg-xyne-surface"
+                    }`}
+                  >
+                    {n ?? `#${c.chunkIndex}`}
+                  </button>
+                );
+              })}
+            </div>
+          </details>
+        )}
+
+        <details className="group shrink-0 border-b border-xyne-border-subtle">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-xyne-fg-muted">
+            <CaretRightIcon size={11} className="transition-transform group-open:rotate-90" />
+            Tool input
+          </summary>
+          <div className="mt-2">
+            <pre className="max-h-56 min-w-0 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed text-xyne-fg-secondary">
+              {argsText}
+            </pre>
+          </div>
+        </details>
+
+        <div className="flex min-h-[280px] flex-1 flex-col overflow-hidden  border border-xyne-brand/30 bg-xyne-surface shadow-sm">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-xyne-border-subtle bg-xyne-brand-ghost px-3 py-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-xyne-brand">
+              {selection.citationNumber > 0
+                ? `Cited source ${selection.citationNumber}`
+                : `Chunk #${chunk.chunkIndex}`}
+            </p>
+            <p className="min-w-0 truncate text-right text-[11px] text-xyne-fg-tertiary" title={chunk.title}>
+              {chunk.title || "No title"}
+            </p>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
+            <pre className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed text-xyne-fg-primary">
+              {chunk.text || "(empty chunk)"}
+            </pre>
+          </div>
+        </div>
+      </div>
+    </SidePanel>
+  );
 }
 
 /* ── reasoning block ─────────────────────────────────────────────── */
@@ -380,6 +929,186 @@ function InvocationBlocks({ invocations }: { invocations: ToolInvocation[] }) {
   );
 }
 
+/* ── branch pager ──────────────────────────────────────────────────
+ *
+ * `< 2/5 >` widget shown next to a message that has sibling branches. A
+ * single pager scales to any branch count (vs. one button per sibling) and
+ * stays compact in the timestamp row.
+ * ─────────────────────────────────────────────────────────────────── */
+function BranchPager({
+  branchInfo,
+  sending,
+  onSelectBranch,
+}: {
+  branchInfo: MessageBranchInfo;
+  sending: boolean;
+  onSelectBranch: (parentId: string, messageId: string) => void;
+}) {
+  const currentIndex = branchInfo.choices.findIndex((choice) => choice.id === branchInfo.currentId);
+  const previous = branchInfo.choices[currentIndex - 1];
+  const next = branchInfo.choices[currentIndex + 1];
+  return (
+    <span className="inline-flex items-center gap-1 rounded border border-xyne-border-subtle bg-xyne-surface px-1 py-0.5">
+      <button
+        type="button"
+        className="rounded px-1 text-[10px] leading-4 text-xyne-fg-muted transition-colors hover:text-xyne-fg-primary disabled:opacity-30"
+        onClick={() => {
+          if (previous) onSelectBranch(branchInfo.parentId, previous.id);
+        }}
+        disabled={sending || !previous}
+      >
+        &lt;
+      </button>
+      <span className="min-w-[34px] text-center text-[10px] leading-4 text-xyne-fg-muted">
+        {currentIndex + 1}/{branchInfo.choices.length}
+      </span>
+      <button
+        type="button"
+        className="rounded px-1 text-[10px] leading-4 text-xyne-fg-muted transition-colors hover:text-xyne-fg-primary disabled:opacity-30"
+        onClick={() => {
+          if (next) onSelectBranch(branchInfo.parentId, next.id);
+        }}
+        disabled={sending || !next}
+      >
+        &gt;
+      </button>
+    </span>
+  );
+}
+
+function PendingActionBlocks({
+  actions,
+  onApprove,
+  onApproveAndContinue,
+  onDecline,
+}: {
+  actions: PendingAction[];
+  onApprove: (pa: PendingAction) => Promise<void> | void;
+  onApproveAndContinue: (pa: PendingAction) => Promise<void> | void;
+  onDecline: (pa: PendingAction) => void;
+}) {
+  return (
+    <div data-id="pending-action-blocks" className="space-y-2">
+      {actions.map((pa, idx) => (
+        <PendingActionItem
+          key={pa.signature || `${pa.serverType}-${pa.tool}-${idx}`}
+          action={pa}
+          onApprove={onApprove}
+          onApproveAndContinue={onApproveAndContinue}
+          onDecline={onDecline}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PendingActionItem({
+  action,
+  onApprove,
+  onApproveAndContinue,
+  onDecline,
+}: {
+  action: PendingAction;
+  onApprove: (pa: PendingAction) => Promise<void> | void;
+  onApproveAndContinue: (pa: PendingAction) => Promise<void> | void;
+  onDecline: (pa: PendingAction) => void;
+}) {
+  const [state, setState] = useState<"idle" | "running" | "running-continue" | "approved" | "declined" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const argsPreview = useMemo(() => {
+    try {
+      const s = JSON.stringify(action.params ?? {}, null, 2);
+      return s.length > 300 ? `${s.slice(0, 300)}...` : s;
+    } catch {
+      return String(action.params);
+    }
+  }, [action.params]);
+
+  const handleApprove = async () => {
+    setState("running");
+    setError(null);
+    try {
+      await onApprove(action);
+      setState("approved");
+    } catch (err) {
+      setState("error");
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleApproveAndContinue = async () => {
+    setState("running-continue");
+    setError(null);
+    try {
+      await onApproveAndContinue(action);
+      setState("approved");
+    } catch (err) {
+      setState("error");
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  if (state === "approved") {
+    return (
+      <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-700">
+        Approved: {humanizeToolName(action.tool)}
+      </div>
+    );
+  }
+
+  if (state === "declined") {
+    return (
+      <div className="rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle px-2.5 py-1.5 text-[11px] text-xyne-fg-muted">
+        Declined: {humanizeToolName(action.tool)}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5">
+      <div className="mb-1 text-[11px] font-medium text-amber-700">
+        Approval needed: {humanizeToolName(action.tool)}
+      </div>
+      <pre className="mb-2 max-h-28 overflow-auto whitespace-pre-wrap break-all rounded bg-xyne-surface px-2 py-1 text-[10px] text-xyne-fg-tertiary">
+        {argsPreview}
+      </pre>
+      {error && (
+        <div className="mb-2 text-[10px] text-red-600">{error}</div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={state === "running" || state === "running-continue"}
+          onClick={() => { void handleApprove(); }}
+          className="rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {state === "running" ? "Approving..." : "Approve"}
+        </button>
+        <button
+          type="button"
+          disabled={state === "running" || state === "running-continue"}
+          onClick={() => { void handleApproveAndContinue(); }}
+          className="rounded-md bg-xyne-brand px-2.5 py-1 text-[11px] font-medium text-xyne-fg-inverse transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {state === "running-continue" ? "Approving + continuing..." : "Approve and continue"}
+        </button>
+        <button
+          type="button"
+          disabled={state === "running" || state === "running-continue"}
+          onClick={() => {
+            setState("declined");
+            onDecline(action);
+          }}
+          className="rounded-md border border-xyne-border px-2.5 py-1 text-[11px] font-medium text-xyne-fg-primary transition-colors hover:bg-xyne-surface-subtle disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Decline
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── message thread ──────────────────────────────────────────────── */
 
 function MessageThread({
@@ -393,6 +1122,18 @@ function MessageThread({
   liveReasoning,
   invocationsByMsgId,
   reasoningByMsgId,
+  selectedCitationKey,
+  onOpenTurnDebugger,
+  onOpenCitation,
+  branchInfoByMsgId,
+  onSelectBranch,
+  onRegenerate,
+  latestUserMessageId,
+  onEditUserMessage,
+  pendingActionsByMsgId,
+  onApproveAction,
+  onApproveAndContinueAction,
+  onDeclineAction,
 }: {
   messages: ChatMsg[];
   sending: boolean;
@@ -404,45 +1145,188 @@ function MessageThread({
   liveReasoning: string;
   invocationsByMsgId: Map<string, ToolInvocation[]>;
   reasoningByMsgId: Map<string, string>;
+  selectedCitationKey: string | null;
+  /** turnIndex stays for back-compat (debugger title); assistantMessageId is
+   *  the authoritative selector so the drawer can pick the right run by
+   *  sessionId under branching. */
+  onOpenTurnDebugger: (turnIndex: number, live: boolean, assistantMessageId: string) => void;
+  onOpenCitation: (citation: CitationRef, citationNumber: number, numbers: Map<string, number>) => void;
+  branchInfoByMsgId: Map<string, MessageBranchInfo>;
+  onSelectBranch: (parentId: string, messageId: string) => void;
+  onRegenerate: (assistantMessageId: string) => void;
+  latestUserMessageId: string | null;
+  onEditUserMessage: (userMessageId: string, text: string) => void;
+  pendingActionsByMsgId: Map<string, PendingAction[]>;
+  onApproveAction: (msgId: string, action: PendingAction) => Promise<void>;
+  onApproveAndContinueAction: (msgId: string, action: PendingAction) => Promise<void>;
+  onDeclineAction: (msgId: string, action: PendingAction) => void;
 }) {
+  // Inline edit state for the latest visible user message. Older messages are
+  // intentionally not editable — see comment in useChat.editLatestUserMessage.
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
   const threadRef = useRef<HTMLDivElement>(null);
+  const safeInvocationsByMsgId = invocationsByMsgId ?? new Map<string, ToolInvocation[]>();
+  const safeReasoningByMsgId = reasoningByMsgId ?? new Map<string, string>();
+  const safePendingActionsByMsgId = pendingActionsByMsgId ?? new Map<string, PendingAction[]>();
+  // Tracks whether the user is at (or very near) the bottom of the thread.
+  // Updated on every scroll event. Used by the auto-scroll effect below to
+  // decide whether to stay pinned to the bottom as new streamed tokens land —
+  // if the user has scrolled up to re-read something earlier, we leave them
+  // alone instead of yanking them back down on every delta.
+  const isPinnedToBottomRef = useRef(true);
+  // 64px slack: small enough to detect a deliberate scroll-up, large enough
+  // to absorb rounding and the browser's scroll-anchor behavior on append.
+  const PIN_THRESHOLD_PX = 64;
+  // Shows the "jump to latest" pill only when the user is actively scrolled
+  // up AND new content is arriving — otherwise it'd just be visual noise.
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 
-  useEffect(() => {
+  const updatePinState = useCallback(() => {
     const el = threadRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const pinned = distanceFromBottom <= PIN_THRESHOLD_PX;
+    isPinnedToBottomRef.current = pinned;
+    setShowJumpToBottom(!pinned);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    isPinnedToBottomRef.current = true;
+    setShowJumpToBottom(false);
+  }, []);
+
+  // Auto-scroll only when the user is already at the bottom. The dependency
+  // array still tracks every streaming surface (messages / sending / toolLabel
+  // / liveInvocations / liveReasoning) so the scroll fires on every new token,
+  // tool call, or reasoning chunk — but the pin check inside gates the actual
+  // scroll write.
+  useEffect(() => {
+    if (isPinnedToBottomRef.current) {
+      const el = threadRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
   }, [messages, sending, toolLabel, liveInvocations, liveReasoning]);
+
+  // When the user submits a new message, snap back to the bottom regardless
+  // of where they were. Their own send is an intent signal — they want to see
+  // what they just sent and the agent's response, not stay parked in history.
+  const lastMessageId = messages.at(-1)?.id;
+  const lastMessageRole = messages.at(-1)?.role;
+  useEffect(() => {
+    if (lastMessageRole === "user") {
+      scrollToBottom();
+    }
+    // Only react when the LAST message changes (a brand-new message arrived),
+    // not on every keystroke / streaming delta into the same assistant message.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastMessageId, lastMessageRole]);
 
   const lastMsg = messages.at(-1);
   const isStreaming = lastMsg?.status === "streaming";
+  // Last assistant on the visible path — the only one with a "Regenerate"
+  // button. Older assistants are reachable via the branch pager instead.
+  const lastAssistantId = [...messages].reverse().find((msg) => msg.role === "assistant")?.id;
 
   return (
+    // min-h-0 on the wrapper is REQUIRED — flex children default to
+    // `min-height: auto`, which lets the inner thread expand to fit its
+    // content and silently disables the overflow-y-auto on it. With min-h-0
+    // the wrapper is allowed to shrink below content size so the inner div's
+    // overflow actually kicks in and the page scrolls.
+    <div className="relative flex flex-1 flex-col min-h-0">
     <div
       ref={threadRef}
       data-id="message-thread"
       className="flex-1 overflow-y-auto px-4 py-5"
+      onScroll={updatePinState}
     >
       {/* Center the messages on wide screens — same column width as the
           input below so the conversation reads as a single centered stack. */}
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-      {messages.map((msg) => {
+      {messages.map((msg, messageIndex) => {
         const isUser = msg.role === "user";
         const isStream = msg.status === "streaming" || msg.id === streamingMsgId;
+        const assistantTurnIndex = messages.slice(0, messageIndex + 1).filter((message) => message.role === "assistant").length - 1;
         const ts = fmtTime(msg.createdAt);
+        const branchInfo = branchInfoByMsgId.get(msg.id);
 
         if (isUser) {
+          const isEditing = editingUserId === msg.id;
           return (
             <div key={msg.id} data-id="user-message" className="flex flex-row-reverse items-end gap-2">
               <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-xyne-fg-primary text-[9px] font-bold text-xyne-fg-inverse">
                 {userAbbr}
               </div>
               <div className="flex flex-col items-end gap-1" style={{ maxWidth: "75%" }}>
-                <div className="whitespace-pre-wrap rounded-[14px] rounded-tr-[4px] bg-xyne-brand px-4 py-2.5 text-[14px] leading-relaxed text-xyne-fg-inverse">
-                  {msg.content}
-                </div>
+                {isEditing ? (
+                  <div className="flex w-[min(520px,75vw)] flex-col gap-2 rounded-[14px] rounded-tr-[4px] bg-xyne-brand px-3 py-2.5">
+                    <textarea
+                      value={editingText}
+                      onChange={(e) => setEditingText(e.target.value)}
+                      className="min-h-[72px] resize-y rounded border border-white/20 bg-black/10 px-2 py-1.5 text-[14px] leading-relaxed text-xyne-fg-inverse outline-none placeholder:text-white/60"
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-1">
+                      <button
+                        type="button"
+                        className="rounded px-2 py-1 text-[11px] text-white/80 hover:bg-white/10"
+                        onClick={() => {
+                          setEditingUserId(null);
+                          setEditingText("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded bg-white px-2 py-1 text-[11px] font-medium text-xyne-brand disabled:opacity-50"
+                        disabled={!editingText.trim() || editingText.trim() === msg.content.trim() || sending}
+                        onClick={() => {
+                          onEditUserMessage(msg.id, editingText);
+                          setEditingUserId(null);
+                          setEditingText("");
+                        }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="whitespace-pre-wrap rounded-[14px] rounded-tr-[4px] bg-xyne-brand px-4 py-2.5 text-[14px] leading-relaxed text-xyne-fg-inverse">
+                    {stripMalformedCitations(msg.content)}
+                  </div>
+                )}
                 {ts && (
                   <span className="mr-1 flex items-center gap-1 text-[11px] text-xyne-fg-muted">
                     <TimerIcon size={10} />
                     {ts}
+                    {/* Edit affordance — visible only on the latest user, and
+                        only when nothing's streaming. Older edits would re-root
+                        the tree, so we don't expose them. */}
+                    {msg.id === latestUserMessageId && !sending && !isEditing && (
+                      <button
+                        type="button"
+                        className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded border border-xyne-border-subtle text-xyne-fg-muted transition-colors hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+                        title="Edit message"
+                        onClick={() => {
+                          setEditingUserId(msg.id);
+                          setEditingText(msg.content);
+                        }}
+                      >
+                        <PencilSimpleIcon size={12} />
+                      </button>
+                    )}
+                    {branchInfo && (
+                      <BranchPager
+                        branchInfo={branchInfo}
+                        sending={sending}
+                        onSelectBranch={onSelectBranch}
+                      />
+                    )}
                   </span>
                 )}
               </div>
@@ -453,8 +1337,9 @@ function MessageThread({
         // Source of truth for tool calls + reasoning:
         // - For the currently-streaming message: pull from live state (updates every SSE event).
         // - For older finalized messages: pull from the per-message persisted maps.
-        const msgInvocations = isStream ? liveInvocations : invocationsByMsgId.get(msg.id) ?? [];
-        const msgReasoning = isStream ? liveReasoning : reasoningByMsgId.get(msg.id);
+        const msgInvocations = isStream ? liveInvocations : safeInvocationsByMsgId.get(msg.id) ?? [];
+        const msgReasoning = isStream ? liveReasoning : safeReasoningByMsgId.get(msg.id);
+        const msgPendingActions = safePendingActionsByMsgId.get(msg.id) ?? [];
 
         const hasInvocations = msgInvocations.length > 0;
         const hasReasoning = !!msgReasoning && msgReasoning.length > 0;
@@ -479,11 +1364,27 @@ function MessageThread({
                 </div>
               )}
 
+              {msg.status === "cancelled" && !hasText && !hasInvocations && !hasReasoning && (
+                <div className="inline-flex w-fit items-center gap-1.5 rounded-full bg-xyne-surface px-3 py-1.5 text-[11px] text-xyne-fg-muted ring-1 ring-xyne-border-subtle">
+                  <StopIcon size={10} />
+                  <span>Stopped</span>
+                </div>
+              )}
+
               {hasReasoning && (
                 <ReasoningBlock text={msgReasoning!} streaming={isStream} />
               )}
 
               {hasInvocations && <InvocationBlocks invocations={msgInvocations} />}
+
+              {msgPendingActions.length > 0 && (
+                <PendingActionBlocks
+                  actions={msgPendingActions}
+                  onApprove={(pa) => onApproveAction(msg.id, pa)}
+                  onApproveAndContinue={(pa) => onApproveAndContinueAction(msg.id, pa)}
+                  onDecline={(pa) => onDeclineAction(msg.id, pa)}
+                />
+              )}
 
               {hasText && (
                 <div
@@ -493,7 +1394,12 @@ function MessageThread({
                   }}
                 >
                   <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2">
-                    <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
+                    <CitationMarkdown
+                      content={msg.content}
+                      invocations={msgInvocations}
+                      selectedCitationKey={selectedCitationKey}
+                      onOpenCitation={onOpenCitation}
+                    />
                   </div>
                   {isStream && (
                     <span className="ml-1 inline-block h-3 w-1 translate-y-[1px] animate-pulse bg-xyne-fg-muted" />
@@ -502,11 +1408,41 @@ function MessageThread({
               )}
 
               {ts && !isStream && (hasText || hasInvocations) && (
-                <span className="ml-1 flex items-center gap-1 text-[11px] text-xyne-fg-muted">
-                  <TimerIcon size={10} />
-                  {ts}
-                </span>
+                <div className="ml-1 flex items-center gap-2 text-[11px] text-xyne-fg-muted">
+                  <span className="flex items-center gap-1">
+                    <TimerIcon size={10} />
+                    {ts}
+                  </span>
+                  {/* Regenerate — only on the LATEST visible assistant. Older
+                      branches stay reachable via the pager below; regen on an
+                      older sibling would shadow the visible chain. */}
+                  {msg.id === lastAssistantId && (
+                    <button
+                      type="button"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded border border-xyne-border-subtle text-xyne-fg-muted transition-colors hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:opacity-50"
+                      title="Regenerate response"
+                      onClick={() => onRegenerate(msg.id)}
+                      disabled={sending}
+                    >
+                      <ArrowsClockwiseIcon size={12} />
+                    </button>
+                  )}
+                  {branchInfo && (
+                    <BranchPager
+                      branchInfo={branchInfo}
+                      sending={sending}
+                      onSelectBranch={onSelectBranch}
+                    />
+                  )}
+                </div>
               )}
+              <button
+                type="button"
+                onClick={() => onOpenTurnDebugger(assistantTurnIndex, isStream, msg.id)}
+                className="ml-1 inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-xyne-fg-muted transition hover:bg-xyne-surface hover:text-xyne-fg-secondary"
+              >
+                <ChartBarIcon size={11} /> Debug this response
+              </button>
             </div>
           </div>
         );
@@ -516,6 +1452,23 @@ function MessageThread({
         <TypingIndicator agent={agent} />
       )}
       </div>
+    </div>
+    {showJumpToBottom && (
+      <button
+        type="button"
+        onClick={scrollToBottom}
+        data-id="jump-to-latest"
+        // Pinned to the bottom-center of the thread viewport — sits above the
+        // composer and out of the way of message content. Only mounts while
+        // the user is scrolled up, so it doesn't compete with the typing
+        // indicator or the last message in steady-state.
+        className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-bg-elevated/95 px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary shadow-md backdrop-blur-sm transition-opacity hover:text-xyne-fg-primary"
+        aria-label="Jump to latest message"
+      >
+        <ArrowDownIcon size={12} weight="bold" />
+        {isStreaming ? "New replies below" : "Jump to latest"}
+      </button>
+    )}
     </div>
   );
 }
@@ -990,7 +1943,7 @@ function LeftPanel({
       </div>
 
       {/* Footer — Browse-all-agents CTA card.
-          More than a hyperlink: branded icon chip + title + "{N} specialists"
+          More than a hyperlink: branded icon chip + title + "{N} subagents"
           subtitle + sliding arrow on hover, so it reads as a destination the
           user explicitly opts into rather than passive footer chrome. */}
       <div className="shrink-0 border-t border-xyne-border-subtle p-3">
@@ -1008,7 +1961,7 @@ function LeftPanel({
               Browse all agents
             </p>
             <p className="truncate text-[10px] text-xyne-fg-tertiary">
-              {agents.length} specialist{agents.length !== 1 ? "s" : ""} available
+              {agents.length} subagent{agents.length !== 1 ? "s" : ""} available
             </p>
           </div>
           <ArrowRightIcon
@@ -1044,18 +1997,22 @@ function CenterHeader({
   convTitle,
   conversationId,
   userId,
+  userAbbr,
   messageCount,
   onOpenSettings,
   onOpenDashboard,
+  onOpenDebugger,
 }: {
   agent: Agent;
   convTitle?: string;
   /** Active conversation id — used to fetch per-conversation token totals. */
   conversationId: string | undefined;
   userId: string;
+  userAbbr: string;
   messageCount: number;
   onOpenSettings: () => void;
   onOpenDashboard: () => void;
+  onOpenDebugger: () => void;
 }) {
   const [agentInfoOpen, setAgentInfoOpen] = useState(false);
   const [tokens, setTokens] = useState<ConversationTokens | null>(null);
@@ -1136,9 +2093,20 @@ function CenterHeader({
           >
             <InfoIcon size={18} />
           </button>
+          <button
+            type="button"
+            data-id="center-debug-btn"
+            onClick={onOpenDebugger}
+            title="Open debugger"
+            aria-label="Open debugger"
+            disabled={!conversationId}
+            className="flex h-9 items-center justify-center rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 text-[12px] font-medium text-xyne-fg-secondary shadow-sm transition-all hover:border-xyne-border hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Debug
+          </button>
           {/* Export current session — same dropdown the Control Center
-              row actions use. Hidden until a conversation exists so the
-              "new chat" empty state stays uncluttered. */}
+            row actions use. Hidden until a conversation exists so the
+            "new chat" empty state stays uncluttered. */}
           <SessionExportMenu
             conversationId={conversationId}
             agentSlug={agent.slug}
@@ -1358,10 +2326,11 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
       return;
     }
     // Plain Enter — send. Shift+Enter falls through to newline.
+    // While sending, Enter is a no-op: the stop button handles cancellation,
+    // and absorbing the keypress here prevents the input from inserting a newline.
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (sending) onStop();
-      else onSend();
+      if (!sending) onSend();
       return;
     }
     // ↑ on empty input — recall the user's last message (shell convention).
@@ -1880,7 +2849,7 @@ function EmptyState({
           className="studio-hero-fade mt-1.5 max-w-md text-center text-[13px] leading-relaxed text-xyne-fg-muted"
           style={{ animationDelay: "180ms" }}
         >
-          Your roster of AI specialists. Pick one, give them a task, and they'll get it done — using
+          Your roster of AI subagents. Pick one, give them a task, and they'll get it done — using
           tools, your workspace data, and the apps you've connected.
         </p>
       </div>
@@ -2023,14 +2992,24 @@ export function ChatPageV3() {
     reasoning: liveReasoning,
     invocationsByMsgId,
     reasoningByMsgId,
+    branchInfoByMsgId,
+    pendingActionsByMsgId,
     streamingMsgId,
+    debugEvents,
+    debugArtifactsReadyVersion,
     activeAgentSlug: ctxAgentSlug,
     setActiveAgentSlug: setCtxAgentSlug,
     send,
+    regenerate,
+    editLatestUserMessage,
+    selectBranch,
     stop,
     clear,
     loadConversation,
+    applyLiveEvent,
     onConversationCreated,
+    approvePendingAction,
+    declinePendingAction,
   } = useChat();
 
   const [searchParams] = useSearchParams();
@@ -2057,6 +3036,34 @@ export function ChatPageV3() {
   const [convLoading, setConvLoading]         = useState(false);
   const [inputValue, setInputValue]           = useState("");
   const [showModal, setShowModal]             = useState(false);
+  const [showDebugger, setShowDebugger]       = useState(false);
+  const [debugTurnIndex, setDebugTurnIndex]   = useState<number | null>(null);
+  const [debugTurnLive, setDebugTurnLive]     = useState(false);
+  // Branching-safe debugger selector. The Nth visible assistant no longer maps
+  // to the Nth chronological run, so we pin selection by run sessionId derived
+  // from the assistant message's AgentRun.chatMessageId.
+  const [debugSessionId, setDebugSessionId]   = useState<string | null>(null);
+  // Map: assistant message id → AgentRun.sessionId. Populated when the active
+  // conversation is loaded. Used by the "Debug this response" button to derive
+  // the selectedSessionId for the drawer.
+  const [debugRunByMsgId, setDebugRunByMsgId] = useState<Map<string, string>>(new Map());
+  const [selectedCitation, setSelectedCitation] = useState<CitationSelection | null>(null);
+  const [citationPanelWidth, setCitationPanelWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("chat-citation-panel-width");
+      return saved ? parseInt(saved, 10) : 480;
+    } catch {
+      return 480;
+    }
+  });
+  const [debuggerWidth, setDebuggerWidth]     = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("chat-debugger-width");
+      return saved ? parseInt(saved, 10) : 420;
+    } catch {
+      return 420;
+    }
+  });
   const [providers, setProviders]             = useState<ProviderCredential[]>([]);
   const [selectedProvider, setSelectedProvider] = useState("spaces");
   const [providerChanging, setProviderChanging] = useState(false);
@@ -2073,6 +3080,11 @@ export function ChatPageV3() {
 
   // Ref into the InputArea so we can focus the textarea on conv switch / mount.
   const inputAreaRef = useRef<InputAreaHandle>(null);
+
+  // Always-current ref for sending state — used in async callbacks where the
+  // closure would otherwise capture a stale value from a previous render.
+  const sendingRef = useRef(sending);
+  sendingRef.current = sending;
 
   // Composer attachments — images queued for upload, kept on the parent so
   // they survive composer re-renders. previewUrl is an object URL that we
@@ -2181,6 +3193,69 @@ export function ChatPageV3() {
   );
   const activeConv = conversations.find((c) => c.conversationId === conversationId);
 
+  const citationIndex = useMemo(() => {
+    const index = new Map<string, CitationLookup>();
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue;
+      const invocations = msg.id === streamingMsgId
+        ? liveInvocations
+        : (invocationsByMsgId ?? new Map<string, ToolInvocation[]>()).get(msg.id) ?? [];
+      for (const invocation of invocations) {
+        if (!invocation.toolCallId || !invocation.result) continue;
+        const chunks = parseInvocationCitationChunks(invocation);
+        if (chunks.length === 0) continue;
+        for (const chunk of chunks) {
+          const lookup: CitationLookup = {
+            invocation,
+            messageId: msg.id,
+            chunk,
+            chunks,
+          };
+          for (const key of buildCitationKeyAliases(chunk.toolCallId, chunk.chunkIndex)) {
+            index.set(key, lookup);
+          }
+          for (const key of buildCitationKeyAliases(invocation.toolCallId, chunk.chunkIndex)) {
+            index.set(key, lookup);
+          }
+        }
+      }
+    }
+    return index;
+  }, [messages, streamingMsgId, liveInvocations, invocationsByMsgId]);
+
+  const resolvedCitation = selectedCitation
+    ? citationIndex.get(selectedCitation.key) ?? null
+    : null;
+
+  useEffect(() => {
+    setSelectedCitation(null);
+  }, [conversationId, activeAgentSlug]);
+
+  // Refresh the debugger's msg→sessionId map after a turn finishes. Triggered
+  // by `sending` going false on a known conversation: the new AgentRun row
+  // gets a chatMessageId on finalize, and that's what the debugger keys by.
+  useEffect(() => {
+    if (sending || !conversationId || !activeAgentSlug) return;
+    listRuns(userId, { conversationId, agentSlug: activeAgentSlug, limit: 200 })
+      .then((runs) => {
+        const next = new Map<string, string>();
+        for (const r of runs) {
+          if (r.chatMessageId) next.set(r.chatMessageId, r.sessionId);
+        }
+        setDebugRunByMsgId(next);
+      })
+      .catch(() => {});
+  }, [sending, conversationId, activeAgentSlug, userId]);
+
+  const handleOpenCitation = useCallback((ref: CitationRef, citationNumber: number, numbers: Map<string, number>) => {
+    setShowDebugger(false);
+    setSelectedCitation({ key: ref.key, ref, citationNumber, numbers });
+  }, []);
+
+  const handleCloseCitation = useCallback(() => {
+    setSelectedCitation(null);
+  }, []);
+
   // Most recent user-authored message — used by InputArea's ↑-to-recall shortcut.
   const lastUserMessage = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -2228,10 +3303,18 @@ export function ChatPageV3() {
           // instead of the most recent one. Only honor it once per page
           // load so an in-page conversation switch doesn't keep snapping
           // back to the URL value.
+          // Honor ?conversation=<id> even when the target ISN'T in this user's
+          // own conversation list. Admins open other users' runs from the
+          // agent "All Runs" view, and those conversations are never in the
+          // admin's user-scoped `convs`. The /messages endpoint is the ACL
+          // boundary (admins get every message + tool invocation via
+          // listByConversation; non-admins get only their own slice — an empty
+          // pane for a conversation they can't see, never a leak), so it's safe
+          // to always attempt the deep-link load here. Previously this required
+          // `convs.find(...)`, which silently snapped foreign deep-links back to
+          // the admin's own most-recent conversation.
           const deepLinkTarget =
-            urlConversation &&
-            consumedDeepLinkRef.current !== urlConversation &&
-            convs.find((c) => c.conversationId === urlConversation)
+            urlConversation && consumedDeepLinkRef.current !== urlConversation
               ? urlConversation
               : null;
           const targetConvId = deepLinkTarget ?? convs[0]?.conversationId;
@@ -2247,9 +3330,26 @@ export function ChatPageV3() {
           if (shouldLoad && targetConvId) {
             if (deepLinkTarget) consumedDeepLinkRef.current = deepLinkTarget;
             pollChatMessages(activeAgentSlug, targetConvId)
-              .then(({ messages: msgs, invocationsByMsgId }) =>
-                loadConversation(msgs, targetConvId, invocationsByMsgId),
-              )
+              .then(({ messages: msgs, invocationsByMsgId, reasoningByMsgId }) => {
+                // Skip auto-load if the user started sending while we were
+                // fetching — the draft session is already the active one.
+                // Deep-links always go through (user explicitly asked for it).
+                if (!deepLinkTarget && sendingRef.current) return;
+                loadConversation(msgs, targetConvId, invocationsByMsgId, reasoningByMsgId);
+              })
+              .catch(() => {});
+            // Side-load AgentRuns to build the msg→sessionId map the debugger
+            // needs to pick the right run under branching. Independent of the
+            // messages fetch — runs are an admin-side projection, not part of
+            // the chat thread, so failure here is silent.
+            listRuns(userId, { conversationId: targetConvId, agentSlug: activeAgentSlug, limit: 200 })
+              .then((runs) => {
+                const next = new Map<string, string>();
+                for (const r of runs) {
+                  if (r.chatMessageId) next.set(r.chatMessageId, r.sessionId);
+                }
+                setDebugRunByMsgId(next);
+              })
               .catch(() => {});
           }
         })
@@ -2276,6 +3376,44 @@ export function ChatPageV3() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAgentSlug, userId, agents, urlConversation]);
+
+  /* Live tool calls for a VIEWED (not driven) conversation. Spaces-originated
+   * runs report over the callback webhook; subscribe to the /live SSE so this
+   * window shows tool calls + progress in real time. Skipped while THIS tab is
+   * driving the run (its own stream owns liveness; applyLiveEvent guards against
+   * double-apply too). On `done`, refetch the canonical transcript with a short
+   * retry, since the assistant ChatMessage save is fire-and-forget. The /live
+   * route 404s when the feature flag is off → the helper ends silently. */
+  useEffect(() => {
+    if (!conversationId || !activeAgentSlug || !userId) return;
+    if (sending) return; // this tab is driving — its SSE handles liveness
+    const slug = activeAgentSlug;
+    const convId = conversationId;
+    const close = subscribeLiveConversation(slug, convId, userId, {
+      onSnapshot: ({ inProgress }) => applyLiveEvent(convId, { type: "snapshot", inProgress }),
+      onLabel: (label) => applyLiveEvent(convId, { type: "label", toolLabel: label }),
+      onInvocation: (inv) => applyLiveEvent(convId, { type: "invocation", toolInvocation: inv }),
+      onDone: () => {
+        applyLiveEvent(convId, { type: "done" });
+        let attempts = 0;
+        const tryLoad = () => {
+          pollChatMessages(slug, convId)
+            .then(({ messages: msgs, invocationsByMsgId: invMap, reasoningByMsgId: reasonMap }) => {
+              const last = msgs[msgs.length - 1];
+              if (last?.role !== "assistant" && attempts < 4) {
+                attempts++;
+                window.setTimeout(tryLoad, 700);
+                return;
+              }
+              loadConversation(msgs, convId, invMap, reasonMap);
+            })
+            .catch(() => {});
+        };
+        tryLoad();
+      },
+    });
+    return close;
+  }, [conversationId, activeAgentSlug, userId, sending, applyLiveEvent, loadConversation]);
 
   /* When a new conversation row is created mid-stream (SSE meta event), pull
    * the freshly persisted conversation into the sidebar so the user can click
@@ -2324,6 +3462,7 @@ export function ChatPageV3() {
     clear();
     setInputValue("");
     setConversations([]);
+    setSelectedCitation(null);
   }, [activeAgentSlug, clear]);
 
   /**
@@ -2337,6 +3476,7 @@ export function ChatPageV3() {
     clear();
     setInputValue("");
     setConversations([]);
+    setSelectedCitation(null);
   }, [activeAgentSlug, clear]);
 
   /**
@@ -2353,6 +3493,7 @@ export function ChatPageV3() {
         setConversations([]);
       }
       setInputValue(prompt);
+      setSelectedCitation(null);
       // Wait for the agent panel + input to mount before grabbing focus.
       window.setTimeout(() => inputAreaRef.current?.focus(), 50);
     },
@@ -2376,21 +3517,34 @@ export function ChatPageV3() {
   const handleSelectConv = useCallback(async (conv: ConversationWithAgent) => {
     const switchingAgent = conv.agentSlug !== activeAgentSlug;
     try {
-      const { messages: msgs, invocationsByMsgId } = await pollChatMessages(conv.agentSlug, conv.conversationId);
-      loadConversation(msgs, conv.conversationId, invocationsByMsgId);
+      const { messages: msgs, invocationsByMsgId, reasoningByMsgId } = await pollChatMessages(conv.agentSlug, conv.conversationId);
+      loadConversation(msgs, conv.conversationId, invocationsByMsgId, reasoningByMsgId);
+      setSelectedCitation(null);
       if (switchingAgent) {
         setActiveAgentSlug(conv.agentSlug);
         setInputValue("");
       }
+      // Refresh the debugger's msg→sessionId map for the new conversation so
+      // "Debug this response" picks the right run under branching.
+      listRuns(userId, { conversationId: conv.conversationId, agentSlug: conv.agentSlug, limit: 200 })
+        .then((runs) => {
+          const next = new Map<string, string>();
+          for (const r of runs) {
+            if (r.chatMessageId) next.set(r.chatMessageId, r.sessionId);
+          }
+          setDebugRunByMsgId(next);
+        })
+        .catch(() => {});
     } catch {
       // no-op — error is non-critical
     }
-  }, [activeAgentSlug, loadConversation]);
+  }, [activeAgentSlug, loadConversation, userId]);
 
   const handleNewConversation = useCallback(() => {
     if (activeAgent) {
       clear();
       setInputValue("");
+      setSelectedCitation(null);
     } else {
       setShowModal(true);
     }
@@ -2418,6 +3572,72 @@ export function ChatPageV3() {
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   }, [leftPanelWidth]);
+
+  const handleDebuggerResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = debuggerWidth;
+    let currentWidth = startWidth;
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = startX - ev.clientX;
+      currentWidth = Math.max(320, Math.min(760, startWidth + delta));
+      setDebuggerWidth(currentWidth);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try {
+        localStorage.setItem("chat-debugger-width", String(currentWidth));
+      } catch {}
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [debuggerWidth]);
+
+  const handleCitationResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = citationPanelWidth;
+    let currentWidth = startWidth;
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = startX - ev.clientX;
+      currentWidth = Math.max(320, Math.min(760, startWidth + delta));
+      setCitationPanelWidth(currentWidth);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try {
+        localStorage.setItem("chat-citation-panel-width", String(currentWidth));
+      } catch {}
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [citationPanelWidth]);
+
+  // Latest visible user message id — gates the "Edit" affordance (older edits
+  // would re-root the branch tree, which is intentionally out of scope).
+  const latestUserMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]!;
+      if (m.role === "user") return m.id;
+    }
+    return null;
+  }, [messages]);
+
+  const handleRegenerate = useCallback((assistantMessageId: string) => {
+    if (!activeAgentSlug || sending) return;
+    void regenerate(activeAgentSlug, userId, assistantMessageId);
+  }, [activeAgentSlug, sending, regenerate, userId]);
+
+  const handleEditUserMessage = useCallback((userMessageId: string, text: string) => {
+    if (!activeAgentSlug || sending) return;
+    void editLatestUserMessage(activeAgentSlug, userId, userMessageId, text);
+  }, [activeAgentSlug, sending, editLatestUserMessage, userId]);
 
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
@@ -2497,6 +3717,63 @@ export function ChatPageV3() {
     void dispatch();
   }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send]);
 
+  const handleApproveAction = useCallback(async (msgId: string, action: PendingAction) => {
+    if (!activeAgentSlug) throw new Error("No active agent selected");
+    const resultText = await approveChatAction(activeAgentSlug, userId, action);
+    approvePendingAction(msgId, action, resultText);
+  }, [activeAgentSlug, userId, approvePendingAction]);
+
+  const handleApproveAndContinueAction = useCallback(async (msgId: string, action: PendingAction) => {
+    if (!activeAgentSlug) throw new Error("No active agent selected");
+
+    const latestUserIntent = [...messages].reverse().find((m) => m.role === "user")?.content?.trim();
+
+    try {
+      const resultText = await approveChatAction(activeAgentSlug, userId, action);
+      approvePendingAction(msgId, action, resultText);
+
+      const normalized = (resultText ?? "").trim();
+      const cappedResult = normalized.length > 5000 ? `${normalized.slice(0, 5000)}\n... (truncated)` : normalized;
+
+      const additionalInstructions = [
+        "Approved write-action continuation:",
+        `- Tool: ${action.tool}`,
+        latestUserIntent ? `- Latest user intent: ${latestUserIntent}` : "",
+        "Use only the approved result below to answer.",
+        "Do not call tools. Do not request any further approval.",
+        "Respond like a normal assistant: concise summary, intent mapping, and next best step.",
+        `Approved result:\n${cappedResult || "(empty output)"}`,
+      ].filter(Boolean).join("\n\n");
+
+      await send(activeAgentSlug, userId, "Continue with approved result.", {
+        disableTools: true,
+        additionalInstructions,
+      });
+      return;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const additionalInstructions = [
+        "Approved write-action attempt failed:",
+        `- Tool: ${action.tool}`,
+        latestUserIntent ? `- Latest user intent: ${latestUserIntent}` : "",
+        `- API/Execution error: ${errorMessage || "Unknown error"}`,
+        "Explain this failure to the user in plain terms.",
+        "Ask the user exactly which missing/invalid key or value is needed to retry.",
+        "Do not call tools in this turn.",
+      ].filter(Boolean).join("\n\n");
+
+      await send(activeAgentSlug, userId, "Continue after failed approved action.", {
+        disableTools: true,
+        additionalInstructions,
+      });
+      throw err;
+    }
+  }, [activeAgentSlug, userId, approvePendingAction, messages, send]);
+
+  const handleDeclineAction = useCallback((msgId: string, action: PendingAction) => {
+    declinePendingAction(msgId, action);
+  }, [declinePendingAction]);
+
   return (
     <>
       <div data-id="chat-page" className="flex h-full overflow-hidden">
@@ -2537,76 +3814,152 @@ export function ChatPageV3() {
 
         {activeAgent ? (
           <>
-            {/* Center */}
-            <div
-              data-id="chat-center-panel"
-              className="flex flex-1 flex-col overflow-hidden bg-xyne-surface-subtle"
-            >
-              <CenterHeader
-                agent={activeAgent}
-                convTitle={activeConv?.title}
-                conversationId={conversationId}
-                userId={userId}
-                messageCount={messages.length}
-                onOpenSettings={() => navigate(`/v3/agents/${activeAgent.slug}`)}
-                onOpenDashboard={() => navigate("/v3/dashboard")}
-              />
-
-              {messages.length === 0 && !sending ? (
-                <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
-                  <ChatCircleIcon size={48} className="text-xyne-brand" />
-                  <p className="text-[15px] font-medium text-xyne-fg-primary">{activeAgent.name}</p>
-                  <p className="max-w-[280px] text-center text-[13px] text-xyne-fg-muted">
-                    {activeAgent.description || "Start a conversation with this agent"}
-                  </p>
-                </div>
-              ) : (
-                <MessageThread
-                  messages={messages}
-                  sending={sending}
-                  toolLabel={toolLabel}
+            <div className="flex flex-1 min-w-0 overflow-hidden">
+              <div
+                data-id="chat-center-panel"
+                className="flex min-w-0 flex-1 flex-col overflow-hidden bg-xyne-surface-subtle"
+              >
+                <CenterHeader
                   agent={activeAgent}
+                  convTitle={activeConv?.title}
+                  conversationId={conversationId}
+                  userId={userId}
                   userAbbr={userAbbr}
-                  streamingMsgId={streamingMsgId}
-                  liveInvocations={liveInvocations}
-                  liveReasoning={liveReasoning}
-                  invocationsByMsgId={invocationsByMsgId}
-                  reasoningByMsgId={reasoningByMsgId}
+                  messageCount={messages.length}
+                  onOpenSettings={() => navigate(`/v3/agents/${activeAgent.slug}`)}
+                  onOpenDashboard={() => navigate("/v3/dashboard")}
+                  onOpenDebugger={() => {
+                    setSelectedCitation(null);
+                    setDebugTurnIndex(null);
+                    setDebugTurnLive(false);
+                    setShowDebugger(true);
+                  }}
                 />
-              )}
 
-              <InputArea
-                ref={inputAreaRef}
-                agentName={activeAgent.name}
-                value={inputValue}
-                onChange={setInputValue}
-                onSend={handleSend}
-                onStop={() => { stop(userId).catch(() => {}); }}
-                sending={sending}
-                disabled={false}
-                lastUserMessage={lastUserMessage}
-                pendingFiles={pendingFiles}
-                onAddFiles={handleAddFiles}
-                onRemoveFile={handleRemoveFile}
-                selectedContext={selectedContext}
-                onRemoveContext={handleRemoveContext}
-                mentionOpen={mentionOpen}
-                onToggleMention={handleToggleMention}
-                renderMentionPicker={() => (
-                  <ContextPicker
-                    slug={activeAgent.slug}
-                    userId={userId}
-                    open={mentionOpen}
-                    tab={contextTab}
-                    query={contextQuery}
-                    selectedKeys={selectedContextKeys}
-                    onTabChange={setContextTab}
-                    onQueryChange={setContextQuery}
-                    onSelect={handleAddContext}
-                    onClose={() => setMentionOpen(false)}
+                {messages.length === 0 && !sending ? (
+                  <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
+                    <ChatCircleIcon size={48} className="text-xyne-brand" />
+                    <p className="text-[15px] font-medium text-xyne-fg-primary">{activeAgent.name}</p>
+                    <p className="max-w-[280px] text-center text-[13px] text-xyne-fg-muted">
+                      {activeAgent.description || "Start a conversation with this agent"}
+                    </p>
+                  </div>
+                ) : (
+                  <MessageThread
+                    messages={messages}
+                    sending={sending}
+                    toolLabel={toolLabel}
+                    agent={activeAgent}
+                    userAbbr={userAbbr}
+                    streamingMsgId={streamingMsgId}
+                    liveInvocations={liveInvocations}
+                    liveReasoning={liveReasoning}
+                    invocationsByMsgId={invocationsByMsgId}
+                    reasoningByMsgId={reasoningByMsgId}
+                    branchInfoByMsgId={branchInfoByMsgId}
+                    onSelectBranch={selectBranch}
+                    onRegenerate={handleRegenerate}
+                    latestUserMessageId={latestUserMessageId}
+                    onEditUserMessage={handleEditUserMessage}
+                    selectedCitationKey={selectedCitation?.key ?? null}
+                    onOpenTurnDebugger={(turnIndex, live, assistantMessageId) => {
+                      setDebugTurnIndex(turnIndex);
+                      setDebugTurnLive(live);
+                      // Resolve to sessionId via the runs map. Falls back to
+                      // null when the run isn't ready yet (streaming) — the
+                      // drawer's selectedTurnIndex still gets us close.
+                      setDebugSessionId(debugRunByMsgId.get(assistantMessageId) ?? null);
+                      setSelectedCitation(null);
+                      setShowDebugger(true);
+                    }}
+                    onOpenCitation={handleOpenCitation}
+                    pendingActionsByMsgId={pendingActionsByMsgId}
+                    onApproveAction={handleApproveAction}
+                    onApproveAndContinueAction={handleApproveAndContinueAction}
+                    onDeclineAction={handleDeclineAction}
                   />
                 )}
-              />
+
+                <InputArea
+                  ref={inputAreaRef}
+                  agentName={activeAgent.name}
+                  value={inputValue}
+                  onChange={setInputValue}
+                  onSend={handleSend}
+                  onStop={() => { stop(userId).catch(() => {}); }}
+                  sending={sending}
+                  disabled={false}
+                  lastUserMessage={lastUserMessage}
+                  pendingFiles={pendingFiles}
+                  onAddFiles={handleAddFiles}
+                  onRemoveFile={handleRemoveFile}
+                  selectedContext={selectedContext}
+                  onRemoveContext={handleRemoveContext}
+                  mentionOpen={mentionOpen}
+                  onToggleMention={handleToggleMention}
+                  renderMentionPicker={() => (
+                    <ContextPicker
+                      slug={activeAgent.slug}
+                      userId={userId}
+                      open={mentionOpen}
+                      tab={contextTab}
+                      query={contextQuery}
+                      selectedKeys={selectedContextKeys}
+                      onTabChange={setContextTab}
+                      onQueryChange={setContextQuery}
+                      onSelect={handleAddContext}
+                      onClose={() => setMentionOpen(false)}
+                    />
+                  )}
+                />
+              </div>
+
+              {selectedCitation && !showDebugger && (
+                <>
+                  <div
+                    data-id="chat-citation-resizer"
+                    className="group relative flex w-1 shrink-0 cursor-col-resize items-center justify-center"
+                    onMouseDown={handleCitationResizeStart}
+                  >
+                    <div className="h-full w-px bg-xyne-border-subtle group-hover:w-0.5 group-hover:bg-xyne-border-strong transition-all" />
+                  </div>
+                  <CitationPanel
+                    selection={selectedCitation}
+                    citation={resolvedCitation}
+                    width={citationPanelWidth}
+                    onClose={handleCloseCitation}
+                    onOpenCitation={handleOpenCitation}
+                  />
+                </>
+              )}
+
+              {showDebugger && (
+                <>
+                  <div
+                    data-id="chat-debugger-resizer"
+                    className="group relative flex w-1 shrink-0 cursor-col-resize items-center justify-center bg-transparent"
+                    onMouseDown={handleDebuggerResizeStart}
+                  >
+                    <div className="h-full w-px bg-xyne-border-subtle group-hover:w-0.5 group-hover:bg-xyne-border-strong transition-all" />
+                  </div>
+                  <DebugDrawer
+                    open={showDebugger}
+                    inline
+                    width={debuggerWidth}
+                    agentSlug={activeAgentSlug ?? ""}
+                    conversationId={conversationId}
+                    liveEvents={debugEvents}
+                    running={sending}
+                    artifactsReadyVersion={debugArtifactsReadyVersion}
+                    selectedTurnIndex={debugTurnIndex}
+                    selectedTurnLive={debugTurnLive}
+                    selectedSessionId={debugSessionId}
+                    onClose={() => {
+                      setShowDebugger(false);
+                    }}
+                  />
+                </>
+              )}
             </div>
 
           </>

@@ -56,6 +56,9 @@ const MIN_BACKFILL_MONTHS = 0;
 /** Per-record curator cost estimate. Haiku 4.5 at ~$0.001 per request for
  *  a 50-record batch ≈ $0.000020 per record. Used for the consent screen. */
 const COST_PER_RECORD_USD = 0.000020;
+const DEFAULT_AUTO_APPROVE_MIN_SCORE = 0.9;
+const MIN_AUTO_APPROVE_SCORE = 0.7;
+const MAX_AUTO_APPROVE_SCORE = 1;
 
 /** Per-record fact density coefficient. Heuristic — gets refined over time. */
 const CANDIDATES_PER_RECORD = 0.06;
@@ -90,13 +93,15 @@ digitalTwinRouter.get("/status", requireUserAuth, async (req, res) => {
       res.status(401).json({ success: false, error: "Unauthenticated" });
       return;
     }
-    const user = await prisma.user.findUnique({
+    const user = await (prisma.user.findUnique as any)({
       where: { id: userId },
       select: {
         digitalTwinEnabled: true,
         digitalTwinEnabledAt: true,
         digitalTwinBackfillState: true,
         digitalTwinResponseSuffix: true,
+        digitalTwinMemoryApprovalMode: true,
+        digitalTwinMemoryAutoApproveMinScore: true,
       },
     });
     if (!user) {
@@ -122,6 +127,8 @@ digitalTwinRouter.get("/status", requireUserAuth, async (req, res) => {
         approvedCandidates: approved,
         mdFileCount: mdFiles,
         responseSuffix: user.digitalTwinResponseSuffix ?? "",
+        memoryApprovalMode: user.digitalTwinMemoryApprovalMode,
+        memoryAutoApproveMinScore: user.digitalTwinMemoryAutoApproveMinScore,
       },
     });
   } catch (err) {
@@ -298,22 +305,18 @@ digitalTwinRouter.post("/disable", requireUserAuth, async (req, res) => {
       let deletedHindsight = 0;
       let deletedCandidates = 0;
       try {
-        const approved = await prisma.userMemoryCandidate.findMany({
-          where: { userId, status: "approved", hindsightMemoryId: { not: null } },
-          select: { hindsightMemoryId: true },
-        });
-        for (const a of approved) {
-          if (!a.hindsightMemoryId) continue;
-          try {
-            await memory.deleteMemory(TWIN_BANK_ID, a.hindsightMemoryId);
-            deletedHindsight += 1;
-          } catch (err) {
-            logger.warn("[digital-twin] hindsight delete failed on disable", {
-              userId,
-              memoryId: a.hindsightMemoryId,
-              err: err instanceof Error ? err.message : String(err),
-            });
-          }
+        // Delete the user's memories from Hindsight by TAG, not by stored id.
+        // candidate.hindsightMemoryId is always null (async retain returns no
+        // ids — see the digital-twin memory investigation), so the old per-id
+        // delete silently removed nothing. Tag delete reaches every memory the
+        // user has in the shared twin bank.
+        try {
+          deletedHindsight = (await memory.deleteByTag?.(TWIN_BANK_ID, `user:${userId}`)) ?? 0;
+        } catch (err) {
+          logger.warn("[digital-twin] hindsight delete-by-tag failed on disable", {
+            userId,
+            err: err instanceof Error ? err.message : String(err),
+          });
         }
         const result = await prisma.userMemoryCandidate.deleteMany({ where: { userId } });
         deletedCandidates = result.count;
@@ -538,9 +541,174 @@ digitalTwinRouter.patch("/candidates/:id", requireUserAuth, async (req, res) => 
   }
 });
 
-// ── 8. .md upload (manual seed memories) ───────────────────────────────────
+// ── 8. Approval metrics ────────────────────────────────────────────────────
 
-// ── 8. Settings (per-user Twin config) ─────────────────────────────────────
+digitalTwinRouter.get("/metrics", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+
+    // Optional ?days=7|30|90 window applied to approvedAt/rejectedAt.
+    // Pending candidates are always counted from createdAt regardless of window.
+    const daysParam = Number(req.query["days"]);
+    const since = !isNaN(daysParam) && daysParam > 0
+      ? new Date(Date.now() - daysParam * 24 * 60 * 60 * 1000)
+      : null;
+    // Previous period of same length (for trend deltas)
+    const prevSince = since && daysParam > 0
+      ? new Date(since.getTime() - daysParam * 24 * 60 * 60 * 1000)
+      : null;
+
+    const reviewedFilter = since ? { gte: since } : undefined;
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    function sourceCategory(source: string): "daily" | "upload" | "backfill" | "other" {
+      if (source.startsWith("daily:")) return "daily";
+      if (source.startsWith("upload:")) return "upload";
+      if (source.startsWith("backfill:")) return "backfill";
+      return "other";
+    }
+
+    const [
+      approvedClean, approvedEdited, rejected, pending,
+      bySubsystemRaw, bySourceRaw, oldestPending, addedSinceYesterday,
+      prevApproved, prevRejected, prevApprovedEdited,
+      recallSessionIds,
+    ] = await Promise.all([
+      prisma.userMemoryCandidate.count({ where: { userId, status: "approved", editedText: null, ...(reviewedFilter ? { approvedAt: reviewedFilter } : {}) } }),
+      prisma.userMemoryCandidate.count({ where: { userId, status: "approved", NOT: { editedText: null }, ...(reviewedFilter ? { approvedAt: reviewedFilter } : {}) } }),
+      prisma.userMemoryCandidate.count({ where: { userId, status: "rejected", ...(reviewedFilter ? { rejectedAt: reviewedFilter } : {}) } }),
+      prisma.userMemoryCandidate.count({ where: { userId, status: "pending" } }),
+      // Subsystem breakdown
+      prisma.userMemoryCandidate.groupBy({
+        by: ["subsystem", "status"],
+        where: { userId, ...(reviewedFilter ? {
+          OR: [
+            { status: "approved", approvedAt: reviewedFilter },
+            { status: "rejected", rejectedAt: reviewedFilter },
+            { status: "pending" },
+          ],
+        } : {}) },
+        _count: { id: true },
+      }),
+      // Source breakdown
+      prisma.userMemoryCandidate.groupBy({
+        by: ["source", "status"],
+        where: { userId, ...(reviewedFilter ? {
+          OR: [
+            { status: "approved", approvedAt: reviewedFilter },
+            { status: "rejected", rejectedAt: reviewedFilter },
+          ],
+        } : { status: { in: ["approved", "rejected"] } }) },
+        _count: { id: true },
+      }),
+      // Oldest pending candidate
+      prisma.userMemoryCandidate.findFirst({
+        where: { userId, status: "pending" },
+        orderBy: { createdAt: "asc" },
+        select: { createdAt: true },
+      }),
+      // Candidates added in the last 24h
+      prisma.userMemoryCandidate.count({ where: { userId, createdAt: { gte: yesterday } } }),
+      // Previous period approved
+      prevSince ? prisma.userMemoryCandidate.count({ where: { userId, status: "approved", approvedAt: { gte: prevSince, lt: since! } } }) : Promise.resolve(null),
+      prevSince ? prisma.userMemoryCandidate.count({ where: { userId, status: "rejected", rejectedAt: { gte: prevSince, lt: since! } } }) : Promise.resolve(null),
+      prevSince ? prisma.userMemoryCandidate.count({ where: { userId, status: "approved", NOT: { editedText: null }, approvedAt: { gte: prevSince, lt: since! } } }) : Promise.resolve(null),
+      // Recall precision: sessionIds where Digital Twin recalled personal memories
+      prisma.memoryRecallHit.findMany({
+        where: { userId, agentSlug: "digital-twin", scope: "user", ...(reviewedFilter ? { recalledAt: reviewedFilter } : {}) },
+        select: { sessionId: true },
+        distinct: ["sessionId"],
+      }),
+    ]);
+
+    // Subsystem map
+    const subsystemMap: Record<string, { approved: number; rejected: number; pending: number }> = {};
+    for (const row of bySubsystemRaw) {
+      const s = row.subsystem;
+      if (!subsystemMap[s]) subsystemMap[s] = { approved: 0, rejected: 0, pending: 0 };
+      if (row.status === "approved") subsystemMap[s].approved += row._count.id;
+      else if (row.status === "rejected") subsystemMap[s].rejected += row._count.id;
+      else if (row.status === "pending") subsystemMap[s].pending += row._count.id;
+    }
+    const bySubsystem = Object.entries(subsystemMap).map(([subsystem, counts]) => ({ subsystem, ...counts }));
+
+    // Source map
+    const sourceMap: Record<string, { approved: number; rejected: number }> = {};
+    for (const row of bySourceRaw) {
+      const cat = sourceCategory(row.source);
+      if (!sourceMap[cat]) sourceMap[cat] = { approved: 0, rejected: 0 };
+      if (row.status === "approved") sourceMap[cat].approved += row._count.id;
+      else if (row.status === "rejected") sourceMap[cat].rejected += row._count.id;
+    }
+    const bySource = Object.entries(sourceMap).map(([source, counts]) => ({ source, ...counts }));
+
+    const totalApproved = approvedClean + approvedEdited;
+    const totalReviewed = totalApproved + rejected;
+    const approvalRate = totalReviewed > 0 ? Math.round((totalApproved / totalReviewed) * 100) : null;
+    const editRate = totalApproved > 0 ? Math.round((approvedEdited / totalApproved) * 100) : null;
+
+    // Previous period rates
+    const prevTotalApproved = prevApproved ?? null;
+    const prevTotalReviewed = prevApproved !== null && prevRejected !== null ? prevApproved + prevRejected : null;
+    const prevApprovalRate = prevTotalReviewed !== null && prevTotalReviewed > 0
+      ? Math.round(((prevTotalApproved ?? 0) / prevTotalReviewed) * 100)
+      : null;
+    const prevEditRate = prevApproved !== null && prevApproved > 0 && prevApprovedEdited !== null
+      ? Math.round((prevApprovedEdited / prevApproved) * 100)
+      : null;
+
+    // Oldest pending age in days
+    const oldestPendingDays = oldestPending
+      ? Math.floor((Date.now() - oldestPending.createdAt.getTime()) / (1000 * 60 * 60 * 24))
+      : null;
+
+    // Recall precision: of Digital Twin runs that recalled personal memories AND were rated,
+    // what % got a thumbs-up? Uses AgentRun.rating which is set by the user in chat.
+    let recallPrecision: number | null = null;
+    let recallRatedCount = 0;
+    if (recallSessionIds.length > 0) {
+      const sessionIds = recallSessionIds.map((r) => r.sessionId);
+      const [ratedRuns, positiveRuns] = await Promise.all([
+        prisma.agentRun.count({ where: { sessionId: { in: sessionIds }, rating: { not: null } } }),
+        prisma.agentRun.count({ where: { sessionId: { in: sessionIds }, rating: "up" } }),
+      ]);
+      recallRatedCount = ratedRuns;
+      recallPrecision = ratedRuns > 0 ? Math.round((positiveRuns / ratedRuns) * 100) : null;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        total: totalApproved + rejected + pending,
+        approvedClean,
+        approvedEdited,
+        totalApproved,
+        rejected,
+        pending,
+        approvalRate,
+        editRate,
+        previousApprovalRate: prevApprovalRate,
+        previousEditRate: prevEditRate,
+        bySubsystem,
+        bySource,
+        oldestPendingDays,
+        addedSinceYesterday,
+        // Three new metrics
+        recallPrecision,
+        recallRatedCount,
+      },
+    });
+  } catch (err) {
+    logger.error("[digital-twin] GET /metrics failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+// ── 9. Settings (per-user Twin config) ─────────────────────────────────────
 //
 // V1 settings surface: just the response suffix. Future fields go here too
 // (e.g. response-style flags, opt-out tags). Returns the persisted value on
@@ -555,34 +723,73 @@ digitalTwinRouter.patch("/settings", requireUserAuth, async (req, res) => {
       res.status(401).json({ success: false, error: "Unauthenticated" });
       return;
     }
-    const body = (req.body ?? {}) as { responseSuffix?: string | null };
+    const body = (req.body ?? {}) as {
+      responseSuffix?: string | null;
+      memoryApprovalMode?: string;
+      memoryAutoApproveMinScore?: number | string | null;
+    };
 
-    if (!("responseSuffix" in body)) {
-      res.status(400).json({ success: false, error: "responseSuffix is required" });
+    if (!("responseSuffix" in body) && !("memoryApprovalMode" in body) && !("memoryAutoApproveMinScore" in body)) {
+      res.status(400).json({ success: false, error: "At least one setting is required" });
       return;
     }
 
+    const data: Record<string, unknown> = {};
+
     // Normalize: trim, accept empty string OR null as "clear suffix".
-    const raw = body.responseSuffix;
-    let normalized: string | null = null;
-    if (typeof raw === "string") {
-      const trimmed = raw.trim();
-      if (trimmed.length === 0) {
-        normalized = null;
-      } else if (trimmed.length > MAX_SUFFIX_LEN) {
-        res.status(400).json({ success: false, error: `responseSuffix must be ≤ ${MAX_SUFFIX_LEN} chars` });
-        return;
-      } else {
-        normalized = trimmed;
+    if ("responseSuffix" in body) {
+      const raw = body.responseSuffix;
+      let normalized: string | null = null;
+      if (typeof raw === "string") {
+        const trimmed = raw.trim();
+        if (trimmed.length === 0) {
+          normalized = null;
+        } else if (trimmed.length > MAX_SUFFIX_LEN) {
+          res.status(400).json({ success: false, error: `responseSuffix must be ≤ ${MAX_SUFFIX_LEN} chars` });
+          return;
+        } else {
+          normalized = trimmed;
+        }
       }
+      data.digitalTwinResponseSuffix = normalized;
     }
 
-    await prisma.user.update({
+    if ("memoryApprovalMode" in body) {
+      const mode = String(body.memoryApprovalMode ?? "").trim().toLowerCase();
+      if (mode !== "manual" && mode !== "auto") {
+        res.status(400).json({ success: false, error: "memoryApprovalMode must be manual or auto" });
+        return;
+      }
+      data.digitalTwinMemoryApprovalMode = mode;
+    }
+
+    if ("memoryAutoApproveMinScore" in body) {
+      const score = Number(body.memoryAutoApproveMinScore ?? DEFAULT_AUTO_APPROVE_MIN_SCORE);
+      if (!Number.isFinite(score) || score < MIN_AUTO_APPROVE_SCORE || score > MAX_AUTO_APPROVE_SCORE) {
+        res.status(400).json({ success: false, error: `memoryAutoApproveMinScore must be between ${MIN_AUTO_APPROVE_SCORE} and ${MAX_AUTO_APPROVE_SCORE}` });
+        return;
+      }
+      data.digitalTwinMemoryAutoApproveMinScore = score;
+    }
+
+    const updated = await (prisma.user.update as any)({
       where: { id: userId },
-      data: { digitalTwinResponseSuffix: normalized },
+      data,
+      select: {
+        digitalTwinResponseSuffix: true,
+        digitalTwinMemoryApprovalMode: true,
+        digitalTwinMemoryAutoApproveMinScore: true,
+      },
     });
 
-    res.json({ success: true, data: { responseSuffix: normalized ?? "" } });
+    res.json({
+      success: true,
+      data: {
+        responseSuffix: updated.digitalTwinResponseSuffix ?? "",
+        memoryApprovalMode: updated.digitalTwinMemoryApprovalMode,
+        memoryAutoApproveMinScore: updated.digitalTwinMemoryAutoApproveMinScore,
+      },
+    });
   } catch (err) {
     logger.error("[digital-twin] PATCH /settings failed", { err: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ success: false, error: "Internal error" });

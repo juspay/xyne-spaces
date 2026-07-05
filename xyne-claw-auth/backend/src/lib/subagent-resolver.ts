@@ -15,6 +15,9 @@
 import type { PrismaClient, SubagentDefinition, Skill, SkillFile } from "@prisma/client";
 import { SUBAGENT_DEFINITIONS, type SubagentDefinition as BuiltinDef } from "xyne-claw-shared";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("subagent-resolver");
+
 // ── Wire-format types ─────────────────────────────────────────────────────
 
 export interface CustomSubagentSpec {
@@ -245,21 +248,10 @@ export async function validateSubagentInput(
   const tools = validateToolsConfig(input.tools);
   const mcpInstanceMap = validateMcpInstanceMap(input.mcpInstanceMap);
 
-  // Subagent must have SOMETHING to do — either explicit direct/custom tools,
-  // OR an MCP server pin via mcpInstanceMap (whose tools form the palette at
-  // runtime via the wrapped serverType). An empty subagent with neither is
-  // unusable. This combined check replaces the strict per-tools.direct/custom
-  // emptiness check that previously lived inside validateToolsConfig — that
-  // check blocked legitimate builtin forks like `grafana → grafana-eu` where
-  // the new custom subagent's palette comes entirely from the grafana MCP.
-  const hasTools = (tools.direct?.length ?? 0) + (tools.custom?.length ?? 0) > 0;
-  const hasMcpInstance = Object.keys(mcpInstanceMap).length > 0;
-  if (!hasTools && !hasMcpInstance) {
-    throw new ValidationError(
-      "tools",
-      "must select at least one direct or custom tool, or specify an mcpInstanceMap to wrap an MCP server",
-    );
-  }
+  // Tools are OPTIONAL — a subagent with no tools (just a system prompt + skills)
+  // is a valid reasoning/summarize/critique helper. We intentionally do NOT block
+  // on an empty tool set; the UI also treats tools as optional. (Shapes are still
+  // validated above.)
 
   return {
     name,
@@ -363,7 +355,7 @@ export async function resolveSubagentsForRun(
       resolved.push({ source: "custom", custom: toCustomSubagentSpec(custom) });
       continue;
     }
-    console.warn(`[subagent-resolver] Unknown subagent name "${name}" — skipping`);
+    log.warn(`[subagent-resolver] Unknown subagent name "${name}" — skipping`);
   }
   return resolved;
 }

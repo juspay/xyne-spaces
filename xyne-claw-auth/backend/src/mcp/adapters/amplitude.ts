@@ -23,7 +23,7 @@ export const amplitudeAdapter: StdioMcpAdapter = {
     const apiKey = credentials["apiKey"] as string;
     return {
       cmd: "npx",
-      args: ["-y", "amplitude-mcp-server", "--api-key", apiKey],
+      args: ["-y", "amplitude-mcp-server@1.0.2", "--api-key", apiKey],
       env: {},
     };
   },

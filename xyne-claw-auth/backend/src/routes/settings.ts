@@ -11,6 +11,9 @@ import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
 import { fetchAnthropicModels } from "./agents.js";
 
+import { createLogger } from "../logger.js";
+const log = createLogger("settings");
+
 const router = Router();
 
 const VALID_PROVIDERS = new Set(["spaces", "copilot", "claude", "codex"]);
@@ -40,7 +43,7 @@ router.get("/provider-credentials", async (req: Request, res: Response) => {
     }));
     res.json({ success: true, data });
   } catch (err) {
-    console.error("[settings] list credentials error:", err);
+    log.error("[settings] list credentials error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -108,7 +111,7 @@ router.put("/provider-credentials/:provider", async (req: Request<{ provider: st
       },
     });
   } catch (err) {
-    console.error("[settings] upsert credentials error:", err);
+    log.error("[settings] upsert credentials error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -124,7 +127,7 @@ router.delete("/provider-credentials/:provider", async (req: Request<{ provider:
     await userProviderCredentialsRepository.delete(userId, req.params.provider);
     res.json({ success: true });
   } catch (err) {
-    console.error("[settings] delete credentials error:", err);
+    log.error("[settings] delete credentials error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -141,7 +144,7 @@ router.get("/subagent-routing", async (req: Request, res: Response) => {
     const data = rows.map((r) => ({ subagentName: r.subagentName, provider: r.provider }));
     res.json({ success: true, data });
   } catch (err) {
-    console.error("[settings] list subagent routing error:", err);
+    log.error("[settings] list subagent routing error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -162,7 +165,7 @@ router.put("/subagent-routing/:subagentName", async (req: Request<{ subagentName
     const row = await userSubagentConfigRepository.upsert(userId, req.params.subagentName, provider);
     res.json({ success: true, data: { subagentName: row.subagentName, provider: row.provider } });
   } catch (err) {
-    console.error("[settings] upsert subagent routing error:", err);
+    log.error("[settings] upsert subagent routing error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -178,7 +181,7 @@ router.delete("/subagent-routing/:subagentName", async (req: Request<{ subagentN
     await userSubagentConfigRepository.delete(userId, req.params.subagentName);
     res.json({ success: true });
   } catch (err) {
-    console.error("[settings] delete subagent routing error:", err);
+    log.error("[settings] delete subagent routing error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -222,7 +225,7 @@ router.post("/copilot/github-login", async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    console.error("[settings] github-login error:", err);
+    log.error("[settings] github-login error:", err);
     res.status(500).json({ success: false, error: "Failed to initiate GitHub login" });
   }
 });
@@ -278,7 +281,7 @@ router.post("/copilot/github-poll", async (req: Request, res: Response) => {
     await redis.del(key);
     res.json({ success: false, error: data.error_description ?? data.error ?? "Authorization failed" });
   } catch (err) {
-    console.error("[settings] github-poll error:", err);
+    log.error("[settings] github-poll error:", err);
     res.status(500).json({ success: false, error: "Failed to poll GitHub" });
   }
 });
@@ -333,7 +336,7 @@ router.post("/codex/oauth/start", async (req: Request, res: Response) => {
 
     res.json({ success: true, data: { url: url.toString(), state, expiresIn: CODEX_PKCE_TTL } });
   } catch (err) {
-    console.error("[settings] codex/oauth/start error:", err);
+    log.error("[settings] codex/oauth/start error:", err);
     res.status(500).json({ success: false, error: "Failed to start Codex login" });
   }
 });
@@ -408,7 +411,7 @@ router.post("/codex/oauth/exchange", async (req: Request, res: Response) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error("[settings] codex/oauth/exchange error:", err);
+    log.error("[settings] codex/oauth/exchange error:", err);
     res.status(500).json({ success: false, error: "Codex login exchange failed" });
   }
 });
@@ -458,7 +461,7 @@ router.get("/copilot/models", async (req: Request, res: Response) => {
       .map((m) => ({ id: m.id as string, name: m.name ?? m.id as string }));
     res.json({ success: true, data: models });
   } catch (err) {
-    console.error("[settings] copilot models error:", err);
+    log.error("[settings] copilot models error:", err);
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Failed to fetch Copilot models" });
   }
 });
@@ -479,7 +482,7 @@ router.get("/claude/models", async (req: Request, res: Response) => {
     const models = await fetchAnthropicModels(apiKey, cred.baseUrl ?? undefined, cred.authType ?? undefined);
     res.json({ success: true, data: models });
   } catch (err) {
-    console.error("[settings] claude models error:", err);
+    log.error("[settings] claude models error:", err);
     res.status(400).json({ success: false, error: err instanceof Error ? err.message : "Failed to fetch Claude models" });
   }
 });
@@ -571,7 +574,7 @@ router.get("/codex/models", async (req: Request, res: Response) => {
       .map((m) => ({ id: m.id, name: m.id }));
     res.json({ success: true, data: models });
   } catch (err) {
-    console.error("[settings] codex models error:", err);
+    log.error("[settings] codex models error:", err);
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Failed to fetch models" });
   }
 });

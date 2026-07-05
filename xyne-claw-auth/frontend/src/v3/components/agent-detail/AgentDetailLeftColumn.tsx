@@ -4,6 +4,7 @@ import {
   PlugIcon,
   GearSixIcon,
   SlidersIcon,
+  BookOpenIcon,
   MagicWandIcon,
   MagnifyingGlassIcon,
   PlusIcon,
@@ -17,14 +18,18 @@ import {
   PencilSimpleIcon,
 } from "@phosphor-icons/react";
 import type { Agent } from "../../../lib/types";
+import { PromptVersionHistory } from "../../../components/PromptVersionHistory";
 import type { AgentPermissions } from "../../lib/agentPermissions";
-import type { ClaudeModelInfo, AvailableTools, Skill, ProviderCredential } from "../../../lib/api";
+import type { ClaudeModelInfo, AvailableTools, Skill, ProviderCredential, SandboxRepoOption, SbxGitRepoOption, ResearchAgentOption } from "../../../lib/api";
+import { generateOutputFormat } from "../../../lib/api";
 import type { AgentProvider } from "../../hooks/useAgents";
 import type { AgentToolSelection } from "../ToolPickerDialog";
 import { useSnackbar } from "../ui/Snackbar";
-import { Tabs, type TabItem } from "../ui/Tabs";
 import { Dialog } from "../ui/Dialog";
 import { IntegrationCard } from "./IntegrationCard";
+import { ToolboxPicker } from "../ToolboxPicker";
+import { KnowledgeBasePicker } from "../KnowledgeBasePicker";
+import { parseGatewaySource } from "../../lib/gatewayKeys";
 
 /* ── Tab model ─────────────────────────────────────────────────────────
    Four-layer mental model: who the agent is (Persona), what it knows
@@ -34,9 +39,6 @@ import { IntegrationCard } from "./IntegrationCard";
    as always-relevant context.
 
    Removed from this surface:
-   - Git URL — backend reads `repoUrl`, V3 wrote `gitRepoUrl`; field is
-     dead config on the chat/scheduled path. Re-add when the backend
-     migrates or aligns the key.
    - Model dropdown — `agent.modelId` is never read at runtime. The
      actual model lives on per-provider credentials, so model belongs
      in the Provider Credentials screen, not in the agent config. */
@@ -67,10 +69,10 @@ const KIND_LABEL: Record<keyof typeof KIND_ICON, string> = {
    falls into "other" so future kinds are never silently dropped. */
 
 const TOOL_TAB_LABELS = {
-  subagents:     "Specialists",    // user-facing term; technical term is "subagents"
-  integrations:  "Integrations",   // kind: "mcp"
+  subagents:     "Subagents",    // user-facing term; technical term is "subagents"
+  integrations:  "Integrations",   // kind: "mcp" | "gateway" (gateway folds in here)
   platform:      "Platform",       // kind: "custom" (Xyne-provided tools)
-  sandbox:       "Sandbox",        // kind: "builtin" (filesystem tools)
+  sandbox:       "Sandbox",        // kind: "builtin" (opt-in sandbox actions: bash, edit)
   miscellaneous: "Miscellaneous",  // future / unknown kinds — tab only appears when ≥1 exists
 } as const;
 
@@ -79,10 +81,42 @@ type ToolTabKey = keyof typeof TOOL_TAB_LABELS;
 function kindToTab(kind: string): Exclude<ToolTabKey, "subagents"> {
   const map: Record<string, Exclude<ToolTabKey, "subagents">> = {
     mcp:     "integrations",
+    gateway: "integrations", // gateway tools surface in the Integrations tab
     custom:  "platform",
     builtin: "sandbox",
   };
   return map[kind] ?? "miscellaneous";
+}
+
+/**
+ * Resolve which tab an integration belongs to. Kind alone isn't sufficient
+ * because some `custom`-kind integrations (notably the `custom:sandbox`
+ * tool source — sandbox-create, sandbox-run, sandbox-pw-*, etc.) belong in
+ * the Sandbox tab next to the builtin bash/edit, not in Platform alongside
+ * Google/Microsoft/pgm/research-agent. Special-case those by slug.
+ */
+function integrationTab(intg: { kind: string; slug: string }): Exclude<ToolTabKey, "subagents"> {
+  if (intg.kind === "custom" && intg.slug === "custom:sandbox") return "sandbox";
+  return kindToTab(intg.kind);
+}
+
+function gatewayServiceFromIntegrationSlug(slug: string): string | null {
+  return parseGatewaySource(slug)?.serviceName ?? null;
+}
+
+function integrationToolSelected(
+  intg: { kind: string; slug: string },
+  tool: { slug: string; name: string },
+  tools: AgentToolSelection,
+): boolean {
+  if (intg.kind === "custom") return tools.custom.includes(tool.slug);
+  if (intg.kind === "gateway") {
+    const serviceName = gatewayServiceFromIntegrationSlug(intg.slug);
+    return tools.direct.includes(tool.slug)
+      || tools.gateway.includes(intg.slug)
+      || (serviceName ? tools.gateway.includes(serviceName) : false);
+  }
+  return tools.direct.includes(tool.name);
 }
 
 /* ── shimmer skeletons ─────────────────────────────────────────────
@@ -147,10 +181,10 @@ interface SectionInfoDef {
 
 const SECTION_INFO: Record<ToolTabKey, SectionInfoDef> = {
   subagents: {
-    title: "Specialists",
+    title: "Subagents",
     tagline: "Domain-expert agents the agent can delegate to",
-    what: "Specialists are purpose-built AI agents that handle tasks in a specific domain. When you enable a specialist, the parent agent can call on it during a conversation — delegating work rather than handling it directly.",
-    when: "Enable a specialist when the agent needs deep expertise in a particular system (e.g. reading Grafana dashboards, creating GitHub PRs, managing Jira tickets). The parent agent decides which specialist to call based on the user's request.",
+    what: "Subagents are purpose-built AI agents that handle tasks in a specific domain. When you enable a subagent, the parent agent can call on it during a conversation — delegating work rather than handling it directly.",
+    when: "Enable a subagent when the agent needs deep expertise in a particular system (e.g. reading Grafana dashboards, creating GitHub PRs, managing Jira tickets). The parent agent decides which subagent to call based on the user's request.",
     examples: [
       { name: "spaces",       note: "Manages tickets, canvases, and calls inside Xyne Spaces" },
       { name: "github",       note: "Reads and writes code, PRs, issues, and reviews on GitHub" },
@@ -162,7 +196,7 @@ const SECTION_INFO: Record<ToolTabKey, SectionInfoDef> = {
     title: "Integrations",
     tagline: "Connected third-party services via MCP",
     what: "Integration tools connect the agent directly to external platforms using the Model Context Protocol (MCP). Each integration exposes read tools (fetch data) and write tools (take action). You control exactly which tools are enabled.",
-    when: "Enable integration tools when you want the agent to read from or act on an external service without going through a specialist. Useful when the agent needs targeted access — for example, only reading Slack messages without the full Slack specialist.",
+    when: "Enable integration tools when you want the agent to read from or act on an external service without going through a subagent. Useful when the agent needs targeted access — for example, only reading Slack messages without the full Slack subagent.",
     examples: [
       { name: "Slack",     note: "Read channels, post messages, reply to threads" },
       { name: "BigQuery",  note: "Run SQL queries against your data warehouse" },
@@ -183,15 +217,16 @@ const SECTION_INFO: Record<ToolTabKey, SectionInfoDef> = {
   },
   sandbox: {
     title: "Sandbox tools",
-    tagline: "Sandboxed filesystem — read, write, and execute",
-    what: "Sandbox tools give the agent access to a session-scoped filesystem. The agent can read files, write new ones, edit existing content, search with grep, and run shell commands — all confined to the session workspace. Nothing can escape the sandbox.",
-    when: "Enable sandbox tools for coding agents that need to create or modify files, run tests, or execute scripts. Essential for any agent doing software development tasks.",
+    tagline: "Opt-in workspace actions — bash, edit, full sandbox sessions",
+    what: "Sandbox tools give the agent the ability to mutate the session workspace, run shell commands, and spin up isolated full-OS sandboxes for richer execution (e.g. running tests, browser automation via Playwright, file delivery). Read-only filesystem tools (read, write, grep, find, ls) are enabled by default at the runtime layer and aren't shown here — they're always on for every agent.",
+    when: "Enable sandbox tools when the agent needs to run code, edit files beyond simple writes, or operate a full isolated environment. Essential for coding agents and automation flows. Leave them off for chat-only agents to keep the action surface minimal.",
     examples: [
-      { name: "read",  note: "Read the contents of a file by path" },
-      { name: "write", note: "Create or overwrite a file" },
-      { name: "edit",  note: "Apply precise string replacements to a file" },
-      { name: "bash",  note: "Execute shell commands within the sandbox" },
-      { name: "grep",  note: "Search file contents with a regular expression" },
+      { name: "bash",                 note: "Execute shell commands within the workspace" },
+      { name: "edit",                 note: "Apply precise string replacements to a file" },
+      { name: "sandbox-create",       note: "Spin up a fresh isolated sandbox session" },
+      { name: "sandbox-run",          note: "Run commands inside a sandbox session" },
+      { name: "sandbox-pw-navigate",  note: "Drive a browser inside a sandbox via Playwright" },
+      { name: "sandbox-deliver-files",note: "Send sandbox-produced files to the user" },
     ],
   },
   miscellaneous: {
@@ -442,19 +477,24 @@ function ToolGroup({
    between the two and let the toolbox tab stay declarative. */
 
 function selectedKeysForIntegration(
-  kind: "mcp" | "builtin" | "custom",
+  kind: "mcp" | "builtin" | "custom" | "gateway",
   tools: AgentToolSelection,
 ): Set<string> {
-  return new Set(kind === "custom" ? tools.custom : tools.direct);
+  if (kind === "custom") return new Set(tools.custom);
+  if (kind === "gateway") return new Set(tools.gateway);
+  return new Set(tools.direct);
 }
 
 function applyToggle(
   tools: AgentToolSelection,
-  kind: "mcp" | "builtin" | "custom",
+  kind: "mcp" | "builtin" | "custom" | "gateway",
   key: string,
   next: boolean,
 ): AgentToolSelection {
-  const field: "direct" | "custom" = kind === "custom" ? "custom" : "direct";
+  const field: "direct" | "custom" | "gateway" = 
+    kind === "custom" ? "custom" : 
+    kind === "gateway" ? "gateway" : 
+    "direct";
   const current = tools[field];
   const exists = current.includes(key);
   if (next && !exists) return { ...tools, [field]: [...current, key] };
@@ -464,11 +504,14 @@ function applyToggle(
 
 function applyBulkToggle(
   tools: AgentToolSelection,
-  kind: "mcp" | "builtin" | "custom",
+  kind: "mcp" | "builtin" | "custom" | "gateway",
   keys: string[],
   next: boolean,
 ): AgentToolSelection {
-  const field: "direct" | "custom" = kind === "custom" ? "custom" : "direct";
+  const field: "direct" | "custom" | "gateway" = 
+    kind === "custom" ? "custom" : 
+    kind === "gateway" ? "gateway" : 
+    "direct";
   const set = new Set(tools[field]);
   if (next) for (const k of keys) set.add(k);
   else for (const k of keys) set.delete(k);
@@ -516,7 +559,7 @@ function SubagentPicker({
   if (available.length === 0) {
     return (
       <div className="rounded-lg border border-xyne-border-subtle py-6 text-center text-[12px] text-xyne-fg-tertiary">
-        No specialists available
+        No subagents available
       </div>
     );
   }
@@ -730,6 +773,85 @@ function TriggerDropdown({
   );
 }
 
+/* ── dropdown (styled like a select but with a fixed-height scrollable panel) ──
+   Same floating-panel + backdrop pattern as TriggerDropdown, but sized for
+   form fields (text-[12px], py-2) rather than the compact trigger-card
+   micro-select. Used for Research Agent product / repository picks. */
+
+function Dropdown({
+  value,
+  options,
+  placeholder,
+  onChange,
+  disabled,
+  className,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  placeholder: string;
+  onChange: (val: string) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <div className={`relative ${className ?? ""}`}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-[12px] text-left transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+          open
+            ? "border-xyne-border-focus bg-xyne-surface text-xyne-fg-primary"
+            : "border-xyne-border bg-xyne-surface-sunken text-xyne-fg-primary hover:border-xyne-border-strong"
+        }`}
+      >
+        <span className={`truncate ${selected ? "text-xyne-fg-primary" : "text-xyne-fg-placeholder"}`}>
+          {selected?.label ?? placeholder}
+        </span>
+        <CaretDownIcon
+          size={12}
+          className={`shrink-0 text-xyne-fg-muted transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 overflow-hidden rounded-xl border border-xyne-border bg-xyne-surface shadow-[0_8px_24px_rgba(0,0,0,0.10)]">
+            <div className="max-h-[240px] overflow-y-auto py-1">
+              <button
+                type="button"
+                onClick={() => { onChange(""); setOpen(false); }}
+                className="flex w-full px-3 py-2 text-left text-[12px] text-xyne-fg-placeholder transition-colors hover:bg-xyne-surface-subtle"
+              >
+                {placeholder}
+              </button>
+              {options.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => { onChange(opt.value); setOpen(false); }}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-xyne-surface-subtle ${
+                    opt.value === value ? "font-medium text-xyne-brand" : "text-xyne-fg-primary"
+                  }`}
+                >
+                  <span className="w-[14px] shrink-0">
+                    {opt.value === value && <CheckIcon size={12} weight="bold" />}
+                  </span>
+                  <span className="truncate">{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ── subagent skill panel ──────────────────────────────────────────────
    Appears below the pill grid when a subagent is focused. Mirrors V1's
    "No skills. Add to propagate into this subagent." UX. Skills are stored
@@ -835,20 +957,22 @@ function SubagentSkillPanel({
   );
 }
 
-/* ── specialist category mapping ────────────────────────────────────────
+/* ── subagent category mapping ────────────────────────────────────────
    Frontend-side grouping until the backend adds a `category` field to
    the subagent manifest. Unknown names fall into "Other" and always
-   appear — no specialist is silently dropped. Extend this map when new
-   specialists are added to the platform. */
+   appear — no subagent is silently dropped. Extend this map when new
+   subagents are added to the platform. */
 
-const SPECIALIST_CATEGORY_MAP: Record<string, string> = {
+const SUBAGENT_CATEGORY_MAP: Record<string, string> = {
   "context7":          "Docs & Research",
   "deepwiki":          "Docs & Research",
   "research-agent":    "Docs & Research",
   "perplexity":        "Docs & Research",
   "github":            "Engineering",
   "bitbucket":         "Engineering",
-  "sandbox":           "Engineering",
+  // "sandbox" removed 2026-06-09 — see SUBAGENT_DEFINITIONS in xyne-claw-shared.
+  // Sandbox tools (sandbox-run, sandbox-pw-*, etc.) now mount directly on the
+  // parent via the `custom:sandbox` integration card under Toolbox → Sandbox.
   "grafana":           "Engineering",
   "kibana":            "Engineering",
   "victoria-metrics":  "Engineering",
@@ -867,10 +991,10 @@ const SPECIALIST_CATEGORY_MAP: Record<string, string> = {
 };
 
 function getCategoryFor(name: string): string {
-  return SPECIALIST_CATEGORY_MAP[name] ?? "Other";
+  return SUBAGENT_CATEGORY_MAP[name] ?? "Other";
 }
 
-// Deterministic avatar colours derived from the specialist's name so the
+// Deterministic avatar colours derived from the subagent's name so the
 // colour is stable across renders and doesn't flash on update.
 const AVATAR_COLORS = [
   "bg-[#3b82f6]", // blue-500
@@ -885,13 +1009,13 @@ const AVATAR_COLORS = [
   "bg-[#f97316]", // orange-500
 ];
 
-function specialistInitials(name: string): string {
+function subagentInitials(name: string): string {
   // Strip hyphens/underscores and take the first two letters uppercased.
   // e.g. "context7" → "CO", "research-agent" → "RE".
   return name.replace(/[-_]/g, "").slice(0, 2).toUpperCase();
 }
 
-function specialistAvatarColor(name: string): string {
+function subagentAvatarColor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = (hash * 31 + name.charCodeAt(i)) & 0xffff;
@@ -899,10 +1023,10 @@ function specialistAvatarColor(name: string): string {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length] ?? "bg-[#3b82f6]";
 }
 
-/* ── SpecialistsPanelSkeleton ─────────────────────────────────────────
+/* ── SubagentsPanelSkeleton ─────────────────────────────────────────
    Loading shimmer that mirrors the two-panel shape. */
 
-function SpecialistsPanelSkeleton() {
+function SubagentsPanelSkeleton() {
   const leftWidths = [52, 64, 48, 72, 56, 80, 48, 60, 52];
   return (
     <div className="flex min-h-[400px] overflow-hidden rounded-xl border border-xyne-border">
@@ -935,7 +1059,7 @@ function SpecialistsPanelSkeleton() {
   );
 }
 
-/* ── SpecialistsPanel ──────────────────────────────────────────────────
+/* ── SubagentsPanel ──────────────────────────────────────────────────
    Two-mode layout with a smooth cross-fade transition:
 
    "grid" mode (default) — compact pill grid, identical to the previous
@@ -947,7 +1071,7 @@ function SpecialistsPanelSkeleton() {
              skills + SkillDropdown, footer hint.
    A "← View all" link returns to the grid. */
 
-function SpecialistsPanel({
+function SubagentsPanel({
   available,
   selected,
   skillTriggers,
@@ -994,7 +1118,7 @@ function SpecialistsPanel({
     ? skillTriggers.filter((t) => t.toolName === selectedName)
     : [];
 
-  // Open the detail panel for a specific specialist.
+  // Open the detail panel for a specific subagent.
   const openDetail = (name: string) => {
     setSelectedName(name);
     setViewMode("detail");
@@ -1058,7 +1182,7 @@ function SpecialistsPanel({
       >
         {available.length === 0 ? (
           <div className="rounded-lg border border-xyne-border-subtle py-6 text-center text-[12px] text-xyne-fg-tertiary">
-            No specialists available
+            No subagents available
           </div>
         ) : (
           <div className="flex flex-wrap gap-1.5">
@@ -1179,13 +1303,13 @@ function SpecialistsPanel({
             </div>
           </div>
 
-          {/* Right: specialist detail */}
+          {/* Right: subagent detail */}
           <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
             {!detail ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
                 <RobotIcon size={28} className="text-xyne-fg-muted" weight="light" />
                 <p className="text-[12px] text-xyne-fg-tertiary">
-                  Select a specialist to configure it
+                  Select a subagent to configure it
                 </p>
               </div>
             ) : (
@@ -1193,16 +1317,16 @@ function SpecialistsPanel({
                 {/* Header: avatar + name + subtitle + enable/remove button */}
                 <div className="flex items-start gap-3">
                   <div
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[13px] font-bold text-white ${specialistAvatarColor(detail.name)}`}
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[13px] font-bold text-white ${subagentAvatarColor(detail.name)}`}
                   >
-                    {specialistInitials(detail.name)}
+                    {subagentInitials(detail.name)}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-[14px] font-bold text-xyne-fg-primary">
                       {detail.name}
                     </div>
                     <div className="text-[11px] text-xyne-fg-tertiary">
-                      {getCategoryFor(detail.name)} · specialist
+                      {getCategoryFor(detail.name)} · subagent
                     </div>
                   </div>
                   {!disabled && (
@@ -1292,7 +1416,7 @@ function SpecialistsPanel({
                 {/* Footer hint */}
                 <div className="mt-auto flex items-start gap-1.5 border-t border-xyne-border-subtle pt-3 text-[11px] text-xyne-fg-tertiary">
                   <ArrowDownIcon size={11} className="mt-0.5 shrink-0" />
-                  <span>Skills you attach here travel with this specialist every time it's invoked.</span>
+                  <span>Skills you attach here travel with this subagent every time it's invoked.</span>
                 </div>
               </div>
             )}
@@ -1307,6 +1431,7 @@ function SpecialistsPanel({
 
 interface Props {
   agent: Agent;
+  userId: string;
   permissions: AgentPermissions;
 
   // Identity (name + description editable; slug is immutable — see notes
@@ -1342,6 +1467,16 @@ interface Props {
   onToggleSkill: (id: string) => void;
   availableSkills: Skill[];
 
+  // Knowledge Base — per-agent grants over spaces collections / files.
+  // The picker only shows what THIS user can already access in spaces;
+  // selection is enforced again at the MCP-tool layer when the agent runs.
+  draftKbResources: import("../KnowledgeBasePicker").KbSelection[];
+  onDraftKbResourcesChange: (next: import("../KnowledgeBasePicker").KbSelection[]) => void;
+  // KB scope mode: "COLLECTIONS" = use draftKbResources (picker).
+  //                "USER"        = inherit caller's full KB; picker hidden.
+  draftKbScope: "COLLECTIONS" | "USER";
+  onDraftKbScopeChange: (next: "COLLECTIONS" | "USER") => void;
+
   // Triggers
   skillTriggers: Array<{
     toolName: string;
@@ -1361,6 +1496,78 @@ interface Props {
   draftPromptInjection: string;
   onDraftPromptInjectionChange: (v: string) => void;
 
+  // Sandbox repo pin (agent.config.sandboxRepo). When set, the runtime forces
+  // sandbox-repo-setup onto this repo so the agent can't pick the wrong one.
+  draftSandboxRepo: string;
+  onDraftSandboxRepoChange: (v: string) => void;
+  sandboxRepoOptions: SandboxRepoOption[];
+  // Reviewer read-only multi-repo sandbox (agent.config.forceReadOnlySandbox):
+  // route every run to the shared sbx-git sandbox (grep all repos, no clone/write).
+  draftForceReadOnlySandbox: boolean;
+  onDraftForceReadOnlySandboxChange: (v: boolean) => void;
+  // Operator-selected repo focus for read-only agents (agent.config.sbxGitRepos).
+  draftSbxGitRepos: string[];
+  onDraftSbxGitReposChange: (v: string[]) => void;
+  sbxGitRepoOptions: SbxGitRepoOption[];
+
+  // Research Agent product/repository context. Product takes precedence at runtime.
+  draftResearchAgentProductId: string;
+  onDraftResearchAgentProductIdChange: (v: string) => void;
+  researchAgentProductOptions: ResearchAgentOption[];
+  draftResearchAgentRepositoryId: string;
+  onDraftResearchAgentRepositoryIdChange: (v: string) => void;
+  researchAgentRepositoryOptions: ResearchAgentOption[];
+
+  // Suggest Goals opt-in (agent.config.suggestGoal). When on, xyne-claw injects
+  // the `suggest-goal` tool + a /goal-awareness primer so the agent can propose
+  // a one-click "Run autonomously" button at the end of multi-turn planning.
+  draftSuggestGoal: boolean;
+  onDraftSuggestGoalChange: (v: boolean) => void;
+  // Verify-responses opt-in (agent.config.verifyResponses). When on, the agent
+  // delivers its final answer via the submit-response tool, which checks the
+  // draft's factual claims against gathered tool evidence before it's posted.
+  draftVerifyResponses: boolean;
+  onDraftVerifyResponsesChange: (v: boolean) => void;
+  // Citation reflection opt-in (agent.config.citationReflection). When on, the
+  // runtime nudges the agent to add inline [clf-…] citations post-response if it
+  // used citeable sources but cited none.
+  draftCitationReflection: boolean;
+  onDraftCitationReflectionChange: (v: boolean) => void;
+  // Generic auto-citations opt-in (agent.config.autoToolCitations). When on,
+  // every tool result is chunked + [clf-…]-tokenized so the model can cite any
+  // tool's output (tools that self-cite are left untouched).
+  draftAutoToolCitations: boolean;
+  onDraftAutoToolCitationsChange: (v: boolean) => void;
+  // Per-agent delivery criteria, layered on top of the default factual check
+  // (only meaningful when verifyResponses is on).
+  draftVerifyResponseCriteria: string;
+  onDraftVerifyResponseCriteriaChange: (v: string) => void;
+
+  // Structured output (agent.config.outputFormat). When on, xyne-claw injects a
+  // `submit-result` tool the agent must deliver its final answer through. Type
+  // "json" uses draftOutputSchema (+ optional markdown render template); type
+  // "markdown" uses draftOutputTemplate as an optional outline.
+  draftOutputFormatEnabled: boolean;
+  onDraftOutputFormatEnabledChange: (v: boolean) => void;
+  draftOutputType: "json" | "markdown";
+  onDraftOutputTypeChange: (v: "json" | "markdown") => void;
+  draftOutputSchema: string;
+  onDraftOutputSchemaChange: (v: string) => void;
+  draftOutputTemplate: string;
+  onDraftOutputTemplateChange: (v: string) => void;
+  // Process guard (outputFormat.requireToolsBeforeSubmit): comma/newline-
+  // separated tool-name substrings that must run before submit-result is
+  // accepted. Stops the agent short-circuiting a pipeline with an empty payload.
+  draftOutputRequireTools: string;
+  onDraftOutputRequireToolsChange: (v: string) => void;
+
+  // Always Goal opt-in (agent.config.autoGoal). When on, claw-auth's webhook
+  // wraps every user message as `/goal <text>` before parsing, so EVERY
+  // interaction with this agent runs autonomously. User-typed `/stop` and
+  // `/goal status` still work (they start with `/` and bypass the wrap).
+  draftAutoGoal: boolean;
+  onDraftAutoGoalChange: (v: boolean) => void;
+
   // Dialog callbacks
   onOpenToolPicker: () => void;
   onOpenSkillPicker: () => void;
@@ -1369,10 +1576,76 @@ interface Props {
   onRequestRenameHandle: () => void;
 }
 
+/* ── accordion disclosure header ───────────────────────────────────────
+   The left column is a calm vertical list of disclosure cards (it replaces
+   the old four-tab strip). Each card's header shows a friendly label + the
+   technical term, a one-line subtitle, optional micro-notes, and a summary
+   chip of the section's current state; the editor body reveals below when
+   the section is expanded. Single-open accordion. */
+function DisclosureHeader({
+  icon: Icon,
+  label,
+  tech,
+  subtitle,
+  notes,
+  summary,
+  open,
+  onToggle,
+}: {
+  icon: React.ComponentType<{ size?: number; weight?: "regular" | "fill" | "bold" }>;
+  label: string;
+  tech?: string;
+  subtitle: string;
+  notes?: string[];
+  summary: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className="flex w-full items-center gap-3 px-4 py-3 text-left"
+    >
+      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-xyne-surface-subtle text-xyne-fg-secondary">
+        <Icon size={18} weight={open ? "fill" : "regular"} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="inline-flex items-baseline gap-1.5">
+          <span className="text-[13.5px] font-semibold text-xyne-fg-primary">{label}</span>
+          {tech && <span className="text-xyne-fg-tertiary">•</span>}
+          {tech && <span className="text-[12px] font-normal text-xyne-fg-tertiary">{tech}</span>}
+        </span>
+        <span className="truncate text-[11.5px] text-xyne-fg-tertiary">{subtitle}</span>
+        {notes && notes.length > 0 && (
+          <span className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10.5px] text-xyne-fg-muted">
+            {notes.map((n) => (
+              <span key={n} className="inline-flex items-center gap-1">
+                <span className="h-[3px] w-[3px] rounded-full bg-xyne-fg-muted" />
+                {n}
+              </span>
+            ))}
+          </span>
+        )}
+      </span>
+      <span className="shrink-0 rounded-full bg-xyne-surface-sunken px-2.5 py-1 text-[11px] font-medium tabular-nums text-xyne-fg-secondary">
+        {summary}
+      </span>
+      <CaretDownIcon
+        size={15}
+        weight="bold"
+        className={`shrink-0 text-xyne-fg-tertiary transition-transform ${open ? "rotate-180" : ""}`}
+      />
+    </button>
+  );
+}
+
 /* ── main component ────────────────────────────────────────────────── */
 
 export function AgentDetailLeftColumn({
   agent,
+  userId,
   permissions,
   draftName,
   onDraftNameChange,
@@ -1392,23 +1665,93 @@ export function AgentDetailLeftColumn({
   draftSkillIds,
   onToggleSkill,
   availableSkills,
+  draftKbResources,
+  onDraftKbResourcesChange,
+  draftKbScope,
+  onDraftKbScopeChange,
   skillTriggers,
   onSkillTriggersChange,
   draftPromptInjection,
   onDraftPromptInjectionChange,
+  draftSandboxRepo,
+  onDraftSandboxRepoChange,
+  draftForceReadOnlySandbox,
+  onDraftForceReadOnlySandboxChange,
+  draftSbxGitRepos,
+  onDraftSbxGitReposChange,
+  sbxGitRepoOptions,
+  draftResearchAgentProductId,
+  onDraftResearchAgentProductIdChange,
+  researchAgentProductOptions,
+  draftResearchAgentRepositoryId,
+  onDraftResearchAgentRepositoryIdChange,
+  researchAgentRepositoryOptions,
+  draftSuggestGoal,
+  onDraftSuggestGoalChange,
+  draftVerifyResponses,
+  draftVerifyResponseCriteria,
+  onDraftVerifyResponseCriteriaChange,
+  onDraftVerifyResponsesChange,
+  draftCitationReflection,
+  onDraftCitationReflectionChange,
+  draftAutoToolCitations,
+  onDraftAutoToolCitationsChange,
+  draftAutoGoal,
+  onDraftAutoGoalChange,
+  draftOutputFormatEnabled,
+  onDraftOutputFormatEnabledChange,
+  draftOutputType,
+  onDraftOutputTypeChange,
+  draftOutputSchema,
+  onDraftOutputSchemaChange,
+  draftOutputTemplate,
+  onDraftOutputTemplateChange,
+  draftOutputRequireTools,
+  onDraftOutputRequireToolsChange,
+  sandboxRepoOptions,
   onOpenToolPicker,
   onOpenSkillPicker,
   onRequestRenameHandle,
 }: Props) {
   const { show: showSnackbar } = useSnackbar();
   const [briefInput, setBriefInput] = useState("");
+  // Structured-output "describe in plain text → generate schema+template" helper.
+  const [outputGenInput, setOutputGenInput] = useState("");
+  const [outputGenLoading, setOutputGenLoading] = useState(false);
+  const [outputGenNotes, setOutputGenNotes] = useState<string>("");
+  const [outputGenWarnings, setOutputGenWarnings] = useState<string[]>([]);
+  const runOutputGenerate = async () => {
+    if (!outputGenInput.trim() || outputGenLoading) return;
+    setOutputGenLoading(true);
+    setOutputGenNotes("");
+    setOutputGenWarnings([]);
+    try {
+      const result = await generateOutputFormat({
+        description: outputGenInput.trim(),
+        format: draftOutputType,
+        ...(draftOutputSchema.trim() ? { existingSchema: draftOutputSchema } : {}),
+        ...(draftOutputTemplate.trim() ? { existingTemplate: draftOutputTemplate } : {}),
+        agentName: agent.name,
+      });
+      if (draftOutputType === "json") onDraftOutputSchemaChange(result.schema);
+      onDraftOutputTemplateChange(result.template);
+      setOutputGenNotes(result.notes);
+      setOutputGenWarnings(result.warnings ?? []);
+      showSnackbar({ variant: "success", title: "Generated — review and tweak before saving" });
+    } catch (err) {
+      showSnackbar({ variant: "error", title: err instanceof Error ? err.message : "Failed to generate output format" });
+    } finally {
+      setOutputGenLoading(false);
+    }
+  };
   const [toolGroupOpen, setToolGroupOpen] = useState<Record<string, boolean>>({
     subagents: false,
     direct: false,
     custom: false,
     system: false,
   });
-  const [activeTab, setActiveTab] = useState<ConfigTabKey>("persona");
+  const [activeTab, setActiveTab] = useState<ConfigTabKey | null>("persona");
+  const toggleSection = (id: ConfigTabKey) => setActiveTab((p) => (p === id ? null : id));
   const [toolSearch, setToolSearch] = useState("");
   const [toolTab, setToolTab] = useState<ToolTabKey>("subagents");
   const [infoSection, setInfoSection] = useState<ToolTabKey | null>(null);
@@ -1417,17 +1760,17 @@ export function AgentDetailLeftColumn({
   // Description textarea uses a fixed initial size (rows={3}) + manual
   // resize-y, matching the labeled-form design. No auto-grow ref needed.
 
-  /** Currently-focused subagent in the Toolbox → Specialists tab; opens
+  /** Currently-focused subagent in the Toolbox → Subagents tab; opens
    *  the inline SubagentSkillPanel beneath the picker so the operator
    *  can wire triggers without leaving the tab. */
   const [focusedSubagent, setFocusedSubagent] = useState<string | null>(null);
 
-  const totalTools = draftTools.subagents.length + draftTools.direct.length + draftTools.custom.length;
+  const totalTools = draftTools.subagents.length + draftTools.direct.length + draftTools.custom.length + draftTools.gateway.length;
   const totalSubagents = availableTools?.subagents.length ?? 0;
   const totalWriteTools = availableTools?.writeTools.length ?? 0;
   const totalMcpTools = availableTools?.customGroups.flatMap((g) => g.tools).length ?? 0;
   /** Subagents filtered by the toolSearch box. Empty string → all. Used
-   *  by the Specialists picker AND by the search-input placeholder to
+   *  by the Subagents picker AND by the search-input placeholder to
    *  show a "Search N of M" count when a filter is active. */
   const filteredSubagents = useMemo(() => {
     const all = availableTools?.subagents ?? [];
@@ -1447,15 +1790,13 @@ export function AgentDetailLeftColumn({
     let enabledIntegrationTools = 0;
     let totalIntegrationTools = 0;
     for (const intg of availableTools.integrations) {
-      const selSet = new Set<string>(intg.kind === "custom" ? draftTools.custom : draftTools.direct);
       for (const t of intg.readTools) {
         totalIntegrationTools++;
-        if (selSet.has(intg.kind === "custom" ? t.slug : t.name)) enabledIntegrationTools++;
+        if (integrationToolSelected(intg, t, draftTools)) enabledIntegrationTools++;
       }
       for (const t of intg.writeTools) {
         totalIntegrationTools++;
-        const k = intg.kind === "custom" ? t.slug : t.name;
-        if (selSet.has(k)) enabledIntegrationTools++;
+        if (integrationToolSelected(intg, t, draftTools)) enabledIntegrationTools++;
       }
     }
     const totalEnabled = draftTools.subagents.length + enabledIntegrationTools;
@@ -1463,18 +1804,28 @@ export function AgentDetailLeftColumn({
     return { totalEnabled, totalAvailable };
   }, [availableTools, draftTools]);
 
-  // Filtered lists for search — narrows integration cards (Specialists tab has its own search).
+  // Filtered lists for search — narrows integration cards (Subagents tab has its own search).
   const filteredIntegrations = useMemo(() => {
     const intgs = availableTools?.integrations ?? [];
-    if (!toolSearch.trim()) return intgs;
-    const q = toolSearch.toLowerCase();
-    return intgs.filter((intg) => {
-      if (intg.label.toLowerCase().includes(q)) return true;
-      return [...intg.readTools, ...intg.writeTools].some(
-        (t) => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q),
+    const q = toolSearch.trim().toLowerCase();
+    const matched = q
+      ? intgs.filter((intg) => {
+          if (intg.label.toLowerCase().includes(q)) return true;
+          return [...intg.readTools, ...intg.writeTools].some(
+            (t) => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q),
+          );
+        })
+      : intgs;
+    // Hoist the integrations THIS agent already uses to the top. Within each
+    // group (selected / not) the backend order is preserved — that's
+    // most-used-by-other-agents first — because Array.sort is stable.
+    const hasSelection = (intg: (typeof matched)[number]) => {
+      return [...intg.readTools, ...intg.writeTools].some((t) =>
+        integrationToolSelected(intg, t, draftTools),
       );
-    });
-  }, [availableTools, toolSearch]);
+    };
+    return [...matched].sort((a, b) => Number(hasSelection(b)) - Number(hasSelection(a)));
+  }, [availableTools, toolSearch, draftTools]);
 
   const canEdit = permissions.canEdit;
 
@@ -1486,29 +1837,6 @@ export function AgentDetailLeftColumn({
   const hasReminder = draftPromptInjection.trim().length > 0;
   const knowledgeCount = draftSkillIds.length + skillTriggers.length;
   const behaviorCount = hasReminder ? 1 : 0;
-  const tabItems: TabItem<ConfigTabKey>[] = [
-    { id: "persona", label: "Persona" },
-    {
-      id: "knowledge",
-      label: knowledgeCount > 0 ? `Knowledge (${knowledgeCount})` : "Knowledge",
-    },
-    {
-      id: "toolbox",
-      label: totalTools > 0 ? `Toolbox (${totalTools})` : "Toolbox",
-    },
-    // Behavior now holds only per-turn Reminders (promptInjection).
-    // Hidden for non-editors since it's read-only and already implicit
-    // in the running prompt — nothing to do here as a viewer.
-    ...(canEdit
-      ? [
-          {
-            id: "behavior" as const,
-            label: behaviorCount > 0 ? `Behavior (${behaviorCount})` : "Behavior",
-          },
-        ]
-      : []),
-  ];
-
   const toggleToolGroup = (group: string) => {
     setToolGroupOpen((prev) => ({ ...prev, [group]: !prev[group] }));
   };
@@ -1524,11 +1852,11 @@ export function AgentDetailLeftColumn({
     //   • Interactive buttons within cards: bg-xyne-surface (white) — pop
     //     back up to the container's surface so they're tappable-looking.
     <div className="flex w-[60%] shrink-0 flex-col overflow-hidden border-l border-r border-xyne-border bg-xyne-surface">
-      {/* Always-visible top: identity + provider/model + git url. These
+      {/* Always-visible top: identity + provider/model. These
           aren't tabbed because they're either short or define the agent's
           basic identity (you want to see them regardless of which detail
           tab is open). */}
-      <div className="flex flex-col gap-2 border-b border-xyne-border-subtle px-5 py-3">
+      <div className="flex shrink-0 flex-col gap-2 border-b border-xyne-border-subtle px-5 py-3">
       {/* View-only banner for non-editors */}
       {!canEdit && (
         <div className="rounded-lg border border-xyne-info-border bg-xyne-info-bg px-3 py-1.5 text-[11px] text-xyne-info-fg">
@@ -1648,23 +1976,27 @@ export function AgentDetailLeftColumn({
       </div>
       </div>
 
-      {/* Tab strip — centered horizontally to anchor the configuration
-          area visually. The Tabs primitive owns the underline indicator
-          + keyboard nav. */}
-      <div className="shrink-0 flex justify-center px-4 pt-2">
-        <Tabs items={tabItems} selected={activeTab} onSelect={setActiveTab} />
+      {/* Define the agent — a calm vertical list of disclosure cards
+          (replaces the old tab strip). Each card summarizes its state and
+          expands to the full editor. Single-open accordion; the outer div
+          owns the scroll, cards stack with a small gap. */}
+      <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+      <div className="flex w-full flex-col gap-3 overflow-y-auto px-5 py-4 min-h-0">
+      <div className="px-0.5 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-xyne-fg-tertiary">
+        Define the agent
       </div>
 
-      {/* Tab content — outer fills height (no scroll), inner is a
-          centered max-width column. Persona's textarea grows to fill
-          the remaining vertical space (flex-1 chain below), so the
-          field "touches the bottom" of the visible area. Other tabs
-          fall back to natural height inside the centered column. */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col gap-6 overflow-y-auto p-4 min-h-0">
-      {/* Placeholder so the indentation/markup below stays intact when the
-          structural Section blocks are reorganized into tabs. */}
-      <div className="hidden" />
+      {/* Persona & behaviour card */}
+      <div className={`rounded-xl border bg-xyne-surface transition-colors ${activeTab === "persona" ? "border-xyne-border-strong" : "border-xyne-border-subtle"}`}>
+      <DisclosureHeader
+        icon={SlidersIcon}
+        label="Persona"
+        tech="system prompt"
+        subtitle="the voice & rules behind every reply"
+        summary={`${prompt.length.toLocaleString()} chars`}
+        open={activeTab === "persona"}
+        onToggle={() => toggleSection("persona")}
+      />
 
       {/* Persona — the long-form "who this agent is" expression. The
             short identity (name / description) lives in the always-visible
@@ -1676,7 +2008,7 @@ export function AgentDetailLeftColumn({
             the bottom"). Section's outer div has a fixed `flex-col`
             sizing that can't propagate flex-1 to a deep child. */}
       {activeTab === "persona" && (
-      <div className="flex flex-1 flex-col gap-2.5 min-h-0">
+      <div className="flex flex-col gap-2.5 border-t border-xyne-border-subtle px-4 py-4">
 
         {/* Header row: "Persona • system prompt" + info bubble */}
         <div className="flex items-center gap-2">
@@ -1752,254 +2084,60 @@ export function AgentDetailLeftColumn({
           onChange={(e) => onPromptChange(e.target.value)}
           placeholder="You are an agent that…"
           readOnly={!canEdit}
-          className="flex-1 min-h-[120px] w-full resize-none rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
+          className="min-h-[200px] w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
         />
         <span className="shrink-0 text-[11px] text-xyne-fg-tertiary">
           {prompt.length.toLocaleString()} character{prompt.length === 1 ? "" : "s"}
         </span>
+        <PromptVersionHistory
+          agentSlug={agent.slug}
+          activeVersion={agent.activePromptVersion}
+          readOnly={!canEdit}
+          onActivated={(restored) => onPromptChange(restored)}
+        />
       </div>
       )}
+      </div>
 
-      {/* Toolbox — what the agent can actually do.
-          Layout: summary bar + search + four tabs (Subagents / MCP Tools /
-          Custom / System). "Advanced" icon button in the header opens the
-          raw tool picker for power users. */}
+      {/* Tools card */}
+      <div className={`rounded-xl border bg-xyne-surface transition-colors ${activeTab === "toolbox" ? "border-xyne-border-strong" : "border-xyne-border-subtle"}`}>
+      <DisclosureHeader
+        icon={PlugIcon}
+        label="Tools"
+        tech="what it can do"
+        subtitle="what it's allowed to do"
+        notes={["acts on real systems", "credentials live with each integration"]}
+        summary={availableTools ? `${toolboxSummary.totalEnabled} of ${toolboxSummary.totalAvailable}` : `${totalTools} on`}
+        open={activeTab === "toolbox"}
+        onToggle={() => toggleSection("toolbox")}
+      />
+
       {activeTab === "toolbox" && (
-      <Section
-        title={
-          <span className="inline-flex items-baseline gap-2">
-            Toolbox
-            <span className="text-xyne-fg-tertiary">•</span>
-            <span className="font-normal text-xyne-fg-tertiary">tools</span>
-          </span>
-        }
-        description="Bring in a helper agent, or grant access to connected integrations"
-        info={{
-          title: "Toolbox",
-          description: "Everything the agent can act on",
-          content: (
-            <div className="flex flex-col gap-4">
-              <div>
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">What it is</div>
-                <p className="text-[13px] leading-relaxed text-xyne-fg-secondary">The Toolbox controls everything the agent can do — specialists to delegate work to, integration tools to read from or write to external services, and sandbox tools for file and code operations.</p>
-              </div>
-              <div>
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">When to configure it</div>
-                <p className="text-[13px] leading-relaxed text-xyne-fg-secondary">Enable only the tools the agent actually needs. Fewer tools means faster, more focused responses — the model has less to reason about on every turn.</p>
-              </div>
-            </div>
-          ),
-        }}
-        action={
-          canEdit ? (
-            /* Advanced: icon-only circle that expands to "(icon) Advanced" on hover */
-            <button
-              onClick={onOpenToolPicker}
-              title="Open the raw tool picker (every tool name + slug)"
-              className="group inline-flex items-center overflow-hidden rounded-full border border-xyne-border bg-xyne-surface p-1.5 text-xyne-fg-secondary transition-all duration-150 hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
-            >
-              <SlidersIcon size={14} className="shrink-0" />
-              <span className="max-w-0 overflow-hidden whitespace-nowrap text-[12px] font-medium opacity-0 transition-all duration-150 group-hover:ml-1.5 group-hover:max-w-[64px] group-hover:opacity-100 group-hover:pr-0.5">
-                Advanced
-              </span>
-            </button>
-          ) : undefined
-        }
-      >
-        {/* ── Summary bar (total enabled including subagents) ──────── */}
-        <div className="flex items-center gap-3 rounded-xl border border-xyne-border bg-xyne-surface px-4 py-3">
-          {availableTools ? (
-            <>
-              <span className="text-[22px] font-bold leading-none text-xyne-fg-primary">
-                {toolboxSummary.totalEnabled}
-              </span>
-              <span className="text-[13px] text-xyne-fg-secondary">
-                of {toolboxSummary.totalAvailable} tools enabled
-              </span>
-            </>
-          ) : (
-            <>
-              <Shimmer className="h-7 w-8" />
-              <Shimmer className="h-4 w-36" />
-            </>
-          )}
-        </div>
-
-        {/* ── Inner tabs ───────────────────────────────────────────── */}
-        <div className="flex gap-0.5 rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle p-0.5">
-          {(Object.keys(TOOL_TAB_LABELS) as ToolTabKey[])
-            .filter((key) => {
-              // Always show Subagents. For integration tabs, only show if
-              // there's at least one integration of that kind (or loading).
-              if (key === "subagents") return true;
-              if (!availableTools) return key !== "miscellaneous"; // show skeleton tabs while loading
-              if (key === "miscellaneous") {
-                return availableTools.integrations.some(
-                  (i) => !["mcp", "custom", "builtin"].includes(i.kind),
-                );
-              }
-              const kindMap: Record<string, string> = { integrations: "mcp", platform: "custom", sandbox: "builtin" };
-              return availableTools.integrations.some((i) => i.kind === kindMap[key]);
-            })
-            .map((key) => {
-              const count = key === "subagents" ? draftTools.subagents.length : null;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setToolTab(key)}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-medium transition-colors ${
-                    toolTab === key
-                      ? "bg-xyne-surface text-xyne-fg-primary shadow-sm"
-                      : "text-xyne-fg-tertiary hover:text-xyne-fg-secondary"
-                  }`}
-                >
-                  {TOOL_TAB_LABELS[key]}
-                  {count != null && count > 0 && (
-                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
-                      toolTab === key
-                        ? "bg-xyne-brand text-xyne-fg-inverse"
-                        : "bg-xyne-surface text-xyne-fg-tertiary"
-                    }`}>
-                      {count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-        </div>
-
-        {/* ── Search (per-tab; hidden on Specialists — the panel has its own search) */}
-        {toolTab !== "subagents" && (
-        <div className="relative">
-          <MagnifyingGlassIcon
-            size={13}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xyne-fg-tertiary"
-          />
-          <input
-            type="text"
-            value={toolSearch}
-            onChange={(e) => setToolSearch(e.target.value)}
-            placeholder="Search"
-            disabled={!availableTools}
-            className="w-full rounded-lg border border-xyne-border bg-xyne-surface-sunken py-2 pl-8 pr-3 text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-tertiary focus:border-xyne-border-focus focus:outline-none disabled:opacity-50"
-          />
-        </div>
-        )}
-
-        {/* ── Info modal — shared across all tabs ──────────────────── */}
-        <SectionInfoModal tab={infoSection} onClose={() => setInfoSection(null)} />
-
-        {/* ── Specialists tab ──────────────────────────────────────── */}
-        {toolTab === "subagents" && (
-          <>
-            {/* Section header with info button + enabled count */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">
-                  Specialists
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setInfoSection("subagents")}
-                  className="rounded-full p-0.5 text-xyne-fg-muted transition-colors hover:text-xyne-fg-secondary"
-                  title="What are specialists?"
-                >
-                  <InfoIcon size={13} />
-                </button>
-              </div>
-              <span className="text-[11px] text-xyne-fg-muted">
-                {draftTools.subagents.length}
-                {availableTools ? ` / ${availableTools.subagents.length}` : ""} enabled
-              </span>
-            </div>
-            {availableTools ? (
-              <SpecialistsPanel
-                available={availableTools.subagents}
-                selected={draftTools.subagents}
-                skillTriggers={skillTriggers}
-                availableSkills={availableSkills}
-                onToggle={(name, next) => {
-                  onDraftToolsChange((t: AgentToolSelection) => ({
-                    ...t,
-                    subagents: next
-                      ? [...t.subagents, name]
-                      : t.subagents.filter((x) => x !== name),
-                  }));
-                }}
-                onSkillTriggersChange={onSkillTriggersChange}
-                disabled={!canEdit}
-              />
-            ) : (
-              <SpecialistsPanelSkeleton />
-            )}
-          </>
-        )}
-
-        {/* ── Integration tabs (Integrations / Platform / Sandbox / Other) */}
-        {toolTab !== "subagents" && (() => {
-          const kindMap: Record<string, string> = {
-            integrations: "mcp",
-            platform:     "custom",
-            sandbox:      "builtin",
-          };
-          const targetKind = kindMap[toolTab]; // undefined for "miscellaneous"
-          const list = availableTools
-            ? filteredIntegrations.filter((i) =>
-                targetKind ? i.kind === targetKind : !Object.values(kindMap).includes(i.kind),
-              )
-            : null;
-
-          if (!list) {
-            // Loading skeleton — show 3 placeholder cards
-            return (
-              <div className="flex flex-col gap-2">
-                {[0, 1, 2].map((i) => <IntegrationCardSkeleton key={i} />)}
-              </div>
-            );
-          }
-
-          return (
-            <>
-              {/* Section header with info button */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">
-                  {TOOL_TAB_LABELS[toolTab]}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setInfoSection(toolTab)}
-                  className="rounded-full p-0.5 text-xyne-fg-muted transition-colors hover:text-xyne-fg-secondary"
-                  title={`What are ${TOOL_TAB_LABELS[toolTab].toLowerCase()}?`}
-                >
-                  <InfoIcon size={13} />
-                </button>
-              </div>
-              {list.length > 0 ? (
-                <div className="flex flex-col gap-2">
-                  {list.map((intg) => (
-                    <IntegrationCard
-                      key={intg.slug}
-                      integration={intg}
-                      selected={selectedKeysForIntegration(intg.kind, draftTools)}
-                      onToggle={(key, next) => onDraftToolsChange((t) => applyToggle(t, intg.kind, key, next))}
-                      onBulkToggle={(keys, next) => onDraftToolsChange((t) => applyBulkToggle(t, intg.kind, keys, next))}
-                      disabled={!canEdit}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-xyne-border-subtle py-8 text-center text-[12px] text-xyne-fg-tertiary">
-                  {toolSearch
-                    ? `No ${TOOL_TAB_LABELS[toolTab].toLowerCase()} tools match "${toolSearch}"`
-                    : `No ${TOOL_TAB_LABELS[toolTab].toLowerCase()} tools available`}
-                </div>
-              )}
-            </>
-          );
-        })()}
-      </Section>
+       <div className="border-t border-xyne-border-subtle px-4 py-4">
+        <ToolboxPicker
+          availableTools={availableTools}
+          loading={!availableTools}
+          value={draftTools}
+          onChange={(next) => onDraftToolsChange((prev) => ({ ...prev, ...next, gateway: next.gateway ?? prev.gateway }))}
+          largeHeight="560px"
+          showCaption={false}
+          suggestContext={{ systemPrompt: prompt, description: agent.description ?? undefined }}
+        />
+      </div>
       )}
+      </div>
+
+      {/* Knowledge card */}
+      <div className={`rounded-xl border bg-xyne-surface transition-colors ${activeTab === "knowledge" ? "border-xyne-border-strong" : "border-xyne-border-subtle"}`}>
+      <DisclosureHeader
+        icon={BookOpenIcon}
+        label="Knowledge"
+        tech="skills"
+        subtitle="reference material it can pull on"
+        summary={knowledgeCount > 0 ? `${knowledgeCount} configured` : "None configured"}
+        open={activeTab === "knowledge"}
+        onToggle={() => toggleSection("knowledge")}
+      />
 
       {/* Knowledge — the agent's onboarding library. Two related blocks:
               (A) Skills: markdown "reading material" the agent consults
@@ -2011,7 +2149,7 @@ export function AgentDetailLeftColumn({
             which is why they share this tab — moved from Behavior to
             match V1's grouping. */}
       {activeTab === "knowledge" && (
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-5 border-t border-xyne-border-subtle px-4 py-4">
         <Section
           title={
             <span className="inline-flex items-baseline gap-2">
@@ -2076,16 +2214,124 @@ export function AgentDetailLeftColumn({
         </Section>
 
         {/* ── section divider ────────────────────────────────────── */}
+        <hr className="border-xyne-border-subtle" />
+
+        {/* Knowledge Base — per-agent grants over spaces collections / files.
+            Two scoping modes:
+              • COLLECTIONS — picker selects an explicit allowlist.
+              • USER        — agent inherits the calling user's full spaces KB
+                              at runtime; picker is hidden / locked. When
+                              User A runs the agent it sees User A's docs;
+                              User B sees only User B's. Spaces is the
+                              security boundary.
+            When the agent has ≥1 grant OR is USER-scoped, four read-only KB
+            tools (kb-list-resources, kb-search, kb-list-files, kb-read-file)
+            are auto-added to its tool roster. */}
+        <Section
+          title={
+            <span className="inline-flex items-baseline gap-2">
+              Knowledge Base
+              <span className="text-xyne-fg-tertiary">•</span>
+              <span className="font-normal text-xyne-fg-tertiary">collections &amp; files</span>
+            </span>
+          }
+          description="Spaces documents this agent can read at runtime"
+          info={{
+            title: "Knowledge Base",
+            description: "Per-agent access to spaces knowledge base content",
+            content: (
+              <div className="flex flex-col gap-3">
+                <p className="text-[13px] leading-relaxed text-xyne-fg-secondary">
+                  <strong>Selected collections &amp; files</strong> — pick whole collections (every file inside is accessible) or expand a collection to grant access to individual files. The agent's scope is fixed: every user who runs it sees the same set.
+                </p>
+                <p className="text-[13px] leading-relaxed text-xyne-fg-secondary">
+                  <strong>Match my access</strong> — the agent inherits the spaces access of whoever is running it. User A sees User A's docs, User B sees only User B's. Use when the agent should follow each operator's permissions automatically.
+                </p>
+                <p className="text-[13px] leading-relaxed text-xyne-fg-secondary">
+                  Read-only tools (search, list, read) are added automatically. The agent can never read anything outside the active scope.
+                </p>
+              </div>
+            ),
+          }}
+        >
+          {/* Scope toggle — two cards, single-select. Hidden tool surface
+              behaves the same regardless; the scope decides what the agent
+              can SEE inside that surface. */}
+          <fieldset
+            className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2"
+            disabled={!canEdit}
+          >
+            {([
+              {
+                value: "COLLECTIONS" as const,
+                label: "Selected collections & files",
+                hint: "Pick an explicit allowlist. Same scope for every user who runs the agent.",
+              },
+              {
+                value: "USER" as const,
+                label: "Match my access",
+                hint: "Agent inherits whatever the running user can already see in spaces.",
+              },
+            ]).map((opt) => {
+              const selected = draftKbScope === opt.value;
+              return (
+                <label
+                  key={opt.value}
+                  className={`flex cursor-pointer flex-col gap-1 rounded-lg border px-3 py-2 transition-colors ${
+                    selected
+                      ? "border-xyne-accent bg-xyne-accent/5"
+                      : "border-xyne-border-subtle hover:border-xyne-border"
+                  } ${canEdit ? "" : "cursor-not-allowed opacity-60"}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="kb-scope"
+                      value={opt.value}
+                      checked={selected}
+                      onChange={() => canEdit && onDraftKbScopeChange(opt.value)}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span className="text-[13px] font-medium text-xyne-fg-primary">{opt.label}</span>
+                  </span>
+                  <span className="pl-[22px] text-[11px] leading-snug text-xyne-fg-tertiary">{opt.hint}</span>
+                </label>
+              );
+            })}
+          </fieldset>
+
+          {draftKbScope === "USER" ? (
+            <div className="rounded-lg border border-xyne-border-subtle bg-xyne-surface-muted px-3 py-3">
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                This agent is scoped at the user level — its Knowledge Base reach is whatever the running user can already see in spaces. No per-collection picker; each session is gated by that user's own permissions.
+              </p>
+            </div>
+          ) : (
+            <>
+              <KnowledgeBasePicker
+                value={draftKbResources}
+                onChange={(next) => canEdit && onDraftKbResourcesChange(next)}
+              />
+              <p className="mt-2 text-[11px] text-xyne-fg-tertiary">
+                {draftKbResources.length === 0
+                  ? "No KB grants — the agent will not be able to read documents."
+                  : `${draftKbResources.length} grant${draftKbResources.length === 1 ? "" : "s"} attached`}
+              </p>
+            </>
+          )}
+        </Section>
+
+        {/* ── section divider ────────────────────────────────────── */}
         {canEdit && (
           <hr className="border-xyne-border-subtle" />
         )}
 
-        {/* Contextual Responses — tool-level skill injection only.
-              Subagent-level skill attachments (toolName with no colon) are
-              managed exclusively from Toolbox → Subagents to avoid editing
-              the same triggers from two places. Contextual Responses only
-              shows and creates triggers that target a specific inner tool
-              (toolName format: "subagentName:toolName").
+        {/* Contextual Responses — the single home for ALL skill triggers,
+              both subagent-level (toolName = bare subagent name; inner tool
+              left as "Any tool") and tool-level (toolName = "subagent:tool").
+              Subagent-level triggers used to live in Toolbox → Subagents; now
+              that the Toolbox uses the shared ToolboxPicker (selection only),
+              they're managed here so the capability is preserved in one place.
               Gated on canEdit because the Add button + selects need write
               access. Non-editors don't see this block. */}
         {canEdit && (
@@ -2097,14 +2343,14 @@ export function AgentDetailLeftColumn({
                 <span className="font-normal text-xyne-fg-tertiary">skill triggers</span>
               </span>
             }
-            description="When a specific tool finishes, inject a skill into its result"
+            description="When a subagent — or one of its tools — finishes, inject a skill into its result"
             action={
               <button
                 onClick={() =>
                   onSkillTriggersChange([
                     ...skillTriggers,
-                    // Default to an empty inner-tool slot so the user is guided
-                    // to pick a specific tool (subagent-level = Toolbox tab).
+                    // Blank toolName — the user then picks a subagent (and,
+                    // optionally, a specific inner tool) in the card below.
                     { toolName: "", skillSlug: "", when: "after", prompt: "" },
                   ])
                 }
@@ -2115,13 +2361,11 @@ export function AgentDetailLeftColumn({
               </button>
             }
           >
-            {/* Only show tool-specific triggers (contain ":"). Subagent-level
-                triggers (no colon) live in Toolbox → Subagents tab. */}
-            {skillTriggers.filter((t) => t.toolName.includes(":") || t.toolName === "").length > 0 ? (
+            {/* Show every trigger — subagent-level (bare name) and tool-level
+                (name:tool) are both edited from this one place. */}
+            {skillTriggers.length > 0 ? (
               <div className="flex flex-col gap-2.5">
                 {skillTriggers.map((trigger, idx) => {
-                  // Skip subagent-level triggers — they are managed in Toolbox.
-                  if (!trigger.toolName.includes(":") && trigger.toolName !== "") return null;
                   const colonIdx = trigger.toolName.indexOf(":");
                   const selectedSubagent = colonIdx > 0 ? trigger.toolName.slice(0, colonIdx) : trigger.toolName;
                   const selectedInnerTool = colonIdx > 0 ? trigger.toolName.slice(colonIdx + 1) : "";
@@ -2248,7 +2492,7 @@ export function AgentDetailLeftColumn({
               <div className="rounded-lg border border-xyne-border-subtle py-6 text-center text-[12px] text-xyne-fg-tertiary">
                 No contextual responses configured.{" "}
                 <span className="not-italic">
-                  To attach a skill to a whole subagent, use the Toolbox → Subagents tab.
+                  Add one to inject a skill after a subagent — or a specific tool — finishes.
                 </span>
               </div>
             )}
@@ -2256,12 +2500,28 @@ export function AgentDetailLeftColumn({
         )}
       </div>
       )}
+      </div>
+
+      {/* Behaviour card */}
+      <div className={`rounded-xl border bg-xyne-surface transition-colors ${activeTab === "behavior" ? "border-xyne-border-strong" : "border-xyne-border-subtle"}`}>
+      <DisclosureHeader
+        icon={GearSixIcon}
+        label="Behaviour"
+        tech="rules & autonomy"
+        subtitle="extra rules applied on every turn"
+        summary={behaviorCount > 0 || draftSuggestGoal || draftAutoGoal ? "Customised" : "Defaults"}
+        open={activeTab === "behavior"}
+        onToggle={() => toggleSection("behavior")}
+      />
+
+      {activeTab === "behavior" && (
+      <div className="flex flex-col gap-5 border-t border-xyne-border-subtle px-4 py-4">
 
       {/* Behavior — Constant Reminders (per-turn promptInjection appended
             as a [System Reminder]). Contextual Responses / skill triggers
             were relocated to the Knowledge tab to keep skills-related UI
             together (see the Knowledge block above). */}
-      {activeTab === "behavior" && canEdit && (
+      {canEdit && (
         <Section
           title={
             <span className="inline-flex items-baseline gap-2">
@@ -2299,9 +2559,510 @@ export function AgentDetailLeftColumn({
         </Section>
       )}
 
+      {/* Sandbox repository — pins which REPO_CONFIGS setup the sandbox uses, so
+          the runtime forces sandbox-repo-setup onto this repo (deterministic). */}
+      {(canEdit || draftSandboxRepo) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Sandbox repository</div>
+          <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
+            Pin this agent to a sandbox setup. When set, the runtime forces <code className="text-xyne-fg-tertiary">sandbox-repo-setup</code> onto this repo — the agent can&apos;t pick the wrong one. &quot;None&quot; lets the agent choose.
+          </p>
+          <select
+            value={draftSandboxRepo}
+            onChange={(e) => onDraftSandboxRepoChange(e.target.value)}
+            disabled={!canEdit}
+            className="min-w-0 w-full rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 text-[12px] text-xyne-fg-primary focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
+          >
+            <option value="">None (agent chooses)</option>
+            {sandboxRepoOptions.map((r) => (
+              <option key={r.key} value={r.key}>{r.name} ({r.key})</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Read-only multi-repo sandbox (reviewer agents). Routes EVERY run to the
+          shared sbx-git sandbox: grep across all cloned repos read-only, no
+          per-project clone, mutating sandbox tools (run/build/write) stripped.
+          Off by default. Show when canEdit OR already on. */}
+      {(canEdit || draftForceReadOnlySandbox) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Read-only multi-repo sandbox</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Route every run to the shared <code className="text-xyne-fg-tertiary">sbx-git</code> sandbox — the agent greps across all cloned repos read-only, with no per-project clone or snapshot. Mutating sandbox tools (run/build/write) are stripped.
+                {" "}
+                <span className="text-xyne-fg-tertiary">Best for code-review agents that only read code.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftForceReadOnlySandbox}
+                onChange={(e) => onDraftForceReadOnlySandboxChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable read-only multi-repo sandbox"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftForceReadOnlySandbox ? "On" : "Off"}</span>
+            </label>
+          </div>
+
+          {/* Repo context — advisory scope surfaced to the agent. Empty = all repos. */}
+          {draftForceReadOnlySandbox && (
+            <div className="mt-3 border-t border-xyne-border pt-3">
+              <div className="mb-1 flex items-center justify-between">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Repo context</div>
+                <span className="text-[11px] text-xyne-fg-tertiary">
+                  {draftSbxGitRepos.length > 0 ? `${draftSbxGitRepos.length} selected` : "all repos"}
+                </span>
+              </div>
+              <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Focus this reviewer on specific repos — the selection is surfaced to the agent as its scope. Leave empty to use all {sbxGitRepoOptions.length}. Advisory: every repo stays on disk in the shared sandbox.
+              </p>
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-xyne-border bg-xyne-surface-sunken p-2">
+                {sbxGitRepoOptions.map((r) => {
+                  const checked = draftSbxGitRepos.includes(r.key);
+                  return (
+                    <label key={r.key} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[12px] text-xyne-fg-primary hover:bg-xyne-surface">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          if (e.target.checked) onDraftSbxGitReposChange([...draftSbxGitRepos, r.key]);
+                          else onDraftSbxGitReposChange(draftSbxGitRepos.filter((k) => k !== r.key));
+                        }}
+                        className="h-3.5 w-3.5 cursor-pointer accent-xyne-accent disabled:opacity-60"
+                      />
+                      <span className="truncate">{r.key}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {canEdit && draftSbxGitRepos.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onDraftSbxGitReposChange([])}
+                  className="mt-2 text-[11px] text-xyne-fg-tertiary underline hover:text-xyne-fg-primary"
+                >
+                  Clear selection (use all repos)
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Research Agent context — used by query-codebase and review-pull-request. */}
+      {(canEdit || draftResearchAgentProductId || draftResearchAgentRepositoryId) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Research Agent context</div>
+          <p className="mb-3 text-[12px] leading-relaxed text-xyne-fg-secondary">
+            Pick the product or repository used by <code className="text-xyne-fg-tertiary">query-codebase</code> and <code className="text-xyne-fg-tertiary">review-pull-request</code>. Product wins when both are set.
+          </p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <label className="min-w-0">
+              <div className="mb-1 text-[11px] font-medium text-xyne-fg-tertiary">Product</div>
+              <Dropdown
+                value={draftResearchAgentProductId}
+                options={researchAgentProductOptions.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))}
+                placeholder="None"
+                onChange={onDraftResearchAgentProductIdChange}
+                disabled={!canEdit}
+              />
+            </label>
+            <label className="min-w-0">
+              <div className="mb-1 text-[11px] font-medium text-xyne-fg-tertiary">Repository</div>
+              <Dropdown
+                value={draftResearchAgentRepositoryId}
+                options={researchAgentRepositoryOptions.map((r) => ({ value: r.id, label: `${r.name} (${r.id})` }))}
+                placeholder="None"
+                onChange={onDraftResearchAgentRepositoryIdChange}
+                disabled={!canEdit}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Suggest Goals — opt-in switch. When on, xyne-claw injects the
+          `suggest-goal` tool and a /goal-awareness primer into the agent's
+          context. At the end of a planning turn the agent can call the tool;
+          the user then sees a one-click "▶ Run autonomously as /goal" button
+          in the Spaces thread. Off by default (no behaviour change for
+          existing agents). Display when canEdit OR when already on, so
+          read-only viewers see the current setting on agents that have it
+          enabled. */}
+      {(canEdit || draftSuggestGoal) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Suggest Goals</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Let this agent propose autonomous <code className="text-xyne-fg-tertiary">/goal</code> loops. At the end of a multi-turn plan, the user sees a one-click button to run the work to completion (turn cap + judge enforced).
+                {" "}
+                <span className="text-xyne-fg-tertiary">Best for agents that handle long-horizon tasks (audits, sweeps, multi-PR reviews).</span>
+              </p>
+            </div>
+            {/* Checkbox styled as a switch — matches the visual weight of the
+                sandbox repository dropdown card above. */}
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftSuggestGoal}
+                onChange={(e) => onDraftSuggestGoalChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Suggest Goals"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftSuggestGoal ? "On" : "Off"}</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Always Goal — every user message becomes `/goal <text>` automatically.
+          Stronger than Suggest Goals: there's no choice surface, every reply
+          this agent gets is run as an autonomous loop. The user can still send
+          `/stop` or `/goal status` to control — those start with `/` and bypass
+          the wrap. Off by default; turning this on for a chat-style agent
+          would be a UX regression, so the help copy spells out the implications. */}
+      {(canEdit || draftAutoGoal) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Always Goal</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Run every message as a <code className="text-xyne-fg-tertiary">/goal</code> loop automatically. Each user reply becomes an autonomous turn budget — the agent works until the judge says done or the turn cap hits.
+                {" "}
+                <span className="text-xyne-fg-tertiary">Use only when the agent is purpose-built for autonomous execution (PR sweeps, scheduled audits). Users can still type <code className="text-xyne-fg-tertiary">/stop</code> to cancel mid-loop.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftAutoGoal}
+                onChange={(e) => onDraftAutoGoalChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Always Goal"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftAutoGoal ? "On" : "Off"}</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Verify Responses opt-in (agent.config.verifyResponses). The agent
+          delivers its final answer via the submit-response tool, which checks
+          the draft's factual claims (counts, dates, IDs) against the tool
+          evidence gathered this run before posting — a wrong claim is sent
+          back for correction. Adds one LLM call per response (more on a
+          rejection). Best for agents that report data; not for casual chat.
+          Off by default. Show when canEdit OR already on. */}
+      {activeTab === "behavior" && (canEdit || draftVerifyResponses) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Verify Responses</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Before the final answer is sent, check its factual claims (counts, dates, IDs, totals) against the tool results the agent gathered. A contradicted claim is sent back for correction.
+                {" "}
+                <span className="text-xyne-fg-tertiary">Adds one LLM call per response (more on a rejection). Best for agents that report data; skip for casual chat.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftVerifyResponses}
+                onChange={(e) => onDraftVerifyResponsesChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Verify Responses"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftVerifyResponses ? "On" : "Off"}</span>
+            </label>
+          </div>
+          {/* Per-agent delivery criteria — stacked on top of the default factual
+              check. Inverted rule: a stated requirement with no supporting
+              evidence is a FAILURE (e.g. "must post a POT video before claiming
+              done"). Only shown/saved when verification is on. */}
+          {draftVerifyResponses && (
+            <div className="mt-3 border-t border-xyne-border-subtle pt-3">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">
+                Delivery criteria <span className="font-normal normal-case text-xyne-fg-tertiary">(optional)</span>
+              </div>
+              <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Extra requirements the response MUST meet before it&apos;s delivered — checked against the run&apos;s evidence. Unlike the factual check above, a requirement with no proof is rejected. One per line.
+              </p>
+              <textarea
+                value={draftVerifyResponseCriteria}
+                onChange={(e) => onDraftVerifyResponseCriteriaChange(e.target.value)}
+                disabled={!canEdit}
+                rows={4}
+                placeholder={"e.g.\n- Must post a Proof-of-Testing video to the thread before claiming the fix is done.\n- Must include a PR link when it says a PR was opened."}
+                className="w-full resize-y rounded-md border border-xyne-border-subtle bg-xyne-surface px-2.5 py-2 text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-muted focus:border-xyne-border focus:outline-none disabled:opacity-60"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Citation reflection opt-in (agent.config.citationReflection). After the
+          agent answers, if it drew on citeable sources (search / KB / subagents
+          that emit [clf-…] tokens) but cited none, the runtime nudges it once to
+          rewrite with verbatim inline citations. Cheap (regex + ≤1 re-prompt, no
+          extra LLM judge call). Off by default. Show when canEdit OR already on. */}
+      {activeTab === "behavior" && (canEdit || draftCitationReflection) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Enforce Citations</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                After the answer is written, if the agent used citeable sources but cited none, nudge it once to rewrite with verbatim inline citations.
+                {" "}
+                <span className="text-xyne-fg-tertiary">Cheap — a token check plus at most one re-prompt; no extra LLM call. Best for agents that answer from retrieved data.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftCitationReflection}
+                onChange={(e) => onDraftCitationReflectionChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Enforce Citations"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftCitationReflection ? "On" : "Off"}</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-cite all tools (agent.config.autoToolCitations). Chunks EVERY tool
+          result that doesn't already self-cite and injects [clf-…] tokens so the
+          model can cite any output — every MCP, sandbox, and built-in tool. Tools
+          that emit their own citations are untouched. Off by default. */}
+      {activeTab === "behavior" && (canEdit || draftAutoToolCitations) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Auto-cite All Tools</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Chunk every tool result and inject inline citation tokens so the agent can cite any tool's output — every MCP, sandbox, and built-in tool.
+                {" "}
+                <span className="text-xyne-fg-tertiary">Tools that already emit their own citations are left untouched. Built-in file/shell output gets cited too.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftAutoToolCitations}
+                onChange={(e) => onDraftAutoToolCitationsChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Auto-cite All Tools"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftAutoToolCitations ? "On" : "Off"}</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Structured JSON output (agent.config.outputFormat). When on, xyne-claw
+          injects a `submit-result` tool whose input schema is the schema below
+          and requires the agent to deliver its final answer through it — the
+          agent still uses tools/reasoning normally, only the final answer is
+          constrained. Best for trigger/workflow/scheduled runs consumed by a
+          machine; in chat threads the reply is raw JSON. Off by default. */}
+      {activeTab === "behavior" && (canEdit || draftOutputFormatEnabled) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Structured Output</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Force the agent to deliver its final answer through a fixed format. The agent works normally (tools, reasoning); only the final answer is constrained.
+                {" "}
+                <span className="text-xyne-fg-tertiary">JSON suits machine consumers (workflows/triggers); Markdown renders natively in Spaces threads.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftOutputFormatEnabled}
+                onChange={(e) => onDraftOutputFormatEnabledChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Structured Output"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftOutputFormatEnabled ? "On" : "Off"}</span>
+            </label>
+          </div>
+
+          {draftOutputFormatEnabled && (
+            <div className="mt-3 space-y-3">
+              {/* Format type toggle */}
+              <div>
+                <label className="mb-1.5 block text-[11px] font-medium text-xyne-fg-secondary">Format</label>
+                <div className="inline-flex rounded-lg border border-xyne-border bg-xyne-surface-subtle p-0.5">
+                  {(["json", "markdown"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      disabled={!canEdit}
+                      onClick={() => onDraftOutputTypeChange(t)}
+                      className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors disabled:cursor-not-allowed ${
+                        draftOutputType === t
+                          ? "bg-xyne-surface text-xyne-fg-primary shadow-[0_1px_2px_rgba(16,24,40,0.08)]"
+                          : "text-xyne-fg-tertiary hover:text-xyne-fg-secondary"
+                      }`}
+                    >
+                      {t === "json" ? "JSON" : "Markdown"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Describe-in-plain-text → generate schema+template helper.
+                  Mirrors the "generate prompt" affordance: the user writes the
+                  shape they want in words; an LLM produces the contract and
+                  fills the fields below for review. */}
+              {canEdit && (
+                <div className="rounded-lg border border-dashed border-xyne-border bg-xyne-surface-subtle p-3">
+                  <label className="mb-1.5 block text-[11px] font-medium text-xyne-fg-secondary">
+                    Describe the output you want
+                  </label>
+                  <textarea
+                    value={outputGenInput}
+                    onChange={(e) => setOutputGenInput(e.target.value)}
+                    disabled={outputGenLoading}
+                    rows={2}
+                    placeholder={draftOutputType === "json"
+                      ? "e.g. A daily report: 5 KPIs each with a value and trend arrow, plus a 2-line summary"
+                      : "e.g. A short answer with a Summary heading, a bulleted Findings list, then Next steps"}
+                    className="w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2 text-[12px] text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)] disabled:opacity-60"
+                  />
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void runOutputGenerate()}
+                      disabled={outputGenLoading || !outputGenInput.trim()}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-xyne-fg-primary px-3 py-1.5 text-[12px] font-medium text-xyne-fg-inverse transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {outputGenLoading
+                        ? "Generating…"
+                        : (draftOutputSchema.trim() || draftOutputTemplate.trim()) ? "Regenerate from description" : "Generate"}
+                    </button>
+                    <span className="text-[11px] text-xyne-fg-tertiary">Fills the fields below — review before saving.</span>
+                  </div>
+                  {outputGenNotes && (
+                    <p className="mt-2 text-[11px] text-xyne-fg-secondary whitespace-pre-line">{outputGenNotes}</p>
+                  )}
+                  {outputGenWarnings.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {outputGenWarnings.map((w, i) => (
+                        <li key={i} className="text-[11px] text-amber-600 flex items-start gap-1">
+                          <span aria-hidden>⚠</span><span>{w}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {/* JSON: schema (required) + optional markdown render template */}
+              {draftOutputType === "json" && (
+                <>
+                  <div>
+                    <label className="mb-1.5 block text-[11px] font-medium text-xyne-fg-secondary">JSON Schema</label>
+                    <textarea
+                      value={draftOutputSchema}
+                      onChange={(e) => onDraftOutputSchemaChange(e.target.value)}
+                      disabled={!canEdit}
+                      rows={9}
+                      spellCheck={false}
+                      placeholder={'{\n  "type": "object",\n  "properties": {\n    "summary": { "type": "string" },\n    "severity": { "type": "string", "enum": ["low", "medium", "high"] }\n  },\n  "required": ["summary", "severity"]\n}'}
+                      className="w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)] disabled:opacity-60"
+                    />
+                    <p className="mt-1 text-[11px] text-xyne-fg-tertiary">
+                      Top-level <code className="text-xyne-fg-tertiary">type</code> is usually <code className="text-xyne-fg-tertiary">"object"</code>. Validated on save.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-[11px] font-medium text-xyne-fg-secondary">
+                      Markdown render template <span className="font-normal text-xyne-fg-tertiary">(optional)</span>
+                    </label>
+                    <textarea
+                      value={draftOutputTemplate}
+                      onChange={(e) => onDraftOutputTemplateChange(e.target.value)}
+                      disabled={!canEdit}
+                      rows={6}
+                      spellCheck={false}
+                      placeholder={'## {{summary}}\n\n**Severity:** {{severity}}\n\n{{#each findings}}\n- {{title}}: {{detail}}\n{{/each}}'}
+                      className="w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)] disabled:opacity-60"
+                    />
+                    <p className="mt-1 text-[11px] text-xyne-fg-tertiary">
+                      If set, the chat reply is this template rendered from the JSON ({"{{field}}"}, {"{{#each list}}…{{/each}}"}). Workflow/trigger consumers still get the raw JSON. Leave blank to show raw JSON in chat.
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* Markdown: optional structural outline */}
+              {draftOutputType === "markdown" && (
+                <div>
+                  <label className="mb-1.5 block text-[11px] font-medium text-xyne-fg-secondary">
+                    Outline <span className="font-normal text-xyne-fg-tertiary">(optional)</span>
+                  </label>
+                  <textarea
+                    value={draftOutputTemplate}
+                    onChange={(e) => onDraftOutputTemplateChange(e.target.value)}
+                    disabled={!canEdit}
+                    rows={8}
+                    spellCheck={false}
+                    placeholder={'## Summary\n<one-line summary>\n\n## Findings\n<bulleted list>\n\n## Next steps\n<numbered list>'}
+                    className="w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)] disabled:opacity-60"
+                  />
+                  <p className="mt-1 text-[11px] text-xyne-fg-tertiary">
+                    The agent writes its final answer as Markdown (Spaces renders it). This outline shapes the structure — leave blank to let the agent decide.
+                  </p>
+                </div>
+              )}
+
+              {/* Process guard — required tools before submit. Applies to both
+                  json and markdown modes. Stops the agent short-circuiting a
+                  multi-step pipeline by submitting an empty/placeholder result
+                  without first running its data-gathering tools. */}
+              <div>
+                <label className="mb-1.5 block text-[11px] font-medium text-xyne-fg-secondary">
+                  Required tools before submit <span className="font-normal text-xyne-fg-tertiary">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={draftOutputRequireTools}
+                  onChange={(e) => onDraftOutputRequireToolsChange(e.target.value)}
+                  disabled={!canEdit}
+                  spellCheck={false}
+                  placeholder={'user-tickets, sandbox-run'}
+                  className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)] disabled:opacity-60"
+                />
+                <p className="mt-1 text-[11px] text-xyne-fg-tertiary">
+                  Comma- or newline-separated tool-name fragments that MUST run before the agent can deliver. The agent is blocked from submitting an empty or placeholder result until each has been called (matched as a case-insensitive substring, so <code>sandbox-run</code> matches the sandbox tool). Leave blank for no guard.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      </div>
+      )}
+      </div>
+
       {/* Delete moved to the page header (owner-only Trash button there) so
-          it's reachable without scrolling to the bottom of the config.
-          Git URL and Model deliberately omitted — see notes at top of file. */}
+          it's reachable without scrolling to the bottom of the config. */}
       </div>
       </div>
     </div>
