@@ -55,6 +55,14 @@ interface BoardStageConfigScreenProps {
   initialBoard?: unknown; // Optional board data to avoid Zero sync delay
 }
 
+interface ConditionDeleteDialogState {
+  kind: 'confirm' | 'blocked';
+  conditionId: string;
+  conditionName: string;
+  targetStageName?: string;
+  openRequestCount: number;
+}
+
 const getStatusBgColor = (status: TicketStatusV2): string => {
   switch (status) {
     case TicketStatusV2.TODO:
@@ -82,25 +90,42 @@ const getBoardMetadata = (board: unknown): Record<string, unknown> =>
     ? ((board as { metadata?: Record<string, unknown> }).metadata ?? {})
     : {};
 
+const PREFILLABLE_NON_LINEAR_UNSUPPORTED_MESSAGE =
+  'Non-linear boards do not support prefillable forms. Turn off prefillable forms before enabling non-linear board.';
+
 const ToggleSwitch = ({
   checked,
   onToggle,
   trackName,
+  disabled = false,
+  disabledReason,
+  onDisabledToggle,
 }: {
   checked: boolean;
   onToggle: () => void;
   trackName: string;
+  disabled?: boolean;
+  disabledReason?: string;
+  onDisabledToggle?: () => void;
 }): ReactElement => (
   <button
     type='button'
     role='switch'
     aria-checked={checked}
-    onClick={onToggle}
+    aria-disabled={disabled}
+    title={disabled ? disabledReason : undefined}
+    onClick={() => {
+      if (disabled) {
+        onDisabledToggle?.();
+        return;
+      }
+      onToggle();
+    }}
     data-track-category='board_config'
     data-track-name={trackName}
-    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-      checked ? 'bg-[#6276be]' : 'bg-muted'
-    }`}
+    className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+      disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+    } ${checked ? 'bg-[#6276be]' : 'bg-muted'}`}
   >
     <span
       className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-sm transition-transform duration-200 ${
@@ -510,13 +535,27 @@ const BoardStageConfigScreen = ({
         readonly formId: string;
         readonly contextId: string;
         readonly contextType: string;
+        readonly form?: {
+          readonly id: string;
+          readonly formName?: string | null;
+        } | null;
       }[];
     }[];
   }, [board]);
 
   // Fetch forms list (lightweight - only scalar fields for name lookup)
   const [allForms] = useCachedQuery(queries.getAllFormsList());
-  const formMap = useMemo(() => new Map(allForms?.map(f => [f.id, f.formName]) || []), []);
+  const formMap = useMemo(() => {
+    const map = new Map(allForms?.map(f => [f.id, f.formName]) || []);
+    boardStages.forEach(stage => {
+      stage.formContextMappings?.forEach(mapping => {
+        if (mapping.formId && mapping.form?.formName) {
+          map.set(mapping.formId, mapping.form.formName);
+        }
+      });
+    });
+    return map;
+  }, [allForms, boardStages]);
   const stageFormsList = useMemo(
     () =>
       (allForms ?? [])
@@ -532,6 +571,9 @@ const BoardStageConfigScreen = ({
   const [isConditionModalOpen, setIsConditionModalOpen] = useState(false);
   const [selectedStageForCondition, setSelectedStageForCondition] = useState<number | null>(null);
   const [editingCondition, setEditingCondition] = useState<StageCondition | null>(null);
+  const [conditionDeleteDialog, setConditionDeleteDialog] =
+    useState<ConditionDeleteDialogState | null>(null);
+  const [isCheckingConditionDelete, setIsCheckingConditionDelete] = useState(false);
 
   // ── Create Form Panel State ──────────────────────────────────────────────────
   const [isCreateFormOpen, setIsCreateFormOpen] = useState(false);
@@ -578,8 +620,30 @@ const BoardStageConfigScreen = ({
   // Typed as the non-nullable union so comparisons against 'priority' are unambiguous.
   const [slaPolicyType, setSlaPolicyType] = useState<'stages' | 'priority'>('stages');
 
+  const [showNextStageFormInTicketDetails, setShowNextStageFormInTicketDetails] = useState(false);
+
   // ── Board Type Toggle ────────────────────────────────────────────────────────
   const [boardType, setBoardType] = useState<BoardType>(BoardType.DEFAULT);
+  const isNonLinearToggleBlocked =
+    boardType !== BoardType.NON_LINEAR && showNextStageFormInTicketDetails;
+
+  const showNonLinearPrefillableUnsupportedToast = useCallback(() => {
+    toast.error('Non-linear boards do not support prefillable forms', {
+      description: 'Turn off prefillable forms before enabling non-linear board.',
+      duration: 5000,
+    });
+  }, []);
+
+  const handleBoardTypeToggle = useCallback(() => {
+    if (isNonLinearToggleBlocked) {
+      showNonLinearPrefillableUnsupportedToast();
+      return;
+    }
+
+    setBoardType(current =>
+      current === BoardType.NON_LINEAR ? BoardType.DEFAULT : BoardType.NON_LINEAR,
+    );
+  }, [isNonLinearToggleBlocked, showNonLinearPrefillableUnsupportedToast]);
 
   // ── Edge form state (non-linear boards) ─────────────────────────────────────
   // Which edge has a form being created/edited
@@ -670,6 +734,32 @@ const BoardStageConfigScreen = ({
   const [etaValue, setEtaValue] = useState('');
   const etaInputRef = useRef<HTMLInputElement>(null);
 
+  const getConditionTargetStage = useCallback(
+    (condition: StageCondition): Stage | undefined => {
+      if (condition.thenField === 'form') {
+        const targetStageName = condition.whenValue;
+        const formId = condition.thenValue;
+        return stages.find(stage => stage.name === targetStageName || stage.formId === formId);
+      }
+
+      if (condition.whenField === 'pr_status' && condition.thenField === 'status') {
+        return stages.find(stage => stage.name === condition.thenValue);
+      }
+
+      if (condition.thenField === 'approver') {
+        if (condition.whenField === 'status') {
+          return stages.find(stage => stage.name === condition.whenValue);
+        }
+        if (condition.whenField === 'form') {
+          return stages.find(stage => stage.formId === condition.whenValue);
+        }
+      }
+
+      return undefined;
+    },
+    [stages],
+  );
+
   // Reset initialization flag when board ID changes
   useEffect(() => {
     if (boardId) {
@@ -681,6 +771,10 @@ const BoardStageConfigScreen = ({
   useEffect(() => {
     if (board && typeof board === 'object' && 'metadata' in board) {
       const metadata = board.metadata as Record<string, unknown>;
+      const loadedBoardType =
+        'boardType' in board
+          ? ((board as { boardType?: BoardType }).boardType ?? BoardType.DEFAULT)
+          : BoardType.DEFAULT;
       if (metadata?.['fullRoleAssignment'] !== undefined) {
         setFullRoleAssignment(Boolean(metadata['fullRoleAssignment']));
       }
@@ -689,10 +783,11 @@ const BoardStageConfigScreen = ({
       } else {
         setSlaPolicyType('stages');
       }
-      if (board && typeof board === 'object' && 'boardType' in board) {
-        const boardObj = board as { boardType?: BoardType };
-        setBoardType(boardObj.boardType ?? BoardType.DEFAULT);
-      }
+      setShowNextStageFormInTicketDetails(
+        loadedBoardType !== BoardType.NON_LINEAR &&
+          Boolean(metadata?.['showNextStageFormInTicketDetails']),
+      );
+      setBoardType(loadedBoardType);
     }
   }, [board]);
 
@@ -1111,57 +1206,137 @@ const BoardStageConfigScreen = ({
     [selectedStageForCondition],
   );
 
-  const handleDeleteCondition = useCallback(
-    (conditionId: string) => {
-      if (selectedStageForCondition === null) return;
+  const deleteConditionFromStages = useCallback((conditionId: string) => {
+    setStages(prev => {
+      let conditionToDelete: StageCondition | undefined;
 
-      setStages(prev => {
-        // Find the condition being deleted to determine what to clean up
-        const stageWithCondition = prev.find(s => s.tempId === selectedStageForCondition);
-        const conditionToDelete = stageWithCondition?.conditions.find(c => c.id === conditionId);
+      for (const stage of prev) {
+        conditionToDelete = stage.conditions.find(c => c.id === conditionId);
+        if (conditionToDelete) break;
+      }
 
-        return prev.map(stage => {
-          // Remove condition from the current stage
-          if (stage.tempId === selectedStageForCondition) {
+      if (!conditionToDelete) return prev;
+
+      return prev.map(stage => {
+        if (stage.conditions.some(c => c.id === conditionId)) {
+          stage = {
+            ...stage,
+            conditions: stage.conditions.filter(c => c.id !== conditionId),
+          };
+        }
+
+        if (conditionToDelete.whenField === 'status' && conditionToDelete.thenField === 'form') {
+          const nextStageName = conditionToDelete.whenValue;
+          const formId = conditionToDelete.thenValue;
+          if (stage.name === nextStageName || stage.formId === formId) {
+            const { formId: _, ...restStage } = stage;
+            stage = restStage;
+          }
+        }
+
+        if (
+          conditionToDelete.whenField === 'pr_status' &&
+          conditionToDelete.thenField === 'status'
+        ) {
+          const targetStageName = conditionToDelete.thenValue;
+          const prStatus = conditionToDelete.whenValue;
+          if (stage.name === targetStageName && stage.prStatuses) {
             stage = {
               ...stage,
-              conditions: (stage.conditions || []).filter(c => c.id !== conditionId),
+              prStatuses: stage.prStatuses.filter(ps => ps !== prStatus),
             };
           }
+        }
 
-          // If deleting a form condition, remove formId from the target stage
+        if (conditionToDelete.thenField === 'approver') {
+          const nextStageName =
+            conditionToDelete.whenField === 'status' ? conditionToDelete.whenValue : undefined;
+          const formId =
+            conditionToDelete.whenField === 'form' ? conditionToDelete.whenValue : undefined;
           if (
-            conditionToDelete?.whenField === 'status' &&
-            conditionToDelete?.thenField === 'form'
+            (nextStageName && stage.name === nextStageName) ||
+            (formId && stage.formId === formId)
           ) {
-            const nextStageName = conditionToDelete.whenValue;
-            if (stage.name === nextStageName) {
-              const { formId: _, ...restStage } = stage;
-              stage = restStage;
-            }
+            stage = {
+              ...stage,
+              approvers: [],
+            };
           }
+        }
 
-          // If deleting a PR status condition, remove prStatus from the target stage
-          if (
-            conditionToDelete?.whenField === 'pr_status' &&
-            conditionToDelete?.thenField === 'status'
-          ) {
-            const targetStageName = conditionToDelete.thenValue;
-            const prStatus = conditionToDelete.whenValue;
-            if (stage.name === targetStageName && stage.prStatuses) {
-              stage = {
-                ...stage,
-                prStatuses: stage.prStatuses.filter(ps => ps !== prStatus),
-              };
-            }
-          }
+        return stage;
+      });
+    });
+  }, []);
 
-          return stage;
-        });
+  const handleDeleteCondition = useCallback(
+    (conditionId: string) => {
+      const conditionToDelete = stages
+        .flatMap(stage => stage.conditions)
+        .find(condition => condition.id === conditionId);
+
+      if (!conditionToDelete) return;
+
+      const targetStage = getConditionTargetStage(conditionToDelete);
+      setConditionDeleteDialog({
+        kind: 'confirm',
+        conditionId,
+        conditionName: conditionToDelete.name || 'this condition',
+        openRequestCount: 0,
+        ...(targetStage?.name && { targetStageName: targetStage.name }),
       });
     },
-    [selectedStageForCondition],
+    [getConditionTargetStage, stages],
   );
+
+  const handleConfirmDeleteCondition = useCallback(() => {
+    if (!conditionDeleteDialog || conditionDeleteDialog.kind !== 'confirm') return;
+
+    const conditionToDelete = stages
+      .flatMap(stage => stage.conditions)
+      .find(condition => condition.id === conditionDeleteDialog.conditionId);
+
+    if (!conditionToDelete) {
+      setConditionDeleteDialog(null);
+      return;
+    }
+
+    const targetStage = getConditionTargetStage(conditionToDelete);
+    if (!targetStage?.id) {
+      deleteConditionFromStages(conditionDeleteDialog.conditionId);
+      setConditionDeleteDialog(null);
+      return;
+    }
+
+    setIsCheckingConditionDelete(true);
+    void zero
+      .run(queries.getOpenTicketStageRequestsByStageId({ stageId: targetStage.id }), {
+        type: 'complete',
+      })
+      .then(openRequests => {
+        const openRequestCount = Array.isArray(openRequests) ? openRequests.length : 0;
+        if (openRequestCount > 0) {
+          setConditionDeleteDialog({
+            kind: 'blocked',
+            conditionId: conditionDeleteDialog.conditionId,
+            conditionName: conditionDeleteDialog.conditionName,
+            openRequestCount,
+            ...(targetStage.name && { targetStageName: targetStage.name }),
+          });
+          return;
+        }
+
+        deleteConditionFromStages(conditionDeleteDialog.conditionId);
+        setConditionDeleteDialog(null);
+      })
+      .catch(error => {
+        console.error('Failed to check pending stage requests:', error);
+        toast.error('Could not check pending approvals', {
+          description: 'Please try again before deleting this condition.',
+        });
+      })
+      .finally(() => setIsCheckingConditionDelete(false));
+  }, [conditionDeleteDialog, deleteConditionFromStages, getConditionTargetStage, stages, zero]);
 
   // ── Create Form Panel Handlers ───────────────────────────────────────────────
   const handleOpenCreateForm = useCallback((condition?: StageCondition) => {
@@ -1737,6 +1912,7 @@ const BoardStageConfigScreen = ({
           ...existingMetadata,
           fullRoleAssignment,
           slaPolicyType,
+          ...(boardType !== BoardType.NON_LINEAR && { showNextStageFormInTicketDetails }),
         },
         boardType,
         timestamp: Date.now(),
@@ -1746,6 +1922,56 @@ const BoardStageConfigScreen = ({
         ...(stageFormMappings.length > 0 && { stageFormMappings }),
         ...(stageApprovers.length > 0 && { stageApprovers }),
       };
+
+      const desiredTransitions: Array<{
+        fromStageId: string | null;
+        toStageId: string;
+        formId?: string | null;
+        requiresApproval?: boolean;
+        approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
+        visitSlaMode?: string;
+        fixedEtaHours?: number | null;
+        onReenter?: string;
+      }> = [];
+
+      for (const [fromTempId, targetTempIds] of transitionsByTempId.entries()) {
+        const fromStage = stages.find(s => s.tempId === fromTempId);
+        const fromStageId = fromStage?.id || stageIds[String(fromStage?.sequenceNumber)];
+        if (!fromStageId) continue;
+
+        for (const toTempId of targetTempIds) {
+          const toStage = stages.find(s => s.tempId === toTempId);
+          const toStageId = toStage?.id || stageIds[String(toStage?.sequenceNumber)];
+          if (!toStageId || toStageId === fromStageId) continue;
+
+          const meta = transitionsMeta.get(`${fromTempId}->${toTempId}`);
+          desiredTransitions.push({
+            fromStageId,
+            toStageId,
+            ...(meta?.formId !== undefined && { formId: meta.formId }),
+            ...(meta?.requiresApproval !== undefined && {
+              requiresApproval: meta.requiresApproval,
+            }),
+            ...(meta?.approvers !== undefined && {
+              approvers: meta.approvers,
+            }),
+            ...(meta?.visitSlaMode !== undefined && { visitSlaMode: meta.visitSlaMode }),
+            ...(meta?.fixedEtaHours !== undefined && { fixedEtaHours: meta.fixedEtaHours }),
+            ...(meta?.onReenter !== undefined && { onReenter: meta.onReenter }),
+          });
+        }
+      }
+
+      const invalidApprovalTransitions = desiredTransitions.filter(
+        t => t.requiresApproval && !t.approvers?.length,
+      );
+      if (invalidApprovalTransitions.length > 0) {
+        toast.error('Some transitions require approval but have no approvers assigned.', {
+          description:
+            'Please add at least one approver to each approval-required transition before saving.',
+        });
+        return;
+      }
 
       const result = zero.mutate(mutators.board.update(mutatorArgs));
       const res = await result.server;
@@ -1758,59 +1984,6 @@ const BoardStageConfigScreen = ({
       } else {
         // Sync stage transitions for all board types
         try {
-          const desiredTransitions: Array<{
-            fromStageId: string | null;
-            toStageId: string;
-            formId?: string | null;
-            requiresApproval?: boolean;
-            approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
-            visitSlaMode?: string;
-            fixedEtaHours?: number | null;
-            onReenter?: string;
-          }> = [];
-
-          // Forms, approvers and SLA on NON_LINEAR boards are EDGE-specific: every gate lives on
-          // a concrete fromStage→toStage transition, so a form/approval only fires for that
-          // specific edge rather than when entering a stage from any source.
-          for (const [fromTempId, targetTempIds] of transitionsByTempId.entries()) {
-            const fromStage = stages.find(s => s.tempId === fromTempId);
-            const fromStageId = fromStage?.id || stageIds[String(fromStage?.sequenceNumber)];
-            if (!fromStageId) continue;
-
-            for (const toTempId of targetTempIds) {
-              const toStage = stages.find(s => s.tempId === toTempId);
-              const toStageId = toStage?.id || stageIds[String(toStage?.sequenceNumber)];
-              if (!toStageId || toStageId === fromStageId) continue;
-
-              const meta = transitionsMeta.get(`${fromTempId}->${toTempId}`);
-              desiredTransitions.push({
-                fromStageId,
-                toStageId,
-                ...(meta?.formId !== undefined && { formId: meta.formId }),
-                ...(meta?.requiresApproval !== undefined && {
-                  requiresApproval: meta.requiresApproval,
-                }),
-                ...(meta?.approvers !== undefined && {
-                  approvers: meta.approvers,
-                }),
-                ...(meta?.visitSlaMode !== undefined && { visitSlaMode: meta.visitSlaMode }),
-                ...(meta?.fixedEtaHours !== undefined && { fixedEtaHours: meta.fixedEtaHours }),
-                ...(meta?.onReenter !== undefined && { onReenter: meta.onReenter }),
-              });
-            }
-          }
-
-          const invalidApprovalTransitions = desiredTransitions.filter(
-            t => t.requiresApproval && !t.approvers?.length,
-          );
-          if (invalidApprovalTransitions.length > 0) {
-            toast.error('Some transitions require approval but have no approvers assigned.', {
-              description:
-                'Please add at least one approver to each approval-required transition before saving.',
-            });
-            return;
-          }
-
           const transitionsWithIds = desiredTransitions.map(t => ({
             id: uuidv4(),
             fromStageId: t.fromStageId ?? null,
@@ -1849,6 +2022,7 @@ const BoardStageConfigScreen = ({
             description: `${errMsg}. Please reopen board settings and save transitions again.`,
             duration: 8000,
           });
+          return;
         }
         toast.success('Board stages updated successfully');
         if (onNext) {
@@ -1874,6 +2048,7 @@ const BoardStageConfigScreen = ({
     zero,
     fullRoleAssignment,
     slaPolicyType,
+    showNextStageFormInTicketDetails,
     boardType,
     transitionsByTempId,
     transitionsMeta,
@@ -1987,6 +2162,28 @@ const BoardStageConfigScreen = ({
             )}
           </div>
 
+          {boardType !== BoardType.NON_LINEAR && (
+            <div className='px-6 py-3 border-t border-border'>
+              <div className='flex items-center justify-between gap-4'>
+                <div className='flex items-center gap-2 min-w-0'>
+                  <Pencil size={14} className='text-muted-foreground flex-shrink-0' />
+                  <span className='text-[13px] font-medium text-foreground whitespace-nowrap'>
+                    Prefillable forms
+                  </span>
+                  <span className='text-[12px] text-muted-foreground truncate hidden sm:block'>
+                    When enabled, tickets can fill the next stage form before moving stages (This
+                    will be showed in ticket details page)
+                  </span>
+                </div>
+                <ToggleSwitch
+                  checked={showNextStageFormInTicketDetails}
+                  onToggle={() => setShowNextStageFormInTicketDetails(value => !value)}
+                  trackName='toggle_next_stage_form_ticket_details'
+                />
+              </div>
+            </div>
+          )}
+
           {/* ── Board Type Toggle ── */}
           <div className='px-6 py-3 border-t border-border'>
             <div className='flex items-center justify-between gap-4'>
@@ -1999,15 +2196,21 @@ const BoardStageConfigScreen = ({
                   When enabled, ticket stage movements are controlled by explicit transitions
                 </span>
               </div>
-              <ToggleSwitch
-                checked={boardType === BoardType.NON_LINEAR}
-                onToggle={() =>
-                  setBoardType(
-                    boardType === BoardType.NON_LINEAR ? BoardType.DEFAULT : BoardType.NON_LINEAR,
-                  )
+              <span
+                className='inline-flex'
+                title={
+                  isNonLinearToggleBlocked ? PREFILLABLE_NON_LINEAR_UNSUPPORTED_MESSAGE : undefined
                 }
-                trackName='toggle_non_linear_board'
-              />
+              >
+                <ToggleSwitch
+                  checked={boardType === BoardType.NON_LINEAR}
+                  onToggle={handleBoardTypeToggle}
+                  disabled={isNonLinearToggleBlocked}
+                  disabledReason={PREFILLABLE_NON_LINEAR_UNSUPPORTED_MESSAGE}
+                  onDisabledToggle={showNonLinearPrefillableUnsupportedToast}
+                  trackName='toggle_non_linear_board'
+                />
+              </span>
             </div>
           </div>
 
@@ -2206,6 +2409,56 @@ const BoardStageConfigScreen = ({
                     : {})}
                   title={edgeEditFormId ? 'Edit Transition Form' : 'Configure Transition Form'}
                 />
+              </div>
+            )}
+            {conditionDeleteDialog && (
+              <div className='fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4'>
+                <div className='w-full max-w-[420px] rounded-lg border border-border bg-background p-5 shadow-xl'>
+                  <h2 className='text-base font-semibold text-foreground'>
+                    {conditionDeleteDialog.kind === 'blocked'
+                      ? 'Cannot delete condition'
+                      : 'Delete condition?'}
+                  </h2>
+                  <p className='mt-2 text-sm leading-5 text-muted-foreground'>
+                    {conditionDeleteDialog.kind === 'blocked'
+                      ? `There ${
+                          conditionDeleteDialog.openRequestCount === 1 ? 'is' : 'are'
+                        } ${conditionDeleteDialog.openRequestCount} pending approval ${
+                          conditionDeleteDialog.openRequestCount === 1 ? 'request' : 'requests'
+                        }${
+                          conditionDeleteDialog.targetStageName
+                            ? ` for ${conditionDeleteDialog.targetStageName}`
+                            : ''
+                        }. Close all pending approvals before deleting this condition.`
+                      : `Are you sure you want to delete "${conditionDeleteDialog.conditionName}"?`}
+                  </p>
+                  <div className='mt-5 flex justify-end gap-2'>
+                    <Button
+                      variant='secondary'
+                      onClick={() => setConditionDeleteDialog(null)}
+                      data-track-category='board_config'
+                      data-track-name={
+                        conditionDeleteDialog.kind === 'blocked'
+                          ? 'close_condition_delete_blocked'
+                          : 'cancel_condition_delete_confirm'
+                      }
+                    >
+                      {conditionDeleteDialog.kind === 'blocked' ? 'Close' : 'Cancel'}
+                    </Button>
+                    {conditionDeleteDialog.kind === 'confirm' && (
+                      <Button
+                        variant='default'
+                        onClick={handleConfirmDeleteCondition}
+                        disabled={isCheckingConditionDelete}
+                        className='bg-red-600 text-white hover:bg-red-700'
+                        data-track-category='board_config'
+                        data-track-name='confirm_condition_delete'
+                      >
+                        {isCheckingConditionDelete ? 'Checking...' : 'Delete'}
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>

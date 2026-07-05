@@ -1,7 +1,7 @@
-import React, { useRef, useState } from 'react';
-import { Upload } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { FileText, Upload } from 'lucide-react';
 import { useSelector } from '@xstate/react';
-import { AttachmentPreview } from '../../ui/files/AttachmentPreview';
+import { MediaViewer } from '../../ui/files/MediaViewer';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import {
   attachmentViewerActor,
@@ -13,13 +13,8 @@ import Button from '../../ui/Button';
 
 interface StageFormDocFieldProps {
   fieldId: string;
-  // Persisted (claimed) attachment from the parent's getFormEntityValuesByEntityId
-  // query, joined via the `attachments` relation on form_entity_values. Renders
-  // the chat-style preview + click-to-open viewer when present.
   existingAttachment?: MessageAttachmentRow | undefined;
-  // Called when the user picks a new file (provides File) or removes the
-  // current selection (provides undefined). The parent tracks these and
-  // uploads pending files at submit time — no DB writes happen here.
+  existingAttachmentId?: string | undefined;
   onLocalChange: (file: File | undefined) => void;
   disabled?: boolean;
   readOnly?: boolean;
@@ -28,15 +23,25 @@ interface StageFormDocFieldProps {
 export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
   fieldId,
   existingAttachment,
+  existingAttachmentId,
   onLocalChange,
   disabled = false,
   readOnly = false,
 }) => {
-  // Local-only file state. No upload happens here — the file lives in memory
-  // until the user clicks Submit in the parent modal, at which point the parent
-  // POSTs it to /attachments/upload directly bound to a FormEntityValues row.
   const [localFile, setLocalFile] = useState<File | undefined>();
+  const [localFileUrl, setLocalFileUrl] = useState<string | null>(null);
+  const [localViewerOpen, setLocalViewerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!localFile || !localFile.type.startsWith('image/')) {
+      setLocalFileUrl(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(localFile);
+    setLocalFileUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [localFile]);
 
   const isViewerOpen = useSelector(
     attachmentViewerActor,
@@ -87,39 +92,71 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
     />
   );
 
-  // Local file picked this session takes precedence — render its preview from
-  // the browser File directly. No upload yet, so no MessageAttachment row.
   if (localFile) {
     return (
       <div className='space-y-2'>
-        <AttachmentPreview
-          file={localFile}
-          onRemove={() => {
-            if (!readOnly && !disabled) handleRemove();
-          }}
-          isUploading={false}
-          variant='detailed'
-        />
+        <button
+          type='button'
+          className='w-full text-left p-3 bg-card hover:bg-accent rounded-xl border border-border shadow-sm transition cursor-pointer'
+          onClick={() => setLocalViewerOpen(true)}
+          data-track-category='Tickets'
+          data-track-name='StageFormDocFieldOpenLocalPreview'
+          data-track-metadata={JSON.stringify({ fieldId })}
+        >
+          <div className='flex items-center gap-3'>
+            {localFileUrl ? (
+              <img
+                src={localFileUrl}
+                alt={localFile.name}
+                className='h-16 w-16 shrink-0 rounded-md object-cover'
+              />
+            ) : (
+              <div className='flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-muted'>
+                <FileText size={20} className='text-muted-foreground' />
+              </div>
+            )}
+            <div className='flex flex-col min-w-0'>
+              <span className='font-medium text-sm text-foreground truncate'>{localFile.name}</span>
+              <span className='text-xs text-muted-foreground'>{localFile.type || 'Document'}</span>
+            </div>
+          </div>
+        </button>
         {!readOnly && !disabled && (
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            onClick={openPicker}
-            data-track-category='Tickets'
-            data-track-name='StageFormDocFieldReplace'
-            data-track-metadata={JSON.stringify({ fieldId })}
-          >
-            Replace document
-          </Button>
+          <div className='flex gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={openPicker}
+              data-track-category='Tickets'
+              data-track-name='StageFormDocFieldReplace'
+              data-track-metadata={JSON.stringify({ fieldId })}
+            >
+              Replace document
+            </Button>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={handleRemove}
+              data-track-category='Tickets'
+              data-track-name='StageFormDocFieldRemoveLocal'
+              data-track-metadata={JSON.stringify({ fieldId })}
+            >
+              Remove
+            </Button>
+          </div>
         )}
+        <MediaViewer
+          file={localFile}
+          isOpen={localViewerOpen}
+          onClose={() => setLocalViewerOpen(false)}
+        />
         {hiddenInput}
       </div>
     );
   }
 
-  // Persisted attachment from prior submission — chat-style preview with
-  // click-to-open viewer (mirrors FileBubble's pattern).
   if (existingAttachment) {
     return (
       <div className='space-y-2'>
@@ -176,6 +213,53 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
     );
   }
 
+  if (existingAttachmentId) {
+    return (
+      <div className='space-y-2'>
+        <div className='w-full rounded-xl border border-border bg-card p-3 text-left shadow-sm'>
+          <div className='flex items-center gap-3'>
+            <FileText size={18} className='shrink-0 text-muted-foreground' />
+            <div className='flex min-w-0 flex-col'>
+              <span className='truncate text-sm font-medium text-foreground'>
+                Uploaded document
+              </span>
+              <span className='truncate text-xs text-muted-foreground'>
+                Loading file details...
+              </span>
+            </div>
+          </div>
+        </div>
+        {!readOnly && !disabled && (
+          <div className='flex gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={openPicker}
+              data-track-category='Tickets'
+              data-track-name='StageFormDocFieldReplace'
+              data-track-metadata={JSON.stringify({ fieldId })}
+            >
+              Replace document
+            </Button>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={handleRemove}
+              data-track-category='Tickets'
+              data-track-name='StageFormDocFieldRemovePersisted'
+              data-track-metadata={JSON.stringify({ fieldId })}
+            >
+              Remove
+            </Button>
+          </div>
+        )}
+        {hiddenInput}
+      </div>
+    );
+  }
+
   if (readOnly || disabled) {
     return <div className='text-sm text-muted-foreground italic'>No document uploaded</div>;
   }
@@ -197,5 +281,3 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
     </>
   );
 };
-
-export default StageFormDocField;

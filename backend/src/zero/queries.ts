@@ -27,6 +27,7 @@ import {
   Status,
   ProjectType,
   TicketPriority,
+  TicketStageRequestStatus,
   TicketStatusV2,
   TicketReferenceRelation,
   DelayedMessageStatus,
@@ -2727,6 +2728,18 @@ export const queries = defineQueries({
         .orderBy('createdAt', 'desc');
     },
   ),
+  attachmentsByIds: defineQuery(
+    z.object({ attachmentIds: z.array(z.string()) }),
+    ({ args: { attachmentIds } }) => {
+      if (attachmentIds.length === 0) {
+        return zql.message_attachments.where('id', '__none__');
+      }
+      return zql.message_attachments
+        .where('entityType', AttachmentEntityType.FORM_ENTITY_VALUE)
+        .where('isDeleted', false)
+        .where(helpers => helpers.or(...attachmentIds.map(id => helpers.cmp('id', '=', id))));
+    },
+  ),
   channelConversationsPaginated: defineQuery(
     z.object({
       channelId: z.string(),
@@ -3562,6 +3575,19 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .where('ticketId', ticketId)
         .related('reviewerCommentMessage')
         .orderBy('createdAt', 'desc');
+    },
+  ),
+  getOpenTicketStageRequestsByStageId: defineQuery(
+    z.object({ stageId: z.string() }),
+    ({ args: { stageId } }) => {
+      return zql.ticket_stage_requests
+        .where('stageId', stageId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('status', '=', TicketStageRequestStatus.DRAFT),
+            helpers.cmp('status', '=', TicketStageRequestStatus.SUBMITTED),
+          )
+        );
     },
   ),
 

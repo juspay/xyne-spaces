@@ -11,3 +11,6 @@ export const isReleaseTicket = (ticketType?: BaseTicketType | null): boolean => 
 
     return ticketType === BaseTicketType.Release || ticketType === BaseTicketType.Hotfix;
 }
+
+export const stringFromFormValue = (value: unknown): string | null =>
+  typeof value === 'string' && value.length > 0 ? value : null;

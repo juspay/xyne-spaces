@@ -28,6 +28,8 @@ import { TicketPriorityIcon } from '../../../assets/icons';
 import { TicketStatusIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
 import { formatPRActivityParts } from '../../../utils/activityFormatter';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 
 type FormValueEntry = {
   id: string;
@@ -65,10 +67,17 @@ type ActivityValue = Partial<
     SubticketActivityValue & {
       fieldName?: string;
       reason?: string;
+      stageName?: string;
+      oldFilename?: string;
+      newFilename?: string;
     }
 >;
 
 type SortOrder = 'newest' | 'oldest';
+
+const isPotentialAttachmentId = (value: string): boolean =>
+  /^c[a-z0-9]{20,}$/i.test(value) ||
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 const formatTimestamp = (timestamp: number | Date): string => {
   try {
@@ -84,6 +93,7 @@ const getActivityDescription = (
   users: User[] | undefined,
   boards?: { id: string; name: string }[],
   userGroups?: UserGroup[],
+  customFieldAttachmentFilenameById?: ReadonlyMap<string, string>,
 ): { description: string; details: ReactNode; hideActorName?: boolean } => {
   const value = activity.value as ActivityValue | null;
   const referenceTitle =
@@ -277,10 +287,42 @@ const getActivityDescription = (
     }
 
     case ActivityType.METADATA:
+      if (value?.field === 'stageFormFile') {
+        const fieldLabel = value.fieldName || 'file';
+        const filename = value.newFilename || value.oldFilename || 'file';
+        const stageSuffix = value.stageName ? ` in ${value.stageName} form` : '';
+        const action = value.action;
+
+        if (action === 'removed') {
+          return {
+            description: `removed file from ${fieldLabel}${stageSuffix}`,
+            details: <span className='font-semibold'>{filename}</span>,
+          };
+        }
+
+        if (action === 'updated') {
+          return {
+            description: `replaced file in ${fieldLabel}${stageSuffix}`,
+            details: <span className='font-semibold'>{filename}</span>,
+          };
+        }
+
+        return {
+          description: `uploaded file to ${fieldLabel}${stageSuffix}`,
+          details: <span className='font-semibold'>{filename}</span>,
+        };
+      }
+
       if (value?.field === 'customField') {
         const fieldLabel = value?.fieldName || 'custom field';
-        const oldValue = value?.oldValue;
-        const newValue = value?.newValue;
+        const oldValue =
+          typeof value?.oldValue === 'string'
+            ? (customFieldAttachmentFilenameById?.get(value.oldValue) ?? value.oldValue)
+            : value?.oldValue;
+        const newValue =
+          typeof value?.newValue === 'string'
+            ? (customFieldAttachmentFilenameById?.get(value.newValue) ?? value.newValue)
+            : value?.newValue;
 
         if (oldValue && newValue) {
           return {
@@ -498,6 +540,11 @@ const getActivityDescription = (
 };
 
 export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
+  const value = activity.value as ActivityValue | null;
+  if (activity.activityType === ActivityType.METADATA && value?.field === 'stageFormFile') {
+    return <FileText size={12} className='text-blue-600' />;
+  }
+
   switch (activity.activityType) {
     case ActivityType.PRIORITY:
       return <TicketPriorityIcon size={12} />;
@@ -549,6 +596,32 @@ export const TicketActivity = ({
     });
   }, [activities, sortOrder]);
 
+  const customFieldAttachmentIds = useMemo(() => {
+    const ids = new Set<string>();
+    activities?.forEach(activity => {
+      if (activity.activityType !== ActivityType.METADATA) return;
+      const value = activity.value as ActivityValue | null;
+      if (value?.field !== 'customField') return;
+      if (typeof value.oldValue === 'string' && isPotentialAttachmentId(value.oldValue)) {
+        ids.add(value.oldValue);
+      }
+      if (typeof value.newValue === 'string' && isPotentialAttachmentId(value.newValue)) {
+        ids.add(value.newValue);
+      }
+    });
+    return Array.from(ids);
+  }, [activities]);
+
+  const [customFieldAttachments] = useCachedQuery(
+    queries.attachmentsByIds({ attachmentIds: customFieldAttachmentIds }),
+    { enabled: customFieldAttachmentIds.length > 0 },
+  );
+
+  const customFieldAttachmentFilenameById = useMemo(() => {
+    const attachments = Array.isArray(customFieldAttachments) ? customFieldAttachments : [];
+    return new Map(attachments.map(attachment => [attachment.id, attachment.originalFilename]));
+  }, [customFieldAttachments]);
+
   const toggleSort = () => {
     setSortOrder(prev => (prev === 'newest' ? 'oldest' : 'newest'));
   };
@@ -584,6 +657,7 @@ export const TicketActivity = ({
               {...(boards !== undefined ? { boards } : {})}
               activities={sortedActivities}
               stageVisitFormValues={stageVisitFormValues}
+              customFieldAttachmentFilenameById={customFieldAttachmentFilenameById}
             />
           ))}
         </div>
@@ -612,6 +686,7 @@ export const ActivityComponent = ({
   userGroups,
   activities,
   stageVisitFormValues = [],
+  customFieldAttachmentFilenameById,
 }: {
   activity: TicketActivityType;
   index: number;
@@ -620,6 +695,7 @@ export const ActivityComponent = ({
   userGroups: UserGroup[] | undefined;
   activities: TicketActivityType[];
   stageVisitFormValues?: StageVisitFormValues[];
+  customFieldAttachmentFilenameById?: ReadonlyMap<string, string>;
 }) => {
   const [formExpanded, setFormExpanded] = useState(true);
   const activityUser = users?.find(u => u.id === activity.updatedBy);
@@ -628,6 +704,7 @@ export const ActivityComponent = ({
     users,
     boards,
     userGroups,
+    customFieldAttachmentFilenameById,
   );
   const isLast = index === activities.length - 1;
 

@@ -46,6 +46,7 @@ export interface BoardMetadata {
   ticketFormConfig?: TicketFormConfig;
   isAllowedToTransfer?: boolean;
   fullRoleAssignment?: boolean;
+  showNextStageFormInTicketDetails?: boolean;
   fieldOrder?: FieldOrderItem[];
   customFieldsFormId?: string;
   /**

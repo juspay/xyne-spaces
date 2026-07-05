@@ -184,7 +184,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
       role='button'
       tabIndex={0}
       aria-label='File viewer - click or press Enter to close'
-      className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/95'
+      className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 pointer-events-auto'
       onClick={onClose}
       onKeyDown={(e): void => {
         if (e.key === 'Enter' || e.key === ' ') {

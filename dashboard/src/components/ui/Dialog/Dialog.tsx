@@ -19,6 +19,12 @@ export interface DialogProps {
    * the dialog stealing focus so a child can manage focus on its own schedule.
    */
   onOpenAutoFocus?: (e: Event) => void;
+  onEscapeKeyDown?: React.ComponentPropsWithoutRef<
+    typeof DialogPrimitive.Content
+  >['onEscapeKeyDown'];
+  onPointerDownOutside?: React.ComponentPropsWithoutRef<
+    typeof DialogPrimitive.Content
+  >['onPointerDownOutside'];
   testId?: string;
 }
 
@@ -49,6 +55,8 @@ export const Dialog = ({
   className,
   focusRef,
   onOpenAutoFocus,
+  onEscapeKeyDown,
+  onPointerDownOutside,
   testId,
 }: DialogProps): React.ReactElement => {
   const [isMobile, setIsMobile] = useState(false);
@@ -124,6 +132,8 @@ export const Dialog = ({
               event.preventDefault();
             }
           }}
+          {...(onEscapeKeyDown && { onEscapeKeyDown })}
+          {...(onPointerDownOutside && { onPointerDownOutside })}
           data-testid={testId ?? 'dialog-content'}
           className={cn(
             'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',

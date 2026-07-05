@@ -12,6 +12,9 @@ import { ticketSchema } from '@/vespa/src/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
+import { ActivityType } from '@prisma/client';
+import { FormFieldType } from '@xyne/shared';
+import { stringFromFormValue } from '@xyne/shared/zero';
 
 /**
  * Side effect handler for form_entity_values table.
@@ -253,6 +256,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
           entityId: true,
           entityType: true,
           fieldId: true,
+          contextId: true,
           fieldValue: true,
           actualFieldValue: true,
         },
@@ -264,10 +268,21 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
       const formField = await db.formFields.findUnique({
         where: { id: formEntityValue.fieldId },
-        select: { fieldName: true },
+        select: { fieldName: true, fieldType: true },
       });
 
       if (!formField?.fieldName) {
+        return;
+      }
+
+      if (formField.fieldType === FormFieldType.DOC) {
+        await this.createFileFieldActivity(
+          formEntityValue.entityId,
+          formEntityValue.contextId,
+          formField.fieldName,
+          operation === 'update' ? stringFromFormValue(previousValue?.actualFieldValue) : null,
+          stringFromFormValue(formEntityValue.actualFieldValue),
+        );
         return;
       }
 
@@ -284,6 +299,58 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         operation,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  private async createFileFieldActivity(
+    ticketId: string,
+    contextId: string | null,
+    fieldName: string,
+    previousAttachmentId: string | null,
+    nextAttachmentId: string | null,
+  ): Promise<void> {
+    if ((previousAttachmentId ?? null) === (nextAttachmentId ?? null)) return;
+
+    const [previousAttachment, nextAttachment, stage] = await Promise.all([
+      previousAttachmentId
+        ? db.messageAttachment.findUnique({ where: { id: previousAttachmentId } })
+        : null,
+      nextAttachmentId
+        ? db.messageAttachment.findUnique({ where: { id: nextAttachmentId } })
+        : null,
+      contextId ? db.stage.findUnique({ where: { id: contextId }, select: { name: true } }) : null,
+    ]);
+
+    const action = previousAttachmentId && nextAttachmentId
+      ? 'updated'
+      : nextAttachmentId
+        ? 'added'
+        : 'removed';
+
+    await db.ticketActivity.create({
+      data: {
+        ticketId,
+        updatedBy: this.ctx.userID,
+        activityType: ActivityType.METADATA,
+        value: {
+          field: 'stageFormFile',
+          fieldName,
+          action,
+          ...(stage?.name ? { stageName: stage.name } : {}),
+          ...(previousAttachmentId ? { oldValue: previousAttachmentId } : {}),
+          ...(nextAttachmentId ? { newValue: nextAttachmentId } : {}),
+          ...(previousAttachment?.originalFilename
+            ? { oldFilename: previousAttachment.originalFilename }
+            : {}),
+          ...(nextAttachment?.originalFilename
+            ? { newFilename: nextAttachment.originalFilename }
+            : {}),
+        },
+      },
+    });
+
+    if (previousAttachmentId && previousAttachmentId !== nextAttachmentId) {
+      await db.messageAttachment.delete({ where: { id: previousAttachmentId } });
     }
   }
 }
