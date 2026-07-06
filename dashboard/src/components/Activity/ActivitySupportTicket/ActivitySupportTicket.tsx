@@ -13,6 +13,7 @@ const EMPTY_TICKET_FILTER = {
   stageName: undefined,
   aiCategory: undefined,
   hasAiDraft: undefined,
+  userGroups: undefined,
 } as const;
 
 /**

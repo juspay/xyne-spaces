@@ -978,8 +978,9 @@ export const queries = defineQueries({
       assignedTo: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
+      userGroups: z.array(z.string()).optional(),
     }),
-    ({ args: { channelId, merchantMid, assignedTo, priority, stageName } }) => {
+    ({ args: { channelId, merchantMid, assignedTo, priority, stageName, userGroups } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -997,6 +998,10 @@ export const queries = defineQueries({
 
       if (stageName && stageName.length > 0) {
         query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
+      }
+
+      if (userGroups && userGroups.length > 0) {
+        query = query.where('userGroupId', 'IN', userGroups);
       }
 
       return query
@@ -1090,11 +1095,12 @@ export const queries = defineQueries({
       aiCategory: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
       mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam']).optional(),
+      userGroups: z.array(z.string()).optional(),
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1141,6 +1147,10 @@ export const queries = defineQueries({
               ),
           ),
         );
+      }
+
+      if (userGroups && userGroups.length > 0) {
+        query = query.where('userGroupId', 'IN', userGroups);
       }
 
       const orderDirection = dir === 'forward' ? 'desc' : 'asc';

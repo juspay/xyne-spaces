@@ -33,6 +33,7 @@ interface TicketListViewProps {
     stageName?: string[] | undefined;
     aiCategory?: string[] | undefined;
     hasAiDraft?: boolean | undefined;
+    userGroups?: string[] | undefined;
   };
   onTicketClick: (ticket: SupportTicketRow) => void;
   isMember: boolean;
@@ -86,7 +87,7 @@ export const TicketListView = function TicketListView({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { userID } = useAuthContextValues();
 
-  const { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft } = filter;
+  const { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups } = filter;
 
   const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>([null]);
   const [pageIndex, setPageIndex] = useState(0);
@@ -110,6 +111,7 @@ export const TicketListView = function TicketListView({
       // adaptive fetch window so their pages fill correctly after filtering.
       ...(mailboxFolder ? { mailboxFolder } : {}),
       limit: fetchLimit,
+      userGroups,
       start: pageStart,
       dir: 'forward',
     }),
@@ -128,8 +130,9 @@ export const TicketListView = function TicketListView({
         ac: aiCategory ?? null,
         ad: hasAiDraft ?? null,
         mf: mailboxFolder ?? null,
+        g: userGroups ?? null,
       }),
-    [channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder],
+    [channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups],
   );
 
   useEffect(() => {

@@ -51,6 +51,7 @@ export interface SupportKanbanBoardProps {
     assignedTo: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
+    userGroups: string[] | undefined;
   };
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   onTicketsLoaded?: (tickets: Ticket[]) => void;
@@ -100,8 +101,15 @@ export const SupportKanbanBoard = ({
         a: ticketFilter.assignedTo ?? null,
         p: ticketFilter.priority ?? null,
         s: ticketFilter.stageName ?? null,
+        g: ticketFilter.userGroups ?? null,
       }),
-    [channelId, ticketFilter.assignedTo, ticketFilter.priority, ticketFilter.stageName],
+    [
+      channelId,
+      ticketFilter.assignedTo,
+      ticketFilter.priority,
+      ticketFilter.stageName,
+      ticketFilter.userGroups,
+    ],
   );
   const loadStartTimeRef = useRef<number | null>(Date.now());
   useEffect(() => {
