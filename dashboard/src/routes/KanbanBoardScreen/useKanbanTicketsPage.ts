@@ -205,6 +205,7 @@ const toQueryFilters = (
 
   return {
     priority: filters.priority,
+    boards: filters.boards,
     assignee: filters.assignee,
     userGroups: filters.userGroups,
     createdBy: filters.createdBy,
