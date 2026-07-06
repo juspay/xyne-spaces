@@ -30,7 +30,7 @@ import { websocketService } from './websocketService';
 import { redisService } from './redisService';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
 import { config } from '@/config/env';
-import { vespaQueue } from '@/queues/vespaQueue';
+import { vespaQueue, vespaBackfillQueue } from '@/queues/vespaQueue';
 import { messageSchema, fileSchema, SubApp, channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
@@ -178,8 +178,22 @@ export class ConversationService {
     };
   }
 
-  private async pushVespaJobForMessage(messageID: string, userId: string, workspaceId?: string): Promise<void> {
-    vespaQueue
+  /**
+   * Pick which Vespa producer a job goes to based on the content's age.
+   * Historical content (e.g. Slack migration writes original timestamps) is routed
+   * to the backfill queues so a large import never floods/starves live ingestion.
+   * Live messages always have createdAt≈now, so they never hit the backfill queues.
+   * Threshold is VESPA_BACKFILL_AGE_DAYS (default 365 days).
+   */
+  private pickVespaQueue(createdAt?: Date) {
+    const ageDays = Number(process.env.VESPA_BACKFILL_AGE_DAYS ?? 365);
+    const thresholdMs = ageDays * 24 * 60 * 60 * 1000;
+    const isHistorical = !!createdAt && createdAt.getTime() < Date.now() - thresholdMs;
+    return isHistorical ? vespaBackfillQueue : vespaQueue;
+  }
+
+  private async pushVespaJobForMessage(messageID: string, userId: string, workspaceId?: string, createdAt?: Date): Promise<void> {
+    this.pickVespaQueue(createdAt)
       .addJob({
         schema: messageSchema,
         jobType: 'feed',
@@ -250,15 +264,17 @@ export class ConversationService {
   private async pushVespaJobForAttachments(
     attachments: Array<{ id: string; mimetype: string }>,
     userId: string,
-    workspaceId?: string
+    workspaceId?: string,
+    createdAt?: Date
   ): Promise<void> {
     if (attachments.length === 0) return;
 
     // Filter only supported MIME types (PDF, DOCX, TXT, MD, etc.)
     const supportedAttachments = attachments.filter(att => isSupportedMimeType(att.mimetype));
 
+    const queue = this.pickVespaQueue(createdAt);
     for (const attachment of supportedAttachments) {
-      vespaQueue.addJob({
+      queue.addJob({
         schema: fileSchema,
         jobType: "feed",
         docId: attachment.id,
@@ -433,14 +449,14 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId).catch(error => {
+        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId, message.createdAt).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in conversation ${conversation.conversationId}:`, error);
         });
       }
     }
 
     // Push Vespa job for message indexing
-    this.pushVespaJobForMessage(message.messageId, userId, channel?.workspaceId).catch((error) => {
+    this.pushVespaJobForMessage(message.messageId, userId, channel?.workspaceId, message.createdAt).catch((error) => {
       logger.error(
         `[ConversationService] Error pushing Vespa job for message ${message.messageId}:`,
         error
@@ -662,14 +678,14 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId).catch(error => {
+        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId, message.createdAt).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
         });
       }
     }
 
     // Push Vespa job for message indexing
-    this.pushVespaJobForMessage(message.messageId, userId, channel?.workspaceId).catch((error) => {
+    this.pushVespaJobForMessage(message.messageId, userId, channel?.workspaceId, message.createdAt).catch((error) => {
       logger.error(
         `[ConversationService] Error pushing Vespa job for message ${message.messageId}:`,
         error
@@ -886,7 +902,7 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, message.senderId, channel?.workspaceId).catch(error => {
+        this.pushVespaJobForAttachments(attachments, message.senderId, channel?.workspaceId, message.createdAt).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
         });
       }
@@ -905,7 +921,7 @@ export class ConversationService {
     }
 
     // Push Vespa job for message update indexing
-    this.pushVespaJobForMessage(updatedMessage.messageId, message.senderId, channel?.workspaceId).catch((error) => {
+    this.pushVespaJobForMessage(updatedMessage.messageId, message.senderId, channel?.workspaceId, updatedMessage.createdAt).catch((error) => {
       logger.error(
         `[ConversationService] Error pushing Vespa job for message ${updatedMessage.messageId}:`,
         error

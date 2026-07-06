@@ -10,7 +10,31 @@ class VespaQueue {
 	private isInitialized = false;
 	private isInitializing = false;
 
-	constructor() {
+	// Global registry of every queue created by ANY VespaQueue instance (live + backfill),
+	// keyed by queue name. Queue names are globally unique, so this lets monitoring
+	// (stats/jobs/retry) resolve any queue regardless of which producer owns it.
+	private static globalRegistry: Map<string, Bull.Queue<VespaJob>> = new Map();
+
+	/** All queue names known across every VespaQueue instance. */
+	static getRegisteredQueueNames(): string[] {
+		return [...VespaQueue.globalRegistry.keys()];
+	}
+
+	/** Resolve any queue by name from the global registry (live or backfill). */
+	static getRegisteredQueue(queueName: string): Bull.Queue<VespaJob> | undefined {
+		return VespaQueue.globalRegistry.get(queueName);
+	}
+
+	/**
+	 * @param queueNamesOverride  explicit queue names this producer fans out to.
+	 *                            When omitted, falls back to VESPA_QUEUE_NAMES (live flow).
+	 * @param fileQueueNameOverride  queue that receives file-schema jobs.
+	 *                               When omitted, falls back to VESPA_FILE_QUEUE_NAME.
+	 */
+	constructor(
+		private queueNamesOverride?: string[],
+		private fileQueueNameOverride?: string,
+	) {
 	}
 
 	async initialize(): Promise<void> {
@@ -34,10 +58,12 @@ class VespaQueue {
 				})
 			};
 
-			const queueNames = (process.env.VESPA_QUEUE_NAMES || 'vespa-ingestion,vespa-files')
-				.split(',')
-				.map(n => n.trim())
-				.filter(Boolean);
+			const queueNames = (this.queueNamesOverride && this.queueNamesOverride.length)
+				? this.queueNamesOverride
+				: (process.env.VESPA_QUEUE_NAMES || 'vespa-ingestion,vespa-files')
+					.split(',')
+					.map(n => n.trim())
+					.filter(Boolean);
 
 			const bullOptions = {
 				redis: redisConfig,
@@ -55,7 +81,9 @@ class VespaQueue {
 			};
 			this.setupEventListeners();
 			for (const name of queueNames) {
-				this.queues.set(name, new Bull<VespaJob>(name, bullOptions));
+				const q = new Bull<VespaJob>(name, bullOptions);
+				this.queues.set(name, q);
+				VespaQueue.globalRegistry.set(name, q);   // expose for cross-instance monitoring
 			}
 
 			this.isInitialized = true;
@@ -73,7 +101,8 @@ class VespaQueue {
 	}
 
 	getQueue(queueName: string): Bull.Queue<VespaJob> | undefined {
-		return this.queues.get(queueName);
+		// Resolve globally so any queue (live or backfill) is reachable from any instance
+		return VespaQueue.globalRegistry.get(queueName);
 	}
 
 	get isReady(): boolean {
@@ -99,7 +128,7 @@ class VespaQueue {
 		}
 
 		const { schema, jobType, docId } = vespaJob;
-		const fileQueueName = process.env.VESPA_FILE_QUEUE_NAME || 'vespa-files';
+		const fileQueueName = this.fileQueueNameOverride || process.env.VESPA_FILE_QUEUE_NAME || 'vespa-files';
 		
 		try {
 			const jobData: VespaJob = vespaJob;
@@ -146,9 +175,9 @@ class VespaQueue {
 	 * Get queue statistics
 	 */
 	async getStats(queueName: string) {
-		const q = this.queues.get(queueName);
+		const q = VespaQueue.globalRegistry.get(queueName);
 		if (!q) {
-			logger.warn(`Queue '${queueName}' not found. Available: ${[...this.queues.keys()].join(', ')}`);
+			logger.warn(`Queue '${queueName}' not found. Available: ${VespaQueue.getRegisteredQueueNames().join(', ')}`);
 			return { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, total: 0 };
 		}
 
@@ -171,6 +200,18 @@ class VespaQueue {
 	}
 
 	/**
+	 * Stats for EVERY registered queue (live + backfill), keyed by queue name.
+	 * Convenience for dashboards that want to show all queues at once.
+	 */
+	async getAllStats(): Promise<Record<string, Awaited<ReturnType<VespaQueue['getStats']>>>> {
+		const names = VespaQueue.getRegisteredQueueNames();
+		const entries = await Promise.all(
+			names.map(async (name) => [name, await this.getStats(name)] as const)
+		);
+		return Object.fromEntries(entries);
+	}
+
+	/**
 	 * Get main queue jobs with pagination and state filter
 	 */
 	async getJobs(
@@ -179,9 +220,9 @@ class VespaQueue {
 		state: 'waiting' | 'active' | 'delayed' | 'completed' | 'failed' | 'all' = 'failed',
 		queueName: string
 	) {
-		const q = this.queues.get(queueName);
+		const q = VespaQueue.globalRegistry.get(queueName);
 		if (!q) {
-			logger.warn(`Queue '${queueName}' not found. Available: ${[...this.queues.keys()].join(', ')}`);
+			logger.warn(`Queue '${queueName}' not found. Available: ${VespaQueue.getRegisteredQueueNames().join(', ')}`);
 			return { jobs: [], total: 0, page, limit, totalPages: 0 };
 		}
 		let jobs: any[] = [];
@@ -254,9 +295,9 @@ class VespaQueue {
  * Retry all failed jobs from Queue
  */
 	async retryAllFailedJobs(queueName: string) {
-		const q = this.queues.get(queueName);
+		const q = VespaQueue.globalRegistry.get(queueName);
 		if (!q) {
-			logger.warn(`Queue '${queueName}' not found. Available: ${[...this.queues.keys()].join(', ')}`);
+			logger.warn(`Queue '${queueName}' not found. Available: ${VespaQueue.getRegisteredQueueNames().join(', ')}`);
 			return { success: 0, failed: 0, errors: [`Queue '${queueName}' does not exist`], total: 0 };
 		}
 
@@ -419,10 +460,27 @@ class VespaQueue {
 			logger.info('VespaQueue already closed or never initialized');
 		} else {
 			await Promise.all([...this.queues.values()].map(q => q.close()));
+			// Drop this instance's queues from the global registry to avoid stale references
+			for (const name of this.queues.keys()) {
+				VespaQueue.globalRegistry.delete(name);
+			}
 			logger.info('VespaQueue closed');
 		}
 	}
 }
 
-// Export singleton instance
+// Live ingestion producer — fans out to VESPA_QUEUE_NAMES (unchanged behavior)
 export const vespaQueue = new VespaQueue();
+
+// Dedicated BACKFILL producer for backfill + migration so heavy backfill load never lands
+// in the live queues. Mirrors the live normal/file split (vespa-ingestion / vespa-files):
+//   - non-file backfill jobs → vespa-backfill-normal
+//   - file-schema backfill jobs → vespa-backfill-file
+// Both names are overridable via env. Drained by dedicated backfill worker pods that set
+// VESPA_WORKER_QUEUE_NAME to one of these queue names.
+const backfillQueueNames = (process.env.VESPA_BACKFILL_QUEUE_NAMES || 'vespa-backfill-normal,vespa-backfill-file')
+	.split(',')
+	.map(n => n.trim())
+	.filter(Boolean);
+const backfillFileQueueName = process.env.VESPA_BACKFILL_FILE_QUEUE_NAME || 'vespa-backfill-file';
+export const vespaBackfillQueue = new VespaQueue(backfillQueueNames, backfillFileQueueName);

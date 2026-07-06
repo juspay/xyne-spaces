@@ -18,13 +18,13 @@ import { UserRepository } from '../../database/repositories/users';
 import { WebClient } from '@slack/web-api';
 import { config } from '../../config/env';
 import { getBotConfigByWorkspaceId } from './slackMigrationBotConfig';
-import { vespaQueue } from '@/queues/vespaQueue';
+import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 
 async function pushVespaJobForChannel(channelId: string, userId: string, workspaceId?: string): Promise<void> {
-  vespaQueue.addJob({
+  vespaBackfillQueue.addJob({
     schema: channelSchema,
     jobType: 'feed',
     docId: channelId,
