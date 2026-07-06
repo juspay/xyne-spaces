@@ -151,20 +151,42 @@ export async function listAccessibleRootCollections(
     )];
     const channelMeta = new Map<string, { name: string; projectId: string; projectName: string }>();
     if (channelIds.length > 0) {
+        // NOTE: do NOT select the required `channel.project` relation here.
+        // Projects are hard-deleted with no FK cascade (relationMode = "prisma"),
+        // so a channel can outlive its project. Selecting the required relation
+        // makes Prisma throw "Field project is required to return data, got null"
+        // for the ENTIRE query, breaking collection listings for every user whose
+        // result set happens to include one orphaned channel-scoped collection.
+        // Instead we select the scalar projectId and resolve project names via a
+        // separate batch lookup that tolerates missing projects.
         const channels = await db.channel.findMany({
             where: { id: { in: channelIds } },
             select: {
                 id: true,
                 name: true,
                 projectId: true,
-                project: { select: { id: true, name: true } },
             },
         });
+
+        const projectIds = [...new Set(channels.map(c => c.projectId).filter(Boolean))];
+        const projectNames = new Map<string, string>();
+        if (projectIds.length > 0) {
+            const projects = await db.project.findMany({
+                where: { id: { in: projectIds } },
+                select: { id: true, name: true },
+            });
+            for (const p of projects) {
+                projectNames.set(p.id, p.name);
+            }
+        }
+
         for (const c of channels) {
             channelMeta.set(c.id, {
                 name: c.name,
                 projectId: c.projectId,
-                projectName: c.project?.name ?? '',
+                // Orphaned channel (project hard-deleted): fall back to a blank
+                // project name instead of throwing.
+                projectName: projectNames.get(c.projectId) ?? '',
             });
         }
     }
