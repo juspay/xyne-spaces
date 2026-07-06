@@ -234,8 +234,10 @@ class WorkerService {
         await teamIntelligenceWorker.start();
       }
 
-      logger.info('Starting email classification worker...');
-      await emailClassificationWorker.start();
+      if (appConfig.enableEmailClassificationWorker) {
+        logger.info('Starting email classification worker...');
+        await emailClassificationWorker.start();
+      }
 
       logger.info('Starting auto draft worker...');
       await autoDraftWorker.start();
@@ -374,7 +376,9 @@ class WorkerService {
         await teamIntelligenceWorker.shutdown();
       }
 
-      await emailClassificationWorker.shutdown();
+      if (appConfig.enableEmailClassificationWorker) {
+        await emailClassificationWorker.shutdown();
+      }
       await autoDraftWorker.shutdown();
 
       if (appConfig.enableTagGenerationPipeline) {
