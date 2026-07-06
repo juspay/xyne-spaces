@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { FileViewerPanel } from '../viewer/FileViewerPanel';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import {
@@ -25,6 +25,19 @@ export const FileViewerLayout: React.FC = () => {
 
   // '_' is the sentinel for collection root (no folder)
   const resolvedFolderId = folderId === '_' ? null : (folderId ?? null);
+
+  // Citation deep-links carry `?page=<N>` (1-based) so the PDF opens scrolled
+  // to the cited chunk's page. Parse defensively — ignore non-numeric/<1 values
+  // and leave the viewer at page 1.
+  const [searchParams] = useSearchParams();
+  const pageParam = Number(searchParams.get('page'));
+  const initialPage = Number.isInteger(pageParam) && pageParam >= 1 ? pageParam : undefined;
+
+  // `?chunkIndex=<K>` (0-based) identifies the cited chunk; FileViewerPanel
+  // fetches its snippet and highlights it in the PDF via pdf.js find.
+  const chunkParam = Number(searchParams.get('chunkIndex'));
+  const initialChunkIndex =
+    Number.isInteger(chunkParam) && chunkParam >= 0 ? chunkParam : undefined;
 
   // URL → machine sync. When a user arrives here through the collection
   // browser, KnowledgeBaseV2Screen has already seeded the XState context
@@ -101,6 +114,8 @@ export const FileViewerLayout: React.FC = () => {
       <FileViewerPanel
         handleBackNavigation={handleBack}
         fileId={fileId}
+        {...(initialPage !== undefined ? { initialPage } : {})}
+        {...(initialChunkIndex !== undefined ? { initialChunkIndex } : {})}
         onOpenChat={handleOpenChat}
       />
     </div>

@@ -3441,6 +3441,45 @@ img.inline-emoji,
   }
 }
 
+/* ── PDF citation highlight ──────────────────────────────────────────────
+   pdf.js renders a transparent text layer (textLayerMode: 2) over the canvas.
+   When a citation snippet is fed to the find controller, matched glyphs get the
+   `.highlight` class. We override pdf.js's default (muted) highlight variables
+   with a saturated amber so the cited passage reads clearly through the canvas
+   without obscuring the underlying text. Mirrors xyne-search's PDF highlight. */
+
+/* ROOT-CAUSE FIX for "highlight sits below the text": pdf.js sizes its layers
+   (canvas, text layer, …) with the legacy `content-box` model — the `.page`
+   wrapper has a 9px transparent border pdf.js expects to ADD around the content,
+   so the canvas fills the inner area and the text layer overlays it exactly.
+   Tailwind's preflight sets `box-sizing: border-box` on every element, which
+   makes that 9px border eat INTO the content: the canvas ends up ~18px smaller
+   than the text layer positioned over it, so glyphs and find-highlights are
+   shifted (~9px, and it grows with zoom). Restoring `content-box` inside the
+   viewer subtree realigns them. This is the exact fix xyne-search uses. */
+.pdfViewer,
+.pdfViewer * {
+  box-sizing: content-box;
+}
+
+/* Secondary: the global `* { font-family: "Inter" }` (top of this file) matches
+   the highlight child-spans directly (they carry no inline font), swapping them
+   off the parent text-span's PDF font. Reinherit only `font-family` (not the
+   `font` shorthand — pdf.js re-scales font-size/line-height on zoom). */
+.pdfViewer .textLayer .highlight,
+.pdfViewer .textLayer .highlight * {
+  font-family: inherit !important;
+}
+.pdfViewer .textLayer .highlight {
+  --highlight-bg-color: hsl(45 95% 55% / 0.45);
+  --highlight-selected-bg-color: hsl(38 100% 50% / 0.55);
+  border-radius: 2px;
+}
+[data-theme="midnight"] .pdfViewer .textLayer .highlight {
+  --highlight-bg-color: hsl(45 95% 55% / 0.4);
+  --highlight-selected-bg-color: hsl(38 100% 55% / 0.55);
+}
+
 /* ============================================================================
  * RECORDING OVERLAY STYLES
  * ============================================================================

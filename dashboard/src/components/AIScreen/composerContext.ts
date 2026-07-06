@@ -27,7 +27,7 @@ export interface ComposerContext {
   transcripts: SelectedTranscript[];
   recordings: SelectedRecording[];
   collections: { id: string; name: string }[];
-  fileScope: { id: string; name: string } | null;
+  fileScopes: { id: string; name: string }[];
   research: ResearchContext | null;
   webSearchEnabled: boolean;
   deepResearchEnabled: boolean;
@@ -41,7 +41,7 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   transcripts: [],
   recordings: [],
   collections: [],
-  fileScope: null,
+  fileScopes: [],
   research: null,
   webSearchEnabled: false,
   deepResearchEnabled: false,
@@ -57,7 +57,7 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.transcripts.length > 0 ||
     ctx.recordings.length > 0 ||
     ctx.collections.length > 0 ||
-    ctx.fileScope !== null ||
+    ctx.fileScopes.length > 0 ||
     ctx.research !== null ||
     ctx.webSearchEnabled ||
     ctx.deepResearchEnabled ||
@@ -75,7 +75,7 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
   return {
     channelIds: ctx.channels.map(c => c.id),
     collectionIds: ctx.collections.map(c => c.id),
-    fileIds: ctx.fileScope ? [ctx.fileScope.id] : [],
+    fileIds: ctx.fileScopes.map(f => f.id),
     ticketIds: ctx.tickets.map(t => t.id),
     canvasIds: ctx.canvases.map(c => c.id),
     callIds: [...ctx.transcripts.map(t => t.id), ...ctx.recordings.map(r => r.id)],

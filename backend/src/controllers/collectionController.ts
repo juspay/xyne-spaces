@@ -7,6 +7,9 @@ import { storageService } from '@/services/storage';
 import { fileValidationService } from '@/services/fileValidationService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { SubApp } from '@/vespa/src/types';
+import vespaClient from '@/vespa/client';
+import { fileSchema } from '@/vespa/src/types';
+import type { VespaFileDocument, VespaChunkMeta } from '@/vespa/src/types';
 import { CollectionRole, CollectionPermission, IngestionStatus, Collection } from '@prisma/client';
 import archiver from 'archiver';
 import unzipper from 'unzipper';
@@ -15,6 +18,53 @@ import {
     listAccessibleRootCollections,
     expandCollectionTrees,
 } from '@/services/collectionAccess';
+
+/**
+ * Turn a stored chunk into a snippet the PDF text layer will actually contain,
+ * for pdf.js find-based highlighting. Docling/PdfJs chunks may carry a leading
+ * `[Page N]` marker plus markdown/HTML, but pdf.js's text layer has only plain
+ * glyphs — so we strip formatting and collapse whitespace.
+ *
+ * Length rule: take a base window of words, then extend ONLY to finish the
+ * sentence we're in the middle of (up to a hard cap). This avoids two bad
+ * cases: a hard word cap cuts the highlight mid-sentence ("...at all times,")
+ * which looks broken; accumulating whole sentences greedily bleeds across a
+ * section boundary (into a table/next heading) which pdf.js then can't match
+ * contiguously, so nothing highlights at all. Finishing the current sentence
+ * and stopping keeps the highlight clean and matchable. Returns null when
+ * nothing usable remains.
+ */
+const HIGHLIGHT_SNIPPET_BASE_WORDS = 30;
+const HIGHLIGHT_SNIPPET_HARD_WORDS = 80;
+function buildHighlightSnippet(raw: string | undefined | null): string | null {
+    const cleaned = String(raw ?? '')
+        .replace(/^\[Pages?\s+\d+(?:[-,\s\d]*)?\]\s*/i, '') // drop leading [Page N] / [Pages 1, 2, 3] marker
+        .replace(/<[^>]+>/g, ' ')                      // strip HTML tags
+        .replace(/&[a-z]+;|&#\d+;/gi, ' ')             // strip HTML entities
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')       // unwrap markdown links
+        .replace(/[*_`~#>|]+/g, ' ')                   // strip markdown symbols
+        .replace(/[-–—]{2,}/g, ' ')                    // strip markdown rules / dash runs (not in the PDF text layer)
+        .replace(/\s+/g, ' ')                          // collapse whitespace
+        .trim();
+    if (cleaned.length === 0) return null;
+    // Drop a leading single-char token (list-marker / table-cell residue).
+    const tokens = cleaned.split(' ');
+    while (tokens.length > 0 && tokens[0]!.length <= 1) tokens.shift();
+    if (tokens.length === 0) return null;
+
+    // Base window, then extend to the end of the sentence we landed in.
+    const endsSentence = (w: string): boolean => /[.!?]["')\]]?$/.test(w);
+    let end = Math.min(HIGHLIGHT_SNIPPET_BASE_WORDS, tokens.length);
+    while (
+        end < tokens.length &&
+        end < HIGHLIGHT_SNIPPET_HARD_WORDS &&
+        !endsSentence(tokens[end - 1]!)
+    ) {
+        end++;
+    }
+    const snippet = tokens.slice(0, end).join(' ');
+    return snippet.length > 3 ? snippet : null;
+}
 
 export class CollectionController {
     private collectionRepository: CollectionRepository;
@@ -529,6 +579,64 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             logger.info(`📄 [DOWNLOAD] File "${file.name}" downloaded by user ${user.id}`);
         } catch (error) {
             logger.error('Error downloading file:', error);
+            if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+        }
+    };
+
+    /**
+     * Returns a plain-text snippet + page number for one chunk of a file, used
+     * to highlight the cited passage inside the PDF viewer. The dashboard calls
+     * this with the citation deep-link's `?chunkIndex=K` (0-based), then feeds
+     * `chunkText` to pdf.js's find controller which highlights the matching run
+     * in the PDF's own text layer (no precomputed bboxes). Returns
+     * `chunkText: null` when the chunk is missing / has no usable text, so the
+     * viewer degrades to a page-only jump.
+     */
+    getFileChunk = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const { itemId } = req.params;
+            const user = req.user;
+
+            if (!user) { res.status(401).json({ error: 'Unauthorized' }); return; }
+            if (!itemId || typeof itemId !== 'string' || itemId.trim() === '') {
+                res.status(400).json({ error: 'Item ID is required' });
+                return;
+            }
+            const index = Number(req.query.index);
+            if (!Number.isInteger(index) || index < 0) {
+                res.status(400).json({ error: 'A non-negative chunk index is required' });
+                return;
+            }
+
+            const file = await this.collectionRepository.findItemById(itemId.trim());
+            if (!file) { res.status(404).json({ error: 'File not found' }); return; }
+
+            const { role } = await this.getCollectionOrRole(file.rootCollectionId, user.id);
+            if (!role) {
+                res.status(403).json({ error: 'Forbidden: You do not have access to this collection' });
+                return;
+            }
+
+            // The stable file UUID is the Vespa docId.
+            const rawDoc = await vespaClient.crudService.getDocument(file.fileId, fileSchema);
+            const fields = (rawDoc as { fields?: VespaFileDocument } | null)?.fields;
+            const chunks: string[] = fields?.chunks || [];
+            const chunksMap: VespaChunkMeta[] = fields?.chunks_map || [];
+
+            if (index >= chunks.length) {
+                res.json({ chunkText: null, pageNumber: null, pages: [] });
+                return;
+            }
+
+            const chunkText = buildHighlightSnippet(chunks[index]);
+            const pages = Array.isArray(chunksMap[index]?.page_numbers)
+                ? chunksMap[index]!.page_numbers
+                : [];
+            const pageNumber = pages.length > 0 ? pages[0] : null;
+
+            res.json({ chunkText, pageNumber, pages });
+        } catch (error) {
+            logger.error('Error resolving file chunk:', error);
             if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
         }
     };

@@ -223,16 +223,17 @@ const XyneAISidebar = ({
   const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>([]);
   const [showContextModal, setShowContextModal] = useState(false);
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
-  // Single-file scope when Ask AI is opened from a file viewer. Removable to widen back to the collection.
-  const [fileScope, setFileScope] = useState<{ id: string; name: string } | null>(
-    kbDocIdProp ? { id: kbDocIdProp, name: kbDocNameProp || 'this file' } : null,
+  // File scope(s) — multi-select. Seeded with the file Ask AI was opened from
+  // (via a file viewer); users can add/remove more from the picker.
+  const [fileScopes, setFileScopes] = useState<{ id: string; name: string }[]>(
+    kbDocIdProp ? [{ id: kbDocIdProp, name: kbDocNameProp || 'this file' }] : [],
   );
   // Re-sync the file scope on every KB-scoped OPEN, even when kbDocIdProp/Name
   // are unchanged. Without kbOpenNonce in the deps, removing the file chip and
   // clicking Ask AI on the same file again would not re-attach (props identical
   // → effect skipped). The machine bumps the nonce on every OPEN with a KB id.
   useEffect(() => {
-    setFileScope(kbDocIdProp ? { id: kbDocIdProp, name: kbDocNameProp || 'this file' } : null);
+    setFileScopes(kbDocIdProp ? [{ id: kbDocIdProp, name: kbDocNameProp || 'this file' }] : []);
   }, [kbDocIdProp, kbDocNameProp, kbOpenNonce]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
@@ -633,7 +634,7 @@ const XyneAISidebar = ({
     channelIds: selectedChannels.map(ch => ch.id),
     activities: selectedActivities,
     collectionIds: selectedCollectionIds ?? [],
-    fileIds: fileScope ? [fileScope.id] : [],
+    fileIds: fileScopes.map(f => f.id),
     conversationId,
     streamSessionKey: streamThreadKey,
     threadConversationId: activeThreadInfo?.conversationId,
@@ -1854,9 +1855,8 @@ const XyneAISidebar = ({
     ...(selectedAgent && selectedAgent.kbScope === 'COLLECTIONS'
       ? { agentKbGrants: selectedAgent.collections }
       : {}),
-    fileScope,
-    onRemoveFileScope: () => setFileScope(null),
-    onSelectFileScope: (file: { id: string; name: string }) => setFileScope(file),
+    fileScopes,
+    onFileScopesChange: setFileScopes,
     onOpenContextModal: handleOpenContextModal,
     selectedTickets,
     onRemoveTicket: handleRemoveTicket,
