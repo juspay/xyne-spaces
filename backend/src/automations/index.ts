@@ -15,6 +15,7 @@ import { switchStep } from './steps/switch.step';
 
 import { sendMessageStep } from './steps/send-message.step';
 import { notifyUserStep } from './steps/notify-user.step';
+import { notifyUserSosStep } from './steps/notify-user-sos.step';
 import { createTicketStep } from './steps/create-ticket.step';
 import { createSubTicketStep } from './steps/create-sub-ticket.step';
 import { updateTicketStep } from './steps/update-ticket.step';
@@ -23,6 +24,7 @@ import { closeTicketStep } from './steps/close-ticket.step';
 import { changeStageStep } from './steps/change-stage.step';
 import { archiveTicketStep } from './steps/archive-ticket.step';
 import { sendEmailReplyStep } from './steps/send-email-reply.step';
+import { sendEmailToUserStep } from './steps/send-email-to-user.step';
 import { notifyGroupStep } from './steps/notify-group.step';
 import { updateTagsStep } from './steps/update-tags.step';
 import { assignTicketToGroupStep } from './steps/assign-ticket-to-group.step';
@@ -54,6 +56,7 @@ export async function initializeAutomations(): Promise<void> {
 
   stepRegistry.register(sendMessageStep);
   stepRegistry.register(notifyUserStep);
+  stepRegistry.register(notifyUserSosStep);
   stepRegistry.register(createTicketStep);
   stepRegistry.register(createSubTicketStep);
   stepRegistry.register(updateTicketStep);
@@ -62,6 +65,7 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(changeStageStep);
   stepRegistry.register(archiveTicketStep);
   stepRegistry.register(sendEmailReplyStep);
+  stepRegistry.register(sendEmailToUserStep);
   stepRegistry.register(notifyGroupStep);
   stepRegistry.register(updateTagsStep);
   stepRegistry.register(assignTicketToGroupStep);

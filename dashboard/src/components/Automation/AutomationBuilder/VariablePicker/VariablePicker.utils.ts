@@ -36,6 +36,7 @@ export function acceptsVariable(
 
 const PREFERRED_PATHS_BY_KIND: Record<string, string[]> = {
   conversation: ['ticket.conversationId', 'email.conversationId'],
+  ticket: ['ticket.id'],
 };
 
 export function findSoleMatchingVariable(
@@ -54,13 +55,18 @@ export function findSoleMatchingVariable(
   if (matches.length === 1) return matches[0]!;
 
   if (targetEntityKind) {
+    // Exact entity-kind matches win over generic string fallbacks.
+    const exact = matches.filter(m => m.entityKind === targetEntityKind);
+    const pool = exact.length > 0 ? exact : matches;
+    if (pool.length === 1) return pool[0]!;
+
     const preferred = PREFERRED_PATHS_BY_KIND[targetEntityKind] ?? [];
     for (const path of preferred) {
-      const hit = matches.find(m => m.path === path);
+      const hit = pool.find(m => m.path === path);
       if (hit) return hit;
     }
-    const sourceKeys = new Set(matches.map(m => `${m.sourceKey}:${m.role}`));
-    if (sourceKeys.size === 1) return matches[0]!;
+    const sourceKeys = new Set(pool.map(m => `${m.sourceKey}:${m.role}`));
+    if (sourceKeys.size === 1) return pool[0]!;
   }
   return null;
 }

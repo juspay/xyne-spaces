@@ -229,9 +229,11 @@ export function StepCard({
                   pathPrefix={pathPrefix}
                   variableSources={variableSources}
                 />
-              ) : step.type === 'NOTIFY_USER' || step.type === 'NOTIFY_GROUP' ? (
+              ) : step.type === 'NOTIFY_USER' ||
+                step.type === 'NOTIFY_USER_SOS' ||
+                step.type === 'NOTIFY_GROUP' ? (
                 <NotifyStepForm
-                  recipient={step.type === 'NOTIFY_USER' ? 'user' : 'group'}
+                  recipient={step.type === 'NOTIFY_GROUP' ? 'group' : 'user'}
                   value={step.config}
                   onChange={onConfigChange}
                   issues={issues ?? null}
