@@ -466,6 +466,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     existingRequest?: TicketStageRequest | null;
     showPersistedDocValues?: boolean;
   } | null>(null);
+
+  const [nonFormReviewDialog, setNonFormReviewDialog] = useState<{
+    requestId: string;
+    stageId: string;
+    kind: 'APPROVE' | 'REJECT';
+    stageName: string;
+  } | null>(null);
+  const [nonFormReviewComment, setNonFormReviewComment] = useState('');
+
   const [editingStageETA, setEditingStageETA] = useState(false);
   const [stageEtaValue, setStageEtaValue] = useState('');
   const stageEtaInputRef = useRef<HTMLInputElement>(null);
@@ -597,6 +606,41 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const userGroups = useUserGroups();
   const { user: currentUser } = useAuth();
   const currentUserRoleIds = useCurrentUserRoleIds();
+
+  const handleNonFormReviewSubmit = async (): Promise<void> => {
+    if (!nonFormReviewDialog || !ticket) return;
+    const trimmedComment = nonFormReviewComment.trim();
+    if (nonFormReviewDialog.kind === 'REJECT' && !trimmedComment) {
+      toast.error('Please add a comment explaining the rejection');
+      return;
+    }
+    const isApprove = nonFormReviewDialog.kind === 'APPROVE';
+    const commentMessageId = trimmedComment ? uuidv4() : undefined;
+    try {
+      const result = await zero.mutate(
+        mutators.ticketStageRequest.upsert({
+          id: nonFormReviewDialog.requestId,
+          ticketId: ticket.id,
+          stageId: nonFormReviewDialog.stageId,
+          status: isApprove ? TicketStageRequestStatus.APPROVED : TicketStageRequestStatus.REJECTED,
+          updatedBy: currentUser?.id || '',
+          reviewedBy: currentUser?.id,
+          updatedAt: Date.now(),
+          ...(isApprove ? { approvedActivityId: uuidv4() } : { rejectedActivityId: uuidv4() }),
+          ...(commentMessageId && { commentMessageId, comment: trimmedComment }),
+        }),
+      ).server;
+      if (result.type === 'error') {
+        toast.error(result.error.message || 'Failed to update stage request');
+        return;
+      }
+      toast.success(isApprove ? 'Stage approved' : 'Stage rejected');
+      setNonFormReviewDialog(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(message || 'Failed to update stage request');
+    }
+  };
 
   // Query stages if ticket has a boardId
   const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: ticket?.boardId ?? '' }), {
@@ -3581,19 +3625,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                               {isSubmitted && !item.formId && isApprover && (
                                 <>
                                   <button
-                                    onClick={() =>
-                                      void zero.mutate(
-                                        mutators.ticketStageRequest.upsert({
-                                          id: item.id,
-                                          ticketId: ticket.id,
-                                          stageId: item.stageId,
-                                          status: TicketStageRequestStatus.APPROVED,
-                                          updatedBy: currentUser?.id || '',
-                                          updatedAt: Date.now(),
-                                          approvedActivityId: uuidv4(),
-                                        }),
-                                      )
-                                    }
+                                    onClick={() => {
+                                      setNonFormReviewComment('');
+                                      setNonFormReviewDialog({
+                                        requestId: item.id,
+                                        stageId: item.stageId,
+                                        kind: 'APPROVE',
+                                        stageName: stage?.name ?? 'Unknown Stage',
+                                      });
+                                    }}
                                     className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-green-500 text-white hover:bg-green-600'
                                     data-track-category='Tickets'
                                     data-track-name='ApproveStageRequest'
@@ -3602,19 +3642,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     Approve
                                   </button>
                                   <button
-                                    onClick={() =>
-                                      void zero.mutate(
-                                        mutators.ticketStageRequest.upsert({
-                                          id: item.id,
-                                          ticketId: ticket.id,
-                                          stageId: item.stageId,
-                                          status: TicketStageRequestStatus.REJECTED,
-                                          updatedBy: currentUser?.id || '',
-                                          updatedAt: Date.now(),
-                                          rejectedActivityId: uuidv4(),
-                                        }),
-                                      )
-                                    }
+                                    onClick={() => {
+                                      setNonFormReviewComment('');
+                                      setNonFormReviewDialog({
+                                        requestId: item.id,
+                                        stageId: item.stageId,
+                                        kind: 'REJECT',
+                                        stageName: stage?.name ?? 'Unknown Stage',
+                                      });
+                                    }}
                                     className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600'
                                     data-track-category='Tickets'
                                     data-track-name='RejectStageRequest'
@@ -4131,6 +4167,64 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           targetStageEtas={stageFormModalEtas}
           onSuccess={() => setStageFormModal(null)}
         />
+      )}
+      {nonFormReviewDialog && (
+        <Dialog
+          open={!!nonFormReviewDialog}
+          onOpenChange={open => {
+            if (!open) setNonFormReviewDialog(null);
+          }}
+          title={
+            nonFormReviewDialog.kind === 'APPROVE'
+              ? `Approve stage change to ${nonFormReviewDialog.stageName}`
+              : `Reject stage change to ${nonFormReviewDialog.stageName}`
+          }
+        >
+          <div className='p-6'>
+            <label
+              htmlFor='non-form-reviewer-comment'
+              className='block text-sm font-medium text-foreground mb-1'
+            >
+              Comment{' '}
+              <span className='text-xs text-muted-foreground'>
+                {nonFormReviewDialog.kind === 'REJECT' ? '(required)' : '(optional)'}
+              </span>
+            </label>
+            <textarea
+              id='non-form-reviewer-comment'
+              value={nonFormReviewComment}
+              onChange={e => setNonFormReviewComment(e.target.value)}
+              placeholder='Explain your decision…'
+              rows={3}
+              className='w-full px-3 py-2 border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-y'
+              data-track-category='Tickets'
+              data-track-name='NonFormStageReviewerCommentInput'
+            />
+            <div className='mt-4 flex justify-end gap-3'>
+              <Button
+                variant='secondary'
+                onClick={() => setNonFormReviewDialog(null)}
+                data-track-category='Tickets'
+                data-track-name='CancelNonFormStageReview'
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  void handleNonFormReviewSubmit();
+                }}
+                data-track-category='Tickets'
+                data-track-name={
+                  nonFormReviewDialog.kind === 'APPROVE'
+                    ? 'ConfirmNonFormStageApprove'
+                    : 'ConfirmNonFormStageReject'
+                }
+              >
+                {nonFormReviewDialog.kind === 'APPROVE' ? 'Approve' : 'Reject'}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
       )}
       {/* Backward movement confirmation dialog */}
       {backwardStageChange && (
