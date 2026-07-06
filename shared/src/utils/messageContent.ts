@@ -12,7 +12,7 @@
  * dashboard (browser), backend (Node), and lotus (React Native).
  */
 
-export const MAX_MESSAGE_CONTENT_LENGTH = 10000;
+export const MAX_MESSAGE_CONTENT_LENGTH = 40000;
 
 /**
  * Approximate the visible (rendered) character length of an HTML message body.

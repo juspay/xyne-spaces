@@ -47,6 +47,7 @@ import {
   SlackButtonElement,
   SlackTableBlock,
   SlackTableCell,
+  SlackRoom,
 } from './slackBlockKitTypes';
 
 // Reusable CSS styles
@@ -86,6 +87,12 @@ export class SlackBlockKitParser {
    */
   parse(message: SlackBlockKitMessage): string {
     const parts: string[] = [];
+
+    // Huddle / call "start" messages carry an empty `text`; their content
+    // (that a huddle happened, its duration and participants) lives in `room`.
+    if (message.room && (message.subtype === 'huddle_thread' || message.room.call_family)) {
+      parts.push(this.parseRoom(message.room));
+    }
 
     if (message.text) {
       parts.push(this.formatText({ type: 'mrkdwn', text: message.text }));
@@ -349,6 +356,69 @@ export class SlackBlockKitParser {
         return titleHtml + valueHtml;
       })
       .join('');
+  }
+
+  /**
+   * Render a huddle / call `room` object. Huddle start messages have no text,
+   * so this produces the summary that becomes the parent message body —
+   * without it the message is empty and its thread replies get dropped during
+   * migration. When participant names are resolved (migration path) it reads
+   * like Slack — "A and B were in the huddle for 1m" — otherwise it falls back
+   * to a "🎧 Huddle · 1m · 2 participants" summary (e.g. live webhook events).
+   */
+  private parseRoom(room: SlackRoom): string {
+    const duration = this.formatRoomDuration(room.date_start, room.date_end);
+    const names = room.participant_names?.filter(Boolean) ?? [];
+
+    // Slack-style sentence when we have names.
+    if (names.length) {
+      const who = escapeForSlack(this.joinNames(names));
+      const verb = names.length === 1 ? 'was' : 'were';
+      const durationSuffix = duration ? ` for ${escapeForSlack(duration)}` : '';
+      return `<div class="huddle-block" style="${STYLES.blockMargin} ${STYLES.lineHeight}">${who} ${verb} in the huddle${durationSuffix}</div>`;
+    }
+
+    // Fallback: no resolved names — show a labelled summary with count/duration.
+    const label = !room.call_family || room.call_family === 'huddle' ? 'Huddle' : 'Call';
+    const details: string[] = [];
+    if (duration) details.push(duration);
+    const participantCount = room.participant_history?.length ?? room.participants?.length;
+    if (participantCount) {
+      details.push(`${participantCount} participant${participantCount === 1 ? '' : 's'}`);
+    }
+    const detailsHtml = details.length
+      ? ` <span style="${STYLES.smallText}">· ${escapeForSlack(details.join(' · '))}</span>`
+      : '';
+
+    return `<div class="huddle-block" style="${STYLES.blockMargin} ${STYLES.lineHeight}">🎧 <strong>${label}</strong>${detailsHtml}</div>`;
+  }
+
+  /**
+   * Join display names the way Slack does: "A", "A and B", "A, B, and C"
+   * (Oxford comma for three or more).
+   */
+  private joinNames(names: string[]): string {
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return `${names[0]} and ${names[1]}`;
+    return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  }
+
+  /**
+   * Format the elapsed time between two Unix-second timestamps the way Slack
+   * does for huddles — whole minutes ("1m", "1h 2m"), or seconds when under a
+   * minute. Returns undefined when there's no valid duration (still ongoing).
+   */
+  private formatRoomDuration(start?: number, end?: number): string | undefined {
+    if (!start || !end || end <= start) return undefined;
+    const total = Math.round(end - start);
+    if (total < 60) return `${total}s`;
+    const totalMinutes = Math.floor(total / 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    const segments: string[] = [];
+    if (hours) segments.push(`${hours}h`);
+    if (minutes) segments.push(`${minutes}m`);
+    return segments.join(' ') || `${totalMinutes}m`;
   }
 
   /**

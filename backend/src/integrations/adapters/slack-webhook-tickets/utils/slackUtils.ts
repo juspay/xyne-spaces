@@ -103,29 +103,49 @@ export function parseMrkdwnBlocks<T>(content: string, handlers: MrkdwnBlockHandl
   };
 
   for (const line of content.split('\n')) {
-    if (/^```/.test(line.trim())) {
-      // Single-line fence: ```content``` — opening and closing ``` on the same line.
-      // Handle before the multi-line toggle so the content is never discarded.
-      const singleLine = line.trim().match(/^```(.+)```$/);
-      if (singleLine) {
-        if (codeLines !== null) flushCode();
-        else { flushRegular(); flushQuote(); flushList(); }
-        results.push(handlers.onCode([singleLine[1]]));
+    // ---- Inside a code block: look for a closing ``` anywhere on the line ----
+    // Slack has no info-string / language concept: ``` simply toggles code, and
+    // any text on the same line as the fence is part of the message. A closing
+    // fence may therefore be glued to the end of the last code line
+    // (e.g. `MIGRATION_SHEET_ID=...```), so we scan for it mid-line rather than
+    // only at the start.
+    if (codeLines !== null) {
+      const closeIdx = line.indexOf('```');
+      if (closeIdx === -1) {
+        codeLines.push(line);
         continue;
       }
-      if (codeLines !== null) {
-        flushCode();
-      } else {
-        flushRegular();
-        flushQuote();
-        flushList();
-        codeLines = [];
-      }
+      const before = line.slice(0, closeIdx);
+      if (before.length) codeLines.push(before);
+      flushCode();
+      const after = line.slice(closeIdx + 3);
+      if (after.trim().length) regularLines.push(after);
       continue;
     }
 
-    if (codeLines !== null) {
-      codeLines.push(line);
+    // ---- Not in a code block: an opening ``` may appear anywhere on the line ----
+    const openIdx = line.indexOf('```');
+    if (openIdx !== -1) {
+      // Text before the opening fence is regular content.
+      const before = line.slice(0, openIdx);
+      if (before.trim().length) regularLines.push(before);
+      flushRegular();
+      flushQuote();
+      flushList();
+
+      const rest = line.slice(openIdx + 3);
+      const closeInRest = rest.indexOf('```');
+      if (closeInRest !== -1) {
+        // Single-line fence: ```content``` — opening and closing on the same line.
+        results.push(handlers.onCode([rest.slice(0, closeInRest)]));
+        const after = rest.slice(closeInRest + 3);
+        if (after.trim().length) regularLines.push(after);
+      } else {
+        // Opening fence with the remainder of the line as the first code line.
+        // This is the content Slack shows but a CommonMark info-string drops.
+        codeLines = [];
+        if (rest.length) codeLines.push(rest);
+      }
       continue;
     }
 

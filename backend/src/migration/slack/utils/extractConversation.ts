@@ -815,6 +815,56 @@ async function deepResolveMentions<T>(obj: T, token: string, workspaceId?: strin
   return obj;
 }
 
+// Display-name cache for huddle participants, keyed by Slack UID. Slack profile
+// names rarely change, so caching avoids re-fetching the same user across huddles.
+const huddleParticipantNameCache = new Map<string, string | null>();
+
+/**
+ * Resolve a single participant's Slack DISPLAY name (what Slack itself shows in
+ * a huddle summary). Uses the Slack profile directly rather than the DB record —
+ * the DB stores a handle (e.g. "siraj.shaik") and email-matched users carry no
+ * name at all, both of which would misrender or silently drop the participant.
+ */
+async function resolveHuddleParticipantName(uid: string, botToken?: string): Promise<string | null> {
+  if (huddleParticipantNameCache.has(uid)) {
+    return huddleParticipantNameCache.get(uid)!;
+  }
+
+  const token = botToken || process.env.SLACK_BOT_TOKEN || '';
+  let name: string | null = null;
+  try {
+    const info = await fetchSlackUserInfo(uid, token);
+    // Prefer display_name (Slack shows this first), then real_name.
+    name = info?.profile?.display_name || info?.profile?.real_name || null;
+  } catch {
+    name = null;
+  }
+
+  huddleParticipantNameCache.set(uid, name);
+  return name;
+}
+
+/**
+ * Resolve a huddle `room`'s participant Slack UIDs to display names so the
+ * rendered summary reads like Slack ("A, B and C were in the huddle for 1m").
+ * Falls back to the raw room (parser then shows a participant count) when no
+ * name can be resolved.
+ */
+async function resolveHuddleRoom(room: any, botToken?: string): Promise<any> {
+  const uids: string[] = room.participant_history?.length
+    ? room.participant_history
+    : room.participants ?? [];
+
+  if (uids.length === 0) {
+    return room;
+  }
+
+  const names = await Promise.all(uids.map((uid) => resolveHuddleParticipantName(uid, botToken)));
+
+  const participant_names = names.filter((n): n is string => !!n);
+  return participant_names.length ? { ...room, participant_names } : room;
+}
+
 async function extractMessageContent(msg: any, isBotContext: boolean = false, botToken?: string, workspaceId?: string): Promise<string> {
   const token = botToken || process.env.SLACK_BOT_TOKEN || '';
 
@@ -831,7 +881,20 @@ async function extractMessageContent(msg: any, isBotContext: boolean = false, bo
       ? await deepResolveMentions(renderableAttachments, token, workspaceId)
       : undefined;
 
-    return blockKitParser.parse({ text: resolvedText, attachments: resolvedAttachments });
+    // Huddle / call start messages (subtype `huddle_thread`) carry an empty
+    // `text`; their content lives in the `room` object. Pass it through so the
+    // parent renders a real summary — otherwise it's empty and gets filtered
+    // out, taking its thread replies with it.
+    const isHuddle = msg.subtype === 'huddle_thread' || !!msg.room?.call_family;
+    const room = isHuddle && msg.room
+      ? await resolveHuddleRoom(msg.room, botToken)
+      : undefined;
+
+    return blockKitParser.parse({
+      text: resolvedText,
+      attachments: resolvedAttachments,
+      ...(isHuddle && { subtype: msg.subtype, room }),
+    });
   }
 
   // Bot context: blocks primary, text fallback, attachments always resolved

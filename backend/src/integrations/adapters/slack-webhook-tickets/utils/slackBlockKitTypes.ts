@@ -206,10 +206,50 @@ export interface SlackAttachment {
   from_url?: string;
 }
 
+// ========== Huddle / Call (room) Types ==========
+
+/**
+ * Slack `room` object attached to huddle / call messages (subtype
+ * `huddle_thread`). These "a huddle started" messages carry an EMPTY `text`
+ * and their meaningful content — that a huddle happened, its duration and who
+ * joined — lives only here. Without rendering this, the huddle parent message
+ * is blank, and when empty messages are filtered out its thread replies are
+ * dropped with it.
+ * https://api.slack.com/apis/calls
+ */
+export interface SlackRoom {
+  id?: string;
+  name?: string;
+  /** 'huddle' for huddles; other values identify Slack calls. */
+  call_family?: string;
+  /** Unix seconds when the huddle/call started. */
+  date_start?: number;
+  /** Unix seconds when it ended (present once `has_ended` is true). */
+  date_end?: number;
+  has_ended?: boolean;
+  /** Slack UIDs of everyone who joined the huddle at any point. */
+  participant_history?: string[];
+  /** Slack UIDs currently in the huddle. */
+  participants?: string[];
+  /**
+   * Resolved display names for `participant_history`, populated by the migration
+   * layer (which has the user cache) so the summary can read like Slack —
+   * "A and B were in the huddle for 1m" — instead of a bare participant count.
+   */
+  participant_names?: string[];
+  /** Deep link to (re)join the huddle. */
+  huddle_link?: string;
+  thread_root_ts?: string;
+}
+
 // ========== Message Types ==========
 
 export interface SlackBlockKitMessage {
   blocks?: SlackBlock[];
   attachments?: SlackAttachment[];
   text?: string;
+  /** Slack message subtype, e.g. `huddle_thread` for huddle start messages. */
+  subtype?: string;
+  /** Present on huddle/call messages; see {@link SlackRoom}. */
+  room?: SlackRoom;
 }
