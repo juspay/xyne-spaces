@@ -65,6 +65,7 @@ import {
   resolveCitationIconUrl,
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
 import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
+import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
@@ -367,6 +368,17 @@ function ClawCitationChip({
     conversationTools && conversationTools.length > 0 ? conversationTools : toolInvocations;
   const citation = findCitationForChunk(lookupTools, toolCallId, chunkIndex);
   const url = citation ? buildClawCitationUrl(citation) : null;
+
+  // On the /ai page a KB PDF citation opens in the right-side docs panel instead
+  // of navigating away (mirrors xyne-search). The provider is only present on
+  // /ai, so elsewhere `citationDocs` is null and we fall back to navigation.
+  const citationDocs = useCitationDocs();
+  const panelDoc = citationDocs ? panelDocFromCitation(citation, url) : null;
+  const openInPanel = (e: React.MouseEvent): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (panelDoc) citationDocs!.openDoc(panelDoc);
+  };
   // Show the citation's header (title) instead of the bare number — easier to
   // read at a glance. Falls back to the number if the citation didn't resolve.
   const label = citation ? getClawCitationLabel(citation) : `${toolNumber}.${chunkIndex}`;
@@ -393,14 +405,27 @@ function ClawCitationChip({
     </>
   );
   const trigger = url ? (
-    <CitationLink
-      url={url}
-      newTab={!!citation && citationOpensInNewTab(citation)}
-      className={chipClass}
-      ariaLabel={tooltip}
-    >
-      {chipInner}
-    </CitationLink>
+    panelDoc ? (
+      <button
+        type='button'
+        className={chipClass}
+        aria-label={tooltip}
+        onClick={openInPanel}
+        data-track-category='ask-ai'
+        data-track-name='citation-open-doc-panel'
+      >
+        {chipInner}
+      </button>
+    ) : (
+      <CitationLink
+        url={url}
+        newTab={!!citation && citationOpensInNewTab(citation)}
+        className={chipClass}
+        ariaLabel={tooltip}
+      >
+        {chipInner}
+      </CitationLink>
+    )
   ) : onOpenToolDebug ? (
     // No link (generic auto-citation) — open the source tool call in the debug panel.
     <button

@@ -5,6 +5,7 @@ import Tooltip from '../../ui/Tooltip';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { detectFileType, FILE_TYPE_CONFIG } from '../../FileViewer/utils';
 import { fetchFile, downloadFile } from '../../../services/clients/fileFetchService';
+import { apiInstance } from '../../../services/clients/apiClient';
 import { useProjectCollections } from '../hooks/useProjectCollections';
 import { KbCodeViewer } from './KbCodeViewer';
 import { KbTxtViewer } from './KbTxtViewer';
@@ -23,6 +24,8 @@ const KB_VIEWER_OVERRIDES: Record<
     fileName?: string;
     width?: number;
     height?: number;
+    initialPage?: number;
+    highlightQuery?: string;
   }>
 > = {
   code: KbCodeViewer,
@@ -51,12 +54,17 @@ function extLabel(name: string): string {
 export const FileViewerPanel: React.FC<{
   handleBackNavigation: () => void;
   fileId: string | undefined;
+  /** 1-based page to open the PDF on (from a citation deep-link `?page=`). */
+  initialPage?: number;
+  /** 0-based cited chunk index (from `?chunkIndex=`) — resolves a highlight snippet. */
+  initialChunkIndex?: number;
   onOpenChat?: (docId: string, docName: string) => void;
-}> = ({ handleBackNavigation, fileId, onOpenChat }) => {
+}> = ({ handleBackNavigation, fileId, initialPage, initialChunkIndex, onOpenChat }) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [containerWidth, setContainerWidth] = useState<number | undefined>(undefined);
+  const [highlightQuery, setHighlightQuery] = useState<string | undefined>(undefined);
   const contentRef = useRef<HTMLDivElement>(null);
   const fileIdRef = useRef<string | undefined>(fileId);
   fileIdRef.current = fileId;
@@ -173,6 +181,31 @@ export const FileViewerPanel: React.FC<{
     }
   }, [fileForId, fileId]);
 
+  // Resolve the cited chunk's highlight snippet. Best-effort: on any failure we
+  // leave it unset and the viewer degrades to a page-only jump.
+  useEffect(() => {
+    setHighlightQuery(undefined);
+    if (!fileId || initialChunkIndex === undefined) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await apiInstance.get(`/collections/items/${fileId}/chunk`, {
+          params: { index: initialChunkIndex },
+        });
+        if (cancelled) return;
+        const chunkText = (res.data as { chunkText?: string | null })?.chunkText;
+        if (typeof chunkText === 'string' && chunkText.trim().length >= 2) {
+          setHighlightQuery(chunkText.trim());
+        }
+      } catch {
+        // best-effort — leave highlight unset
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fileId, initialChunkIndex]);
+
   if (!file) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -259,6 +292,8 @@ export const FileViewerPanel: React.FC<{
           source={fileData}
           fileName={file.name}
           {...(containerWidth ? { width: containerWidth } : {})}
+          {...(initialPage ? { initialPage } : {})}
+          {...(highlightQuery ? { highlightQuery } : {})}
         />
       </div>
     );

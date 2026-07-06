@@ -17,6 +17,9 @@ router.get('/:collectionId/search', collectionController.searchItems);
 // Download file
 router.get('/items/:itemId/download', collectionController.downloadFile);
 
+// Resolve one chunk's highlight snippet (for pdf.js find-based citation highlighting)
+router.get('/items/:itemId/chunk', collectionController.getFileChunk);
+
 // Download folder as zip
 router.get('/items/:itemId/download-folder', collectionController.downloadFolder);
 

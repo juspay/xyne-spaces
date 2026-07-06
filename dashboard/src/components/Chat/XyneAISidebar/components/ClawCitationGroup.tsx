@@ -10,12 +10,19 @@ import {
 } from '../utils/clawCitationUrl';
 import type { ToolInvocation } from '../utils/XyneAITypes';
 import type { ClawCiteGroupRef } from '../../../ui/TipTapExtensions/CitationMark';
+import {
+  useCitationDocs,
+  panelDocFromCitation,
+  type OpenDocInput,
+} from '../../../AIScreen/citationDocs';
 
 interface ResolvedCite {
   url: string | null;
   label: string;
   iconUrl?: string;
   newTab: boolean;
+  /** Set when this source is a KB PDF openable in the /ai docs panel. */
+  panelDoc?: OpenDocInput | null;
   /** Source tool call — used to open the debug panel for generic auto-citations
    *  (which have no link target). */
   toolCallId: string;
@@ -43,15 +50,21 @@ export function ClawCitationGroup({
    *  in the debug panel instead. Absent for normal (linkable) citations. */
   onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
 }): ReactElement | null {
+  // On the /ai page each KB PDF source opens in the docs panel instead of
+  // navigating. `citationDocs` is null off /ai → falls back to CitationLink.
+  const citationDocs = useCitationDocs();
+
   const items: ResolvedCite[] = [];
   for (const ref of refs) {
     const citation = findCitationForChunk(toolInvocations, ref.toolCallId, ref.chunkIndex);
     if (!citation) continue;
     const iconUrl = resolveCitationIconUrl(citation);
+    const url = buildClawCitationUrl(citation);
     items.push({
-      url: buildClawCitationUrl(citation),
+      url,
       label: getClawCitationLabel(citation),
       newTab: citationOpensInNewTab(citation),
+      panelDoc: citationDocs ? panelDocFromCitation(citation, url) : null,
       toolCallId: ref.toolCallId,
       ...(iconUrl ? { iconUrl } : {}),
     });
@@ -75,6 +88,25 @@ export function ClawCitationGroup({
         <span className='min-w-0 truncate'>{it.label}</span>
       </>
     );
+    if (it.panelDoc) {
+      const doc = it.panelDoc;
+      return (
+        <button
+          type='button'
+          className={chipClass}
+          aria-label={it.label}
+          onClick={e => {
+            e.preventDefault();
+            e.stopPropagation();
+            citationDocs!.openDoc(doc);
+          }}
+          data-track-category='ask-ai'
+          data-track-name='citation-open-doc-panel'
+        >
+          {inner}
+        </button>
+      );
+    }
     return it.url ? (
       <CitationLink url={it.url} newTab={it.newTab} className={chipClass} ariaLabel={it.label}>
         {inner}
@@ -172,6 +204,25 @@ export function ClawCitationGroup({
           const rowClass =
             'flex items-center gap-1.5 min-w-0 px-2 py-1 rounded text-[12px] text-foreground ' +
             'hover:bg-accent transition-colors';
+          if (it.panelDoc) {
+            const doc = it.panelDoc;
+            return (
+              <button
+                key={i}
+                type='button'
+                className={`${rowClass} w-full text-left`}
+                onClick={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  citationDocs!.openDoc(doc);
+                }}
+                data-track-category='ask-ai'
+                data-track-name='citation-open-doc-panel-grouped'
+              >
+                {inner}
+              </button>
+            );
+          }
           return it.url ? (
             <CitationLink key={i} url={it.url} newTab={it.newTab} className={rowClass}>
               {inner}

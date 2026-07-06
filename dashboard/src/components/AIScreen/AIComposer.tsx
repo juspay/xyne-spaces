@@ -223,7 +223,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     recordings: seed.recordings,
   }));
   const [collections, setCollections] = useState(() => seed.collections);
-  const [fileScope, setFileScope] = useState(() => seed.fileScope);
+  const [fileScopes, setFileScopes] = useState(() => seed.fileScopes);
   const [research, setResearch] = useState(() => seed.research);
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
@@ -248,7 +248,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       transcripts: selections.transcripts,
       recordings: selections.recordings,
       collections,
-      fileScope,
+      fileScopes,
       research,
       webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
@@ -257,7 +257,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     [
       selections,
       collections,
-      fileScope,
+      fileScopes,
       research,
       webSearchEnabled,
       deepResearchEnabled,
@@ -513,9 +513,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       selections.transcripts.length > 0 ||
       selections.recordings.length > 0 ||
       collections.length > 0 ||
-      fileScope !== null ||
+      fileScopes.length > 0 ||
       research !== null,
-    [attachments, selections, collections, fileScope, research],
+    [attachments, selections, collections, fileScopes, research],
   );
 
   const canSend = value.trim().length > 0;
@@ -626,20 +626,18 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   icon={<BookOpen className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
                   label={collection.name}
                   accent
-                  onRemove={() => {
-                    setCollections(prev => prev.filter(c => c.id !== collection.id));
-                    if (fileScope) setFileScope(null);
-                  }}
+                  onRemove={() => setCollections(prev => prev.filter(c => c.id !== collection.id))}
                 />
               ))}
-              {fileScope && (
+              {fileScopes.map(fs => (
                 <ContextPill
+                  key={`fs-${fs.id}`}
                   icon={<FileText className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
-                  label={fileScope.name}
+                  label={fs.name}
                   accent
-                  onRemove={() => setFileScope(null)}
+                  onRemove={() => setFileScopes(prev => prev.filter(f => f.id !== fs.id))}
                 />
-              )}
+              ))}
               {research && (
                 <ContextPill
                   icon={
@@ -719,9 +717,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               />
               <ComposerCollectionPicker
                 collections={collections}
-                fileScope={fileScope}
+                fileScopes={fileScopes}
                 onCollectionsChange={setCollections}
-                onFileScopeChange={setFileScope}
+                onFileScopesChange={setFileScopes}
               />
               <ComposerResearchPicker research={research} onResearchChange={setResearch} />
 

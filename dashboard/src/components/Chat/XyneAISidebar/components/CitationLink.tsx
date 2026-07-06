@@ -1,5 +1,13 @@
-import { ComponentPropsWithoutRef, forwardRef } from 'react';
-import { Link } from 'react-router-dom';
+import { ComponentPropsWithoutRef, forwardRef, MouseEvent } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+
+/**
+ * Dispatched when a citation is re-clicked while the app is already at that
+ * exact in-app URL. react-router treats same-location navigation as a no-op, so
+ * the already-open file viewer would otherwise ignore the re-click. The viewer
+ * (PdfViewer) listens for this and re-jumps to the cited page.
+ */
+export const CITATION_REJUMP_EVENT = 'xyne:citation-rejump';
 
 interface CitationLinkProps extends Omit<ComponentPropsWithoutRef<'a'>, 'href'> {
   /** Resolved citation URL. */
@@ -23,7 +31,9 @@ interface CitationLinkProps extends Omit<ComponentPropsWithoutRef<'a'>, 'href'> 
  * handlers and a ref onto the underlying <a>. Dropping either kills the tooltip.
  */
 export const CitationLink = forwardRef<HTMLAnchorElement, CitationLinkProps>(
-  ({ url, newTab, ariaLabel, children, ...rest }, ref) => {
+  ({ url, newTab, ariaLabel, children, onClick, ...rest }, ref) => {
+    const location = useLocation();
+
     if (newTab) {
       return (
         <a
@@ -32,14 +42,31 @@ export const CitationLink = forwardRef<HTMLAnchorElement, CitationLinkProps>(
           target='_blank'
           rel='noopener noreferrer'
           aria-label={ariaLabel}
+          onClick={onClick}
+          data-track-category='citation'
+          data-track-name='citation-open-external'
           {...rest}
         >
           {children}
         </a>
       );
     }
+
+    const handleClick = (e: MouseEvent<HTMLAnchorElement>): void => {
+      // If the citation points at the URL we're already on, react-router won't
+      // re-render, so re-clicking it after scrolling the file would do nothing.
+      // Detect that and tell the open viewer to re-jump to the cited page.
+      const target = url.split('#')[0];
+      const current = `${location.pathname}${location.search}`;
+      if (target === current) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent(CITATION_REJUMP_EVENT));
+      }
+      onClick?.(e);
+    };
+
     return (
-      <Link ref={ref} to={url} aria-label={ariaLabel} {...rest}>
+      <Link ref={ref} to={url} aria-label={ariaLabel} onClick={handleClick} {...rest}>
         {children}
       </Link>
     );

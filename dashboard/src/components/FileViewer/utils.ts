@@ -22,6 +22,12 @@ export interface BaseViewerProps {
   height?: number;
   initialTime?: number;
   initialPage?: number;
+  /**
+   * Plain-text snippet of the cited chunk. The PDF viewer feeds it to pdf.js's
+   * find controller, which highlights the matching run in the PDF's own text
+   * layer (search-project-style highlighting). Absent → no highlight.
+   */
+  highlightQuery?: string;
   onExpand?: () => void;
   disableGestures?: boolean;
   onInteractionStateChange?: ((state: ZoomState) => void) | undefined;

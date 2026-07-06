@@ -11,6 +11,8 @@ import {
 } from '../../components/AIScreen/AIComposer';
 import type { ComposerContext } from '../../components/AIScreen/composerContext';
 import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen/AIChatThread';
+import { CitationDocsProvider } from '../../components/AIScreen/citationDocs';
+import { ChatWithCitationDocs } from '../../components/AIScreen/CitationDocsPanel';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSessionInvalidator } from '../../hooks/useAskAISessions';
@@ -215,68 +217,72 @@ const AIScreen = (): ReactElement => {
   }, [navigate]);
 
   return (
-    <div className={cn('ai-page-bg flex h-full w-full')}>
-      {/* ─── Left sidebar (xyne-search style) ─── */}
-      <AISidebar
-        activeSessionId={activeSessionId}
-        onCreateChat={handleCreateChat}
-        onSelectSession={handleSelectSession}
-        onAccount={handleAccount}
-        mobileOpen={mobileSidebarOpen}
-        onMobileOpenChange={setMobileSidebarOpen}
-      />
+    <CitationDocsProvider>
+      <div className={cn('ai-page-bg flex h-full w-full')}>
+        {/* ─── Left sidebar (xyne-search style) ─── */}
+        <AISidebar
+          activeSessionId={activeSessionId}
+          onCreateChat={handleCreateChat}
+          onSelectSession={handleSelectSession}
+          onAccount={handleAccount}
+          mobileOpen={mobileSidebarOpen}
+          onMobileOpenChange={setMobileSidebarOpen}
+        />
 
-      {/* ─── Main content ─── */}
-      <div ref={dropZoneRef} className='relative flex h-full min-w-0 flex-1 flex-col'>
-        {isDragging && !showChatView && (
-          <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
-            <div className='flex flex-col items-center gap-3'>
-              <div className='rounded-full bg-primary/10 p-4'>
-                <Upload className='h-8 w-8 text-primary' />
-              </div>
-              <div className='text-center'>
-                <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
-                <p className='text-sm text-muted-foreground'>
-                  Images, PDF, text, office documents, or data files
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-        {showChatView ? (
-          <AIChatThread
-            ref={chatThreadRef}
-            key={chatKey}
-            sessionId={activeSessionId || undefined}
-            initialQuery={initialQuery}
-            initialAttachments={initialAttachments}
-            initialExtras={initialExtras}
-            onSetMobileSidebarOpen={setMobileSidebarOpen}
-            onConversationChange={handleConversationChange}
-            onAgentChange={handleAgentChange}
-            onContextChange={handleContextChange}
-          />
-        ) : (
-          /* Landing page – centred greeting + composer */
-          <main className='flex h-full flex-1 items-center justify-center px-6 py-8'>
-            <div className='flex w-full max-w-2xl flex-col'>
-              <AIEmptyState />
-              <div className='mt-6'>
-                <AIComposer
-                  ref={landingComposerRef}
-                  autoFocus
-                  onSubmit={handleComposerSubmit}
-                  onAgentChange={handleAgentChange}
-                  showAgentSelector={isV2}
-                  onContextChange={handleContextChange}
-                  hideDisclaimer
-                />
+        {/* ─── Main content ─── */}
+        <div ref={dropZoneRef} className='relative flex h-full min-w-0 flex-1 flex-col'>
+          {isDragging && !showChatView && (
+            <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
+              <div className='flex flex-col items-center gap-3'>
+                <div className='rounded-full bg-primary/10 p-4'>
+                  <Upload className='h-8 w-8 text-primary' />
+                </div>
+                <div className='text-center'>
+                  <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
+                  <p className='text-sm text-muted-foreground'>
+                    Images, PDF, text, office documents, or data files
+                  </p>
+                </div>
               </div>
             </div>
-          </main>
-        )}
+          )}
+          {showChatView ? (
+            <ChatWithCitationDocs>
+              <AIChatThread
+                ref={chatThreadRef}
+                key={chatKey}
+                sessionId={activeSessionId || undefined}
+                initialQuery={initialQuery}
+                initialAttachments={initialAttachments}
+                initialExtras={initialExtras}
+                onSetMobileSidebarOpen={setMobileSidebarOpen}
+                onConversationChange={handleConversationChange}
+                onAgentChange={handleAgentChange}
+                onContextChange={handleContextChange}
+              />
+            </ChatWithCitationDocs>
+          ) : (
+            /* Landing page – centred greeting + composer */
+            <main className='flex h-full flex-1 items-center justify-center px-6 py-8'>
+              <div className='flex w-full max-w-2xl flex-col'>
+                <AIEmptyState />
+                <div className='mt-6'>
+                  <AIComposer
+                    ref={landingComposerRef}
+                    autoFocus
+                    onSubmit={handleComposerSubmit}
+                    onAgentChange={handleAgentChange}
+                    showAgentSelector={isV2}
+                    onContextChange={handleContextChange}
+                    hideDisclaimer
+                  />
+                </div>
+              </div>
+            </main>
+          )}
+        </div>
       </div>
-    </div>
+    </CitationDocsProvider>
   );
 };
 

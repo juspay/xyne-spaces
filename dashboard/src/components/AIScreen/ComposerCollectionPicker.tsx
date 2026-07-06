@@ -17,23 +17,23 @@ interface FileScope {
 
 interface ComposerCollectionPickerProps {
   collections: SelectedCollection[];
-  fileScope: FileScope | null;
+  fileScopes: FileScope[];
   onCollectionsChange: (collections: SelectedCollection[]) => void;
-  onFileScopeChange: (fileScope: FileScope | null) => void;
+  onFileScopesChange: (fileScopes: FileScope[]) => void;
 }
 
 /**
- * "Book" button + collection picker for the /ai composer. Ports the sidebar's
- * (XyneAIInputBox) collection behaviour: single-select a collection, or
- * double-click to drill into its folders and pick a single file to scope Ask AI
- * to. Agent-scope gating is intentionally omitted here (the backend MCP layer
- * is the hard gate); everything else mirrors the sidebar.
+ * "Book" button + collection picker for the /ai composer. Multi-select: click
+ * collections to toggle them, or double-click to drill into folders and toggle
+ * individual files to scope Ask AI to (several files, across folders, stay
+ * selected). Agent-scope gating is intentionally omitted here (the backend MCP
+ * layer is the hard gate); everything else mirrors the sidebar.
  */
 export function ComposerCollectionPicker({
   collections,
-  fileScope,
+  fileScopes,
   onCollectionsChange,
-  onFileScopeChange,
+  onFileScopesChange,
 }: ComposerCollectionPickerProps): ReactElement {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -129,23 +129,35 @@ export function ComposerCollectionPicker({
       if (clickTimer.current) return; // a double-click is in progress
       clickTimer.current = setTimeout(() => {
         clickTimer.current = null;
-        const isCurrent = collections.length === 1 && collections[0]?.id === collection.id;
-        onCollectionsChange(isCurrent ? [] : [collection]);
-        // Collection-level scope drops any single-file scope.
-        onFileScopeChange(null);
+        // Toggle this collection in/out of the multi-select set.
+        const isSelected = collections.some(c => c.id === collection.id);
+        onCollectionsChange(
+          isSelected
+            ? collections.filter(c => c.id !== collection.id)
+            : [...collections, collection],
+        );
       }, 220);
     },
-    [collections, onCollectionsChange, onFileScopeChange],
+    [collections, onCollectionsChange],
   );
 
-  const handleSelectFile = useCallback(
+  const handleToggleFile = useCallback(
     (file: { fileId: string; name: string }) => {
-      onFileScopeChange({ id: file.fileId, name: file.name });
+      // Toggle this file in/out of the multi-select set — keep the picker open
+      // so several files (across folders) can be picked in one pass.
+      const isSelected = fileScopes.some(f => f.id === file.fileId);
+      onFileScopesChange(
+        isSelected
+          ? fileScopes.filter(f => f.id !== file.fileId)
+          : [...fileScopes, { id: file.fileId, name: file.name }],
+      );
+      // Keep the file's root collection in scope so the backend can resolve it.
       const root = navStack[0];
-      onCollectionsChange(root ? [root] : []);
-      setOpen(false);
+      if (!isSelected && root && !collections.some(c => c.id === root.id)) {
+        onCollectionsChange([...collections, root]);
+      }
     },
-    [navStack, onCollectionsChange, onFileScopeChange],
+    [fileScopes, collections, navStack, onFileScopesChange, onCollectionsChange],
   );
 
   return (
@@ -223,12 +235,12 @@ export function ComposerCollectionPicker({
                     </button>
                   ))}
                   {currentFiles.map(file => {
-                    const isSelected = fileScope?.id === file.fileId;
+                    const isSelected = fileScopes.some(f => f.id === file.fileId);
                     return (
                       <button
                         key={file.fileId}
                         type='button'
-                        onClick={() => handleSelectFile(file)}
+                        onClick={() => handleToggleFile(file)}
                         className={cn(
                           'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent',
                           isSelected && 'bg-accent',

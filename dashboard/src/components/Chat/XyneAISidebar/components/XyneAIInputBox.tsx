@@ -176,11 +176,10 @@ export interface XyneAIInputBoxProps {
     fileId: string | null;
     rootCollectionId: string;
   }>;
-  /** When Ask AI is opened from a file viewer, scopes retrieval to this single file. */
-  fileScope?: { id: string; name: string } | null;
-  onRemoveFileScope?: () => void;
-  /** Select a file from the picker as scope (id = the file's Vespa docId / fileId UUID). */
-  onSelectFileScope?: (file: { id: string; name: string }) => void;
+  /** When Ask AI is opened from a file viewer / picker, scopes retrieval to these files (multi-select). */
+  fileScopes?: { id: string; name: string }[];
+  /** Replace the selected file set (id = each file's Vespa docId / fileId UUID). */
+  onFileScopesChange?: (fileScopes: { id: string; name: string }[]) => void;
   compactToolbar?: boolean;
   tightToolbar?: boolean;
 }
@@ -253,9 +252,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onCreateCanvasToggle,
       kbCollectionId = '',
       kbOpenNonce,
-      fileScope = null,
-      onRemoveFileScope,
-      onSelectFileScope,
+      fileScopes = [],
+      onFileScopesChange,
       onUserTagsChange,
       isOnboarding = false,
       selectedAgentSlug = null,
@@ -566,37 +564,49 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           // effect re-fires on selectedCollections.length=0. The Ask AI button
           // still re-attaches A via the kbOpenNonce-driven effect.
           autoAddedCollectionRemoved.current = true;
-          // Single-select: at most ONE collection. Clicking the selected one clears it.
+          // Multi-select: toggle this collection in/out of the set.
           setSelectedCollections(prev => {
-            const isCurrent = prev.length === 1 && prev[0]?.id === collection.id;
-            const updated = isCurrent ? [] : [{ id: collection.id, name: collection.name }];
+            const isSelected = prev.some(c => c.id === collection.id);
+            const updated = isSelected
+              ? prev.filter(c => c.id !== collection.id)
+              : [...prev, { id: collection.id, name: collection.name }];
             onSelectedCollectionsChange?.(updated.map(c => c.id));
             return updated;
           });
-          // Choosing a collection = collection-level scope → drop any single-file scope.
-          onRemoveFileScope?.();
         }, 220);
       },
-      [onSelectedCollectionsChange, onRemoveFileScope],
+      [onSelectedCollectionsChange],
     );
 
-    // Pick a file: scope Ask AI to just that file, and ensure its (root) collection is
-    // selected so the KB tool stays enabled + the collection filter applies.
-    const handleSelectFile = useCallback(
+    // Toggle a file in/out of the multi-select scope. Keeps the dropdown open so
+    // several files (across folders) can be picked in one pass. When adding a
+    // file, ensure its (root) collection is selected so the KB tool stays enabled
+    // + the collection filter applies.
+    const handleToggleFile = useCallback(
       (file: { fileId: string; name: string }) => {
-        onSelectFileScope?.({ id: file.fileId, name: file.name });
-        // Same rationale as handleCollectionSingleClick: explicit file pick is
-        // user-driven scope, so don't let the KB auto-add bring back the original
-        // collection if the user later clears these chips.
-        autoAddedCollectionRemoved.current = true;
-        // Single-select: the file's (root) collection becomes the ONLY selected collection.
-        const col = navStack[0];
-        const updated = col ? [col] : [];
-        setSelectedCollections(updated);
-        onSelectedCollectionsChange?.(updated.map(c => c.id));
-        setShowCollectionDropdown(false);
+        const isSelected = fileScopes.some(f => f.id === file.fileId);
+        onFileScopesChange?.(
+          isSelected
+            ? fileScopes.filter(f => f.id !== file.fileId)
+            : [...fileScopes, { id: file.fileId, name: file.name }],
+        );
+        if (!isSelected) {
+          // Same rationale as handleCollectionSingleClick: explicit file pick is
+          // user-driven scope, so don't let the KB auto-add bring back the original
+          // collection if the user later clears these chips.
+          autoAddedCollectionRemoved.current = true;
+          const col = navStack[0];
+          if (col) {
+            setSelectedCollections(prev => {
+              if (prev.some(c => c.id === col.id)) return prev;
+              const updated = [...prev, col];
+              onSelectedCollectionsChange?.(updated.map(c => c.id));
+              return updated;
+            });
+          }
+        }
       },
-      [onSelectFileScope, navStack, onSelectedCollectionsChange],
+      [fileScopes, onFileScopesChange, navStack, onSelectedCollectionsChange],
     );
 
     // Thread info state - track if user has removed it
@@ -1806,9 +1816,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   </div>
                 ))}
 
-                {/* File Scope Pill — narrows Ask AI to a single file (opened from file viewer) */}
-                {fileScope && (
+                {/* File Scope Pills — narrow Ask AI to specific file(s) */}
+                {fileScopes.map(fs => (
                   <div
+                    key={`fs-${fs.id}`}
                     className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
                   >
                     <div className='flex items-center gap-1'>
@@ -1816,14 +1827,14 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         <FileText className='w-3.5 h-3.5 text-[#7C3AED]' />
                       </div>
                       <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[160px] truncate">
-                        {fileScope.name}
+                        {fs.name}
                       </span>
                     </div>
-                    {onRemoveFileScope && (
+                    {onFileScopesChange && (
                       <button
-                        onClick={onRemoveFileScope}
+                        onClick={() => onFileScopesChange(fileScopes.filter(f => f.id !== fs.id))}
                         className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                        aria-label={`Remove file scope ${fileScope.name}`}
+                        aria-label={`Remove file scope ${fs.name}`}
                         data-track-category='XyneAI'
                         data-track-name='REMOVE_FILE_SCOPE'
                       >
@@ -1831,7 +1842,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       </button>
                     )}
                   </div>
-                )}
+                ))}
 
                 {/* Collection Pills */}
                 {selectedCollections.map(collection => (
@@ -2325,12 +2336,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       </button>
                     ))}
                     {currentFiles.map(file => {
-                      const isSelected = fileScope?.id === file.fileId;
+                      const isSelected = fileScopes.some(f => f.id === file.fileId);
                       return (
                         <button
                           key={file.fileId}
                           type='button'
-                          onClick={() => handleSelectFile(file)}
+                          onClick={() => handleToggleFile(file)}
                           className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent ${
                             isSelected ? 'bg-accent' : ''
                           }`}
