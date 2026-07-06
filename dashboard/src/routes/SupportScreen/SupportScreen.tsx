@@ -26,6 +26,7 @@ import {
   Loader2,
   Pencil,
   Users2,
+  Users,
   Lock,
   Hash,
   Inbox,
@@ -78,6 +79,7 @@ import {
   PrioritySubmenu,
   UserSubmenu,
   AICategorySubmenu,
+  UserGroupSubmenu,
 } from '../../components/Tickets/TicketFilters/Submenus';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { Switch } from '../../components/ui/Switch';
@@ -573,6 +575,8 @@ const SupportScreen = (): ReactElement => {
       aiCategory:
         filters.aiCategory && filters.aiCategory.length > 0 ? filters.aiCategory : undefined,
       hasAiDraft: filters.hasAiDraft === true ? true : undefined,
+      userGroups:
+        filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
     }),
     [filters, userID],
   );
@@ -597,7 +601,8 @@ const SupportScreen = (): ReactElement => {
     filters.hasAiDraft === true ||
     (filters.priority && filters.priority.length > 0) ||
     (filters.stages && filters.stages.length > 0) ||
-    (filters.aiCategory && filters.aiCategory.length > 0)
+    (filters.aiCategory && filters.aiCategory.length > 0) ||
+    (filters.userGroups && filters.userGroups.length > 0)
   );
   const hasAnyFilterActive = hasAssigneeFilter || hasMoreFiltersActive;
 
@@ -631,6 +636,7 @@ const SupportScreen = (): ReactElement => {
     { id: 'priority', label: 'Priority', icon: BarChart4Icon },
     { id: 'stages', label: 'Stages', icon: Circle },
     { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
+    { id: 'userGroups', label: 'User Groups', icon: Users },
   ] as const;
 
   const renderSubmenu = useCallback((): ReactElement | null => {
@@ -660,10 +666,18 @@ const SupportScreen = (): ReactElement => {
             channelId={selectedChannelId}
           />
         );
+      case 'userGroups':
+        return (
+          <UserGroupSubmenu
+            selectedGroups={filters.userGroups || []}
+            onChange={(groups: string[]) => handleFilterChange('userGroups', groups)}
+            onClose={() => setActiveSubmenu(null)}
+          />
+        );
       default:
         return null;
     }
-  }, [activeSubmenu, filters, handleFilterChange, availablePriorities]);
+  }, [activeSubmenu, filters, handleFilterChange, availablePriorities, selectedChannelId]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () =>
@@ -2011,7 +2025,9 @@ const SupportScreen = (): ReactElement => {
                                     (item.id === 'stages' &&
                                       !!(filters.stages && filters.stages.length > 0)) ||
                                     (item.id === 'aiCategory' &&
-                                      !!(filters.aiCategory && filters.aiCategory.length > 0));
+                                      !!(filters.aiCategory && filters.aiCategory.length > 0)) ||
+                                    (item.id === 'userGroups' &&
+                                      !!(filters.userGroups && filters.userGroups.length > 0));
                                   const menuButton = (
                                     <button
                                       ref={el => {
@@ -2512,6 +2528,7 @@ type SupportTicketDetailProps = {
     stageName: string[] | undefined;
     aiCategory: string[] | undefined;
     hasAiDraft: boolean | undefined;
+    userGroups: string[] | undefined;
   };
   isMember: boolean;
   onMailtoClick: (email: string) => void;

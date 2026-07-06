@@ -332,7 +332,7 @@ export class AdminBackfillController {
 
       for (const app of apps) {
         try {
-          await vespaQueue.addJob({ schema: appSchema, jobType: 'feed', docId: app.id });
+          await vespaBackfillQueue.addJob({ schema: appSchema, jobType: 'feed', docId: app.id });
           totalQueued++;
         } catch (error) {
           logger.error(`[Backfill] Failed to queue app ${app.id}:`, error);
