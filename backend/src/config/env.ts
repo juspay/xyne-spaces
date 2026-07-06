@@ -129,6 +129,9 @@ const envSchema = Joi.object({
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
   ASK_AI_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  // Document outline generation (BaseStrategy.buildDocumentOutline) — an extra LLM
+  // call per ingested document. Disable independently of the shared LiteLLM config.
+  DOCUMENT_OUTLINE_ENABLED: Joi.boolean().default(true),
   IMAGE_GENERATION_ENDPOINT: Joi.string().default(''),
   IMAGE_GENERATION_MODEL: Joi.string().default(''),
   ACTIVITY_CLASSIFICATION_LITELLM_API_KEY: Joi.string().allow('').default(''),
@@ -562,6 +565,7 @@ export const config = {
     askAiApiKey: envVars.ASK_AI_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
     imageGenerationEndpoint: envVars.IMAGE_GENERATION_ENDPOINT,
     imageGenerationModel: envVars.IMAGE_GENERATION_MODEL,
+    documentOutlineEnabled: envVars.DOCUMENT_OUTLINE_ENABLED,
   },
   dashboard: {
     aiRequestTimeoutMs: envVars.DASHBOARD_AI_REQUEST_TIMEOUT_MS,
