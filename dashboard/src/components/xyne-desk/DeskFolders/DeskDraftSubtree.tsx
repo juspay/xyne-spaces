@@ -19,7 +19,7 @@ export const DeskDraftSubtree = ({
   onOpenUserSent,
 }: DeskDraftSubtreeProps): ReactElement => {
   return (
-    <div className='mt-0.5 ml-3 pl-2 border-l border-border/60 flex flex-col gap-0.5'>
+    <div className='flex flex-col gap-0.5'>
       <SubItem
         icon={<Pencil size={12} className='text-muted-foreground' />}
         label='Drafts'

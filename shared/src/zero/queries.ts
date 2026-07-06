@@ -29,6 +29,7 @@ import {
   Status,
   TicketPriority,
   TicketStageRequestStatus,
+  MailboxState,
   TicketStatusV2,
   TicketReferenceRelation,
   DelayedMessageStatus,
@@ -1088,11 +1089,12 @@ export const queries = defineQueries({
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
+      mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam']).optional(),
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1118,6 +1120,29 @@ export const queries = defineQueries({
         );
       }
 
+      // Mailbox folder server-side filtering. Spam and Starred REQUIRE an overlay row, so they
+      // can be filtered with a positive exists() (works on the client too, unlike not(exists)),
+      // making pagination meaningful instead of scanning the whole channel client-side. Inbox /
+      // All Mail include no-overlay tickets (default = Inbox) and stay client-side.
+      if (mailboxFolder === 'spam') {
+        query = query.where(({ exists }) =>
+          exists('userMailbox', m =>
+            m.where('userId', ctx.userID).where('state', MailboxState.SPAM),
+          ),
+        );
+      } else if (mailboxFolder === 'starred') {
+        query = query.where(({ exists }) =>
+          exists('userMailbox', m =>
+            m
+              .where('userId', ctx.userID)
+              .where('starred', true)
+              .where(({ or, cmp }) =>
+                or(cmp('state', MailboxState.INBOX), cmp('state', MailboxState.ARCHIVED)),
+              ),
+          ),
+        );
+      }
+
       const orderDirection = dir === 'forward' ? 'desc' : 'asc';
       query = query.orderBy('lastEmailAt', orderDirection);
       // id tiebreak keeps the (lastEmailAt, id) keyset cursor deterministic on ties.
@@ -1130,14 +1155,20 @@ export const queries = defineQueries({
         );
       }
 
-      return query
-        .limit(limit)
-        .related('emailDrafts', q =>
-          q.where(({ or, cmp }) =>
-            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
-          ),
-        )
-        .related('emailReads', q => q.where('userId', ctx.userID));
+      return (
+        query
+          .limit(limit)
+          .related('emailDrafts', q =>
+            q.where(({ or, cmp }) =>
+              or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+            ),
+          )
+          .related('emailReads', q => q.where('userId', ctx.userID))
+          // Caller's per-user mailbox overlay so the list can be filtered into mailbox
+          // folders (Inbox / All Mail / Starred / Spam) client-side. A ticket with no
+          // overlay row defaults to Inbox.
+          .related('userMailbox', q => q.where('userId', ctx.userID))
+      );
     },
   ),
   supportTicketsPageV4: defineQuery(
@@ -1231,6 +1262,17 @@ export const queries = defineQueries({
         .orderBy('updatedAt', 'desc');
     },
   ),
+  // The caller's compose drafts (brand-new emails, no thread) for a channel.
+  composeDraftsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.email_drafts
+        .where('channelId', channelId)
+        .where('userId', ctx.userID)
+        .where('conversationId', 'IS', null)
+        .orderBy('updatedAt', 'desc');
+    },
+  ),
   userEmailDrafts: defineQuery(
     z.object({
       channelId: z.string(),
@@ -1241,6 +1283,10 @@ export const queries = defineQueries({
       let query = zql.email_drafts
         .where('channelId', channelId)
         .where('userId', '=', ctx.userID)
+        // Reply drafts only. Compose drafts (conversationId IS NULL) live in the same
+        // table but are paginated separately (composeDraftsByChannel); without this they
+        // would consume page slots here and can hide reply drafts behind the keyset window.
+        .where('conversationId', 'IS NOT', null)
         // id is part of the keyset cursor below, so it must also be in the sort —
         // otherwise drafts sharing an updatedAt can be skipped/duplicated across pages.
         .orderBy('updatedAt', 'desc')
@@ -2845,6 +2891,37 @@ export const queries = defineQueries({
         .orderBy('name', 'asc');
     },
   ),
+  // Conversation labels (Gmail-style) — the channel/desk's label catalog for the sidebar.
+  conversationLabelsByChannelId: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.conversation_labels.where('channelId', channelId).orderBy('name', 'asc');
+    },
+  ),
+  // Labels applied to a single conversation (for chips on the email thread view).
+  conversationLabelMappingsByConversationId: defineQuery(
+    z.object({ conversationId: z.string() }),
+    ({ args: { conversationId } }) => {
+      return zql.conversation_label_mappings
+        .where('conversationId', conversationId)
+        .orderBy('labelName', 'asc');
+    },
+  ),
+  // All conversation mappings carrying a given label (for the per-label panel view).
+  // Pulls the conversation and its ticket so the panel can navigate to the thread.
+  conversationLabelMappingsByLabelId: defineQuery(
+    z.object({ labelId: z.string() }),
+    ({ args: { labelId } }) => {
+      return zql.conversation_label_mappings
+        .where('labelId', labelId)
+        .related('conversation', c => c.related('ticket'))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+  // The caller's mailbox overlay for a single ticket (ACL scopes to userId = me).
+  myTicketMailbox: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+    return zql.ticket_user_mailbox.where('ticketId', ticketId);
+  }),
   // Query for ticket entity mappings by ticket ID
   getTicketEntityMappingsByTicketId: defineQuery(
     z.object({ ticketId: z.string() }),

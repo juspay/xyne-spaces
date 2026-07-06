@@ -133,10 +133,23 @@ import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailCompo
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
+import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
 import { useEmailDraft } from '../../hooks/useEmailDraft';
+import {
+  useComposeDrafts,
+  useComposeDraftOperations,
+  type ComposeDraftRecord,
+} from '../../hooks/useComposeDraft';
 import { DeskDraftSubtree } from '../../components/xyne-desk/DeskFolders/DeskDraftSubtree';
 import { UserDraftsView } from '../../components/xyne-desk/DeskFolders/UserDraftsView';
 import { UserSentView } from '../../components/xyne-desk/DeskFolders/UserSentView';
+import { DeskLabelsSidebar } from '../../components/xyne-desk/DeskFolders/DeskLabelsSidebar';
+import { LabelThreadsView } from '../../components/xyne-desk/DeskFolders/LabelThreadsView';
+import {
+  DeskMailboxSidebar,
+  type MailboxFolder,
+} from '../../components/xyne-desk/DeskFolders/DeskMailboxSidebar';
+import { MailboxActions } from '../../components/xyne-desk/MailboxActions/MailboxActions';
 import { useMarkEmailRead } from '../../hooks/useMarkEmailRead';
 import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
@@ -244,6 +257,18 @@ interface PersistedComposeInstance {
 
 const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';
 const COMPOSE_DRAFT_KEY_PREFIX = 'xyne:composeDraft:';
+const COMPOSE_DRAFT_META_KEY_PREFIX = 'xyne:composeDraftMeta:';
+const COMPOSE_DRAFTS_MIGRATED_KEY_PREFIX = 'xyne:composeDraftsMigratedV1:';
+
+/** Legacy localStorage compose-draft payload — read only for the one-time migration. */
+interface LegacyComposeDraftPayload {
+  subject?: string;
+  body?: string;
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  attachments?: Array<{ attachmentId: string }>;
+}
 
 const readPersistedInstances = (userId: string): PersistedComposeInstance[] => {
   try {
@@ -255,80 +280,55 @@ const readPersistedInstances = (userId: string): PersistedComposeInstance[] => {
   }
 };
 
-const writePersistedInstances = (userId: string, instances: PersistedComposeInstance[]): void => {
-  try {
-    localStorage.setItem(`${COMPOSE_INSTANCES_KEY_PREFIX}${userId}`, JSON.stringify(instances));
-  } catch {
-    /* ignore quota errors */
-  }
-};
-
-/** Returns true when the draft for this instance has any non-empty content. */
-const instanceHasDraft = (userId: string, instanceId: string): boolean => {
-  try {
-    const raw = localStorage.getItem(`${COMPOSE_DRAFT_KEY_PREFIX}${userId}:${instanceId}`);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw) as {
-      subject?: string;
-      body?: string;
-      to?: string[];
-      cc?: string[];
-      bcc?: string[];
-      attachments?: Array<{ attachmentId: string }>;
-    };
-    const bodyText = parsed.body ? stripHtml(parsed.body) : '';
-    return (
-      (parsed.subject?.trim().length ?? 0) > 0 ||
-      bodyText.trim().length > 0 ||
-      (parsed.to?.length ?? 0) > 0 ||
-      (parsed.cc?.length ?? 0) > 0 ||
-      (parsed.bcc?.length ?? 0) > 0 ||
-      (parsed.attachments?.length ?? 0) > 0
-    );
-  } catch {
-    return false;
-  }
-};
-
-/** Returns a lightweight preview of a compose draft for display in the Drafts list. */
-const readDraftPreview = (
+/** Reads a legacy localStorage compose draft (used only for the one-time server migration). */
+const readLegacyComposeDraft = (
   userId: string,
   instanceId: string,
-): { subject: string; to: string[]; bodySnippet: string } => {
+): LegacyComposeDraftPayload | null => {
   try {
     const raw = localStorage.getItem(`${COMPOSE_DRAFT_KEY_PREFIX}${userId}:${instanceId}`);
-    if (!raw) return { subject: '', to: [], bodySnippet: '' };
-    const parsed = JSON.parse(raw) as {
-      subject?: string;
-      body?: string;
-      to?: string[];
-      attachments?: Array<{ originalName?: string }>;
-    };
-    const bodySnippet = parsed.body
-      ? stripHtml(parsed.body).replace(/\s+/g, ' ').trim().slice(0, 120)
-      : parsed.attachments?.[0]?.originalName
-        ? `Attachment: ${parsed.attachments[0].originalName}`
-        : '';
-    return {
-      subject: parsed.subject?.trim() ?? '',
-      to: parsed.to ?? [],
-      bodySnippet,
-    };
+    if (!raw) return null;
+    return JSON.parse(raw) as LegacyComposeDraftPayload;
   } catch {
-    return { subject: '', to: [], bodySnippet: '' };
+    return null;
   }
 };
 
-/** Removes all localStorage artefacts for a compose instance (draft + AI draft). */
-const clearInstanceStorage = (userId: string, instanceId: string, channelId: string): void => {
+const legacyComposeDraftHasContent = (d: LegacyComposeDraftPayload | null): boolean => {
+  if (!d) return false;
+  const bodyText = d.body ? stripHtml(d.body) : '';
+  return (
+    (d.subject?.trim().length ?? 0) > 0 ||
+    bodyText.trim().length > 0 ||
+    (d.to?.length ?? 0) > 0 ||
+    (d.cc?.length ?? 0) > 0 ||
+    (d.bcc?.length ?? 0) > 0 ||
+    (d.attachments?.length ?? 0) > 0
+  );
+};
+
+/** Removes all browser-local artefacts for a compose instance (display cache + legacy draft + AI draft). */
+const clearComposeLocalCache = (userId: string, instanceId: string, channelId: string): void => {
   try {
+    localStorage.removeItem(`${COMPOSE_DRAFT_META_KEY_PREFIX}${userId}:${instanceId}`);
     localStorage.removeItem(`${COMPOSE_DRAFT_KEY_PREFIX}${userId}:${instanceId}`);
-    // AI draft key mirrors the pattern used in SupportScreen's onClose handler.
     localStorage.removeItem(`xd-ai-draft:${channelId}_compose`);
     localStorage.removeItem(`xd-ai-draft:${instanceId}_compose`);
   } catch {
     /* ignore */
   }
+};
+
+/** Display label for a server compose-draft row in the Drafts list. */
+const composeDraftLabel = (d: ComposeDraftRecord): string => {
+  const subject = d.subject?.trim();
+  if (subject) return subject;
+  const to = Array.isArray(d.toRecipients) ? d.toRecipients : [];
+  if (to.length > 0 && to[0]) return `To: ${to[0]}`;
+  const snippet = d.draftContent
+    ? stripHtml(d.draftContent).replace(/\s+/g, ' ').trim().slice(0, 120)
+    : '';
+  return snippet || 'No subject';
 };
 type Email = NonNullable<QueryResultType<typeof queries.getEmailsForConversations>>[number];
 
@@ -548,7 +548,16 @@ const SupportScreen = (): ReactElement => {
   });
   const [filters, setFilters] = useState<TicketFilters>({});
   const [expandedDeskIds, setExpandedDeskIds] = useState<Set<string>>(new Set());
-  const [deskView, setDeskView] = useState<'tickets' | 'userDrafts' | 'userSent'>('tickets');
+  const [deskView, setDeskView] = useState<'tickets' | 'userDrafts' | 'userSent' | 'labelThreads'>(
+    'tickets',
+  );
+  const [selectedLabel, setSelectedLabel] = useState<{ id: string; name: string } | null>(null);
+  // Active mailbox folder for the base ticket list (Inbox by default). Inbox / All Mail /
+  // Starred / Spam filter the same rich list, rather than opening a separate view.
+  const [selectedFolder, setSelectedFolder] = useState<{
+    key: MailboxFolder;
+    label: string;
+  }>({ key: 'inbox', label: 'Inbox' });
   // Build the filter args once — reused by both the kanban query and the list view.
   // "My Tickets" toggle is the assignee fallback when the explicit assignee filter is empty.
   const ticketFilter = useMemo(
@@ -669,25 +678,21 @@ const SupportScreen = (): ReactElement => {
   // ---------------------------------------------------------------------------
   const [composeInstances, setComposeInstances] = useState<ComposeInstance[]>([]);
 
+  // Server-backed compose drafts for the selected channel (synced across devices).
+  // The composer itself autosaves each window's content; here we only read the list
+  // and delete rows on discard.
+  const composeDraftRows = useComposeDrafts(selectedChannelId);
+  const { deleteComposeDraft: deleteComposeDraftRow } =
+    useComposeDraftOperations(selectedChannelId);
+
   /** Add a new compose window for the given channel. */
-  const openNewCompose = useCallback(
-    (channelId: string, initialTo?: string[]): void => {
-      const id = uuidv4();
-      const next: ComposeInstance = {
-        id,
-        channelId,
-        minimized: false,
-        key: 0,
-        initialTo: initialTo ?? [],
-      };
-      setComposeInstances(prev => [...prev, next]);
-      if (userID) {
-        const persisted = readPersistedInstances(userID);
-        writePersistedInstances(userID, [...persisted, { id, channelId }]);
-      }
-    },
-    [userID],
-  );
+  const openNewCompose = useCallback((channelId: string, initialTo?: string[]): void => {
+    const id = uuidv4();
+    setComposeInstances(prev => [
+      ...prev,
+      { id, channelId, minimized: false, key: 0, initialTo: initialTo ?? [] },
+    ]);
+  }, []);
 
   const handleMailtoClick = useCallback(
     (email: string): void => {
@@ -697,105 +702,53 @@ const SupportScreen = (): ReactElement => {
     [openNewCompose, selectedChannelId],
   );
 
-  /** Close (save as draft) a compose window by instance ID. */
-  const closeCompose = useCallback(
-    (instanceId: string): void => {
-      // localStorage reads/writes must happen outside the setState updater.
-      // React StrictMode double-invokes updaters, which would corrupt the
-      // persisted registry if the writes were inside the updater function.
-      setComposeInstances(prev => {
-        const target = prev.find(i => i.id === instanceId);
-        if (target && userID) {
-          const hasDraft = instanceHasDraft(userID, instanceId);
-          if (hasDraft) {
-            // Save as draft: keep localStorage intact, mark as closedAsDraft in registry.
-            const persisted = readPersistedInstances(userID);
-            const alreadyPresent = persisted.find(p => p.id === instanceId);
-            const updated = alreadyPresent
-              ? persisted.map(p =>
-                  p.id === instanceId ? { ...p, closedAsDraft: true, savedAt: Date.now() } : p,
-                )
-              : [
-                  ...persisted,
-                  {
-                    id: instanceId,
-                    channelId: target.channelId,
-                    closedAsDraft: true,
-                    savedAt: Date.now(),
-                  },
-                ];
-            writePersistedInstances(userID, updated);
-          } else {
-            // No content — discard silently.
-            clearInstanceStorage(userID, instanceId, target.channelId);
-            writePersistedInstances(
-              userID,
-              readPersistedInstances(userID).filter(p => p.id !== instanceId),
-            );
-          }
-        }
-        return prev.filter(i => i.id !== instanceId);
-      });
-    },
-    [userID],
-  );
+  /**
+   * Close a compose window. Its content is already persisted server-side by the
+   * composer's autosave (and an empty draft deletes its own row), so closing just
+   * removes the floating window — any saved draft stays in the Drafts list.
+   */
+  const closeCompose = useCallback((instanceId: string): void => {
+    setComposeInstances(prev => prev.filter(i => i.id !== instanceId));
+  }, []);
 
-  /** Close a compose window and explicitly discard any persisted draft state. */
+  /** Close a compose window and explicitly discard its draft. */
   const discardCompose = useCallback(
     (instanceId: string): void => {
-      setComposeInstances(prev => {
-        const target = prev.find(i => i.id === instanceId);
-        if (target && userID) {
-          clearInstanceStorage(userID, instanceId, target.channelId);
-          writePersistedInstances(
-            userID,
-            readPersistedInstances(userID).filter(p => p.id !== instanceId),
-          );
-        }
-        return prev.filter(i => i.id !== instanceId);
-      });
+      deleteComposeDraftRow(instanceId);
+      if (userID) {
+        const channelId =
+          composeInstances.find(i => i.id === instanceId)?.channelId ?? selectedChannelId ?? '';
+        clearComposeLocalCache(userID, instanceId, channelId);
+      }
+      setComposeInstances(prev => prev.filter(i => i.id !== instanceId));
     },
-    [userID],
+    [userID, deleteComposeDraftRow, composeInstances, selectedChannelId],
   );
 
   /** Permanently discard a saved draft (from the Drafts list). */
   const discardDraft = useCallback(
     (instanceId: string): void => {
-      if (!userID) return;
-      const persisted = readPersistedInstances(userID);
-      const target = persisted.find(p => p.id === instanceId);
-      if (target) {
-        clearInstanceStorage(userID, instanceId, target.channelId);
-      }
-      writePersistedInstances(
-        userID,
-        persisted.filter(p => p.id !== instanceId),
-      );
-      // Also remove from active instances if somehow present.
+      const channelId =
+        composeDraftRows.find(d => d.id === instanceId)?.channelId ?? selectedChannelId ?? '';
+      deleteComposeDraftRow(instanceId);
+      if (userID) clearComposeLocalCache(userID, instanceId, channelId);
       setComposeInstances(prev => prev.filter(i => i.id !== instanceId));
     },
-    [userID],
+    [userID, deleteComposeDraftRow, composeDraftRows, selectedChannelId],
   );
 
-  /** Reopen a saved draft as a compose window. */
+  /** Reopen a saved draft as a compose window (the composer loads its content from the server). */
   const reopenDraft = useCallback(
     (instanceId: string): void => {
-      if (!userID) return;
-      const persisted = readPersistedInstances(userID);
-      const target = persisted.find(p => p.id === instanceId);
-      if (!target) return;
-      // Update registry: no longer closedAsDraft.
-      const updated = persisted.map(p =>
-        p.id === instanceId ? { ...p, closedAsDraft: false } : p,
-      );
-      writePersistedInstances(userID, updated);
-      // Add to active compose instances (reuse same id so draft content is picked up).
+      const channelId =
+        composeDraftRows.find(d => d.id === instanceId)?.channelId ?? selectedChannelId;
+      if (!channelId) return;
       setComposeInstances(prev => {
         if (prev.find(i => i.id === instanceId)) return prev; // already open
-        return [...prev, { id: instanceId, channelId: target.channelId, minimized: false, key: 0 }];
+        return [...prev, { id: instanceId, channelId, minimized: false, key: 0 }];
       });
     },
-    [userID],
+    [composeDraftRows, selectedChannelId],
   );
 
   /** Toggle minimized state for a single compose window. */
@@ -803,30 +756,42 @@ const SupportScreen = (): ReactElement => {
     setComposeInstances(prev => prev.map(i => (i.id === instanceId ? { ...i, minimized } : i)));
   }, []);
 
-  // Restore any persisted compose drafts for the current channel on channel change.
-  // Only instances that were NOT explicitly closed as drafts are restored as minimized
-  // windows. Closed drafts are shown in the Drafts list instead.
+  // One-time migration: push any browser-local compose drafts (saved before server-side
+  // compose drafts existed) up to the server so in-flight work isn't lost. Idempotent
+  // per user via a localStorage flag.
   useEffect(() => {
-    if (!selectedChannelId || !userID) return;
-    const persisted = readPersistedInstances(userID);
-    const channelPersisted = persisted.filter(p => p.channelId === selectedChannelId);
-    if (channelPersisted.length === 0) return;
-
-    setComposeInstances(prev => {
-      // Only restore instances not already in state and not explicitly closed as drafts.
-      const existingIds = new Set(prev.map(i => i.id));
-      const toRestore: ComposeInstance[] = channelPersisted
-        .filter(p => !p.closedAsDraft && !existingIds.has(p.id) && instanceHasDraft(userID, p.id))
-        .map(p => ({ id: p.id, channelId: p.channelId, minimized: true, key: 0 }));
-      if (toRestore.length === 0) return prev;
-      return [...prev, ...toRestore];
-    });
-
-    // Prune any persisted instances whose drafts are now empty.
-    const nonEmpty = channelPersisted.filter(p => instanceHasDraft(userID, p.id));
-    const others = persisted.filter(p => p.channelId !== selectedChannelId);
-    writePersistedInstances(userID, [...others, ...nonEmpty]);
-  }, [selectedChannelId, userID]);
+    if (!userID) return;
+    const migratedKey = `${COMPOSE_DRAFTS_MIGRATED_KEY_PREFIX}${userID}`;
+    try {
+      if (localStorage.getItem(migratedKey) === 'true') return;
+    } catch {
+      return;
+    }
+    for (const inst of readPersistedInstances(userID)) {
+      const legacy = readLegacyComposeDraft(userID, inst.id);
+      if (!legacy || !legacyComposeDraftHasContent(legacy)) continue;
+      void zero.mutate(
+        mutators.emailDraft.upsertComposeDraft({
+          id: inst.id,
+          channelId: inst.channelId,
+          ...(legacy.subject !== undefined && { subject: legacy.subject }),
+          ...(legacy.body !== undefined && { draftContent: legacy.body }),
+          ...(legacy.to !== undefined && { toRecipients: legacy.to }),
+          ...(legacy.cc !== undefined && { ccRecipients: legacy.cc }),
+          ...(legacy.bcc !== undefined && { bccRecipients: legacy.bcc }),
+          ...(legacy.attachments !== undefined && {
+            attachmentIds: legacy.attachments.map(a => a.attachmentId),
+          }),
+          updatedAt: Date.now(),
+        }),
+      );
+    }
+    try {
+      localStorage.setItem(migratedKey, 'true');
+    } catch {
+      /* ignore */
+    }
+  }, [userID, zero]);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
 
@@ -1053,9 +1018,12 @@ const SupportScreen = (): ReactElement => {
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
   );
+  // Clear the selection on channel OR folder change — switching folders hides the
+  // previously-selected rows, so a stale selection would let bulk actions (mark-read,
+  // merge) operate on tickets that aren't visible in the current folder.
   useEffect(() => {
     setSelectedTickets(new Map());
-  }, [selectedChannelId]);
+  }, [selectedChannelId, selectedFolder.key]);
   const selectedTicketIds = useMemo(() => new Set(selectedTickets.keys()), [selectedTickets]);
   const toggleTicketSelected = useCallback(
     (row: {
@@ -1390,19 +1358,16 @@ const SupportScreen = (): ReactElement => {
     [navigate, isMobile, supportBase],
   );
 
-  // Derive saved drafts: persisted instances for the current channel that were
-  // explicitly closed (X) and still have content — shown in the Drafts banner.
-  const savedDrafts = useMemo(() => {
-    if (!selectedChannelId || !userID) return [];
+  // Saved compose drafts for the current channel that aren't currently open as a
+  // window — shown in the Drafts banner and the Drafts view. Server-backed (synced).
+  const savedDrafts = useMemo<ComposeDraftRecord[]>(() => {
+    if (!selectedChannelId) return [];
     const openIds = new Set(composeInstances.map(i => i.id));
-    return readPersistedInstances(userID).filter(
-      p =>
-        p.channelId === selectedChannelId &&
-        p.closedAsDraft === true &&
-        !openIds.has(p.id) &&
-        instanceHasDraft(userID, p.id),
-    );
-  }, [selectedChannelId, userID, composeInstances]);
+    return composeDraftRows
+      .filter(d => !openIds.has(d.id))
+      .slice()
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [selectedChannelId, composeInstances, composeDraftRows]);
 
   const toggleDeskExpanded = useCallback((id: string): void => {
     setExpandedDeskIds(prev => {
@@ -1434,6 +1399,15 @@ const SupportScreen = (): ReactElement => {
   const selectDesk = useCallback(
     (id: string): void => {
       setSelectedChannelId(id);
+      // Clicking a channel lands on its Inbox (Gmail-style default) and expands its
+      // folder subtree if it was collapsed.
+      setSelectedFolder({ key: 'inbox', label: 'Inbox' });
+      setExpandedDeskIds(prev => {
+        if (prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
       setDeskView('tickets');
     },
     [setSelectedChannelId],
@@ -1455,6 +1429,27 @@ const SupportScreen = (): ReactElement => {
     [setSelectedChannelId],
   );
 
+  const openLabel = useCallback(
+    (channelId: string, labelId: string, labelName: string): void => {
+      setSelectedChannelId(channelId);
+      setSelectedLabel({ id: labelId, name: labelName });
+      setDeskView('labelThreads');
+    },
+    [setSelectedChannelId],
+  );
+
+  const openMailbox = useCallback(
+    (channelId: string, folder: MailboxFolder, label: string): void => {
+      setSelectedChannelId(channelId);
+      setSelectedFolder({ key: folder, label });
+      // Folders filter the base ticket LIST in place. The kanban board doesn't apply the
+      // folder, so selecting a folder switches to list view to avoid silently ignoring it.
+      setViewMode('list');
+      setDeskView('tickets');
+    },
+    [setSelectedChannelId],
+  );
+
   const openDeskTicket = useCallback(
     (item: {
       channelId: string;
@@ -1469,21 +1464,10 @@ const SupportScreen = (): ReactElement => {
     [navigate, supportBase],
   );
 
-  const composeDraftRefs = useMemo(() => {
-    if (!userID) return [];
-    return savedDrafts
-      .slice()
-      .sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0))
-      .map(draft => {
-        const preview = readDraftPreview(userID, draft.id);
-        const label =
-          preview.subject ||
-          (preview.to.length > 0 ? `To: ${preview.to[0]}` : '') ||
-          preview.bodySnippet ||
-          'No subject';
-        return { id: draft.id, label };
-      });
-  }, [savedDrafts, userID]);
+  const composeDraftRefs = useMemo(
+    () => savedDrafts.map(draft => ({ id: draft.id, label: composeDraftLabel(draft) })),
+    [savedDrafts],
+  );
 
   const renderChannelRow = (c: (typeof sortedEmailChannels)[number]): ReactElement => {
     const isPrivate = c.visibility === ChannelVisibility.PRIVATE;
@@ -1504,10 +1488,13 @@ const SupportScreen = (): ReactElement => {
           role='button'
           tabIndex={0}
           className={cn(
-            'flex items-center gap-1 h-8 rounded-md px-1.5 cursor-pointer transition-colors',
+            'flex items-center gap-1 h-8 rounded-md px-1.5 cursor-pointer transition-colors hover:bg-sidebar-item-hover',
+            // The active highlight lives on the selected mailbox folder (Inbox) in the
+            // subtree below, not on the channel header — so the channel row only gets text
+            // emphasis when active, not a background.
             isActive
-              ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
-              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
+              ? 'text-sidebar-primary-foreground font-medium'
+              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
           )}
           onClick={() => selectDesk(c.id)}
           onKeyDown={e => {
@@ -1554,15 +1541,34 @@ const SupportScreen = (): ReactElement => {
           </span>
         </div>
         {isExpanded && (
-          <DeskDraftSubtree
-            activeFolder={
-              selectedChannelId === c.id && (deskView === 'userDrafts' || deskView === 'userSent')
-                ? deskView
-                : null
-            }
-            onOpenUserDrafts={() => openUserDrafts(c.id)}
-            onOpenUserSent={() => openUserSent(c.id)}
-          />
+          <div className='mt-0.5 ml-3 pl-2 border-l border-border/60 flex flex-col gap-1'>
+            <DeskMailboxSidebar
+              activeFolder={
+                selectedChannelId === c.id && deskView === 'tickets' && viewMode === 'list'
+                  ? selectedFolder.key
+                  : null
+              }
+              onSelectFolder={(folder, label) => openMailbox(c.id, folder, label)}
+            />
+            <DeskDraftSubtree
+              activeFolder={
+                selectedChannelId === c.id && (deskView === 'userDrafts' || deskView === 'userSent')
+                  ? deskView
+                  : null
+              }
+              onOpenUserDrafts={() => openUserDrafts(c.id)}
+              onOpenUserSent={() => openUserSent(c.id)}
+            />
+            <DeskLabelsSidebar
+              channelId={c.id}
+              activeLabelId={
+                selectedChannelId === c.id && deskView === 'labelThreads'
+                  ? (selectedLabel?.id ?? null)
+                  : null
+              }
+              onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
+            />
+          </div>
         )}
       </div>
     );
@@ -1676,6 +1682,14 @@ const SupportScreen = (): ReactElement => {
                     />
                   ) : deskView === 'userSent' && selectedChannelId ? (
                     <UserSentView
+                      channelId={selectedChannelId}
+                      onOpenTicket={openDeskTicket}
+                      onClose={() => setDeskView('tickets')}
+                    />
+                  ) : deskView === 'labelThreads' && selectedLabel ? (
+                    <LabelThreadsView
+                      labelId={selectedLabel.id}
+                      labelName={selectedLabel.name}
                       channelId={selectedChannelId}
                       onOpenTicket={openDeskTicket}
                       onClose={() => setDeskView('tickets')}
@@ -2257,45 +2271,37 @@ const SupportScreen = (): ReactElement => {
                             Drafts
                           </span>
                           <div className='flex items-center gap-2 flex-wrap'>
-                            {savedDrafts
-                              .slice()
-                              .sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0))
-                              .map(draft => {
-                                const preview = readDraftPreview(userID, draft.id);
-                                const label =
-                                  preview.subject ||
-                                  (preview.to.length > 0 ? `To: ${preview.to[0]}` : '') ||
-                                  preview.bodySnippet ||
-                                  'No subject';
-                                return (
-                                  <div
-                                    key={draft.id}
-                                    className='flex items-center gap-1 bg-muted/60 border border-border rounded-full pl-3 pr-1 py-0.5 max-w-[280px] group'
+                            {savedDrafts.map(draft => {
+                              const label = composeDraftLabel(draft);
+                              return (
+                                <div
+                                  key={draft.id}
+                                  className='flex items-center gap-1 bg-muted/60 border border-border rounded-full pl-3 pr-1 py-0.5 max-w-[280px] group'
+                                >
+                                  <button
+                                    type='button'
+                                    onClick={() => reopenDraft(draft.id)}
+                                    className='text-xs text-foreground truncate hover:text-primary transition-colors'
+                                    title={`Reopen draft: ${label}`}
+                                    data-track-category='Support'
+                                    data-track-name='ReopenDraft'
                                   >
-                                    <button
-                                      type='button'
-                                      onClick={() => reopenDraft(draft.id)}
-                                      className='text-xs text-foreground truncate hover:text-primary transition-colors'
-                                      title={`Reopen draft: ${label}`}
-                                      data-track-category='Support'
-                                      data-track-name='ReopenDraft'
-                                    >
-                                      {label}
-                                    </button>
-                                    <button
-                                      type='button'
-                                      onClick={() => discardDraft(draft.id)}
-                                      className='p-0.5 rounded-full text-muted-foreground hover:text-destructive transition-colors shrink-0'
-                                      title='Discard draft'
-                                      aria-label='Discard draft'
-                                      data-track-category='Support'
-                                      data-track-name='DiscardDraft'
-                                    >
-                                      <X size={12} />
-                                    </button>
-                                  </div>
-                                );
-                              })}
+                                    {label}
+                                  </button>
+                                  <button
+                                    type='button'
+                                    onClick={() => discardDraft(draft.id)}
+                                    className='p-0.5 rounded-full text-muted-foreground hover:text-destructive transition-colors shrink-0'
+                                    title='Discard draft'
+                                    aria-label='Discard draft'
+                                    data-track-category='Support'
+                                    data-track-name='DiscardDraft'
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
@@ -2312,6 +2318,7 @@ const SupportScreen = (): ReactElement => {
                     ) : (
                       <TicketListView
                         isMember={isSelectedChannelJoined}
+                        mailboxFolder={selectedFolder.key}
                         filter={{
                           channelId: selectedChannelId,
                           ...ticketFilter,
@@ -2719,6 +2726,9 @@ export const SupportTicketDetail = ({
   const channelId = ticket?.channelId || '';
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
+  // DB ticket id (not the xyneId) for per-user mailbox actions; router state carries it
+  // on list navigation, else it comes from the fetched ticket row.
+  const mailboxTicketId = ticket?.id ?? ticketId ?? null;
   const boardId = ticket?.boardId ?? null;
 
   const [channelPreferenceList] = useCachedQuery(
@@ -3201,12 +3211,22 @@ export const SupportTicketDetail = ({
                 <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-md font-mono shrink-0 whitespace-nowrap'>
                   {ticketIdParam}
                 </span>
-                <span
-                  className='font-medium text-foreground min-w-0 flex-1 truncate'
-                  title={title || 'Untitled Ticket'}
-                >
-                  {title || 'Untitled Ticket'}
-                </span>
+                <div className='flex items-center gap-2 min-w-0 flex-1'>
+                  <span
+                    className='font-medium text-foreground min-w-0 truncate'
+                    title={title || 'Untitled Ticket'}
+                  >
+                    {title || 'Untitled Ticket'}
+                  </span>
+
+                  {conversationId && channelId && (
+                    <ConversationLabels conversationId={conversationId} channelId={channelId} />
+                  )}
+
+                  {mailboxTicketId && channelId && (
+                    <MailboxActions ticketId={mailboxTicketId} channelId={channelId} />
+                  )}
+                </div>
 
                 {emailCollapseState.canToggleAll && (
                   <>

@@ -81,6 +81,15 @@ enum TicketStatusV2 {
   @@schema("public")
 }
 
+// Gmail-style mailbox location for a ticket, per-user (see TicketUserMailbox).
+// ARCHIVED = removed from Inbox but still in All Mail. Absence of a row = INBOX.
+enum MailboxState {
+  INBOX
+  ARCHIVED
+  SPAM
+  @@schema("public")
+}
+
 enum TicketPriority {
   LOW
   MEDIUM
@@ -2326,11 +2335,16 @@ model Email {
 
 model EmailDraft {
   id String @id @default(cuid())
-  conversationId String
+  conversationId String? // null = a brand-new compose draft (no thread yet); set = a reply draft
   userId String?
   channelId String
   draftContent String
+  subject String? // compose-draft subject (reply drafts inherit the thread subject)
+  fromAddress String? // compose-draft "From" (sender alias)
   attachmentIds Json? // Array of attachment IDs for draft attachments
+  toRecipients String? // draft "To" recipients — JSON-stringified string[], parsed app-side
+  ccRecipients String? // draft "Cc" recipients — JSON-stringified string[]
+  bccRecipients String? // draft "Bcc" recipients — JSON-stringified string[]
   autoDraftStatus AutoDraftStatus?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2356,6 +2370,67 @@ model EmailRead {
   @@index([userId])
   @@index([ticketId])
   @@map("email_reads")
+  @@schema("public")
+}
+
+// Gmail-style labels for desk/support email conversations. Labels are private to the
+// agent who created them (createdBy): ConversationLabel is the per-channel, per-user
+// label catalog; ConversationLabelMapping is the many-to-many junction attaching a
+// label to a conversation (email thread).
+model ConversationLabel {
+  id          String   @id @default(cuid())
+  name        String
+  color       String?  // hex color, mirrors Gmail label color
+  channelId   String   // Channel (desk) scope — labels belong to a desk (no FK constraint)
+  projectId   String   // Project (denormalized from channel)
+  workspaceId String   // Workspace for ACL optimization (denormalized from channel)
+  createdBy   String   // Owner — labels are private to this user (no FK constraint)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime // Set manually in code — written only by Zero mutators, never Prisma Client
+
+  // Also serves per-user catalog reads + ACL via its (channelId, createdBy) prefix,
+  // with the trailing "name" matching the catalog query's orderBy('name').
+  @@unique([channelId, createdBy, name]) // No duplicate label names per user within a desk
+  @@map("conversation_labels")
+  @@schema("public")
+}
+
+model ConversationLabelMapping {
+  id             String   @id @default(cuid())
+  labelId        String
+  labelName      String   // Denormalized from ConversationLabel.name for fast reads
+  conversationId String
+  channelId      String   // Denormalized for ACL (channel membership/visibility)
+  workspaceId    String
+  createdBy      String   // Owner — the agent who applied the label (no FK constraint)
+  createdAt      DateTime @default(now())
+
+  // The unique's conversationId prefix also serves the per-thread chips read.
+  @@unique([conversationId, labelId]) // A label can only be applied once per conversation
+  @@index([labelId]) // label-panel read, label→mappings correlation, deleteLabel cascade
+  @@map("conversation_label_mappings")
+  @@schema("public")
+}
+
+// Gmail-style mailbox overlay: a per-user, per-desk filing of a shared ticket
+// (Inbox / Archived / Spam / Trash + star). Sparse — a row exists only once the agent
+// acts on the ticket; absence means { INBOX, not starred }. The ticket itself stays
+// shared at the channel level (untouched). Mirrors the per-user labels scoping.
+model TicketUserMailbox {
+  id          String       @id @default(cuid())
+  ticketId    String       // The shared ticket this overlay files (no FK constraint)
+  userId      String       // Owner — the overlay is private to this agent (no FK constraint)
+  channelId   String       // Denormalized for ACL + per-user view filtering
+  workspaceId String       // Denormalized
+  state       MailboxState? // No DDL default on the custom enum type — mutators always write it; readers treat null/absent as INBOX
+  starred     Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     // Set manually in code — written only by Zero mutators, never Prisma Client
+
+  // Also serves the setState/setStarred upsert lookup and the tickets.userMailbox
+  // correlation (spam/starred exists() + related() overlay) via its ticketId prefix.
+  @@unique([ticketId, userId]) // one overlay row per agent per ticket
+  @@map("ticket_user_mailbox")
   @@schema("public")
 }
 

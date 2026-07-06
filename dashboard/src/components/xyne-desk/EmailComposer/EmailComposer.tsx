@@ -60,6 +60,11 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useComposeSubjectAI } from '../../../hooks/useComposeSubjectAI';
 import { AutoDraftStatus } from '@xyne/shared';
 import { useEmailDraft, useEmailDraftOperations } from '../../../hooks/useEmailDraft';
+import {
+  useComposeDraftOperations,
+  parseComposeDraftRow,
+  type ComposeDraftRecord,
+} from '../../../hooks/useComposeDraft';
 import { useDeskAIDraft } from '../../../hooks/useDeskAIDraft';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useChannelConnectedEmail } from '../../../hooks/useChannelConnectedEmail';
@@ -252,7 +257,10 @@ export const EmailComposer = ({
   const draft = useEmailDraft(conversationId);
   const isAutoDraftGenerating =
     !isComposeMode && draft?.autoDraftStatus === AutoDraftStatus.GENERATING;
-  const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(conversationId, channelId);
+  const { saveDraft, saveRecipients, deleteDraft, draftId } = useEmailDraftOperations(
+    conversationId,
+    channelId,
+  );
   const [emailContent, setEmailContent] = useState<string>('');
   // Subject is only meaningful in compose mode — reply inherits from the thread.
   const [composeSubject, setComposeSubject] = useState<string>('');
@@ -407,6 +415,10 @@ export const EmailComposer = ({
   // an autosave changes `updatedAt`) from re-running the restore and clearing
   // attachments the user has added during the current session.
   const restoredAttachmentsForDraftRef = useRef<string | null>(null);
+  // Tracks the conversation whose recipients we've already hydrated from defaults
+  // (localStorage / thread). Once hydrated, the user's recipient edits — including clearing
+  // every field — are authoritative and must not be re-derived by a later draft re-emit.
+  const recipientsHydratedRef = useRef<string | null>(null);
 
   // Reset all composer state when switching conversations
   useEffect(() => {
@@ -752,90 +764,157 @@ export const EmailComposer = ({
   const recipientsStorageKey =
     !isComposeMode && conversationId ? `xyne:emailDraft:recipients:${conversationId}` : null;
 
-  // Compose-mode draft is persisted in localStorage keyed by channelId — there's
-  // no conversationId yet, so the DB-backed draft system can't help. Stores the
-  // full payload (subject + body + recipients) so users can close + reopen
-  // without losing work.
-  // Per-user, per-channel scope so drafts don't bleed across users
-  // sharing a browser, and a user keeps independent drafts per channel.
-  // When `composeDraftId` is supplied (multi-compose), use it as the scope key
-  // so multiple windows on the same channel each maintain independent drafts.
-  const composeDraftKey =
-    isComposeMode && userID
-      ? composeDraftId
-        ? `xyne:composeDraft:${userID}:${composeDraftId}`
-        : channelId
-          ? `xyne:composeDraft:${userID}:${channelId}`
-          : null
+  // Compose drafts are persisted server-side (synced across devices) in `email_drafts`
+  // with `conversationId IS NULL`, keyed by the compose-window id (reused as the row id)
+  // — or the channelId for a non-multi composer. The server row carries subject + body +
+  // recipients + attachmentIds; a small localStorage cache (composeMetaKey) holds only the
+  // attachment display metadata + AI sources for same-device fidelity (the row stores ids).
+  const composeDraftServerId = isComposeMode ? (composeDraftId ?? channelId ?? null) : null;
+  const composeMetaKey =
+    isComposeMode && userID && composeDraftServerId
+      ? `xyne:composeDraftMeta:${userID}:${composeDraftServerId}`
       : null;
+
+  const { saveComposeDraft, deleteComposeDraft: deleteComposeDraftRow } =
+    useComposeDraftOperations(channelId);
+  const [composeRows, composeRowsDetails] = useCachedQuery(
+    queries.composeDraftsByChannel({ channelId: channelId || '' }),
+    { enabled: isComposeMode && !!channelId },
+  );
+  const serverComposeDraft = useMemo<ComposeDraftRecord | undefined>(() => {
+    if (!composeDraftServerId) return undefined;
+    // Direct query (bypasses useComposeDrafts), so the TEXT recipient columns must be
+    // parsed back to string[] here too before the hydration effect's Array.isArray gates.
+    const row = (composeRows as unknown as ComposeDraftRecord[] | undefined)?.find(
+      d => d.id === composeDraftServerId,
+    );
+    return row ? parseComposeDraftRow(row) : undefined;
+  }, [composeRows, composeDraftServerId]);
 
   // Restore compose draft on mount
   const [composeDraftLoaded, setComposeDraftLoaded] = useState(false);
+  // Snapshot of the last-persisted compose content, so the autosave can skip a write
+  // when nothing actually changed (e.g. a no-edit reopen) instead of bumping updatedAt
+  // and reshuffling the Drafts list. Seeded by the load effect.
+  const lastSavedComposeSnapshotRef = useRef<string | null>(null);
   useEffect(() => {
     setComposeDraftLoaded(false);
-  }, [composeDraftKey]);
+    lastSavedComposeSnapshotRef.current = null;
+  }, [composeDraftServerId]);
   useEffect(() => {
     if (isComposeMode && aiDraft.draftSources.length > 0) {
       setComposeSources(aiDraft.draftSources);
     }
   }, [isComposeMode, aiDraft.draftSources]);
   useEffect(() => {
-    if (!composeDraftKey || composeDraftLoaded) return;
-    try {
-      const raw = localStorage.getItem(composeDraftKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as {
-          subject?: string;
-          body?: string;
-          to?: string[];
-          cc?: string[];
-          bcc?: string[];
-          attachments?: PersistedComposeAttachment[];
-          sources?: DraftSource[];
-        };
-        if (parsed.subject) setComposeSubject(parsed.subject);
-        if (parsed.body) setEmailContent(parsed.body);
-        if (parsed.sources && parsed.sources.length > 0) setComposeSources(parsed.sources);
-        if (parsed.to) setToEmails(parsed.to);
-        if (parsed.cc) {
-          setCcEmails(parsed.cc);
-          if (parsed.cc.length > 0) setShowCc(true);
-        }
-        if (parsed.bcc) {
-          setBccEmails(parsed.bcc);
-          if (parsed.bcc.length > 0) setShowBcc(true);
-        }
-        if (parsed.attachments && parsed.attachments.length > 0) {
-          setAttachments(
-            parsed.attachments.map(att => ({
-              attachmentId: att.attachmentId,
-              file: toUploadedAttachmentFile(att),
-            })),
-          );
-        }
+    if (!isComposeMode || composeDraftLoaded || !composeDraftServerId) return;
+    // Wait until the compose-drafts query has settled, otherwise an as-yet-unloaded
+    // row would be mistaken for "no draft" and we'd mark the composer loaded too early.
+    if (composeRowsDetails.type !== 'complete') return;
+    const okEmail = (s: unknown): s is string => typeof s === 'string' && s.includes('@');
+    let snapshotTo: string[] = [];
+    let snapshotCc: string[] = [];
+    let snapshotBcc: string[] = [];
+    let snapshotAttachmentIds: string[] = [];
+    if (serverComposeDraft) {
+      const to = Array.isArray(serverComposeDraft.toRecipients)
+        ? serverComposeDraft.toRecipients.filter(okEmail)
+        : [];
+      const cc = Array.isArray(serverComposeDraft.ccRecipients)
+        ? serverComposeDraft.ccRecipients.filter(okEmail)
+        : [];
+      const bcc = Array.isArray(serverComposeDraft.bccRecipients)
+        ? serverComposeDraft.bccRecipients.filter(okEmail)
+        : [];
+      snapshotTo = to;
+      snapshotCc = cc;
+      snapshotBcc = bcc;
+      if (serverComposeDraft.subject) setComposeSubject(serverComposeDraft.subject);
+      if (serverComposeDraft.draftContent) setEmailContent(serverComposeDraft.draftContent);
+      if (to.length > 0) setToEmails(to);
+      if (cc.length > 0) {
+        setCcEmails(cc);
+        setShowCc(true);
       }
-    } catch {
-      /* ignore corrupt draft */
+      if (bcc.length > 0) {
+        setBccEmails(bcc);
+        setShowBcc(true);
+      }
+      // The SERVER row's attachmentIds are the source of truth for which attachments the
+      // draft carries; the local cache (composeMetaKey) only enriches them with display
+      // metadata (name/size/type) and is absent on other devices / after eviction. We must
+      // rebuild `attachments` from the server ids regardless of the cache — otherwise the
+      // autosave would persist an empty attachmentIds (wiping them) and the send would drop
+      // them. AI sources are display-only and come from the cache.
+      const metaById = new Map<string, PersistedComposeAttachment>();
+      try {
+        if (composeMetaKey) {
+          const raw = localStorage.getItem(composeMetaKey);
+          if (raw) {
+            const meta = JSON.parse(raw) as {
+              attachments?: PersistedComposeAttachment[];
+              sources?: DraftSource[];
+            };
+            if (meta.sources && meta.sources.length > 0) setComposeSources(meta.sources);
+            for (const a of meta.attachments ?? []) metaById.set(a.attachmentId, a);
+          }
+        }
+      } catch {
+        /* ignore corrupt cache */
+      }
+      snapshotAttachmentIds = Array.isArray(serverComposeDraft.attachmentIds)
+        ? serverComposeDraft.attachmentIds.filter((x): x is string => typeof x === 'string')
+        : [];
+      if (snapshotAttachmentIds.length > 0) {
+        setAttachments(
+          snapshotAttachmentIds.map(id => {
+            const persisted: PersistedComposeAttachment = metaById.get(id) ?? {
+              attachmentId: id,
+              originalName: 'Attachment',
+              fileSize: 0,
+              mimeType: 'application/octet-stream',
+            };
+            return { attachmentId: id, file: toUploadedAttachmentFile(persisted) };
+          }),
+        );
+      }
     }
+    // Seed the dirty snapshot with exactly what we just loaded so an unedited reopen is a
+    // no-op (no redundant write / updatedAt bump). Must mirror the autosave's snapshot shape.
+    lastSavedComposeSnapshotRef.current = JSON.stringify({
+      subject: serverComposeDraft?.subject ?? '',
+      body: serverComposeDraft?.draftContent ?? '',
+      to: snapshotTo,
+      cc: snapshotCc,
+      bcc: snapshotBcc,
+      attachmentIds: snapshotAttachmentIds,
+    });
     setComposeDraftLoaded(true);
-  }, [composeDraftKey, composeDraftLoaded]);
+  }, [
+    isComposeMode,
+    composeDraftLoaded,
+    composeDraftServerId,
+    composeRowsDetails.type,
+    serverComposeDraft,
+    composeMetaKey,
+  ]);
 
   // Seed default CC from channel preference when opening a fresh compose (no
-  // saved draft). Uses a ref keyed by composeDraftKey so it fires at most once
+  // saved draft). Uses a ref keyed by composeDraftServerId so it fires at most once
   // per compose session — this handles the race where channelPreference loads
   // after composeDraftLoaded has already been set to true.
   const defaultCcSeededKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isComposeMode) return;
     if (!composeDraftLoaded) return;
-    if (!composeDraftKey) return;
+    if (!composeDraftServerId) return;
     // Already seeded for this compose session.
-    if (defaultCcSeededKeyRef.current === composeDraftKey) return;
+    if (defaultCcSeededKeyRef.current === composeDraftServerId) return;
     // Preference query hasn't settled yet — wait for next render.
     if (channelPreferenceDetails?.type !== 'complete') return;
     // Only seed when the user hasn't already entered CC (saved draft or manual).
     if (ccEmails.length > 0) {
-      defaultCcSeededKeyRef.current = composeDraftKey;
+      defaultCcSeededKeyRef.current = composeDraftServerId;
       return;
     }
     if (channelPreference?.defaultCc) {
@@ -845,19 +924,23 @@ export const EmailComposer = ({
         setShowCc(true);
       }
     }
-    defaultCcSeededKeyRef.current = composeDraftKey;
+    defaultCcSeededKeyRef.current = composeDraftServerId;
   }, [
     isComposeMode,
     composeDraftLoaded,
-    composeDraftKey,
+    composeDraftServerId,
     channelPreference?.defaultCc,
     channelPreferenceDetails?.type,
     ccEmails.length,
   ]);
 
-  // Save compose draft on change (debounced via the natural batch of state updates)
+  // Save compose draft on change. Persists to the server (synced); empties delete the
+  // row. The attachment metadata + AI sources are cached locally for same-device display
+  // fidelity. A snapshot guard skips no-op writes (e.g. a no-edit reopen) so updatedAt
+  // isn't bumped and the Drafts list doesn't reshuffle. (One mutation per keystroke while
+  // actively typing — matching the prior localStorage behavior — is acceptable here.)
   useEffect(() => {
-    if (!composeDraftKey || !composeDraftLoaded) return;
+    if (!isComposeMode || !composeDraftLoaded || !composeDraftServerId) return;
     const persistedAttachments = attachments
       .map(toPersistedComposeAttachment)
       .filter((attachment): attachment is PersistedComposeAttachment => attachment !== null);
@@ -868,27 +951,60 @@ export const EmailComposer = ({
       ccEmails.length === 0 &&
       bccEmails.length === 0 &&
       persistedAttachments.length === 0;
-    try {
-      if (isEmpty) {
-        localStorage.removeItem(composeDraftKey);
-        return;
+    const snapshot = JSON.stringify({
+      subject: composeSubject,
+      body: emailContent,
+      to: toEmails,
+      cc: ccEmails,
+      bcc: bccEmails,
+      attachmentIds: persistedAttachments.map(att => att.attachmentId),
+    });
+    // Unchanged since the last persist/load — don't write (and, for a never-saved blank
+    // compose, don't fire a spurious delete against a row that doesn't exist).
+    if (snapshot === lastSavedComposeSnapshotRef.current) return;
+    if (isEmpty) {
+      deleteComposeDraftRow(composeDraftServerId);
+      lastSavedComposeSnapshotRef.current = snapshot;
+      if (composeMetaKey) {
+        try {
+          localStorage.removeItem(composeMetaKey);
+        } catch {
+          /* ignore */
+        }
       }
-      const payload = {
-        subject: composeSubject,
-        body: emailContent,
-        to: toEmails,
-        cc: ccEmails,
-        bcc: bccEmails,
-        attachments: persistedAttachments,
-        ...(composeSources.length > 0 && { sources: composeSources }),
-      };
-      localStorage.setItem(composeDraftKey, JSON.stringify(payload));
-    } catch {
-      /* ignore quota */
+      return;
+    }
+    saveComposeDraft(composeDraftServerId, {
+      subject: composeSubject,
+      draftContent: emailContent,
+      toRecipients: toEmails,
+      ccRecipients: ccEmails,
+      bccRecipients: bccEmails,
+      attachmentIds: persistedAttachments.map(att => att.attachmentId),
+    });
+    lastSavedComposeSnapshotRef.current = snapshot;
+    if (composeMetaKey) {
+      try {
+        if (persistedAttachments.length > 0 || composeSources.length > 0) {
+          localStorage.setItem(
+            composeMetaKey,
+            JSON.stringify({
+              attachments: persistedAttachments,
+              ...(composeSources.length > 0 && { sources: composeSources }),
+            }),
+          );
+        } else {
+          localStorage.removeItem(composeMetaKey);
+        }
+      } catch {
+        /* ignore quota */
+      }
     }
   }, [
-    composeDraftKey,
+    isComposeMode,
     composeDraftLoaded,
+    composeDraftServerId,
+    composeMetaKey,
     composeSubject,
     emailContent,
     toEmails,
@@ -896,6 +1012,8 @@ export const EmailComposer = ({
     bccEmails,
     attachments,
     composeSources,
+    saveComposeDraft,
+    deleteComposeDraftRow,
   ]);
 
   // Auto-grow the composer the first time the AI draft card OR the AI
@@ -924,6 +1042,30 @@ export const EmailComposer = ({
     // In compose mode there's no thread to derive recipients from — start blank.
     if (isComposeMode) return;
     if (channelPreferenceDetails?.type !== 'complete') return;
+    // Prefer recipients persisted on the draft in the DB (synced across devices). Fall
+    // back to legacy localStorage (in-flight drafts saved before this change), then derive
+    // from the thread.
+    if (draft && Array.isArray(draft.toRecipients)) {
+      // The draft carries explicitly-persisted recipients — the source of truth, even when the
+      // lists are all empty (the user cleared them). Always re-sync from it: the saveRecipients
+      // equality guard keeps this from looping, and respecting an empty list is what makes
+      // "clear recipients" actually stick instead of being re-derived from the thread below.
+      const ok = (s: unknown): s is string => typeof s === 'string' && s.includes('@');
+      const dbTo = (draft.toRecipients ?? []).filter(ok);
+      const dbCc = (draft.ccRecipients ?? []).filter(ok);
+      const dbBcc = (draft.bccRecipients ?? []).filter(ok);
+      setToEmails(dbTo);
+      setCcEmails(dbCc);
+      setBccEmails(dbBcc);
+      setShowCc(dbCc.length > 0);
+      setShowBcc(dbBcc.length > 0);
+      recipientsHydratedRef.current = conversationId ?? null;
+      return;
+    }
+    // Defaults below (localStorage, then thread) are derived ONCE per conversation. After that,
+    // the user's recipient edits are authoritative — a later thread update or draft re-emit must
+    // not re-derive over them. (A draft with persisted recipients always wins, handled above.)
+    if (recipientsHydratedRef.current === conversationId) return;
     if (recipientsStorageKey) {
       try {
         const raw = localStorage.getItem(recipientsStorageKey);
@@ -944,6 +1086,7 @@ export const EmailComposer = ({
             setBccEmails((parsed.bcc ?? []).filter(isEmailLike));
             setShowCc((parsed.cc ?? []).filter(isEmailLike).length > 0);
             setShowBcc((parsed.bcc ?? []).filter(isEmailLike).length > 0);
+            recipientsHydratedRef.current = conversationId ?? null;
             return;
           }
         }
@@ -1062,6 +1205,7 @@ export const EmailComposer = ({
 
         setShowCc(true);
         setShowBcc(nextBcc.length > 0);
+        recipientsHydratedRef.current = conversationId ?? null;
       }
     }
   }, [
@@ -1075,27 +1219,17 @@ export const EmailComposer = ({
     isComposeMode,
     channelPreference?.defaultCc,
     channelPreferenceDetails?.type,
+    draft,
   ]);
 
   useEffect(() => {
-    if (!recipientsStorageKey) return;
-    if (toEmails.length === 0 && ccEmails.length === 0 && bccEmails.length === 0) {
-      try {
-        localStorage.removeItem(recipientsStorageKey);
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-    try {
-      localStorage.setItem(
-        recipientsStorageKey,
-        JSON.stringify({ to: toEmails, cc: ccEmails, bcc: bccEmails }),
-      );
-    } catch {
-      /* ignore quota errors */
-    }
-  }, [recipientsStorageKey, toEmails, ccEmails, bccEmails]);
+    // Persist recipients onto the DB draft (replaces the old localStorage write, so a
+    // draft is one synced record). saveRecipients self-gates: it no-ops until a real
+    // draft exists, so opening a reply (which pre-fills recipients) never creates a
+    // phantom draft.
+    if (isComposeMode) return;
+    saveRecipients(toEmails, ccEmails, bccEmails);
+  }, [isComposeMode, toEmails, ccEmails, bccEmails, saveRecipients]);
 
   // Upload attachments
   const uploadAttachments = async (files: File[]): Promise<string[]> => {
@@ -1280,11 +1414,14 @@ export const EmailComposer = ({
         setToEmails([]);
         setCcEmails([]);
         setBccEmails([]);
-        if (composeDraftKey) {
-          try {
-            localStorage.removeItem(composeDraftKey);
-          } catch {
-            /* ignore */
+        if (composeDraftServerId) {
+          deleteComposeDraftRow(composeDraftServerId);
+          if (composeMetaKey) {
+            try {
+              localStorage.removeItem(composeMetaKey);
+            } catch {
+              /* ignore */
+            }
           }
         }
         // If the backend sent the mail but couldn't record it locally, it
@@ -2243,11 +2380,14 @@ export const EmailComposer = ({
                             if (isComposeMode) {
                               deleteDraft();
                             }
-                            if (composeDraftKey) {
-                              try {
-                                localStorage.removeItem(composeDraftKey);
-                              } catch {
-                                /* ignore quota/access errors */
+                            if (composeDraftServerId) {
+                              deleteComposeDraftRow(composeDraftServerId);
+                              if (composeMetaKey) {
+                                try {
+                                  localStorage.removeItem(composeMetaKey);
+                                } catch {
+                                  /* ignore quota/access errors */
+                                }
                               }
                             }
                             setEmailContent('');

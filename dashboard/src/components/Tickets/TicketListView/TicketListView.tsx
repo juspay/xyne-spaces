@@ -14,7 +14,8 @@ import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 import { logger, Event } from '../../../utils/logger';
 import type { QueryResultType } from '@rocicorp/zero';
 import type { TicketListItem } from './TicketListView.types';
-import { TicketPriority } from '@xyne/shared';
+import { TicketPriority, MailboxState } from '@xyne/shared';
+import type { MailboxFolder } from '../../xyne-desk/DeskFolders/DeskMailboxSidebar';
 
 const PAGE_SIZE = 50;
 
@@ -35,6 +36,12 @@ interface TicketListViewProps {
   };
   onTicketClick: (ticket: SupportTicketRow) => void;
   isMember: boolean;
+  /**
+   * When set, the current page is filtered into a per-user mailbox folder (Inbox / All Mail /
+   * Starred / Spam) using each ticket's `userMailbox` overlay. Filtering is client-side
+   * (a ticket with no overlay row defaults to Inbox, which can't be expressed server-side).
+   */
+  mailboxFolder?: MailboxFolder | undefined;
   activeTicketId?: string | null | undefined;
   showExtraFields?: boolean;
   skeletonRowCount?: number;
@@ -62,6 +69,7 @@ export interface SelectableRow {
 export const TicketListView = function TicketListView({
   filter,
   isMember,
+  mailboxFolder,
   onTicketClick,
   activeTicketId,
   showExtraFields = false,
@@ -83,6 +91,9 @@ export const TicketListView = function TicketListView({
   const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>([null]);
   const [pageIndex, setPageIndex] = useState(0);
   const [selectAllMenuOpen, setSelectAllMenuOpen] = useState(false);
+  // Adaptive server fetch window. Starts at one page (+1 sentinel); grows only for the
+  // client-filtered folders when a page needs more rows to fill after filtering.
+  const [fetchLimit, setFetchLimit] = useState(PAGE_SIZE + 1);
 
   const pageStart = pageCursors[pageIndex] ?? null;
   const [firstPage, firstPageDetails] = useCachedQuery(
@@ -94,7 +105,11 @@ export const TicketListView = function TicketListView({
       stageName,
       aiCategory,
       hasAiDraft,
-      limit: PAGE_SIZE + 1,
+      // Spam/Starred are filtered server-side (they need an overlay row) so pagination is
+      // meaningful; Inbox/All Mail are filtered client-side in `filteredAll` below, over an
+      // adaptive fetch window so their pages fill correctly after filtering.
+      ...(mailboxFolder ? { mailboxFolder } : {}),
+      limit: fetchLimit,
       start: pageStart,
       dir: 'forward',
     }),
@@ -112,8 +127,9 @@ export const TicketListView = function TicketListView({
         s: stageName ?? null,
         ac: aiCategory ?? null,
         ad: hasAiDraft ?? null,
+        mf: mailboxFolder ?? null,
       }),
-    [channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft],
+    [channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder],
   );
 
   useEffect(() => {
@@ -121,6 +137,11 @@ export const TicketListView = function TicketListView({
     setPageIndex(0);
     loadStartTimeRef.current = Date.now();
   }, [filterKey]);
+
+  // Each page (and each filter) begins a fresh adaptive fetch from its own cursor.
+  useEffect(() => {
+    setFetchLimit(PAGE_SIZE + 1);
+  }, [pageStart, filterKey]);
 
   // Record first-page load duration once it becomes complete.
   useEffect(() => {
@@ -162,22 +183,65 @@ export const TicketListView = function TicketListView({
     return unique;
   }, [firstPage]);
 
-  const hasNextPage = allRows.length > PAGE_SIZE;
-  const tickets = useMemo(() => allRows.slice(0, PAGE_SIZE), [allRows]);
+  // Filter the WHOLE fetched buffer into the active mailbox folder BEFORE paginating, so
+  // Inbox / All Mail paginate over the filtered result set (not a pre-sliced page). Inbox /
+  // All Mail must be filtered client-side: they include tickets with no overlay row
+  // (default = Inbox), which would need a NOT EXISTS predicate to filter server-side —
+  // unsupported on the Zero client (bug 3438). Spam / Starred are already filtered
+  // server-side, so this is a no-op for them.
+  const filteredAll = useMemo<SupportTicketRow[]>(() => {
+    if (!mailboxFolder) return allRows;
+    return allRows.filter(t => {
+      const overlay = (t.userMailbox ?? [])[0];
+      const state = overlay?.state ?? MailboxState.INBOX;
+      switch (mailboxFolder) {
+        case 'all':
+          return state === MailboxState.INBOX || state === MailboxState.ARCHIVED;
+        case 'starred':
+          return (
+            !!overlay?.starred && (state === MailboxState.INBOX || state === MailboxState.ARCHIVED)
+          );
+        case 'spam':
+          return state === MailboxState.SPAM;
+        case 'inbox':
+        default:
+          return state === MailboxState.INBOX;
+      }
+    });
+  }, [allRows, mailboxFolder]);
+
+  // Paginate over the FILTERED rows: render one PAGE_SIZE window; a (PAGE_SIZE+1)th filtered
+  // row is the "next page exists" sentinel (mirrors the server keyset paging, on filtered rows).
+  const filteredTickets = useMemo(() => filteredAll.slice(0, PAGE_SIZE), [filteredAll]);
+  const hasNextPage = filteredAll.length > PAGE_SIZE;
 
   useEffect(() => {
-    onTicketsLoaded?.(tickets);
-  }, [tickets, onTicketsLoaded]);
+    onTicketsLoaded?.(filteredTickets);
+  }, [filteredTickets, onTicketsLoaded]);
 
   const complete = firstPageDetails.type === 'complete';
-  const rowsEmpty = complete && tickets.length === 0;
-  const showInitialSkeletons = !complete && tickets.length === 0;
+  // Server returned fewer rows than requested → the channel/folder is genuinely exhausted;
+  // no amount of extra fetching can surface additional rows.
+  const serverExhausted = allRows.length < fetchLimit;
+  // A client-filtered folder (Inbox / All Mail) can filter a full server page down below a
+  // page's worth. Keep growing the fetch window (effect below) until we have a full page
+  // (+1 sentinel) of MATCHING rows OR the source is genuinely exhausted — there is no fixed
+  // cap, so matching tickets sitting behind a long run of archived/spam are never missed.
+  // `converged` = the page is definitive (safe to show its empty state).
+  const needMoreRows = complete && !serverExhausted && filteredAll.length < PAGE_SIZE + 1;
+  const converged = complete && !needMoreRows;
+
+  const rowsEmpty = converged && filteredTickets.length === 0;
+  const showInitialSkeletons = (!complete && allRows.length === 0) || needMoreRows;
 
   const isLastPage = !hasNextPage;
 
   const goToNextPage = useCallback(() => {
     if (isLastPage) return;
-    const last = tickets[tickets.length - 1];
+    // Continue from the last RENDERED (filtered) row: filtered rows are a subsequence of the
+    // keyset-ordered buffer, so their (lastEmailAt, id) is a valid cursor and the next page
+    // picks up the next matching rows without skipping or duplicating.
+    const last = filteredTickets[filteredTickets.length - 1];
     if (!last) return;
     const cursor: PageCursor = { id: last.id, lastEmailAt: last.lastEmailAt };
     setPageCursors(prev => {
@@ -187,7 +251,7 @@ export const TicketListView = function TicketListView({
     });
     setPageIndex(pageIndex + 1);
     onPageChange?.(pageIndex + 1);
-  }, [isLastPage, tickets, pageIndex, onPageChange]);
+  }, [isLastPage, filteredTickets, pageIndex, onPageChange]);
 
   const goToPrevPage = useCallback(() => {
     if (pageIndex === 0) return;
@@ -199,23 +263,34 @@ export const TicketListView = function TicketListView({
     virtuosoRef.current?.scrollToIndex({ index: 0 });
   }, [pageIndex]);
 
-  // Snap back if we land on an empty page past page 0 (stale count / live deletes).
+  // Grow the fetch window until the client-filtered page holds a full PAGE_SIZE (+1 sentinel)
+  // of matching rows, or the source is genuinely exhausted — so Inbox / All Mail never miss
+  // matching tickets that sit behind a long run of archived/spam rows. Doubling keeps this to
+  // O(log n) fetches even when a folder is sparse in a large channel; termination is
+  // guaranteed because `serverExhausted` flips true once the window exceeds the row count.
   useEffect(() => {
-    if (rowsEmpty && pageIndex > 0) {
-      const target = pageIndex - 1;
-      setPageIndex(target);
-      onPageChange?.(target);
-    }
-  }, [rowsEmpty, pageIndex, onPageChange]);
+    if (!needMoreRows) return;
+    setFetchLimit(prev => prev * 2);
+    // fetchLimit is a dep so the effect re-evaluates after each grow, even if a cached
+    // refetch never lets `needMoreRows` flip to false in between.
+  }, [needMoreRows, fetchLimit]);
 
-  const firstRowBoardId = tickets[0]?.boardId;
+  // If a page past the first ends up empty (e.g. its rows were archived/deleted after we
+  // navigated to it), fall back toward populated pages.
+  useEffect(() => {
+    if (converged && filteredTickets.length === 0 && pageIndex > 0) {
+      goToPrevPage();
+    }
+  }, [converged, filteredTickets.length, pageIndex, goToPrevPage]);
+
+  const firstRowBoardId = (filteredTickets[0] ?? allRows[0])?.boardId;
   useEffect(() => {
     if (firstRowBoardId) onBoardIdReady?.(firstRowBoardId);
   }, [firstRowBoardId, onBoardIdReady]);
 
   // Keyboard navigation: j/k to move, Enter to open the highlighted row.
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const rowCount = tickets.length;
+  const rowCount = filteredTickets.length;
 
   const moveBy = useCallback(
     (delta: number) => {
@@ -249,7 +324,7 @@ export const TicketListView = function TicketListView({
     'enter',
     () => {
       if (selectedIndex === null) return;
-      const row = tickets[selectedIndex];
+      const row = filteredTickets[selectedIndex];
       if (row) onTicketClick(row);
     },
     {
@@ -301,7 +376,7 @@ export const TicketListView = function TicketListView({
   const list = (
     <Virtuoso
       ref={virtuosoRef}
-      data={tickets}
+      data={filteredTickets}
       data-slot='ticket-list-view'
       tabIndex={0}
       onFocus={(e: React.FocusEvent<HTMLDivElement>) => {
@@ -354,7 +429,7 @@ export const TicketListView = function TicketListView({
   );
 
   const fromIndex = pageIndex * PAGE_SIZE + 1;
-  const toIndex = pageIndex * PAGE_SIZE + tickets.length;
+  const toIndex = pageIndex * PAGE_SIZE + filteredTickets.length;
   const rangeLabel = `${fromIndex}–${toIndex}`;
 
   const toSelectable = (t: SupportTicketRow): SelectableRow => {
@@ -381,9 +456,9 @@ export const TicketListView = function TicketListView({
     const userRow = (reads ?? []).find(r => r.userId === userID);
     return (t.emailCount ?? 0) > 0 && (!userRow || userRow.lastReadEmailAt < (t.lastEmailAt ?? 0));
   };
-  const pageRows: SelectableRow[] = tickets.map(toSelectable);
-  const unreadRows = tickets.filter(isUnread).map(toSelectable);
-  const readRows = tickets.filter(t => !isUnread(t)).map(toSelectable);
+  const pageRows: SelectableRow[] = filteredTickets.map(toSelectable);
+  const unreadRows = filteredTickets.filter(isUnread).map(toSelectable);
+  const readRows = filteredTickets.filter(t => !isUnread(t)).map(toSelectable);
   const selectedOnPage = pageRows.reduce((n, r) => (selectedIds?.has(r.id) ? n + 1 : n), 0);
   const totalSelected = selectedIds?.size ?? 0;
   const allSelected = pageRows.length > 0 && selectedOnPage === pageRows.length;

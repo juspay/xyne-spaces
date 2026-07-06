@@ -46,7 +46,9 @@ export class CreateEmailDraftStep extends BaseActionStep<
 
     return {
       draftId: draft.id,
-      conversationId: draft.conversationId,
+      // conversationId is now nullable on EmailDraft (compose drafts have none), but this
+      // step always upserts by a concrete conversation, so fall back to the input.
+      conversationId: draft.conversationId ?? (config.conversationId as string),
       channelId: draft.channelId,
     };
   }

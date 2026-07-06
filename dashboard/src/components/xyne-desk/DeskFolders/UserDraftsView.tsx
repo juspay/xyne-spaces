@@ -30,7 +30,8 @@ interface DraftItem {
 
 const toDraftItem = (d: DraftRow): DraftItem | null => {
   const ticket = d.ticket;
-  if (!ticket) return null;
+  // Reply drafts only: a row with no conversationId is a compose draft (handled elsewhere).
+  if (!ticket || !d.conversationId) return null;
   return {
     draftId: d.id,
     updatedAt: d.updatedAt,
