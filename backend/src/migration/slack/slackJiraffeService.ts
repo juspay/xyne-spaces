@@ -27,7 +27,7 @@ import {
 } from './utils/extractConversation';
 import { ticketSchema } from '@xyne/vespa-ts';
 import { NAMESPACE } from '../../vespa/vespaConfig';
-import { vespaQueue } from '../../queues/vespaQueue';
+import { vespaBackfillQueue } from '../../queues/vespaQueue';
 import { syncConversationTicketMdFromPrismaTicket } from '../../utils/ticketMd';
 
 const ENABLE_NOTIFICATIONS = true;
@@ -163,7 +163,7 @@ async function fetchTicketsFromBitbot(
 }
 
 async function pushVespaJobForTicket(ticketId: string, userId: string, workspaceId?: string): Promise<void> {
-  vespaQueue
+  vespaBackfillQueue
     .addJob({
       schema: ticketSchema,
       jobType: 'feed',

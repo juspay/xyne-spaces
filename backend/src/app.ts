@@ -895,8 +895,10 @@ export class App {
     await initializeXyneAI();
 
     logger.info('Initializing Vespa queue...');
-    const { vespaQueue } = await import('@/queues/vespaQueue');
+    const { vespaQueue, vespaBackfillQueue } = await import('@/queues/vespaQueue');
     await vespaQueue.initialize();
+    // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
+    await vespaBackfillQueue.initialize();
 
     logger.info('Initializing conversation ingest queue (producer)...');
     await conversationIngestQueue.initialize();

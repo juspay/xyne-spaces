@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { vespaQueue } from '@/queues/vespaQueue';
+import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
@@ -92,7 +92,7 @@ export class TicketMigrationController {
 
             // 3. Queue for Search Indexing (Vespa)
             try {
-              await vespaQueue.addJob({
+              await vespaBackfillQueue.addJob({
                 schema: ticketSchema,
                 jobType: 'update',
                 docId: ticket.id,

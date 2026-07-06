@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponse } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { vespaQueue } from '@/queues/vespaQueue';
+import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import {
   messageSchema,
   channelSchema,
@@ -111,7 +111,7 @@ export class AdminBackfillController {
       for (const messageRef of messages) {
         try {
           // Queue only the ID - worker will handle the processing
-      await vespaQueue.addJob({
+      await vespaBackfillQueue.addJob({
         schema: messageSchema,
         jobType: 'feed',
         docId: messageRef.messageId,
@@ -192,7 +192,7 @@ export class AdminBackfillController {
       for (const channelRef of channels) {
         try {
           // Queue only the ID - worker will handle the processing
-        await vespaQueue.addJob({
+        await vespaBackfillQueue.addJob({
           schema: channelSchema,
           jobType: 'feed',
           docId: channelRef.id,
@@ -274,7 +274,7 @@ export class AdminBackfillController {
       for (const projectRef of projects) {
         try {
           // Queue only the ID - worker will handle the processing
-        await vespaQueue.addJob({
+        await vespaBackfillQueue.addJob({
           schema: projectSchema,
           jobType: 'feed',
           docId: projectRef.id,
@@ -429,7 +429,7 @@ export class AdminBackfillController {
       for (const ticketRef of tickets) {
         try {
           // Queue only the ID - worker will handle the processing
-        await vespaQueue.addJob({
+        await vespaBackfillQueue.addJob({
           schema: ticketSchema,
           jobType: 'feed',
           docId: ticketRef.id,
@@ -508,7 +508,7 @@ export class AdminBackfillController {
 
       for (const emailRef of emails) {
         try {
-          await vespaQueue.addJob({
+          await vespaBackfillQueue.addJob({
             schema: mailSchema,
             jobType: 'feed',
             docId: emailRef.id,
@@ -588,7 +588,7 @@ export class AdminBackfillController {
       for (const canvasRef of canvases) {
         try {
           // Queue only the ID - worker will handle the processing
-          await vespaQueue.addJob({
+          await vespaBackfillQueue.addJob({
             schema: fileSchema,
             jobType: 'feed',
             docId: canvasRef.id,
@@ -679,7 +679,7 @@ export class AdminBackfillController {
           }
 
           // Queue only the ID - worker will handle the processing
-          await vespaQueue.addJob({
+          await vespaBackfillQueue.addJob({
             schema: fileSchema,
             jobType: 'feed',
             docId: attachmentRef.id,
@@ -771,7 +771,7 @@ export class AdminBackfillController {
           }
 
           // Queue only the ID - worker will handle the processing
-          await vespaQueue.addJob({
+          await vespaBackfillQueue.addJob({
             schema: fileSchema,
             jobType: 'feed',
             docId: attachmentRef.id,
@@ -859,7 +859,7 @@ export class AdminBackfillController {
       for (const callRef of calls) {
         try {
           // Queue only the ID - worker will handle the processing
-          await vespaQueue.addJob({
+          await vespaBackfillQueue.addJob({
             schema: fileSchema,
             jobType: 'feed',
             docId: callRef.id,
@@ -967,7 +967,7 @@ export class AdminBackfillController {
       logger.info(`📊 Backfilling schemas: ${schemasToBackfill.join(', ')}`);
 
       // Get initial queue stats
-      const initialStats = await vespaQueue.getStats(queueName);
+      const initialStats = await vespaBackfillQueue.getStats(queueName);
 
       // Generate a unique job ID for tracking
       const backfillJobId = `backfill-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -1094,7 +1094,7 @@ export class AdminBackfillController {
       }
 
       const totalQueued = Object.values(stats).reduce((sum, count) => sum + count, 0);
-      const finalStats = await vespaQueue.getStats(queueName);
+      const finalStats = await vespaBackfillQueue.getStats(queueName);
 
       logger.info(`✅ Background backfill job ${backfillJobId} completed successfully`);
       logger.info(`📊 Total jobs queued: ${totalQueued}`);
@@ -1116,7 +1116,7 @@ export class AdminBackfillController {
       const queueName = req.query.queueName as string;
 
       logger.debug('[Backfill] Fetching queue stats...');
-      const stats = await vespaQueue.getStats(queueName);
+      const stats = await vespaBackfillQueue.getStats(queueName);
       logger.debug(`[Backfill] Queue stats: ${JSON.stringify(stats)}`);
 
       res.status(200).json({
@@ -1160,7 +1160,7 @@ export class AdminBackfillController {
         return;
       }
 
-      const result = await vespaQueue.getJobs(
+      const result = await vespaBackfillQueue.getJobs(
         page,
         limit,
         state as 'waiting' | 'active' | 'delayed' | 'completed' | 'failed' | 'all',
@@ -1193,7 +1193,7 @@ export class AdminBackfillController {
     try {
       const queueName = req.query.queueName as string;
       // Use the centralized retryAllFailedJobs function from vespaBullQueue
-      const result = await vespaQueue.retryAllFailedJobs(queueName);
+      const result = await vespaBackfillQueue.retryAllFailedJobs(queueName);
 
       res.status(200).json({
         success: true,
@@ -1240,7 +1240,7 @@ export class AdminBackfillController {
         return;
       }
 
-      const queue = vespaQueue.getQueue(queueName);
+      const queue = vespaBackfillQueue.getQueue(queueName);
       if (!queue) {
         res.status(500).json({
           success: false,
@@ -1251,7 +1251,7 @@ export class AdminBackfillController {
       }
 
       // Get stats before clearing for reporting
-      const statsBefore = await vespaQueue.getStats(queueName);
+      const statsBefore = await vespaBackfillQueue.getStats(queueName);
 
       if (state === 'all') {
         // Clear all states
@@ -1269,7 +1269,7 @@ export class AdminBackfillController {
         await queue.clean(0, state as 'completed' | 'failed' | 'wait' | 'active' | 'delayed');
       } 
 
-      const statsAfter = await vespaQueue.getStats(queueName);
+      const statsAfter = await vespaBackfillQueue.getStats(queueName);
 
       res.status(200).json({
         success: true,
