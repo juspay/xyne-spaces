@@ -15,6 +15,7 @@ import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
+import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event
@@ -56,6 +57,7 @@ interface NotificationData {
       canvasId?: string;
       blockId?: string;
       conversation?: Conversation;
+      notificationType?: string;
     };
     metadata?: {
       notificationType?: string;
@@ -131,6 +133,9 @@ export const NotificationHandler: React.FC = () => {
             { workspaceId: targetWorkspaceId },
             { withCredentials: true },
           );
+          console.log(
+            `[NotificationHandler] Switched workspace from=${currentWorkspaceId} to=${targetWorkspaceId}`,
+          );
           queryClient.clear();
           window.location.href = resolvedUrl;
           return;
@@ -149,6 +154,9 @@ export const NotificationHandler: React.FC = () => {
   const handleNotification = useCallback(
     (data: NotificationData): void => {
       try {
+        console.log(
+          `[NotificationHandler] Notification received id=${data.notification.id} type=${data.notification.type} workspace=${data.notification.workspaceId ?? 'current'}`,
+        );
         // Skip silent data-only notifications meant for mobile tray clearing
         const type = data.notification?.type?.toLowerCase();
         if (type === 'channel_read' || type === 'thread_read') {
@@ -175,6 +183,11 @@ export const NotificationHandler: React.FC = () => {
             : undefined;
         const fallbackChatActionUrl = buildChatActionUrl(data.notification);
         const notificationWorkspaceId = data.notification.workspaceId;
+        if (notificationWorkspaceId && notificationWorkspaceId !== activeWorkspaceIdRef.current) {
+          console.log(
+            `[NotificationHandler] Cross-workspace notification received id=${data.notification.id} from=${notificationWorkspaceId} current=${activeWorkspaceIdRef.current}`,
+          );
+        }
         const resolvedRawActionUrl =
           data.notification.actionUrl || canvasRedirectUrl || fallbackChatActionUrl;
         const resolvedActionUrl = resolvedRawActionUrl
@@ -186,6 +199,47 @@ export const NotificationHandler: React.FC = () => {
         const bannerSubtitle = data.notification.workspaceName
           ? data.notification.title
           : undefined;
+
+        // SOS alerts (safety escalations) — show a native notification for
+        // the ping, plus a persistent in-app toast (SosAlertBanner) that stays
+        // until the user explicitly dismisses or clicks View.
+        const isSosAlert =
+          data.notification.data?.notificationType === 'sos_alert' ||
+          data.notification.metadata?.notificationType === 'sos_alert';
+        if (isSosAlert) {
+          console.log(
+            `[NotificationHandler] SOS alert received id=${data.notification.id} workspace=${notificationWorkspaceId ?? 'current'}`,
+          );
+          // Bring Electron to foreground so the agent can't miss it.
+          if (isElectron && window.electronAPI?.focusApp) {
+            window.electronAPI.focusApp();
+          }
+
+          // Persistent in-app toast — survives navigation and page refresh.
+          sendSosAlertEvent({
+            type: 'addAlert',
+            alert: {
+              id: data.notification.id,
+              title: data.notification.title,
+              message: data.notification.message,
+              ...(resolvedActionUrl && { actionUrl: resolvedActionUrl }),
+              ...(notificationWorkspaceId && { workspaceId: notificationWorkspaceId }),
+              ...(data.notification.workspaceName && {
+                workspaceName: data.notification.workspaceName,
+              }),
+              receivedAt: Date.now(),
+            },
+          });
+
+          // Confirm delivery to the backend.
+          const sosSocket = websocketService.getSocket();
+          if (sosSocket && data.notification.id) {
+            sosSocket.emit('notification_acknowledged', {
+              notificationId: data.notification.id,
+            });
+          }
+          return;
+        }
 
         if (
           isElectron &&

@@ -332,6 +332,14 @@ class WebSocketService {
       await this.handleNotificationAcknowledgment(socket, data);
     });
 
+    socket.on('sos_alert_acknowledged', async (data: { alertId: string }) => {
+      await this.handleSosAlertAcknowledgment(socket, data);
+    });
+
+    socket.on('sos_alerts_sync', async (data: { alertIds: string[] }) => {
+      await this.handleSosAlertsSync(socket, data);
+    });
+
     // Handle workflow subscription (room-based)
     socket.on('subscribe_to_workflow', (data: { executionId: string }) => {
       this.handleWorkflowSubscription(socket, data.executionId);
@@ -731,6 +739,81 @@ class WebSocketService {
       logger.info(`User ${userEmail} disconnected from WebSocket`);
     } catch (error) {
       logger.error('Error handling disconnection:', error);
+    }
+  }
+
+  private async handleSosAlertAcknowledgment(socket: AuthenticatedSocket, data: { alertId: string }): Promise<void> {
+    try {
+      const { userId } = socket;
+      if (!userId) return;
+      const alertId = data?.alertId;
+      if (!alertId || typeof alertId !== 'string') {
+        logger.warn(`[SOS-ACK] Invalid alertId received from user ${userId}`);
+        return;
+      }
+      // Verify the acking user owns this alert (by userId or same orgMember)
+      const notification = await repositories.notifications.findById(alertId);
+      if (!notification) {
+        logger.warn(`[SOS-ACK] Alert ${alertId} not found, ignoring ack from user ${userId}`);
+        return;
+      }
+      let isOwner = notification.userId === userId;
+      if (!isOwner && socket.orgMemberId) {
+        const owner = await repositories.users.findById(notification.userId);
+        isOwner = !!owner?.orgMemberId && owner.orgMemberId === socket.orgMemberId;
+      }
+      if (!isOwner) {
+        logger.warn(`[SOS-ACK] User ${userId} does not own alert ${alertId}, ignoring ack`);
+        return;
+      }
+
+      await repositories.notifications.dismiss(alertId, notification.userId);
+
+      // Forward ack to the user's other sessions across all workspaces
+      const connections = socket.orgMemberId
+        ? await redisService.getOrgMemberConnections(socket.orgMemberId)
+        : await redisService.getUserConnections(userId);
+      const others = connections.filter(id => id !== socket.id);
+      logger.info(`[SOS-ACK] User ${userId} acknowledged alert ${alertId}, forwarding to ${others.length} other connection(s)`);
+      for (const socketId of others) {
+        this.io?.to(socketId).emit('sos_alert_acknowledged', { alertId });
+      }
+    } catch (error) {
+      logger.error(`[SOS-ACK] Error handling SOS acknowledgment for alert ${data?.alertId}`, error);
+    }
+  }
+
+  /** Tells the client which of its stored SOS alerts were already dismissed elsewhere. */
+  private async handleSosAlertsSync(socket: AuthenticatedSocket, data: { alertIds: string[] }): Promise<void> {
+    try {
+      const { userId } = socket;
+      if (!userId) return;
+      const alertIds = Array.isArray(data?.alertIds)
+        ? data.alertIds.filter((id): id is string => typeof id === 'string' && id.length > 0).slice(0, 50)
+        : [];
+      if (alertIds.length === 0) return;
+
+      // Match against all of the user's workspace identities
+      let userIds: string[] = [userId];
+      if (socket.orgMemberId) {
+        const siblings = await repositories.users.findMany({
+          where: { orgMemberId: socket.orgMemberId },
+        });
+        if (siblings.length > 0) userIds = siblings.map(u => u.id);
+      }
+
+      const dismissed = await repositories.notifications.findMany({
+        where: { id: { in: alertIds }, userId: { in: userIds }, status: 'DISMISSED' },
+        select: { id: true },
+      });
+      if (dismissed.length === 0) return;
+
+      logger.info(`[SOS-SYNC] User ${userId}: ${dismissed.length}/${alertIds.length} stored alert(s) already dismissed elsewhere`);
+      for (const { id } of dismissed) {
+        socket.emit('sos_alert_acknowledged', { alertId: id });
+      }
+    } catch (error) {
+      logger.error('[SOS-SYNC] Error reconciling SOS alerts:', error);
     }
   }
 

@@ -42,6 +42,7 @@ import { IncomingCallModal } from '../components/Call/CallModals/IncomingCallMod
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
+import { SosAlertBanner } from '../components/SosAlert/SosAlertBanner';
 import { CallFromRecentsHandler } from '../components/CallFromRecentsHandler/CallFromRecentsHandler';
 import { usePlatform } from '../hooks/usePlatform';
 import { useIsInPanelWebview } from '../hooks/useIsInPanelWebview';
@@ -678,6 +679,7 @@ const AppRoot = (): ReactElement => {
                     <RecordingOverlay />
                     <GlobalUploadProgress />
                     <NotificationHandler />
+                    <SosAlertBanner />
                     <CallFromRecentsHandler />
                     <BrowserPanelHandler />
                     <GlobalCommandMenu />

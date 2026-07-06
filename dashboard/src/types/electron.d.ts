@@ -46,6 +46,7 @@ export interface ElectronAPI {
   onCallAction: (
     callback: (data: { callId: string; action: 'accept' | 'reject' }) => void,
   ) => () => void;
+  focusApp: () => void;
   onNavigateTo: (callback: (url: string, workspaceId?: string) => void) => () => void;
   onBrowserNewTab: (callback: () => void) => () => void;
   onBrowserFindInPage: (callback: () => void) => () => void;

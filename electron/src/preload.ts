@@ -38,6 +38,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('show-notification', data);
   },
 
+  focusApp: () => {
+    ipcRenderer.send('focus-app');
+  },
+
   showCallNotification: (data: {
     callId: string;
     callerName: string;

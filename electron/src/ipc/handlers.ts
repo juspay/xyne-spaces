@@ -249,6 +249,16 @@ export function setupIpcHandlers(): void {
     showNotification(data, getMainWindow());
   });
 
+  ipcMain.on('focus-app', () => {
+    const mainWindow = getMainWindow();
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      if (process.platform === 'darwin') app.dock.bounce('critical');
+    }
+  });
+
   ipcMain.on('show-call-notification', (_event, data: CallNotificationData) => {
     showCallNotification(data, getMainWindow());
   });
