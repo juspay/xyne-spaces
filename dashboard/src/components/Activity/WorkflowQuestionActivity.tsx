@@ -3,6 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { HelpCircle } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 
 export const WorkflowQuestionActivity = ({
   activity,
@@ -15,7 +16,7 @@ export const WorkflowQuestionActivity = ({
   const ticketIdValue = activity.ticketId;
   const actorId = activity.actorId || 'system';
   const actor = useUser(actorId);
-  const actorName = actor?.name || 'Xyne';
+  const actorName = actor ? getUserDisplayName(actor) : 'Xyne';
   const targetPath = ticketIdValue
     ? `/tickets/${ticketIdValue}/workflow/${workflowId}`
     : `/tickets`;

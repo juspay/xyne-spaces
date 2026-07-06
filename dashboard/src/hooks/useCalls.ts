@@ -86,7 +86,7 @@ export const formatParticipantText = <
   T extends { userId: string; displayName?: string | null; isExternal?: boolean },
 >(
   participants: readonly T[] | T[],
-  userMap: Map<string, { id: string; name?: string }>,
+  userMap: Map<string, { id: string; name?: string; displayName?: string | null }>,
 ): string => {
   // Helper function to extract the first name from a full name
   const getFirstName = (fullName: string | undefined): string => {
@@ -98,7 +98,7 @@ export const formatParticipantText = <
   const getParticipantFirstName = (p: T): string => {
     if (p.isExternal) return `${p.displayName?.split(' ')[0] || 'Guest'} (External)`;
     const user = userMap.get(p.userId);
-    return getFirstName(user?.name);
+    return getFirstName(user?.displayName || user?.name);
   };
 
   const count = participants.length;

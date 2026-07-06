@@ -25,6 +25,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useUserGroups } from '@/hooks/useUserGroup';
 import { cn } from '../../../utils/classNames';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export interface CanvasShareModalProps {
   canvas: Canvas;
@@ -695,7 +696,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
               : undefined;
             const editorLocked = isEditor && !isOwner && participant.role === CanvasRole.OWNER;
             const displayName = isUser
-              ? usersById.get(participant.userId as string)?.name || 'Unknown User'
+              ? getUserDisplayName(usersById.get(participant.userId as string))
               : isGroup
                 ? groupsById.get(participant.userGroupId || '')?.name ||
                   participant.userGroupId ||

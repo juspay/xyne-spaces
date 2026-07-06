@@ -4,6 +4,7 @@ import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { parseReactionsMd, ReactionsData, getMostRecentEmoji } from '@xyne/shared';
 import { renderEmoji } from '../../utils/customEmojiUtils';
@@ -66,7 +67,7 @@ export const ReactionAddedActivityV2 = ({
     <ActivityItemCard
       activity={activity}
       actorId={activity.actorId} // Most recent reactor
-      actorName={actorUser?.name ?? 'Someone'}
+      actorName={getUserDisplayName(actorUser)}
       channelId={message.conversation?.channelId}
       badgeIcon={renderEmoji(latestEmoji)}
       badgeColorClass='bg-muted'

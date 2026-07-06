@@ -30,6 +30,7 @@ import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
 import { formatPRActivityParts } from '../../../utils/activityFormatter';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 type FormValueEntry = {
   id: string;
@@ -151,7 +152,9 @@ const getActivityDescription = (
           }
         : {
             description: 'assigned PR Reviewer',
-            details: <span className='font-semibold'>{newUser?.name || 'Unassigned'}</span>,
+            details: (
+              <span className='font-semibold'>{getUserDisplayName(newUser) || 'Unassigned'}</span>
+            ),
           };
     }
 
@@ -169,11 +172,13 @@ const getActivityDescription = (
             description: 'assigned QA',
             details: value?.oldValue ? (
               <>
-                from <span className='font-semibold'>{oldUser?.name || 'Unassigned'}</span> to{' '}
-                <span className='font-semibold'>{newUser?.name || 'Unassigned'}</span>
+                from{' '}
+                <span className='font-semibold'>{getUserDisplayName(oldUser) || 'Unassigned'}</span>{' '}
+                to{' '}
+                <span className='font-semibold'>{getUserDisplayName(newUser) || 'Unassigned'}</span>
               </>
             ) : (
-              <span className='font-semibold'>{newUser?.name || 'Unassigned'}</span>
+              <span className='font-semibold'>{getUserDisplayName(newUser) || 'Unassigned'}</span>
             ),
           };
     }
@@ -191,7 +196,8 @@ const getActivityDescription = (
           description: 'Auto-assigned',
           details: (
             <>
-              to <span className='font-semibold'>{newUser?.name || 'Unassigned'}</span>
+              to{' '}
+              <span className='font-semibold'>{getUserDisplayName(newUser) || 'Unassigned'}</span>
             </>
           ),
           hideActorName: true,
@@ -207,8 +213,10 @@ const getActivityDescription = (
             description: 'changed assignment',
             details: (
               <>
-                from <span className='font-semibold'>{oldUser?.name || 'Unassigned'}</span> to{' '}
-                <span className='font-semibold'>{newUser?.name || 'Unassigned'}</span>
+                from{' '}
+                <span className='font-semibold'>{getUserDisplayName(oldUser) || 'Unassigned'}</span>{' '}
+                to{' '}
+                <span className='font-semibold'>{getUserDisplayName(newUser) || 'Unassigned'}</span>
               </>
             ),
           };
@@ -740,7 +748,7 @@ export const ActivityComponent = ({
           <p className='text-sm text-muted-foreground'>
             {activity.activityType !== ActivityType.PR &&
               !hideActorName &&
-              (activityUser?.name || 'Someone')}{' '}
+              (getUserDisplayName(activityUser) || 'Someone')}{' '}
             {description}
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>

@@ -22,6 +22,7 @@ import {
   isCallRecording,
 } from '../../../hooks/useCalls';
 import { useUsers } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
 import { ScreenPickerModal } from '../../ScreenPicker/ScreenPickerModal';
 import { mutators } from '../../../zero/mutators';
@@ -204,7 +205,7 @@ export function CustomLiveKitRoom({
           name = (newest as { displayName?: string | null }).displayName ?? undefined;
         } else {
           const foundUser = allUsers.find(u => u.id === newest.userId);
-          name = foundUser?.name;
+          name = getUserDisplayName(foundUser);
         }
         toast.info(`${name ?? 'Someone'} is requesting to join`, {
           duration: 5000,

@@ -95,7 +95,7 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
     const [user, orgMember] = await Promise.all([
       db.user.findUnique({
         where: { id: decoded.sub },
-        select: { role: true },
+        select: { role: true, displayName: true },
       }),
       db.orgMember.findUnique({
         where: { memberId: decoded.memberId },
@@ -118,6 +118,7 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
       sub: decoded.sub,
       email: decoded.email,
       name: decoded.name,
+      displayName: user.displayName,
       workspaceId: decoded.workspaceId,
       memberId: decoded.memberId,
       role: user.role,

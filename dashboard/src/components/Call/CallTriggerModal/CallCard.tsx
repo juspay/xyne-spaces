@@ -3,6 +3,7 @@ import { Users } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { useUsers } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { roomActor } from '../../../machines/roomMachine';
@@ -83,7 +84,7 @@ export const CallCard: React.FC<CallCardProps> = ({
 
   const initiatorName = useMemo(() => {
     const initiator = allUsers.find(u => u.id === call.createdByUserId);
-    return initiator?.name || 'Someone';
+    return getUserDisplayName(initiator);
   }, [call.createdByUserId, allUsers]);
 
   const callTitle = useFetchCallTitle(call.externalId);

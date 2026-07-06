@@ -5,6 +5,7 @@ import { MessageCircleMore } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { parseRepliesMd, RepliesData } from '@xyne/shared';
 
@@ -81,7 +82,7 @@ export const MessageRepliedActivityV2 = ({
     <ActivityItemCard
       activity={activity}
       actorId={activity.actorId} // Most recent replier
-      actorName={actorUser?.name ?? 'Someone'}
+      actorName={getUserDisplayName(actorUser)}
       channelId={conversation.channelId}
       badgeIcon={<MessageCircleMore className='text-yellow-600' />}
       badgeColorClass='bg-accent'

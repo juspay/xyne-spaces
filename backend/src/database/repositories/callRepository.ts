@@ -488,7 +488,7 @@ export class CallRepository {
       ? await repositories.users.getUserNamesByIds(internalUserIds, tx)
       : [];
 
-    const userMap = new Map(users.map(u => [u.id, u.name]));
+    const userMap = new Map(users.map(u => [u.id, u.displayName || u.name]));
 
     return {
       participants: joinedParticipants.map(p => ({
@@ -1089,7 +1089,7 @@ export class CallRepository {
       // Get creator's name for the system message
       const user = await tx.user.findUnique({
         where: { id: createdBy },
-        select: { name: true },
+        select: { name: true, displayName: true },
       });
 
       if (callOrigin === CallOrigin.CONVERSATION) {
@@ -1121,7 +1121,7 @@ export class CallRepository {
             conversationId,
             ...(workspaceId ? { workspaceId } : {}),
             senderId: 'system',
-            content: `${user?.name || 'Someone'} started a call`,
+            content: `${user?.displayName || user?.name || 'Someone'} started a call`,
             msgType: 'SYSTEM',
             showInChannel: false,
             metadata: {
@@ -1141,7 +1141,7 @@ export class CallRepository {
           workspaceId,
           callId: roomName,
           callType,
-          initiatorName: user?.name || 'Someone',
+          initiatorName: user?.displayName || user?.name || 'Someone',
           conversationMetadata: isHeadless
             ? { isHeadlessRecording: true, callId: roomName }
             : undefined,
@@ -1193,7 +1193,7 @@ export class CallRepository {
 
     return users.map(user => ({
       userId: user.id,
-      userName: user.name,
+      userName: user.displayName || user.name,
       userEmail: user.email,
       userPicture: user.picture,
     }));
@@ -1253,7 +1253,7 @@ export class CallRepository {
       const user = userMap.get(p.userId);
       return {
         userId: p.userId,
-        userName: user?.name ?? 'Unknown',
+        userName: (user?.displayName || user?.name) ?? 'Unknown',
         userEmail: user?.email ?? '',
         userPicture: user?.picture ?? null,
         response: p.response,

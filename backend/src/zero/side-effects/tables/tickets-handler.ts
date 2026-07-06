@@ -236,10 +236,10 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
                 in: [oldAssigneeId, newAssigneeId].filter(Boolean) as string[],
               },
             },
-            select: { id: true, name: true },
+            select: { id: true, name: true, displayName: true },
           });
 
-          const userNameMap = new Map(users.map(u => [u.id, u.name || 'Unknown']));
+          const userNameMap = new Map(users.map(u => [u.id, u.displayName || u.name || 'Unknown']));
           const oldAssigneeName = oldAssigneeId ? userNameMap.get(oldAssigneeId) || 'Unassigned' : 'Unassigned';
           const newAssigneeName = newAssigneeId ? userNameMap.get(newAssigneeId) || 'Unassigned' : 'Unassigned';
 

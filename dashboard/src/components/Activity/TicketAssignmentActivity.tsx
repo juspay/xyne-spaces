@@ -3,6 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { UserPlus } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 
 interface TicketAssignmentActivityProps {
   activity: ActivityWithRelated;
@@ -16,11 +17,11 @@ export const TicketAssignmentActivity = ({
   const ticket = activity.ticket;
   const actorId = activity.actorId || 'system';
   const actor = useUser(actorId);
-  const actorName = actor?.name || 'Xyne';
+  const actorName = actor ? getUserDisplayName(actor) : 'Xyne';
 
   const assignedUserId = ticket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
   const assignedUser = useUser(assignedUserId);
-  const assignedUserName = assignedUser?.name || 'Unknown';
+  const assignedUserName = getUserDisplayName(assignedUser);
 
   if (!ticket) {
     return null;

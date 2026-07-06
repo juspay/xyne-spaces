@@ -149,7 +149,7 @@ export class CallController {
 
       if (call.createdByUserId !== userId) {
         const responder = await repositories.users.findById(userId);
-        const responderName = responder?.name || responder?.email || 'A participant';
+        const responderName = responder?.displayName || responder?.name || responder?.email || 'A participant';
         const callName = call.title || 'Scheduled Call';
         
         let notificationTitle = '';
@@ -353,7 +353,7 @@ export class CallController {
     try {
       const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel, conversationId } = req.body;
       const userId = req.user?.id;
-      const userName = req.user?.name;
+      const userName = req.user?.displayName || req.user?.name;
       const userEmail = req.user?.email;
 
       logger.info(`[${correlationId}] call_initiation_requested | user_id=${userId}, channel_id=${channelId}, call_type=${callType}, is_headless=${isHeadless}`);
@@ -753,7 +753,7 @@ export class CallController {
       const token = await livekitService.generateAccessToken({
         userIdentity: user.id,
         roomName: callId,
-        userName: user.name || user.email || 'Unknown',
+        userName: user.displayName || user.name || user.email || 'Unknown',
         metadata: JSON.stringify({ picture: joiner?.picture || null }),
         canPublishSources: lockedSources,
       });

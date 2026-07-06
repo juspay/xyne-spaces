@@ -253,7 +253,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }),
       db.user.findUnique({
         where: { id: senderId },
-        select: { name: true, userType: true, picture: true }
+        select: { name: true, displayName: true, userType: true, picture: true }
       }),
       db.channelParticipant.findMany({
         where: { channelId },
@@ -275,7 +275,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const participantUserIds = channelParticipantsRaw.map(p => p.userId);
     const users = await db.user.findMany({
       where: { id: { in: participantUserIds } },
-      select: { id: true, email: true, name: true, userType: true, status: true }
+      select: { id: true, email: true, name: true, displayName: true, userType: true, status: true }
     });
     const appUserIds = users.filter(u => u.userType === UserType.APP).map(u => u.id);
     const inactiveUserIds = new Set(users.filter(u => u.status !== UserStatus.ACTIVE).map(u => u.id));
@@ -285,12 +285,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       userId: p.userId,
       user: {
         email: userMap.get(p.userId)?.email || '',
-        name: userMap.get(p.userId)?.name || ''
+        name: userMap.get(p.userId)?.displayName || userMap.get(p.userId)?.name || ''
       }
     }));
 
     const channelName = channel?.name || 'Unknown Channel';
-    const senderName = sender?.name || 'Someone';
+    const senderName = sender?.displayName || sender?.name || 'Someone';
     const cleanContent = getNotificationPreviewContent(content, message.msgType, message.hasAttachment);
     const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
     const isOneToOneDM = channel?.scopeType === ChannelScopeType.DM;
@@ -1097,7 +1097,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const [senderUser, conv, messageAttachments] = await Promise.all([
       db.user.findUnique({
         where: { id: targetMessage.senderId },
-        select: { id: true, name: true, picture: true },
+        select: { id: true, name: true, displayName: true, picture: true },
       }),
       db.conversation.findUnique({
         where: { conversationId: targetMessage.conversationId },
@@ -1170,7 +1170,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       channelName: channel.name,
       channelScopeType: channel.scopeType,
       senderId: senderUser.id,
-      senderName: senderUser.name,
+      senderName: senderUser.displayName || senderUser.name,
       senderAvatar: senderUser.picture ?? undefined,
       content: plainForLength.length > 300 ? rawContent.slice(0, 600) : rawContent,
       timestamp: targetMessage.createdAt.toISOString(),

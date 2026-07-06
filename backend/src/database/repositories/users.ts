@@ -429,10 +429,10 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
   async getUserNamesByIds(
     userIds: string[],
     tx: Prisma.TransactionClient
-  ): Promise<Array<{ id: string; name: string }>> {
+  ): Promise<Array<{ id: string; name: string; displayName: string | null }>> {
     return await tx.user.findMany({
       where: { id: { in: userIds } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, displayName: true },
     });
   }
 }

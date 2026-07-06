@@ -115,6 +115,7 @@ async function handleAppAuth(
       googleId: user.providerUserId,
       email: user.email,
       name: user.name,
+      displayName: user.displayName,
       workspaceId: user.workspaceId,
       memberId: user.orgMemberId,
       role: user.role,

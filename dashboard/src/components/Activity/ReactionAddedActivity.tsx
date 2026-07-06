@@ -4,6 +4,7 @@ import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { renderEmoji } from '../../utils/customEmojiUtils';
 import { getReactionMessagePreview } from './reactionMessagePreview';
@@ -30,7 +31,7 @@ export const ReactionAddedActivity = ({
     <ActivityItemCard
       activity={activity}
       actorId={reaction.userId}
-      actorName={actorUser?.name ?? 'unknown'}
+      actorName={getUserDisplayName(actorUser)}
       channelId={message.conversation?.channelId}
       badgeIcon={renderEmoji(reaction.emojiName)}
       badgeColorClass='bg-muted'

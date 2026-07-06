@@ -69,9 +69,9 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
     const actor = await db.user.findUnique({
       where: { id: this.ctx.userID },
-      select: { name: true, id: true },
+      select: { name: true, displayName: true, id: true },
     });
-    const actorName = actor?.name || 'Someone';
+    const actorName = actor?.displayName || actor?.name || 'Someone';
     const actorId = actor?.id || 'unknown';
 
     const canvas = await db.canvas.findUnique({

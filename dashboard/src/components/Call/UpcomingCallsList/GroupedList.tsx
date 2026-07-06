@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { isSameDay } from '../../../utils/dateUtils';
 import { groupByDay, type Call } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 import { useUsers } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { DayGroup } from './DayGroup';
 
 interface GroupedListProps {
@@ -25,7 +26,7 @@ export function GroupedList({
 }: GroupedListProps): React.JSX.Element {
   const allUsers = useUsers();
   const userMap = useMemo(
-    () => new Map(allUsers.map(u => [u.id, { id: u.id, name: u.name }])),
+    () => new Map(allUsers.map(u => [u.id, { id: u.id, name: getUserDisplayName(u) }])),
     [allUsers],
   );
 

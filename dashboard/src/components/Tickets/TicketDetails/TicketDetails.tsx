@@ -98,6 +98,7 @@ import { generateReleaseNotes } from '../../../services/ticketBoardService';
 import { searchService } from '../../../services/searchService';
 import { AIClassificationPanel } from './AIClassificationPanel';
 import type { TicketClassificationData } from '../../../types/classification';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 const formatTimestamp = (timestamp: number): string => {
   const date = new Date(timestamp);
@@ -2708,7 +2709,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   >
                     {group.userIds.map(userId => {
                       const user = users?.find(
-                        (u: { id: string; name: string }) => u.id === userId,
+                        (u: { id: string; name: string; displayName?: string | null }) =>
+                          u.id === userId,
                       );
                       return (
                         <div key={userId} className='flex items-center gap-2'>
@@ -2718,7 +2720,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             shape={AvatarShape.CIRCULAR}
                             showActiveStatus={false}
                           />
-                          <span className='text-sm text-foreground'>{user?.name || 'Unknown'}</span>
+                          {getUserDisplayName(user) || 'Unknown'}
                         </div>
                       );
                     })}
@@ -2977,7 +2979,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               value={
                 <div className='items-center flex gap-2'>
                   <UserAvatar userId={createdByUser?.id || ''} shape={AvatarShape.CIRCULAR} />
-                  {createdByUser?.name || 'Merchant User'}
+                  {getUserDisplayName(createdByUser) || 'Merchant User'}
                 </div>
               }
             />
