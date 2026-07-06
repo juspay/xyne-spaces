@@ -35,9 +35,9 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       // Someone else added them - get the adder's info
       const adder = await db.user.findUnique({
         where: { id: this.ctx.userID },
-        select: { name: true, id: true }
+        select: { name: true, displayName: true, id: true }
       });
-      const adderName = adder?.name || 'Someone';
+      const adderName = adder?.displayName || adder?.name || 'Someone';
       const adderId = adder?.id || 'unknown';
       
       logger.info(`[ChannelParticipantsHandler] User ${userId} was added to channel ${channelId} by ${this.ctx.userID} (${adderName})`);

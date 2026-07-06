@@ -5,6 +5,7 @@ import { AtSign } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
 
 export const MessageMentionActivity = ({
@@ -33,7 +34,7 @@ export const MessageMentionActivity = ({
     <ActivityItemCard
       activity={activity}
       actorId={sender.id}
-      actorName={sender.name}
+      actorName={getUserDisplayName(sender)}
       channelId={message.conversation?.channelId}
       badgeIcon={<AtSign className='w-4 h-4 text-primary' />}
       badgeColorClass='bg-muted'

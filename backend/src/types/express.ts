@@ -42,6 +42,7 @@ export interface AuthenticatedUser {
   googleId: string;
   email: string;
   name: string;
+  displayName?: string | null;
   workspaceId: string;
   isApiKeyUser?: boolean;
   scopes?: string[];

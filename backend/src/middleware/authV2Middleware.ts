@@ -271,6 +271,7 @@ class AuthV2Middleware {
         googleId: session.user.providerUserId,
         email: session.user.email,
         name: session.user.name,
+        displayName: session.user.displayName,
         workspaceId: session.user.workspaceId,
         role: session.user.role,
         orgRole: session.user.orgMember.role,
@@ -378,12 +379,13 @@ class AuthV2Middleware {
               const [user, orgMember] = await Promise.all([
                 db.user.findUnique({
                   where: { id: decoded.sub },
-                  select: { 
-                    id: true, 
-                    role: true, 
-                    email: true, 
-                    name: true, 
-                    leftAt: true, 
+                  select: {
+                    id: true,
+                    role: true,
+                    email: true,
+                    name: true,
+                    displayName: true,
+                    leftAt: true,
                     providerUserId: true,
                     authProvider: true,
                   }
@@ -432,6 +434,7 @@ class AuthV2Middleware {
                   googleId: user.providerUserId,
                   email: user.email,
                   name: user.name,
+                  displayName: user.displayName,
                   workspaceId: effectiveWorkspaceId,
                   role: workspaceRole,
                   orgRole: orgRole,

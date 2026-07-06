@@ -6,6 +6,7 @@ import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 
 export const DirectMessageActivity = ({
   activity,
@@ -31,7 +32,7 @@ export const DirectMessageActivity = ({
     <ActivityItemCard
       activity={activity}
       actorId={sender.id}
-      actorName={sender.name}
+      actorName={getUserDisplayName(sender)}
       channelId={message.conversation?.channelId}
       badgeIcon={<MessageCircle className='w-4 h-4 text-emerald-500' />}
       badgeColorClass='bg-muted'

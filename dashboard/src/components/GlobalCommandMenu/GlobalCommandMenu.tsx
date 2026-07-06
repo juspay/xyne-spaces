@@ -26,12 +26,15 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 export function resolveDMChannelName(
   channel: { name: string; scopeType: ChannelScopeType },
   currentUserId: string,
-  allUsers: { id: string; name?: string | null }[],
+  allUsers: { id: string; name?: string | null; displayName?: string | null }[],
 ): string {
   if (!isDMChannel(channel.scopeType)) return channel.name;
   const participantIds = getDMParticipantIdsToFetch(channel, currentUserId);
   const names = participantIds
-    .map(id => allUsers.find(u => u.id === id)?.name)
+    .map(id => {
+      const u = allUsers.find(u => u.id === id);
+      return u ? u.displayName || u.name || null : null;
+    })
     .filter((name): name is string => !!name);
   return names.length > 0 ? names.join(', ') : channel.name;
 }

@@ -62,6 +62,7 @@ import { useUser, useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings' | 'ai-features';
 interface InfoProps {
@@ -608,7 +609,7 @@ const ParticipantListItem = ({
         <Avatar userId={participant.userId} size='md' showActiveStatus={true} />
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-2'>
-            <span className='text-sm truncate text-foreground'>{user?.name}</span>
+            <span className='text-sm truncate text-foreground'>{getUserDisplayName(user)}</span>
             {hasValidStatus && (
               <Tooltip
                 content={`${user?.statusContent || 'Status'}`}
@@ -684,7 +685,9 @@ const ParticipantListItem = ({
                 {canRemoveThisUser && (
                   <button
                     className={popoverStyle}
-                    onClick={() => onRemove(participant.userId, user?.name || 'this user')}
+                    onClick={() =>
+                      onRemove(participant.userId, getUserDisplayName(user) || 'this user')
+                    }
                     data-track-category='ChatInfo'
                     data-track-name='RemoveParticipant'
                     data-track-metadata={JSON.stringify({ userId: participant.userId })}
@@ -755,9 +758,9 @@ const ChannelMembers = ({
 
   const allUsers = useUsers();
   const usersById = useMemo(() => {
-    const map = new Map<string, { name: string }>();
+    const map = new Map<string, { name: string; displayName?: string | null }>();
     for (const u of allUsers) {
-      map.set(u.id, { name: u.name });
+      map.set(u.id, { name: u.name, displayName: u.displayName });
     }
     return map;
   }, [allUsers]);
@@ -887,14 +890,16 @@ const ChannelMembers = ({
       return [...searchResults].sort((a, b) => {
         const userA = usersById.get(a.userId);
         const userB = usersById.get(b.userId);
-        const aStartsWith = userA ? nameStartsWith(userA.name, searchQuery) : false;
-        const bStartsWith = userB ? nameStartsWith(userB.name, searchQuery) : false;
+        const displayA = getUserDisplayName(userA);
+        const displayB = getUserDisplayName(userB);
+        const aStartsWith = userA ? nameStartsWith(displayA, searchQuery) : false;
+        const bStartsWith = userB ? nameStartsWith(displayB, searchQuery) : false;
 
         if (aStartsWith && !bStartsWith) return -1;
         if (!aStartsWith && bStartsWith) return 1;
 
-        const nameA = userA?.name || '';
-        const nameB = userB?.name || '';
+        const nameA = displayA;
+        const nameB = displayB;
         return nameA.localeCompare(nameB);
       });
     }
@@ -952,7 +957,7 @@ const ChannelMembers = ({
       >
         <div className='p-6'>
           <h2 className='text-xl font-semibold mb-4'>
-            Remove {userToRemove?.name} from {channelDisplayName}?
+            Remove {getUserDisplayName(userToRemove)} from {channelDisplayName}?
           </h2>
           <p className='text-sm text-muted-foreground mb-6'>
             {channel.visibility === ChannelVisibility.PRIVATE

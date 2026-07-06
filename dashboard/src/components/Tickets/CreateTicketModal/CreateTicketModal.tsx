@@ -91,6 +91,7 @@ import { isReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { openCreateTicketWindow, subscribeCreateTicketResult } from '../../../utils/electronApp';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface CreateTicketModalProps {
   isOpen: boolean;
@@ -1461,7 +1462,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const userOptions =
       users?.map(user => ({
         ...user,
-        label: user.name || user.email,
+        label: getUserDisplayName(user) || user.email,
         value: `user:${user.id}`,
         icon: (
           <Avatar

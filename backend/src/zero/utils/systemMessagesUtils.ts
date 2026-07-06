@@ -36,7 +36,7 @@ export function formatSystemGenerateMessage(
   ) {
     const addedOrRemovedText =
       operationType === 'participants_added' ? 'added' : 'removed';
-    systemMessage = `${formattedUsers} ${allUserNames.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${authData.name}`;
+    systemMessage = `${formattedUsers} ${allUserNames.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${authData.displayName || authData.name}`;
   } else if (operationType === 'participants_joined') {
     systemMessage = `${formattedUsers} joined the channel`;
   }
@@ -104,7 +104,7 @@ export async function sendAddAndRemoveParticipantsSystemMessage(
         operationType,
         participants: allParticipants,
         adminUserId: authData.sub,
-        adminUserName: authData.name,
+        adminUserName: authData.displayName || authData.name,
       };
 
       // Update the existing message
@@ -125,7 +125,7 @@ export async function sendAddAndRemoveParticipantsSystemMessage(
         operationType,
         participants: newParticipants,
         adminUserId: authData.sub,
-        adminUserName: authData.name,
+        adminUserName: authData.displayName || authData.name,
       };
 
       // Create conversation for system message

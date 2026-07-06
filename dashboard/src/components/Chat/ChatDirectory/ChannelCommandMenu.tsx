@@ -974,13 +974,19 @@ const ChannelCommandMenu = ({
 
       if (isSelfDM) {
         // For self-DMs, show "You" or the user's own name
-        const currentUserName = usersById.get(currentUserID)?.name;
+        const currentUser = usersById.get(currentUserID);
+        const currentUserName = currentUser
+          ? currentUser.displayName || currentUser.name
+          : undefined;
         return currentUserName ? `${currentUserName} (You)` : 'You';
       }
 
       // Regular DM with others
       const otherNames = otherUserIds
-        .map(id => usersById.get(id)?.name)
+        .map(id => {
+          const u = usersById.get(id);
+          return u ? u.displayName || u.name : undefined;
+        })
         .filter((n): n is string => !!n);
 
       return otherNames.length > 0 ? otherNames.join(', ') : 'Group Chat';
@@ -1738,7 +1744,7 @@ const ChannelCommandMenu = ({
           const allItems: DisplaySearchResult[] = rankedLocalUsers.map(user => ({
             id: user.id,
             type: 'user' as const,
-            title: user.name,
+            title: getUserDisplayName(user),
             subtitle: user.email || '',
             relevanceScore: 1,
             metadata: {},

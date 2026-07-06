@@ -2,6 +2,7 @@ import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { Ticket } from 'lucide-react';
 import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ActivityItemCard } from './ActivityItemCard';
 
 interface GroupedTicketActivityProps {
@@ -45,7 +46,7 @@ export const GroupedTicketActivity = ({
   const first = activities[0];
   const actorId = first?.actorId || 'system';
   const actor = useUser(actorId);
-  const actorName = actor?.name || 'Xyne';
+  const actorName = actor ? getUserDisplayName(actor) : 'Xyne';
 
   if (!first || !first.ticket) return null;
 

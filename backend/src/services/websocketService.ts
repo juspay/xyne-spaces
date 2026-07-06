@@ -151,7 +151,7 @@ class WebSocketService {
             // Attach user info to socket same as Express attaches to req
             (socket as any).userId = req.user.id;
             (socket as any).userEmail = req.user.email;
-            (socket as any).userName = req.user.name;
+            (socket as any).userName = req.user.displayName || req.user.name;
             (socket as any).user = req.user;
 
             logger.info(`WebSocket authenticated: ${req.user.email} (${req.user.id})`);

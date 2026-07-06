@@ -2,6 +2,7 @@ import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { CalendarClock, Bell, CalendarCheck, CalendarX } from 'lucide-react';
 
 export const ScheduledCallActivity = ({
@@ -56,7 +57,7 @@ export const ScheduledCallActivity = ({
     <ActivityItemCard
       activity={activity}
       actorId={actor.id}
-      actorName={actor.name}
+      actorName={getUserDisplayName(actor)}
       channelId={activity.channelId ?? undefined}
       badgeIcon={<Icon className={`w-4 h-4 ${iconColor}`} />}
       badgeColorClass='bg-muted'

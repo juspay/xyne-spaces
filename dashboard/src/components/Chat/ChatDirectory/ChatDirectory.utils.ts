@@ -191,7 +191,7 @@ export const formatChannelLabel = (ch: {
 export const getDMSearchableNames = (
   channel: { name: string; scopeType: ChannelScopeType },
   currentUserId: string,
-  usersById: Map<string, { name: string }>,
+  usersById: Map<string, { name: string; displayName?: string | null }>,
 ): string[] => {
   if (!isDMChannel(channel.scopeType)) {
     return [channel.name];
@@ -201,12 +201,18 @@ export const getDMSearchableNames = (
   const isSelfDM = userIds.length === 1 && userIds[0] === currentUserId;
 
   if (isSelfDM) {
-    const currentUserName = usersById.get(currentUserId)?.name;
+    const currentUser = usersById.get(currentUserId);
+    const currentUserName = currentUser ? currentUser.displayName || currentUser.name : undefined;
     return currentUserName ? [currentUserName, 'You'] : ['You'];
   }
 
   const otherUserIds = userIds.filter(id => id !== currentUserId);
-  return otherUserIds.map(id => usersById.get(id)?.name).filter((n): n is string => !!n);
+  return otherUserIds
+    .map(id => {
+      const u = usersById.get(id);
+      return u ? u.displayName || u.name : undefined;
+    })
+    .filter((n): n is string => !!n);
 };
 
 /**

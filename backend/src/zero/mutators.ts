@@ -144,6 +144,7 @@ export type AuthData = {
   sub: string;
   email: string;
   name: string;
+  displayName?: string | null;
   workspaceId: string;
   role: string;
   orgRole: string;
@@ -618,7 +619,7 @@ async function createNonParticipantSystemMessages(
         if (user) {
           nonParticipants.push({
             userId: user.id,
-            userName: user.name,
+            userName: user.displayName || user.name,
           });
           logger.info(`🚫 [NON-PARTICIPANT] User ${user.name} (${userId}) is not in channel ${channelId}`);
         }
@@ -926,7 +927,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await addChannelParticipant(tx, channelId, authData.sub, ChannelRole.MEMBER, channelParticipantId, channelUserStatusId, timestamp);
 
           // send system message for joined participants
-          const newParticipants = [{ userId: authData.sub, userName: authData.name }];
+          const newParticipants = [{ userId: authData.sub, userName: authData.displayName || authData.name }];
           const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", role: "", memberId: "", orgRole: "" }
           await sendAddAndRemoveParticipantsSystemMessage(tx, { channel, newParticipants, authData: messageSender, operationType: 'participants_joined' })
         },
@@ -1101,7 +1102,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // send system message for added participants
           const newParticipants = addedUsers.map((currUser) => ({
             userId: currUser.id,
-            userName: currUser.name,
+            userName: currUser.displayName || currUser.name,
           }));
           await sendAddAndRemoveParticipantsSystemMessage(tx, {
             channel,
@@ -1166,7 +1167,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               channel,
               newParticipants: [{
                 userId: targetUser.id,
-                userName: targetUser.name,
+                userName: targetUser.displayName || targetUser.name,
               }],
               authData,
               operationType: 'participants_removed'
@@ -1695,7 +1696,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               operationType: 'description_updated',
               newDescription: description,
               userId: authData.sub,
-              userName: user.name,
+              userName: user.displayName || user.name,
             },
           });
 
@@ -2426,7 +2427,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       userMessageId: message.messageId,
                       userId: user.id,
                       userEmail: user.email,
-                      userName: user.name,
+                      userName: user.displayName || user.name,
                       sessionId: undefined, // New conversation, no session yet
                     });
 
@@ -3226,7 +3227,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       userMessageId: message.messageId,
                       userId: user.id,
                       userEmail: user.email,
-                      userName: user.name,
+                      userName: user.displayName || user.name,
                       sessionId,
                     });
 
@@ -3693,7 +3694,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               const { added } = await addChannelParticipant(tx, channelId, userId, ChannelRole.MEMBER, participantId, channelUserStatusId, Date.now());
 
               if (added) {
-                validUsers.push({ userId, userName: user.name });
+                validUsers.push({ userId, userName: user.displayName || user.name });
               }
             }
 
@@ -4369,7 +4370,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .filter(p => p.joinedAt !== null)
                 .map(p => ({
                   userId: p.userId,
-                  userName: p.user?.name || 'Unknown User',
+                  userName: p.user?.displayName || p.user?.name || 'Unknown User',
                 }));
 
               const totalCount = joinedParticipants.length;
@@ -5887,10 +5888,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
 
             const user = await tx.run(zql.users.where('id', authData.sub).one());
-            if (!user?.name) {
+            if (!user?.name && !user?.displayName) {
               throw new Error('User name is required but not available');
             }
-            const userName = user.name;
+            const userName = user.displayName || user.name;
             let activityMessage = '';
 
             if (activity.activityType === 'TITLE') {
@@ -5905,7 +5906,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 if (activity.value.newValue === authData.sub) {
                   activityMessage = `${userName} self-assigned the ticket`;
                 } else {
-                  activityMessage = `${userName} assigned to ${newAssignee?.name || 'someone'}`;
+                  activityMessage = `${userName} assigned to ${newAssignee?.displayName || newAssignee?.name || 'someone'}`;
                 }
               } else {
                 activityMessage = `${userName} unassigned the ticket`;
@@ -7601,13 +7602,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
 
           const user = await tx.run(zql.users.where('id', ctx.userID).one());
-          if (!user?.name) {
+          if (!user?.name && !user?.displayName) {
             throw new Error('User name is required but not available');
           }
           const referenceTitle =
             targetTicket?.title || targetTicket?.xyneId || targetTicketId;
           const relationLabel = formatTicketReferenceRelationLabel(relationType);
-          const activityMessage = `${user.name} added related ticket "${referenceTitle}" (${relationLabel})`;
+          const activityMessage = `${user.displayName || user.name} added related ticket "${referenceTitle}" (${relationLabel})`;
 
           if (activityMessage && sourceTicket?.conversationId) {
             await tx.mutate.messages.insert({
@@ -7673,14 +7674,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
-          if (!user?.name) {
+          if (!user?.name && !user?.displayName) {
             throw new Error('User name is required but not available');
           }
           const referenceTitle =
             targetTicket?.title || targetTicket?.xyneId || reference.targetTicketId;
           const newLabel = formatTicketReferenceRelationLabel(relationType);
           const oldLabel = formatTicketReferenceRelationLabel(reference.relationType);
-          const activityMessage = `${user.name} updated related ticket label from "${oldLabel}" to "${newLabel}" for "${referenceTitle}"`;
+          const activityMessage = `${user.displayName || user.name} updated related ticket label from "${oldLabel}" to "${newLabel}" for "${referenceTitle}"`;
 
           if (activityMessage && sourceTicket?.conversationId) {
             await tx.mutate.messages.insert({
@@ -7739,13 +7740,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
-          if (!user?.name) {
+          if (!user?.name && !user?.displayName) {
             throw new Error('User name is required but not available');
           }
           const referenceTitle =
             targetTicket?.title || targetTicket?.xyneId || reference.targetTicketId;
           const relationLabel = formatTicketReferenceRelationLabel(reference.relationType);
-          const activityMessage = `${user.name} removed related ticket "${referenceTitle}" (${relationLabel})`;
+          const activityMessage = `${user.displayName || user.name} removed related ticket "${referenceTitle}" (${relationLabel})`;
 
           if (activityMessage && sourceTicket?.conversationId) {
             await tx.mutate.messages.insert({

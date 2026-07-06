@@ -78,6 +78,7 @@ export class ChannelController {
         return {
           id: user.id,
           name: user.name,
+          displayName: user.displayName,
           email: user.email,
           picture: user.picture
         };
@@ -1591,7 +1592,7 @@ export class ChannelController {
               .slice(0, searchLimit)
               .map(user => ({
                 id: user.id,
-                name: user.name,
+                name: user.displayName || user.name,
                 email: user.email,
                 picture: user.picture,
                 type: 'user'
@@ -1790,7 +1791,7 @@ export class ChannelController {
       const users = await this.userRepository.findMany({
         where: { id: { in: Array.from(userIds) } }
       });
-      const userMap = new Map(users.map(u => ({ id: u.id, name: u.name, email: u.email, picture: u.picture })).map(u => [u.id, u]));
+      const userMap = new Map(users.map(u => ({ id: u.id, name: u.displayName || u.name, email: u.email, picture: u.picture })).map(u => [u.id, u]));
 
       // Assemble the response data
       const dmChannelsWithCounts = dmChannels.map(channel => {
@@ -2028,7 +2029,7 @@ export class ChannelController {
           isSelfDm: true,
           targetUser: {
             id: currentUserInfo.id,
-            name: currentUserInfo.name,
+            name: currentUserInfo.displayName || currentUserInfo.name,
             email: currentUserInfo.email,
             picture: currentUserInfo.picture
           },
@@ -2092,7 +2093,7 @@ export class ChannelController {
             isExisting: true,
             targetUser: {
               id: targetUser.id,
-              name: targetUser.name,
+              name: targetUser.displayName || targetUser.name,
               email: targetUser.email,
               picture: targetUser.picture
             },
@@ -2107,7 +2108,7 @@ export class ChannelController {
         const channelData: CreateChannelInput = {
           scopeType: 'DM',
           name: v.sort().join(","),
-          description: `Direct message between ${await this.getUserInfo(currentUserId).then(u => u.name)} and ${targetUser.name}`,
+          description: `Direct message between ${await this.getUserInfo(currentUserId).then(u => u.displayName || u.name)} and ${targetUser.displayName || targetUser.name}`,
           visibility: 'PRIVATE',
           createdBy: currentUserId,
           projectId: dmProjectId,
@@ -2150,7 +2151,7 @@ export class ChannelController {
           createdAt: channel.createdAt,
           targetUser: {
             id: targetUser.id,
-            name: targetUser.name,
+            name: targetUser.displayName || targetUser.name,
             email: targetUser.email,
             picture: targetUser.picture
           },
@@ -2490,7 +2491,7 @@ export class ChannelController {
             const validUsers = await Promise.all(
               participantsAddedList.map(async (userId) => {
                 const user = await this.userRepository.findById(userId);
-                return user ? { userId: user.id, userName: user.name } : null;
+                return user ? { userId: user.id, userName: user.displayName || user.name } : null;
               })
             );
             const filteredUsers = validUsers.filter((u): u is { userId: string; userName: string } => u !== null);

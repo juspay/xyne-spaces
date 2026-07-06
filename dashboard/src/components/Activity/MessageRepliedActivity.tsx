@@ -6,6 +6,7 @@ import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 
 export const MessageRepliedActivity = ({
   activity,
@@ -29,7 +30,7 @@ export const MessageRepliedActivity = ({
     <ActivityItemCard
       activity={activity}
       actorId={sender.id}
-      actorName={sender.name}
+      actorName={getUserDisplayName(sender)}
       channelId={message.conversation?.channelId}
       badgeIcon={<MessageCircleMore className='text-yellow-600' />}
       badgeColorClass='bg-muted'

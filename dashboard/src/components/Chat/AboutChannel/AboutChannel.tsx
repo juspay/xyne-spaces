@@ -7,6 +7,8 @@ import Button from '../../ui/Button';
 import { LucideSquarePen } from 'lucide-react';
 import { formatDate } from '../../../utils/dateUtils';
 import { useUser } from '../../../hooks/useUsers';
+import { useAuthContextValues } from '../../../hooks/useAuth';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { v4 as uuidv4 } from 'uuid';
 import { channelService } from '../../../services/Chat/channelService';
 import { toast } from 'sonner';
@@ -47,6 +49,8 @@ const AboutChannel = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const createdByUser = useUser(channel.createdBy);
+  const { userID } = useAuthContextValues();
+  const currentUser = useUser(userID || '');
 
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
   const isAdmin = userRole === ChannelRole.ADMIN;
@@ -345,7 +349,9 @@ const AboutChannel = ({
               </div>
             ) : (
               <p className='text-sm text-muted-foreground'>
-                {channel.description || 'No description set'}
+                {isDM && dmUser
+                  ? `Direct message between ${getUserDisplayName(currentUser)} and ${getUserDisplayName(dmUser)}`
+                  : channel.description || 'No description set'}
               </p>
             )}
           </div>
@@ -387,7 +393,7 @@ const AboutChannel = ({
         )}
 
         <div className='text-[14px] text-muted-foreground py-4 text-center'>
-          Created By <span className='text-primary'>{createdByUser?.name || 'Unknown'}</span> on{' '}
+          Created By <span className='text-primary'>{getUserDisplayName(createdByUser)}</span> on{' '}
           <span className='visual-regression-hide'>{formatDate(channel.createdAt)}</span>
         </div>
       </div>

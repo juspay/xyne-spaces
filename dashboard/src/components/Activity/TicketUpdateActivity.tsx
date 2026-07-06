@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 
 interface TicketUpdateActivityProps {
   activity: ActivityWithRelated;
@@ -187,7 +188,7 @@ export const TicketUpdateActivity = ({
   const ticket = activity.ticket;
   const actorId = activity.actorId || 'system';
   const actor = useUser(actorId);
-  const actorName = actor?.name || 'Xyne';
+  const actorName = actor ? getUserDisplayName(actor) : 'Xyne';
 
   if (!ticket) {
     return null;

@@ -77,7 +77,7 @@ class CallSideEffectService {
 
                 const invitedByUserId = participant.invitedBy;
                 const caller = await db.user.findUnique({ where: { id: invitedByUserId } });
-                const callerName = caller?.name || 'Someone';
+                const callerName = caller?.displayName || caller?.name || 'Someone';
 
                 await notificationService.createNotification(participant.userId, {
                     title: 'Missed Call',
@@ -199,19 +199,19 @@ class CallSideEffectService {
             // Fetch details for notification
             const caller = await db.user.findUnique({
                 where: { id: invitedBy },
-                select: { name: true, picture: true }
+                select: { name: true, displayName: true, picture: true }
             });
 
-            const callerName = caller?.name || 'Someone';
+            const callerName = caller?.displayName || caller?.name || 'Someone';
             const recipient = await db.user.findUnique({
                 where: { id: recipientId },
-                select: { name: true, picture: true }
+                select: { name: true, displayName: true, picture: true }
             });
 
             const token = await livekitService.generateAccessToken({
                 userIdentity: recipientId,
                 roomName: call.externalId,
-                userName: recipient?.name || 'User',
+                userName: recipient?.displayName || recipient?.name || 'User',
                 metadata: JSON.stringify({ picture: recipient?.picture || null }),
             });
 
