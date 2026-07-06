@@ -13,6 +13,7 @@ import {
   ChannelSortOrder,
   ConversationParticipation,
   TicketStatusV2,
+  MailboxState,
   TicketPriority,
   TicketReferenceRelation,
   EmailMergeMode,
@@ -7612,11 +7613,28 @@ export const mutators = defineMutators({
         id: z.string(),
         conversationId: z.string(),
         channelId: z.string(),
-        draftContent: z.string(),
+        draftContent: z.string().optional(),
         attachmentIds: z.array(z.string()).optional(),
+        toRecipients: z.array(z.string()).optional(),
+        ccRecipients: z.array(z.string()).optional(),
+        bccRecipients: z.array(z.string()).optional(),
         updatedAt: z.number(),
       }),
-      async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, attachmentIds, updatedAt } }) => {
+      async ({
+        tx,
+        ctx,
+        args: {
+          id,
+          conversationId,
+          channelId,
+          draftContent,
+          attachmentIds,
+          toRecipients,
+          ccRecipients,
+          bccRecipients,
+          updatedAt,
+        },
+      }) => {
         const existing = await tx.run(
           zql.email_drafts
             .where('conversationId', conversationId)
@@ -7624,10 +7642,16 @@ export const mutators = defineMutators({
             .one(),
         );
         if (existing) {
+          // Merge: only overwrite fields that were explicitly provided, so a body-only
+          // save and a recipients-only save don't clobber each other.
           await tx.mutate.email_drafts.update({
             id: existing.id,
-            draftContent,
+            ...(draftContent !== undefined && { draftContent }),
             ...(attachmentIds !== undefined && { attachmentIds }),
+            // Recipient columns are TEXT ("string only") — store a JSON-stringified string[].
+            ...(toRecipients !== undefined && { toRecipients: JSON.stringify(toRecipients) }),
+            ...(ccRecipients !== undefined && { ccRecipients: JSON.stringify(ccRecipients) }),
+            ...(bccRecipients !== undefined && { bccRecipients: JSON.stringify(bccRecipients) }),
             updatedAt,
           });
         } else {
@@ -7636,8 +7660,11 @@ export const mutators = defineMutators({
             conversationId,
             channelId,
             userId: ctx.userID,
-            draftContent,
+            draftContent: draftContent ?? '',
             ...(attachmentIds !== undefined && { attachmentIds }),
+            ...(toRecipients !== undefined && { toRecipients: JSON.stringify(toRecipients) }),
+            ...(ccRecipients !== undefined && { ccRecipients: JSON.stringify(ccRecipients) }),
+            ...(bccRecipients !== undefined && { bccRecipients: JSON.stringify(bccRecipients) }),
             createdAt: updatedAt,
             updatedAt,
           });
@@ -7657,6 +7684,308 @@ export const mutators = defineMutators({
         );
         if (existing) {
           await tx.mutate.email_drafts.delete({ id: existing.id });
+        }
+      },
+    ),
+    // Compose drafts (brand-new emails, no thread yet). Keyed by the draft id, since
+    // conversationId is null and would collide across many compose drafts per user.
+    // Merge-update so partial saves (body vs recipients vs subject) don't clobber.
+    upsertComposeDraft: defineMutator(
+      z.object({
+        id: z.string(),
+        channelId: z.string(),
+        subject: z.string().optional(),
+        fromAddress: z.string().optional(),
+        draftContent: z.string().optional(),
+        attachmentIds: z.array(z.string()).optional(),
+        toRecipients: z.array(z.string()).optional(),
+        ccRecipients: z.array(z.string()).optional(),
+        bccRecipients: z.array(z.string()).optional(),
+        updatedAt: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const existing = await tx.run(zql.email_drafts.where('id', args.id).one());
+        // Owner-only on the update path (mirrors deleteComposeDraft and the reply upsert):
+        // ids are client-supplied, so never let one user's id overwrite another user's row.
+        if (existing && existing.userId !== ctx.userID) return;
+        if (existing) {
+          await tx.mutate.email_drafts.update({
+            id: args.id,
+            ...(args.subject !== undefined && { subject: args.subject }),
+            ...(args.fromAddress !== undefined && { fromAddress: args.fromAddress }),
+            ...(args.draftContent !== undefined && { draftContent: args.draftContent }),
+            ...(args.attachmentIds !== undefined && { attachmentIds: args.attachmentIds }),
+            // Recipient columns are TEXT ("string only") — store a JSON-stringified string[].
+            ...(args.toRecipients !== undefined && {
+              toRecipients: JSON.stringify(args.toRecipients),
+            }),
+            ...(args.ccRecipients !== undefined && {
+              ccRecipients: JSON.stringify(args.ccRecipients),
+            }),
+            ...(args.bccRecipients !== undefined && {
+              bccRecipients: JSON.stringify(args.bccRecipients),
+            }),
+            updatedAt: args.updatedAt,
+          });
+        } else {
+          await tx.mutate.email_drafts.insert({
+            id: args.id,
+            channelId: args.channelId,
+            userId: ctx.userID,
+            draftContent: args.draftContent ?? '',
+            ...(args.subject !== undefined && { subject: args.subject }),
+            ...(args.fromAddress !== undefined && { fromAddress: args.fromAddress }),
+            ...(args.attachmentIds !== undefined && { attachmentIds: args.attachmentIds }),
+            ...(args.toRecipients !== undefined && {
+              toRecipients: JSON.stringify(args.toRecipients),
+            }),
+            ...(args.ccRecipients !== undefined && {
+              ccRecipients: JSON.stringify(args.ccRecipients),
+            }),
+            ...(args.bccRecipients !== undefined && {
+              bccRecipients: JSON.stringify(args.bccRecipients),
+            }),
+            createdAt: args.updatedAt,
+            updatedAt: args.updatedAt,
+          });
+        }
+      },
+    ),
+    deleteComposeDraft: defineMutator(
+      z.object({ id: z.string() }),
+      async ({ tx, ctx, args: { id } }) => {
+        const existing = await tx.run(zql.email_drafts.where('id', id).one());
+        if (existing && existing.userId === ctx.userID) {
+          await tx.mutate.email_drafts.delete({ id });
+        }
+      },
+    ),
+  },
+  // Gmail-style labels for desk/support email conversations. Labels are private to the
+  // agent who created them: the catalog is per-channel, per-user (createdBy), and
+  // mappings attach a label to a conversation (email thread).
+  conversationLabel: {
+    // Create a new label in the user's catalog for this channel (no conversation attached yet).
+    createLabel: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        color: z.string().optional(),
+        channelId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, name, color, channelId, timestamp } }) => {
+        const trimmed = name.trim();
+        if (!trimmed) throw new Error('Label name cannot be empty');
+
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) throw new Error('Channel not found');
+
+        const existing = await tx.run(
+          zql.conversation_labels
+            .where('channelId', channelId)
+            .where('createdBy', ctx.userID)
+            .where('name', trimmed)
+            .one(),
+        );
+        if (existing) throw new Error('A label with this name already exists');
+
+        await tx.mutate.conversation_labels.insert({
+          id,
+          name: trimmed,
+          ...(color ? { color } : {}),
+          channelId,
+          projectId: channel.projectId,
+          workspaceId: channel.workspaceId,
+          createdBy: ctx.userID,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    // Apply a label to a conversation. Creates the catalog label if it doesn't yet
+    // exist (mirrors Gmail "Label as → Create new"), then inserts the mapping.
+    applyLabel: defineMutator(
+      z.object({
+        labelId: z.string(),
+        labelName: z.string(),
+        color: z.string().optional(),
+        conversationId: z.string(),
+        channelId: z.string(),
+        mappingId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const trimmed = args.labelName.trim();
+        if (!trimmed) throw new Error('Label name cannot be empty');
+
+        const channel = await tx.run(zql.channels.where('id', args.channelId).one());
+        if (!channel) throw new Error('Channel not found');
+
+        // Resolve an existing catalog label by name, or create it.
+        let labelId = args.labelId;
+        const now = args.timestamp;
+        const existingLabel = await tx.run(
+          zql.conversation_labels
+            .where('channelId', args.channelId)
+            .where('createdBy', ctx.userID)
+            .where('name', trimmed)
+            .one(),
+        );
+        if (existingLabel) {
+          labelId = existingLabel.id;
+        } else {
+          await tx.mutate.conversation_labels.insert({
+            id: labelId,
+            name: trimmed,
+            ...(args.color ? { color: args.color } : {}),
+            channelId: args.channelId,
+            projectId: channel.projectId,
+            workspaceId: channel.workspaceId,
+            createdBy: ctx.userID,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+
+        // Idempotent: don't double-apply the same label to a conversation.
+        const existingMapping = await tx.run(
+          zql.conversation_label_mappings
+            .where('conversationId', args.conversationId)
+            .where('labelId', labelId)
+            .one(),
+        );
+        if (existingMapping) return;
+
+        await tx.mutate.conversation_label_mappings.insert({
+          id: args.mappingId,
+          labelId,
+          labelName: trimmed,
+          conversationId: args.conversationId,
+          channelId: args.channelId,
+          workspaceId: channel.workspaceId,
+          createdBy: ctx.userID,
+          createdAt: now,
+        });
+      },
+    ),
+    // Remove a label from a conversation (deletes only the mapping, not the catalog label).
+    // Scoped to the caller so an agent can only remove their own mapping.
+    removeLabel: defineMutator(
+      z.object({ conversationId: z.string(), labelId: z.string() }),
+      async ({ tx, ctx, args: { conversationId, labelId } }) => {
+        const existing = await tx.run(
+          zql.conversation_label_mappings
+            .where('conversationId', conversationId)
+            .where('labelId', labelId)
+            .where('createdBy', ctx.userID)
+            .one(),
+        );
+        if (existing) {
+          await tx.mutate.conversation_label_mappings.delete({ id: existing.id });
+        }
+      },
+    ),
+    // Delete a label from the catalog and cascade-remove all its conversation mappings.
+    // Only the owner (createdBy) may delete their label.
+    deleteLabel: defineMutator(
+      z.object({ labelId: z.string() }),
+      async ({ tx, ctx, args: { labelId } }) => {
+        const label = await tx.run(zql.conversation_labels.where('id', labelId).one());
+        if (!label) throw new Error('Label not found');
+        if (label.createdBy !== ctx.userID) throw new Error('You can only delete your own labels');
+
+        const mappings = await tx.run(
+          zql.conversation_label_mappings.where('labelId', labelId),
+        );
+        for (const mapping of mappings) {
+          await tx.mutate.conversation_label_mappings.delete({ id: mapping.id });
+        }
+        await tx.mutate.conversation_labels.delete({ id: labelId });
+      },
+    ),
+  },
+  // Gmail-style mailbox overlay (per-user, per-desk) over shared desk tickets. Sparse:
+  // a row exists only once the agent acts; absence means { INBOX, not starred }. The
+  // ticket stays shared at the channel level.
+  ticketMailbox: {
+    // Upsert the caller's mailbox state for a ticket (archive/spam/trash/restore-to-inbox).
+    setState: defineMutator(
+      z.object({
+        id: z.string(),
+        ticketId: z.string(),
+        channelId: z.string(),
+        state: z.nativeEnum(MailboxState),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, ticketId, channelId, state, timestamp } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) throw new Error('Channel not found');
+
+        const existing = await tx.run(
+          zql.ticket_user_mailbox
+            .where('ticketId', ticketId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (existing) {
+          await tx.mutate.ticket_user_mailbox.update({
+            id: existing.id,
+            state,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.ticket_user_mailbox.insert({
+            id,
+            ticketId,
+            userId: ctx.userID,
+            channelId,
+            workspaceId: channel.workspaceId,
+            state,
+            starred: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    // Upsert the caller's star flag for a ticket (additive — keeps the mailbox state).
+    setStarred: defineMutator(
+      z.object({
+        id: z.string(),
+        ticketId: z.string(),
+        channelId: z.string(),
+        starred: z.boolean(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, ticketId, channelId, starred, timestamp } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) throw new Error('Channel not found');
+
+        const existing = await tx.run(
+          zql.ticket_user_mailbox
+            .where('ticketId', ticketId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (existing) {
+          await tx.mutate.ticket_user_mailbox.update({
+            id: existing.id,
+            starred,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.ticket_user_mailbox.insert({
+            id,
+            ticketId,
+            userId: ctx.userID,
+            channelId,
+            workspaceId: channel.workspaceId,
+            state: MailboxState.INBOX,
+            starred,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
         }
       },
     ),

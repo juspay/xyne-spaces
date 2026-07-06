@@ -72,6 +72,9 @@ import {
   FormEntityValuesACL,
   EmailsACL,
   EmailDraftsACL,
+  ConversationLabelsACL,
+  ConversationLabelMappingsACL,
+  TicketUserMailboxACL,
   EmailChannelPreferencesACL,
   BoardSlaPoliciesACL,
   DelayedMessagesACL,
@@ -228,6 +231,12 @@ export class QueryACLFactory {
         return new EmailsACL(ctx) as BaseQueryACL<TTable>;
       case 'email_drafts':
         return new EmailDraftsACL(ctx) as BaseQueryACL<TTable>;
+      case 'conversation_labels':
+        return new ConversationLabelsACL(ctx) as BaseQueryACL<TTable>;
+      case 'conversation_label_mappings':
+        return new ConversationLabelMappingsACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_user_mailbox':
+        return new TicketUserMailboxACL(ctx) as BaseQueryACL<TTable>;
       case 'email_channel_preferences':
         return new EmailChannelPreferencesACL(ctx) as BaseQueryACL<TTable>;
       case 'board_sla_policies':

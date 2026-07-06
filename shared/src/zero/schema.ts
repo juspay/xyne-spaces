@@ -56,6 +56,15 @@ export enum TicketStatusV2 {
   COMPLETED = 'COMPLETED',
 }
 
+// Gmail-style per-user mailbox location for a ticket (see ticketUserMailboxTable).
+// ARCHIVED = removed from Inbox but still in All Mail. Absence of a row = INBOX.
+// @ts-ignore TS1294
+export enum MailboxState {
+  INBOX = 'INBOX',
+  ARCHIVED = 'ARCHIVED',
+  SPAM = 'SPAM',
+}
+
 // @ts-ignore TS1294
 export enum TicketPriority {
   LOW = 'LOW',
@@ -2011,12 +2020,60 @@ export const emailTable = table('emails')
 export const emailDraftTable = table('email_drafts')
   .columns({
     id: string(),
-    conversationId: string(),
+    conversationId: string().optional(),
     userId: string().optional(),
     channelId: string(),
     draftContent: string(),
+    subject: string().optional(),
+    fromAddress: string().optional(),
     attachmentIds: json().optional(),
+    // TEXT columns holding a JSON-stringified string[] — parsed at the dashboard
+    // read boundaries (useEmailDraft / useComposeDraft), stringified in the mutators.
+    toRecipients: string().optional(),
+    ccRecipients: string().optional(),
+    bccRecipients: string().optional(),
     autoDraftStatus: enumeration<AutoDraftStatus>().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const conversationLabelTable = table('conversation_labels')
+  .columns({
+    id: string(),
+    name: string(),
+    color: string().optional(),
+    channelId: string(),
+    projectId: string(),
+    workspaceId: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const conversationLabelMappingTable = table('conversation_label_mappings')
+  .columns({
+    id: string(),
+    labelId: string(),
+    labelName: string(),
+    conversationId: string(),
+    channelId: string(),
+    workspaceId: string(),
+    createdBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const ticketUserMailboxTable = table('ticket_user_mailbox')
+  .columns({
+    id: string(),
+    ticketId: string(),
+    userId: string(),
+    channelId: string(),
+    workspaceId: string(),
+    state: enumeration<MailboxState>().optional(),
+    starred: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2669,6 +2726,13 @@ export const agentToolsMappingTableRelationships = relationships(
 );
 
 export const ticketTableRelationships = relationships(ticketTable, ({ one, many }) => ({
+  // Per-user mailbox overlays (Inbox/Archived/Spam/Trash + star). Used by the mailbox
+  // view queries via exists/not-exists, filtered to the current user.
+  userMailbox: many({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: ticketUserMailboxTable,
+  }),
   attachments: many({
     sourceField: ['id'],
     destField: ['entityId'],
@@ -4299,6 +4363,64 @@ export const emailDraftTableRelationships = relationships(emailDraftTable, ({ on
   }),
 }));
 
+export const conversationLabelTableRelationships = relationships(
+  conversationLabelTable,
+  ({ one, many }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    project: one({
+      sourceField: ['projectId'],
+      destField: ['id'],
+      destSchema: projectTable,
+    }),
+    mappings: many({
+      sourceField: ['id'],
+      destField: ['labelId'],
+      destSchema: conversationLabelMappingTable,
+    }),
+  }),
+);
+
+export const conversationLabelMappingTableRelationships = relationships(
+  conversationLabelMappingTable,
+  ({ one }) => ({
+    label: one({
+      sourceField: ['labelId'],
+      destField: ['id'],
+      destSchema: conversationLabelTable,
+    }),
+    conversation: one({
+      sourceField: ['conversationId'],
+      destField: ['conversationId'],
+      destSchema: conversationTable,
+    }),
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+  }),
+);
+
+export const ticketUserMailboxTableRelationships = relationships(
+  ticketUserMailboxTable,
+  ({ one }) => ({
+    ticket: one({
+      sourceField: ['ticketId'],
+      destField: ['id'],
+      destSchema: ticketTable,
+    }),
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+  }),
+);
+
 export const emailSignatureTableRelationships = relationships(emailSignatureTable, ({ one }) => ({
   user: one({
     sourceField: ['userId'],
@@ -4706,6 +4828,9 @@ export const schema = createSchema({
     repoTable,
     emailTable,
     emailDraftTable,
+    conversationLabelTable,
+    conversationLabelMappingTable,
+    ticketUserMailboxTable,
     emailSignatureTable,
     emailReadTable,
     emailChannelPreferenceTable,
@@ -4824,6 +4949,9 @@ export const schema = createSchema({
     linkAccessTableRelationships,
     emailTableRelationships,
     emailDraftTableRelationships,
+    conversationLabelTableRelationships,
+    conversationLabelMappingTableRelationships,
+    ticketUserMailboxTableRelationships,
     emailSignatureTableRelationships,
     emailReadTableRelationships,
     emailChannelPreferenceTableRelationships,
@@ -4942,6 +5070,9 @@ export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
+export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
+export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;
+export type TicketUserMailbox = Row<typeof schema.tables.ticket_user_mailbox>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type EmailRead = Row<typeof schema.tables.email_reads>;
 export type EmailChannelPreference = Row<typeof schema.tables.email_channel_preferences>;
