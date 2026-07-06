@@ -824,6 +824,19 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         const workspaceId = xyneChannel.workspaceId;
         wsConfig = getBotConfigByWorkspaceId(workspaceId);
         xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${input.xyneSpaceChannelId}|${channelName}>`;
+        if (xyneChannel.isMigrated) {
+          const project = xyneChannel.projectId
+            ? await db.project.findUnique({ where: { id: xyneChannel.projectId }, select: { name: true } })
+            : null;
+          logger.info('analytics_event', {
+            event: 'channel_remigrated',
+            timestamp: new Date().toISOString(),
+            channelId: input.xyneSpaceChannelId,
+            channelName,
+            channelProjectName: project?.name ?? null,
+            sourceType: 'slack',
+          });
+        }
       }
     }
     // Re-resolve resolvedLogChannelId now that we have the real workspaceId config
@@ -1333,8 +1346,22 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
     if (!anyBatchFailed) {
       try {
         const xyneChannel = await channelRepo.findById(xyneSpaceChannelId);
-        if (xyneChannel && !(xyneChannel as any).isMigrated) {
+        const wasAlreadyMigrated = !!xyneChannel?.isMigrated;
+        if (xyneChannel && !wasAlreadyMigrated) {
           await channelRepo.update(xyneSpaceChannelId, { isMigrated: true });
+        }
+        if (xyneChannel) {
+          const project = xyneChannel.projectId
+            ? await db.project.findUnique({ where: { id: xyneChannel.projectId }, select: { name: true } })
+            : null;
+          logger.info('analytics_event', {
+            event: wasAlreadyMigrated ? 'dm_remigrated' : 'dm_migrated',
+            timestamp: new Date().toISOString(),
+            channelId: xyneSpaceChannelId,
+            channelName: xyneChannel.name,
+            channelProjectName: project?.name ?? null,
+            sourceType: 'slack',
+          });
         }
         // Replace the `now` placeholder so the DM list sorts by the real last message time, not the migration run time.
         await channelRepo.recalculateLastActivityFromMessages(xyneSpaceChannelId);
