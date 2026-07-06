@@ -65,6 +65,9 @@ const handleResultEvent = async (event: DoclingResultEvent) => {
   if (!jobId) return
   const part = await getDoclingPartByJobId(jobId)
   if (!part) return
+  const t1 = part.submittedAt ? part.submittedAt.getTime() : null
+  const t2 = Date.now()
+  const ocrMs = t1 !== null ? t2 - t1 : null
 
   if (
     part.status !== DOCLING_PART_STATUS.Submitting &&
@@ -81,6 +84,14 @@ const handleResultEvent = async (event: DoclingResultEvent) => {
       await releaseDoclingSchedulerPermit({ kind: 'ocr-submit', permitId: part.submitPermitId })
     }
     const message = event.error || 'unknown OCR failure'
+    logger.warn('[DOCLING_SCHEDULER_METRICS][result] OCR failed', {
+      fileId: part.fileId,
+      partIndex: part.partIndex,
+      jobId,
+      ocrMs,
+      attemptCount: part.attemptCount,
+      error: message,
+    })
     if (part.attemptCount >= sched().maxPartAttempts) {
       await failSchedulerFile(
         part.fileId,
@@ -122,11 +133,12 @@ const handleResultEvent = async (event: DoclingResultEvent) => {
   if (part.submitPermitId) {
     await releaseDoclingSchedulerPermit({ kind: 'ocr-submit', permitId: part.submitPermitId })
   }
-  logger.info('[DOCLING_SCHEDULER][result] OCR result stored → part ready', {
+  logger.info('[DOCLING_SCHEDULER_METRICS][result] OCR result stored → part ready', {
     fileId: part.fileId,
     partIndex: part.partIndex,
     jobId,
     chunks: result.chunks.length,
+    ocrMs,
   })
 }
 

@@ -403,7 +403,17 @@ const runSplitterWorker = async (id: string, shouldStop: () => boolean) => {
     });
     try {
       const ctx = await getSchedulerFileContext(file);
+
+      const t1 = Date.now();
       const sourceBuffer = await readSourceBuffer(file.sourceStorageKey || file.sourcePath);
+      const t2 = Date.now();
+      logger.info('[DOCLING_SCHEDULER_METRICS][splitter] gcs read complete', {
+        fileId: file.fileId,
+        gcsReadMs: t2 - t1,
+        bytes: sourceBuffer.length,
+      });
+
+      const t3 = Date.now();
       const stagedParts = await stagePdfParts({
         fileId: file.fileId,
         sourceBuffer,
@@ -411,6 +421,14 @@ const runSplitterWorker = async (id: string, shouldStop: () => boolean) => {
         fileName: ctx.fileName,
         pageChunkSize: getRuntimeConfig().pageChunkSize,
       });
+      const t4 = Date.now();
+      logger.info('[DOCLING_SCHEDULER_METRICS][splitter] split complete', {
+        fileId: file.fileId,
+        splitMs: t4 - t3,
+        parts: stagedParts.partsTotal,
+        totalPages: stagedParts.totalPages,
+      });
+
       const committed = await markDoclingFileSplitComplete(
         file,
         stagedParts,
@@ -421,8 +439,10 @@ const runSplitterWorker = async (id: string, shouldStop: () => boolean) => {
           fileId: file.fileId,
         });
       } else {
-        logger.info('[DOCLING_SCHEDULER][splitter] split complete → queued_for_ocr', {
+        logger.info('[DOCLING_SCHEDULER][splitter] queued_for_ocr', {
           fileId: file.fileId,
+          gcsReadMs: t2 - t1,
+          splitMs: t4 - t3,
           parts: stagedParts.partsTotal,
           totalPages: stagedParts.totalPages,
         });
@@ -739,6 +759,7 @@ const runSubmitterProcessor = async (
 
       logger.info('[DOCLING_SCHEDULER][submitter] part submitted', {
         fileId: work.part.fileId, partIndex: work.part.partIndex, jobId,
+        readPartMs: readMs, submitMs, markSubmittedMs: markMs,
       });
     } catch (error) {
       await releasePermit(work.requestPermit);
@@ -864,6 +885,25 @@ const runWriterWorker = async (id: string, shouldStop: () => boolean) => {
       if (parts.length !== file.totalParts) {
         throw new Error(`Expected ${file.totalParts} parts, found ${parts.length}`);
       }
+
+      // Total OCR time for the whole file: file admitted into active OCR
+      // (file.ocrActivatedAt) → the last part's OCR result arriving (max readyAt).
+      const ocrStart = file.ocrActivatedAt?.getTime() ?? null;
+      const readyTimes = parts.map((p) => p.readyAt?.getTime() ?? null);
+      const ocrEnd = readyTimes.every((t) => t !== null)
+        ? Math.max(...(readyTimes as number[]))
+        : null;
+      const totalOcrMs = ocrStart !== null && ocrEnd !== null ? ocrEnd - ocrStart : null;
+      logger.info('[DOCLING_SCHEDULER_METRICS][writer] total OCR time for file', {
+        fileId: file.fileId,
+        totalParts: file.totalParts,
+        totalOcrMs,
+        perPartOcrMs: parts.map((p) => ({
+          partIndex: p.partIndex,
+          ocrMs: p.submittedAt && p.readyAt ? p.readyAt.getTime() - p.submittedAt.getTime() : null,
+        })),
+      });
+
       const aggregate = await aggregatePartResults(parts);
       logger.info('[DOCLING_SCHEDULER][writer] aggregated parts', {
         fileId: file.fileId,

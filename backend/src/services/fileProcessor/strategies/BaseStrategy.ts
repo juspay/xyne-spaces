@@ -38,6 +38,11 @@ export abstract class BaseStrategy {
     ): Promise<string | undefined> {
         if (chunks.length === 0) return undefined
 
+        if (!config.litellm.documentOutlineEnabled) {
+            logger.debug('[BaseStrategy] Document outline generation disabled via DOCUMENT_OUTLINE_ENABLED')
+            return undefined
+        }
+
         // Resolve base URL and API key — config takes priority, then env aliases
         const baseUrl =
             config.litellm.baseUrl ||
