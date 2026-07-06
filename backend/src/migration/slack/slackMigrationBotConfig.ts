@@ -9,6 +9,7 @@
  *     "slackBotToken": "xoxb-...",
  *     "slackSigningSecret": "abc...",
  *     "slackMigrationLogChannelId": "C0B312E4RNV",
+ *     "syncDmLogChannelId": "C0BCN9BDQMN",
  *     "notificationsEnabled": true,
  *     "migrationApprovals": ["U123", "U456"],
  *     "migrationFinalMessage": "<base64-encoded-string>"
@@ -27,6 +28,8 @@ export interface SlackMigrationBotConfig {
   slackBotToken: string;
   slackSigningSecret: string;
   slackMigrationLogChannelId: string;
+  /** Dedicated channel for /sync-dm updates; falls back to the global SYNC_DM_LOG_CHANNEL default. */
+  syncDmLogChannelId: string;
   notificationsEnabled: boolean;
   migrationApprovals: string[];
   migrationFinalMessage: string;
@@ -81,6 +84,7 @@ function getDefaultConfig(): SlackMigrationBotConfig {
     slackBotToken: config.slackBotToken,
     slackSigningSecret: config.slackSigningSecret,
     slackMigrationLogChannelId: config.slackMigrationLogChannelId,
+    syncDmLogChannelId: config.syncDm.logChannelId,
     notificationsEnabled: config.slackMigrationNotificationsEnabled,
     migrationApprovals: config.slackMigrationApprovals,
     migrationFinalMessage: config.slackMigrationFinalMessage,

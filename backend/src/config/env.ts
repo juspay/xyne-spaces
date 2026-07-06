@@ -101,6 +101,8 @@ const envSchema = Joi.object({
   SLACK_MIGRATION_SYNC_CRON: Joi.string().default(''), // Nightly sync cron (default: 12 AM IST = 18:30 UTC)
   SLACK_MIGRATION_CLEANUP_CRON: Joi.string().default(''), // Cleanup cron (default: 7 AM IST = 01:30 UTC)
   SLACK_MIGRATION_NOTIFICATIONS_ENABLED: Joi.boolean().default(true), // Enable/disable Slack postMessage notifications during migration
+  SYNC_DM_CONCURRENCY: Joi.number().integer().min(1).default(3), // Max DMs/group-DMs migrated in parallel (/sync-dm)
+  SYNC_DM_LOG_CHANNEL: Joi.string().allow('').default(''), // Default Slack channel for /sync-dm updates; per-workspace override via MIGRATION_SLACK_BOT_CONFIGS[].syncDmLogChannelId
   // Zoho Integration
   ZOHO_AUTO_WORKFLOW_ENABLED: Joi.boolean().default(true),
   // SAM Service Configuration
@@ -522,6 +524,10 @@ export const config = {
     concurrency: envVars.SLACK_MIGRATION_CONCURRENCY as number,
     syncCron: envVars.SLACK_MIGRATION_SYNC_CRON as string,
     cleanupCron: envVars.SLACK_MIGRATION_CLEANUP_CRON as string,
+  },
+  syncDm: {
+    concurrency: envVars.SYNC_DM_CONCURRENCY as number,
+    logChannelId: envVars.SYNC_DM_LOG_CHANNEL as string,
   },
   slackMigrationNotificationsEnabled: envVars.SLACK_MIGRATION_NOTIFICATIONS_ENABLED,
   migrationSlackBotConfigs: envVars.MIGRATION_SLACK_BOT_CONFIGS as string,

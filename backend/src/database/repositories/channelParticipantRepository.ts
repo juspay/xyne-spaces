@@ -65,11 +65,15 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         }
       });
 
-      // Automatically create status record
+      // Automatically create status record. Use upsert so a pre-existing status
+      // row (e.g. orphaned from a prior partial migration run) is left as-is
+      // instead of throwing a unique-constraint error on (channelId, userId).
       // desktopNotificationLevel / mobileNotificationLevel intentionally omitted —
       // null (inherit global) is the DB column default.
-      await tx.channelUserStatus.create({
-        data: {
+      await tx.channelUserStatus.upsert({
+        where: { channelId_userId: { channelId: data.channelId, userId: data.userId } },
+        update: {},
+        create: {
           channelId: data.channelId,
           userId: data.userId,
           isClosed: false,
@@ -166,11 +170,15 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         }
       });
 
-      // Automatically create status record
+      // Automatically create status record. Use upsert so a pre-existing status
+      // row (e.g. orphaned from a prior partial migration run) is left as-is
+      // instead of throwing a unique-constraint error on (channelId, userId).
       // desktopNotificationLevel / mobileNotificationLevel intentionally omitted —
       // null (inherit global) is the DB column default.
-      await tx.channelUserStatus.create({
-        data: {
+      await tx.channelUserStatus.upsert({
+        where: { channelId_userId: { channelId, userId } },
+        update: {},
+        create: {
           channelId,
           userId,
           isClosed,

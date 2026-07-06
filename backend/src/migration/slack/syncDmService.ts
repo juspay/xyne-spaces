@@ -81,16 +81,10 @@ export async function handleSyncDmCommand(req: Request, res: Response): Promise<
 // Bulk DM migration
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Dedicated Slack channel for ALL /sync-dm updates (plan, progress, summary).
-// The migration bot must be a member of this channel to post. Override via env.
-const SYNC_DM_LOG_CHANNEL = process.env.SYNC_DM_LOG_CHANNEL || 'C0BCN9BDQMN';
-
-// How many DMs/group-DMs to migrate concurrently. Override via env; defaults to 3.
-// Falls back to 3 for missing/invalid/non-positive values.
-const SYNC_DM_CONCURRENCY = (() => {
-  const parsed = parseInt(process.env.SYNC_DM_CONCURRENCY ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 3;
-})();
+// How many DMs/group-DMs to migrate concurrently (config.syncDm.concurrency,
+// env SYNC_DM_CONCURRENCY, default 3). The log channel is resolved per-workspace
+// inside runMigrationAllDms — see below.
+const SYNC_DM_CONCURRENCY = config.syncDm.concurrency;
 
 export async function runMigrationAllDms({
   userToken,
@@ -99,14 +93,15 @@ export async function runMigrationAllDms({
 }: {
   userToken: string;
   userId?: string;
-  // Accepted for API compatibility but ignored — all updates go to SYNC_DM_LOG_CHANNEL.
+  // Accepted for API compatibility but ignored — all updates go to the resolved sync-dm channel.
   responseChannelId?: string;
   teamId?: string;
 }): Promise<void> {
   const workspaceId = (teamId ? getWorkspaceIdByTeamId(teamId) : '') || config.defaultWorkspaceId;
   const wsConfig = getBotConfigByWorkspaceId(workspaceId || '');
-  // All /sync-dm updates go to the dedicated sync-dm channel.
-  const logChannelId = SYNC_DM_LOG_CHANNEL;
+  // All /sync-dm updates go to the dedicated sync-dm channel: prefer this
+  // workspace's configured channel, else the global SYNC_DM_LOG_CHANNEL default.
+  const logChannelId = wsConfig.syncDmLogChannelId || config.syncDm.logChannelId;
   const userClient = new WebClient(userToken);
   const dmBotToken = wsConfig.slackBotToken;
 
