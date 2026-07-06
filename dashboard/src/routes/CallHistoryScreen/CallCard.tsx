@@ -350,15 +350,17 @@ export const CallCard = ({
                       >
                         Go to Message
                       </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={e => {
-                          e.stopPropagation();
-                          onViewExternalChat?.();
-                        }}
-                        className='text-sm font-medium rounded-lg'
-                      >
-                        View External Chat
-                      </DropdownMenuItem>
+                      {onViewExternalChat && (
+                        <DropdownMenuItem
+                          onClick={e => {
+                            e.stopPropagation();
+                            onViewExternalChat();
+                          }}
+                          className='text-sm font-medium rounded-lg'
+                        >
+                          View External Chat
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem
                         onClick={e => {
                           e.stopPropagation();
@@ -421,22 +423,21 @@ export const CallCard = ({
                         </button>
                       </span>
                     </Tooltip>
-                    <Tooltip content='View External Chat' delayDuration={300}>
-                      <span className={!onViewExternalChat ? 'cursor-not-allowed' : ''}>
+                    {onViewExternalChat && (
+                      <Tooltip content='View External Chat' delayDuration={300}>
                         <button
                           onClick={e => {
                             e.stopPropagation();
-                            onViewExternalChat?.();
+                            onViewExternalChat();
                           }}
-                          disabled={!onViewExternalChat}
                           data-track-category='calls'
                           data-track-name='view-external-chat'
-                          className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50 disabled:pointer-events-none'
+                          className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                         >
                           <ArrowUpRight className='size-4' />
                         </button>
-                      </span>
-                    </Tooltip>
+                      </Tooltip>
+                    )}
                     <Tooltip content='Start Call' delayDuration={300}>
                       <button
                         onClick={e => {
@@ -477,15 +478,17 @@ export const CallCard = ({
                     >
                       Go to Message
                     </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={e => {
-                        e.stopPropagation();
-                        onViewExternalChat?.();
-                      }}
-                      className='text-sm font-medium rounded-lg'
-                    >
-                      External Huddle
-                    </DropdownMenuItem>
+                    {onViewExternalChat && (
+                      <DropdownMenuItem
+                        onClick={e => {
+                          e.stopPropagation();
+                          onViewExternalChat();
+                        }}
+                        className='text-sm font-medium rounded-lg'
+                      >
+                        External Huddle
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       onClick={e => {
                         e.stopPropagation();
@@ -533,18 +536,20 @@ export const CallCard = ({
                       </Button>
                     </span>
                   </Tooltip>
-                  <Tooltip content='View External Chat' delayDuration={300}>
-                    <Button
-                      onClick={onViewExternalChat}
-                      variant='outline'
-                      size='icon'
-                      className='size-7'
-                      data-track-category='calls'
-                      data-track-name='view-external-chat'
-                    >
-                      <ScrollText className='size-3.5 text-muted-foreground' />
-                    </Button>
-                  </Tooltip>
+                  {onViewExternalChat && (
+                    <Tooltip content='View External Chat' delayDuration={300}>
+                      <Button
+                        onClick={onViewExternalChat}
+                        variant='outline'
+                        size='icon'
+                        className='size-7'
+                        data-track-category='calls'
+                        data-track-name='view-external-chat'
+                      >
+                        <ScrollText className='size-3.5 text-muted-foreground' />
+                      </Button>
+                    </Tooltip>
+                  )}
                 </>
               ))}
             {isUserInvited &&

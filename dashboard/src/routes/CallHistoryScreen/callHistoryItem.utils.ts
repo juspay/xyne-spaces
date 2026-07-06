@@ -2,6 +2,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { formatDuration } from '../../utils/dateUtils';
 import { CallOrigin, CallStatus, InvitationResponse, type User } from '@xyne/shared';
+import { hasJoinedExternalParticipant as hasJoinedExternalCallParticipant } from '../../components/Call/callParticipant.utils';
 
 export type RecentCallFilter = 'all' | 'incoming' | 'outgoing' | 'active' | 'missed';
 
@@ -49,6 +50,10 @@ export function hasAnyoneJoined(participants: Call['participants']): boolean {
   return (participants || []).some(
     p => p.response === InvitationResponse.ACCEPTED || p.response === InvitationResponse.LEFT,
   );
+}
+
+export function hasJoinedExternalParticipant(participants: Call['participants']): boolean {
+  return hasJoinedExternalCallParticipant(participants);
 }
 
 // Get other participants (excluding current user)

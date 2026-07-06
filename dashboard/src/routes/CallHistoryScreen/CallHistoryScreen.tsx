@@ -44,6 +44,7 @@ import { CallCard } from './CallCard';
 import {
   Call,
   isExternalCalendarEvent,
+  hasJoinedExternalParticipant,
   isScheduledCallJoinable,
   RecentCallFilter,
   FILTER_LABELS,
@@ -1075,7 +1076,7 @@ const CallHistoryScreen = (): ReactElement => {
                         handleGotoTranscript={getGotoTranscriptHandler(call)}
                         handleDownloadTranscript={() => handleDownloadTranscript(call)}
                         onViewExternalChat={
-                          call.participants?.some(p => p.isExternal)
+                          hasJoinedExternalParticipant(call.participants)
                             ? () => setExternalChatCallId(call.externalId)
                             : undefined
                         }
@@ -1108,7 +1109,7 @@ const CallHistoryScreen = (): ReactElement => {
                             handleGotoTranscript={getGotoTranscriptHandler(call)}
                             handleDownloadTranscript={() => handleDownloadTranscript(call)}
                             onViewExternalChat={
-                              call.participants?.some(p => p.isExternal)
+                              hasJoinedExternalParticipant(call.participants)
                                 ? () => setExternalChatCallId(call.externalId)
                                 : undefined
                             }

@@ -1,7 +1,7 @@
 import type { Room } from 'livekit-client';
 import { ConnectionQuality, ConnectionState } from 'livekit-client';
 import { WifiLow } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   useParticipantNetworkQuality,
   useNetworkQualityToast,
@@ -30,6 +30,7 @@ import { RecordingStopDialog } from '../CallControls/RecordingStopDialog';
 import { CallPrivacyIndicator } from '../CallPrivacyIndicator/CallPrivacyIndicator';
 import { createCallPrivacyActions } from '../CallPrivacyIndicator/callPrivacyActions';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
+import { hasJoinedExternalParticipant } from '../callParticipant.utils';
 
 const CALL_PRIVACY_DESCRIPTION = [
   'Xyne AI is active in this call. Active actions and saved artifacts are listed below.',
@@ -375,6 +376,19 @@ export function FullCallView({
   // Show toast for incoming call chat messages
   useCallChatNotifications(room, localParticipantId, onCallChatNewMessage);
 
+  const hasExternalJoined = useMemo(() => {
+    return hasJoinedExternalParticipant(callParticipants);
+  }, [callParticipants]);
+
+  const canUseCallChat = isExternalUser || hasExternalJoined;
+  const isCallChatVisible = canUseCallChat && isCallChatOpen;
+
+  useEffect(() => {
+    if (isCallChatOpen && !canUseCallChat && onToggleCallChat) {
+      onToggleCallChat();
+    }
+  }, [canUseCallChat, isCallChatOpen, onToggleCallChat]);
+
   // Determine if any right sidebar is open (for layout adjustments)
   const isRightSidebarOpen = isChatOpen || isParticipantsSidebarOpen || isHostControlsOpen;
 
@@ -458,7 +472,7 @@ export function FullCallView({
             className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'
             style={{
               paddingRight: isRightSidebarOpen ? 'min(500px, 100vw)' : '0',
-              paddingLeft: isCallChatOpen ? 'min(400px, 100vw)' : '0',
+              paddingLeft: isCallChatVisible ? 'min(400px, 100vw)' : '0',
             }}
           >
             <ScreenShareView
@@ -481,7 +495,7 @@ export function FullCallView({
             className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'
             style={{
               paddingRight: isRightSidebarOpen ? 'min(500px, 100vw)' : '0',
-              paddingLeft: isCallChatOpen ? 'min(400px, 100vw)' : '0',
+              paddingLeft: isCallChatVisible ? 'min(400px, 100vw)' : '0',
             }}
           >
             <ParticipantGrid
@@ -499,8 +513,8 @@ export function FullCallView({
           className='absolute bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-1rem)] sm:w-auto max-w-[calc(100%-1rem)] transition-transform duration-300'
           style={{
             transform: isRightSidebarOpen
-              ? `translateX(calc(-50% - min(250px, 50vw)${isCallChatOpen ? ' + min(200px, 50vw)' : ''}))`
-              : isCallChatOpen
+              ? `translateX(calc(-50% - min(250px, 50vw)${isCallChatVisible ? ' + min(200px, 50vw)' : ''}))`
+              : isCallChatVisible
                 ? 'translateX(calc(-50% + min(200px, 50vw)))'
                 : 'translateX(-50%)',
           }}
@@ -532,8 +546,8 @@ export function FullCallView({
             viewMode='full'
             requestedAiController={requestedAiController}
             pendingControlRequest={pendingControlRequest}
-            isCallChatOpen={isCallChatOpen}
-            onToggleCallChat={onToggleCallChat}
+            isCallChatOpen={isCallChatVisible}
+            onToggleCallChat={canUseCallChat ? onToggleCallChat : undefined}
             unreadCallChatCount={unreadCallChatCount}
             hideThreadChat={hideThreadChat}
             hideAIAssistant={hideAIAssistant}
@@ -549,7 +563,7 @@ export function FullCallView({
       </CallStateTransition>
 
       {/* Call Chat Panel - Left Sidebar */}
-      {isCallChatOpen && onToggleCallChat && (
+      {isCallChatVisible && onToggleCallChat && (
         <div className='fixed left-0 top-0 h-full w-full md:w-[400px] bg-background shadow-xl z-[60]'>
           <CallChatPanel
             room={room}
