@@ -19,6 +19,7 @@ interface FileBubbleProps {
   onClick?: () => void;
   createdBy: string;
   createdAt: number;
+  compact?: boolean;
 }
 
 export const FileBubble: React.FC<FileBubbleProps> = ({
@@ -26,6 +27,7 @@ export const FileBubble: React.FC<FileBubbleProps> = ({
   onClick,
   createdBy,
   createdAt,
+  compact = false,
 }) => {
   const user = useUser(createdBy);
   const isOpen = useSelector(
@@ -52,6 +54,21 @@ export const FileBubble: React.FC<FileBubbleProps> = ({
       startIndex: 0,
     });
   };
+
+  if (compact) {
+    return (
+      <button
+        type='button'
+        className='shrink-0 cursor-pointer'
+        onClick={handleClick}
+        title={attachment.originalFilename}
+      >
+        <div className='pointer-events-none'>
+          <MessageAttachment attachment={attachment} compact={true} />
+        </div>
+      </button>
+    );
+  }
 
   return (
     <div className='w-full py-1.5'>
