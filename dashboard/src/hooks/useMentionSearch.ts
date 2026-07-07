@@ -1,13 +1,30 @@
-import { useState, useCallback, useMemo } from 'react';
-import { useChannel, useAllVisibleChannels } from './useChannels';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useChannel } from './useChannels';
 import { ChannelScopeType } from '@xyne/shared';
-import { useAuthContextValues, useAuth } from './useAuth';
+import { useAuth } from './useAuth';
 import type { MentionResult } from '../components/ui/Selectors';
-import { useSelf, useUsers, useActiveUsers, useActiveUserSearch } from './useUsers';
+import { useActiveUsers, useActiveUserSearch } from './useUsers';
 import type { User } from '../machines/stateMachine';
 import { useUserGroupSearch } from './useUserGroupSearch';
-import { getUserDisplayName } from '../utils/userDisplayName';
+import { useChannelRecentSenders } from './useChannelRecentSenders';
 import { useVespaChannelParticipants } from './useVespaChannelParticipants';
+import { useCacConfig } from './useCacConfig';
+import { useDmAffinityRank } from './useDmMentionList';
+import { getUserDisplayName, userToMentionResult } from '../utils/userDisplayName';
+import {
+  eligibleSpecials,
+  isPrefixMatch,
+  normalizeAffinity,
+  rankCandidates,
+  type RankableCandidate,
+  type SpecialMentionDescriptor,
+} from '../utils/mentionRanking';
+import {
+  DEFAULT_MENTION_RANKING_CAC_CONFIG,
+  MENTION_RANKING_CAC_KEY,
+  type MentionRankingCacConfig,
+} from './mentionRankingCacConfig';
+import { affinityService } from '../services/affinityService';
 
 interface UseMentionSearchResult {
   results: MentionResult[];
@@ -23,292 +40,295 @@ interface UseMentionSearchOptions {
   includeSpecialMentions?: boolean;
 }
 
-const getUserPicture = (name: string, picture: string | null): string => {
-  if (picture) return picture;
-  return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=0ea5e9&color=fff`;
-};
+function emailLocalPart(email: string | null | undefined): string {
+  if (!email) return '';
+  const at = email.indexOf('@');
+  return at >= 0 ? email.slice(0, at) : email;
+}
+
+function specialToMentionResult(s: SpecialMentionDescriptor): MentionResult {
+  return {
+    id: s.id,
+    name: s.literal,
+    type: s.literal,
+    isSpecial: true,
+    description: s.description,
+  };
+}
+
+interface UserCandidateCtx {
+  currentUserId: string | undefined;
+  participantsLoaded: boolean;
+  channelParticipantIds: Set<string>;
+  recentInChannelIds: Set<string>;
+  affinityById: Map<string, number>;
+  isOneToOneDm?: boolean;
+  threadParticipantIds?: ReadonlySet<string>;
+}
+
+function buildUserCandidate(u: User, ctx: UserCandidateCtx): RankableCandidate {
+  const isMember = ctx.participantsLoaded && ctx.channelParticipantIds.has(u.id);
+  const displayName = getUserDisplayName(u);
+  const isEngagedInContext =
+    ctx.recentInChannelIds.has(u.id) || (ctx.threadParticipantIds?.has(u.id) ?? false);
+  // A 1:1/self DM isn't a "channel" — never surface the "Not in channel" pill there.
+  const membershipFlag = ctx.isOneToOneDm
+    ? undefined
+    : ctx.participantsLoaded
+      ? isMember
+      : undefined;
+  return {
+    matchFields: [displayName, emailLocalPart(u.email)],
+    scoreInputs: {
+      isChannelMember: isMember,
+      isEngagedInContext,
+      affinityScore: ctx.affinityById.get(u.id) ?? 0,
+      isSpecialMention: false,
+      isGroupMatchingName: false,
+    },
+    result: userToMentionResult(u, u.id === ctx.currentUserId, membershipFlag),
+    tieKey: displayName.toLowerCase(),
+  };
+}
+
+function buildGroupCandidate(
+  g: {
+    id: string;
+    name: string;
+    alias?: string | null;
+    description?: string | null;
+    isActive?: boolean;
+  },
+  query: string,
+): RankableCandidate {
+  return {
+    matchFields: [g.name, g.alias ?? null],
+    scoreInputs: {
+      isChannelMember: false,
+      isEngagedInContext: false,
+      affinityScore: 0,
+      isSpecialMention: false,
+      isGroupMatchingName: isPrefixMatch([g.name, g.alias ?? null], query),
+    },
+    result: {
+      id: g.id,
+      name: g.name,
+      type: 'group' as const,
+      ...(g.alias && { alias: g.alias }),
+      ...(g.description && { description: g.description }),
+      memberCount: 0,
+      isDeactivated: g.isActive === false,
+    },
+    tieKey: (g.alias || g.name).toLowerCase(),
+  };
+}
+
+function buildSpecialCandidate(s: SpecialMentionDescriptor): RankableCandidate {
+  return {
+    matchFields: [s.literal],
+    scoreInputs: {
+      isChannelMember: false,
+      isEngagedInContext: false,
+      affinityScore: 0,
+      isSpecialMention: true,
+      isGroupMatchingName: false,
+    },
+    result: specialToMentionResult(s),
+    tieKey: s.literal,
+  };
+}
 
 export const useMentionSearch = (
   channelId?: string,
+  threadParticipantIds?: ReadonlySet<string>,
+  _conversationId?: string,
   options: UseMentionSearchOptions = {},
 ): UseMentionSearchResult => {
   const { includeSpecialMentions = true } = options;
-  const context = useAuthContextValues();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  // Gates the Vespa membership fetch — fires only after the picker has been
+  // interacted with, avoiding a network call on every channel open.
   const [isMentionRequested, setIsMentionRequested] = useState<boolean>(false);
   const shouldSearch = searchQuery.trim().length > 0;
   // Deactivated users must not appear in the @mention picker
-  const usersData = useActiveUserSearch(searchQuery, 10);
-  const userGroupsData = useUserGroupSearch(searchQuery, 10);
 
-  const currentUser = useSelf();
+  const { config: rankingConfig } = useCacConfig<MentionRankingCacConfig>({
+    key: MENTION_RANKING_CAC_KEY,
+    fallbackConfig: DEFAULT_MENTION_RANKING_CAC_CONFIG,
+  });
+
+  // Bumped when async affinity weights finish loading, so the ranking memos
+  // recompute with the real scores (getUserWeight is otherwise non-reactive).
+  const [affinityVersion, setAffinityVersion] = useState(0);
+  useEffect(() => {
+    if (!isMentionRequested) return;
+    let cancelled = false;
+    affinityService
+      .prefetch()
+      .then(() => {
+        if (!cancelled) setAffinityVersion(v => v + 1);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isMentionRequested]);
 
   // Active users in the workspace – drives the empty-state picker (recent DM
   // partners / channel members). Deactivated users are excluded here too.
   const allWorkspaceUsers = useActiveUsers();
-
-  const usersById = useMemo(() => {
-    const map = new Map<string, User>();
-    for (const u of allWorkspaceUsers) {
-      map.set(u.id, u);
-    }
-    return map;
-  }, [allWorkspaceUsers]);
+  const usersData = useActiveUserSearch(searchQuery, 100);
+  const userGroupsData = useUserGroupSearch(searchQuery, 10);
 
   // Get channel to determine scope type
   const channel = useChannel(channelId || '');
-
-  // Determine if this is a DM or regular channel
-  const isDMChannel = channel?.scopeType === ChannelScopeType.DM;
+  const isOneToOneDm = channel?.scopeType === ChannelScopeType.DM; // 1:1 + self-DM
+  const isGroupDm = channel?.scopeType === ChannelScopeType.GROUP_DM;
+  // DM + group DM know their members locally (channel.name = participant ids),
+  // so they skip Vespa; regular channels fetch membership from Vespa.
+  const usesLocalParticipants = isOneToOneDm || isGroupDm;
   const channelDataReady = channel && channel.id === channelId;
 
+  const localParticipantIds = useMemo(
+    () => (usesLocalParticipants && channel?.name ? channel.name.split(',') : null),
+    [usesLocalParticipants, channel?.name],
+  );
+  const isSelfDm =
+    !!localParticipantIds &&
+    localParticipantIds.length === 1 &&
+    localParticipantIds[0] === user?.id;
+
+  // Channel membership via Vespa (channels only, lazy on picker open). `null`
+  // means "not fetched yet" — distinct from "fetched and empty".
   const vespaParticipantIds = useVespaChannelParticipants(
-    !isDMChannel ? channel?.id : undefined,
+    !usesLocalParticipants ? channel?.id : undefined,
     isMentionRequested,
   );
-  const vespaParticipantIdSet = useMemo(
-    () => new Set(vespaParticipantIds ?? []),
-    [vespaParticipantIds],
+  // Unified member set: local participants for DM/group-DM, Vespa for channels.
+  const memberIds = useMemo(
+    () =>
+      new Set(usesLocalParticipants ? (localParticipantIds ?? []) : (vespaParticipantIds ?? [])),
+    [usesLocalParticipants, localParticipantIds, vespaParticipantIds],
   );
-  const hasVespaParticipants = !!vespaParticipantIds?.length;
+  const membersLoaded = usesLocalParticipants ? true : vespaParticipantIds !== null;
 
-  // Get participants based on channel type when not searching
-  const dmParticipants = channel?.name.split(',');
+  // DM-recency rank — used as the secondary affinity signal when MFU is empty.
+  const dmRank = useDmAffinityRank(user?.id);
+  const dmRankAffinity = useMemo(() => normalizeAffinity(dmRank), [dmRank]);
 
-  const visibleChannels = useAllVisibleChannels();
-  const cachedDMParticipants = useMemo(() => {
-    const currentUserId = user?.id;
-    const sortedDmChannels = visibleChannels
-      .filter(
-        ch => ch.scopeType === ChannelScopeType.DM || ch.scopeType === ChannelScopeType.GROUP_DM,
-      )
-      .sort(
-        (a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0),
-      );
+  // Distinct senders in this channel within trailing window (channels only).
+  const recentInChannelIds = useChannelRecentSenders(
+    !usesLocalParticipants ? channelId : undefined,
+    rankingConfig.recentInChannelWindowDays,
+  );
+  const allUsers = useMemo<MentionResult[]>(() => {
+    if (allWorkspaceUsers.length === 0) return [];
+    return allWorkspaceUsers.map(u => userToMentionResult(u, false, undefined));
+  }, [allWorkspaceUsers]);
 
-    const dmUserIds: string[] = [];
-
-    for (const ch of sortedDmChannels) {
-      if (dmUserIds.length >= 10) break;
-
-      for (const participantId of ch.name.split(',')) {
-        if (dmUserIds.length >= 10) break;
-        if (participantId !== currentUserId && !dmUserIds.includes(participantId)) {
-          dmUserIds.push(participantId);
-        }
-      }
-    }
-
-    if (dmUserIds.length > 0) {
-      return dmUserIds;
-    }
-
-    if (!allWorkspaceUsers?.length) return [];
-
-    return allWorkspaceUsers
-      .filter(u => u.id !== currentUserId)
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 10)
-      .map(u => u.id);
-  }, [visibleChannels, user?.id, allWorkspaceUsers]);
-
-  // Get all users for mention resolution (used when sending messages)
-  const allUsersData = useUsers();
-
-  // Helper to convert user to MentionResult
-  const toMentionResult = useCallback((user: User, isCurrentUser = false): MentionResult => {
-    const displayName = getUserDisplayName(user);
-    return {
-      id: user.id,
-      name: isCurrentUser ? `${displayName} (you)` : displayName,
-      username: displayName,
-      type: 'user' as const,
-      email: user.email,
-      picture: getUserPicture(displayName, user.picture),
-      avatar: displayName.charAt(0).toUpperCase(),
-    };
-  }, []);
-
-  // All users in the system for mention resolution when sending messages
-  const allUsers = useMemo((): MentionResult[] => {
-    if (!allUsersData || allUsersData.length === 0) {
-      return [];
-    }
-
-    return allUsersData.map(u => toMentionResult(u));
-  }, [allUsersData, toMentionResult]);
-
-  const users = useMemo(() => {
-    if (shouldSearch) {
-      if (!usersData) return [];
-
-      const baseUsers = usersData.map(user => {
-        const displayName = getUserDisplayName(user);
-        return {
-          id: user.id,
-          name: context.userID === user.id ? `${displayName} (you)` : displayName,
-          username: displayName,
-          type: 'user' as const,
-          email: user.email,
-          picture: getUserPicture(displayName, user.picture),
-          avatar: displayName.charAt(0).toUpperCase(),
-        };
-      });
-
-      if (isDMChannel) {
-        return baseUsers;
-      }
-
-      // Rank: channel members (Vespa) → recent DM partners → rest.
-      // isChannelMember is only set once Vespa has responded, so the UI never
-      // shows "Not in channel" against users we haven't checked.
-      const dmUserIds = new Set(cachedDMParticipants);
-      return baseUsers
-        .map(user => ({
-          ...user,
-          isInDM: dmUserIds.has(user.id),
-          ...(hasVespaParticipants && {
-            isChannelMember: vespaParticipantIdSet.has(user.id),
-          }),
-        }))
-        .sort((a, b) => {
-          if (!!a.isChannelMember !== !!b.isChannelMember) return a.isChannelMember ? -1 : 1;
-          if (a.isInDM !== b.isInDM) return a.isInDM ? -1 : 1;
-          return 0;
-        });
-    }
-
-    // Get participants based on channel type
-    let sortedParticipants: MentionResult[] = [];
-
-    if (isDMChannel) {
-      // For DM channels, just use DM participants
-      sortedParticipants =
-        dmParticipants
-          ?.filter(p => p !== user?.id)
-          .sort((a, b) => {
-            const userA = usersById.get(a);
-            const userB = usersById.get(b);
-            return (userB?.lastActiveAt || 0) - (userA?.lastActiveAt || 0);
-          })
-          .map(p => {
-            const u = usersById.get(p);
-            return u ? toMentionResult(u) : null;
-          })
-          .filter((u): u is MentionResult => u !== null) || [];
-    } else {
-      // Regular channel empty-state. Before Vespa lands: recent DM partners.
-      // After: channel members + up to 10 DM partners not in the channel,
-      // tagged so the UI shows the "Not in channel" pill on the latter.
-      const buildList = (ids: string[], isChannelMember?: boolean): MentionResult[] =>
-        ids
-          .map(id => usersById.get(id))
-          .filter((u): u is User => !!u && u.id !== user?.id)
-          .sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0))
-          .slice(0, 10)
-          .map(u =>
-            isChannelMember === undefined
-              ? toMentionResult(u)
-              : { ...toMentionResult(u), isChannelMember },
-          );
-
-      if (hasVespaParticipants && vespaParticipantIds) {
-        sortedParticipants = [
-          ...buildList(vespaParticipantIds, true),
-          ...buildList(
-            cachedDMParticipants.filter(id => !vespaParticipantIdSet.has(id)),
-            false,
-          ),
-        ];
-      } else {
-        sortedParticipants = buildList(cachedDMParticipants);
-      }
-    }
-
-    // Current user first, then other participants
-    return sortedParticipants;
+  const currentUserId = user?.id;
+  const eligibleUsers = useMemo<User[]>(() => {
+    const src: User[] = shouldSearch
+      ? (usersData ?? [])
+      : usesLocalParticipants
+        ? allWorkspaceUsers.filter(u => memberIds.has(u.id) || dmRankAffinity.has(u.id))
+        : membersLoaded
+          ? allWorkspaceUsers.filter(u => memberIds.has(u.id))
+          : allWorkspaceUsers.filter(u => dmRankAffinity.has(u.id));
+    // Keep yourself only in a self-DM; otherwise you're never a mention candidate.
+    return src.filter(u => (isSelfDm ? true : u.id !== currentUserId));
   }, [
-    usersData,
     shouldSearch,
-    currentUser,
-    isDMChannel,
-    dmParticipants,
-    cachedDMParticipants,
-    usersById,
-    toMentionResult,
-    user?.id,
-    context.userID,
-    vespaParticipantIds,
-    vespaParticipantIdSet,
-    hasVespaParticipants,
+    usersData,
+    usesLocalParticipants,
+    membersLoaded,
+    allWorkspaceUsers,
+    memberIds,
+    dmRankAffinity,
+    isSelfDm,
+    currentUserId,
   ]);
 
-  // Convert user groups to MentionResult format
-  const groups = useMemo(() => {
-    if (!userGroupsData || userGroupsData.length === 0) {
-      return [];
-    }
+  const candidateIdsKey = useMemo(() => eligibleUsers.map(u => u.id).join(','), [eligibleUsers]);
 
-    return userGroupsData.map(group => ({
-      id: group.id,
-      name: group.name,
-      type: 'group' as const,
-      ...(group.alias && { alias: group.alias }),
-      ...(group.description && { description: group.description }),
-      memberCount: 0,
-      isDeactivated: group.isActive === false,
-    }));
-  }, [userGroupsData]);
+  const mfuAffinity = useMemo(() => {
+    if (!currentUserId) return new Map<string, number>();
 
-  const results = useMemo(() => {
-    // Add special mentions (@channel and @here) only for non-DM channels
-    const specialMentions: MentionResult[] = [];
-
-    if (includeSpecialMentions && shouldSearch && !isDMChannel && channelDataReady) {
-      const allSpecialMentions = [
-        {
-          id: 'special-channel',
-          name: 'channel',
-          type: 'channel' as const,
-          isSpecial: true,
-          description: 'Notify all members in this channel',
-        },
-        {
-          id: 'special-here',
-          name: 'here',
-          type: 'here' as const,
-          isSpecial: true,
-          description: 'Notify all online members',
-        },
-      ];
-
-      // Filter special mentions based on search query
-      if (shouldSearch) {
-        const query = searchQuery.toLowerCase();
-        allSpecialMentions.forEach(mention => {
-          if (mention.name.toLowerCase().includes(query)) {
-            specialMentions.push(mention);
-          }
-        });
-      } else {
-        // No search query, show all special mentions
-        specialMentions.push(...allSpecialMentions);
+    const raw = new Map<string, number>();
+    let max = 0;
+    for (const u of eligibleUsers) {
+      const w = affinityService.getUserWeight(u.id);
+      if (w > 0) {
+        raw.set(u.id, w);
+        if (w > max) max = w;
       }
     }
+    if (max === 0) return new Map<string, number>();
 
-    // Order: Special mentions (@channel, @here) -> Users -> User Groups
-    return [...specialMentions, ...users, ...groups];
+    const normalized = new Map<string, number>();
+    for (const [id, w] of raw) {
+      normalized.set(id, w / max);
+    }
+    return normalized;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, candidateIdsKey, affinityVersion]);
+
+  const results = useMemo<MentionResult[]>(() => {
+    if (!channelDataReady) return [];
+
+    const affinityById = mfuAffinity.size > 0 ? mfuAffinity : dmRankAffinity;
+
+    const ctx: UserCandidateCtx = {
+      currentUserId,
+      participantsLoaded: membersLoaded,
+      channelParticipantIds: memberIds,
+      recentInChannelIds,
+      affinityById,
+      isOneToOneDm,
+      ...(threadParticipantIds && { threadParticipantIds }),
+    };
+
+    const userCandidates = eligibleUsers.map(u => buildUserCandidate(u, ctx));
+
+    // Groups & special mentions are channel / group-DM concepts; a 1:1 DM is not a channel.
+    const groupCandidates = (!isOneToOneDm && shouldSearch ? (userGroupsData ?? []) : []).map(g =>
+      buildGroupCandidate(g, searchQuery),
+    );
+    const specialCandidates = includeSpecialMentions
+      ? eligibleSpecials({
+          isDMChannel: isOneToOneDm,
+          shouldSearch,
+        }).map(buildSpecialCandidate)
+      : [];
+
+    const cap = shouldSearch ? rankingConfig.queryStateCap : rankingConfig.zeroStateCap;
+    return rankCandidates(
+      [...userCandidates, ...groupCandidates, ...specialCandidates],
+      searchQuery,
+      cap,
+      rankingConfig,
+    );
   }, [
-    users,
-    groups,
-    isDMChannel,
-    shouldSearch,
     channelDataReady,
+    isOneToOneDm,
+    shouldSearch,
     searchQuery,
+    userGroupsData,
+    eligibleUsers,
+    memberIds,
+    membersLoaded,
+    recentInChannelIds,
+    mfuAffinity,
+    dmRankAffinity,
+    threadParticipantIds,
+    currentUserId,
+    rankingConfig,
     includeSpecialMentions,
   ]);
+
+  const users = useMemo(() => results.filter(r => r.type === 'user'), [results]);
 
   const searchMentions = useCallback((query: string) => {
     setError(null);

@@ -1,5 +1,7 @@
 import { isStatusExpired } from './statusUtils';
 import { UserStatus } from '@xyne/shared';
+import type { User } from '../machines/stateMachine';
+import type { MentionResult } from '../components/ui/Selectors';
 
 /**
  * Check if a user is deactivated (status is INACTIVE)
@@ -93,4 +95,35 @@ export function getUserLabel(
     | null,
 ): string {
   return user?.displayName || user?.name || user?.email || 'Unknown User';
+}
+
+/**
+ * Resolve a user's avatar URL, falling back to a generated ui-avatars image.
+ */
+export function getUserPicture(name: string, picture: string | null): string {
+  if (picture) return picture;
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=0ea5e9&color=fff`;
+}
+
+/**
+ * Map a User to the MentionResult shape used by the @-mention pickers.
+ * `isChannelMember` is omitted when undefined so the UI can distinguish
+ * "not a member" from "membership not yet known".
+ */
+export function userToMentionResult(
+  u: User,
+  isCurrentUser: boolean,
+  isChannelMember?: boolean,
+): MentionResult {
+  const displayName = getUserDisplayName(u);
+  return {
+    id: u.id,
+    name: isCurrentUser ? `${displayName} (you)` : displayName,
+    username: displayName,
+    type: 'user' as const,
+    email: u.email,
+    picture: getUserPicture(displayName, u.picture),
+    avatar: displayName.charAt(0).toUpperCase(),
+    ...(isChannelMember !== undefined && { isChannelMember }),
+  };
 }

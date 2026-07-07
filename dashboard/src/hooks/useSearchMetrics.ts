@@ -236,7 +236,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
 
   useEffect(() => {
-    affinityService.prefetch();
+    void affinityService.prefetch();
   }, []);
 
   const [searchSessionId, setSearchSessionId] = useState<string | null>(null);

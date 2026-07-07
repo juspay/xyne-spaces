@@ -32,11 +32,12 @@ class AffinityService {
     }
   }
 
-  prefetch(): void {
+  prefetch(): Promise<void> {
     const stale = Date.now() - this.lastFetchedAt > CACHE_TTL_MS;
-    if (!stale) return;
-    if (this.inflight) return;
+    if (!stale) return Promise.resolve();
+    if (this.inflight) return this.inflight;
     this.inflight = this.fetch();
+    return this.inflight;
   }
 
   getChannelWeight(channelId: string): number {
