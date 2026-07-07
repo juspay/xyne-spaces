@@ -137,6 +137,10 @@ export function ParticipantTile({
         : undefined,
     [microphonePublication, participant.participant],
   );
+  const videoTrackStyle = useMemo(
+    () => (participant.isLocal && !isScreenShare ? { transform: 'scaleX(-1)' } : undefined),
+    [isScreenShare, participant.isLocal],
+  );
 
   // Border styling based on state
   const getBorderClass = (): string => {
@@ -188,7 +192,7 @@ export function ParticipantTile({
             'w-full h-full',
             isScreenShare ? 'object-contain bg-black' : 'object-cover',
           )}
-          style={participant.isLocal && !isScreenShare ? { transform: 'scaleX(-1)' } : undefined}
+          style={videoTrackStyle}
         />
       ) : (
         <div
