@@ -103,11 +103,21 @@ class EmailClassificationWorker {
 
       if (runClassification) {
         resolvedGroupId = await emailClassificationService.resolveUserGroup(result, config);
-        effectiveGroupId = resolvedGroupId ?? null;
+        // Fall back to the channel-default group when the AI category has no
+        // mapping row — same guarantee as the classification-failure path:
+        // an unmapped category must not leave the ticket unassigned.
+        effectiveGroupId = resolvedGroupId ?? groupId ?? null;
+        if (!resolvedGroupId && groupId) {
+          logger.warn(
+            `[EMAIL-CLASSIFICATION-WORKER] No mapping for AI category "${result.category}" on ticket ${ticketId}, falling back to channel default group ${groupId}`,
+          );
+        }
 
-        // Only store if classification actually produced data
+        // Only store if classification actually produced data. Store the true
+        // AI resolution (null when unmapped) — the default-group fallback is
+        // an assignment concern, not part of the classification result.
         if (result && Object.keys(result.rawOutput ?? {}).length > 0) {
-          await emailClassificationService.storeOnTicket(ticketId, result, effectiveGroupId);
+          await emailClassificationService.storeOnTicket(ticketId, result, resolvedGroupId);
         }
       }
     }
