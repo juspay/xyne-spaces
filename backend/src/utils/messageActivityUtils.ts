@@ -149,53 +149,6 @@ export async function createSpecialMentionActivities(
 }
 
 /**
- * Create activities for direct 1:1 DM messages (non-mention flow)
- * @param messageId - ID of the message
- * @param senderUserId - User who sent the message (excluded from activities)
- * @param channelId - ID of the DM channel
- */
-export async function createDirectMessageActivities(
-  messageId: string,
-  senderUserId: string,
-  channelId: string,
-  isThreadActivity?: boolean,
-  workspaceId?: string,
-): Promise<void> {
-  logger.info('[ActivityUtils] Creating direct message activities', {
-    messageId,
-    senderUserId,
-    channelId,
-  });
-
-  const participants = await db.channelParticipant.findMany({
-    where: { channelId },
-    select: { userId: true },
-  });
-
-  const recipientIds = participants
-    .map(p => p.userId)
-    .filter(userId => userId && userId !== senderUserId);
-
-  if (recipientIds.length === 0) return;
-
-  const activities = recipientIds.map(userId => ({
-    id: uuidv4(),
-    userId,
-    workspaceId,
-    actorId: senderUserId,
-    actorAction: 'direct_message' as const,
-    actionSource: 'message' as const,
-    actionSourceId: messageId,
-    messageId: messageId,
-    channelId,
-    isThreadActivity,
-    classification: ActivityClassification.PENDING,
-  }));
-
-  await activityService.createActivities(activities);
-}
-
-/**
  * Create activity when someone replies to a thread
  * @param conversationId - ID of the conversation (thread)
  * @param replyMessageId - ID of the reply message

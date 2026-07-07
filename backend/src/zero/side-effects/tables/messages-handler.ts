@@ -17,7 +17,6 @@ import {
   getOnlineChannelParticipants,
   extractSpecialMentions,
 } from '@/utils/mentionUtils';
-import { createDirectMessageActivities } from '@/utils/messageActivityUtils';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
@@ -38,7 +37,6 @@ import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { prefetchFilterData, type PrefetchedFilterData } from '@/services/notificationFilterService';
 
-const LARGE_GROUP_DM_THRESHOLD = 8;
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
 
@@ -1336,7 +1334,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     hasAttachment: boolean,
     prefetchedData?: PrefetchedFilterData,
   ): Promise<void> {
-    const isLargeGroupDm = channelParticipants.length > LARGE_GROUP_DM_THRESHOLD;
     const isReply = !!(initialMessageId && initialMessageId !== messageId);
     if (mentionType) {
       await this.handleSpecialMentionActivities(channelId, messageId, senderId, mentionType, [], initialMessageId !== messageId);
@@ -1474,10 +1471,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         this.ctx.workspaceId,
       );
     } else {
-      if (!mentionType && !isLargeGroupDm) {
-        await createDirectMessageActivities(messageId, senderId, channelId, initialMessageId !== messageId, this.ctx.workspaceId);
-      }
-
       const recipientIds = channelParticipants
         .map(p => p.userId)
         .filter(userId => userId !== senderId);
