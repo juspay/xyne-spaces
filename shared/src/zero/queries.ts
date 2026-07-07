@@ -1608,7 +1608,14 @@ export const queries = defineQueries({
     ({ args: { channelId, searchQuery } }) => {
       return zql.channel_participants
         .where('channelId', channelId)
-        .whereExists('user', u => u.where('name', 'ILIKE', `%${searchQuery}%`));
+        .whereExists('user', u =>
+          u.where((helpers: any) =>
+            helpers.or(
+              helpers.cmp('name', 'ILIKE', `%${searchQuery}%`),
+              helpers.cmp('displayName', 'ILIKE', `%${searchQuery}%`),
+            ),
+          ),
+        );
     },
   ),
   channelParticipantsPaginated: defineQuery(
