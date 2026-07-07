@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } from '@rocicorp/zero';
-import { ChannelType, ChannelRole, Schema } from '@xyne/shared';
+import { ChannelRole, Schema, isDeskChannelType } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
@@ -12,8 +12,8 @@ export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferenc
       throw new MutationACLError('Email channel preference insert failed: channel does not exist', 'email_channel_preferences');
     }
 
-    if (channel.type !== ChannelType.EMAIL) {
-      throw new MutationACLError('Email channel preference insert failed: preferences can only be set on EMAIL channels', 'email_channel_preferences');
+    if (!isDeskChannelType(channel.type)) {
+      throw new MutationACLError('Email channel preference insert failed: preferences can only be set on desk channels (EMAIL, SLACK, APP)', 'email_channel_preferences');
     }
 
     if (channel.isArchived) {
@@ -42,8 +42,8 @@ export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferenc
       throw new MutationACLError('Email channel preference update failed: channel does not exist', 'email_channel_preferences');
     }
 
-    if (channel.type !== ChannelType.EMAIL) {
-      throw new MutationACLError('Email channel preference update failed: preferences can only be set on EMAIL channels', 'email_channel_preferences');
+    if (!isDeskChannelType(channel.type)) {
+      throw new MutationACLError('Email channel preference update failed: preferences can only be set on desk channels (EMAIL, SLACK, APP)', 'email_channel_preferences');
     }
 
     if (channel.isArchived) {
