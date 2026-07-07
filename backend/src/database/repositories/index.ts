@@ -35,6 +35,7 @@ export { MessageSearchRepository } from './messageSearchRepository';
 export { BaseRepository } from './base';
 export { CallRepository } from './callRepository';
 export { CallRecordingRepository } from './callRecordingRepository';
+export { CallWhiteboardRepository } from './callWhiteboardRepository';
 export { ProjectRepository } from './projectRepository';
 export { ChannelRepository } from './channelRepository';
 export { ChannelParticipantRepository } from './channelParticipantRepository';
@@ -90,6 +91,7 @@ import {
 } from './notificationRepository';
 import { CallRepository } from './callRepository';
 import { CallRecordingRepository } from './callRecordingRepository';
+import { CallWhiteboardRepository } from './callWhiteboardRepository';
 import { MessageRepository } from './messageRepository';
 import { ProjectRepository } from './projectRepository';
 import { MessageSearchRepository } from './messageSearchRepository';
@@ -147,6 +149,7 @@ export class RepositoryContainer {
   public browserNotificationSubscriptions: BrowserNotificationSubscriptionRepository;
   public calls: CallRepository;
   public callRecordings: CallRecordingRepository;
+  public callWhiteboards: CallWhiteboardRepository;
   public messages: MessageRepository;
   public projects: ProjectRepository;
   public messageSearch: MessageSearchRepository;
@@ -201,6 +204,7 @@ export class RepositoryContainer {
     this.browserNotificationSubscriptions = new BrowserNotificationSubscriptionRepository();
     this.calls = new CallRepository();
     this.callRecordings = new CallRecordingRepository();
+    this.callWhiteboards = new CallWhiteboardRepository();
     this.messages = new MessageRepository();
     this.projects = new ProjectRepository();
     this.messageSearch = new MessageSearchRepository();

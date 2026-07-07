@@ -18,6 +18,8 @@ import {
   ChevronUp,
   Bot,
   Pencil,
+  MoreVertical,
+  PencilRuler,
   SmilePlus,
   UserLock,
   ImagePlus,
@@ -27,12 +29,30 @@ import { cn } from '../../../utils/classNames';
 import { useSelector } from '@xstate/react';
 import { roomActor } from '../../../machines/roomMachine';
 import { useDrawStore, sendDrawEvent } from '../../../hooks/useDrawStore';
+import {
+  CALL_WHITEBOARD_TOPIC,
+  sendCallWhiteboardEvent,
+  type CallWhiteboardWireMessage,
+  useCallWhiteboardStore,
+} from '../../../stores/callWhiteboardStore';
 import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
 import { callLobbyService } from '../../../services/Call/callLobbyService';
 import { InvitationResponse, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
+import {
+  getAiButtonColorClass,
+  getAiButtonDisabled,
+  getAiButtonTitle,
+  handleAiButtonClick,
+} from '../../../utils/callControls';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 
 interface ActiveCallForControls {
@@ -163,6 +183,7 @@ export function CallControls({
     state => state.context.isBackgroundBlurEnabled,
   );
   const isDrawingEnabled = useDrawStore(s => s.isDrawingEnabled);
+  const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
 
   const hostControls = useSelector(roomActor, state => state.context.hostControls);
   const externalId = useSelector(roomActor, state => state.context.externalId);
@@ -224,13 +245,15 @@ export function CallControls({
 
   // Check if current user is the controller
   const isController = localParticipantId === aiController?.id;
-  const isControlledByOther = aiController && !isController;
+  const isControlledByOther = Boolean(aiController && !isController);
 
   // Check if someone else has a pending request (disable request button)
-  const hasPendingRequestFromOther =
-    pendingControlRequest && pendingControlRequest.requesterId !== localParticipantId;
-  const isRequestingUser =
-    pendingControlRequest && pendingControlRequest.requesterId === localParticipantId;
+  const hasPendingRequestFromOther = Boolean(
+    pendingControlRequest && pendingControlRequest.requesterId !== localParticipantId,
+  );
+  const isRequestingUser = Boolean(
+    pendingControlRequest && pendingControlRequest.requesterId === localParticipantId,
+  );
 
   // Use LiveKit's device selection hooks
   const {
@@ -321,37 +344,70 @@ export function CallControls({
   // Calculate button gap based on iconSize
   const gapClass = iconSize < 16 ? 'gap-1' : iconSize < 20 ? 'gap-1.5' : 'gap-1 sm:gap-1.5';
 
-  const isAiButtonDisabled =
-    hasPendingRequestFromOther || isRequestingUser || requestedAiController;
+  const isAiButtonDisabled = getAiButtonDisabled({
+    hasPendingRequestFromOther,
+    isRequestingUser,
+    requestedAiController,
+  });
+  const aiButtonTitle = getAiButtonTitle({
+    hasPendingRequestFromOther,
+    isRequestingUser,
+    isControlledByOther,
+    isAIAssistantEnabled,
+    pendingControlRequest,
+    aiController,
+  });
+  const aiButtonColorClass = getAiButtonColorClass({
+    hasPendingRequestFromOther,
+    isController,
+    isAIAssistantEnabled,
+    isControlledByOther,
+    defaultControlClass: midnightControlClass,
+  });
 
-  const getAiButtonTitle = () => {
-    if (hasPendingRequestFromOther)
-      return `${pendingControlRequest?.requesterName || 'Unknown User'} is requesting control`;
-    if (isRequestingUser) return 'Your request is pending...';
-    if (isControlledByOther) return `Request control from ${aiController?.name || 'Unknown User'}`;
-    if (isAIAssistantEnabled) return 'Disable Xyne Automatic';
-    return 'Enable Xyne Automatic';
+  const publishWhiteboardVisibility = (isOpen: boolean, timestamp: number): void => {
+    if (!room) return;
+    const message: CallWhiteboardWireMessage = {
+      type: 'WHITEBOARD_VISIBILITY',
+      participantIdentity: room.localParticipant.identity,
+      isOpen,
+      timestamp,
+    };
+    void room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(message)), {
+      reliable: true,
+      topic: CALL_WHITEBOARD_TOPIC,
+    });
   };
 
-  const getAiButtonColorClass = () => {
-    if (hasPendingRequestFromOther) return `${midnightControlClass} cursor-not-allowed opacity-60`;
-    if (isController || (isAIAssistantEnabled && !isControlledByOther)) {
-      return 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-500/50';
-    }
-    if (isControlledByOther) {
-      return 'bg-yellow-600 hover:bg-yellow-700 text-white shadow-yellow-500/50';
-    }
-    return midnightControlClass;
+  const toggleWhiteboardFromMiniView = (): void => {
+    const nextIsOpen = !isWhiteboardOpen;
+    const timestamp = Date.now();
+    sendCallWhiteboardEvent({ type: 'setOpen', isOpen: nextIsOpen, timestamp });
+    publishWhiteboardVisibility(nextIsOpen, timestamp);
   };
 
-  const handleAiButtonClick = () => {
-    if (hasPendingRequestFromOther) return;
-    if (isControlledByOther && onRequestControl) {
-      onRequestControl();
-    } else {
-      onToggleAIAssistant();
+  const handleWhiteboardClick = (): void => {
+    if (viewMode === 'mini') {
+      toggleWhiteboardFromMiniView();
+      return;
     }
+
+    const nextIsOpen = !isWhiteboardOpen;
+    const timestamp = Date.now();
+    sendCallWhiteboardEvent({ type: 'setOpen', isOpen: nextIsOpen, timestamp });
+    publishWhiteboardVisibility(nextIsOpen, timestamp);
   };
+
+  const callToolMenuItems = [
+    {
+      id: 'whiteboard',
+      label: isWhiteboardOpen ? 'Close whiteboard' : 'Open whiteboard',
+      icon: PencilRuler,
+      isActive: isWhiteboardOpen,
+      onSelect: handleWhiteboardClick,
+      trackName: 'TOGGLE_WHITEBOARD',
+    },
+  ];
 
   return (
     <>
@@ -899,11 +955,18 @@ export function CallControls({
         {!hideAIAssistant && (
           <div className='relative'>
             <button
-              onClick={handleAiButtonClick}
+              onClick={() =>
+                handleAiButtonClick({
+                  hasPendingRequestFromOther,
+                  isControlledByOther,
+                  onRequestControl,
+                  onToggleAIAssistant,
+                })
+              }
               disabled={isAiButtonDisabled}
-              className={cn(buttonClasses, 'relative', getAiButtonColorClass())}
+              className={cn(buttonClasses, 'relative', aiButtonColorClass)}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              title={getAiButtonTitle()}
+              title={aiButtonTitle}
               data-track-category='CALLS'
               data-track-name='AI_Assistant'
               data-track-metadata={JSON.stringify({
@@ -980,6 +1043,60 @@ export function CallControls({
             )}
           </button>
         )}
+
+        {/* More options */}
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <button
+              className={cn(
+                buttonClasses,
+                isWhiteboardOpen
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/50'
+                  : midnightControlClass,
+              )}
+              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+              data-track-event='BUTTON_CLICK'
+              data-track-category='CALLS'
+              data-track-name='OPEN_CALL_TOOLS_MENU'
+              data-track-metadata={JSON.stringify({ callId })}
+              title='More options'
+            >
+              <MoreVertical
+                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                style={
+                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+                }
+              />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side='top'
+            align='end'
+            sideOffset={12}
+            className='w-52 rounded-xl border-gray-700 bg-gray-800 p-1 text-gray-100 shadow-2xl'
+          >
+            {callToolMenuItems.map(item => {
+              const Icon = item.icon;
+              return (
+                <DropdownMenuItem
+                  key={item.id}
+                  onClick={item.onSelect}
+                  className={cn(
+                    'cursor-pointer rounded-lg px-3 py-2 text-sm focus:bg-gray-700 focus:text-white',
+                    item.isActive && 'bg-gray-700 text-white',
+                  )}
+                  data-track-event='BUTTON_CLICK'
+                  data-track-category='CALLS'
+                  data-track-name={item.trackName}
+                  data-track-metadata={JSON.stringify({ callId, enabled: item.isActive })}
+                >
+                  <Icon className='h-4 w-4 text-emerald-300' aria-hidden />
+                  <span>{item.label}</span>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* Presentation Mode Button */}
         {!hidePresentationMode && onTogglePresentationMode && (

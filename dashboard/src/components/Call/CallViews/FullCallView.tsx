@@ -21,6 +21,7 @@ import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar'
 import { HostControlsPanel } from '../HostControlsPanel/HostControlsPanel';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
+import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
 import { useReactions } from '../hooks/useReactions';
 import { ReactionsOverlay } from '../components/ReactionsOverlay';
 import { CallChatPanel } from '../CallChatPanel/CallChatPanel';
@@ -32,6 +33,7 @@ import { CallPrivacyIndicator } from '../CallPrivacyIndicator/CallPrivacyIndicat
 import { createCallPrivacyActions } from '../CallPrivacyIndicator/callPrivacyActions';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import { hasJoinedExternalParticipant } from '../callParticipant.utils';
+import { CallWhiteboardView } from '../CallWhiteboard';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
 import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
@@ -172,6 +174,7 @@ export function FullCallView({
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
   const [isHostControlsOpen, setIsHostControlsOpen] = useState(false);
+  const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
   // Track local participant's network quality
   const networkQuality = useParticipantNetworkQuality(room?.localParticipant ?? null);
@@ -479,7 +482,24 @@ export function FullCallView({
       </div>
 
       <CallStateTransition connectionState={connectionState} machineState={machineState}>
-        {focusedScreenShare ? (
+        {isWhiteboardOpen ? (
+          <div
+            className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'
+            style={{
+              paddingRight: isRightSidebarOpen ? 'min(500px, 100vw)' : '0',
+              paddingLeft: isCallChatVisible ? 'min(400px, 100vw)' : '0',
+            }}
+          >
+            <CallWhiteboardView
+              participants={participants}
+              room={room}
+              className='h-full'
+              showSidebar={true}
+              aiController={aiController}
+              requestedAiController={requestedAiController}
+            />
+          </div>
+        ) : focusedScreenShare ? (
           // Screen share layout with sidebar
           <div
             className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'

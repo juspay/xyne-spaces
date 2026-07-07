@@ -14,13 +14,11 @@ type ActiveCallWithRelations = QueryResultType<typeof queries.userActiveCalls>[n
 type CallParticipants = NonNullable<ActiveCallWithRelations['participants']>;
 
 /**
- * Utility function to filter active participants (ACCEPTED and not left)
+ * Utility function to filter accepted participants
  * @param participants - Array of call participants
- * @returns Array of active participants
+ * @returns Array of accepted participants
  */
-export const getActiveParticipants = <
-  T extends { response?: InvitationResponse | string | null; leftAt?: number | null },
->(
+export const getActiveParticipants = <T extends { response?: InvitationResponse | string | null }>(
   participants: readonly T[],
 ): T[] => {
   return participants.filter(p => p.response === InvitationResponse.ACCEPTED);
