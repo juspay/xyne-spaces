@@ -256,6 +256,14 @@ export const ThreadMessages = ({
   );
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
   const isMessagesLoaded = messagesDetails.type === 'complete' || messagesDetails.type === 'error';
+
+  const threadParticipantIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of messages) {
+      if (m.senderId) set.add(m.senderId);
+    }
+    return set;
+  }, [messages]);
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const channel = useChannel(derivedChannelId);
@@ -949,6 +957,7 @@ export const ThreadMessages = ({
                   conversation={conversation ?? undefined}
                   placeholder='Reply to this thread...'
                   hasTicket={hasTicketInMessages}
+                  threadParticipantIds={threadParticipantIds}
                 />
               </div>
             ) : (
@@ -1389,6 +1398,7 @@ export const ThreadMessages = ({
                         conversation={conversation ?? undefined}
                         placeholder='Reply to this thread...'
                         hasTicket={hasTicketInMessages}
+                        threadParticipantIds={threadParticipantIds}
                       />
                     </div>
                   ) : (
@@ -1830,6 +1840,7 @@ export const ThreadMessages = ({
                       conversation={conversation ?? undefined}
                       placeholder='Reply to this thread...'
                       hasTicket={hasTicketInMessages}
+                      threadParticipantIds={threadParticipantIds}
                     />
                   </div>
                 ) : (

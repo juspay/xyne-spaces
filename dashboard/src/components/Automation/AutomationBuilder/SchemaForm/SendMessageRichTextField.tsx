@@ -44,9 +44,12 @@ export function SendMessageRichTextField({
   // Channel participants are only resolvable when the channel is a concrete id;
   // for a {{variable}} channel we fall back to workspace-wide mention search.
   const concreteChannelId = channelId && !channelId.includes('{{') ? channelId : undefined;
-  const { results: mentionItems, searchMentions } = useMentionSearch(concreteChannelId, {
-    includeSpecialMentions: true,
-  });
+  const { results: mentionItems, searchMentions } = useMentionSearch(
+    concreteChannelId,
+    undefined,
+    undefined,
+    { includeSpecialMentions: true },
+  );
 
   const variableButton = (
     <Popover

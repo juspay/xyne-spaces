@@ -97,6 +97,7 @@ interface ChatInputProps {
   showTypingIndicator?: boolean;
   hasTicket?: boolean;
   isForwardedContent?: boolean;
+  threadParticipantIds?: ReadonlySet<string>;
 }
 
 const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
@@ -115,6 +116,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       onCancel,
       hasTicket = false,
       isForwardedContent = false,
+      threadParticipantIds,
     },
     ref,
   ) => {
@@ -166,13 +168,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     }, [isMobile, isXyneAIOpen]);
 
     const { allowThreadBroadcastMentions } = useThreadBroadcastMentions();
-    const {
-      results: mentionResults,
-      allUsers,
-      searchMentions,
-    } = useMentionSearch(channelId, {
-      includeSpecialMentions: !conversation?.conversationId || allowThreadBroadcastMentions,
-    });
     const [channelSearchQuery, setChannelSearchQuery] = useState('');
     const channelResults = useChannelSearch(channelSearchQuery, 10);
     const conversationId = conversation?.conversationId;
@@ -238,6 +233,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
     const [ticketDescription, setTicketDescription] = useState('');
     const [recentScheduledFor, setRecentScheduledFor] = useState<number | null>(null);
+
+    const {
+      results: mentionResults,
+      allUsers,
+      searchMentions,
+    } = useMentionSearch(channelId, threadParticipantIds, conversationId, {
+      includeSpecialMentions: !conversationId || allowThreadBroadcastMentions,
+    });
     const channel = useChannel(channelId);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
     const upcomingScheduledInContext = useUpcomingDelayedMessage(channelId, conversationId ?? null);
@@ -528,6 +531,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           result: ReturnType<typeof zero.mutate>,
           onReject: () => void,
           onSuccess?: () => void,
+          onServerSuccess?: () => void,
           logMeta?: Record<string, unknown>,
         ) => {
           result.client
@@ -570,7 +574,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                     stage: 'server',
                   });
                 }
+                return;
               }
+              onServerSuccess?.();
             })
             .catch(error => {
               if (isTransientError(error)) {
@@ -644,7 +650,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }),
             );
             saveDraft(lookupId, '', '');
-            handleMutationResult(result, restoreDraft, undefined, {
+            handleMutationResult(result, restoreDraft, undefined, undefined, {
               channelId,
               conversationId,
               isReply: true,
@@ -711,9 +717,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             handleMutationResult(
               result,
               restoreDraft,
-              () => {
-                dispatchChatMessageSentEvent(channelId);
-              },
+              () => dispatchChatMessageSentEvent(channelId),
+              undefined,
               {
                 channelId,
                 isNewConversation: true,
@@ -768,6 +773,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         allUsersForMentionResolution,
         onMessageChange,
         isOffline,
+        user?.id,
+        context.workspaceId,
         allowThreadBroadcastMentions,
       ],
     );
