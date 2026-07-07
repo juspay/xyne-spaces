@@ -12,7 +12,7 @@ export class TeamIntelligenceOrgController {
    *
   * Response:
   *   orgSummary - flattened list of org summary text lines (string[])
-  *   prMerged   - list of merged PR summaries/titles (string[])
+  *   prTotal    - list of PR summaries/titles in the selected range (string[])
   *   aiUsages   - summed token/spend fields across all users in that range
    */
   getOrgSummary = async (req: Request, res: Response): Promise<void> => {

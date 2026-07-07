@@ -27,7 +27,7 @@ const OrgQuickInsights = (): ReactElement => {
     limit: 4,
   });
 
-  const totalPrMerged = data?.prMerged?.length || 0;
+  const totalPrs = data?.prTotal?.length || 0;
   const totalAiTokens = data?.aiUsages?.total_tokens || 0;
   const solvedTickets = ticketRecapsData?.ticketMetrics?.solvedCount || 0;
   const totalTickets = ticketRecapsData?.ticketMetrics?.totalCount || 0;
@@ -45,9 +45,9 @@ const OrgQuickInsights = (): ReactElement => {
       <div className='grid gap-3 grid-cols-1 md:grid-cols-2'>
         <StatCard
           title='Development Velocity'
-          value={totalPrMerged}
+          value={totalPrs}
           icon={GitCommitIcon}
-          description='PRs Merged'
+          description='Total PRs'
           isLoading={isOrgSummaryLoading}
         />
         <StatCard

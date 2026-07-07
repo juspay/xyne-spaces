@@ -2,7 +2,7 @@ import { apiInstance } from '../clients/apiClient';
 
 export interface OrgSummaryResponse {
   orgSummary: string[];
-  prMerged: string[];
+  prTotal: string[];
   aiUsages: {
     total_tokens: number;
     prompt_tokens: number;

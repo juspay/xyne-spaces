@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
+import { logger } from '@/utils/logger';
 
 export interface OrgSummaryDateRangeFilters {
   from: Date;
@@ -16,7 +17,7 @@ export interface AiUsageAggregate {
 
 export interface OrgDashboardSummary {
   orgSummary: string[];
-  prMerged: string[];
+  prTotal: string[];
   aiUsages: AiUsageAggregate;
 }
 
@@ -66,6 +67,9 @@ const ORG_BULLET_CATEGORIES = new Set([
   'helped',
   'milestone',
 ]);
+
+// Default concurrency for hydrating stored JSON payloads. Extracted from magic numbers.
+const DEFAULT_HYDRATION_CONCURRENCY = 8;
 
 function inferBulletCategory(text: string): string {
   const normalized = text.toLowerCase();
@@ -123,6 +127,45 @@ function buildBulletTitle(text: string): string {
 }
 
 class TeamIntelligenceOrgRepository {
+  private async mapWithConcurrency<T, U>(
+    items: T[],
+    fn: (item: T) => Promise<U>,
+    concurrency = DEFAULT_HYDRATION_CONCURRENCY,
+  ): Promise<(U | null)[]> {
+    const results: (U | null)[] = new Array(items.length).fill(null);
+    let idx = 0;
+
+    const worker = async () => {
+      while (idx < items.length) {
+        const i = idx++;
+        if (i >= items.length) break;
+        try {
+          results[i] = await fn(items[i]);
+        } catch (err) {
+          try {
+            logger.warn('[TEAM-INTEL] mapWithConcurrency worker failed', {
+              index: i,
+              itemType: typeof items[i],
+              error: err,
+            });
+          } catch {
+            // Swallow logging errors to avoid interfering with main flow
+          }
+          results[i] = null;
+        }
+      }
+    };
+
+    const workers: Promise<void>[] = [];
+    const workerCount = Math.min(concurrency, items.length);
+    for (let w = 0; w < workerCount; w++) {
+      workers.push(worker());
+    }
+
+    await Promise.all(workers);
+    return results;
+  }
+
   /**
    * Returns org summaries list + aggregated merged PRs + aggregated AI usage
    * for all batches whose reportDate falls within [from, to] (inclusive).
@@ -156,12 +199,18 @@ class TeamIntelligenceOrgRepository {
     ]);
 
     const orgSummary: string[] = [];
-    const prMerged: string[] = [];
+    const prTotal: string[] = [];
 
-    for (const org of orgSummaries) {
-      const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
-        summaryText?: unknown[];
-      }>(null, org.contentUrl);
+    const orgContents = await this.mapWithConcurrency(
+      orgSummaries,
+      async (org) =>
+        teamIntelligenceContentStorageService.hydrateJsonPayload<{
+          summaryText?: unknown[];
+        }>(null, org.contentUrl),
+      DEFAULT_HYDRATION_CONCURRENCY,
+    );
+
+    for (const content of orgContents) {
       const summaries = content?.summaryText as unknown;
       if (Array.isArray(summaries)) {
         for (const summary of summaries) {
@@ -180,21 +229,26 @@ class TeamIntelligenceOrgRepository {
       currency: 'USD',
     };
 
-    for (const user of userIngestions) {
-      const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
-        pullRequests?: unknown[];
-      }>(null, user.contentUrl);
+    const userContents = await this.mapWithConcurrency(
+      userIngestions,
+      async (user) =>
+        teamIntelligenceContentStorageService.hydrateJsonPayload<{
+          pullRequests?: unknown[];
+        }>(null, user.contentUrl),
+      DEFAULT_HYDRATION_CONCURRENCY,
+    );
+
+    for (let i = 0; i < userIngestions.length; i++) {
+      const user = userIngestions[i];
+      const content = userContents[i] ?? null;
       const prs = (content?.pullRequests ?? []) as Array<{
         prState?: string;
         prSummary?: string;
         prTitle?: string;
       }>;
+
       if (Array.isArray(prs)) {
         for (const pr of prs) {
-          if (pr.prState !== 'merged') {
-            continue;
-          }
-
           const summary =
             typeof pr.prSummary === 'string' && pr.prSummary.trim()
               ? pr.prSummary.trim()
@@ -203,7 +257,7 @@ class TeamIntelligenceOrgRepository {
                 : '';
 
           if (summary) {
-            prMerged.push(summary);
+            prTotal.push(summary);
           }
         }
       }
@@ -223,7 +277,7 @@ class TeamIntelligenceOrgRepository {
     // Round spend to 6 decimal places to avoid floating-point noise
     aiAgg.total_spend = Math.round(aiAgg.total_spend * 1_000_000) / 1_000_000;
 
-    return { orgSummary, prMerged, aiUsages: aiAgg };
+    return { orgSummary, prTotal, aiUsages: aiAgg };
   }
 
   /**
@@ -359,7 +413,17 @@ class TeamIntelligenceOrgRepository {
       return created;
     };
 
-    for (const teamSummary of teamSummaries) {
+    const teamContents = await this.mapWithConcurrency(
+      teamSummaries,
+      async (teamSummary) =>
+        teamIntelligenceContentStorageService.hydrateJsonPayload<{
+          summaryText?: unknown[];
+        }>(null, teamSummary.contentUrl),
+      DEFAULT_HYDRATION_CONCURRENCY,
+    );
+
+    for (let i = 0; i < teamSummaries.length; i++) {
+      const teamSummary = teamSummaries[i];
       const teamId = typeof teamSummary.teamId === 'string' ? teamSummary.teamId.trim() : '';
       const teamName = teamSummary.teamName.trim();
       if (!teamId) {
@@ -367,9 +431,7 @@ class TeamIntelligenceOrgRepository {
       }
 
       const aggregate = getOrCreateTeam(teamId, teamName || 'No Team');
-      const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
-        summaryText?: unknown[];
-      }>(null, teamSummary.contentUrl);
+      const content = teamContents[i] ?? null;
       const summaries = content?.summaryText as unknown;
       if (Array.isArray(summaries)) {
         for (const summary of summaries) {
@@ -380,7 +442,17 @@ class TeamIntelligenceOrgRepository {
       }
     }
 
-    for (const user of userIngestions) {
+    const userContents = await this.mapWithConcurrency(
+      userIngestions,
+      async (user) =>
+        teamIntelligenceContentStorageService.hydrateJsonPayload<{
+          pullRequests?: unknown[];
+        }>(null, user.contentUrl),
+      DEFAULT_HYDRATION_CONCURRENCY,
+    );
+
+    for (let i = 0; i < userIngestions.length; i++) {
+      const user = userIngestions[i];
       const teamId = typeof user.teamId === 'string' ? user.teamId.trim() : '';
       const teamName = typeof user.teamName === 'string' ? user.teamName.trim() : '';
       if (!teamId) {
@@ -388,11 +460,9 @@ class TeamIntelligenceOrgRepository {
       }
 
       const aggregate = getOrCreateTeam(teamId, teamName || 'No Team');
-      const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
-        pullRequests?: unknown[];
-      }>(null, user.contentUrl);
+      const content = userContents[i] ?? null;
       const prs = Array.isArray(content?.pullRequests)
-        ? (content.pullRequests as Array<{
+        ? (content!.pullRequests as Array<{
             commits?: Array<Record<string, unknown>>;
           }>)
         : [];

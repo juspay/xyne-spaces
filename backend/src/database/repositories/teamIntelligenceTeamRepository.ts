@@ -463,9 +463,7 @@ class TeamIntelligenceTeamRepository {
       };
     }
 
-    const now = new Date();
-
-    const [total, recaps, channels, ticketRecords, overdueTicketRecords] = await Promise.all([
+    const [total, recaps, channels] = await Promise.all([
       db.recap.count({
         where: {
           entityType: 'CHANNEL',
@@ -511,50 +509,9 @@ class TeamIntelligenceTeamRepository {
           name: true,
         },
       }),
-      db.ticket.findMany({
-        where: {
-          channelId: {
-            in: channelIds,
-          },
-          createdAt: {
-            gte: rangeStart,
-            lte: rangeEnd,
-          },
-        },
-        orderBy: [{ createdAt: 'desc' }, { updatedAt: 'desc' }],
-      }),
-      db.ticket.findMany({
-        where: {
-          channelId: {
-            in: channelIds,
-          },
-          createdAt: {
-            gte: rangeStart,
-            lte: rangeEnd,
-          },
-          eta: {
-            lt: now,
-          },
-          statusV2: {
-            in: ['TODO', 'STARTED', 'PAUSED'],
-          },
-        },
-        orderBy: [{ eta: 'asc' }, { updatedAt: 'desc' }],
-      }),
     ]);
-
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
     const channelNameById = new Map(channels.map((channel) => [channel.id, channel.name]));
-
-    const ticketMetrics = {
-      totalCount: ticketRecords.length,
-      solvedCount: ticketRecords.filter((ticket) => ticket.statusV2 === 'COMPLETED').length,
-      todoCount: ticketRecords.filter((ticket) => ticket.statusV2 === 'TODO').length,
-      startedCount: ticketRecords.filter((ticket) => ticket.statusV2 === 'STARTED').length,
-      pausedCount: ticketRecords.filter((ticket) => ticket.statusV2 === 'PAUSED').length,
-      cancelledCount: ticketRecords.filter((ticket) => ticket.statusV2 === 'CANCELLED').length,
-      overdueCount: overdueTicketRecords.length,
-    };
 
     return {
       from: rangeStart.toISOString().slice(0, 10),
@@ -571,8 +528,85 @@ class TeamIntelligenceTeamRepository {
         userId: recap.userId,
         channelName: channelNameById.get(recap.entityId) ?? recap.entityId,
       })),
-      ticketMetrics,
-      overdueTickets: overdueTicketRecords.map((ticket) => ({
+    };
+  }
+
+  async getChannelTicketsByChannelIdsAndDate({
+    from,
+    to,
+    channelIds,
+    page,
+    limit,
+  }: {
+    from: Date;
+    to: Date;
+    channelIds: string[];
+    page: number;
+    limit: number;
+  }) {
+    const rangeStart = new Date(from);
+    rangeStart.setUTCHours(0, 0, 0, 0);
+
+    const rangeEnd = new Date(to);
+    rangeEnd.setUTCHours(23, 59, 59, 999);
+
+    if (channelIds.length === 0) {
+      return {
+        from: rangeStart.toISOString().slice(0, 10),
+        to: rangeEnd.toISOString().slice(0, 10),
+        page,
+        limit,
+        total: 0,
+        totalPages: 0,
+        tickets: [],
+        ticketMetrics: {
+          totalCount: 0,
+          solvedCount: 0,
+          todoCount: 0,
+          startedCount: 0,
+          pausedCount: 0,
+          cancelledCount: 0,
+          overdueCount: 0,
+        },
+      };
+    }
+
+    const now = new Date();
+
+    const [total, tickets, solvedCount, todoCount, startedCount, pausedCount, cancelledCount, overdueCount] = await Promise.all([
+      db.ticket.count({
+        where: {
+          channelId: { in: channelIds },
+          createdAt: { gte: rangeStart, lte: rangeEnd },
+        },
+      }),
+      db.ticket.findMany({
+        where: {
+          channelId: { in: channelIds },
+          createdAt: { gte: rangeStart, lte: rangeEnd },
+        },
+        orderBy: [{ createdAt: 'desc' }, { updatedAt: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'COMPLETED' } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'TODO' } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'STARTED' } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'PAUSED' } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, statusV2: 'CANCELLED' } }),
+      db.ticket.count({ where: { channelId: { in: channelIds }, createdAt: { gte: rangeStart, lte: rangeEnd }, eta: { lt: now }, statusV2: { in: ['TODO', 'STARTED', 'PAUSED'] } } }),
+    ]);
+
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+
+    return {
+      from: rangeStart.toISOString().slice(0, 10),
+      to: rangeEnd.toISOString().slice(0, 10),
+      page,
+      limit,
+      total,
+      totalPages,
+      tickets: tickets.map((ticket) => ({
         ...ticket,
         createdAt: ticket.createdAt.toISOString(),
         updatedAt: ticket.updatedAt.toISOString(),
@@ -582,6 +616,15 @@ class TeamIntelligenceTeamRepository {
         firstRespondedAt: ticket.firstRespondedAt ? ticket.firstRespondedAt.toISOString() : null,
         lastEmailAt: ticket.lastEmailAt.toISOString(),
       })),
+      ticketMetrics: {
+        totalCount: total,
+        solvedCount,
+        todoCount,
+        startedCount,
+        pausedCount,
+        cancelledCount,
+        overdueCount,
+      },
     };
   }
 }

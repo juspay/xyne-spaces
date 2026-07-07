@@ -282,7 +282,7 @@ class TeamIntelligenceTeamDashboardService {
     return {
       from: recapResult.from,
       to: recapResult.to,
-        teamId,
+      teamId,
       teamName,
       page,
       limit,
@@ -296,9 +296,138 @@ class TeamIntelligenceTeamDashboardService {
       total: recapResult.total,
       totalPages: recapResult.totalPages,
       recaps: recapResult.recaps,
-      ticketMetrics: recapResult.ticketMetrics,
-      overdueTickets: recapResult.overdueTickets,
     };
+    } catch (error) {
+      logger.error('[TeamIntelligenceTeam] getTeamChannelTickets failed', { error, input });
+      throw error;
+    }
+  }
+
+  async getTeamChannelTickets(input: { from: Date; to: Date; teamId: string; page: number; limit: number }) {
+    try {
+      const { from, to, teamId, page, limit } = input;
+      const display = await teamIntelligenceTeamRepository.findLatestTeamDisplayByTeamId(teamId, { from, to });
+      const teamName = display?.teamName ?? 'No Team';
+      const allTeamNames = await teamIntelligenceTeamRepository.findAllTeamNamesByTeamId(teamId);
+      const teamNamesForMatching = allTeamNames.length > 0 ? allTeamNames : [teamName];
+      const cacheKey = this.buildTeamChannelMatchCacheKey(teamId, from, to);
+      const cacheTtlSeconds = 5 * 24 * 60 * 60;
+
+      const candidates = await teamIntelligenceTeamRepository.getChannelRecapChannelsByDate({ from, to });
+      if (candidates.length === 0) {
+        return {
+          from: from.toISOString().slice(0, 10),
+          to: to.toISOString().slice(0, 10),
+          teamId,
+          teamName,
+          page,
+          limit,
+          cache: {
+            hit: false,
+            key: cacheKey,
+            ttlSeconds: cacheTtlSeconds,
+          },
+          matchedChannels: [],
+          totalMatchedChannels: 0,
+          total: 0,
+          totalPages: 0,
+          tickets: [],
+          ticketMetrics: {
+            totalCount: 0,
+            solvedCount: 0,
+            todoCount: 0,
+            startedCount: 0,
+            pausedCount: 0,
+            cancelledCount: 0,
+            overdueCount: 0,
+          },
+        };
+      }
+
+      let matchedChannelIds: string[] = [];
+      let cacheHit = false;
+
+      try {
+        const cachedRaw = await redisService.get(cacheKey);
+        if (cachedRaw) {
+          try {
+            const cachedParsed = JSON.parse(cachedRaw) as {
+              matchedChannelIds?: unknown;
+              matchedChannels?: unknown;
+            };
+            const allowedIds = new Set(candidates.map((candidate) => candidate.channelId));
+            matchedChannelIds = Array.isArray(cachedParsed.matchedChannelIds)
+              ? cachedParsed.matchedChannelIds
+                  .filter((value): value is string => typeof value === 'string')
+                  .filter((id) => allowedIds.has(id))
+              : [];
+            cacheHit = matchedChannelIds.length > 0;
+          } catch (parseError) {
+            logger.warn('[TEAM-INTEL-TEAM] Redis cache key parse failed', { cacheKey, parseError });
+            cacheHit = false;
+          }
+        }
+      } catch (redisGetError) {
+        logger.warn('[TEAM-INTEL-TEAM] Redis cache read failed, proceeding without cache', { redisGetError });
+        cacheHit = false;
+      }
+
+      if (!cacheHit) {
+        matchedChannelIds = await this.llmMatchChannelIds(teamNamesForMatching, candidates);
+        if (matchedChannelIds.length === 0) {
+          matchedChannelIds = this.fallbackMatchChannelIds(teamName, candidates);
+        }
+
+        try {
+          await redisService.set(
+            cacheKey,
+            JSON.stringify({
+              matchedChannelIds,
+              matchedChannels: candidates
+                .filter((candidate) => matchedChannelIds.includes(candidate.channelId))
+                .map((candidate) => ({ channelId: candidate.channelId, channelName: candidate.channelName })),
+              teamId,
+              teamName: this.normalizeTeamName(teamName),
+            }),
+            cacheTtlSeconds
+          );
+        } catch (redisSetError) {
+          logger.warn('[TEAM-INTEL-TEAM] Redis cache write failed, continuing without cache', { redisSetError, cacheKey });
+        }
+      }
+
+      const ticketsResult = await teamIntelligenceTeamRepository.getChannelTicketsByChannelIdsAndDate({
+        from,
+        to,
+        channelIds: matchedChannelIds,
+        page,
+        limit,
+      });
+
+      const matchedChannelSet = new Set(matchedChannelIds);
+      const matchedChannels = candidates.filter((candidate) => matchedChannelSet.has(candidate.channelId));
+      const orderMap = new Map(matchedChannelIds.map((id, index) => [id, index]));
+      matchedChannels.sort((a, b) => (orderMap.get(a.channelId) ?? Number.MAX_SAFE_INTEGER) - (orderMap.get(b.channelId) ?? Number.MAX_SAFE_INTEGER));
+
+      return {
+        from: ticketsResult.from,
+        to: ticketsResult.to,
+        teamId,
+        teamName,
+        page,
+        limit,
+        cache: {
+          hit: cacheHit,
+          key: cacheKey,
+          ttlSeconds: cacheTtlSeconds,
+        },
+        matchedChannels,
+        totalMatchedChannels: matchedChannels.length,
+        total: ticketsResult.total,
+        totalPages: ticketsResult.totalPages,
+        tickets: ticketsResult.tickets,
+        ticketMetrics: ticketsResult.ticketMetrics,
+      };
     } catch (error) {
       logger.error('[TeamIntelligenceTeam] getTeamChannelRecaps failed', { error, input });
       throw error;
