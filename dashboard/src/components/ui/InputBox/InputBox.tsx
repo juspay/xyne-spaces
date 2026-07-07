@@ -93,6 +93,7 @@ import type { VoiceInputHandle } from './VoiceInput';
 import { v4 as uuidv4 } from 'uuid';
 import { logger, Event } from '../../../utils/logger';
 import { ScheduleMessageDialog } from '../ScheduleMessageDialog/ScheduleMessageDialog';
+import { Checkbox } from '../Checkbox/Checkbox';
 
 /** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
 const getFileExtension = (name: string): string => {
@@ -1466,23 +1467,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             {/* Show checkbox for "also send to channel" functionality */}
             {onAlsoSendToChannelChange && (
-              <div className='flex items-center space-x-1.5 px-3 py-1'>
-                <input
-                  type='checkbox'
-                  id='also-send-to-channel'
-                  checked={alsoSendToChannelChecked}
-                  onChange={e => {
-                    onAlsoSendToChannelChange(e.target.checked);
-                  }}
-                  className='h-3 w-3 text-primary focus:ring-ring border-input rounded'
+              <div className='flex items-center px-3 py-1'>
+                <Checkbox
+                  size='sm'
+                  checked={alsoSendToChannelChecked ?? false}
+                  onChange={onAlsoSendToChannelChange}
                   disabled={disabled || isSending}
+                  label={`Also send ${isDMThread ? 'as direct message' : 'to channel'}`}
                 />
-                <label
-                  htmlFor='also-send-to-channel'
-                  className='text-xs text-muted-foreground cursor-pointer'
-                >
-                  Also send {isDMThread ? 'as direct message' : 'to channel'}
-                </label>
               </div>
             )}
 
