@@ -74,7 +74,6 @@ import {
   getCanvasFolderNameConflictMessage,
   rethrowCanvasFolderNameConflict,
   resolveCanvasHierarchy,
-  DeskType,
   VCSProviderType,
   ReleaseTrackingMode,
   parseRepliesMd,
@@ -86,6 +85,7 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
   isDeskChannelType,
+  deskTypeForChannelType,
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import { v4 as uuidv4 } from 'uuid';
@@ -13188,6 +13188,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
             });
           } else {
+            const channel = await tx.run(zql.channels.where('id', channelId).one());
+            const deskType = deskTypeForChannelType(channel?.type);
             await tx.mutate.email_channel_preferences.insert({
               channelId,
               ownerUserId: ownerUserId ?? authData.sub,
@@ -13202,7 +13204,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               emailMergeMode: emailMergeMode ?? EmailMergeMode.ENABLED,
               twoStepSendEnabled: twoStepSendEnabled ?? false,
               autoDraftMode: autoDraftMode ?? AutoDraftMode.OFF,
-              deskType: DeskType.EMAIL,
+              deskType,
               autoDraftAgentSlug: autoDraftAgentSlug ?? null,
               priorityClassificationEnabled: false,
               priorityClassificationPrompt: null,
@@ -13233,6 +13235,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               subCategoryField: subCategoryField ?? null,
             });
           } else {
+            const channel = await tx.run(zql.channels.where('id', channelId).one());
             await tx.mutate.email_channel_preferences.insert({
               channelId,
               ownerUserId: ctx.userID,
@@ -13245,7 +13248,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               subCategoryField: subCategoryField ?? null,
               defaultCc: null,
               autoDraftMode: AutoDraftMode.OFF,
-            deskType: DeskType.EMAIL,
+              deskType: deskTypeForChannelType(channel?.type),
               priorityClassificationEnabled: false,
               priorityClassificationPrompt: null,
               priorityClassificationThreshold: 0.5,
@@ -13273,6 +13276,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,
             });
           } else {
+            const channel = await tx.run(zql.channels.where('id', channelId).one());
             await tx.mutate.email_channel_preferences.insert({
               channelId,
               ownerUserId: ctx.userID,
@@ -13285,7 +13289,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               subCategoryField: null,
               defaultCc: null,
               autoDraftMode: AutoDraftMode.OFF,
-            deskType: DeskType.EMAIL,
+              deskType: deskTypeForChannelType(channel?.type),
               priorityClassificationEnabled,
               priorityClassificationPrompt: priorityClassificationPrompt ?? null,
               priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,

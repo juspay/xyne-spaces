@@ -84,7 +84,7 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
-import { isDeskChannelType } from '../utils/channel.js';
+import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
@@ -8260,6 +8260,7 @@ export const mutators = defineMutators({
             ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
           });
         } else {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
           await tx.mutate.email_channel_preferences.insert({
             channelId,
             ownerUserId: ownerUserId ?? ctx.userID,
@@ -8275,7 +8276,7 @@ export const mutators = defineMutators({
             twoStepSendEnabled: twoStepSendEnabled ?? false,
             autoDraftMode: autoDraftMode ?? AutoDraftMode.OFF,
             autoDraftAgentSlug: autoDraftAgentSlug ?? null,
-            deskType: DeskType.EMAIL,
+            deskType: deskTypeForChannelType(channel?.type),
             priorityClassificationEnabled: false,
             priorityClassificationPrompt: null,
             priorityClassificationThreshold: 0.5,
@@ -8305,6 +8306,7 @@ export const mutators = defineMutators({
             subCategoryField: subCategoryField ?? null,
           });
         } else {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
           await tx.mutate.email_channel_preferences.insert({
             channelId,
             ownerUserId: ctx.userID,
@@ -8317,7 +8319,7 @@ export const mutators = defineMutators({
             subCategoryField: subCategoryField ?? null,
             defaultCc: null,
             autoDraftMode: AutoDraftMode.OFF,
-            deskType: DeskType.EMAIL,
+            deskType: deskTypeForChannelType(channel?.type),
             priorityClassificationEnabled: false,
             priorityClassificationPrompt: null,
             priorityClassificationThreshold: 0.5,
@@ -8345,6 +8347,7 @@ export const mutators = defineMutators({
             priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,
           });
         } else {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
           await tx.mutate.email_channel_preferences.insert({
             channelId,
             ownerUserId: ctx.userID,
@@ -8357,7 +8360,7 @@ export const mutators = defineMutators({
             subCategoryField: null,
             defaultCc: null,
             autoDraftMode: AutoDraftMode.OFF,
-            deskType: DeskType.EMAIL,
+            deskType: deskTypeForChannelType(channel?.type),
             priorityClassificationEnabled,
             priorityClassificationPrompt: priorityClassificationPrompt ?? null,
             priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,
