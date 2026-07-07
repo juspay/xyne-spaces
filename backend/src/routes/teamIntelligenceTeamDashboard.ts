@@ -12,7 +12,9 @@ router.get('/pr', teamIntelligenceTeamController.getPrByDate);
 // GET /api/team-intelligence-dashboard/team/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123
 router.get('/usage', teamIntelligenceTeamController.getTeamUsageSummary);
 
-// GET /api/team-intelligence-dashboard/team/channel-recaps?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123&page=1&limit=10
+// GET /api/team-intelligence-dashboard/team/channel-recaps?from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&limit=10 (provide `teamId` as a query parameter)
 router.get('/channel-recaps', teamIntelligenceTeamController.getTeamChannelRecaps);
+// GET /api/team-intelligence-dashboard/team/channel-tickets?from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&limit=10 (provide `teamId` as a query parameter)
+router.get('/channel-tickets', teamIntelligenceTeamController.getTeamChannelTickets);
 
 export default router;
