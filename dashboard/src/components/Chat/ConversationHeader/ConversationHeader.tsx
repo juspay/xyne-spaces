@@ -266,7 +266,7 @@ const ConversationHeader = ({
               data-track-name='OPEN_CHANNEL_INFO'
               data-track-metadata={JSON.stringify({ channelId: channel.id, isDM })}
             >
-              <span className='shrink-0'>
+              <span className='shrink-0 inline-flex items-center leading-none'>
                 <ChannelIcon channel={channel} />
               </span>
               <span className={cn('visual-regression-hide truncate', isChannelDM && 'pt-1')}>
