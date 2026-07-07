@@ -1457,6 +1457,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
   }, [editingDescription]);
 
+  useEffect(() => {
+    if (!editingDescription) return;
+    const el = descriptionTextareaRef.current;
+    if (!el) return;
+    el.style.height = '0px';
+    el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
+  }, [editingDescription, descriptionValue]);
+
   // Auto-focus tag input when dropdown opens
   useEffect(() => {
     if (showTagDropdown && tagInputRef.current) {
@@ -2642,7 +2650,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     setEditingDescription(false);
                   }
                 }}
-                className='w-full text-sm text-foreground leading-relaxed outline-none bg-transparent resize-none min-h-[100px]'
+                className='w-full text-sm text-foreground leading-relaxed outline-none bg-transparent resize-none min-h-[150px] overflow-y-auto'
                 data-track-category='Tickets'
                 data-track-name='EditDescription'
                 data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
