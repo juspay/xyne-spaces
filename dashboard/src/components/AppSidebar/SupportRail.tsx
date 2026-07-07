@@ -85,6 +85,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
     label: 'Dashboards',
     icon: ChartScatter,
     path: '/analytics-dashboard',
+    gatedPath: '/analytics',
     isActive: ctx => ctx.activeRoute === '/analytics-dashboard',
   },
   {

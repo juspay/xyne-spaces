@@ -716,6 +716,7 @@ const MobileNavbar = ({
   const mobileNavItems = filteredNavigationItems.filter(item => {
     // Filter analytics based on admin access
     if (item.path === '/analytics' && !analyticsPermission) return false;
+    if (item.path === '/dashboards' && !analyticsPermission) return false;
     if (item.path === '/recorder' && !reactNativeBridge.isAvailable()) return false;
 
     return true;

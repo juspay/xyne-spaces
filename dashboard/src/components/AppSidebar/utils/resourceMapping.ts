@@ -7,6 +7,7 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/tickets': 'WORKFLOWS',
   '/knowledge-base': 'KNOWLEDGE-BASE',
   '/analytics': 'ANALYTICS',
+  '/dashboards': 'ANALYTICS',
   '/user-groups': 'USER-GROUPS',
   '/listProjects': 'LISTPROJECTS',
   '/resource-access': 'USERS',
