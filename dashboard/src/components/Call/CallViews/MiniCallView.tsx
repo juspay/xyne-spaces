@@ -3,17 +3,21 @@ import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import type { Room } from 'livekit-client';
 import { ConnectionState } from 'livekit-client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import ThreadMessages from '../../Chat/ThreadPannel';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
+import { findRemotePresenter } from '../ParticipantGrid/sortParticipants';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
+import { useAuth } from '../../../hooks/useAuth';
+import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
+import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
 
 interface MiniCallViewProps {
   participants: ParticipantInfo[];
@@ -103,6 +107,9 @@ export function MiniCallView({
   raisedHands = [],
   onToggleHandRaise,
 }: MiniCallViewProps): React.ReactElement {
+  const { user } = useAuth();
+  const isTelepresenceEnabled = useTelepresenceEnabled(user?.email);
+
   const participantCount = participants.length;
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -121,6 +128,7 @@ export function MiniCallView({
 
   // State for participants sidebar
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
+  const [isPresentationMode, setIsPresentationMode] = useState(false);
 
   // Close participants sidebar when chat opens
   useEffect(() => {
@@ -169,6 +177,11 @@ export function MiniCallView({
   // Get the focused screen share participant
   const focusedScreenShare = screenSharingParticipants.find(
     p => p.identity === focusedScreenShareIdentity,
+  );
+
+  const remoteParticipant = useMemo(
+    () => findRemotePresenter(participants, localParticipantId),
+    [participants, localParticipantId],
   );
 
   // Handle clicking on a screen share to focus it
@@ -323,7 +336,6 @@ export function MiniCallView({
                   onPointerDown={(e): void => e.stopPropagation()}
                 >
                   {focusedScreenShare ? (
-                    // Screen share layout with sidebar
                     <div className='h-full'>
                       <ScreenShareView
                         focusedScreenShare={focusedScreenShare}
@@ -338,7 +350,6 @@ export function MiniCallView({
                       />
                     </div>
                   ) : (
-                    // Normal grid layout when no screen share
                     <div className='h-full'>
                       <ParticipantGrid
                         participants={participants}
@@ -387,6 +398,11 @@ export function MiniCallView({
                     buttonPadding={buttonPadding}
                     pendingControlRequest={pendingControlRequest}
                     requestedAiController={requestedAiController}
+                    onTogglePresentationMode={
+                      isTelepresenceEnabled ? () => setIsPresentationMode(prev => !prev) : undefined
+                    }
+                    isPresentationMode={isPresentationMode}
+                    hidePresentationMode={!isTelepresenceEnabled}
                   />
                 </div>
               </div>
@@ -445,6 +461,15 @@ export function MiniCallView({
           onDeny={() => roomActor.send({ type: 'DENY_CONTROL_REQUEST' })}
         />
       )}
+
+      {/* Presentation Mode Overlay — fullscreen + smooth fade, consistent with FullCallView */}
+      <PresentationModeOverlay
+        isOpen={isPresentationMode}
+        participant={remoteParticipant ?? null}
+        aiController={aiController}
+        requestedAiController={requestedAiController}
+        onExit={() => setIsPresentationMode(false)}
+      />
     </>
   );
 }

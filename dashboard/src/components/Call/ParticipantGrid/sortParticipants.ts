@@ -41,6 +41,21 @@ export function compareParticipants(a: ParticipantInfo, b: ParticipantInfo): num
  *                       original relative order. When true they participate
  *                       in the normal 3-tier sort alongside everyone else.
  */
+/**
+ * Returns the first non-local, non-agent participant for presentation mode.
+ * Relies on the caller passing a pre-sorted array (sortParticipants output) so
+ * that .find() lands on the most-active caller (mic→camera→joinedAt order).
+ * MVP limitation: does not switch to active speaker dynamically.
+ */
+export function findRemotePresenter(
+  participants: ParticipantInfo[],
+  localParticipantId: string | null,
+): ParticipantInfo | undefined {
+  return participants.find(
+    p => p.identity !== localParticipantId && !p.identity.startsWith('agent-'),
+  );
+}
+
 export function sortParticipants(
   participants: ParticipantInfo[],
   isAIEnabled: boolean,
