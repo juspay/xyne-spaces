@@ -2240,69 +2240,7 @@ export class CallController {
         return;
       }
 
-      const db = DatabaseClient.getInstance();
-
-      // Find conversation for this recording
-      const conversation = await db.conversation.findFirst({
-        where: {
-          metadata: {
-            path: ['callId'],
-            equals: callId,
-          },
-        },
-      });
-
-      if (conversation) {
-        // Get all message IDs in this conversation to delete their attachments
-        const messages = await db.message.findMany({
-          where: { conversationId: conversation.conversationId },
-          select: { messageId: true },
-        });
-        const messageIds = messages.map(m => m.messageId);
-
-        // Delete attachments for these messages (transcript attachments, etc.)
-        if (messageIds.length > 0) {
-          const deleteResult = await db.messageAttachment.deleteMany({
-            where: {
-              entityId: { in: messageIds },
-              entityType: 'CHAT',
-            },
-          });
-          logger.info(`Deleted ${deleteResult.count} attachments for recording ${callId}`);
-        }
-
-        // Update all messages in this conversation with placeholder text
-        await db.message.updateMany({
-          where: {
-            conversationId: conversation.conversationId,
-          },
-          data: {
-            content: '<p>Transcript was deleted for this recording</p>',
-            metadata: {
-              deleted: true,
-              deletedAt: new Date().toISOString(),
-            },
-          },
-        });
-
-        logger.info(`Updated messages in conversation ${conversation.conversationId} for deleted recording ${callId}`);
-      }
-
-      // Delete activities
-      await db.activity.deleteMany({
-        where: {
-          callId: call.id,
-        },
-      });
-
-      await db.callParticipant.deleteMany({
-        where: {
-          callId: call.id,
-        },
-      });
-
-      // Delete the call record
-      await repositories.calls.delete(call.id);
+      await this.deleteHeadlessRecordingCascade(call);
 
       logger.info(`User ${userId} deleted HEADLESS recording ${callId}`);
 
@@ -2310,6 +2248,155 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to delete recording:', error);
       res.status(500).json({ success: false, error: 'Failed to delete recording' });
+    }
+  };
+
+  private deleteHeadlessRecordingCascade = async (call: { id: string; externalId: string }): Promise<void> => {
+    const db = DatabaseClient.getInstance();
+    const callId = call.externalId;
+
+    // Find conversation for this recording
+    const conversation = await db.conversation.findFirst({
+      where: {
+        metadata: {
+          path: ['callId'],
+          equals: callId,
+        },
+      },
+    });
+
+    if (conversation) {
+      // Get all message IDs in this conversation to delete their attachments
+      const messages = await db.message.findMany({
+        where: { conversationId: conversation.conversationId },
+        select: { messageId: true },
+      });
+      const messageIds = messages.map(m => m.messageId);
+
+      // Delete attachments for these messages (transcript attachments, etc.)
+      if (messageIds.length > 0) {
+        const deleteResult = await db.messageAttachment.deleteMany({
+          where: {
+            entityId: { in: messageIds },
+            entityType: 'CHAT',
+          },
+        });
+        logger.info(`Deleted ${deleteResult.count} attachments for recording ${callId}`);
+      }
+
+      // Update all messages in this conversation with placeholder text
+      await db.message.updateMany({
+        where: {
+          conversationId: conversation.conversationId,
+        },
+        data: {
+          content: '<p>Transcript was deleted for this recording</p>',
+          metadata: {
+            deleted: true,
+            deletedAt: new Date().toISOString(),
+          },
+        },
+      });
+
+      logger.info(`Updated messages in conversation ${conversation.conversationId} for deleted recording ${callId}`);
+    }
+
+    // Delete activities
+    await db.activity.deleteMany({
+      where: {
+        callId: call.id,
+      },
+    });
+
+    await db.callParticipant.deleteMany({
+      where: {
+        callId: call.id,
+      },
+    });
+
+    // Delete the call record
+    await repositories.calls.delete(call.id);
+  };
+
+
+  bulkDeleteRecordings = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const { callIds } = req.body as { callIds?: unknown };
+
+    if (
+      !Array.isArray(callIds) ||
+      callIds.length === 0 ||
+      !callIds.every(id => typeof id === 'string' && id.length > 0)
+    ) {
+      res.status(400).json({ success: false, error: 'callIds must be a non-empty array of recording ids' });
+      return;
+    }
+
+    // Cap batch size so a single request can't kick off an unbounded cascade.
+    const MAX_BULK_DELETE = 100;
+    const uniqueIds = [...new Set(callIds as string[])];
+    if (uniqueIds.length > MAX_BULK_DELETE) {
+      res.status(400).json({
+        success: false,
+        error: `Cannot delete more than ${MAX_BULK_DELETE} recordings at once`,
+      });
+      return;
+    }
+
+    try {
+      const db = DatabaseClient.getInstance();
+
+      // One query: only the caller's own HEADLESS recordings among the requested ids.
+      const owned = await db.call.findMany({
+        where: {
+          externalId: { in: uniqueIds },
+          createdByUserId: userId,
+          callType: CallType.HEADLESS,
+        },
+        select: { id: true, externalId: true },
+      });
+
+      const ownedByExternalId = new Map(owned.map(c => [c.externalId, c]));
+
+      const deleted: string[] = [];
+      const failed: Array<{ callId: string; reason: string }> = [];
+
+      // Ids we can't touch — surface them rather than silently dropping.
+      for (const id of uniqueIds) {
+        if (!ownedByExternalId.has(id)) {
+          failed.push({ callId: id, reason: 'Recording not found or not deletable' });
+        }
+      }
+
+      // Delete each owned recording independently so one failure doesn't abort the rest.
+      const results = await Promise.allSettled(
+        owned.map(call => this.deleteHeadlessRecordingCascade(call)),
+      );
+
+      results.forEach((result, index) => {
+        const call = owned[index]!;
+        if (result.status === 'fulfilled') {
+          deleted.push(call.externalId);
+        } else {
+          logger.error(`[CallController] bulkDeleteRecordings failed for ${call.externalId}:`, result.reason);
+          failed.push({ callId: call.externalId, reason: 'Failed to delete recording' });
+        }
+      });
+
+      logger.info(
+        `User ${userId} bulk-deleted recordings | requested=${uniqueIds.length}, deleted=${deleted.length}, failed=${failed.length}`,
+      );
+
+      res.json({ success: true, deleted, failed });
+    } catch (error) {
+      logger.error('Failed to bulk delete recordings:', error);
+      res.status(500).json({ success: false, error: 'Failed to delete recordings' });
     }
   };
 

@@ -34,6 +34,8 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { CanvasEditor } from '../../components/Canvas/CanvasEditor/CanvasEditor';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
+import { xyneAIActor } from '../../machines/xyneAIMachine';
+import { removeRecordingsFromCache } from '../../hooks/usePaginatedRecordings';
 
 interface RecordingNavState {
   recordingIds?: string[];
@@ -213,6 +215,7 @@ export default function RecordingDetailScreen(): ReactElement {
     setIsDeleting(true);
     try {
       await recordingService.deleteRecording(recording.externalId);
+      removeRecordingsFromCache([recording.externalId]);
       toast.success('Recording deleted');
       setIsDeleteOpen(false);
       void navigate('/recordings');
@@ -242,6 +245,25 @@ export default function RecordingDetailScreen(): ReactElement {
   };
 
   const formatDuration = formatRecordingDuration;
+
+  const handleAskAI = (): void => {
+    if (!recording?.channelId) {
+      toast.error('Cannot open Ask AI for this recording');
+      return;
+    }
+
+    const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
+    xyneAIActor.send({
+      type: 'OPEN',
+      startFreshChat: true,
+      channelId: recording.channelId,
+      threadInfo: {
+        conversationId: recording.conversationId ?? '',
+        previewText: recording.title || 'Recording Transcript',
+        ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+      },
+    });
+  };
 
   const handleDownloadRecording = async (): Promise<void> => {
     if (!recording) return;
@@ -381,6 +403,21 @@ export default function RecordingDetailScreen(): ReactElement {
 
           {/* Action Buttons */}
           <div className='flex items-center gap-3 mt-4'>
+            <button
+              onClick={handleAskAI}
+              className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              data-track-category='RecordingDetail'
+              data-track-name='ask_ai_recording'
+            >
+              <img
+                src='/svgs/icons/ai-bot-gradient-star.svg'
+                width={16}
+                height={16}
+                alt=''
+                aria-hidden='true'
+              />
+              Ask AI
+            </button>
             {recording?.channelId && recording?.conversationId && (
               <button
                 onClick={() =>

@@ -75,7 +75,14 @@ export type QueryCacheEvent =
   | { type: 'MERGE_CONVERSATION'; channelId: string; conversation: Conversation }
   | { type: 'MERGE_CALL_HISTORY_PAGE'; page: CallHistoryEntry[]; hasMore: boolean }
   | { type: 'HYDRATE_CALL_HISTORY'; data: CallHistoryState }
-  | { type: 'MERGE_RECORDINGS_PAGE'; page: RecordingEntry[]; hasMore: boolean; isFirstPage?: boolean }
+  | {
+      type: 'MERGE_RECORDINGS_PAGE';
+      page: RecordingEntry[];
+      hasMore: boolean;
+      /** @deprecated pass `start: null` instead */
+      isFirstPage?: boolean;
+      start?: { id: string; startedAt: number } | null;
+    }
   | { type: 'HYDRATE_RECORDINGS'; data: RecordingsState }
   | { type: 'SET_HYDRATED' };
 
@@ -217,23 +224,33 @@ export const queryCacheMachine = setup({
 
         const map = new Map(context.recordings.recordings.map(r => [r.id, r]));
 
-        if (event.isFirstPage) {
-          // The live first-page query is the authoritative source for the newest entries.
-          // Remove any accumulated entries that should appear in this range but are absent —
-          // this catches recordings deleted since the last sync (Zero drives the removal).
-          if (event.page.length === 0) {
-            // No recordings at all — clear list.
-            return { recordings: [], hasMore: false };
-          }
+        // Cursor the page was fetched with. `null` = first page; `undefined`
+        // (legacy callers without `start`/`isFirstPage`) = upsert-only merge.
+        const start = event.start !== undefined ? event.start : event.isFirstPage ? null : undefined;
+
+        if (start !== undefined) {
+          // Range-based eviction: a synced page is the authoritative source for
+          // the key range it covers — (start, oldestInPage] in (startedAt desc,
+          // id desc) order, unbounded above when start is null (first page) and
+          // unbounded below when the page is short (end of list reached).
+          // Accumulated entries inside that range that the query no longer
+          // returns were deleted since the last sync (Zero drives the removal).
+          // Range- (not id-diff-) based so a moving window that jumps between
+          // ranges never evicts rows that merely fell outside the new window.
           const oldestInPage = event.page[event.page.length - 1];
           const pageIds = new Set(event.page.map(r => r.id));
-          // Drop existing entries in the first-page range that the live query no longer returns.
+          const reachedEnd = !event.hasMore;
           for (const [id, rec] of map) {
-            if (
-              (rec.startedAt > oldestInPage.startedAt ||
-                (rec.startedAt === oldestInPage.startedAt && rec.id >= oldestInPage.id)) &&
-              !pageIds.has(id)
-            ) {
+            const afterStart =
+              start === null ||
+              rec.startedAt < start.startedAt ||
+              (rec.startedAt === start.startedAt && rec.id < start.id);
+            const beforeOrAtOldest =
+              reachedEnd ||
+              (oldestInPage !== undefined &&
+                (rec.startedAt > oldestInPage.startedAt ||
+                  (rec.startedAt === oldestInPage.startedAt && rec.id >= oldestInPage.id)));
+            if (afterStart && beforeOrAtOldest && !pageIds.has(id)) {
               map.delete(id);
             }
           }
@@ -244,11 +261,15 @@ export const queryCacheMachine = setup({
         const recordings = [...map.values()].sort(
           (a, b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id),
         );
-        const hasMore = !event.hasMore
-          ? false
-          : context.recordings.recordings.length === 0
-            ? true
-            : context.recordings.hasMore;
+
+        const hasMore =
+          start === null
+            ? event.hasMore
+            : !event.hasMore
+              ? false
+              : context.recordings.recordings.length === 0
+                ? true
+                : context.recordings.hasMore;
         return { recordings, hasMore };
       },
     }),

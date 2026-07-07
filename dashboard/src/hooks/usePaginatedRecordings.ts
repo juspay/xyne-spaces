@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../zero/queries';
@@ -10,16 +10,34 @@ export type RecordingEntry = QueryResultType<typeof queries.userRecordings>[numb
 
 const FETCH_LIMIT = 20;
 
+type RecordingCursor = { id: string; startedAt: number } | null;
+
+export function removeRecordingsFromCache(externalIds: string[]): void {
+  if (externalIds.length === 0) return;
+  const idSet = new Set(externalIds);
+  const current = queryCacheActor.getSnapshot().context.recordings;
+  const filtered = current.recordings.filter(r => !idSet.has(r.externalId));
+  if (filtered.length === current.recordings.length) return;
+  queryCacheActor.send({
+    type: 'HYDRATE_RECORDINGS',
+    data: { recordings: filtered, hasMore: current.hasMore },
+  });
+}
+
 interface UsePaginatedRecordingsReturn {
   recordings: RecordingEntry[];
   hasMoreRecordings: boolean;
   loadMoreRecordings: () => void;
+  onVisibleRangeChanged: (startIndex: number) => void;
   isLoading: boolean;
 }
 
 export function usePaginatedRecordings(): UsePaginatedRecordingsReturn {
   const zero = useZero();
   const isFetchingRef = useRef(false);
+
+  const [windowCursor, setWindowCursor] = useState<RecordingCursor>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Accumulated state lives in queryCacheMachine (XState + IndexedDB) — survives unmount/remount
   const accumulatedRecordings = useSelector(queryCacheActor, s => s.context.recordings.recordings);
@@ -29,24 +47,49 @@ export function usePaginatedRecordings(): UsePaginatedRecordingsReturn {
   const recordingsRef = useRef(accumulatedRecordings);
   recordingsRef.current = accumulatedRecordings;
 
-  // One permanent live query with null cursor — always syncs newest recordings
-  const [page, queryDetails] = useCachedQuery(
-    queries.userRecordings({ limit: FETCH_LIMIT, start: null }),
+  // The live window. At cursor `null` it covers the newest page (initial load +
+  // new-at-top); as the cursor follows scroll it covers the viewed page.
+  const [windowPage, windowDetails] = useCachedQuery(
+    queries.userRecordings({ limit: FETCH_LIMIT, start: windowCursor }),
   );
 
   useEffect(() => {
-    if (!page) return;
+    if (!windowPage || windowDetails.type !== 'complete') return;
     queryCacheActor.send({
       type: 'MERGE_RECORDINGS_PAGE',
-      page: page as RecordingEntry[],
-      hasMore: page.length === FETCH_LIMIT,
-      isFirstPage: true,
+      page: windowPage as RecordingEntry[],
+      hasMore: windowPage.length === FETCH_LIMIT,
+      start: windowCursor,
     });
-  }, [page]);
+  }, [windowPage, windowDetails.type, windowCursor]);
+
+  // Aligns the live window to the page containing the first visible row.
+  const onVisibleRangeChanged = useCallback((startIndex: number) => {
+    const list = recordingsRef.current;
+    if (list.length === 0) return;
+
+    const pageStart = Math.floor(Math.max(0, startIndex) / FETCH_LIMIT) * FETCH_LIMIT;
+    // Cursor is the row *before* the page (exclusive start); first page → null
+    const anchor = pageStart === 0 ? null : list[pageStart - 1];
+    const next: RecordingCursor = anchor ? { id: anchor.id, startedAt: anchor.startedAt } : null;
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null;
+      setWindowCursor(prev => (prev?.id === next?.id ? prev : next));
+    }, 150);
+  }, []);
+
+  useEffect(
+    () => (): void => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
 
   // ── Single fetch helper ────────────────────────────────────────────────────
   const fetchPage = useCallback(
-    (start: { id: string; startedAt: number } | null) =>
+    (start: RecordingCursor) =>
       zero.run(queries.userRecordings({ limit: FETCH_LIMIT, start }), { type: 'complete' }),
     [zero],
   );
@@ -60,19 +103,16 @@ export function usePaginatedRecordings(): UsePaginatedRecordingsReturn {
 
     isFetchingRef.current = true;
 
-    void (async () => {
+    void (async (): Promise<void> => {
       try {
-        const nextPage = await fetchPage({ id: last.id, startedAt: last.startedAt });
-
-        if (!nextPage || nextPage.length === 0) {
-          queryCacheActor.send({ type: 'MERGE_RECORDINGS_PAGE', page: [], hasMore: false });
-          return;
-        }
+        const start = { id: last.id, startedAt: last.startedAt };
+        const nextPage = await fetchPage(start);
 
         queryCacheActor.send({
           type: 'MERGE_RECORDINGS_PAGE',
-          page: nextPage as RecordingEntry[],
-          hasMore: nextPage.length === FETCH_LIMIT,
+          page: (nextPage ?? []) as RecordingEntry[],
+          hasMore: (nextPage?.length ?? 0) === FETCH_LIMIT,
+          start,
         });
       } finally {
         isFetchingRef.current = false;
@@ -84,6 +124,7 @@ export function usePaginatedRecordings(): UsePaginatedRecordingsReturn {
     recordings: accumulatedRecordings,
     hasMoreRecordings,
     loadMoreRecordings,
-    isLoading: queryDetails.type === 'unknown',
+    onVisibleRangeChanged,
+    isLoading: accumulatedRecordings.length === 0 && windowDetails.type === 'unknown',
   };
 }
