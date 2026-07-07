@@ -25,6 +25,8 @@ import {
   Brain,
   Loader2,
   Pencil,
+  Archive,
+  AlertCircle,
   Users2,
   Users,
   Lock,
@@ -2583,6 +2585,8 @@ export const SupportTicketDetail = ({
   const [composerOpen, setComposerOpenState] = useState<boolean>(false);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('reply');
+  const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
+  const [isArchivingTicket, setIsArchivingTicket] = useState(false);
   // Auto-draft citations, fetched from the desk-owner's claw draft conversation
   // via the autodraft-insight read-through endpoint (the auto-draft runs as the
   // channel owner, so its citations aren't in the querying user's sidebar).
@@ -2929,6 +2933,16 @@ export const SupportTicketDetail = ({
     });
   };
 
+  const goBackToTicketList = useCallback((): void => {
+    if (onBack) {
+      onBack();
+      return;
+    }
+    const base = navBasePath ?? supportBase;
+    const back = channelIdParam ? `${base}/${channelIdParam}` : base;
+    void navigate(back);
+  }, [channelIdParam, navBasePath, navigate, onBack, supportBase]);
+
   const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
     if (!cursorStart || !channelId) return;
     try {
@@ -2957,6 +2971,34 @@ export const SupportTicketDetail = ({
         dir,
         channelId,
         error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const handleArchiveTicket = (): void => {
+    if (!ticket || isArchivingTicket) return;
+
+    try {
+      if (ticket.isArchived) {
+        throw new Error('Ticket is already archived');
+      }
+
+      setIsArchivingTicket(true);
+      zero.mutate(
+        mutators.ticket.archiveDeskTicket({
+          id: ticket.id,
+          updatedAt: Date.now(),
+        }),
+      );
+
+      setIsArchivingTicket(false);
+      setShowArchiveConfirmDialog(false);
+      toast.success('Ticket archived successfully');
+      goBackToTicketList();
+    } catch (err) {
+      setIsArchivingTicket(false);
+      toast.error('Failed to archive ticket', {
+        description: err instanceof Error ? err.message : 'Please try again',
       });
     }
   };
@@ -3215,8 +3257,7 @@ export const SupportTicketDetail = ({
                       onBack();
                       return;
                     }
-                    const back = channelIdParam ? `${supportBase}/${channelIdParam}` : supportBase;
-                    void navigate(back);
+                    goBackToTicketList();
                   }}
                   className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
                   aria-label='Back to ticket list'
@@ -3334,6 +3375,25 @@ export const SupportTicketDetail = ({
                     data-track-name='CopyTicketLink'
                   >
                     <LinkIcon size={16} />
+                  </button>
+                </Tooltip>
+                <div className='w-px h-4 bg-border' />
+
+                <Tooltip
+                  side='bottom'
+                  delayDuration={300}
+                  content={ticket?.isArchived ? 'Already archived' : 'Archive ticket'}
+                >
+                  <button
+                    type='button'
+                    onClick={() => setShowArchiveConfirmDialog(true)}
+                    disabled={!ticket || !!ticket.isArchived}
+                    className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                    aria-label='Archive ticket'
+                    data-track-category='Support'
+                    data-track-name='ArchiveTicket'
+                  >
+                    <Archive size={16} />
                   </button>
                 </Tooltip>
                 <div className='w-px h-4 bg-border' />
@@ -4006,6 +4066,44 @@ export const SupportTicketDetail = ({
                   {...(channelId ? { channelId } : {})}
                   {...(conversationId ? { conversationId } : {})}
                 />
+                {showArchiveConfirmDialog && (
+                  <Dialog
+                    open={showArchiveConfirmDialog}
+                    onOpenChange={setShowArchiveConfirmDialog}
+                    title='Archive Ticket'
+                  >
+                    <div className='p-6'>
+                      <div className='flex items-center gap-3 mb-4'>
+                        <div className='p-2 rounded-full bg-destructive/10'>
+                          <AlertCircle className='w-6 h-6 text-destructive' />
+                        </div>
+                        <h3 className='text-lg font-semibold'>This action is irreversible</h3>
+                      </div>
+                      <p className='text-sm text-muted-foreground mb-6'>
+                        {ticket?.isArchived
+                          ? 'This ticket is already archived. It is hidden from the Desk ticket list, while the existing conversation data stays preserved.'
+                          : 'Once archived, this ticket cannot be unarchived. It will be hidden from the Desk ticket list, while the existing conversation data stays preserved.'}
+                      </p>
+
+                      <div className='flex justify-end gap-3'>
+                        <Button
+                          variant='secondary'
+                          onClick={() => setShowArchiveConfirmDialog(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={() => handleArchiveTicket()}
+                          disabled={!ticket || !!ticket.isArchived || isArchivingTicket}
+                          loading={isArchivingTicket}
+                          className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                        >
+                          {ticket?.isArchived ? 'Already Archived' : 'Archive Ticket'}
+                        </Button>
+                      </div>
+                    </div>
+                  </Dialog>
+                )}
               </div>
             </Panel>
           </>

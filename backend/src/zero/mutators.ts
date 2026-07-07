@@ -85,6 +85,7 @@ import {
   MAX_NOTIFICATION_KEYWORDS,
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
+  isDeskChannelType,
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import { v4 as uuidv4 } from 'uuid';
@@ -5958,6 +5959,75 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 },
               });
             }
+          }
+        },
+      ),
+      archiveDeskTicket: defineMutator(
+        z.object({
+          id: z.string(),
+          updatedAt: z.number(),
+        }),
+        async ({ tx, args: { id, updatedAt } }) => {
+          const ticket = await tx.run(zql.tickets.where("id", id).one());
+          if (!ticket) {
+            throw new Error("Ticket not found");
+          }
+
+          if (ticket.workspaceId !== authData.workspaceId) {
+            throw new Error('Ticket not found');
+          }
+
+          if (ticket.isArchived) {
+            throw new Error('Ticket is already archived');
+          }
+
+          if (!ticket.channelId) {
+            throw new Error('Ticket has no associated channel');
+          }
+
+          const channel = await tx.run(zql.channels.where('id', ticket.channelId).one());
+          if (!channel || !isDeskChannelType(channel.type)) {
+            throw new Error('Only Desk tickets can be archived from Desk');
+          }
+
+          await tx.mutate.tickets.update({
+            id,
+            isArchived: true,
+            updatedAt,
+            updatedBy: authData.sub,
+          });
+
+          await tx.mutate.ticket_activities.insert({
+            id: uuidv4(),
+            ticketId: id,
+            updatedBy: authData.sub,
+            timestamp: updatedAt,
+            activityType: ActivityType.IS_ARCHIVED,
+            value: { oldValue: false, newValue: true },
+          });
+
+          if (ticket.conversationId) {
+            const user = await tx.run(zql.users.where('id', authData.sub).one());
+            const userName = user?.name || 'Someone';
+
+            await tx.mutate.messages.insert({
+              messageId: uuidv4(),
+              conversationId: ticket.conversationId,
+              workspaceId: authData.workspaceId,
+              senderId: authData.sub,
+              content: `${userName} archived the ticket`,
+              msgType: MessageType.SYSTEM,
+              hasAttachment: false,
+              edited: false,
+              isDeleted: false,
+              isSent: true,
+              showInChannel: false,
+              createdAt: updatedAt,
+              metadata: {
+                activityType: ActivityType.IS_ARCHIVED,
+                isTicketActivity: true,
+              },
+            });
           }
         },
       ),
