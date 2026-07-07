@@ -7,6 +7,7 @@ export { TagsSubmenu } from './TagsSubmenu/TagsSubmenu';
 export { StagesSubmenu } from './StagesSubmenu/StagesSubmenu';
 export { DynamicFieldSubmenu } from './DynamicFieldSubmenu/DynamicFieldSubmenu';
 export { TicketTypeSubmenu } from './TicketTypeSubmenu/TicketTypeSubmenu';
+export { SourceChannelsSubmenu } from './SourceChannelsSubmenu/SourceChannelsSubmenu';
 export { AICategorySubmenu } from './AICategorySubmenu/AICategorySubmenu';
 export { RoleSubmenu } from './RoleSubmenu/RoleSubmenu';
 export type { RoleAssignmentValue } from './RoleSubmenu/RoleSubmenu';

@@ -219,6 +219,7 @@ const toQueryFilters = (
     created: filters.created,
     stages: filters.stages,
     ticketTypes: filters.ticketTypes,
+    sourceChannels: filters.sourceChannels,
   };
 };
 
@@ -282,6 +283,9 @@ const getLocalVespaFilterRejectReasons = (
   }
   if (filters?.boards?.length && !filters.boards.includes(ticket.boardId)) {
     reasons.push('boards');
+  }
+  if (filters?.sourceChannels?.length && !filters.sourceChannels.includes(ticket.channelId)) {
+    reasons.push('sourceChannels');
   }
   if (!matchesIdentityFilter(ticket.assignedTo, filters?.assignee)) {
     reasons.push('assignee');
@@ -392,6 +396,7 @@ export const useKanbanTicketsPage = (
     tags: options.filters?.tags ?? [],
     stages: options.filters?.stages ?? [],
     ticketTypes: options.filters?.ticketTypes ?? [],
+    sourceChannels: options.filters?.sourceChannels ?? [],
   });
   const directVespaPage = useMemo(
     () =>

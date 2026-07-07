@@ -478,6 +478,13 @@ export const applyTicketFilters = (
       }
     }
 
+    // Source channel filter
+    if (filters.sourceChannels && filters.sourceChannels.length > 0) {
+      if (!ticket.channelId || !filters.sourceChannels.includes(ticket.channelId)) {
+        return false;
+      }
+    }
+
     // Dynamic form field filters
     if (filters.dynamicFields && formValuesByTicketId && formFieldsById) {
       const ticketFormValues = formValuesByTicketId.get(ticket.id);
