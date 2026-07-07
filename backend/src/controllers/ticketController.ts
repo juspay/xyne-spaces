@@ -65,6 +65,7 @@ const prisma = DatabaseClient.getInstance();
 type MyTicketBoardOption = {
   id: string;
   name: string;
+  projectId?: string;
 };
 
 export class TicketController {
@@ -371,14 +372,19 @@ export class TicketController {
       select: {
         id: true,
         name: true,
+        projectId: true,
       },
     });
 
-    const boardNameById = new Map(boards.map(board => [board.id, board.name]));
-    const boardDetails: MyTicketBoardOption[] = boardIds.map(boardId => ({
-      id: boardId,
-      name: boardNameById.get(boardId) ?? boardId,
-    }));
+    const boardById = new Map(boards.map(board => [board.id, board]));
+    const boardDetails: MyTicketBoardOption[] = boardIds.map(boardId => {
+      const board = boardById.get(boardId);
+      return {
+        id: boardId,
+        name: board?.name ?? boardId,
+        ...(board?.projectId ? { projectId: board.projectId } : {}),
+      };
+    });
 
       res.json({
         boardIds,

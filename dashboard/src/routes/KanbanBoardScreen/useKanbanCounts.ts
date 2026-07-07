@@ -38,6 +38,7 @@ type TicketCountsSnapshot = {
   id: string;
   workspaceId: string;
   boardId: string | null;
+  channelId: string | null;
   projectId: string | null;
   stageName: string | null;
   statusV2: string | null;
@@ -234,6 +235,8 @@ const matchesRequest = (
   if (!filters) return true;
 
   if (filters.boards?.length && !filters.boards.includes(snapshot.boardId ?? '')) return false;
+  if (filters.sourceChannels?.length && !filters.sourceChannels.includes(snapshot.channelId ?? ''))
+    return false;
   if (filters.priority?.length && !filters.priority.includes(snapshot.priority as never))
     return false;
   if (filters.assignee?.length && !matchesFilterList(snapshot.assignedTo, filters.assignee))
@@ -509,6 +512,9 @@ const normalizeFilters = (filters?: TicketFilters): KanbanCountsFilters | undefi
 
   const boards = sortUniqueValues(filters.boards);
   if (boards) normalized.boards = boards;
+
+  const sourceChannels = sortUniqueValues(filters.sourceChannels);
+  if (sourceChannels) normalized.sourceChannels = sourceChannels;
 
   const tags = sortUniqueValues(filters.tags);
   if (tags) normalized.tags = tags;

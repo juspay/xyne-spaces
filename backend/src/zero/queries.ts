@@ -54,6 +54,7 @@ const kanbanTicketPageFiltersSchema = z.object({
   created: z.boolean().optional(),
   stages: z.array(z.string()).optional(),
   ticketTypes: z.array(z.string()).optional(),
+  sourceChannels: z.array(z.string()).optional(),
 });
 
 const kanbanTicketsPageArgsSchema = z.object({
@@ -266,6 +267,10 @@ const applyKanbanTicketPageConditions = (
 
   if (filters?.ticketTypes?.length) {
     query = query.where('ticketType', 'IN', filters.ticketTypes);
+  }
+
+  if (filters?.sourceChannels?.length) {
+    query = query.where('channelId', 'IN', filters.sourceChannels);
   }
 
   if (filters?.assigned || filters?.created) {

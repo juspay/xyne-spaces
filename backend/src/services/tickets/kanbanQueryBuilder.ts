@@ -35,6 +35,7 @@ export type KanbanTicketFilters = {
   createdDateStart?: number;
   createdDateEnd?: number;
   boards?: string[];
+  sourceChannels?: string[];
   tags?: string[];
   assigned?: boolean;
   created?: boolean;
@@ -175,6 +176,9 @@ export const buildKanbanTicketWhere = (
       },
       buildCurrentUserFilter(context.currentUserId, filters),
       hasItems(filters.boards) ? { boardId: { in: [...filters.boards] } } : undefined,
+      hasItems(filters.sourceChannels)
+        ? { channelId: { in: [...filters.sourceChannels] } }
+        : undefined,
       hasItems(filters.priority) ? { priority: { in: [...filters.priority] } } : undefined,
       hasItems(filters.assignee)
         ? { assignedTo: { in: filters.assignee.flatMap(prefixedIdentityValues) } }

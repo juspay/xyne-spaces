@@ -5,6 +5,7 @@ export type KanbanCountsSnapshot = {
   id: string;
   workspaceId: string;
   boardId: string | null;
+  channelId: string | null;
   projectId: string | null;
   stageName: string | null;
   statusV2: string | null;
@@ -33,6 +34,7 @@ export const buildKanbanCountsSnapshot = async (
       id: true,
       workspaceId: true,
       boardId: true,
+      channelId: true,
       projectId: true,
       stageName: true,
       statusV2: true,
@@ -102,6 +104,7 @@ export const buildKanbanCountsSnapshot = async (
     id: ticket.id,
     workspaceId: ticket.workspaceId,
     boardId: ticket.boardId,
+    channelId: ticket.channelId,
     projectId: ticket.projectId,
     stageName: ticket.stageName,
     statusV2: ticket.statusV2,

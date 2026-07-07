@@ -28,6 +28,7 @@ const kanbanCountsBodySchema = z.object({
       createdDateStart: z.number().optional(),
       createdDateEnd: z.number().optional(),
       boards: z.array(z.string()).optional(),
+      sourceChannels: z.array(z.string()).optional(),
       tags: z.array(z.string()).optional(),
       assigned: z.boolean().optional(),
       created: z.boolean().optional(),

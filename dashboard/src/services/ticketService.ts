@@ -52,6 +52,7 @@ export interface KanbanCountsFilters {
   createdDateStart?: number;
   createdDateEnd?: number;
   boards?: string[];
+  sourceChannels?: string[];
   tags?: string[];
   assigned?: boolean;
   created?: boolean;

@@ -132,6 +132,7 @@ const WORKSPACE_VIEW_ARRAY_KEYS = [
   'tags',
   'stages',
   'ticketTypes',
+  'sourceChannels',
 ] as const satisfies (keyof TicketFilters)[];
 
 const WORKSPACE_VIEW_NUMERIC_KEYS = [
@@ -229,6 +230,14 @@ function parseGroupBy(raw: string): GroupByType {
     // not JSON, fall through
   }
   return raw as GroupByType;
+}
+
+function uniqueProjectIds(boards: readonly { projectId?: string | null }[]): string[] {
+  const ids = new Set<string>();
+  boards.forEach(board => {
+    if (board.projectId) ids.add(board.projectId);
+  });
+  return Array.from(ids);
 }
 
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
@@ -492,20 +501,27 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const searchTerm = searchParams.get('search') ?? '';
   const [isBoardDropdownOpen, setIsBoardDropdownOpen] = useState(false);
+  const [isSourceChannelsOpen, setIsSourceChannelsOpen] = useState(false);
 
   const myTicketBoardsQuery = useQuery({
     queryKey: ['tickets', 'my-board-ids', user?.id],
-    queryFn: async (): Promise<{ boardIds: string[]; boards: { id: string; name: string }[] }> => {
+    queryFn: async (): Promise<{
+      boardIds: string[];
+      boards: { id: string; name: string; projectId?: string }[];
+    }> => {
       const response = await apiInstance.get<{
         boardIds: string[];
-        boards: { id: string; name: string }[];
+        boards: { id: string; name: string; projectId?: string }[];
       }>('/tickets/my-board-ids');
       return {
         boardIds: response.data.boardIds ?? [],
         boards: response.data.boards ?? [],
       };
     },
-    enabled: viewMode === 'my-tickets' && isBoardDropdownOpen && !!user?.id,
+    // Source channels also needs board data (boards -> projects -> channels),
+    // so opening that submenu enables this fetch too.
+    enabled:
+      viewMode === 'my-tickets' && (isBoardDropdownOpen || isSourceChannelsOpen) && !!user?.id,
     staleTime: 60_000,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -513,6 +529,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const handleBoardDropdownOpenChange = useCallback((open: boolean) => {
     setIsBoardDropdownOpen(open);
+  }, []);
+
+  const handleSourceChannelsOpenChange = useCallback((open: boolean) => {
+    setIsSourceChannelsOpen(open);
   }, []);
 
   const setGroupBy = useCallback(
@@ -1350,6 +1370,33 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return undefined;
   }, [myTicketBoardsQuery.data, viewMode]);
 
+  const [workspaceSelectedBoards] = useCachedQuery(
+    queries.boardsByIds({ boardIds: filters.boards ?? [] }),
+    {
+      enabled: isWorkspaceView && isSourceChannelsOpen && (filters.boards?.length ?? 0) > 0,
+    },
+  );
+  const sourceChannelProjectIds = useMemo(() => {
+    if (isMyTicketsView) {
+      const selected = filters.boards ?? [];
+      const details = availableBoardDetails ?? [];
+      // No board selected -> all projects behind the boards dropdown; otherwise only the selected boards' projects.
+      return uniqueProjectIds(
+        selected.length === 0 ? details : details.filter(board => selected.includes(board.id)),
+      );
+    }
+    if (isWorkspaceView) {
+      return uniqueProjectIds(workspaceSelectedBoards ?? []);
+    }
+    return [];
+  }, [
+    isMyTicketsView,
+    isWorkspaceView,
+    filters.boards,
+    availableBoardDetails,
+    workspaceSelectedBoards,
+  ]);
+
   // Clear invalid board filters in my-tickets/user-tickets/group-tickets views
   useEffect(() => {
     // Early return if not in my-tickets view
@@ -2088,6 +2135,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               availableUserGroups={availableUserGroups}
               availableBoards={availableBoards}
               availableBoardDetails={availableBoardDetails}
+              sourceChannelProjectIds={sourceChannelProjectIds}
               showBoardsFilter={!!channelId || isMyTicketsView}
               availableTags={availableTags}
               availableStages={availableStages}
@@ -2096,6 +2144,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               hideAssigneeFilter={viewMode === 'my-tickets' ? true : false}
               isTicketsSyncing={isTicketsSyncing}
               onBoardDropdownOpenChange={handleBoardDropdownOpenChange}
+              onSourceChannelsOpenChange={handleSourceChannelsOpenChange}
               isNonLinearBoard={isNonLinearBoard}
               formMappings={
                 filters.boards?.length === 1 && selectedBoardDetail

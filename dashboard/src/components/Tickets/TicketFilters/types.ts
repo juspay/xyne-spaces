@@ -16,6 +16,7 @@ export interface TicketFilters {
   createdDateStart?: number;
   createdDateEnd?: number;
   boards?: string[];
+  sourceChannels?: string[];
   tags?: string[];
   assigned?: boolean; // filter to show only tickets assigned to current user
   created?: boolean; // filter to show only tickets created by current user
@@ -45,6 +46,7 @@ export interface TicketFiltersProps {
   availableUserGroups?: string[] | undefined;
   availableBoards?: string[] | undefined;
   availableBoardDetails?: BoardOption[] | undefined;
+  sourceChannelProjectIds?: string[] | undefined;
   showBoardsFilter?: boolean;
   availableTags?: string[] | undefined;
   availableStages?: { name: string; status?: TicketStatusV2 | undefined }[] | undefined;
@@ -55,6 +57,8 @@ export interface TicketFiltersProps {
   /** Board name from parent (avoids waiting for lazy board list fetch) */
   selectedBoardName?: string | undefined;
   onBoardDropdownOpenChange?: (open: boolean) => void;
+  /** True while the Source channels submenu is open; drives lazy board→project resolution in the parent */
+  onSourceChannelsOpenChange?: (open: boolean) => void;
   isTicketsSyncing?: boolean;
   /** True when the selected board is a non-linear board */
   isNonLinearBoard?: boolean;

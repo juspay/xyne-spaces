@@ -45,6 +45,7 @@ import {
   StagesSubmenu,
   TicketTypeSubmenu,
   RoleSubmenu,
+  SourceChannelsSubmenu,
 } from './Submenus';
 import { TicketFiltersProps, DateRange, BoardOption } from './types';
 import type { TicketFilters } from './types';
@@ -76,6 +77,7 @@ const ARRAY_FILTER_KEYS = [
   'tags',
   'stages',
   'ticketTypes',
+  'sourceChannels',
 ] as const satisfies (keyof TicketFilters)[];
 
 const NUMERIC_FILTER_KEYS = [
@@ -95,6 +97,7 @@ const FILTER_MENU_ITEMS: FilterMenuItem[] = [
   { id: 'tags', label: 'Labels', icon: Tag, filterKey: 'tags' },
   { id: 'stages', label: 'Stages', icon: Circle, filterKey: 'stages' },
   { id: 'ticketTypes', label: 'Type', icon: Layers, filterKey: 'ticketTypes' },
+  { id: 'sourceChannels', label: 'Source channels', icon: Hash, filterKey: 'sourceChannels' },
 ];
 
 export const TicketFiltersDropdown = ({
@@ -107,6 +110,7 @@ export const TicketFiltersDropdown = ({
   availableBoardDetails,
   availableUserGroups,
   availableBoards,
+  sourceChannelProjectIds,
   showBoardsFilter = false,
   availableTags,
   availableStages,
@@ -118,6 +122,7 @@ export const TicketFiltersDropdown = ({
   onSearchChange,
   selectedBoardName,
   onBoardDropdownOpenChange,
+  onSourceChannelsOpenChange,
   isTicketsSyncing = false,
   isNonLinearBoard = false,
   channelId,
@@ -179,6 +184,14 @@ export const TicketFiltersDropdown = ({
     });
     return Array.from(values);
   }, [ticketTypesResult]);
+
+  // Source-channel filter: a fixed project (channel tab / project view) is just the
+  // single-project case of the derived list. The submenu only mounts (and queries)
+  // while it is open, so the fetch stays lazy.
+  const channelProjectIds = useMemo(
+    () => (projectId ? [projectId] : (sourceChannelProjectIds ?? [])),
+    [projectId, sourceChannelProjectIds],
+  );
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [showSavePopover, setShowSavePopover] = useState(false);
@@ -228,6 +241,10 @@ export const TicketFiltersDropdown = ({
       setActiveSubmenu(null);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    onSourceChannelsOpenChange?.(activeSubmenu === 'sourceChannels');
+  }, [activeSubmenu, onSourceChannelsOpenChange]);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const canViewAnalytics = useCanViewAnalytics();
@@ -419,6 +436,7 @@ export const TicketFiltersDropdown = ({
     if (filters.tags?.length) count++;
     if (filters.stages?.length) count++;
     if (filters.ticketTypes?.length) count++;
+    if (filters.sourceChannels?.length) count++;
     if (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0) {
       count += Object.keys(filters.dynamicFields).length;
     }
@@ -643,6 +661,14 @@ export const TicketFiltersDropdown = ({
             selectedTypes={filters.ticketTypes || []}
             onChange={(types: string[]) => handleFilterChange('ticketTypes', types)}
             availableTypes={availableTicketTypes}
+          />
+        );
+      case 'sourceChannels':
+        return (
+          <SourceChannelsSubmenu
+            projectIds={channelProjectIds}
+            selectedChannels={filters.sourceChannels || []}
+            onChange={(channels: string[]) => handleFilterChange('sourceChannels', channels)}
           />
         );
       default:

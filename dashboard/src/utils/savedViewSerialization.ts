@@ -60,6 +60,9 @@ export function valuesToFilters(values: ReadonlyArray<SavedConfigValueRow>): Tic
       case 'ticketTypes':
         result.ticketTypes = [...(result.ticketTypes ?? []), fieldValue];
         break;
+      case 'sourceChannels':
+        result.sourceChannels = [...(result.sourceChannels ?? []), fieldValue];
+        break;
       case 'dueDateStart':
         result.dueDateStart = Number(fieldValue);
         break;
