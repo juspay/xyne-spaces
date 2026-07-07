@@ -34,15 +34,26 @@ import { toast } from 'sonner';
 import {
   formatRecordingDuration,
   generateRecordingTitle,
+  logRecordingError,
   STT_MODEL_LABELS,
 } from '../../utils/recordingUtils';
 import { logger, Event as LoggerEvent } from '../../utils/logger';
-import { usePaginatedRecordings, type RecordingEntry } from '../../hooks/usePaginatedRecordings';
+import {
+  usePaginatedRecordings,
+  removeRecordingsFromCache,
+  type RecordingEntry,
+} from '../../hooks/usePaginatedRecordings';
 import { useRecordingConnectionState } from './hooks/useRecordingConnectionState';
+import { xyneAIActor } from '../../machines/xyneAIMachine';
+import { ActionModal } from '../../components/Call/ActionModal';
+import { RecordingsBulkActionBar } from './components/RecordingsBulkActionBar';
+import { queries } from '../../zero/queries';
 import {
   RecordingReconnectingOverlay,
   RecordingConnectionWarningModal,
 } from './components/RecordingConnectionStatus';
+
+const MAX_ASK_AI_SELECTION = 5;
 
 export default function RecordingsScreen(): ReactElement {
   const [error, setError] = useState<string | null>(null);
@@ -51,12 +62,18 @@ export default function RecordingsScreen(): ReactElement {
   const [savingTitle, setSavingTitle] = useState(false);
   const [showSttPicker, setShowSttPicker] = useState(false);
   const [sttModel, setSttModel] = useState<'google' | 'azure' | 'deepgram'>('google');
+  // Multi-select for bulk actions (delete / ask AI)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isPreparingAskAI, setIsPreparingAskAI] = useState(false);
   const [isTranscriptMinimized, setIsTranscriptMinimized] = useState(false);
 
   const navigate = useNavigate();
   const zero = useZero();
 
-  const { recordings, hasMoreRecordings, loadMoreRecordings, isLoading } = usePaginatedRecordings();
+  const { recordings, hasMoreRecordings, loadMoreRecordings, onVisibleRangeChanged, isLoading } =
+    usePaginatedRecordings();
 
   // Recording store state (context holds the recording-specific fields)
   const recordingStatus = useRecordingStore(ctx => ctx.status);
@@ -227,6 +244,93 @@ export default function RecordingsScreen(): ReactElement {
     });
   };
 
+  const toggleSelect = (id: string): void => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = (): void => setSelectedIds(new Set());
+
+  const handleAskAISelected = async (): Promise<void> => {
+    const selected = recordings.filter(r => selectedIds.has(r.externalId));
+    if (selected.length === 0 || selected.length > MAX_ASK_AI_SELECTION || isPreparingAskAI) return;
+
+    setIsPreparingAskAI(true);
+    try {
+      const details = await Promise.all(
+        selected.map(r => recordingService.getRecordingDetail(r.externalId)),
+      );
+      const messages = await Promise.all(
+        details.map(d =>
+          d.messageId
+            ? zero.run(queries.getMessageForActivityV2({ messageId: d.messageId }), {
+                type: 'complete',
+              })
+            : Promise.resolve(null),
+        ),
+      );
+      const attachmentIds = messages.flatMap(m =>
+        (m?.attachments ?? []).map((att: { id: string }) => att.id),
+      );
+      if (attachmentIds.length === 0) {
+        toast.error('No transcripts available for the selected recordings');
+        return;
+      }
+      const primary = details[0];
+      xyneAIActor.send({
+        type: 'OPEN',
+        startFreshChat: true,
+        ...(primary?.channelId ? { channelId: primary.channelId } : {}),
+        threadInfo: {
+          conversationId: primary?.conversationId ?? '',
+          previewText:
+            selected.length === 1
+              ? (selected[0]?.title ?? 'Recording Transcript')
+              : `${selected.length} recordings`,
+          attachmentIds,
+        },
+      });
+      clearSelection();
+    } catch (err) {
+      logRecordingError('RecordingsScreen.askAISelected', err);
+      toast.error('Failed to open Ask AI');
+    } finally {
+      setIsPreparingAskAI(false);
+    }
+  };
+
+  const handleDeleteSelected = async (): Promise<void> => {
+    if (isBulkDeleting) return;
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const { deleted, failed } = await recordingService.bulkDeleteRecordings(ids);
+      removeRecordingsFromCache(deleted);
+      if (failed.length > 0) {
+        toast.error(`Failed to delete ${failed.length} recording${failed.length > 1 ? 's' : ''}`);
+      } else {
+        toast.success(`Deleted ${deleted.length} recording${deleted.length > 1 ? 's' : ''}`);
+      }
+      setShowBulkDelete(false);
+      clearSelection();
+    } catch (err) {
+      logRecordingError('RecordingsScreen.deleteSelected', err);
+      toast.error('Failed to delete recordings');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  const selectedCount = selectedIds.size;
+
   // ─── Loading State ───────────────────────────────────────────────
   if (isLoading && recordings.length === 0 && !isActive) {
     return (
@@ -344,6 +448,22 @@ export default function RecordingsScreen(): ReactElement {
               </p>
             </div>
 
+            {/* Bulk Action Bar — shown when one or more recordings are selected */}
+            {selectedCount > 0 && (
+              <RecordingsBulkActionBar
+                selectedCount={selectedCount}
+                isPreparingAskAI={isPreparingAskAI}
+                askAIDisabledReason={
+                  selectedCount > MAX_ASK_AI_SELECTION
+                    ? `For Ask AI, a maximum of ${MAX_ASK_AI_SELECTION} recordings can be selected`
+                    : undefined
+                }
+                onClear={clearSelection}
+                onAskAI={() => void handleAskAISelected()}
+                onDelete={() => setShowBulkDelete(true)}
+              />
+            )}
+
             {/* Empty State */}
             {recordings.length === 0 ? (
               <div className='flex flex-col items-center justify-center py-20 text-center'>
@@ -368,6 +488,7 @@ export default function RecordingsScreen(): ReactElement {
                     useWindowScroll={false}
                     atBottomThreshold={100}
                     endReached={loadMoreRecordings}
+                    rangeChanged={range => onVisibleRangeChanged(range.startIndex)}
                     components={{
                       Footer: () =>
                         hasMoreRecordings ? (
@@ -458,6 +579,18 @@ export default function RecordingsScreen(): ReactElement {
                               className='flex-shrink-0 pr-4'
                             />
                           )}
+                          {/* Selection checkbox — toggles bulk-action selection */}
+                          <label className='flex-shrink-0 flex items-center pr-4 cursor-pointer'>
+                            <input
+                              type='checkbox'
+                              checked={selectedIds.has(recording.externalId)}
+                              onChange={() => toggleSelect(recording.externalId)}
+                              className='w-4 h-4 cursor-pointer accent-black'
+                              aria-label={`Select ${recording.title ?? 'recording'}`}
+                              data-track-category='RecordingsScreen'
+                              data-track-name='toggle_select_recording'
+                            />
+                          </label>
                         </div>
                       </div>
                     )}
@@ -552,6 +685,31 @@ export default function RecordingsScreen(): ReactElement {
         defaultTitle={generateAutoTitle()}
         onSave={handleSaveTitle}
         isSaving={savingTitle}
+      />
+
+      {/* ─── Bulk Delete Confirmation Dialog ───── */}
+      <ActionModal
+        isOpen={showBulkDelete}
+        onClose={() => setShowBulkDelete(false)}
+        showIcon={false}
+        title={`Delete ${selectedCount} recording${selectedCount > 1 ? 's' : ''}`}
+        subtitle={`Are you sure you want to delete ${
+          selectedCount > 1 ? 'these recordings' : 'this recording'
+        }? This action cannot be undone.`}
+        buttons={[
+          {
+            label: 'Cancel',
+            variant: 'outline',
+            onClick: () => setShowBulkDelete(false),
+            testId: 'cancel-delete-selected',
+          },
+          {
+            label: isBulkDeleting ? 'Deleting…' : 'Delete',
+            variant: 'destructive',
+            onClick: () => void handleDeleteSelected(),
+            testId: 'confirm-delete-selected',
+          },
+        ]}
       />
 
       {/* ─── Connection Warning Modal ───── */}

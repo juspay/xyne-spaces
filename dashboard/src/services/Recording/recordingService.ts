@@ -28,6 +28,12 @@ export interface Recording {
   hasRecording?: boolean;
 }
 
+export interface BulkDeleteRecordingsResult {
+  success: boolean;
+  deleted: string[];
+  failed: Array<{ callId: string; reason: string }>;
+}
+
 export interface RecordingDetail extends Recording {
   transcript: string | null;
   identifiedTranscript: string | null;
@@ -164,6 +170,17 @@ class RecordingService {
    */
   async deleteRecording(callId: string): Promise<void> {
     await apiInstance.delete(`/calls/recordings/${callId}`);
+  }
+
+  /**
+   * Delete multiple recordings in a single request.
+   */
+  async bulkDeleteRecordings(callIds: string[]): Promise<BulkDeleteRecordingsResult> {
+    const response: AxiosResponse<BulkDeleteRecordingsResult> = await apiInstance.post(
+      '/calls/recordings/bulk-delete',
+      { callIds },
+    );
+    return response.data;
   }
 
   /**
