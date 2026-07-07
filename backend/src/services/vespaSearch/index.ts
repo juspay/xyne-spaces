@@ -663,6 +663,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.slack.channelId = inVals;
       options.ticket.channelId = inVals;
       options.mail.channelId = inVals;
+      options.file.channelId = inVals;
     }
 
     // Add unified filters (apply to both slack and ticket)
