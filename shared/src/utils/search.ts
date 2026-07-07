@@ -8,6 +8,7 @@ interface Searchable {
 
 interface UserLike extends Searchable {
   email: string;
+  displayName?: string | null;
   status?: string | null;
 }
 
@@ -30,6 +31,7 @@ export function searchUsers<T extends UserLike>(
 
   const fuse = new Fuse(users, {
     keys: [
+      { name: 'displayName', weight: 2 },
       { name: 'name', weight: 2 },
       { name: 'email', weight: 1 },
     ],
@@ -43,14 +45,17 @@ export function searchUsers<T extends UserLike>(
   const results = fuse.search(query);
 
   const rescored = results.map(r => {
+    // Prefer the display name (what the user actually sees) for prefix/word-boundary
+    // boosting, but keep matching on the raw name so the old name still finds them.
+    const displayName = (r.item.displayName || r.item.name).toLowerCase();
     const name = r.item.name.toLowerCase();
     const email = r.item.email.toLowerCase();
 
     let finalScore = r.score ?? 1;
 
-    if (name.startsWith(q)) {
+    if (displayName.startsWith(q) || name.startsWith(q)) {
       finalScore -= 10;
-    } else if (name.includes(' ' + q)) {
+    } else if (displayName.includes(' ' + q) || name.includes(' ' + q)) {
       finalScore -= 5;
     } else if (email.startsWith(q)) {
       finalScore -= 2;
