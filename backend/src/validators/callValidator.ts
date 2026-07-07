@@ -12,6 +12,68 @@ export const HideCallSchema = z.object({
 
 export type UpdateRsvpInput = z.infer<typeof UpdateRsvpSchema>;
 
+const requiredTrimmedString = (message: string) =>
+  z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim() : value),
+    z.string().min(1, message),
+  );
+
+const optionalTrimmedString = z.preprocess(
+  (value) => {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  },
+  z.string().optional(),
+);
+
+const optionalIntegerAtLeast = (minimum: number) =>
+  z.preprocess(
+    (value) => {
+      const parsed = Number.parseInt(String(value ?? ''), 10);
+      return Number.isFinite(parsed) && parsed >= minimum ? parsed : undefined;
+    },
+    z.number().int().optional(),
+  );
+
+const WhiteboardFileSchema = z
+  .custom<Express.Multer.File>(
+    (value): value is Express.Multer.File => {
+      if (!value || typeof value !== 'object') return false;
+      const file = value as Partial<Express.Multer.File>;
+      return typeof file.path === 'string' && file.path.trim().length > 0;
+    },
+    { message: 'Whiteboard image is required' },
+  )
+  .refine((file) => file.mimetype === 'image/png', 'Whiteboard image must be a PNG');
+
+export const SaveWhiteboardAttachmentSchema = z
+  .object({
+    userId: requiredTrimmedString('Unauthorized'),
+    requestWorkspaceId: optionalTrimmedString,
+    callId: requiredTrimmedString('Call ID is required'),
+    file: WhiteboardFileSchema,
+    body: z
+      .object({
+        pageId: optionalTrimmedString,
+        pageLabel: optionalTrimmedString,
+        pageOrder: optionalIntegerAtLeast(0),
+        width: optionalIntegerAtLeast(1),
+        height: optionalIntegerAtLeast(1),
+      })
+      .passthrough(),
+  })
+  .transform(({ body, ...data }) => ({
+    ...data,
+    pageId: body.pageId,
+    pageLabel: body.pageLabel,
+    pageOrder: body.pageOrder,
+    width: body.width,
+    height: body.height,
+  }));
+
+export type SaveWhiteboardAttachmentInput = z.infer<typeof SaveWhiteboardAttachmentSchema>;
+
 /**
  * Validation schema for scheduling a call
  */

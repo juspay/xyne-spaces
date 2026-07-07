@@ -218,6 +218,34 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async findWhiteboardByCallId(callId: string): Promise<MessageAttachment | null> {
+    return await this.db.messageAttachment.findFirst({
+      where: {
+        AND: [
+          { metadata: { path: ['callId'], equals: callId } },
+          { metadata: { path: ['type'], equals: 'whiteboard' } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findWhiteboardByCallIdAndPageId(
+    callId: string,
+    pageId: string,
+  ): Promise<MessageAttachment | null> {
+    return await this.db.messageAttachment.findFirst({
+      where: {
+        AND: [
+          { metadata: { path: ['callId'], equals: callId } },
+          { metadata: { path: ['pageId'], equals: pageId } },
+          { metadata: { path: ['type'], equals: 'whiteboard' } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async findByConversationId(conversationId: string): Promise<MessageAttachment[]> {
     return await this.db.messageAttachment.findMany({
       where: { conversationId, isDeleted: false },

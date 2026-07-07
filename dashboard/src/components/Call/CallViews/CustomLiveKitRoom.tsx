@@ -27,6 +27,17 @@ import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
 import { ScreenPickerModal } from '../../ScreenPicker/ScreenPickerModal';
 import { mutators } from '../../../zero/mutators';
 import { isParticipantScreenShareEnabled } from '../../../utils/livekitScreenShare';
+import { logger, Logger } from '../../../utils/logger';
+import { CallWhiteboardSync } from '../CallWhiteboard';
+import { callService } from '../../../services/Call/callService';
+import {
+  createCallWhiteboardPngBlobs,
+  getCallWhiteboardState,
+  isCallWhiteboardSaved,
+  markCallWhiteboardSaved,
+  sendCallWhiteboardEvent,
+  useCallWhiteboardStore,
+} from '../../../stores/callWhiteboardStore';
 
 export interface CustomLiveKitRoomProps {
   token: string;
@@ -47,6 +58,8 @@ export function CustomLiveKitRoom({
 }: CustomLiveKitRoomProps): React.ReactElement {
   // Sync custom screen picker on/off from CAC — only active while in a call
   useScreenPickerFlag();
+  const isSavingWhiteboardRef = useRef(false);
+  const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
 
   // Subscribe to room state from global XState machine using a single snapshot
   const snapshot = useSelector(roomActor, state => state);
@@ -140,6 +153,20 @@ export function CustomLiveKitRoom({
   );
 
   const currentChannel = useChannel(channelId || '');
+
+  useEffect(() => {
+    sendCallWhiteboardEvent({ type: 'setCallId', callId });
+
+    return (): void => {
+      sendCallWhiteboardEvent({ type: 'setCallId', callId: null });
+    };
+  }, [callId]);
+
+  useEffect(() => {
+    if (!isNativeMode && !isMobile && machineViewMode === 'mini' && isWhiteboardOpen) {
+      roomActor.send({ type: 'TOGGLE_VIEW' });
+    }
+  }, [isMobile, isNativeMode, isWhiteboardOpen, machineViewMode]);
 
   // const isAiControlRequested = useMemo(() => {
   //   return pendingControlRequest !== null;
@@ -237,15 +264,54 @@ export function CustomLiveKitRoom({
     [zero, internalCallId],
   );
 
+  const saveWhiteboardIfNeeded = useCallback(async (): Promise<void> => {
+    const whiteboardState = getCallWhiteboardState();
+    if (
+      !whiteboardState.hasContent ||
+      isCallWhiteboardSaved(callId) ||
+      isSavingWhiteboardRef.current
+    ) {
+      return;
+    }
+
+    isSavingWhiteboardRef.current = true;
+    try {
+      const pngs = await createCallWhiteboardPngBlobs();
+      if (pngs.length === 0) return;
+
+      for (const png of pngs) {
+        await callService.saveWhiteboard(callId, png);
+      }
+      markCallWhiteboardSaved(callId);
+    } catch (error) {
+      toast.error('Whiteboard could not be saved');
+      logger.error(Logger.Event.FRONTEND_ERROR, {
+        feature: 'call-whiteboard',
+        reason: 'save-whiteboard-failed',
+        callId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      isSavingWhiteboardRef.current = false;
+    }
+  }, [callId]);
+
   const handleDisconnect = useCallback(
     (endForAll = false) => {
-      if (isChatOpen) {
-        roomActor.send({ type: 'TOGGLE_CHAT' });
-      }
-      roomActor.send({ type: 'DISCONNECT', endForAll });
-      setShowEndCallModal(false);
+      void (async (): Promise<void> => {
+        const isOnlyConnectedParticipant = (room?.remoteParticipants.size ?? 0) === 0;
+        if (endForAll || isOnlyParticipant || isOnlyConnectedParticipant) {
+          await saveWhiteboardIfNeeded();
+        }
+
+        if (isChatOpen) {
+          roomActor.send({ type: 'TOGGLE_CHAT' });
+        }
+        roomActor.send({ type: 'DISCONNECT', endForAll });
+        setShowEndCallModal(false);
+      })();
     },
-    [isChatOpen],
+    [isChatOpen, isOnlyParticipant, room?.remoteParticipants.size, saveWhiteboardIfNeeded],
   );
 
   const handleDisconnectClick = useCallback(() => {
@@ -339,13 +405,14 @@ export function CustomLiveKitRoom({
 
   // Route to appropriate view based on viewMode
   if (machineViewMode === 'mini') {
-    // Mobile: Don't render anything (header is in AppRoot), Desktop: Show mini view
+    // Mobile call UI is in AppRoot; keep whiteboard sync alive. Desktop shows mini view.
     if (isMobile) {
-      return <></>;
+      return <CallWhiteboardSync room={room} />;
     }
 
     return (
       <>
+        <CallWhiteboardSync room={room} />
         <MiniCallView
           participants={participants}
           isMicEnabled={isMicEnabled}
@@ -418,6 +485,7 @@ export function CustomLiveKitRoom({
 
   return (
     <>
+      <CallWhiteboardSync room={room} />
       <FullCallView
         participants={participants}
         isMicEnabled={isMicEnabled}

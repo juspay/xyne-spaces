@@ -701,6 +701,57 @@ export class CallService {
       throw error;
     }
   }
+
+  async saveWhiteboard(
+    callId: string,
+    payload: {
+      blob: Blob;
+      width: number;
+      height: number;
+      pageId?: string;
+      pageLabel?: string;
+      pageOrder?: number;
+    },
+  ): Promise<{
+    success: boolean;
+    attachmentId?: string;
+    alreadyExists?: boolean;
+    pageId?: string;
+  }> {
+    const formData = new FormData();
+    const fileSuffix = payload.pageLabel ?? payload.pageId ?? 'page';
+    const safeFileSuffix = fileSuffix.replace(/[^a-z0-9_-]/gi, '-');
+    formData.append('file', payload.blob, `whiteboard-${callId}-${safeFileSuffix}.png`);
+    formData.append('width', String(payload.width));
+    formData.append('height', String(payload.height));
+    if (payload.pageId) formData.append('pageId', payload.pageId);
+    if (payload.pageLabel) formData.append('pageLabel', payload.pageLabel);
+    if (payload.pageOrder !== undefined) formData.append('pageOrder', String(payload.pageOrder));
+
+    try {
+      const response = await apiInstance.post<{
+        success: boolean;
+        attachmentId?: string;
+        alreadyExists?: boolean;
+        pageId?: string;
+      }>(`/calls/${callId}/save-whiteboard`, formData);
+
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
   async getOtherUserScheduledCalls(
     userId: string,
     from: Date,

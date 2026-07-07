@@ -3,6 +3,7 @@ import { callController } from '@/controllers/callController';
 import { callHostControlController } from '@/controllers/callHostControlController';
 import { scheduleCallController } from '@/controllers/scheduleCallController';
 import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
+import { uploadSingle } from '@/middleware/upload';
 
 const router = Router();
 
@@ -49,6 +50,13 @@ router.get('/:callId/download-recording', callController.downloadRecording);
 router.get('/:callId/recordings/:recordingId/download', callController.downloadCallRecording);
 router.patch('/:callId/recordings/:recordingId', callController.renameCallRecording);
 router.delete('/:callId/recordings/:recordingId', callController.deleteCallRecording);
+
+// Save in-call whiteboard PNG page - creates the MessageAttachment row at call end or page delete
+router.post(
+  '/:callId/save-whiteboard',
+  uploadSingle({ fieldName: 'file', maxBytes: 15 * 1024 * 1024 }),
+  callController.saveWhiteboardAttachment,
+);
 
 // PRD Generation endpoint (generates PRD canvas from call transcript)
 router.post('/:callId/generate-prd', callController.generatePRD);

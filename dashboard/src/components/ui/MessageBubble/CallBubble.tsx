@@ -191,6 +191,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
   isActiveCall,
   channelId,
   conversationId,
+  context,
   attachments,
 }) => {
   const metadata = message.metadata;
@@ -204,6 +205,8 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
   const visibleAttachments = attachments?.filter(att => {
     const attMeta = att.metadata as Record<string, unknown> | null;
     const attType = attMeta?.['type'] as string | undefined;
+    if (attType === 'whiteboard' && context !== 'thread') return false;
+
     if (speakerIdentificationEnabled && isHeadless) {
       // Prefer identified_transcript; fall back to transcript only when no identified exists
       const hasIdentified = attachments.some(

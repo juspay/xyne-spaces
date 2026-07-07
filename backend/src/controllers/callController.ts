@@ -26,13 +26,22 @@ import { callSideEffectService } from '@/services/callSideEffectService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import z from 'zod';
 import { TrackSource } from 'livekit-server-sdk';
-import { HideCallSchema, UpdateRsvpSchema } from '@/validators/callValidator';
+import {
+  HideCallSchema,
+  SaveWhiteboardAttachmentSchema,
+  UpdateRsvpSchema,
+} from '@/validators/callValidator';
 import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { normalizeStoragePath } from '@/services/storage/pathUtils';
 import { callRecordingService } from '@/services/callRecordingService';
-import { SUMMARY_PROMPT_MAX_LENGTH, type CallParticipantMetadata } from '@xyne/shared';
+import { config } from '@/config/env';
 import { callDocumentService } from '@/services/callDocumentService';
+import {
+  type CallParticipantMetadata,
+  SUMMARY_PROMPT_MAX_LENGTH,
+} from '@xyne/shared';
+import { storageService } from '@/services/storage';
 
 export class CallController {
   private async cancelOtherActiveJoinRequests(
@@ -2397,6 +2406,154 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to bulk delete recordings:', error);
       res.status(500).json({ success: false, error: 'Failed to delete recordings' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/save-whiteboard
+   * Idempotently saves an in-call whiteboard PNG page as a call thread reply.
+   */
+  saveWhiteboardAttachment = async (req: Request, res: Response): Promise<void> => {
+    const uploadedFile = req.file as Express.Multer.File | undefined;
+    const rawCallId = typeof req.params.callId === 'string' ? req.params.callId : 'unknown';
+
+    const cleanupUploadedFile = async (): Promise<void> => {
+      if (!uploadedFile?.path) return;
+      try {
+        await storageService.deleteFile(uploadedFile.path);
+      } catch (error) {
+        logger.warn(`[${rawCallId}] save_whiteboard_cleanup_failed`, {
+          path: uploadedFile.path,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    const validationResult = SaveWhiteboardAttachmentSchema.safeParse({
+      userId: req.user?.id,
+      requestWorkspaceId: req.user?.workspaceId,
+      callId: req.params.callId,
+      file: uploadedFile,
+      body: req.body,
+    });
+    if (!validationResult.success) {
+      await cleanupUploadedFile();
+      const firstIssue = validationResult.error.issues[0];
+      const isUnauthorized = firstIssue?.path[0] === 'userId';
+      res.status(isUnauthorized ? 401 : 400).json({
+        success: false,
+        error: firstIssue?.message ?? 'Invalid whiteboard save request',
+      });
+      return;
+    }
+
+    const {
+      userId,
+      requestWorkspaceId,
+      callId,
+      file,
+      pageId,
+      pageLabel,
+      pageOrder,
+      width,
+      height,
+    } = validationResult.data;
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        await cleanupUploadedFile();
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      const participant = await repositories.calls.findParticipant(call.id, userId);
+      if (!participant) {
+        await cleanupUploadedFile();
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const callMetadata = call.metadata as { conversationId?: string; systemMessageId?: string } | null;
+      const conversationId = callMetadata?.conversationId;
+      const callMessageId = callMetadata?.systemMessageId;
+      if (!conversationId || !callMessageId) {
+        await cleanupUploadedFile();
+        res.status(404).json({ success: false, error: 'Call message not found' });
+        return;
+      }
+
+      const conversation = await repositories.conversations.findById(conversationId);
+      if (!conversation) {
+        await cleanupUploadedFile();
+        res.status(404).json({ success: false, error: 'Call conversation not found' });
+        return;
+      }
+
+      const workspaceId = conversation.workspaceId;
+      if (!workspaceId) {
+        logger.error(`[${callId}] save_whiteboard_missing_workspace`, {
+          callMessageId,
+          conversationId,
+          userId,
+        });
+        await cleanupUploadedFile();
+        res.status(500).json({ success: false, error: 'Call workspace not found' });
+        return;
+      }
+      if (requestWorkspaceId && requestWorkspaceId !== workspaceId) {
+        logger.warn(`[${callId}] save_whiteboard_workspace_mismatch`, {
+          callMessageId,
+          conversationId,
+          requestWorkspaceId,
+          workspaceId,
+          userId,
+        });
+        await cleanupUploadedFile();
+        res.status(403).json({ success: false, error: 'Invalid workspace' });
+        return;
+      }
+
+      const xyneAutomaticBot = await this.getOrCreateBotUser(workspaceId);
+      const { attachment, alreadyExists, whiteboardMessageId } =
+        await repositories.callWhiteboards.saveCallWhiteboardAttachment({
+          callId,
+          conversationId,
+          workspaceId,
+          callMessageId,
+          botUserId: xyneAutomaticBot.id,
+          savedByUserId: userId,
+          originalFilename:
+            file.originalname || `whiteboard-${callId}${pageLabel ? `-${pageLabel}` : ''}.png`,
+          size: file.size || 0,
+          url: file.path,
+          storageProvider: config.fileStorage.provider,
+          ...(pageId && { pageId }),
+          ...(pageLabel && { pageLabel }),
+          ...(pageOrder !== undefined && { pageOrder }),
+          ...(width !== undefined && { width }),
+          ...(height !== undefined && { height }),
+        });
+
+      if (alreadyExists) {
+        await cleanupUploadedFile();
+        res.json({ success: true, attachmentId: attachment.id, alreadyExists: true, pageId });
+        return;
+      }
+
+      logger.info(`[${callId}] save_whiteboard_attachment_created`, {
+        attachmentId: attachment.id,
+        messageId: whiteboardMessageId,
+        pageId,
+        userId,
+        botUserId: xyneAutomaticBot.id,
+      });
+
+      res.json({ success: true, attachmentId: attachment.id, pageId });
+    } catch (error) {
+      logger.error(`Failed to save whiteboard attachment for call ${callId}:`, error);
+      await cleanupUploadedFile();
+      res.status(500).json({ success: false, error: 'Failed to save whiteboard attachment' });
     }
   };
 
