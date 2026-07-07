@@ -33,6 +33,7 @@ import { useShortcutById, useShortcut } from '../../../shortcuts';
 import { callLobbyService } from '../../../services/Call/callLobbyService';
 import { InvitationResponse, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
+import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 
 interface ActiveCallForControls {
   externalId: string;
@@ -87,6 +88,9 @@ interface CallControlsProps {
   canStopRecording?: boolean | undefined;
   onStartRecording?: ((type: RecordingType) => void | Promise<void>) | undefined;
   onStopRecording?: (() => void | Promise<void>) | undefined;
+  onTogglePresentationMode?: (() => void) | undefined;
+  isPresentationMode?: boolean | undefined;
+  hidePresentationMode?: boolean | undefined;
 }
 
 export function CallControls({
@@ -124,11 +128,14 @@ export function CallControls({
   hideThreadChat = false,
   hideAIAssistant = false,
   hideMinimize = false,
+  hidePresentationMode = false,
   isExternalUser = false,
   isRecording = false,
   canStopRecording = true,
   onStartRecording,
   onStopRecording,
+  onTogglePresentationMode,
+  isPresentationMode = false,
 }: CallControlsProps): React.ReactElement {
   const [showCopied, setShowCopied] = useState(false);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
@@ -971,6 +978,34 @@ export function CallControls({
                 }
               />
             )}
+          </button>
+        )}
+
+        {/* Presentation Mode Button */}
+        {!hidePresentationMode && onTogglePresentationMode && (
+          <button
+            onClick={onTogglePresentationMode}
+            className={cn(
+              buttonClasses,
+              'text-white',
+              isPresentationMode
+                ? 'bg-blue-600 hover:bg-blue-700'
+                : 'bg-gray-700 hover:bg-gray-600',
+            )}
+            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            title={isPresentationMode ? 'Exit presentation mode' : 'Enter presentation mode'}
+            aria-label={isPresentationMode ? 'Exit presentation mode' : 'Enter presentation mode'}
+            aria-pressed={isPresentationMode}
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_PRESENTATION_MODE'
+            data-track-metadata={JSON.stringify({ callId, isEnabled: isPresentationMode })}
+          >
+            <XyneTelepresenceIcon
+              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+              style={
+                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+              }
+            />
           </button>
         )}
 

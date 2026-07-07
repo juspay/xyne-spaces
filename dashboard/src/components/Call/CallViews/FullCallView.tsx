@@ -14,6 +14,7 @@ import ThreadMessages from '../../Chat/ThreadPannel';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
+import { findRemotePresenter } from '../ParticipantGrid/sortParticipants';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
@@ -31,6 +32,9 @@ import { CallPrivacyIndicator } from '../CallPrivacyIndicator/CallPrivacyIndicat
 import { createCallPrivacyActions } from '../CallPrivacyIndicator/callPrivacyActions';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import { hasJoinedExternalParticipant } from '../callParticipant.utils';
+import { useAuth } from '../../../hooks/useAuth';
+import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
+import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
 
 const CALL_PRIVACY_DESCRIPTION = [
   'Xyne AI is active in this call. Active actions and saved artifacts are listed below.',
@@ -161,10 +165,14 @@ export function FullCallView({
   privacyReminderEnabled = true,
 }: FullCallViewProps): React.ReactElement {
   // ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS
+  const { user } = useAuth();
+  const isTelepresenceEnabled = useTelepresenceEnabled(user?.email);
+
   // UI state
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
   const [isHostControlsOpen, setIsHostControlsOpen] = useState(false);
+  const [isPresentationMode, setIsPresentationMode] = useState(false);
   // Track local participant's network quality
   const networkQuality = useParticipantNetworkQuality(room?.localParticipant ?? null);
   const showQualityToast = useNetworkQualityToast(networkQuality);
@@ -389,6 +397,11 @@ export function FullCallView({
     }
   }, [canUseCallChat, isCallChatOpen, onToggleCallChat]);
 
+  const remoteParticipant = useMemo(
+    () => findRemotePresenter(participants, localParticipantId),
+    [participants, localParticipantId],
+  );
+
   // Determine if any right sidebar is open (for layout adjustments)
   const isRightSidebarOpen = isChatOpen || isParticipantsSidebarOpen || isHostControlsOpen;
 
@@ -558,6 +571,11 @@ export function FullCallView({
             canStopRecording={canStopRecording}
             onStartRecording={handleStartRecording}
             onStopRecording={handleStopRecording}
+            onTogglePresentationMode={
+              isTelepresenceEnabled ? () => setIsPresentationMode(prev => !prev) : undefined
+            }
+            isPresentationMode={isPresentationMode}
+            hidePresentationMode={!isTelepresenceEnabled}
           />
         </div>
       </CallStateTransition>
@@ -630,6 +648,15 @@ export function FullCallView({
           onDismiss={() => void finalizeStopRecording()}
         />
       )}
+
+      {/* Presentation Mode Overlay — handles fullscreen + smooth fade transition */}
+      <PresentationModeOverlay
+        isOpen={isPresentationMode}
+        participant={remoteParticipant ?? null}
+        aiController={aiController}
+        requestedAiController={requestedAiController}
+        onExit={() => setIsPresentationMode(false)}
+      />
     </div>
   );
 }
