@@ -8,10 +8,17 @@ import { TicketController } from '@/controllers/ticketController';
 import { TicketPriority, TicketStatusV2 } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { generateTitle } from '@/services/agents/title-generator';
+
+const MAX_TITLE_LENGTH = 100;
+const MAX_TITLE_RETRIES = 3;
+const TITLE_RETRY_DELAY_MS = 500;
 
 const CreateTicketConfigSchema = z.object({
-  title: variableRef(z.string().min(1)),
-  description: variableRef(z.string()).optional(),
+  title: variableRef(
+    z.string().describe('Leave empty to auto-generate a title from the description.')
+  ).optional(),
+  description: variableRef(z.string().min(1)),
   channelId: variableRef(z.string().min(1)),
   projectId: variableRef(z.string().min(1)),
   boardId: variableRef(z.string().min(1)),
@@ -36,7 +43,43 @@ interface CreateTicketOutput extends Record<string, unknown> {
 
 const ticketController = new TicketController();
 
-export class CreateTicketStep extends BaseActionStep<typeof CreateTicketConfigSchema, CreateTicketOutput> {
+function truncateForTitle(text: string): string {
+  if (text.length <= MAX_TITLE_LENGTH) return text;
+  return `${text.slice(0, MAX_TITLE_LENGTH - 3)}...`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function generateTitleWithRetry(description: string, userId: string): Promise<string | null> {
+  for (let attempt = 1; attempt <= MAX_TITLE_RETRIES; attempt++) {
+    try {
+      const generated = await generateTitle(
+        { description, maxLength: MAX_TITLE_LENGTH },
+        { userId }
+      );
+      return generated.title;
+    } catch (error) {
+      if (attempt === MAX_TITLE_RETRIES) {
+        logger.warn('[CREATE_TICKET] Title generation failed, falling back to description', error);
+        return null;
+      }
+      logger.warn(
+        `[CREATE_TICKET] Title generation attempt ${attempt}/${MAX_TITLE_RETRIES} failed, retrying...`,
+        error
+      );
+      await delay(TITLE_RETRY_DELAY_MS);
+    }
+  }
+
+  return null;
+}
+
+export class CreateTicketStep extends BaseActionStep<
+  typeof CreateTicketConfigSchema,
+  CreateTicketOutput
+> {
   readonly type = 'CREATE_TICKET';
   readonly configSchema = CreateTicketConfigSchema;
   readonly outputSchema = CreateTicketOutputSchema;
@@ -49,13 +92,29 @@ export class CreateTicketStep extends BaseActionStep<typeof CreateTicketConfigSc
 
   async execute(
     config: z.infer<typeof CreateTicketConfigSchema>,
-    context: AutomationContext,
+    context: AutomationContext
   ): Promise<CreateTicketOutput> {
-    const createdBy =
-      (config.createdById as string | undefined) ?? context.automation.createdById;
-    const rawTitle = config.title as string;
-    const title = extractPlainTextFromHtml(rawTitle).trim() || rawTitle;
-    const description = (config.description as string | undefined) ?? title;
+    const createdBy = (config.createdById as string | undefined) ?? context.automation.createdById;
+
+    const rawTitle = config.title as string | undefined;
+    const rawDescription = config.description as string;
+    if (!rawDescription?.trim()) {
+      throw new Error('[CREATE_TICKET] Description must be provided');
+    }
+
+    const description = rawDescription;
+    const plainDescription = extractPlainTextFromHtml(description).trim();
+
+    let title = rawTitle?.trim() ? extractPlainTextFromHtml(rawTitle).trim() : '';
+
+    if (!title) {
+      if (!plainDescription) {
+        throw new Error('[CREATE_TICKET] Description must contain text to generate a title');
+      }
+      title =
+        (await generateTitleWithRetry(plainDescription, createdBy)) ??
+        truncateForTitle(plainDescription);
+    }
 
     const reqBody: Record<string, unknown> = {
       title,
@@ -108,7 +167,7 @@ export class CreateTicketStep extends BaseActionStep<typeof CreateTicketConfigSc
     };
 
     logger.info(
-      `[automations] CREATE_TICKET → ticket ${ticket.id} (xyneId=${ticket.xyneId}) created in channel=${reqBody.channelId}, board=${reqBody.boardId}, project=${reqBody.projectId}, conversation=${ticket.conversationId}`,
+      `[automations] CREATE_TICKET → ticket ${ticket.id} (xyneId=${ticket.xyneId}) created in channel=${reqBody.channelId}, board=${reqBody.boardId}, project=${reqBody.projectId}, conversation=${ticket.conversationId}`
     );
 
     return {
