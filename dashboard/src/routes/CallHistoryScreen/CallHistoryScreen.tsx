@@ -946,10 +946,6 @@ const CallHistoryScreen = (): ReactElement => {
                 <div className='py-10 flex items-center justify-center'>
                   <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
                 </div>
-              ) : (limitedScheduledCalls?.length ?? 0) === 0 ? (
-                <div className='py-4 text-sm text-muted-foreground text-center'>
-                  No upcoming calls
-                </div>
               ) : (
                 <UpcomingCallsList
                   grouped
