@@ -84,6 +84,7 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
+import { isDeskChannelType } from '../utils/channel.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
@@ -3830,6 +3831,40 @@ export const mutators = defineMutators({
         await tx.mutate.tickets.update({
           id,
           ...updateData,
+        });
+
+        await updateTicketMdFromZero(tx, zql, id);
+      },
+    ),
+    archiveDeskTicket: defineMutator(
+      z.object({
+        id: z.string(),
+        updatedAt: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, updatedAt } }) => {
+        const ticket = await tx.run(zql.tickets.where('id', id).one());
+        if (!ticket) {
+          throw new Error('Ticket not found');
+        }
+
+        if (ticket.isArchived) {
+          throw new Error('Ticket is already archived');
+        }
+
+        if (!ticket.channelId) {
+          throw new Error('Ticket has no associated channel');
+        }
+
+        const channel = await tx.run(zql.channels.where('id', ticket.channelId).one());
+        if (!channel || !isDeskChannelType(channel.type)) {
+          throw new Error('Only Desk tickets can be archived from Desk');
+        }
+
+        await tx.mutate.tickets.update({
+          id,
+          isArchived: true,
+          updatedAt,
+          updatedBy: ctx.userID,
         });
 
         await updateTicketMdFromZero(tx, zql, id);
