@@ -219,28 +219,36 @@ function Field({
     const inner = getVariableRefInner(schema);
     const innerKind = inner ? detectFieldKind(inner) : 'string';
     const isRef = isVariableRefValue(value);
-    if (!entityKind && isRichTextField(fieldKey)) {
-      return (
-        <div className='flex flex-col gap-1'>
-          <FieldHeader label={labelText} description={description} />
-          <AutomationRichTextField
-            value={typeof value === 'string' ? value : ''}
-            onChange={next => onChange(next)}
-            variableSources={variableSources}
-            placeholder={`Enter ${label.toLowerCase()}…`}
-          />
-          {hasError && <FieldError message={errorMessage} />}
-        </div>
-      );
-    }
-    const supportsInlineInsert =
-      !entityKind && (innerKind === 'string' || innerKind === 'textarea');
+    const isTextField = innerKind === 'string' || innerKind === 'textarea';
+    const usesRichTextEditor = !entityKind && isRichTextField(fieldKey);
+    const supportsInlineInsert = !entityKind && (usesRichTextEditor || isTextField);
+    const fieldHeaderDescription = inner?.description ?? description;
+    const inputPlaceholder =
+      fieldKey === 'title'
+        ? 'AI Generated Title'
+        : schema.description
+          ? ''
+          : `Enter ${label.toLowerCase()}`;
 
     if (supportsInlineInsert) {
+      if (usesRichTextEditor) {
+        return (
+          <div className='flex flex-col gap-1'>
+            <FieldHeader label={labelText} description={fieldHeaderDescription} />
+            <AutomationRichTextField
+              value={typeof value === 'string' ? value : ''}
+              onChange={next => onChange(next)}
+              variableSources={variableSources}
+              placeholder={`Enter ${label.toLowerCase()}…`}
+            />
+            {hasError && <FieldError message={errorMessage} />}
+          </div>
+        );
+      }
       if (isRef) {
         return (
           <div className='flex flex-col gap-1'>
-            <FieldHeader label={labelText} description={description} />
+            <FieldHeader label={labelText} description={fieldHeaderDescription} />
             <ReferenceChip
               value={value}
               sources={variableSources}
@@ -252,7 +260,7 @@ function Field({
       }
       return (
         <div className='flex flex-col gap-1' ref={containerRef}>
-          <FieldHeader label={labelText} description={description} />
+          <FieldHeader label={labelText} description={fieldHeaderDescription} />
           <div className='flex items-start gap-2'>
             <div className='flex-1'>
               <RawInput
@@ -260,7 +268,7 @@ function Field({
                 schema={inner ?? schema}
                 value={value}
                 onChange={onChange}
-                placeholder={schema.description ? '' : `Enter ${label.toLowerCase()}`}
+                placeholder={inputPlaceholder}
                 error={hasError}
                 variableSources={variableSources}
               />
@@ -276,7 +284,7 @@ function Field({
 
     return (
       <div className='flex flex-col gap-1'>
-        <FieldHeader label={labelText} description={description} />
+        <FieldHeader label={labelText} description={fieldHeaderDescription} />
         {isRef ? (
           <ReferenceChip
             value={value}
@@ -299,7 +307,7 @@ function Field({
                   schema={inner ?? schema}
                   value={value}
                   onChange={onChange}
-                  placeholder={schema.description ? '' : `Enter ${label.toLowerCase()}`}
+                  placeholder={inputPlaceholder}
                   error={hasError}
                   variableSources={variableSources}
                 />
