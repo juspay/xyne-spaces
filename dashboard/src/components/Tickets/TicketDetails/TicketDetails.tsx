@@ -317,6 +317,7 @@ const StageFormSubmissions: React.FC<StageFormSubmissionsProps> = ({ stageVisitF
     </div>
   );
 };
+const TICKET_ATTACHMENT_PREVIEW_LIMIT = 5;
 
 interface TicketDetailsProps {
   ticketId: string;
@@ -483,6 +484,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const etaInputRef = useRef<HTMLInputElement>(null);
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [needsReadMore, setNeedsReadMore] = useState(false);
+  const [showAllAttachments, setShowAllAttachments] = useState(false);
   const descriptionRef = useRef<HTMLDivElement>(null);
   const [showBackwardConfirmDialog, setShowBackwardConfirmDialog] = useState(false);
   const [backwardStageChange, setBackwardStageChange] = useState<{
@@ -2716,16 +2718,35 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           )}
         </div>
         {/* Display Ticket Files */}
-        {expandedView && ticketAttachments && ticketAttachments.length > 0 && (
-          <div className='space-y-3'>
-            {ticketAttachments.map(attachment => (
-              <FileBubble
-                key={attachment.id}
-                createdBy={attachment.createdBy}
-                createdAt={attachment.createdAt}
-                attachment={attachment}
-              />
-            ))}
+        {ticketAttachments && ticketAttachments.length > 0 && (
+          <div className='flex flex-col gap-2'>
+            <div className='flex flex-wrap items-center gap-2'>
+              {(showAllAttachments
+                ? ticketAttachments
+                : ticketAttachments.slice(0, TICKET_ATTACHMENT_PREVIEW_LIMIT)
+              ).map(attachment => (
+                <FileBubble
+                  key={attachment.id}
+                  compact
+                  createdBy={attachment.createdBy}
+                  createdAt={attachment.createdAt}
+                  attachment={attachment}
+                />
+              ))}
+            </div>
+            {ticketAttachments.length > TICKET_ATTACHMENT_PREVIEW_LIMIT && (
+              <button
+                className='text-xs font-semibold cursor-pointer self-start underline py-1'
+                onClick={() => setShowAllAttachments(prev => !prev)}
+                data-track-category='Tickets'
+                data-track-name={showAllAttachments ? 'ViewLessAttachments' : 'ViewMoreAttachments'}
+                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+              >
+                {showAllAttachments
+                  ? 'View less'
+                  : `View more (${ticketAttachments.length - TICKET_ATTACHMENT_PREVIEW_LIMIT})`}
+              </button>
+            )}
           </div>
         )}
         {/* Ticket MetaData Key Value */}
