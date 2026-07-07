@@ -225,6 +225,8 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                   setIsEditing(false);
                 }
               }}
+              enableSearch
+              searchPlaceholder='Search...'
               alignment={SelectMenuAlignment.START}
             />
           </div>

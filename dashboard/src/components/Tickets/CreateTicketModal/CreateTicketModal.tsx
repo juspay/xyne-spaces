@@ -2111,6 +2111,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             });
                           }
                         }}
+                        enableSearch
+                        searchPlaceholder='Search...'
                         alignment={SelectMenuAlignment.START}
                         error={!!error}
                         {...(error && { errorMessage: error })}
