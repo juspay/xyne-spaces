@@ -87,7 +87,7 @@ export class CanvasController {
         return;
       }
 
-      const canvasUrl = getCanvasUrl(viewAccessId);
+      const canvasUrl = getCanvasUrl(viewAccessId, req.user?.workspaceId);
 
       res.status(201).json({
         id: canvasId,
@@ -442,7 +442,7 @@ export class CanvasController {
         viewAccessId,
         title: canvas.title,
         markdown,
-        url: getCanvasUrl(viewAccessId),
+        url: getCanvasUrl(viewAccessId, req.user?.workspaceId),
       });
     } catch (error) {
       logger.error('[CANVAS-READ] Error:', error);
@@ -509,7 +509,7 @@ export class CanvasController {
         id: canvas.id,
         viewAccessId,
         title: canvas.title,
-        url: getCanvasUrl(viewAccessId),
+        url: getCanvasUrl(viewAccessId, req.user?.workspaceId),
       });
     } catch (error) {
       logger.error('[CANVAS-UPDATE] Error:', error);

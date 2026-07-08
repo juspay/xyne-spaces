@@ -288,9 +288,10 @@ export async function createKnowledgeCanvas(
 /**
  * Generate the shareable canvas URL from viewAccessId
  */
-export function getCanvasUrl(viewAccessId: string): string {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net';
-  return `${frontendUrl}/chat/canvas/${viewAccessId}`;
+export function getCanvasUrl(viewAccessId: string, workspaceId?: string | null): string {
+  const frontendUrl = (process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net').replace(/\/+$/, '');
+  const workspacePrefix = workspaceId ? `/${encodeURIComponent(workspaceId)}` : '';
+  return `${frontendUrl}${workspacePrefix}/chat/canvas/${encodeURIComponent(viewAccessId)}`;
 }
 
 /**

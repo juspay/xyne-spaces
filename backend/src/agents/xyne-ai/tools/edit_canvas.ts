@@ -104,7 +104,7 @@ export function createEditCanvasTool(): Tool<{ canvasViewId?: string; content: s
         });
         
         // Generate canvas URL using shared utility
-        const canvasUrl = getCanvasUrl(canvasViewId);
+        const canvasUrl = getCanvasUrl(canvasViewId, user.workspaceId);
         
         logger.info(`[Tool] [${context.sessionId}] edit_canvas: Updated canvas ${authResult.canvas.id}`);
         
