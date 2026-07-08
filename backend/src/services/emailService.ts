@@ -1387,6 +1387,14 @@ export class EmailService {
             emailId: email.id,
           });
         }
+
+        this.pushVespaJobForTicket(
+          ticketRow.id,
+          conversation.createdBy,
+          channel?.workspaceId,
+        ).catch(error => {
+          logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticketRow.id}:`, error);
+        });
       }
 
       this.pushVespaJobForMail(email.id, conversation.createdBy, channel?.workspaceId).catch(error => {
