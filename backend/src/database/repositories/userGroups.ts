@@ -332,9 +332,10 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     });
   }
 
-  async findByMetadataField(key: string, value: string): Promise<UserGroup | null> {
+  async findByMetadataField(key: string, value: string, workspaceId?: string): Promise<UserGroup | null> {
     return await this.db.userGroup.findFirst({
       where: {
+        ...(workspaceId ? { workspaceId } : {}),
         metadata: {
           path: [key],
           equals: value,

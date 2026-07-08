@@ -487,11 +487,13 @@ export async function resolveSlackIds(
     return undefined;
   }
   const userRepo = new UserRepository();
+  const groupRepo = new UserGroupRepository();
   const userMapper = new Map<string, ResolvedEntry>();
 
-  // For users: try DB lookup first (slackId or direct ID match)
-  // For groups: always call resolveApiGroup so it's created in the TARGET workspace
-  // (cross-workspace findByMetadataField would return a group from another workspace)
+  // DB-first for both users and groups: a Slack-native id is matched by stored metadata
+  // (scoped to this workspace), a Xyne CUID is looked up directly by primary key.
+  // The Slack API is only hit as a fallback for a Slack-native id not yet in the DB —
+  // which, for groups, imports the group + members into the TARGET workspace.
   const userSlackIdsToFetch: string[] = [];
   if (type === 'user') {
     const dbResults = await Promise.allSettled(
@@ -513,8 +515,27 @@ export async function resolveSlackIds(
       }
     });
   } else {
-    // Groups: fetch all from Slack API to ensure creation in target workspace
-    userSlackIdsToFetch.push(...slackUserId);
+    const dbResults = await Promise.allSettled(
+      slackUserId.map((slackId) =>
+        isSlackNativeId(slackId)
+          ? groupRepo.findByMetadataField('slackGroupId', slackId, workspaceId)
+          : groupRepo.findById(slackId)
+      )
+    );
+
+    slackUserId.forEach((slackId, i) => {
+      const result = dbResults[i];
+      if (result.status === 'fulfilled' && result.value) {
+        userMapper.set(slackId, { dbId: result.value.id });
+      } else if (isSlackNativeId(slackId)) {
+        // Slack usergroup not imported yet — fall back to the API to create it in the
+        // target workspace (cross-workspace matches were excluded by the workspace filter).
+        userSlackIdsToFetch.push(slackId);
+      } else {
+        // A Xyne CUID that isn't in the DB can't be resolved via Slack — mark unknown.
+        userMapper.set(slackId, {});
+      }
+    });
   }
 
   if (userSlackIdsToFetch.length > 0) {
