@@ -152,6 +152,8 @@ const applyKanbanTicketPageConditions = (
       ? query.where('statusV2', stageName as TicketStatusV2)
       : query.where('stageName', stageName);
 
+  query = query.where('isArchived', false);
+
   if (filters?.stages?.length) {
     query = query.where('stageName', 'IN', filters.stages);
   }

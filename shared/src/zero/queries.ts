@@ -153,6 +153,8 @@ const applyKanbanTicketPageConditions = (
       ? query.where('statusV2', stageName as TicketStatusV2)
       : query.where('stageName', stageName);
 
+  query = query.where('isArchived', false);
+
   if (columnType !== 'status' && filters?.stages?.length && !filters.stages.includes(stageName)) {
     return query.where('id', '__kanban_stage_filter_no_match__');
   }

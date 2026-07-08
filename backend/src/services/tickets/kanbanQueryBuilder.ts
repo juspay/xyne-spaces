@@ -169,6 +169,7 @@ export const buildKanbanTicketWhere = (
   return {
     AND: compact<Prisma.TicketWhereInput>([
       { workspaceId: context.workspaceId },
+      { isArchived: false },
       buildChannelAccessFilter(context.currentUserId),
       buildScopeFilter(context),
       {
