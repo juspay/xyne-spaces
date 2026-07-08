@@ -7,7 +7,6 @@ import json
 import os
 import re
 import ssl
-import tempfile
 
 import redis.asyncio as redis
 from livekit import rtc
@@ -30,6 +29,7 @@ from modules import MultiUserTranscriber
 from modules.realtime_identifier import RealtimeIdentifier
 from tools import create_ticket_creation_tool, create_get_my_tickets_tool, create_invite_user_tool
 from health_server import start_health_server
+import tempfile
 
 # Configure logging
 setup_logging()

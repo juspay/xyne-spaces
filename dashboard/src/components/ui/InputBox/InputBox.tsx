@@ -1023,6 +1023,23 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const handleSend = useCallback(async () => {
       if (!editor || isSending || sendDisabled) return;
 
+      // If a voice stream is active, finalize it for send first: this strips any
+      // unfinalized interim text and aborts the stream (discarding in-flight results)
+      // BEFORE we read the editor, so only committed text is sent and nothing leaks
+      // into the next message. No-op when no stream is active.
+      voiceInputRef.current?.abortForSend();
+
+      // The voice "shimmer" highlight is a transient editor-only decoration that
+      // auto-clears after ~1.4s; strip it across the doc so a quick send can't bake
+      // the orange highlight (a <span class="voice-shimmer">) into the sent message.
+      if (editor.schema.marks['voiceShimmer']) {
+        editor
+          .chain()
+          .setTextSelection({ from: 0, to: editor.state.doc.content.size })
+          .unsetMark('voiceShimmer')
+          .run();
+      }
+
       // Flush pending debounced content update before sending so that
       // onContentChange consumers (e.g. ComposeDmPanel form state) receive
       // the latest content before handleSubmit reads from the form.

@@ -4,6 +4,8 @@ import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { transcriptService } from '@/services/transcriptService';
+import { redisService } from '@/services/redisService';
+import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
 import { TicketController } from './ticketController';
 // import { CallController } from './callController';
 
@@ -361,14 +363,20 @@ class TranscriptionAgentController {
    */
   getUserNames = async (_req: Request, res: Response): Promise<void> => {
     try {
-      const db = DatabaseClient.getInstance();
-      const users = await db.user.findMany({
-        select: { name: true },
-        orderBy: { name: 'asc' },
-      });
-      const names = users
-        .map(u => (u.name || '').trim())
-        .filter(n => n.length > 0);
+      // STT hint priority (highest first): static hot words (added client-side by the
+      // agent) > bot users > active human users on our own domain. The ordered,
+      // deduplicated list is precomputed daily by warmUserRegistryQueue and cached in
+      // Redis; fall back to computing it live if the cache hasn't been populated yet
+      // (fresh deploy / Redis flush) so the endpoint never just returns nothing.
+      const cached = await redisService.get(STT_HINT_NAMES_REDIS_KEY);
+      let names: string[];
+      if (cached) {
+        names = JSON.parse(cached) as string[];
+      } else {
+        logger.warn('[UserNames] Cache miss — computing live (warm-user-registry cron may not have run yet)');
+        names = await computeSttHintNames();
+      }
+
       logger.info(`[UserNames] Returning ${names.length} user display names to agent`);
       res.json({ success: true, names });
     } catch (error) {

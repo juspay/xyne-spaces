@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import Tooltip from '../Tooltip/Tooltip';
 import type { MentionResult } from '../Selectors/Selectors.types';
 import { voiceInputService } from '../../../services/VoiceInput/voiceInputService';
+import type { VoiceStreamSession } from '../../../services/VoiceInput/voiceInputService';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -106,16 +107,34 @@ function buildVoiceMentionMatcher(source: readonly MentionResult[]): VoiceMentio
   return { pattern, nameMap, userMap };
 }
 
-/** STT name hints derived from the org user set. Built lazily, reused per set. */
-function buildVoiceHints(source: readonly MentionResult[]): string[] {
-  return source
-    .filter(item => item.type === 'user')
-    .map(item => item.name.replace(/ \(you\)$/, '').trim())
-    .filter(Boolean);
+// Live transcript is revealed into the editor one word at a time on this cadence,
+// for a smooth "typewriter" feel instead of whole-phrase jumps. Pure display pacing —
+// it does not change what the server streams over the WebSocket.
+const VOICE_REVEAL_INTERVAL_MS = 150;
+
+// Safety net after end-of-audio: if the server never closes the stream, force-close
+// it after this long so the UI doesn't hang in the transcribing state.
+const VOICE_STREAM_FORCE_CLOSE_MS = 12000;
+
+/** Prefix of `target` extended by up to `words` whole words past `shown`. If `shown`
+ *  is no longer a prefix of `target` (the server revised earlier words), snap to the
+ *  full `target` so we never display stale text. */
+function revealMoreWords(target: string, shown: string, words: number): string {
+  if (!target.startsWith(shown)) return target;
+  let i = shown.length;
+  for (let w = 0; w < words && i < target.length; w += 1) {
+    while (i < target.length && target[i] === ' ') i += 1;
+    while (i < target.length && target[i] !== ' ') i += 1;
+  }
+  return target.slice(0, i);
 }
 
 export interface VoiceInputHandle {
   toggle: () => void;
+  /** Called by the composer right before it sends: strips any unfinalized interim
+   *  text from the editor and aborts an active voice stream (no drain), so nothing
+   *  in flight leaks into the next message. No-op when no stream is active. */
+  abortForSend: () => void;
 }
 
 interface VoiceInputProps {
@@ -147,7 +166,20 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
     const [isVoiceTranscribing, setIsVoiceTranscribing] = useState(false);
     const voiceRecorderRef = useRef<MediaRecorder | null>(null);
     const voiceStreamRef = useRef<MediaStream | null>(null);
-    const voiceChunksRef = useRef<BlobPart[]>([]);
+    const wsSessionRef = useRef<VoiceStreamSession | null>(null);
+    // Tracks the editor range occupied by the current interim (partial) transcript.
+    const voiceStreamInterimRangeRef = useRef<{ from: number; to: number } | null>(null);
+    // Set when a send aborts the stream; makes late frames stop touching the editor.
+    const voiceStreamAbortedRef = useRef(false);
+    // Word-pacing buffer (see VOICE_REVEAL_INTERVAL_MS): transcript text feeds these
+    // refs and a timer drains them into the editor one word at a time.
+    const revealTargetRef = useRef(''); // full text we're typing toward (current phrase)
+    const revealShownRef = useRef(''); // text currently rendered in the interim region
+    const revealMustCommitRef = useRef(false); // target is a final → mention-commit once shown
+    const revealPendingPartialRef = useRef<string | null>(null); // partial queued during a commit
+    const revealTimerRef = useRef<number | null>(null);
+    // Handle for the post-endAudio force-close safety net (see VOICE_STREAM_FORCE_CLOSE_MS).
+    const voiceStreamCloseTimeoutRef = useRef<number | null>(null);
 
     // Notify parent whenever recording/transcribing state changes
     useEffect(() => {
@@ -297,48 +329,156 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
       [editor, parseVoiceTranscript],
     );
 
-    // ── STT hints (user display names for the STT provider) ────────────────
-    // Like the matcher, derived from the org user set and only needed at the
-    // moment we transcribe. Built lazily and cached per source identity.
-    const hintsCacheRef = useRef<{
-      source: readonly MentionResult[];
-      hints: string[];
-    } | null>(null);
+    // ── Streaming transcript reveal (word-paced) ────────────────────────────
+    // Incoming partial/final text feeds a buffer; a timer drains it into the editor's
+    // interim region one word at a time for a smooth typewriter effect. A final is
+    // revealed the same way, then committed with full mention parsing once shown.
 
-    const getVoiceHints = useCallback((): string[] => {
-      const source = voiceMentionItems.length > 0 ? voiceMentionItems : mentionItems;
-      const cached = hintsCacheRef.current;
-      if (cached && cached.source === source) return cached.hints;
-      const hints = buildVoiceHints(source);
-      hintsCacheRef.current = { source, hints };
-      return hints;
-    }, [voiceMentionItems, mentionItems]);
+    // Replace the interim region's content with `text` (or clear it when empty).
+    const renderInterim = useCallback(
+      (text: string): void => {
+        if (!editor) return;
+        const range = voiceStreamInterimRangeRef.current;
+        if (range === null) {
+          if (!text) return;
+          const pos = editor.state.selection.to;
+          editor.commands.insertContent(text);
+          voiceStreamInterimRangeRef.current = { from: pos, to: editor.state.selection.to };
+          return;
+        }
+        editor.chain().setTextSelection({ from: range.from, to: range.to }).deleteSelection().run();
+        if (text) {
+          editor.commands.insertContent(text);
+          voiceStreamInterimRangeRef.current = { from: range.from, to: editor.state.selection.to };
+        } else {
+          voiceStreamInterimRangeRef.current = null;
+        }
+      },
+      [editor],
+    );
+
+    // Swap the interim region for the mention-parsed, committed final text.
+    const commitFinal = useCallback(
+      (text: string): void => {
+        const range = voiceStreamInterimRangeRef.current;
+        if (editor && range) {
+          editor
+            .chain()
+            .setTextSelection({ from: range.from, to: range.to })
+            .deleteSelection()
+            .run();
+        }
+        voiceStreamInterimRangeRef.current = null;
+        appendTranscriptionToEditor(text);
+      },
+      [editor, appendTranscriptionToEditor],
+    );
+
+    const clearRevealTimer = useCallback((): void => {
+      if (revealTimerRef.current !== null) {
+        window.clearInterval(revealTimerRef.current);
+        revealTimerRef.current = null;
+      }
+    }, []);
+
+    const clearVoiceStreamCloseTimer = useCallback((): void => {
+      if (voiceStreamCloseTimeoutRef.current !== null) {
+        window.clearTimeout(voiceStreamCloseTimeoutRef.current);
+        voiceStreamCloseTimeoutRef.current = null;
+      }
+    }, []);
+
+    // Drop the buffer without committing — used on abort and at session start.
+    const resetReveal = useCallback((): void => {
+      clearRevealTimer();
+      revealTargetRef.current = '';
+      revealShownRef.current = '';
+      revealMustCommitRef.current = false;
+      revealPendingPartialRef.current = null;
+    }, [clearRevealTimer]);
+
+    const revealTick = useCallback((): void => {
+      if (!editor) return;
+      const target = revealTargetRef.current;
+      const shown = revealShownRef.current;
+
+      if (shown !== target) {
+        // Catch up faster when the backlog is large so lag stays bounded.
+        const remaining = target.length - shown.length;
+        const words = remaining > 60 ? 4 : remaining > 30 ? 2 : 1;
+        const next = revealMoreWords(target, shown, words);
+        renderInterim(next);
+        revealShownRef.current = next;
+        if (next !== target) return; // more words to reveal on the next tick
+      }
+
+      // Fully revealed: commit a final (with mention parsing), then pick up any
+      // partial that was queued for the next phrase while we were committing.
+      if (revealMustCommitRef.current) {
+        commitFinal(target);
+        revealMustCommitRef.current = false;
+        revealTargetRef.current = '';
+        revealShownRef.current = '';
+        const pending = revealPendingPartialRef.current;
+        revealPendingPartialRef.current = null;
+        if (pending !== null) revealTargetRef.current = pending;
+      }
+    }, [editor, renderInterim, commitFinal]);
+
+    const ensureRevealTimer = useCallback((): void => {
+      if (revealTimerRef.current === null) {
+        revealTimerRef.current = window.setInterval(revealTick, VOICE_REVEAL_INTERVAL_MS);
+      }
+    }, [revealTick]);
+
+    // Immediately reveal + commit everything still buffered (stream closing normally).
+    const flushReveal = useCallback((): void => {
+      clearRevealTimer();
+      const target = revealTargetRef.current;
+      if (revealMustCommitRef.current) {
+        commitFinal(target);
+      } else if (target && target !== revealShownRef.current) {
+        renderInterim(target);
+      }
+      revealTargetRef.current = '';
+      revealShownRef.current = '';
+      revealMustCommitRef.current = false;
+      revealPendingPartialRef.current = null;
+    }, [clearRevealTimer, commitFinal, renderInterim]);
+
+    const handleStreamPartial = useCallback(
+      (text: string): void => {
+        if (!text) return;
+        if (revealMustCommitRef.current) {
+          // A final is still revealing; this partial belongs to the next phrase. Queue it.
+          revealPendingPartialRef.current = text;
+        } else {
+          revealTargetRef.current = text;
+        }
+        ensureRevealTimer();
+      },
+      [ensureRevealTimer],
+    );
+
+    const handleStreamFinal = useCallback(
+      (text: string): void => {
+        if (revealMustCommitRef.current) {
+          // Rare: a new final arrived before the previous finished revealing. Commit prev.
+          commitFinal(revealTargetRef.current);
+          revealShownRef.current = '';
+        }
+        revealTargetRef.current = text;
+        revealMustCommitRef.current = true;
+        ensureRevealTimer();
+      },
+      [commitFinal, ensureRevealTimer],
+    );
 
     // ── Media stream helpers ────────────────────────────────────────────────
     const stopVoiceStream = useCallback((): void => {
       voiceStreamRef.current?.getTracks().forEach(track => track.stop());
       voiceStreamRef.current = null;
     }, []);
-
-    const transcribeVoiceBlob = useCallback(
-      async (blob: Blob): Promise<void> => {
-        setIsVoiceTranscribing(true);
-        try {
-          const transcript = await voiceInputService.transcribeAudio({
-            audioBlob: blob,
-            hints: getVoiceHints(),
-          });
-          appendTranscriptionToEditor(transcript.text);
-        } catch (err) {
-          toast.error('Voice transcription failed', {
-            description: err instanceof Error ? err.message : 'Unknown error',
-          });
-        } finally {
-          setIsVoiceTranscribing(false);
-        }
-      },
-      [appendTranscriptionToEditor, getVoiceHints],
-    );
 
     const stopVoiceRecording = useCallback((): void => {
       const recorder = voiceRecorderRef.current;
@@ -355,7 +495,6 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         voiceStreamRef.current = stream;
-        voiceChunksRef.current = [];
 
         const preferredTypes = [
           'audio/webm;codecs=opus',
@@ -366,35 +505,88 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
         const mimeType = preferredTypes.find(t => MediaRecorder.isTypeSupported(t)) ?? '';
         const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
 
+        const session = voiceInputService.openStreamSession();
+        wsSessionRef.current = session;
+        voiceStreamAbortedRef.current = false;
+        resetReveal();
+
+        session.onMessage(msg => {
+          // Once a send has aborted this stream, ignore any straggler frames so they
+          // can't leak into the (now cleared) next message.
+          if (voiceStreamAbortedRef.current) return;
+          if (msg.type === 'partial' && msg.text) {
+            handleStreamPartial(msg.text);
+          } else if (msg.type === 'final' && msg.text) {
+            handleStreamFinal(msg.text);
+          } else if (msg.type === 'error') {
+            toast.error('Voice transcription failed', {
+              description: msg.message ?? 'Streaming error',
+            });
+          }
+        });
+
+        session.onClose(() => {
+          clearVoiceStreamCloseTimer();
+          // Flush remaining buffered words (commit the final) unless a send aborted the
+          // stream, in which case everything in flight is intentionally discarded.
+          if (voiceStreamAbortedRef.current) {
+            resetReveal();
+          } else {
+            flushReveal();
+          }
+          voiceStreamInterimRangeRef.current = null;
+          wsSessionRef.current = null;
+          setIsVoiceTranscribing(false);
+        });
+
+        session.onError(() => {
+          clearVoiceStreamCloseTimer();
+          toast.error('Voice stream disconnected unexpectedly');
+          resetReveal();
+          voiceStreamInterimRangeRef.current = null;
+          wsSessionRef.current = null;
+          setIsVoiceTranscribing(false);
+        });
+
+        // Send each 250ms chunk as a binary frame over the WebSocket. The session
+        // serializes Blob→ArrayBuffer conversion so frames stay in order.
         recorder.ondataavailable = (event: BlobEvent) => {
-          if (event.data.size > 0) voiceChunksRef.current.push(event.data);
+          if (event.data.size > 0) session.sendChunk(event.data);
         };
 
         recorder.onstop = () => {
-          const blob = new Blob(voiceChunksRef.current, {
-            type: mimeType || 'audio/webm',
-          });
-          voiceChunksRef.current = [];
+          // Signal end-of-audio (flushing the last buffered chunk first) but keep the
+          // socket open so the server can stream back the final transcript before it
+          // closes — onClose then clears the transcribing state. Closing here would
+          // drop the tail audio and the final result.
+          session.endAudio();
+          setIsVoiceTranscribing(true);
           voiceRecorderRef.current = null;
           stopVoiceStream();
-          void transcribeVoiceBlob(blob);
+          // Safety net: if the server never closes after end-of-stream, force-close
+          // so the UI doesn't hang in the transcribing state.
+          voiceStreamCloseTimeoutRef.current = window.setTimeout(() => {
+            voiceStreamCloseTimeoutRef.current = null;
+            session.close();
+          }, VOICE_STREAM_FORCE_CLOSE_MS);
         };
 
         recorder.onerror = () => {
           setIsVoiceRecording(false);
           stopVoiceStream();
+          session.close();
           toast.error('Voice recording failed unexpectedly');
         };
 
         voiceRecorderRef.current = recorder;
-        recorder.start();
+        recorder.start(250); // 250ms timeslices for low latency
         setIsVoiceRecording(true);
       } catch (err) {
         const isDenied = err instanceof DOMException && err.name === 'NotAllowedError';
         stopVoiceStream();
         toast.error(isDenied ? 'Microphone permission denied' : 'Failed to start voice recording');
       }
-    }, [stopVoiceStream, transcribeVoiceBlob]);
+    }, [stopVoiceStream, handleStreamPartial, handleStreamFinal, resetReveal, flushReveal]);
 
     const handleVoiceToggle = useCallback((): void => {
       if (isVoiceTranscribing || disabled || isSending) return;
@@ -412,17 +604,65 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
       startVoiceRecording,
     ]);
 
-    // Expose toggle() so MobileEditor's onVoiceToggle can call it via ref
-    useImperativeHandle(ref, () => ({ toggle: handleVoiceToggle }), [handleVoiceToggle]);
+    // Abort an active stream because the composer is sending. Distinct from the
+    // mic-stop drain: we DISCARD everything still in flight rather than waiting for
+    // the final transcript. The trailing interim text is unfinalized, so it's removed
+    // from the editor — only already-committed (final) text remains to be sent.
+    const abortForSend = useCallback((): void => {
+      if (!wsSessionRef.current && !isVoiceRecording && !isVoiceTranscribing) return;
 
-    // Release microphone on unmount
+      voiceStreamAbortedRef.current = true;
+      clearVoiceStreamCloseTimer();
+      resetReveal();
+
+      // Drop the unfinalized interim text from the editor.
+      const range = voiceStreamInterimRangeRef.current;
+      if (editor && range) {
+        editor.chain().setTextSelection({ from: range.from, to: range.to }).deleteSelection().run();
+      }
+      voiceStreamInterimRangeRef.current = null;
+
+      // Stop capture without the draining onstop handler, then hard-close the socket.
+      const recorder = voiceRecorderRef.current;
+      if (recorder) {
+        recorder.onstop = null;
+        if (recorder.state !== 'inactive') recorder.stop();
+      }
+      voiceRecorderRef.current = null;
+      stopVoiceStream();
+      wsSessionRef.current?.close();
+      wsSessionRef.current = null;
+      setIsVoiceRecording(false);
+      setIsVoiceTranscribing(false);
+    }, [
+      editor,
+      isVoiceRecording,
+      isVoiceTranscribing,
+      stopVoiceStream,
+      resetReveal,
+      clearVoiceStreamCloseTimer,
+    ]);
+
+    // Expose toggle() so MobileEditor's onVoiceToggle can call it via ref
+    useImperativeHandle(ref, () => ({ toggle: handleVoiceToggle, abortForSend }), [
+      handleVoiceToggle,
+      abortForSend,
+    ]);
+
+    // Release microphone, WebSocket, the reveal timer, and the force-close safety net
+    // on unmount — otherwise the safety-net timeout can outlive this component and
+    // fire session.close() against an already torn-down/stale session.
     useEffect(() => {
       return () => {
         const recorder = voiceRecorderRef.current;
         if (recorder && recorder.state !== 'inactive') recorder.stop();
         stopVoiceStream();
+        wsSessionRef.current?.close();
+        wsSessionRef.current = null;
+        clearRevealTimer();
+        clearVoiceStreamCloseTimer();
       };
-    }, [stopVoiceStream]);
+    }, [stopVoiceStream, clearRevealTimer, clearVoiceStreamCloseTimer]);
 
     // ── Render ──────────────────────────────────────────────────────────────
     if (headless) return null;

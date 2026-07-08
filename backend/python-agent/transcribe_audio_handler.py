@@ -15,10 +15,10 @@ from typing import Optional, Tuple
 
 import aiohttp
 from aiohttp import web
-from google.auth import load_credentials_from_file
+from google.auth import load_credentials_from_dict, load_credentials_from_file
 from google.auth.transport.requests import Request as GoogleAuthRequest
-from google.oauth2 import service_account
 from openai import AzureOpenAI
+from google.oauth2 import service_account
 
 from config import Config, get_logger
 from infra import get_user_registry
@@ -100,6 +100,14 @@ _HOT_WORDS = [
     "Xyne Bot", "Juspay Technologies", "Namma Switch",
 ]
 
+# Provider-enforced hard limits on the adaptation/keyword list, in priority order
+# (hot words are always first — see _HOT_WORDS — then registry-derived extra_hints).
+# Exceeding these can error or silently drop terms, so every phrase/keyword list is
+# sliced to the relevant limit before being sent.
+_GOOGLE_BATCH_PHRASE_LIMIT = 500  # batch (REST) recognize — unchanged, plenty of headroom
+_GOOGLE_STREAM_PHRASE_LIMIT = 1200  # streaming — Google's documented max phrases/PhraseSet
+_DEEPGRAM_KEYWORD_LIMIT = 100  # Deepgram's documented max keywords/request
+
 
 def _load_google_credentials_info(cfg: Config) -> dict:
     logger.debug('[google] Loading credentials info')
@@ -144,7 +152,6 @@ async def _transcribe_with_google(
         f'[google] Starting transcription | project={project_id} | location={_GOOGLE_LOCATION} | model={cfg.google_stt_model}'
         f' | language={target_language} | hints={len(extra_hints or [])} extra'
     )
-
     # Load credentials using google.auth so both service-account JSON and ADC
     # (authorized_user) formats are handled correctly.
     credentials_file = (
@@ -171,7 +178,7 @@ async def _transcribe_with_google(
             credentials_info,
             scopes=['https://www.googleapis.com/auth/cloud-platform'],
         )
-
+        
     if not creds.valid:
         logger.debug('[google] Refreshing credentials token')
         await asyncio.to_thread(creds.refresh, GoogleAuthRequest())
@@ -199,7 +206,7 @@ async def _transcribe_with_google(
             'autoDecodingConfig': {},
             'languageCodes': [target_language],
             'model': cfg.google_stt_model,
-            'adaptation': {'phraseSets': [{'inlinePhraseSet': {'phrases': phrases[:500]}}]},
+            'adaptation': {'phraseSets': [{'inlinePhraseSet': {'phrases': phrases[:_GOOGLE_BATCH_PHRASE_LIMIT]}}]},
         },
         'content': content_b64,
     }
@@ -211,7 +218,7 @@ async def _transcribe_with_google(
     timeout = aiohttp.ClientTimeout(total=60)
     logger.info(
         f'[google] POST {url} | file={file_size_kb:.1f}KB'
-        f' | phrases={len(phrases[:500])} (hot_words={len(_HOT_WORDS)} + hints={len(extra_hints or [])})'
+        f' | phrases={len(phrases[:_GOOGLE_BATCH_PHRASE_LIMIT])} (hot_words={len(_HOT_WORDS)} + hints={len(extra_hints or [])})'
     )
     import time as _time
     _t0 = _time.monotonic()
@@ -269,7 +276,9 @@ async def _transcribe_with_deepgram(
 
     file_size_kb = len(audio_bytes) / 1024
 
-    # Build deduplicated keyword list: static hot_words + dynamic per-request hints
+    # Build deduplicated keyword list: static hot_words + dynamic per-request hints,
+    # capped at Deepgram's documented max (both `keywords` and Nova-3 `keyterms` top
+    # out at 100/request — exceeding it risks the API rejecting or truncating the list).
     all_hints = list(_HOT_WORDS) + (extra_hints or [])
     seen: set = set()
     deduped_hints = []
@@ -278,6 +287,7 @@ async def _transcribe_with_deepgram(
         if key not in seen:
             seen.add(key)
             deduped_hints.append(term)
+    deduped_hints = deduped_hints[:_DEEPGRAM_KEYWORD_LIMIT]
 
     is_nova3 = cfg.deepgram_model.startswith('nova-3')
     logger.debug(f'[deepgram] Model family | nova3={is_nova3} | keyword_param={"keyterms" if is_nova3 else "keywords"}')
@@ -332,6 +342,260 @@ async def _transcribe_with_deepgram(
 
     logger.info(f'[deepgram] Transcript ready | chars={len(transcript)}')
     return transcript, target_language, cfg.deepgram_model
+
+
+async def _build_google_credentials(cfg: Config):
+    """Return (credentials, project_id) ready for use with REST or gRPC clients."""
+    credentials_info = _load_google_credentials_info(cfg)
+    project_id = credentials_info.get('project_id') or cfg.gcs_project_id
+    if not project_id:
+        raise ValueError(
+            'Google STT requires a project_id — set GCS_PROJECT_ID in .env or use a service-account credentials file'
+        )
+
+    # Inline-JSON path is loaded straight from the in-memory dict — it must never
+    # touch disk as plaintext.
+    if cfg.google_voice_credentials_json:
+        creds, _ = load_credentials_from_dict(
+            credentials_info,
+            scopes=['https://www.googleapis.com/auth/cloud-platform'],
+        )
+    else:
+        creds, _ = load_credentials_from_file(
+            os.getenv('GOOGLE_APPLICATION_CREDENTIALS'),
+            scopes=['https://www.googleapis.com/auth/cloud-platform'],
+        )
+
+    return creds, project_id
+
+
+async def _stream_with_google(
+    audio_chunks,
+    cfg: Config,
+    requested_language: Optional[str],
+    extra_hints: Optional[list] = None,
+):
+    """
+    Yield (transcript, is_final) tuples from a Google gRPC streaming_recognize call.
+
+    audio_chunks must be an async generator of bytes objects.
+
+    Uses cfg.google_stt_stream_model (default: chirp_2). chirp_3 does not support
+    speechAdaptation in streaming mode; chirp_2 does, so we bias recognition with a
+    phrase set built from the static hot words plus extra_hints (the workspace user
+    registry), mirroring the batch path.
+    """
+    from google.api_core.client_options import ClientOptions
+    from google.cloud.speech_v2 import SpeechAsyncClient
+    from google.cloud.speech_v2.types import (
+        StreamingRecognizeRequest,
+        StreamingRecognitionConfig,
+        RecognitionConfig,
+        AutoDetectDecodingConfig,
+        StreamingRecognitionFeatures,
+        SpeechAdaptation,
+        PhraseSet,
+    )
+
+    creds, project_id = await _build_google_credentials(cfg)
+    target_language = _first_language(requested_language or '', cfg.google_stt_language)
+    stream_model = cfg.google_stt_stream_model
+    # Streaming uses its own region: chirp_2 (with streaming speech-adaptation) is not
+    # hosted in the "us" multi-region that the batch chirp_3 path uses — it lives in
+    # regional locations such as us-central1.
+    location = cfg.google_stt_stream_location
+
+    logger.info(
+        f'[google-stream] Starting gRPC streaming | project={project_id}'
+        f' | location={location} | model={stream_model} | language={target_language}'
+    )
+
+    # A non-global location requires its regional endpoint; the recognizer resource
+    # below pins locations/{location}, and the global endpoint would reject it with
+    # INVALID_ARGUMENT. Matches the batch path's `{location}-speech.googleapis.com`.
+    client_options = (
+        ClientOptions(api_endpoint=f'{location}-speech.googleapis.com')
+        if location and location != 'global'
+        else None
+    )
+    client = SpeechAsyncClient(credentials=creds, client_options=client_options)
+    recognizer = f'projects/{project_id}/locations/{location}/recognizers/_'
+
+    # Build a speech-adaptation phrase set from the static hot words + dynamic hints
+    # (bot users, then active @juspay.in users — see UserRegistry/getUserNames, which
+    # already returns them pre-ordered and deduplicated), deduplicated again here,
+    # boosted, and capped at Google's documented max phrases/PhraseSet.
+    all_hints = list(_HOT_WORDS) + (extra_hints or [])
+    _seen: set = set()
+    phrases = []
+    for term in all_hints:
+        key = term.lower()
+        if key not in _seen:
+            _seen.add(key)
+            phrases.append(PhraseSet.Phrase(value=term, boost=10))
+    adaptation = (
+        SpeechAdaptation(
+            phrase_sets=[
+                SpeechAdaptation.AdaptationPhraseSet(
+                    inline_phrase_set=PhraseSet(phrases=phrases[:_GOOGLE_STREAM_PHRASE_LIMIT]),
+                )
+            ]
+        )
+        if phrases
+        else None
+    )
+    logger.info(
+        f'[google-stream] adaptation phrases={len(phrases[:_GOOGLE_STREAM_PHRASE_LIMIT])}'
+        f' (hot_words={len(_HOT_WORDS)} + hints={len(extra_hints or [])})'
+    )
+
+    recognition_config = RecognitionConfig(
+        auto_decoding_config=AutoDetectDecodingConfig(),
+        language_codes=[target_language],
+        model=stream_model,
+        adaptation=adaptation,
+    )
+    streaming_config = StreamingRecognitionConfig(
+        config=recognition_config,
+        streaming_features=StreamingRecognitionFeatures(interim_results=True),
+    )
+
+    async def _request_generator():
+        yield StreamingRecognizeRequest(
+            recognizer=recognizer,
+            streaming_config=streaming_config,
+        )
+        async for chunk in audio_chunks:
+            yield StreamingRecognizeRequest(audio=chunk)
+
+    response_stream = await client.streaming_recognize(requests=_request_generator())
+    async for response in response_stream:
+        for result in response.results:
+            if result.alternatives:
+                transcript = result.alternatives[0].transcript
+                logger.debug(
+                    f'[google-stream] result | final={result.is_final}'
+                    f' | chars={len(transcript)}'
+                )
+                yield transcript, result.is_final
+
+
+async def transcribe_stream_ws(request):
+    """
+    GET /transcribe-stream — WebSocket endpoint for real-time streaming transcription.
+
+    Protocol (browser ↔ server):
+      Browser → binary frames  (raw audio chunks, ~250 ms MediaRecorder slices)
+      Server  → JSON text frames:
+        { "type": "partial", "text": "..."  }  — interim result (may be superseded)
+        { "type": "final",   "text": "..."  }  — stable committed result
+        { "type": "error",   "message": "..." } — fatal error; WS closes after this
+    """
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+
+    cfg = Config.load()
+    selected_provider = (cfg.voice_input_stt_model or cfg.stt_model or 'azure').lower()
+
+    if selected_provider != 'google':
+        await ws.send_json({
+            'type': 'error',
+            'message': (
+                'Streaming STT requires Google (current provider: '
+                f'{selected_provider}). Set VOICE_INPUT_STT_MODEL=google to enable.'
+            ),
+        })
+        await ws.close()
+        return ws
+
+    language = request.rel_url.query.get('language', '')
+    # Bounded so a client that sends audio faster than Google consumes it applies
+    # backpressure (put() blocks) instead of growing memory without limit. At ~250ms
+    # chunks this caps in-flight audio at roughly 25s.
+    audio_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+
+    async def _audio_chunk_generator():
+        while True:
+            chunk = await audio_queue.get()
+            if chunk is None:
+                return
+            yield chunk
+
+    async def _run_transcription():
+        try:
+            # Bias recognition with the workspace user registry (TTL-cached), the same
+            # hint source the batch path uses. Failures here are non-fatal.
+            extra_hints: list = []
+            try:
+                registry = get_user_registry(
+                    cfg.backend_url, cfg.transcription_agent_api_key
+                )
+                extra_hints = await registry.get_names()
+            except Exception as exc:
+                logger.warning(
+                    f'[transcribe_stream_ws] user registry hint fetch failed: {exc}'
+                )
+
+            async for transcript, is_final in _stream_with_google(
+                _audio_chunk_generator(), cfg, language, extra_hints=extra_hints,
+            ):
+                if ws.closed:
+                    break
+                await ws.send_json({
+                    'type': 'final' if is_final else 'partial',
+                    'text': transcript,
+                })
+        except Exception as exc:
+            logger.error(
+                f'[transcribe_stream_ws] gRPC error: {type(exc).__name__}: {exc}\n'
+                + traceback.format_exc()
+            )
+            if not ws.closed:
+                await ws.send_json({'type': 'error', 'message': str(exc)})
+
+    transcription_task = asyncio.create_task(_run_transcription())
+
+    try:
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.BINARY:
+                try:
+                    audio_queue.put_nowait(msg.data)
+                except asyncio.QueueFull:
+                    # Google isn't draining fast enough (or the transcription task
+                    # already died) — stop accepting audio instead of blocking here,
+                    # which could deadlock against a consumer that's no longer running.
+                    logger.warning(
+                        '[transcribe_stream_ws] audio queue full, closing connection'
+                    )
+                    if not ws.closed:
+                        await ws.send_json({
+                            'type': 'error',
+                            'message': 'Audio buffer full, closing stream',
+                        })
+                    break
+            elif msg.type == aiohttp.WSMsgType.TEXT:
+                # Control frame from the client, e.g. {"type":"eos"} = end of audio.
+                # Break so the finally block drains Google's final result and sends it
+                # back while the socket is still open, then closes from our side.
+                try:
+                    control = json.loads(msg.data)
+                except (ValueError, TypeError):
+                    control = {}
+                if control.get('type') == 'eos':
+                    break
+            elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSE):
+                break
+    finally:
+        try:
+            audio_queue.put_nowait(None)
+        except asyncio.QueueFull:
+            pass
+        try:
+            await asyncio.wait_for(transcription_task, timeout=10.0)
+        except asyncio.TimeoutError:
+            transcription_task.cancel()
+
+    return ws
 
 
 async def transcribe_audio(request):
