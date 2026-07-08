@@ -13,7 +13,21 @@ const WORKSPACE_EXEMPT_PREFIXES = [
   '/newWindow',
   '/redirected',
   '/call/',
+  '/api/',
 ];
+
+function normalizeSameOriginPath(to: string): string {
+  if (typeof window === 'undefined' || !/^https?:\/\//i.test(to)) return to;
+  try {
+    const url = new URL(to);
+    if (url.origin === window.location.origin) {
+      return `${url.pathname}${url.search}${url.hash}`;
+    }
+  } catch {
+    return to;
+  }
+  return to;
+}
 
 /**
  * Drop-in replacement for `useNavigate` from react-router-dom.
@@ -41,18 +55,20 @@ export const useWorkspaceNavigate = (): NavigateFunction => {
         return;
       }
 
+      const normalizedTo = typeof to === 'string' ? normalizeSameOriginPath(to) : to;
+
       if (
         workspaceId &&
-        typeof to === 'string' &&
-        to.startsWith('/') &&
-        !to.startsWith(`/${workspaceId}`) &&
-        !WORKSPACE_EXEMPT_PREFIXES.some(prefix => to.startsWith(prefix))
+        typeof normalizedTo === 'string' &&
+        normalizedTo.startsWith('/') &&
+        !normalizedTo.startsWith(`/${workspaceId}`) &&
+        !WORKSPACE_EXEMPT_PREFIXES.some(prefix => normalizedTo.startsWith(prefix))
       ) {
-        void navigate(`/${workspaceId}${to}`, options);
+        void navigate(`/${workspaceId}${normalizedTo}`, options);
         return;
       }
 
-      void navigate(to, options);
+      void navigate(normalizedTo, options);
     },
     [navigate, workspaceId],
   ) as NavigateFunction;

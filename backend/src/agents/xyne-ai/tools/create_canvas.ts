@@ -124,7 +124,7 @@ export function createCreateCanvasTool(): Tool<{ markdown: string; title: string
         }
         
         // Generate canvas URL using shared utility
-        const canvasUrl = getCanvasUrl(viewAccessId);
+        const canvasUrl = getCanvasUrl(viewAccessId, user.workspaceId);
         
         logger.info(`[Tool] [${context.sessionId}] create_canvas: created canvas ${canvasId} with Ask AI bot and user as owners`);
         

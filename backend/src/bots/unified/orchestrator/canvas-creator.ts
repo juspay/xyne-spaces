@@ -116,20 +116,27 @@ export async function createCanvasWithGeniusBlock(
         }),
     ]);
 
-    const canvasUrl = getCanvasUrl(viewAccessId);
+    let workspaceId: string | undefined;
+    try {
+        const channel = await prisma.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
+        workspaceId = channel?.workspaceId;
+    } catch (workspaceError) {
+        logger.error(`[CanvasCreator] Failed to resolve workspace for channel ${channelId}:`, workspaceError);
+    }
+
+    const canvasUrl = getCanvasUrl(viewAccessId, workspaceId);
     
     logger.info(`[CanvasCreator] Created canvas ${canvasId} with Genius block for ${botId} query`);
     
     // Queue Vespa indexing for the canvas
     try {
-      const channel = await prisma.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
       await vespaQueue.addJob({
         schema: fileSchema,
         docId: canvasId,
         jobType: 'feed',
         userId,
         app: SubApp.CANVAS,
-        ...(channel?.workspaceId ? { workspaceId: channel.workspaceId } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
       });
       logger.info(`[CanvasCreator] Queued Vespa indexing for canvas ${canvasId}`);
     } catch (vespaError) {
@@ -317,7 +324,15 @@ export async function processStreamAndCreateCanvas(
                     }),
                 ]);
 
-                const newCanvasUrl = getCanvasUrl(newViewAccessId);
+                let workspaceId: string | undefined;
+                try {
+                    const channel = await prisma.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
+                    workspaceId = channel?.workspaceId;
+                } catch (workspaceError) {
+                    logger.error(`[CanvasCreator] Failed to resolve workspace for channel ${channelId}:`, workspaceError);
+                }
+
+                const newCanvasUrl = getCanvasUrl(newViewAccessId, workspaceId);
 
                 // Truncate content for message persistence
                 const maxDbContentLength = 9990;
@@ -335,14 +350,13 @@ export async function processStreamAndCreateCanvas(
 
                 // Queue Vespa indexing for the canvas
                 try {
-                  const channel = await prisma.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
                   await vespaQueue.addJob({
                     schema: fileSchema,
                     docId: newCanvasId,
                     jobType: 'feed',
                     userId,
                     app: SubApp.CANVAS,
-                    ...(channel?.workspaceId ? { workspaceId: channel.workspaceId } : {}),
+                    ...(workspaceId ? { workspaceId } : {}),
                   });
                   logger.info(`[CanvasCreator] Queued Vespa indexing for long response canvas ${newCanvasId}`);
                 } catch (vespaError) {
