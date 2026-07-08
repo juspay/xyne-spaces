@@ -1,5 +1,5 @@
 import { type VespaSearchResponse } from '../types';
-import { highlightFuzzyText, calculatePrefixBoost } from './highlight';
+import { highlightText, calculatePrefixBoost } from './highlight';
 import type { ILogger } from '../services/searchService';
 
 interface ProcessResult {
@@ -92,24 +92,14 @@ const stripHighlightTags = (text: string): string => {
   }
   const highlightField = (
   value: string | undefined | null,
-  query: string
+  query: string,
+  mentionNames?: string[]
   ): { highlighted: string; wasHighlighted: boolean } => {
     if (typeof value !== 'string' || !value) {
       return { highlighted: value || '', wasHighlighted: false };
     }
-
-    // Already has highlight tags
-    if (value.includes('<hi>')) {
-      return { highlighted: value, wasHighlighted: true };
-    }
-
-    // Try to highlight
-    const highlighted = highlightFuzzyText(value, query);
-    if (highlighted.includes('<hi>')) {
-      return { highlighted, wasHighlighted: true };
-    }
-
-    return { highlighted: value, wasHighlighted: false };
+    const highlighted = highlightText(value, query, mentionNames);
+    return { highlighted, wasHighlighted: highlighted.includes('<hi>') };
 };
   /**
    * Filter by native rank threshold
@@ -145,6 +135,7 @@ const stripHighlightTags = (text: string): string => {
   export const applyHighlighting = (
   response: VespaSearchResponse,
   query: string,
+  mentionNames: string[],
   limit: number,
   logger: ILogger
 ): VespaSearchResponse => {
@@ -156,7 +147,7 @@ const stripHighlightTags = (text: string): string => {
     const newFields = { ...node.fields };
     let wasHighlighted = false;
 
-      const value = highlightField(newFields.text, query);
+      const value = highlightField(newFields.text, query, mentionNames);
       newFields.text = value.highlighted;
       wasHighlighted = wasHighlighted || value.wasHighlighted;
 

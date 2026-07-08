@@ -42,8 +42,8 @@ export type SerializedFilterChipNode = Spread<
   SerializedTextNode
 >;
 
-/** The chip's display text (`prefix name`, e.g. `from: alice` / `in: general`).
- *  Demotion leaves exactly this string, so it parses like a hand-typed filter. */
+/** Chip display text: prefixed filters read `prefix name`; a prefix-less mention reads with its
+ *  sigil (`@alice`/`#general`). Demotion leaves this string verbatim to re-arm the dropdown. */
 export function buildChipText(mentionData: MentionData): string {
   // Chip always reads lowercase (`priority: high`), independent of the dropdown label.
   if (mentionData.type === MentionType.PRIORITY) {
@@ -52,8 +52,10 @@ export function buildChipText(mentionData: MentionData): string {
   if (mentionData.prefix) {
     return `${mentionData.prefix} ${mentionData.name}`;
   }
-  const prefix = mentionData.type === MentionType.USER ? 'from: ' : 'in: ';
-  return `${prefix}${mentionData.name}`;
+  // Prefix-less chip = a bare @user/#channel mention search: render with its sigil, not
+  // `from:`/`in:` (which would mislabel it as an author/scope filter).
+  const sigil = mentionData.type === MentionType.USER ? '@' : '#';
+  return `${sigil}${mentionData.name}`;
 }
 
 export class FilterChipNode extends TextNode {
@@ -257,27 +259,47 @@ export function $createFilterChipIconNode(mentionData: MentionData): FilterChipI
 
 // ---- Pill wrapper (FilterChipContainerNode) ----
 
+export type SerializedFilterChipContainerNode = Spread<
+  {
+    type: 'filter-chip-container';
+    isSelfMention: boolean;
+  },
+  SerializedElementNode
+>;
+
 /**
- * The inline pill — parent of the icon + label. Its `.filter-chip` style
- * (inline-flex, items-center) aligns them with no per-glyph tuning, and the
- * background lives only here, so demoting the label drops the whole pill at once.
+ * The inline pill (parent of icon + label); the background lives here so demoting the label
+ * drops the whole pill. A chip of the current user (`isSelfMention`) gets Slack's self color.
  */
 export class FilterChipContainerNode extends ElementNode {
+  /** True when the chip references the current user (Slack self-mention color). */
+  __isSelfMention: boolean;
+
   static override getType(): string {
     return 'filter-chip-container';
   }
 
   static override clone(node: FilterChipContainerNode): FilterChipContainerNode {
-    return new FilterChipContainerNode(node.__key);
+    return new FilterChipContainerNode(node.__isSelfMention, node.__key);
   }
 
-  static override importJSON(): FilterChipContainerNode {
-    return new FilterChipContainerNode();
+  static override importJSON(
+    serializedNode: SerializedFilterChipContainerNode,
+  ): FilterChipContainerNode {
+    return new FilterChipContainerNode(serializedNode.isSelfMention ?? false);
+  }
+
+  constructor(isSelfMention = false, key?: NodeKey) {
+    super(key);
+    this.__isSelfMention = isSelfMention;
   }
 
   override createDOM(): HTMLElement {
     const dom = document.createElement('span');
     dom.classList.add('filter-chip');
+    if (this.__isSelfMention) {
+      dom.classList.add('filter-chip--self-mention');
+    }
     return dom;
   }
 
@@ -298,8 +320,12 @@ export class FilterChipContainerNode extends ElementNode {
     return false;
   }
 
-  override exportJSON(): SerializedElementNode {
-    return { ...super.exportJSON(), type: 'filter-chip-container' };
+  override exportJSON(): SerializedFilterChipContainerNode {
+    return {
+      ...super.exportJSON(),
+      type: 'filter-chip-container',
+      isSelfMention: this.__isSelfMention,
+    };
   }
 }
 
@@ -309,10 +335,23 @@ export function $isFilterChipContainerNode(
   return node instanceof FilterChipContainerNode;
 }
 
-/** Build a complete chip: an inline pill containing the icon + editable label. */
-export function $createFilterChip(mentionData: MentionData): FilterChipContainerNode {
-  const container = new FilterChipContainerNode();
-  container.append($createFilterChipIconNode(mentionData), $createFilterChipNode(mentionData));
+/** Build the pill: editable label + a leading icon for prefixed filters (prefix-less mention
+ *  chips drop the icon; a chip of the current user also gets Slack's self color). */
+export function $createFilterChip(
+  mentionData: MentionData,
+  currentUserId?: string,
+): FilterChipContainerNode {
+  const isMention = !mentionData.prefix;
+  // Any chip referencing the current user — bare @me or from:/with:/assignee: me — gets the
+  // Slack self-mention color.
+  const isSelfMention =
+    mentionData.type === MentionType.USER && !!currentUserId && mentionData.id === currentUserId;
+  const container = new FilterChipContainerNode(isSelfMention);
+  if (isMention) {
+    container.append($createFilterChipNode(mentionData));
+  } else {
+    container.append($createFilterChipIconNode(mentionData), $createFilterChipNode(mentionData));
+  }
   return container;
 }
 

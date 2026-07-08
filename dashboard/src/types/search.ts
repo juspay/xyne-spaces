@@ -148,7 +148,10 @@ export interface VespaSearchFilters {
   fromEmail?: string; // Desk-only: sender email address(es) for the mail `from:` filter
   toEmail?: string; // Desk-only: recipient email address(es) for the mail `to:` filter
   with?: string; // User ID for participant filter (matches userId, threadMentions, threadSenders)
-  in?: string; // Channel IDs
+  in?: string; // Channel IDs (scope: within channel/DM)
+  mentions?: string; // User IDs the message mentions (scoped mention search; bare @user chip)
+  channelMentions?: string; // Channel IDs the message references (scoped mention search; bare #channel chip)
+  mentionHighlights?: string[]; // Display name(s) of bare mention chips — highlighted in results, not in YQL
   offset?: number;
   limit?: number;
   apps?: string; // 'slack,ticket,user'

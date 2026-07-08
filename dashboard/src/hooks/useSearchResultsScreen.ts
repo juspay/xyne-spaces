@@ -5,6 +5,9 @@ export interface SearchResultsFilters {
   toEmails: string[];
   inChannelIds: string[];
   assigneeIds: string[];
+  // Bare @user / #channel mention filters (no prefix) — searched as message mentions.
+  mentionUserIds: string[];
+  mentionChannelIds: string[];
   sortBy: 'relevance' | 'newest' | 'oldest';
   includeBotMessages: boolean;
   onlyMyChannels: boolean;
@@ -18,6 +21,8 @@ export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   toEmails: [],
   inChannelIds: [],
   assigneeIds: [],
+  mentionUserIds: [],
+  mentionChannelIds: [],
   sortBy: 'relevance',
   includeBotMessages: false,
   onlyMyChannels: true,

@@ -152,6 +152,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       toEmail,     // Desk: recipient email address(es) for mail `to:` filter
       withUser,    // User ID for participant filter
       in: inChannel, // Channel name or ID (renamed to avoid 'in' keyword)
+      mentions,        // User ID(s) mentioned in the message (scoped mention search)
+      channelMentions, // Channel ID(s) referenced in the message (scoped mention search)
+      mentionHighlights, // Display name(s) of bare mention chips — highlighted in results, not in YQL
       // Unified filters (work for both slack and ticket)
       projectId,   // Project ID(s) - comma-separated
       // Ticket-specific filters
@@ -666,6 +669,18 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.file.channelId = inVals;
     }
 
+    // Map mention filters (scoped search): bare @user -> mentions, bare #channel -> channelMentions.
+    // Both arrive as string[] post-Joi (the validator splits comma strings into arrays).
+    if (mentions) {
+      options.slack.mentionedUserIds = mentions;
+    }
+    if (channelMentions) {
+      options.slack.mentionedChannelIds = channelMentions;
+    }
+    // Highlight-only: exact display names to bold in result snippets (kept out of the YQL filter).
+    if (mentionHighlights) {
+      options.mentionHighlights = mentionHighlights;
+    }
     // Add unified filters (apply to both slack and ticket)
     if (projectId) {
       const projectIds = toFilterValues(projectId, 'projectId');

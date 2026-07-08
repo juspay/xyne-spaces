@@ -373,6 +373,19 @@ export class SearchService {
       params['in'] = filters.in;
     }
 
+    if (filters.mentions) {
+      params['mentions'] = filters.mentions;
+    }
+
+    if (filters.channelMentions) {
+      params['channelMentions'] = filters.channelMentions;
+    }
+
+    // Highlight-only display names; JSON-encoded since names can contain commas.
+    if (filters.mentionHighlights && filters.mentionHighlights.length > 0) {
+      params['mentionHighlights'] = JSON.stringify(filters.mentionHighlights);
+    }
+
     if (filters.offset !== undefined) {
       params['offset'] = filters.offset.toString();
     }

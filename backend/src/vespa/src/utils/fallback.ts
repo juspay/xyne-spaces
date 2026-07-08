@@ -6,6 +6,7 @@ interface FuzzyFallbackOptions {
   searchQuery: string;
   limit: number;
   prefixBoostWeight: number;
+  mentionNames?: string[];
 }
 
 interface FuzzyFallbackResult {
@@ -97,7 +98,7 @@ export const executeFuzzyFallback = async (
   options: FuzzyFallbackOptions,
   logger: ILogger
 ): Promise<FuzzyFallbackResult> => {
-  const { searchQuery, limit, prefixBoostWeight } = options;
+  const { searchQuery, limit, prefixBoostWeight, mentionNames = [] } = options;
   
   const exactCount = exactResponse.root?.children?.length || 0;
 
@@ -109,7 +110,7 @@ export const executeFuzzyFallback = async (
 
   // Apply highlighting
   if (searchQuery?.trim()) {
-    fuzzyResponse = applyHighlighting(fuzzyResponse, searchQuery, limit , logger);
+    fuzzyResponse = applyHighlighting(fuzzyResponse, searchQuery, mentionNames, limit , logger);
   }
 
   // Apply prefix boost

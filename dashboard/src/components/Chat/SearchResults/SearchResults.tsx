@@ -34,6 +34,7 @@ import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
 import { useSearchMetrics, filterChannelsBySearchableNames } from '../../../hooks/useSearchMetrics';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { getDMSearchableNames, isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
   TabType,
   MentionType,
@@ -75,7 +76,10 @@ function docTypeToTabType(docType: SearchResultsFilters['docType']): TabType {
 type ResultsMention = {
   id: string;
   type: MentionType;
-  prefix: 'from:' | 'to:' | 'in:' | 'assignee:' | 'priority:';
+  // Optional: bare @user / #channel mention filters have no prefix.
+  prefix?: 'from:' | 'to:' | 'in:' | 'assignee:' | 'priority:';
+  // Display name — only bare mentions need it (drives the highlight phrase).
+  name?: string;
 };
 
 // Returns true when any sender/channel/assignee filter is active.
@@ -99,6 +103,10 @@ function buildSelectedMentions(
   priority: string,
   fromEmails: string[] = [],
   toEmails: string[] = [],
+  mentionUserIds: string[] = [],
+  mentionChannelIds: string[] = [],
+  mentionUserName: (id: string) => string | undefined = () => undefined,
+  mentionChannelName: (id: string) => string | undefined = () => undefined,
 ): ResultsMention[] {
   return [
     ...fromUserIds.map(id => ({ id, type: MentionType.USER, prefix: 'from:' as const })),
@@ -106,6 +114,17 @@ function buildSelectedMentions(
     ...toEmails.map(id => ({ id, type: MentionType.USER, prefix: 'to:' as const })),
     ...channelIds.map(id => ({ id, type: MentionType.CHANNEL, prefix: 'in:' as const })),
     ...assigneeIds.map(id => ({ id, type: MentionType.USER, prefix: 'assignee:' as const })),
+    // Bare @user / #channel — no prefix (routed to mentions/channelMentions); the resolved name
+    // drives the highlight phrase, since the URL carries only ids. Omit name when unresolved —
+    // exactOptionalPropertyTypes forbids an explicit `name: undefined`.
+    ...mentionUserIds.map(id => {
+      const name = mentionUserName(id);
+      return name ? { id, type: MentionType.USER, name } : { id, type: MentionType.USER };
+    }),
+    ...mentionChannelIds.map(id => {
+      const name = mentionChannelName(id);
+      return name ? { id, type: MentionType.CHANNEL, name } : { id, type: MentionType.CHANNEL };
+    }),
     ...(priority
       ? [{ id: priority, type: MentionType.PRIORITY, prefix: 'priority:' as const }]
       : []),
@@ -134,6 +153,8 @@ const SearchResults = (): ReactElement => {
     const toEmailParam = searchParams.get('toEmail') ?? '';
     const inParam = searchParams.get('in') ?? '';
     const assigneeParam = searchParams.get('assignee') ?? '';
+    const mentionsParam = searchParams.get('mentions') ?? '';
+    const channelMentionsParam = searchParams.get('channelMentions') ?? '';
     const tabParam = parseDocTypeParam(searchParams.get('tab'));
     return {
       ...DEFAULT_SEARCH_FILTERS,
@@ -143,6 +164,10 @@ const SearchResults = (): ReactElement => {
       toEmails: toEmailParam ? toEmailParam.split(',').filter(Boolean) : [],
       inChannelIds: inParam ? inParam.split(',').filter(Boolean) : [],
       assigneeIds: assigneeParam ? assigneeParam.split(',').filter(Boolean) : [],
+      mentionUserIds: mentionsParam ? mentionsParam.split(',').filter(Boolean) : [],
+      mentionChannelIds: channelMentionsParam
+        ? channelMentionsParam.split(',').filter(Boolean)
+        : [],
     };
   });
 
@@ -210,6 +235,8 @@ const SearchResults = (): ReactElement => {
   const toEmailParam = searchParams.get('toEmail') ?? '';
   const inParam = searchParams.get('in') ?? '';
   const assigneeParam = searchParams.get('assignee') ?? '';
+  const mentionsParam = searchParams.get('mentions') ?? '';
+  const channelMentionsParam = searchParams.get('channelMentions') ?? '';
   const tabParam = searchParams.get('tab') ?? '';
   useEffect(() => {
     const parsedTab = parseDocTypeParam(tabParam);
@@ -223,9 +250,22 @@ const SearchResults = (): ReactElement => {
       toEmails: toEmailParam ? toEmailParam.split(',').filter(Boolean) : [],
       inChannelIds: inParam ? inParam.split(',').filter(Boolean) : [],
       assigneeIds: assigneeParam ? assigneeParam.split(',').filter(Boolean) : [],
+      mentionUserIds: mentionsParam ? mentionsParam.split(',').filter(Boolean) : [],
+      mentionChannelIds: channelMentionsParam
+        ? channelMentionsParam.split(',').filter(Boolean)
+        : [],
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromParam, fromEmailParam, toEmailParam, inParam, assigneeParam, tabParam]);
+  }, [
+    fromParam,
+    fromEmailParam,
+    toEmailParam,
+    inParam,
+    assigneeParam,
+    mentionsParam,
+    channelMentionsParam,
+    tabParam,
+  ]);
 
   // Sync docType filter → hook active tab.
   // When from: is active with "all" tab, the Vespa from: filter is message-schema-only,
@@ -298,6 +338,19 @@ const SearchResults = (): ReactElement => {
   // applied server-side via the onlyMyChannels flag synced above.
   const channelIdsForSearch = filters.inChannelIds;
 
+  // Resolve a mention id → display name for the highlight phrase (the URL carries only ids).
+  const mentionUserName = useCallback(
+    (id: string): string | undefined => {
+      const user = allUsers.find(u => u.id === id);
+      return user ? getUserDisplayName(user) : undefined;
+    },
+    [allUsers],
+  );
+  const mentionChannelName = useCallback(
+    (id: string): string | undefined => allChannels.find(c => c.id === id)?.name,
+    [allChannels],
+  );
+
   // Sync from/in/assignee/priority filters → hook selected mentions
   useEffect(() => {
     setSelectedMentions(
@@ -308,6 +361,10 @@ const SearchResults = (): ReactElement => {
         priorityFilter,
         filters.fromEmails,
         filters.toEmails,
+        filters.mentionUserIds,
+        filters.mentionChannelIds,
+        mentionUserName,
+        mentionChannelName,
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -317,6 +374,10 @@ const SearchResults = (): ReactElement => {
     filters.toEmails,
     channelIdsForSearch,
     filters.assigneeIds,
+    filters.mentionUserIds,
+    filters.mentionChannelIds,
+    mentionUserName,
+    mentionChannelName,
     priorityFilter,
   ]);
 
@@ -342,10 +403,21 @@ const SearchResults = (): ReactElement => {
           priorityFilter,
           newFilters.fromEmails,
           newFilters.toEmails,
+          newFilters.mentionUserIds,
+          newFilters.mentionChannelIds,
+          mentionUserName,
+          mentionChannelName,
         ),
       );
     },
-    [setActiveTab, setOnlyMyChannels, setSelectedMentions, priorityFilter],
+    [
+      setActiveTab,
+      setOnlyMyChannels,
+      setSelectedMentions,
+      priorityFilter,
+      mentionUserName,
+      mentionChannelName,
+    ],
   );
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
     if (!isChannelsMode && filters.docType !== 'all') return [];

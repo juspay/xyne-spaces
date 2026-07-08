@@ -318,10 +318,28 @@ const GlobalCommandMenu = ({
       return { id, name, type: 'channel', prefix: 'in:' };
     };
 
+    // Bare @user / #channel mention filters carry no prefix.
+    const bareUserMention = (id: string): MentionData | null => {
+      const user = allUsers.find(u => u.id === id);
+      return user ? { id, name: getUserDisplayName(user), type: 'user' } : null;
+    };
+
+    const bareChannelMention = (id: string): MentionData | null => {
+      const channel = channelData.find(c => c.id === id);
+      if (!channel) return null;
+      return {
+        id,
+        name: resolveDMChannelName(channel, context.userID ?? '', allUsers),
+        type: 'channel',
+      };
+    };
+
     const mentions: MentionData[] = [
       ...splitIds('from').map(id => userMention(id, 'from:')),
       ...splitIds('in').map(channelMention),
       ...splitIds('assignee').map(id => userMention(id, 'assignee:')),
+      ...splitIds('mentions').map(bareUserMention),
+      ...splitIds('channelMentions').map(bareChannelMention),
     ].filter((m): m is MentionData => m !== null);
 
     const text = params.get('query')?.trim() ?? '';

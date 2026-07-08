@@ -691,6 +691,13 @@
     --chip-fg: rgb(191 219 254); /* blue-200 */
   }
 
+  /* A chip of the current user reuses Slack's current-user mention color
+     (--mention-current-user-*, defined per-theme above) — no new color introduced. */
+  .filter-chip--self-mention {
+    --chip-bg: var(--mention-current-user-bg);
+    --chip-fg: var(--mention-current-user-color, var(--mention-color));
+  }
+
   /* Paragraph Adjacent Sibling */
   .chat-input-field p + p {
     @apply mt-2;
