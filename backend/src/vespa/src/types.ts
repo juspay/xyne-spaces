@@ -224,6 +224,7 @@ export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 
   replyCount: number;
   replyUsersCount: number;
   mentions: string[];
+  channelMentions?: string[];
   updatedAt: string;
   deletedAt: number;
   metadata: string;

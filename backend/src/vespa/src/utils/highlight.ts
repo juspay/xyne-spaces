@@ -79,6 +79,34 @@ export const highlightFuzzyText = (text: string, query: string): string => {
   }).join('');
 };
 
+/** Apply a transform only to text outside existing <hi>...</hi> spans, so passes never nest tags. */
+const outsideHi = (text: string, fn: (segment: string) => string): string =>
+  text.split(/(<hi>.*?<\/hi>)/gi).map(s => s.startsWith('<hi>') ? s : fn(s)).join('');
+
+/**
+ * Bold known mention display name(s) as one contiguous phrase (Slack-style, verbatim not
+ * per-token), pulling an optional leading @/# sigil inside the highlight.
+ */
+export const highlightMentionNames = (text: string, names: string[]): string => {
+  const uniq = [...new Set(names.map(n => n.trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
+  if (!text || !uniq.length) return text;
+  // Word-boundary anchored so a name matches only as a whole token ("Test" must not bold
+  // inside "Testing"); the lookbehind also rejects a word char before the @/# sigil.
+  const alternation = uniq.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const re = new RegExp(`(?<![\\w@#])([@#]?(?:${alternation}))(?![\\w])`, 'gi');
+  return outsideHi(text, s => s.replace(re, '<hi>$1</hi>'));
+};
+
+/**
+ * Highlight a result field: exact mention-name phrases first (so the fuzzy pass can't fragment
+ * a name), then fuzzy free-text — both outside existing <hi> spans. Skips fuzzy if already tagged.
+ */
+export const highlightText = (text: string, query: string, mentionNames: string[] = []): string => {
+  let out = mentionNames.length ? highlightMentionNames(text, mentionNames) : text;
+  if (!text.includes('<hi>')) out = outsideHi(out, s => highlightFuzzyText(s, query));
+  return out;
+};
+
 /**
  * Calculate prefix boost score based on 3-letter prefix matching
  * Returns ratio of matched query prefixes (0.0 to 1.0)

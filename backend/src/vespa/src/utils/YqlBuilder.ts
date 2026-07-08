@@ -25,6 +25,10 @@ export interface SlackFilters {
   docType?: string[];
   senderId?: string[];
   participants?: string[]; // Participant filter (user IDs) - matches userId, threadMentions, threadSenders
+  // Mention filters (scoped search): messages that mention a user (mentions field, now holds userIds)
+  // or reference a channel (channelMentions field). Both are exact attribute membership filters.
+  mentionedUserIds?: string[];
+  mentionedChannelIds?: string[];
   // Date filters
   createdBefore?: string; // Created before date (multiple formats)
   createdAfter?: string; // Created after date (multiple formats)
@@ -185,7 +189,6 @@ export class YqlBuilder {
       ({defaultIndex: "text_fuzzy"} userInput(@query))
       or ({defaultIndex: "username"} userInput(@query))
       or ({defaultIndex: "mentionChannelName"} userInput(@query))
-      or ({defaultIndex: "mentions"} userInput(@query))
       or ({defaultIndex: "title"} userInput(@query))
       or ({defaultIndex: "description"} userInput(@query))
       or ({defaultIndex: "title_fuzzy"} userInput(@query))
@@ -218,7 +221,6 @@ export class YqlBuilder {
       ({defaultIndex: "text_fuzzy"} userInput(@query))
       or ({defaultIndex: "username"} userInput(@query))
       or ({defaultIndex: "mentionChannelName"} userInput(@query))
-      or ({defaultIndex: "mentions"} userInput(@query))
       or ({defaultIndex: "title"} userInput(@query))
       or ({defaultIndex: "description"} userInput(@query))
       or ({defaultIndex: "title_fuzzy"} userInput(@query))
@@ -685,6 +687,22 @@ export class YqlBuilder {
         })
         .join(' or ');
       conditions.push(`(${participantConditions})`);
+    }
+
+    // Mention filter - messages that mention these user(s) (mentions field holds userIds)
+    if (filters.mentionedUserIds && filters.mentionedUserIds.length > 0) {
+      const mentionedUsers = filters.mentionedUserIds
+        .map((id) => `mentions contains ${params.bind('mentionedUserId', id.trim())}`)
+        .join(' or ');
+      conditions.push(`(${mentionedUsers})`);
+    }
+
+    // Channel-mention filter - messages that reference these channel(s)
+    if (filters.mentionedChannelIds && filters.mentionedChannelIds.length > 0) {
+      const mentionedChannels = filters.mentionedChannelIds
+        .map((id) => `channelMentions contains ${params.bind('mentionedChannelId', id.trim())}`)
+        .join(' or ');
+      conditions.push(`(${mentionedChannels})`);
     }
 
     if (filters.createdBefore) {

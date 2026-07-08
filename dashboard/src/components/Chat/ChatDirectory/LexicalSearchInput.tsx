@@ -64,6 +64,8 @@ interface LexicalSearchInputProps {
   initialMention?: MentionData | null | undefined;
   initialQuery?: InitialQueryData | null | undefined;
   disableAutoFocus?: boolean;
+  // Current user's id — threaded to chip creation so a current-user chip gets Slack's color.
+  currentUserID?: string;
 }
 
 export interface InitialQueryData {
@@ -87,7 +89,13 @@ function $isEditorSeedable(): boolean {
   return root.getTextContent().trim().length === 0;
 }
 
-function InitialMentionPlugin({ initialMention }: { initialMention?: MentionData | null }) {
+function InitialMentionPlugin({
+  initialMention,
+  currentUserID,
+}: {
+  initialMention?: MentionData | null;
+  currentUserID?: string;
+}) {
   const [editor] = useLexicalComposerContext();
   const appliedRef = useRef<string | null>(null);
 
@@ -116,7 +124,7 @@ function InitialMentionPlugin({ initialMention }: { initialMention?: MentionData
         root.append(paragraph);
 
         const spaceNode = $createTextNode(' ');
-        paragraph.append($createFilterChip(initialMention), spaceNode);
+        paragraph.append($createFilterChip(initialMention, currentUserID), spaceNode);
         spaceNode.selectEnd();
       });
     }, 50);
@@ -127,7 +135,13 @@ function InitialMentionPlugin({ initialMention }: { initialMention?: MentionData
   return null;
 }
 
-function InitialQueryPlugin({ initialQuery }: { initialQuery?: InitialQueryData | null }) {
+function InitialQueryPlugin({
+  initialQuery,
+  currentUserID,
+}: {
+  initialQuery?: InitialQueryData | null;
+  currentUserID?: string;
+}) {
   const [editor] = useLexicalComposerContext();
   const appliedRef = useRef<string | null>(null);
 
@@ -156,7 +170,7 @@ function InitialQueryPlugin({ initialQuery }: { initialQuery?: InitialQueryData 
         root.append(paragraph);
 
         initialQuery.mentions.forEach(mention => {
-          paragraph.append($createFilterChip(mention));
+          paragraph.append($createFilterChip(mention, currentUserID));
           paragraph.append($createTextNode(' '));
         });
 
@@ -317,14 +331,15 @@ function OnChangePluginWrapper({
 }) {
   const extractMentions = (
     node: LexicalNode,
-  ): Array<{ id: string; type: MentionType; prefix?: string }> => {
-    const mentions: Array<{ id: string; type: MentionType; prefix?: string }> = [];
+  ): Array<{ id: string; type: MentionType; prefix?: string; name: string }> => {
+    const mentions: Array<{ id: string; type: MentionType; prefix?: string; name: string }> = [];
 
     if ($isFilterChipNode(node)) {
       const mentionData = node.getMentionData();
-      const mention: { id: string; type: MentionType; prefix?: string } = {
+      const mention: { id: string; type: MentionType; prefix?: string; name: string } = {
         id: mentionData.id,
         type: mentionData.type,
+        name: mentionData.name,
       };
       if (mentionData.prefix) {
         mention.prefix = mentionData.prefix;
@@ -400,6 +415,7 @@ export function LexicalSearchInput({
   initialMention,
   initialQuery,
   disableAutoFocus = false,
+  currentUserID,
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
   const [suffixLeft, setSuffixLeft] = useState(0);
@@ -464,8 +480,18 @@ export function LexicalSearchInput({
             />
           )}
           <ClearEditorPlugin value={value} />
-          {initialMention && <InitialMentionPlugin initialMention={initialMention} />}
-          {initialQuery && <InitialQueryPlugin initialQuery={initialQuery} />}
+          {initialMention && (
+            <InitialMentionPlugin
+              initialMention={initialMention}
+              {...(currentUserID ? { currentUserID } : {})}
+            />
+          )}
+          {initialQuery && (
+            <InitialQueryPlugin
+              initialQuery={initialQuery}
+              {...(currentUserID ? { currentUserID } : {})}
+            />
+          )}
           {onInsertTextReady && <InsertTextPlugin onInsertTextReady={onInsertTextReady} />}
           <CursorPositionPlugin onPositionChange={handlePositionChange} />
           <FilterChipPlugin />
@@ -482,6 +508,7 @@ export function LexicalSearchInput({
             {...(onInsertMentionReady ? { onInsertMentionReady } : {})}
             {...(onMentionInserted ? { onMentionInserted } : {})}
             enableToTrigger={enableToTrigger}
+            {...(currentUserID ? { currentUserID } : {})}
           />
         </div>
       </LexicalComposer>

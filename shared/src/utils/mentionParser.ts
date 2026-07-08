@@ -9,15 +9,16 @@
  * @returns Array of unique user IDs
  */
 export function extractUserMentions(htmlContent: string): string[] {
-  // Match span tags that have both data-mention-type="user" and data-user-id in any order
-  const userMentionRegex = /<span[^>]*data-mention-type="user"[^>]*>/g;
-  const userIdRegex = /data-user-id="([^"]+)"/;
+  // Match span tags that have both data-mention-type=user and data-user-id in any order.
+  // Accept either quote style: Slack blocks/attachments emit single-quoted spans (isStringified).
+  const userMentionRegex = /<span[^>]*data-mention-type=["']user["'][^>]*>/g;
+  const userIdRegex = /data-user-id=(["'])([^"']+)\1/;
 
   const spans = [...htmlContent.matchAll(userMentionRegex)];
   const userIds = spans
     .map(spanMatch => {
       const userIdMatch = spanMatch[0].match(userIdRegex);
-      return userIdMatch ? userIdMatch[1] : null;
+      return userIdMatch ? userIdMatch[2] : null;
     })
     .filter((id): id is string => id !== null);
 
@@ -36,15 +37,16 @@ export function extractUserMentions(htmlContent: string): string[] {
  * @returns Array of unique group IDs
  */
 export function extractGroupMentions(htmlContent: string): string[] {
-  // Match span tags that have both data-mention-type="group" and data-group-id in any order
-  const groupMentionRegex = /<span[^>]*data-mention-type="group"[^>]*>/g;
-  const groupIdRegex = /data-group-id="([^"]+)"/;
+  // Match span tags that have both data-mention-type=group and data-group-id in any order.
+  // Accept either quote style: Slack blocks/attachments emit single-quoted spans (isStringified).
+  const groupMentionRegex = /<span[^>]*data-mention-type=["']group["'][^>]*>/g;
+  const groupIdRegex = /data-group-id=(["'])([^"']+)\1/;
 
   const spans = [...htmlContent.matchAll(groupMentionRegex)];
   const groupIds = spans
     .map(spanMatch => {
       const groupIdMatch = spanMatch[0].match(groupIdRegex);
-      return groupIdMatch ? groupIdMatch[1] : null;
+      return groupIdMatch ? groupIdMatch[2] : null;
     })
     .filter((id): id is string => id !== null);
 

@@ -24,6 +24,7 @@ import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
 import { executeFuzzyFallback } from '../utils/fallback';
+import { highlightText } from '../utils/highlight';
 import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { db } from '@/database/client';
@@ -90,6 +91,8 @@ interface SearchOptions {
   prefixBoostWeight?: number;
   presentationSummary?: string;
   captureDebug?: (info: VespaSearchDebugInfo) => void;
+  // Display name(s) of scoped mention chips, highlighted as exact phrases in results (not in YQL).
+  mentionHighlights?: string[];
 }
 
 export interface ILogger {
@@ -286,6 +289,7 @@ export class SearchService {
         mail = {},
         prefixBoostWeight = 0.2,
         presentationSummary,
+        mentionHighlights = [],
         workspaceId,
         captureDebug,
       } = options;
@@ -519,6 +523,7 @@ export class SearchService {
           searchQuery,
           limit,
           prefixBoostWeight,
+          mentionNames: mentionHighlights,
         },
         this.logger
       );
@@ -530,6 +535,18 @@ export class SearchService {
         `Fallback completed: ${fallbackResult.exactCount} exact + ${fallbackResult.fuzzyCount} fuzzy results`
       );
     }
+
+      // Re-bold the mention name as one phrase: strip existing <hi> tags (our per-token fuzzy pass
+      // fragments multi-word names) and re-apply highlightText. Rebuilt immutably.
+      if (mentionHighlights.length && response.root?.children) {
+        response.root.children = response.root.children.map((child) => {
+          const text = (child.fields as { text?: unknown }).text;
+          if (typeof text !== 'string' || !text) return child;
+          const highlighted = highlightText(text.replace(/<\/?hi>/gi, ''), searchQuery ?? '', mentionHighlights);
+          return { ...child, fields: { ...child.fields, text: highlighted } };
+        });
+      }
+
        if (process.env.NODE_ENV === 'development') {
         // Log only specific fields
         const simplifiedResults = response.root?.children?.map((child: any) => ({

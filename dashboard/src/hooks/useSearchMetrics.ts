@@ -78,6 +78,39 @@ type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
 type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE';
 
+type SelectedMention = { id: string; type: MentionType; prefix?: string; name?: string };
+
+type MentionBuckets = {
+  from: SelectedMention[];
+  with: SelectedMention[];
+  assignee: SelectedMention[];
+  to: SelectedMention[];
+  mentions: SelectedMention[];
+  in: SelectedMention[];
+  channelMentions: SelectedMention[];
+};
+
+/**
+ * Split selected chips into search buckets: a bare (prefix-less) @user/#channel is a *mention*
+ * search; explicit from:/with:/assignee:/in: keep their meaning. Shared by all 3 fold-sites.
+ */
+function deriveMentionBuckets(selectedMentions: SelectedMention[]): MentionBuckets {
+  const users = selectedMentions.filter(m => m.type === MentionType.USER);
+  const channels = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
+  return {
+    from: users.filter(m => m.prefix === 'from:'),
+    with: users.filter(m => m.prefix === 'with:'),
+    assignee: users.filter(m => m.prefix === 'assignee:'),
+    // to:@user is an email-recipient filter (→ toEmail), not a mention search.
+    to: users.filter(m => m.prefix === 'to:'),
+    // Bare @user (no prefix) is a mention search, not an author filter.
+    mentions: users.filter(m => !m.prefix),
+    in: channels.filter(m => m.prefix === 'in:'),
+    // Bare #channel (no prefix) is a channel-mention search, not a scope.
+    channelMentions: channels.filter(m => !m.prefix),
+  };
+}
+
 interface UseSearchMetricsOptions {
   searchLocation?: SearchLocation;
   allChannels?: Array<{ channel: Channel; category: ChannelCategory; searchableNames?: string[] }>;
@@ -265,7 +298,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
   const [selectedMentions, setSelectedMentions] = useState<
-    Array<{ id: string; type: MentionType; prefix?: string }>
+    Array<{ id: string; type: MentionType; prefix?: string; name?: string }>
   >([]);
   const [useVespaSearch, setUseVespaSearch] = useState(true);
   // Cmd-K "Include bot messages" toggle. Default OFF → backend excludes BOT messages.
@@ -555,20 +588,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       if (parsedFiltersForImpression.type) sessionFiltersRef.current.add('type');
 
       // Track mention-based filters
-      const hasFromMention = selectedMentions.some(
-        m => m.type === MentionType.USER && (m.prefix === 'from:' || !m.prefix),
-      );
-      const hasWithMention = selectedMentions.some(
-        m => m.type === MentionType.USER && m.prefix === 'with:',
-      );
-      const hasAssigneeMention = selectedMentions.some(
-        m => m.type === MentionType.USER && m.prefix === 'assignee:',
-      );
-      const hasChannelMention = selectedMentions.some(m => m.type === MentionType.CHANNEL);
-      if (hasFromMention) sessionFiltersRef.current.add('from');
-      if (hasWithMention) sessionFiltersRef.current.add('with');
-      if (hasAssigneeMention) sessionFiltersRef.current.add('assignee');
-      if (hasChannelMention) sessionFiltersRef.current.add('in');
+      const filterBuckets = deriveMentionBuckets(selectedMentions);
+      if (filterBuckets.from.length) sessionFiltersRef.current.add('from');
+      if (filterBuckets.with.length) sessionFiltersRef.current.add('with');
+      if (filterBuckets.assignee.length) sessionFiltersRef.current.add('assignee');
+      if (filterBuckets.mentions.length) sessionFiltersRef.current.add('mentions');
+      if (filterBuckets.in.length) sessionFiltersRef.current.add('in');
+      if (filterBuckets.channelMentions.length) sessionFiltersRef.current.add('channelMentions');
 
       // Reset for next search
       impressionStartTimeRef.current = 0;
@@ -796,7 +822,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     async (
       query: string,
       activeTab: TabType,
-      selectedMentions: Array<{ id: string; type: MentionType; prefix?: string }>,
+      selectedMentions: Array<{ id: string; type: MentionType; prefix?: string; name?: string }>,
       useVespaSearch: boolean,
       filteredLocalUsers: User[],
       filteredLocalChannels: Array<{
@@ -954,9 +980,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               ...(statusFilter && { status: statusFilter }),
             };
 
-            const userMentions = selectedMentions.filter(m => m.type === MentionType.USER);
-            const fromMentions = userMentions.filter(m => m.prefix === 'from:' || !m.prefix);
-            const assigneeMentions = userMentions.filter(m => m.prefix === 'assignee:');
+            const buckets = deriveMentionBuckets(selectedMentions);
+            const fromMentions = buckets.from;
+            const withMentions = buckets.with;
+            const assigneeMentions = buckets.assignee;
+            const mentionUserMentions = buckets.mentions;
+            const inChannels = buckets.in;
+            const mentionChannels = buckets.channelMentions;
+            // with: / bare-@user / bare-#channel filters only exist on chat messages.
+            const hasMessageOnlyMention =
+              withMentions.length > 0 ||
+              mentionUserMentions.length > 0 ||
+              mentionChannels.length > 0;
 
             // Assignee filter doesn't apply to Messages/Attachments - return empty results
             if (
@@ -1032,18 +1067,17 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             if (fromUserIds.length > 0) searchFilters.from = fromUserIds.join(',');
             if (fromEmails.length > 0) searchFilters.fromEmail = fromEmails.join(',');
 
-            const toMentions = userMentions.filter(m => m.prefix === 'to:');
+            const toMentions = buckets.to;
             if (toMentions.length > 0) searchFilters.toEmail = toMentions.map(m => m.id).join(',');
 
-            const withMentions = userMentions.filter(m => m.prefix === 'with:');
             if (withMentions.length > 0) {
               searchFilters.type = VespaDocTypes.MESSAGES;
               searchFilters.with = withMentions.map(user => user.id).join(',');
             }
 
-            // With: filter doesn't apply to Files/Tickets/etc - return empty results for non-Messages tabs
+            // with: / mention filters only apply to Messages - return empty for non-Messages tabs
             if (
-              withMentions.length > 0 &&
+              hasMessageOnlyMention &&
               activeTab !== TabType.MESSAGES &&
               activeTab !== TabType.ALL
             ) {
@@ -1057,12 +1091,32 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               return;
             }
 
-            const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
-            if (channelMentions.length > 0) {
-              searchFilters.in = channelMentions.map(m => m.id).join(',');
+            // Bare @user → messages that mention the user (message-only filter).
+            if (mentionUserMentions.length > 0) {
+              searchFilters.type = VespaDocTypes.MESSAGES;
+              searchFilters.mentions = mentionUserMentions.map(user => user.id).join(',');
+            }
+
+            // Explicit in:#channel scopes the search (cross-app); a bare #channel is a
+            // channel-mention search over messages that reference the channel.
+            if (inChannels.length > 0) {
+              searchFilters.in = inChannels.map(m => m.id).join(',');
               // Explicit in: channels win — don't also constrain to "only my channels"
               // (else searching a channel you're not a member of returns nothing).
               searchFilters.onlyMyChannels = false;
+            }
+            if (mentionChannels.length > 0) {
+              searchFilters.type = VespaDocTypes.MESSAGES;
+              searchFilters.channelMentions = mentionChannels.map(m => m.id).join(',');
+            }
+
+            // Mention names are highlight-only — sent separately from `q` (the id filters handle
+            // recall) so the backend can bold them without polluting the free-text query.
+            const mentionHighlights = [...mentionUserMentions, ...mentionChannels]
+              .map(m => m.name)
+              .filter((n): n is string => !!n);
+            if (mentionHighlights.length > 0) {
+              searchFilters.mentionHighlights = mentionHighlights;
             }
 
             let mergedResults: DisplaySearchResult[] = [];
@@ -1078,8 +1132,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 presentationSummary: 'lean',
               });
 
-              // Only merge local users when no type filter is applied
-              if (typeFilter) {
+              // Merge local users only when no type filter AND no message-only mention is active
+              // (a bare @user/#channel filter is message-only, so people shouldn't be merged in).
+              if (typeFilter || hasMessageOnlyMention) {
                 mergedResults = vespaResponse.results;
                 totalCount = vespaResponse.totalCount;
               } else {
@@ -1394,9 +1449,16 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           ...(statusFilter && { status: statusFilter }),
         };
 
-        const userMentions = selectedMentions.filter(m => m.type === MentionType.USER);
-        const fromMentions = userMentions.filter(m => m.prefix === 'from:' || !m.prefix);
-        const assigneeMentions = userMentions.filter(m => m.prefix === 'assignee:');
+        const buckets = deriveMentionBuckets(selectedMentions);
+        const fromMentions = buckets.from;
+        const withMentions = buckets.with;
+        const assigneeMentions = buckets.assignee;
+        const mentionUserMentions = buckets.mentions;
+        const inChannels = buckets.in;
+        const mentionChannels = buckets.channelMentions;
+        // with: / bare-@user / bare-#channel filters only exist on chat messages.
+        const hasMessageOnlyMention =
+          withMentions.length > 0 || mentionUserMentions.length > 0 || mentionChannels.length > 0;
 
         // Assignee filter doesn't apply to Messages/Attachments - return empty
         if (
@@ -1408,14 +1470,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           return;
         }
 
-        const withMentions = userMentions.filter(m => m.prefix === 'with:');
-
-        // With: filter doesn't apply to Files/Tickets/etc - return empty for non-Messages tabs
-        if (
-          withMentions.length > 0 &&
-          activeTab !== TabType.MESSAGES &&
-          activeTab !== TabType.ALL
-        ) {
+        // with: / mention filters only apply to Messages - return empty for non-Messages tabs
+        if (hasMessageOnlyMention && activeTab !== TabType.MESSAGES && activeTab !== TabType.ALL) {
           setIsLoadingMore(false);
           return;
         }
@@ -1445,7 +1501,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         if (fromUserIdsMore.length > 0) searchFilters.from = fromUserIdsMore.join(',');
         if (fromEmailsMore.length > 0) searchFilters.fromEmail = fromEmailsMore.join(',');
 
-        const toMentionsMore = userMentions.filter(m => m.prefix === 'to:');
+        const toMentionsMore = buckets.to;
         if (toMentionsMore.length > 0)
           searchFilters.toEmail = toMentionsMore.map(m => m.id).join(',');
 
@@ -1454,11 +1510,29 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           searchFilters.with = withMentions.map(user => user.id).join(',');
         }
 
-        const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
-        if (channelMentions.length > 0) {
-          searchFilters.in = channelMentions.map(m => m.id).join(',');
+        // Bare @user → messages that mention the user (message-only filter).
+        if (mentionUserMentions.length > 0) {
+          searchFilters.type = VespaDocTypes.MESSAGES;
+          searchFilters.mentions = mentionUserMentions.map(user => user.id).join(',');
+        }
+
+        // Explicit in:#channel scopes (cross-app); a bare #channel is a channel-mention search.
+        if (inChannels.length > 0) {
+          searchFilters.in = inChannels.map(m => m.id).join(',');
           // Explicit in: channels win over "only my channels" (keep parity with the initial search).
           searchFilters.onlyMyChannels = false;
+        }
+        if (mentionChannels.length > 0) {
+          searchFilters.type = VespaDocTypes.MESSAGES;
+          searchFilters.channelMentions = mentionChannels.map(m => m.id).join(',');
+        }
+
+        // Highlight-only mention names — mirrors the initial search (see note there).
+        const mentionHighlights = [...mentionUserMentions, ...mentionChannels]
+          .map(m => m.name)
+          .filter((n): n is string => !!n);
+        if (mentionHighlights.length > 0) {
+          searchFilters.mentionHighlights = mentionHighlights;
         }
 
         const currentSessionId = searchSessionId || '';

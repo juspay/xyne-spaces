@@ -64,7 +64,7 @@ export const validateQuery = (schema: Joi.ObjectSchema) => {
  */
 export const validateSearchFilters = () => {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const { priority, offset = 0, limit = 20, projectId, in: inChannel, from, withUser, on, after, before, range, board, ticketId, assignee, type, tags } = req.query;
+    const { priority, offset = 0, limit = 20, projectId, in: inChannel, from, withUser, mentions, channelMentions, on, after, before, range, board, ticketId, assignee, type, tags } = req.query;
 
     // Validate 'on' filter (specific date)
     if (on) {
@@ -192,6 +192,24 @@ export const validateSearchFilters = () => {
         const validation = await validateUserIds(userIds);
         if (validation.invalid.length > 0) {
           return next(new AppError(`Invalid assignee IDs: ${validation.invalid.join(', ')}`, 400));
+        }
+      }
+
+      // Validate mention user IDs (bare @user chips → "mentions contains <userId>")
+      if (mentions) {
+        const userIds = parseIds(mentions as string);
+        const validation = await validateUserIds(userIds);
+        if (validation.invalid.length > 0) {
+          return next(new AppError(`Invalid mention user IDs: ${validation.invalid.join(', ')}`, 400));
+        }
+      }
+
+      // Validate channel-mention IDs (bare #channel chips → "channelMentions contains <channelId>")
+      if (channelMentions) {
+        const channelIds = parseIds(channelMentions as string);
+        const validation = await validateChannelIds(channelIds);
+        if (validation.invalid.length > 0) {
+          return next(new AppError(`Invalid channel-mention IDs: ${validation.invalid.join(', ')}`, 400));
         }
       }
     } catch (error) {

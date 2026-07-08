@@ -112,6 +112,50 @@ export const vespaSearchQuerySchema = Joi.object({
       'alternatives.types': 'In must be a string or array of channel IDs'
     }),
 
+  // Mention filter (scoped search): messages that mention these user IDs (Vespa `mentions` field)
+  mentions: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'mentions must be a string or array of user IDs'
+    }),
+
+  // Channel-mention filter (scoped search): messages that reference these channel IDs (Vespa `channelMentions` field)
+  channelMentions: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'channelMentions must be a string or array of channel IDs'
+    }),
+
+  // Highlight-only mention display name(s); JSON-encoded array since names can contain commas.
+  mentionHighlights: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        try {
+          const parsed = JSON.parse(value);
+          return Array.isArray(parsed) ? parsed.map((v: unknown) => String(v)) : [value];
+        } catch {
+          return [value];
+        }
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'mentionHighlights must be a string or array of display names'
+    }),
+
   // Unified filters (work for both slack and ticket)
   projectId: Joi.alternatives()
     .try(

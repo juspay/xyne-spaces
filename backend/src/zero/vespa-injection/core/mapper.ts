@@ -1,4 +1,5 @@
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
+import { extractChannelMentions } from '@/utils/mentionParser';
 import { appSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaAppDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
@@ -413,7 +414,8 @@ export const mapMessage = async (
     reactions: 0, // TODO
     replyCount: conversation.replyCount || 0,
     replyUsersCount: 0, // TODO
-    mentions: mentions?.map(v => v.username) || [],
+    mentions: mentions?.map(v => v.userId) || [],
+    channelMentions: extractChannelMentions(args.content || ''),
     metadata: JSON.stringify(args.metadata || {}),
     threadMentions: threadInfo.threadMentions,
     threadSenders: threadInfo.threadSenders,

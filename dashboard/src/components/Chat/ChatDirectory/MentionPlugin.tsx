@@ -73,6 +73,8 @@ interface MentionPluginProps {
   ) => void;
   onMentionInserted?: () => void;
   enableToTrigger?: boolean;
+  // Current user's id — a chip of the current user gets the Slack self-mention color.
+  currentUserID?: string;
 }
 
 type TriggerType = MentionType | null;
@@ -91,6 +93,7 @@ export function MentionPlugin({
   onInsertMentionReady,
   onMentionInserted,
   enableToTrigger = false,
+  currentUserID,
 }: MentionPluginProps) {
   const [editor] = useLexicalComposerContext();
   const [searchTerm, setSearchTerm] = useState('');
@@ -197,7 +200,7 @@ export function MentionPlugin({
               $removeExistingPriorityChips();
             }
             // Insert the chip pill (icon + editable label) then a trailing space.
-            const chip = $createFilterChip(mentionData);
+            const chip = $createFilterChip(mentionData, currentUserID);
             const spaceNode = $createTextNode(' ');
             anchorNode.insertAfter(chip);
             chip.insertAfter(spaceNode);
@@ -243,7 +246,7 @@ export function MentionPlugin({
           $removeExistingPriorityChips();
         }
         // Insert the chip pill (icon + editable label) then a trailing space.
-        const chip = $createFilterChip(mentionData);
+        const chip = $createFilterChip(mentionData, currentUserID);
         const spaceNode = $createTextNode(' ');
         anchorNode.insertAfter(chip);
         chip.insertAfter(spaceNode);
@@ -462,11 +465,9 @@ export function MentionPlugin({
         const fromMatch = textBeforeCursor.match(/\bfrom:\s*(.*)$/i);
         const toMatch = enableToTrigger ? textBeforeCursor.match(/\bto:\s*(.*)$/i) : null;
         const withMatch = textBeforeCursor.match(/\bwith:\s*(.*)$/i);
-        // Require the trigger char to start the input or follow whitespace, so a
-        // `#`/`@` embedded mid-token (e.g. a pasted spaces URL fragment
-        // `.../chat/dir/cmp...#origin=<uuid>` or an email `john@acme.com`) is NOT
-        // mistaken for a channel/user trigger and hijacked into mention mode.
-        const atMatch = textBeforeCursor.match(/(?:^|\s)@(\S*)$/);
+        // `(?:^|\s)@` ignores an embedded `@` (email/URL won't hijack mention mode); the query
+        // allows spaces (so a demoted multi-word chip re-arms) but not a leading space, may be empty.
+        const atMatch = textBeforeCursor.match(/(?:^|\s)@([^@\s][^@]*)?$/);
 
         const assigneeMatch = textBeforeCursor.match(/\bassignee:\s*(.*)$/i);
 
@@ -548,12 +549,16 @@ export function MentionPlugin({
           // Fuse.js fuzzy search (e.g., typing "@john." should still match "john.doe")
           const rawQuery = atMatch[1] || '';
           const normalizedQuery = rawQuery.replace(/[.,!?:;)]*$/, '');
-          trigger = {
-            type: 'user',
-            text: '@',
-            query: normalizedQuery,
-            index: textBeforeCursor.lastIndexOf('@'),
-          };
+          // @channel / @here are reserved broadcast keywords, never users — skip user-mention mode
+          // (first token, so "@channel test" counts too) so the message search runs, not a picker.
+          if (!/^(channel|here)(\s|$)/i.test(normalizedQuery)) {
+            trigger = {
+              type: 'user',
+              text: '@',
+              query: normalizedQuery,
+              index: textBeforeCursor.lastIndexOf('@'),
+            };
+          }
         } else if (hashMatch) {
           trigger = {
             type: 'channel',

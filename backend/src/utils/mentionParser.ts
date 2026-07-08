@@ -9,15 +9,16 @@
  * @returns Array of unique user IDs
  */
 export function extractUserMentions(htmlContent: string): string[] {
-  // Match span tags that have both data-mention-type="user" and data-user-id in any order
-  const userMentionRegex = /<span[^>]*data-mention-type="user"[^>]*>/g;
-  const userIdRegex = /data-user-id="([^"]+)"/;
+  // Match span tags that have both data-mention-type=user and data-user-id in any order.
+  // Accept either quote style: Slack blocks/attachments emit single-quoted spans (isStringified).
+  const userMentionRegex = /<span[^>]*data-mention-type=["']user["'][^>]*>/g;
+  const userIdRegex = /data-user-id=(["'])([^"']+)\1/;
 
   const spans = [...htmlContent.matchAll(userMentionRegex)];
   const userIds = spans
     .map(spanMatch => {
       const userIdMatch = spanMatch[0].match(userIdRegex);
-      return userIdMatch ? userIdMatch[1] : null;
+      return userIdMatch ? userIdMatch[2] : null;
     })
     .filter((id): id is string => id !== null);
 
@@ -36,20 +37,43 @@ export function extractUserMentions(htmlContent: string): string[] {
  * @returns Array of unique group IDs
  */
 export function extractGroupMentions(htmlContent: string): string[] {
-  // Match span tags that have both data-mention-type="group" and data-group-id in any order
-  const groupMentionRegex = /<span[^>]*data-mention-type="group"[^>]*>/g;
-  const groupIdRegex = /data-group-id="([^"]+)"/;
+  // Match span tags that have both data-mention-type=group and data-group-id in any order.
+  // Accept either quote style: Slack blocks/attachments emit single-quoted spans (isStringified).
+  const groupMentionRegex = /<span[^>]*data-mention-type=["']group["'][^>]*>/g;
+  const groupIdRegex = /data-group-id=(["'])([^"']+)\1/;
 
   const spans = [...htmlContent.matchAll(groupMentionRegex)];
   const groupIds = spans
     .map(spanMatch => {
       const groupIdMatch = spanMatch[0].match(groupIdRegex);
-      return groupIdMatch ? groupIdMatch[1] : null;
+      return groupIdMatch ? groupIdMatch[2] : null;
     })
     .filter((id): id is string => id !== null);
 
   // Return unique group IDs
   return [...new Set(groupIds)];
+}
+
+/**
+ * Extract channel IDs from #channel reference spans (data-channel-mention -> data-channel-id).
+ * Excludes the id-less "@channel" broadcast keyword (data-mention-type="channel").
+ */
+export function extractChannelMentions(htmlContent: string): string[] {
+  // Match span tags carrying the data-channel-mention marker (the #channel reference)
+  const channelMentionRegex = /<span[^>]*data-channel-mention[^>]*>/g;
+  // Accept either quote style: Slack blocks/attachments emit single-quoted spans (isStringified).
+  const channelIdRegex = /data-channel-id=(["'])([^"']+)\1/;
+
+  const spans = [...htmlContent.matchAll(channelMentionRegex)];
+  const channelIds = spans
+    .map(spanMatch => {
+      const channelIdMatch = spanMatch[0].match(channelIdRegex);
+      return channelIdMatch ? channelIdMatch[2] : null;
+    })
+    .filter((id): id is string => id !== null);
+
+  // Return unique channel IDs
+  return [...new Set(channelIds)];
 }
 
 /**

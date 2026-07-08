@@ -364,8 +364,15 @@ const ChannelCommandMenu = ({
   // Check if user has selected from: or in: or with: mention filters (for reordering results)
   const hasWithFilter = selectedMentions.some(m => m.prefix === 'with:');
 
-  const showGroupedLocalResults = (!typeFilter || isChannelsType) && !hasWithFilter;
-  const showGroupedUsers = (!typeFilter || isUsersType) && !hasWithFilter;
+  // Bare @user / #channel mention chips scope the search to message content (like with:),
+  // so the local people/channel quick-switch sections become noise — suppress them.
+  const hasMentionFilter = selectedMentions.some(
+    m => !m.prefix && (m.type === MentionType.USER || m.type === MentionType.CHANNEL),
+  );
+
+  const showGroupedLocalResults =
+    (!typeFilter || isChannelsType) && !hasWithFilter && !hasMentionFilter;
+  const showGroupedUsers = (!typeFilter || isUsersType) && !hasWithFilter && !hasMentionFilter;
 
   // Check if user has selected from:/with: or in: mention filters (for reordering results)
   // Only count in: mentions that are CHANNEL type (not USER type from in: combined list)
@@ -494,9 +501,7 @@ const ChannelCommandMenu = ({
     if (text.trim()) params.set('query', text.trim());
     if (tab) params.set('tab', tab);
 
-    const fromMentions = mentions.filter(
-      m => m.type === MentionType.USER && (m.prefix === 'from:' || !m.prefix),
-    );
+    const fromMentions = mentions.filter(m => m.type === MentionType.USER && m.prefix === 'from:');
     const fromEmails = fromMentions.filter(m => m.id.includes('@')).map(m => m.id);
     const fromIds = fromMentions.filter(m => !m.id.includes('@')).map(m => m.id);
     if (fromIds.length > 0) params.set('from', fromIds.join(','));
@@ -510,6 +515,17 @@ const ChannelCommandMenu = ({
     const inMentions = mentions.filter(m => m.type === MentionType.CHANNEL && m.prefix === 'in:');
     const inIds = inMentions.map(m => m.id);
     if (inIds.length > 0) params.set('in', inIds.join(','));
+
+    // Bare @user / #channel chips (no prefix) are mention filters, not from/in.
+    const mentionUserIds = mentions
+      .filter(m => m.type === MentionType.USER && !m.prefix)
+      .map(m => m.id);
+    if (mentionUserIds.length > 0) params.set('mentions', mentionUserIds.join(','));
+
+    const mentionChannelIds = mentions
+      .filter(m => m.type === MentionType.CHANNEL && !m.prefix)
+      .map(m => m.id);
+    if (mentionChannelIds.length > 0) params.set('channelMentions', mentionChannelIds.join(','));
 
     const assigneeMentions = mentions.filter(
       m => m.type === MentionType.USER && m.prefix === 'assignee:',
@@ -560,7 +576,27 @@ const ChannelCommandMenu = ({
       // Display string lowercase for consistency; the functional param above stays uppercase.
       displayParts.push(`priority:${priorityMention.id.toLowerCase()}`);
     }
+    // Free text before the bare @user/#channel mentions, matching how they're typed
+    // ("test @user"), so the label isn't reordered to "@user test".
     if (text.trim()) displayParts.push(text.trim());
+    if (mentionUserIds.length > 0) {
+      const names = mentionUserIds
+        .map(id => {
+          const user = byId.get(id);
+          return user ? `@${getUserDisplayName(user)}` : '';
+        })
+        .filter(Boolean);
+      if (names.length > 0) displayParts.push(names.join(' '));
+    }
+    if (mentionChannelIds.length > 0) {
+      const names = mentionChannelIds
+        .map(id => {
+          const ch = channels.find(c => c.channel.id === id);
+          return ch ? `#${ch.channel.name}` : '';
+        })
+        .filter(Boolean);
+      if (names.length > 0) displayParts.push(names.join(' '));
+    }
     if (displayParts.length > 0) params.set('display', displayParts.join(' '));
 
     return params;
@@ -684,13 +720,19 @@ const ChannelCommandMenu = ({
     [onClose, onOpen],
   );
 
-  // Handle mention selection from search results.
-  // For `#`-triggered channel picks (Slack-style quick switcher) we navigate to
-  // the channel and close the dialog instead of inserting a filter chip.
-  // For `@`-triggered user picks, we navigate to the user's DM.
+  // On a mention pick: quick-switch (navigate to the DM/channel) only when the box is truly
+  // empty; otherwise it becomes a prefix-less mention-filter chip (mentions/channelMentions).
   const handleMentionSelect = useCallback(
     async (mention: { id: string; name: string; type: MentionType; email?: string }) => {
-      if (mention.type === MentionType.CHANNEL && channelTrigger === '#') {
+      // Quick-switch only for a "pure" bare mention: no chips AND nothing typed before the
+      // trigger. "hi @vishal" has preceding text, so it becomes a mention filter instead.
+      const triggerChar = mention.type === MentionType.CHANNEL ? '#' : '@';
+      const triggerIndex = searchText.lastIndexOf(triggerChar);
+      const hasTextBeforeMention =
+        triggerIndex > 0 && searchText.slice(0, triggerIndex).trim().length > 0;
+      const isQuickSwitch = selectedMentions.length === 0 && !hasTextBeforeMention;
+
+      if (mention.type === MentionType.CHANNEL && channelTrigger === '#' && isQuickSwitch) {
         setMentionSearchType(null);
         setMentionSearchQuery('');
         setChannelTrigger(null);
@@ -700,8 +742,8 @@ const ChannelCommandMenu = ({
         return;
       }
 
-      // For `@`-triggered user picks, navigate to DM instead of inserting a chip
-      if (mention.type === MentionType.USER && userTrigger === '@') {
+      // Navigate to the DM only in quick-switch; otherwise fall through to a mention chip.
+      if (mention.type === MentionType.USER && userTrigger === '@' && isQuickSwitch) {
         setMentionSearchType(null);
         setMentionSearchQuery('');
         setUserTrigger(null);
@@ -739,7 +781,7 @@ const ChannelCommandMenu = ({
         }, 100);
       }
     },
-    [channelTrigger, userTrigger, onOpenChange, navigate],
+    [channelTrigger, userTrigger, onOpenChange, navigate, selectedMentions, searchText],
   );
 
   // Store the insertMention function when it's ready
@@ -1497,8 +1539,11 @@ const ChannelCommandMenu = ({
 
   const hasResults =
     ((activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+      showGroupedLocalResults &&
       filteredLocalChannels.length > 0) ||
-    ((activeTab === TabType.ALL || activeTab === TabType.USERS) && filteredLocalUsers.length > 0) ||
+    ((activeTab === TabType.ALL || activeTab === TabType.USERS) &&
+      showGroupedUsers &&
+      filteredLocalUsers.length > 0) ||
     (activeTab !== TabType.CHANNELS && activeTab !== TabType.USERS && backendResults.length > 0);
 
   const showEmptyState = searchText.trim() && !isLoading && !hasResults;
@@ -2412,6 +2457,7 @@ const ChannelCommandMenu = ({
                   : `Search ${activeTab}...`
             }
             onChange={handleEditorChange}
+            currentUserID={currentUserID}
             onUserSearch={handleUserSearch}
             onChannelSearch={handleChannelSearch}
             onPrioritySearch={handlePrioritySearch}
