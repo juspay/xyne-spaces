@@ -2134,6 +2134,7 @@ export const externalSourceTable = table("external_sources")
     sourceType: string(),
     displayName: string(),
     channelId: string().optional(),
+    externalIdentifier: string().optional(),
     workspaceId: string().optional(),
     boardId: string().optional(),
     ownerUserId: string().optional(),

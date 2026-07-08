@@ -24,6 +24,7 @@ import {
 import { encrypt } from '@/services/encryptionService';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
+import { pubSubWatchService } from '@/pubsub';
 
 const TAG = '[GoogleAuth]';
 const router = express.Router();
@@ -1081,11 +1082,14 @@ router.post('/watch/renew/:sourceName', async (req: Request, res: Response): Pro
       res.status(400).json({ error: 'Source is not a Google integration' }); return;
     }
 
-    const googleService = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
-    const result = await googleService.renewGmailWatch();
+    // Renew the exact source row; Gmail source names are not reversible from email.
+    const result = await pubSubWatchService.renewSubscription('gmail', {
+      id: source.id,
+      email: source.displayName,
+    });
 
     logger.info(`${TAG} Gmail watch renewed`, { sourceName });
-    res.json({ success: true, ...result });
+    res.json({ success: true, historyId: result.historyId, expiration: result.expiration });
   } catch (error: any) {
     logger.error(`${TAG} Error renewing Gmail watch:`, error);
     res.status(500).json({ error: 'Failed to renew Gmail watch', details: error.message });

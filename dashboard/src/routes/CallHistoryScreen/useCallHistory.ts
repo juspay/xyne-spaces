@@ -15,15 +15,19 @@ import {
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 import { usePlatform } from '../../hooks/usePlatform';
-import { stateMachineActor, type User } from '../../machines/stateMachine';
+import { type User } from '../../machines/stateMachine';
 import {
   getCallStatus,
   getParticipantUsers,
   isExternalCalendarEvent,
+  isExternalCalendarEventForUser,
+  shouldShowInCallLists,
+  shouldShowInScheduledList,
 } from './callHistoryItem.utils';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useUsers } from '../../hooks/useUsers';
 import { callService } from '../../services/Call/callService';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { blobToBase64 } from '../../services/clients/fileFetchService';
@@ -39,6 +43,7 @@ type ScheduledCall = ScheduledCallsResult[number];
 interface UseCallHistoryReturn {
   calls: Call[] | undefined;
   scheduledCalls: ScheduledCall[] | undefined;
+  calendarScheduledCalls: ScheduledCall[] | undefined;
   missedCalls: QueryResultType<typeof queries.userCallHistory>;
   isLoading: boolean;
   isScheduledCallsLoading: boolean;
@@ -133,9 +138,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
   const { isMobile } = usePlatform();
 
-  // Get all users from state machine
-  const allUsers = useSelector(stateMachineActor, state => state.context.users);
-
+  const allUsers = useUsers();
   // Helper function to get channel by ID from state machine
   const channels = useAllChannels();
 
@@ -157,19 +160,19 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     );
 
     const filtered = allScheduledCalls.filter(call => {
-      // Only show scheduled calls that haven't passed their end time
       if (call.status === CallStatus.ACTIVE) {
         return false;
       }
-      // Hide if this exact call room is currently live
       if (activeExternalIds.has(call.externalId)) {
         return false;
       }
-      // Hide if another instance of the same recurring series is currently live
       if (call.recurringSeriesId && activeSeriesIds.has(call.recurringSeriesId)) {
         return false;
       }
-      // Don't show calls that have already started
+      if (!shouldShowInScheduledList(call)) {
+        return false;
+      }
+      // Regular scheduled calls: don't show if already started
       if (call.startsAt && new Date(call.startsAt).getTime() <= now) {
         return false;
       }
@@ -189,16 +192,59 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       // broadcast-channel calls (post call updates mode) where call.channelId is a
       // large channel but only a subset of members are real participants.
       // External calendar calls (Google/Microsoft) have no CallParticipant rows —
-      // attendees are stored in metadata only — so check creator instead.
+      // attendees are stored in metadata only — so check the owning user id instead.
       const isExternalCalendarCall = isExternalCalendarEvent(call);
       const isParticipant = isExternalCalendarCall
-        ? call.createdByUserId === userId
+        ? isExternalCalendarEventForUser(call, userId)
         : call.participants?.some(p => p.userId === userId);
       if (!isParticipant) return false;
       return true;
     });
 
     // Sort by start time ascending
+    filtered.sort((a, b) => {
+      const aTime = a.startsAt ? new Date(a.startsAt).getTime() : Infinity;
+      const bTime = b.startsAt ? new Date(b.startsAt).getTime() : Infinity;
+      return aTime - bTime;
+    });
+
+    return filtered;
+  }, [allScheduledCalls, activeCalls, userId]);
+
+  const calendarScheduledCalls = useMemo(() => {
+    if (!allScheduledCalls) return undefined;
+
+    const activeExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
+    const activeSeriesIds = new Set(
+      activeCalls?.map(c => c.recurringSeriesId).filter((id): id is string => !!id) ?? [],
+    );
+
+    const filtered = allScheduledCalls.filter(call => {
+      if (call.status === CallStatus.ACTIVE) {
+        return false;
+      }
+      if (activeExternalIds.has(call.externalId)) {
+        return false;
+      }
+      if (call.recurringSeriesId && activeSeriesIds.has(call.recurringSeriesId)) {
+        return false;
+      }
+      if (
+        userId &&
+        call.participants?.some(
+          p => p.userId === userId && p.meetingStatus === MeetingStatus.HIDDEN,
+        )
+      ) {
+        return false;
+      }
+
+      if (isExternalCalendarEvent(call)) {
+        return isExternalCalendarEventForUser(call, userId);
+      }
+
+      return call.participants?.some(p => p.userId === userId) ?? false;
+    });
+
     filtered.sort((a, b) => {
       const aTime = a.startsAt ? new Date(a.startsAt).getTime() : Infinity;
       const bTime = b.startsAt ? new Date(b.startsAt).getTime() : Infinity;
@@ -232,22 +278,26 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       ) || [];
 
     // Combine base calls with active scheduled calls, filtering out stale ACTIVE entries
-    let allCalls = [...baseCalls, ...activeScheduledCalls].filter(call => {
-      if (call.status === CallStatus.ACTIVE) {
-        // Call has reverted to SCHEDULED (ended before endsAt) — stale accumulator entry
-        if (scheduledCallIds.has(call.id)) return false;
-        // Call has ended — no longer in the live active-calls subscription
-        if (!activeCallExternalIds.has(call.externalId)) return false;
-      }
-      return true;
-    });
+    // External calendar events are excluded from main call lists — they appear only in Calendar view
+    let allCalls = [...baseCalls, ...activeScheduledCalls]
+      .filter(call => {
+        if (call.status === CallStatus.ACTIVE) {
+          // Call has reverted to SCHEDULED (ended before endsAt) — stale accumulator entry
+          if (scheduledCallIds.has(call.id)) return false;
+          // Call has ended — no longer in the live active-calls subscription
+          if (!activeCallExternalIds.has(call.externalId)) return false;
+        }
+        return true;
+      })
+      .filter(shouldShowInCallLists);
 
     // If showChannelCalls is false (default), filter out calls in channels where user wasn't invited
+    // External calendar events (Google/Microsoft) bypass this filter — they have no participants,
+    // the user is identified by createdByUserId instead.
     if (!showChannelCalls) {
       allCalls = allCalls.filter(call => {
-        // Check if user was invited to this call (exists in participants)
+        if (isExternalCalendarEvent(call)) return true;
         const userParticipant = call.participants?.find(p => p.userId === userId);
-        // Only show calls where user was invited
         return !!userParticipant;
       });
     }
@@ -737,6 +787,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   return {
     calls: recentCalls,
     scheduledCalls,
+    calendarScheduledCalls,
     missedCalls,
     isLoading,
     isScheduledCallsLoading: scheduledQueryDetails.type === 'unknown',

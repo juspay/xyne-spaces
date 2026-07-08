@@ -9,12 +9,16 @@
 
 import { logger } from '@/utils/logger';
 import { CallOrigin, CallStatus, CallType, type Prisma } from '@prisma/client';
+import { MAX_CALENDAR_EVENTS_PER_SYNC } from '@/services/calendarSyncConfig';
 import {
+  buildCalendarExternalId,
+  buildCalendarExternalIdPrefix,
+  normalizeCalendarOwnerEmail,
   upsertExternalCalendarCall,
   cancelRemovedExternalCalendarCalls,
   type CalendarOrganizer,
+  type CalendarSyncTimeRange,
 } from './calendarCallStore.utils';
-
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,11 +74,16 @@ function resolveRoomLink(event: GCalEvent): string | undefined {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export async function storeGCalEventAsCall(event: GCalEvent, userId: string): Promise<void> {
+export async function storeGCalEventAsCall(
+  event: GCalEvent,
+  userId: string,
+  userEmail: string,
+): Promise<void> {
   if (!event.id) return;
 
   const now = new Date();
-  const externalId = `gcal__${userId}__${event.id}`;
+  const calendarOwnerEmail = normalizeCalendarOwnerEmail(userEmail);
+  const externalId = buildCalendarExternalId('google', userId, event.id);
   const startsAt = parseGCalDateTime(event.start);
   const endsAt = parseGCalDateTime(event.end);
   const roomLink = resolveRoomLink(event);
@@ -109,6 +118,8 @@ export async function storeGCalEventAsCall(event: GCalEvent, userId: string): Pr
       endsAt,
       timezone: event.start?.timeZone ?? 'UTC',
       metadata: {
+        provider: 'google',
+        calendarOwnerEmail,
         googleEventId: event.id,
         htmlLink: event.htmlLink ?? null,
         location: event.location ?? null,
@@ -124,16 +135,23 @@ export async function storeGCalEventsAsCallsForUser(
   events: GCalEvent[],
   userId: string,
   userEmail: string,
+  options?: { isFullSync?: boolean; timeRange?: CalendarSyncTimeRange; skipCancelRemoved?: boolean },
 ): Promise<void> {
-  logger.info(`[GOOGLE_CALENDAR_STORE] Storing ${events.length} event(s) for ${userEmail}`);
+  const isFullSync = options?.isFullSync ?? false;
+  const eventsToStore = events.slice(0, MAX_CALENDAR_EVENTS_PER_SYNC);
+  const hitStoreCap = eventsToStore.length < events.length;
 
-  const fetchedExternalIds = new Set(
-    events.filter(e => e.id).map(e => `gcal__${userId}__${e.id}`),
-  );
+  if (hitStoreCap) {
+    logger.warn(
+      `[GOOGLE_CALENDAR_STORE] Capping store batch for ${userEmail}: ${events.length} -> ${eventsToStore.length}`,
+    );
+  }
 
-  for (const event of events) {
+  logger.info(`[GOOGLE_CALENDAR_STORE] Storing ${eventsToStore.length} event(s) for ${userEmail} (fullSync=${isFullSync})`);
+
+  for (const event of eventsToStore) {
     try {
-      await storeGCalEventAsCall(event, userId);
+      await storeGCalEventAsCall(event, userId, userEmail);
     } catch (err) {
       logger.error(
         `[GOOGLE_CALENDAR_STORE] Failed to store event "${event.summary}" for ${userEmail}:`,
@@ -142,10 +160,21 @@ export async function storeGCalEventsAsCallsForUser(
     }
   }
 
-  await cancelRemovedExternalCalendarCalls(
-    userId,
-    CallOrigin.GOOGLE_CALENDAR,
-    fetchedExternalIds,
-    'GOOGLE_CALENDAR_STORE',
-  );
+  if (isFullSync && !options?.skipCancelRemoved && !hitStoreCap) {
+    const externalIdPrefix = buildCalendarExternalIdPrefix('google', userId);
+    const fetchedExternalIds = new Set(
+      eventsToStore.filter(e => e.id).map(e => buildCalendarExternalId('google', userId, e.id!)),
+    );
+    await cancelRemovedExternalCalendarCalls(
+      externalIdPrefix,
+      CallOrigin.GOOGLE_CALENDAR,
+      fetchedExternalIds,
+      'GOOGLE_CALENDAR_STORE',
+      options?.timeRange,
+    );
+  } else if (isFullSync && options?.skipCancelRemoved) {
+    logger.warn(`[GOOGLE_CALENDAR_STORE] Skipping removed-event cancellation because sync result was truncated upstream`);
+  } else if (isFullSync && hitStoreCap) {
+    logger.warn(`[GOOGLE_CALENDAR_STORE] Skipping removed-event cancellation because store batch hit cap`);
+  }
 }

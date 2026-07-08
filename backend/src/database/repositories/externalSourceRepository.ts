@@ -4,6 +4,47 @@
  */
 
 import { DatabaseClient } from '../client';
+import { encrypt, decrypt } from '@/services/encryptionService';
+import type { ExternalSource } from '@prisma/client';
+
+export type CalendarProvider = 'GOOGLE' | 'MICROSOFT';
+
+export interface CalendarSourceCredentials {
+  refreshToken: string;
+  accessToken?: string;
+  accessTokenExpiry?: string;
+  resourceId?: string;     // Google Calendar resource id
+  channelToken?: string;   // Google Calendar channel token echoed in X-Goog-Channel-Token
+  clientState?: string;    // Microsoft Graph client state
+  expiration?: string;     // ISO expiration for Google or Microsoft watch/subscription
+}
+
+const CALENDAR_SOURCE_TYPES: Record<CalendarProvider, string> = {
+  GOOGLE: 'google_calendar',
+  MICROSOFT: 'microsoft_calendar',
+};
+const CALENDAR_EXPIRING_SOURCE_PAGE_SIZE = 500;
+
+export function getCalendarSourceType(provider: CalendarProvider): string {
+  return CALENDAR_SOURCE_TYPES[provider];
+}
+
+export function parseCalendarCredentials(
+  encryptedCredentials: string,
+): CalendarSourceCredentials | null {
+  if (!encryptedCredentials) return null;
+  try {
+    return JSON.parse(decrypt(encryptedCredentials)) as CalendarSourceCredentials;
+  } catch {
+    return null;
+  }
+}
+
+export function serializeCalendarCredentials(
+  credentials: CalendarSourceCredentials,
+): string {
+  return encrypt(JSON.stringify(credentials));
+}
 
 export class ExternalSourceRepository {
   private db = DatabaseClient.getInstance();
@@ -32,16 +73,19 @@ export class ExternalSourceRepository {
    * Create external source
    * @param data.credentials - Encrypted credentials string (use encrypt() from encryptionService)
    * @param data.boardId - Optional target board for ticket creation
-   * @deprecated ownerUserId - Use EmailChannelPreference table instead
    */
   async create(data: {
     name: string;
     sourceType: string;
     displayName: string;
-    channelId: string;
+    channelId?: string;
+    externalIdentifier?: string;
     boardId?: string; // Target board for ticket creation
     credentials: string; // Encrypted credentials
-    ownerUserId?: string; // @deprecated - Use EmailChannelPreference table instead
+    ownerUserId?: string; // Owner for user-scoped integrations (calendar, gmail search)
+    workspaceId?: string;
+    isActive?: boolean;
+    lastSyncCursor?: string | null;
   }) {
     return await this.db.externalSource.create({
       data: {
@@ -49,26 +93,31 @@ export class ExternalSourceRepository {
         sourceType: data.sourceType,
         displayName: data.displayName,
         channelId: data.channelId,
+        externalIdentifier: data.externalIdentifier,
         boardId: data.boardId,
         credentials: data.credentials,
         ownerUserId: data.ownerUserId,
-        isActive: true,
+        workspaceId: data.workspaceId,
+        isActive: data.isActive ?? true,
+        lastSyncCursor: data.lastSyncCursor,
       }
     });
   }
 
   /**
    * Update external source
-   * @deprecated ownerUserId - Use EmailChannelPreference table instead
    */
   async update(id: string, data: {
+    name?: string;
     displayName?: string;
-    channelId?: string;
+    channelId?: string | null;
+    externalIdentifier?: string | null;
     boardId?: string;
     isActive?: boolean;
     credentials?: string;
     lastSyncCursor?: string | null;
-    ownerUserId?: string; // @deprecated - Use EmailChannelPreference table instead
+    ownerUserId?: string;
+    workspaceId?: string;
   }) {
     return await this.db.externalSource.update({
       where: { id },
@@ -117,6 +166,15 @@ export class ExternalSourceRepository {
   }
 
   /**
+   * Find external source by external identifier
+   */
+  async findByExternalIdentifier(externalIdentifier: string) {
+    return await this.db.externalSource.findFirst({
+      where: { externalIdentifier }
+    });
+  }
+
+  /**
    * Find active email external source (Google/Microsoft) for a workspace.
    */
   async findEmailSourceByWorkspaceId(workspaceId: string) {
@@ -152,6 +210,271 @@ export class ExternalSourceRepository {
         isActive: true,
       },
       orderBy: { createdAt: 'desc' },
+      });
+  }
+
+
+  // ========================================================================
+  // Calendar integration helpers
+  // ========================================================================
+
+  private calendarName(ownerUserId: string, provider: CalendarProvider): string {
+    const suffix = provider === 'GOOGLE' ? 'google' : 'microsoft';
+    return `calendar-${suffix}-${ownerUserId}`;
+  }
+
+  async findCalendarSourceByOwner(
+    ownerUserId: string,
+    provider: CalendarProvider,
+  ): Promise<ExternalSource | null> {
+    return this.db.externalSource.findFirst({
+      where: {
+        sourceType: getCalendarSourceType(provider),
+        ownerUserId,
+      },
+      orderBy: { updatedAt: 'desc' },
     });
+  }
+
+  async findCalendarSourceByExternalIdentifier(
+    externalIdentifier: string,
+  ): Promise<ExternalSource | null> {
+    return this.db.externalSource.findFirst({
+      where: {
+        externalIdentifier,
+        sourceType: { in: ['google_calendar', 'microsoft_calendar'] },
+      },
+    });
+  }
+
+  async upsertGoogleCalendarWatch(params: {
+    email: string;
+    ownerUserId: string;
+    channelId: string;
+    resourceId: string;
+    channelToken: string;
+    expiration: Date;
+    refreshToken: string;
+    accessToken?: string;
+    accessTokenExpiry?: Date;
+  }): Promise<ExternalSource> {
+    const sourceType = getCalendarSourceType('GOOGLE');
+    const existing = await this.findCalendarSourceByOwner(params.ownerUserId, 'GOOGLE');
+    const existingCreds = existing
+      ? parseCalendarCredentials(existing.credentials)
+      : null;
+
+    const credentials: CalendarSourceCredentials = {
+      refreshToken: params.refreshToken,
+      accessToken: params.accessToken ?? existingCreds?.accessToken,
+      accessTokenExpiry: params.accessTokenExpiry
+        ? params.accessTokenExpiry.toISOString()
+        : existingCreds?.accessTokenExpiry,
+      resourceId: params.resourceId,
+      channelToken: params.channelToken,
+      expiration: params.expiration.toISOString(),
+    };
+
+    if (existing) {
+      return this.update(existing.id, {
+        name: this.calendarName(params.ownerUserId, 'GOOGLE'),
+        displayName: params.email,
+        ownerUserId: params.ownerUserId,
+        externalIdentifier: params.channelId,
+        isActive: true,
+        credentials: serializeCalendarCredentials(credentials),
+      });
+    }
+
+    return this.create({
+      name: this.calendarName(params.ownerUserId, 'GOOGLE'),
+      sourceType,
+      displayName: params.email,
+      ownerUserId: params.ownerUserId,
+      externalIdentifier: params.channelId,
+      credentials: serializeCalendarCredentials(credentials),
+      isActive: true,
+    });
+  }
+
+  async upsertMicrosoftCalendarSubscription(params: {
+    email: string;
+    ownerUserId: string;
+    subscriptionId: string;
+    expiration: Date;
+    clientState: string;
+    refreshToken: string;
+    accessToken?: string;
+    accessTokenExpiry?: Date;
+  }): Promise<ExternalSource> {
+    const sourceType = getCalendarSourceType('MICROSOFT');
+    const existing = await this.findCalendarSourceByOwner(params.ownerUserId, 'MICROSOFT');
+    const existingCreds = existing
+      ? parseCalendarCredentials(existing.credentials)
+      : null;
+
+    const credentials: CalendarSourceCredentials = {
+      refreshToken: params.refreshToken,
+      accessToken: params.accessToken ?? existingCreds?.accessToken,
+      accessTokenExpiry: params.accessTokenExpiry
+        ? params.accessTokenExpiry.toISOString()
+        : existingCreds?.accessTokenExpiry,
+      clientState: params.clientState,
+      expiration: params.expiration.toISOString(),
+    };
+
+    if (existing) {
+      return this.update(existing.id, {
+        name: this.calendarName(params.ownerUserId, 'MICROSOFT'),
+        displayName: params.email,
+        ownerUserId: params.ownerUserId,
+        externalIdentifier: params.subscriptionId,
+        isActive: true,
+        credentials: serializeCalendarCredentials(credentials),
+      });
+    }
+
+    return this.create({
+      name: this.calendarName(params.ownerUserId, 'MICROSOFT'),
+      sourceType,
+      displayName: params.email,
+      ownerUserId: params.ownerUserId,
+      externalIdentifier: params.subscriptionId,
+      credentials: serializeCalendarCredentials(credentials),
+      isActive: true,
+    });
+  }
+
+  async revokeGoogleCalendarWatchById(id: string): Promise<void> {
+    const existing = await this.findById(id);
+    if (!existing) return;
+
+    const creds = parseCalendarCredentials(existing.credentials);
+    const updated: CalendarSourceCredentials = {
+      refreshToken: creds?.refreshToken ?? '',
+      accessToken: creds?.accessToken,
+      accessTokenExpiry: creds?.accessTokenExpiry,
+    };
+
+    await this.update(existing.id, {
+      externalIdentifier: null,
+      isActive: false,
+      credentials: serializeCalendarCredentials(updated),
+    });
+  }
+
+  async revokeMicrosoftCalendarSubscriptionById(id: string): Promise<void> {
+    const existing = await this.findById(id);
+    if (!existing) return;
+
+    const creds = parseCalendarCredentials(existing.credentials);
+    const updated: CalendarSourceCredentials = {
+      refreshToken: creds?.refreshToken ?? '',
+      accessToken: creds?.accessToken,
+      accessTokenExpiry: creds?.accessTokenExpiry,
+    };
+
+    await this.update(existing.id, {
+      externalIdentifier: null,
+      isActive: false,
+      credentials: serializeCalendarCredentials(updated),
+    });
+  }
+
+  async updateCalendarSyncStateById(
+    id: string,
+    params: {
+      syncToken?: string | null;
+      isActive?: boolean;
+    },
+  ): Promise<void> {
+    const existing = await this.findById(id);
+    if (!existing) return;
+
+    await this.update(existing.id, {
+      isActive: params.isActive ?? existing.isActive,
+      lastSyncCursor: params.syncToken,
+    });
+  }
+
+  async markCalendarError(id: string): Promise<void> {
+    await this.update(id, { isActive: false });
+  }
+
+  async markMicrosoftSubscriptionExpired(id: string): Promise<void> {
+    await this.update(id, {
+      externalIdentifier: null,
+      isActive: false,
+    });
+  }
+
+  async clearMicrosoftSubscriptionFields(id: string): Promise<void> {
+    const existing = await this.findById(id);
+    if (!existing) return;
+
+    const creds = parseCalendarCredentials(existing.credentials);
+    const updated: CalendarSourceCredentials = {
+      refreshToken: creds?.refreshToken ?? '',
+      accessToken: creds?.accessToken,
+      accessTokenExpiry: creds?.accessTokenExpiry,
+    };
+
+    await this.update(existing.id, {
+      externalIdentifier: null,
+      credentials: serializeCalendarCredentials(updated),
+    });
+  }
+
+  async renewMicrosoftSubscription(id: string, expiration: Date): Promise<void> {
+    const existing = await this.findById(id);
+    if (!existing) return;
+
+    const creds = parseCalendarCredentials(existing.credentials);
+    const updated: CalendarSourceCredentials = {
+      refreshToken: creds?.refreshToken ?? '',
+      accessToken: creds?.accessToken,
+      accessTokenExpiry: creds?.accessTokenExpiry,
+      clientState: creds?.clientState,
+      expiration: expiration.toISOString(),
+    };
+
+    await this.update(existing.id, {
+      isActive: true,
+      credentials: serializeCalendarCredentials(updated),
+    });
+  }
+
+  async findExpiringCalendarSources(
+    beforeDate: Date,
+    provider: CalendarProvider,
+  ): Promise<ExternalSource[]> {
+    const expiring: ExternalSource[] = [];
+    let cursor: string | undefined;
+
+    while (true) {
+      const sources = await this.db.externalSource.findMany({
+        where: {
+          sourceType: getCalendarSourceType(provider),
+          isActive: true,
+        },
+        orderBy: { id: 'asc' },
+        take: CALENDAR_EXPIRING_SOURCE_PAGE_SIZE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+
+      if (sources.length === 0) break;
+
+      for (const source of sources) {
+        const creds = parseCalendarCredentials(source.credentials);
+        if (!creds?.expiration || new Date(creds.expiration) <= beforeDate) {
+          expiring.push(source);
+        }
+      }
+
+      if (sources.length < CALENDAR_EXPIRING_SOURCE_PAGE_SIZE) break;
+      cursor = sources[sources.length - 1]!.id;
+    }
+
+    return expiring;
   }
 }

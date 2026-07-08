@@ -9,10 +9,16 @@
 
 import { logger } from '@/utils/logger';
 import { CallOrigin, CallStatus, CallType, type Prisma } from '@prisma/client';
+import { repositories } from '@/database/repositories';
+import { MAX_CALENDAR_EVENTS_PER_SYNC } from '@/services/calendarSyncConfig';
 import {
+  buildCalendarExternalId,
+  buildCalendarExternalIdPrefix,
+  normalizeCalendarOwnerEmail,
   upsertExternalCalendarCall,
   cancelRemovedExternalCalendarCalls,
   type CalendarOrganizer,
+  type CalendarSyncTimeRange,
 } from './calendarCallStore.utils';
 
 // ─── Types (re-exported so the queue file doesn't need its own copies) ────────
@@ -43,6 +49,7 @@ export interface MSCalEvent {
   onlineMeetingUrl?: string;
   onlineMeeting?: { joinUrl?: string };
   webLink?: string;
+  '@removed'?: { reason: 'deleted' | 'changed' };
 }
 
 export interface MSCalListResponse {
@@ -54,16 +61,12 @@ export interface MSCalListResponse {
 
 function parseMSCalDateTime(dt?: MSCalDateTime): Date | undefined {
   if (!dt?.dateTime) return undefined;
-  // Graph API returns datetime without timezone suffix (e.g. "2026-04-21T10:30:00.0000000")
-  // even when Prefer: UTC is sent. Append 'Z' to force UTC parsing since we always
-  // request UTC from the API.
   const raw = /[Z+\-]\d*$/.test(dt.dateTime) ? dt.dateTime : dt.dateTime + 'Z';
   const d = new Date(raw);
   return isNaN(d.getTime()) ? undefined : d;
 }
 
 function resolveRoomLink(event: MSCalEvent): string | undefined {
-  // Prefer onlineMeeting.joinUrl (Teams), fall back to deprecated onlineMeetingUrl
   if (event.isOnlineMeeting) {
     const joinUrl = event.onlineMeeting?.joinUrl ?? event.onlineMeetingUrl;
     if (joinUrl) return joinUrl;
@@ -71,10 +74,6 @@ function resolveRoomLink(event: MSCalEvent): string | undefined {
   return event.webLink;
 }
 
-/**
- * Normalise an MS Graph attendee response to the Google Calendar responseStatus
- * vocabulary so the UI can render it consistently.
- */
 function mapMsResponse(response?: string): string {
   switch (response) {
     case 'accepted':
@@ -94,8 +93,10 @@ function mapMsResponse(response?: string): string {
 export async function storeMsCalEventAsCall(
   event: MSCalEvent,
   userId: string,
+  userEmail: string,
 ): Promise<void> {
-  const externalId = `mscal__${userId}__${event.id}`;
+  const calendarOwnerEmail = normalizeCalendarOwnerEmail(userEmail);
+  const externalId = buildCalendarExternalId('microsoft', userId, event.id);
   const now = new Date();
 
   const startsAt = parseMSCalDateTime(event.start);
@@ -107,7 +108,6 @@ export async function storeMsCalEventAsCall(
 
   const organizerEmail = event.organizer?.emailAddress?.address;
 
-  // Normalize attendees to the shared format, filtering out the organizer
   const attendees = (event.attendees ?? [])
     .filter(a => !organizerEmail || a.emailAddress?.address !== organizerEmail)
     .map(a => ({
@@ -137,6 +137,8 @@ export async function storeMsCalEventAsCall(
       endsAt,
       timezone,
       metadata: {
+        provider: 'microsoft',
+        calendarOwnerEmail,
         microsoftEventId: event.id,
         htmlLink: event.webLink ?? null,
         location: event.location?.displayName ?? null,
@@ -152,16 +154,28 @@ export async function storeMsCalEventsAsCallsForUser(
   events: MSCalEvent[],
   userId: string,
   userEmail: string,
+  options?: { isFullSync?: boolean; timeRange?: CalendarSyncTimeRange; skipCancelRemoved?: boolean },
 ): Promise<void> {
-  logger.info(`[MICROSOFT_CALENDAR_STORE] Storing ${events.length} event(s) for ${userEmail}`);
+  const isFullSync = options?.isFullSync ?? false;
+  const eventsToStore = events.slice(0, MAX_CALENDAR_EVENTS_PER_SYNC);
+  const hitStoreCap = eventsToStore.length < events.length;
 
-  const fetchedExternalIds = new Set(
-    events.map(e => `mscal__${userId}__${e.id}`),
-  );
+  if (hitStoreCap) {
+    logger.warn(
+      `[MICROSOFT_CALENDAR_STORE] Capping store batch for ${userEmail}: ${events.length} -> ${eventsToStore.length}`,
+    );
+  }
 
-  for (const event of events) {
+  logger.info(`[MICROSOFT_CALENDAR_STORE] Storing ${eventsToStore.length} event(s) for ${userEmail} (fullSync=${isFullSync})`);
+
+  for (const event of eventsToStore) {
     try {
-      await storeMsCalEventAsCall(event, userId);
+      if (event['@removed']?.reason === 'deleted') {
+        const externalId = buildCalendarExternalId('microsoft', userId, event.id);
+        await repositories.calls.cancelByExternalId(externalId);
+        continue;
+      }
+      await storeMsCalEventAsCall(event, userId, userEmail);
     } catch (err) {
       logger.error(
         `[MICROSOFT_CALENDAR_STORE] Failed to store event "${event.subject}" for ${userEmail}:`,
@@ -170,10 +184,21 @@ export async function storeMsCalEventsAsCallsForUser(
     }
   }
 
-  await cancelRemovedExternalCalendarCalls(
-    userId,
-    CallOrigin.MICROSOFT_CALENDAR,
-    fetchedExternalIds,
-    'MICROSOFT_CALENDAR_STORE',
-  );
+  if (isFullSync && !options?.skipCancelRemoved && !hitStoreCap) {
+    const externalIdPrefix = buildCalendarExternalIdPrefix('microsoft', userId);
+    const fetchedExternalIds = new Set(
+      eventsToStore.map(e => buildCalendarExternalId('microsoft', userId, e.id)),
+    );
+    await cancelRemovedExternalCalendarCalls(
+      externalIdPrefix,
+      CallOrigin.MICROSOFT_CALENDAR,
+      fetchedExternalIds,
+      'MICROSOFT_CALENDAR_STORE',
+      options?.timeRange,
+    );
+  } else if (isFullSync && options?.skipCancelRemoved) {
+    logger.warn(`[MICROSOFT_CALENDAR_STORE] Skipping removed-event cancellation because sync result was truncated upstream`);
+  } else if (isFullSync && hitStoreCap) {
+    logger.warn(`[MICROSOFT_CALENDAR_STORE] Skipping removed-event cancellation because store batch hit cap`);
+  }
 }

@@ -2743,23 +2743,26 @@ model UserExternalToken {
 // External Source Integration Models
 model ExternalSource {
   id              String   @id @default(cuid())
-  name            String   @unique           // "zoho-euler", "slack-external"
-  sourceType      String                    // "zoho", "slack", "jira", etc. - flexible string
-  displayName     String                    // "Zoho (Euler Team)"
-  channelId       String?                   // Target channel for messages (legacy/optional)
+  name            String   @unique           // "zoho-euler", "slack-external", "calendar-<userId>-google"
+  sourceType      String                    // "zoho", "slack", "jira", "google_calendar", "microsoft_calendar", etc. - flexible string
+  displayName     String                    // "Zoho (Euler Team)" or user email for calendar sources
+  channelId       String?                   // Target workspace channel for messages
+  externalIdentifier String?                // External provider identifier: Google Calendar channel id, Microsoft subscription id, etc.
   workspaceId     String?
   boardId         String?                   // @deprecated - Use EmailChannelPreference.boardId instead. Target board for ticket creation (no FK constraint) - N:1 with Board
-  ownerUserId     String?                   // @deprecated - Use EmailChannelPreference table instead. Owner for user-scoped integrations like Gmail search
+  ownerUserId     String?                   // Owner for user-scoped integrations (calendar, gmail search)
   credentials     String                    // Encrypted credentials (IV:ciphertext format)
   isActive        Boolean  @default(true)
-  lastSyncCursor  String?                   // Per-adapter resume cursor. Google: Gmail historyId. Microsoft: ISO timestamp of last synced receivedDateTime.
+  lastSyncCursor  String?                   // Per-adapter resume cursor. Google: Gmail historyId / calendar syncToken. Microsoft: ISO timestamp / calendar deltaLink.
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@unique([workspaceId, sourceType])
   @@index([boardId])
   @@index([ownerUserId])
+  @@index([displayName])
   @@index([channelId])
+  @@index([externalIdentifier])
   @@map("external_sources")
   @@schema("workflow")
 }
@@ -4832,7 +4835,6 @@ enum TagMethod {
   MANUAL
   LLM
   AUTOMATED
-
   @@schema("non_zero")
 }
 

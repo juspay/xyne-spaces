@@ -64,6 +64,8 @@ import notificationRoutes from '@/routes/notifications';
 import draftRoutes from '@/routes/draftAttachments';
 import callRoutes from '@/routes/calls';
 import calendarSyncRoutes from '@/routes/calendarSync';
+import calendarWatchRoutes from '@/routes/calendarWatch';
+import calendarWebhookRoutes from '@/routes/calendarWebhooks';
 import callLobbyRoutes from '@/routes/callLobby';
 import voiceInputRoutes from '@/routes/voiceInput';
 import { attachVoiceInputStreamHandler } from '@/routes/voiceInputStream';
@@ -163,8 +165,8 @@ import { modelSyncQueue } from '@/queues/modelSyncQueue';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
-import { gmailWatchRenewalQueue } from '@/queues/gmailWatchRenewalQueue';
 import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
+import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
@@ -303,6 +305,9 @@ export class App {
       webhookLimiter,
 
       webhookRoutes);
+
+    // Calendar webhook routes (needs JSON body parsing for Microsoft notifications)
+    this.app.use('/api/calendar/webhooks', express.json(), webhookLimiter, calendarWebhookRoutes);
 
     // LiveKit webhook routes (MUST be before body parser for raw body signature verification)
     this.app.use('/api/livekit', livekitWebhookRoutes);
@@ -506,6 +511,7 @@ export class App {
     this.app.use('/api/calls/claw', authenticateUserOrApp, callRoutes);
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
+    this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
 
     // App routes
@@ -849,8 +855,9 @@ export class App {
     logger.info('Initializing Google Calendar sync queue...');
     await googleCalendarSyncQueue.initialize();
 
-    logger.info('Initializing Gmail watch renewal queue...');
-    await gmailWatchRenewalQueue.initialize();
+    // Initialize unified watch renewal queue (replaces Gmail + Calendar renewal queues)
+    logger.info('Initializing unified watch renewal queue...');
+    await watchRenewalQueue.initialize();
 
     logger.info('Initializing warm user registry queue...');
     await warmUserRegistryQueue.initialize();
@@ -951,9 +958,7 @@ export class App {
       // Close calendar sync queues
       await microsoftCalendarSyncQueue.close();
       await googleCalendarSyncQueue.close();
-
-      // Close Gmail watch renewal queue
-      await gmailWatchRenewalQueue.close();
+      await watchRenewalQueue.close();
 
       // Close warm user registry queue
       await warmUserRegistryQueue.close();

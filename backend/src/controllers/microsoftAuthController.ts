@@ -5,12 +5,14 @@ import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
+
 import { AuthProvider } from '@prisma/client';
 import '../types/express';
 import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
 import jwt from 'jsonwebtoken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
+import { persistCalendarOAuthCredentials } from '@/services/calendarTokenRefresh';
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
@@ -81,6 +83,72 @@ export class MicrosoftAuthController {
     );
   }
 
+  private getMicrosoftAuthScopes(connectCalendar?: boolean): string[] {
+    return [
+      'openid',
+      'email',
+      'profile',
+      'User.Read',
+      'offline_access',
+      ...(connectCalendar ? ['Calendars.Read'] : []),
+    ];
+  }
+
+  private getAccessTokenExpiry(token: Record<string, unknown>): Date | undefined {
+    const expiresAt = token.expires_at;
+    if (expiresAt instanceof Date) return expiresAt;
+
+    if (typeof expiresAt === 'string' || typeof expiresAt === 'number') {
+      const date = new Date(expiresAt);
+      if (!Number.isNaN(date.getTime())) return date;
+    }
+
+    const expiresIn = token.expires_in;
+    const expiresInSeconds =
+      typeof expiresIn === 'number'
+        ? expiresIn
+        : typeof expiresIn === 'string'
+          ? Number(expiresIn)
+          : null;
+
+    if (expiresInSeconds && !Number.isNaN(expiresInSeconds)) {
+      return new Date(Date.now() + expiresInSeconds * 1000);
+    }
+
+    return undefined;
+  }
+
+  private async persistMicrosoftCalendarCredentials(
+    email: string,
+    refreshToken: string | null | undefined,
+    accessToken: string | null | undefined,
+    accessTokenExpiry?: Date,
+    ownerUserId?: string,
+  ): Promise<boolean> {
+    const sourceId = await persistCalendarOAuthCredentials({
+      provider: AuthProvider.MICROSOFT,
+      email,
+      refreshToken,
+      accessToken,
+      accessTokenExpiry,
+      ownerUserId,
+    });
+
+    if (!sourceId) {
+      logger.warn('[MicrosoftAuth] Calendar reauth did not include a refresh token', {
+        email,
+      });
+      return false;
+    }
+
+    logger.info('[MicrosoftAuth] Calendar credentials persisted', {
+      email,
+      sourceId,
+      ownerUserId,
+    });
+    return true;
+  }
+
   initiateLogin = async (req: Request, res: Response): Promise<void> => {
     const requestId = `MS_LOGIN_${Date.now()}`;
 
@@ -123,10 +191,7 @@ export class MicrosoftAuthController {
 
         const authorizationUri = this.oauthClient.authorizeURL({
           redirect_uri: redirectUri,
-          scope: [
-            'openid', 'email', 'profile', 'User.Read', 'offline_access',
-            ...(connectCalendar ? ['Calendars.Read'] : []),
-          ],
+          scope: this.getMicrosoftAuthScopes(connectCalendar),
           state,
           code_challenge: codeChallenge,
           code_challenge_method: 'S256',
@@ -240,7 +305,7 @@ export class MicrosoftAuthController {
         const tokenParams = {
           code: code as string,
           redirect_uri: redirectUri,
-          scope: 'openid email profile User.Read offline_access',
+          scope: this.getMicrosoftAuthScopes(peekedState?.connectCalendar).join(' '),
           code_verifier: codeVerifier,
         };
 
@@ -249,6 +314,7 @@ export class MicrosoftAuthController {
         const { token } = tokenResult;
 
         const accessToken = token.access_token as string;
+        const accessTokenExpiry = this.getAccessTokenExpiry(token as Record<string, unknown>);
 
         if (!accessToken) {
           throw new Error('No access token received from Microsoft');
@@ -333,7 +399,7 @@ export class MicrosoftAuthController {
               refreshToken: refreshToken,
               refreshTokenExpiry,
               accessToken: accessToken,
-              accessTokenExpiry: token.expires_at ? new Date(token.expires_at as string) : undefined,
+              accessTokenExpiry,
               deviceInfo: JSON.stringify({
                 userAgent: req.headers['user-agent'],
                 acceptLanguage: req.headers['accept-language'],
@@ -348,6 +414,17 @@ export class MicrosoftAuthController {
             logger.error(`[${requestId}] Error creating user session:`, sessionError);
             // Continue without session creation - not critical for login
           }
+        }
+
+        let calendarReauthRequired = false;
+        if (peekedState?.connectCalendar) {
+          calendarReauthRequired = !(await this.persistMicrosoftCalendarCredentials(
+            microsoftUserData.email,
+            refreshToken,
+            accessToken,
+            accessTokenExpiry,
+            user.id,
+          ));
         }
 
         // Handle mobile platform: redirect to app deep link with token
@@ -405,7 +482,14 @@ export class MicrosoftAuthController {
 
         // If this was a "connect calendar" re-auth, redirect straight to the calls page
         if (peekedState?.connectCalendar && user.workspaceId) {
-          res.redirect(`${frontendUrl}/${user.workspaceId}/calls?tab=upcoming&syncCalendar=true`);
+          const params = new URLSearchParams({
+            tab: 'upcoming',
+            syncCalendar: 'true',
+          });
+          if (calendarReauthRequired) {
+            params.set('calendarReauthRequired', 'true');
+          }
+          res.redirect(`${frontendUrl}/${user.workspaceId}/calls?${params.toString()}`);
           return;
         }
 
@@ -537,11 +621,12 @@ export class MicrosoftAuthController {
       const tokenResult = await this.oauthClient.getToken({
         code,
         redirect_uri: redirectUri,
-        scope: 'openid email profile User.Read offline_access',
+        scope: this.getMicrosoftAuthScopes(stateData.connectCalendar).join(' '),
         ...( codeVerifier ? { code_verifier: codeVerifier } : {}),
       } as Parameters<typeof this.oauthClient.getToken>[0]);
       const { token } = tokenResult;
       const accessToken = token.access_token as string;
+      const accessTokenExpiry = this.getAccessTokenExpiry(token as Record<string, unknown>);
       if (!accessToken) {
         throw new Error('No access token received from Microsoft');
       }
@@ -693,9 +778,7 @@ export class MicrosoftAuthController {
               refreshToken,
               refreshTokenExpiry,
               accessToken,
-              accessTokenExpiry: token.expires_at
-                ? new Date(token.expires_at as string)
-                : undefined,
+              accessTokenExpiry,
               deviceInfo: JSON.stringify({
                 userAgent: req.headers['user-agent'],
                 acceptLanguage: req.headers['accept-language'],
@@ -711,6 +794,17 @@ export class MicrosoftAuthController {
             logger.error(`[${requestId}] Error creating user session:`, sessionError);
             // Continue without session creation - not critical for login
           }
+        }
+
+        let calendarReauthRequired = false;
+        if (stateData.connectCalendar) {
+          calendarReauthRequired = !(await this.persistMicrosoftCalendarCredentials(
+            email,
+            refreshToken,
+            accessToken,
+            accessTokenExpiry,
+            user.id,
+          ));
         }
 
         const cookieOptions = {
@@ -754,6 +848,9 @@ export class MicrosoftAuthController {
           picture: undefined,
           provider: 'microsoft',
           refreshToken: refreshToken ?? null,
+          accessToken,
+          accessTokenExpiry: accessTokenExpiry?.toISOString(),
+          connectCalendar: stateData.connectCalendar,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -772,6 +869,7 @@ export class MicrosoftAuthController {
           picture: user.picture ?? undefined,
           workspaces,
           userExistsButRemoved: false,
+          ...(stateData.connectCalendar ? { connectCalendar: true, workspaceId, calendarReauthRequired } : {}),
         });
         return;
       }
@@ -806,9 +904,7 @@ export class MicrosoftAuthController {
             refreshToken,
             refreshTokenExpiry,
             accessToken,
-            accessTokenExpiry: token.expires_at
-              ? new Date(token.expires_at as string)
-              : undefined,
+            accessTokenExpiry,
             deviceInfo: JSON.stringify({
               userAgent: req.headers['user-agent'],
               acceptLanguage: req.headers['accept-language'],
@@ -834,6 +930,9 @@ export class MicrosoftAuthController {
         picture: undefined,
         provider: 'microsoft',
         refreshToken: refreshToken ?? null,
+        accessToken,
+        accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        connectCalendar: stateData.connectCalendar,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -932,7 +1031,7 @@ export class MicrosoftAuthController {
         client_id: this.clientId!,
         code,
         redirect_uri: redirectUri,
-        scope: 'openid email profile User.Read offline_access',
+        scope: this.getMicrosoftAuthScopes(req.body?.connectCalendar === true).join(' '),
         code_verifier: codeVerifier,
       });
 

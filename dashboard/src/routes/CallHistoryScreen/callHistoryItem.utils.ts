@@ -34,6 +34,44 @@ export function isExternalCalendarEvent(
   return isGoogleCalendarCall(call) || isMicrosoftCalendarCall(call);
 }
 
+export function isExternalCalendarEventForUser(
+  call:
+    | { callOrigin?: string; createdByUserId?: string; externalId?: string }
+    | Record<string, unknown>,
+  userId: string | undefined,
+): boolean {
+  if (!isExternalCalendarEvent(call)) return false;
+  if (!userId) return false;
+  if ((call as { createdByUserId?: string }).createdByUserId === userId) return true;
+
+  const externalId = (call as { externalId?: unknown }).externalId;
+  if (typeof externalId !== 'string') return false;
+
+  const providerPrefix = isGoogleCalendarCall(call) ? 'gcal' : 'mscal';
+  return externalId.startsWith(`${providerPrefix}__${userId}__`);
+}
+
+/**
+ * Determines if a call should be visible in the main call history lists
+ * (All, Active, Missed tabs). External calendar events are excluded —
+ * they should only appear in the Calendar view.
+ */
+export function shouldShowInCallLists(
+  call: { callOrigin?: string } | Record<string, unknown>,
+): boolean {
+  return !isExternalCalendarEvent(call);
+}
+
+/**
+ * Determines if a scheduled call should appear in the "Upcoming" list view.
+ * Calendar events are only shown in the calendar grid, not in lists.
+ */
+export function shouldShowInScheduledList(
+  call: { callOrigin?: string } | Record<string, unknown>,
+): boolean {
+  return !isExternalCalendarEvent(call);
+}
+
 export interface CallStatusInfo {
   isMissedCall: boolean;
   didNotAnswer: boolean;
