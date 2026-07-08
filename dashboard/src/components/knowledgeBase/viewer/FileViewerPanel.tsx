@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ArrowLeft, Download } from 'lucide-react';
+import { ArrowLeft, Database, Download, X } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 import { XyneAIStar } from '../../icons/xyne-ai';
@@ -10,6 +10,7 @@ import { useProjectCollections } from '../hooks/useProjectCollections';
 import { KbCodeViewer } from './KbCodeViewer';
 import { KbTxtViewer } from './KbTxtViewer';
 import { KbPdfViewer } from './KbPdfViewer';
+import { VespaDocView } from './VespaDocView';
 
 // KB-local override map. Substitutes the shared viewers with the thin
 // wrappers under `./Kb*Viewer.tsx`, which apply `fileViewerOverrides.css`
@@ -65,6 +66,7 @@ export const FileViewerPanel: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [containerWidth, setContainerWidth] = useState<number | undefined>(undefined);
   const [highlightQuery, setHighlightQuery] = useState<string | undefined>(undefined);
+  const [vespaInspectorOpen, setVespaInspectorOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const fileIdRef = useRef<string | undefined>(fileId);
   fileIdRef.current = fileId;
@@ -205,6 +207,10 @@ export const FileViewerPanel: React.FC<{
       cancelled = true;
     };
   }, [fileId, initialChunkIndex]);
+
+  useEffect(() => {
+    setVespaInspectorOpen(false);
+  }, [fileId]);
 
   if (!file) {
     return (
@@ -353,6 +359,24 @@ export const FileViewerPanel: React.FC<{
           </Tooltip>
         )}
 
+        <Tooltip content='View Vespa document' side='bottom'>
+          <button
+            type='button'
+            onClick={() => setVespaInspectorOpen(open => !open)}
+            aria-label='View Vespa document'
+            aria-pressed={vespaInspectorOpen}
+            data-track-category='knowledge-base'
+            data-track-name='file-viewer-vespa-document'
+            className={`grid h-8 w-8 place-items-center rounded-md transition ${
+              vespaInspectorOpen
+                ? 'bg-secondary text-foreground'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+            }`}
+          >
+            <Database className='h-4 w-4' strokeWidth={1.75} />
+          </button>
+        </Tooltip>
+
         <button
           type='button'
           onClick={() => {
@@ -368,7 +392,36 @@ export const FileViewerPanel: React.FC<{
         </button>
       </div>
 
-      <div className='flex-1 overflow-auto ai-page-bg'>{renderContent()}</div>
+      <div className='flex min-h-0 flex-1 ai-page-bg'>
+        <div className='min-w-0 flex-1 overflow-auto'>{renderContent()}</div>
+        {vespaInspectorOpen && fileId && (
+          <aside
+            className='flex h-full w-[420px] max-w-[45vw] flex-shrink-0 flex-col border-l border-border bg-background'
+            aria-label='Vespa document inspector'
+          >
+            <div className='flex h-10 flex-shrink-0 items-center gap-2 border-b border-border px-3'>
+              <Database className='h-4 w-4 text-muted-foreground' aria-hidden strokeWidth={1.75} />
+              <div className='min-w-0 flex-1'>
+                <p className='truncate text-[13px] font-medium text-foreground'>Vespa document</p>
+              </div>
+              <button
+                type='button'
+                onClick={() => setVespaInspectorOpen(false)}
+                aria-label='Close Vespa document inspector'
+                title='Close'
+                data-track-category='knowledge-base'
+                data-track-name='file-viewer-close-vespa-document'
+                className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+              >
+                <X className='h-4 w-4' strokeWidth={1.75} />
+              </button>
+            </div>
+            <div className='min-h-0 flex-1'>
+              <VespaDocView itemId={fileId} name={file.name} />
+            </div>
+          </aside>
+        )}
+      </div>
     </div>
   );
 };
