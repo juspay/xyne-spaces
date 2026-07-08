@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
   Bell,
-  LifeBuoy,
   Inbox,
   Sparkles,
   ChartScatter,
@@ -100,9 +99,8 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
 
 /**
  * Support context rail. Replaces the global navigation icons while inside the
- * Support experience. The Support brand at the top doubles as the way out — it
- * reveals a back arrow on hover and returns to the main app rail on click. The
- * active section (Inbox by default) carries the highlight.
+ * Support experience. The back action at the top returns to the main app rail
+ * on click. The active section (Inbox by default) carries the highlight.
  */
 export const SupportRail = ({
   prefixWs,
@@ -123,7 +121,7 @@ export const SupportRail = ({
       aria-label='Support'
       className='flex flex-col items-center gap-3 animate-in fade-in-0 slide-in-from-left-2 duration-300'
     >
-      {/* Support brand = back to the main app rail (back arrow revealed on hover) */}
+      {/* Back to the main app rail */}
       <Tooltip content='Back to menu' side='right' delayDuration={0}>
         <Link
           to={prefixWs('/chat/dir')}
@@ -132,10 +130,9 @@ export const SupportRail = ({
           data-testid='support-rail-home'
           data-track-category='App_Sidebar'
           data-track-name='Support_Rail_Back'
-          className='group size-8 flex items-center justify-center rounded-lg text-appSidebar-activeForeground transition-colors hover:bg-appSidebar-active/50'
+          className='size-8 flex items-center justify-center rounded-lg text-appSidebar-activeForeground transition-colors hover:bg-appSidebar-active/50'
         >
-          <LifeBuoy size={16} className='group-hover:hidden' />
-          <ArrowLeft size={16} className='hidden group-hover:block' />
+          <ArrowLeft size={16} />
         </Link>
       </Tooltip>
 
