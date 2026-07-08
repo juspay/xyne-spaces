@@ -42,6 +42,7 @@ import { IncomingCallModal } from '../components/Call/CallModals/IncomingCallMod
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
+import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
 import { SosAlertBanner } from '../components/SosAlert/SosAlertBanner';
 import { CallFromRecentsHandler } from '../components/CallFromRecentsHandler/CallFromRecentsHandler';
 import { usePlatform } from '../hooks/usePlatform';
@@ -679,6 +680,7 @@ const AppRoot = (): ReactElement => {
                     <RecordingOverlay />
                     <GlobalUploadProgress />
                     <NotificationHandler />
+                    <ElectronBadgeSync />
                     <SosAlertBanner />
                     <CallFromRecentsHandler />
                     <BrowserPanelHandler />
