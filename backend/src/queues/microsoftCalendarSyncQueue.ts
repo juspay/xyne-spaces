@@ -1,212 +1,224 @@
 /**
  * Microsoft Calendar Sync Queue
  *
- * Bull cron job that runs every 5 minutes (configurable via MICROSOFT_CALENDAR_SYNC_CRON).
- * For every user who logged in via Microsoft SSO and has an active session with a refresh
- * token, it:
- *  1. Refreshes the access token if it is within 5 minutes of expiry.
- *  2. Calls the Microsoft Graph calendarView API to fetch events for the next 30 days.
- *  3. Writes the events to a .txt file on disk (one file per user).
- *
- * NOTE: Calendar access requires the Calendars.Read scope which was added to the Microsoft
- * SSO flow. Users who logged in before this change will need to log in again to grant the
- * new scope.
+ * Two distinct sync modes:
+ *  1. MANUAL SYNC — Triggered by user button press. Fetches next 30 days of calendarView,
+ *                   compares with DB, upserts all, cancels ones not in the window.
+ *  2. INCREMENTAL SYNC — Triggered by webhook push. Uses deltaLink to fetch only changes
+ *                        from Microsoft Graph, upserts ONLY changed events, never touches other calls.
  */
 
 import Bull from 'bull';
+import { createHash } from 'crypto';
 import { redisService } from '@/services/redisService';
-import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { AuthProvider } from '@prisma/client';
-import { storeMsCalEventsAsCallsForUser, type MSCalEvent, type MSCalListResponse } from '@/services/microsoftCalendarCallStore';
+import { repositories } from '@/database/repositories';
+import { getCalendarCredentialsBySourceId } from '@/services/calendarTokenRefresh';
+import {
+  fetchMicrosoftEventsInRange,
+  fetchMicrosoftDeltaChanges,
+  fetchAllMicrosoftEventsForBaseline,
+} from '@/services/microsoftCalendarApi';
+import { storeMsCalEventsAsCallsForUser } from '@/services/microsoftCalendarCallStore';
+import { MicrosoftCalendarSubscriptionService } from '@/services/microsoftCalendarSubscriptionService';
+import {
+  CALENDAR_SYNC_LOOKAHEAD_DAYS,
+  MAX_CALENDAR_EVENTS_PER_SYNC,
+} from '@/services/calendarSyncConfig';
+import {
+  calendarSyncErrorMessage,
+  isPermanentCalendarAuthError,
+} from './calendarSyncErrorUtils';
 
-const MICROSOFT_CALENDAR_SYNC_CRON =
-  process.env.MICROSOFT_CALENDAR_SYNC_CRON || '*/5 * * * *';
+type CalendarSyncJobData = {
+  sourceId?: string;
+  deltaLink?: string;
+};
 
-const LOOKAHEAD_DAYS = 30;
-const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+type MicrosoftIncrementalContinuation = {
+  sourceId: string;
+  deltaLink: string;
+};
 
-const prisma = DatabaseClient.getInstance();
-
-// ─── Token refresh ────────────────────────────────────────────────────────────
-
-async function refreshMicrosoftToken(
-  refreshToken: string,
-): Promise<{ accessToken: string; accessTokenExpiry: Date }> {
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-  const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
-
-  if (!clientId || !clientSecret) {
-    throw new Error('MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET are required');
-  }
-
-  const res = await fetch(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token',
-        scope: 'openid email profile User.Read Calendars.Read offline_access',
-      }),
-      signal: AbortSignal.timeout(15_000),
-    },
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Microsoft token refresh failed: ${res.status} ${text}`);
-  }
-
-  const tokens = (await res.json()) as {
-    access_token: string;
-    refresh_token?: string;
-    expires_in: number;
-  };
-
-  return {
-    accessToken: tokens.access_token,
-    accessTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
-  };
+function continuationJobId(sourceId: string, deltaLink: string): string {
+  const cursorHash = createHash('sha1').update(deltaLink).digest('hex');
+  return `microsoft-calendar-incremental-${sourceId}-${cursorHash}`;
 }
 
-// ─── Calendar fetch ───────────────────────────────────────────────────────────
+async function resolveSourceId(jobData: CalendarSyncJobData): Promise<string> {
+  if (jobData.sourceId) return jobData.sourceId;
+  throw new Error('Microsoft calendar sync job missing sourceId; email-based calendar jobs are not supported');
+}
 
-async function fetchCalendarEvents(accessToken: string): Promise<MSCalEvent[]> {
+async function performManualSync(sourceId: string): Promise<void> {
+  const credentials = await getCalendarCredentialsBySourceId(sourceId, AuthProvider.MICROSOFT);
+  if (!credentials) {
+    throw new Error(`No active Microsoft calendar credentials found for source ${sourceId}`);
+  }
+
+  const userId = credentials.userId;
+  const user = await repositories.users.findById(userId);
+  if (!user) {
+    throw new Error(`User not found: ${userId}`);
+  }
+
+  logger.info(`[MICROSOFT_CALENDAR] Manual sync for user ${user.email}`);
+
   const now = new Date();
   const future = new Date(now);
-  future.setDate(future.getDate() + LOOKAHEAD_DAYS);
+  future.setDate(future.getDate() + CALENDAR_SYNC_LOOKAHEAD_DAYS);
 
-  const params = new URLSearchParams({
-    startDateTime: now.toISOString(),
-    endDateTime: future.toISOString(),
-    $select:
-      'id,subject,bodyPreview,start,end,location,organizer,attendees,isAllDay,isCancelled,isOnlineMeeting,onlineMeetingUrl,onlineMeeting,webLink',
-    $orderby: 'start/dateTime',
-    $top: '100',
-  });
+  try {
+    const { events, truncated } = await fetchMicrosoftEventsInRange(
+      credentials.accessToken,
+      now,
+      future,
+      MAX_CALENDAR_EVENTS_PER_SYNC,
+    );
 
-  let url: string | undefined =
-    `https://graph.microsoft.com/v1.0/me/calendarView?${params.toString()}`;
-
-  const events: MSCalEvent[] = [];
-
-  while (url) {
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        Prefer: 'outlook.timezone="UTC"',
-      },
-      signal: AbortSignal.timeout(30_000),
+    await storeMsCalEventsAsCallsForUser(events, userId, user.email, {
+      isFullSync: true,
+      timeRange: { startsAfter: now, startsBefore: future },
+      skipCancelRemoved: truncated,
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Graph calendarView ${res.status}: ${text}`);
-    }
+    await MicrosoftCalendarSubscriptionService.updateSyncStateBySourceId(sourceId, undefined, true);
 
-    const page = (await res.json()) as MSCalListResponse;
-    events.push(...(page.value ?? []));
-    url = page['@odata.nextLink'];
+    logger.info(`[MICROSOFT_CALENDAR] Manual sync complete for user ${user.email}: ${events.length} event(s)`);
+    if (truncated) {
+      logger.warn(`[MICROSOFT_CALENDAR] Manual sync hit event cap for user ${user.email}`);
+    }
+  } catch (err) {
+    const errorMessage = calendarSyncErrorMessage(err);
+    logger.error(`[MICROSOFT_CALENDAR] Sync failed for source ${sourceId}: ${errorMessage}`);
+    if (isPermanentCalendarAuthError(err)) {
+      logger.error(`[MICROSOFT_CALENDAR] Permanent auth failure, deactivating source ${sourceId}`);
+      await MicrosoftCalendarSubscriptionService.updateSyncStateBySourceId(sourceId, undefined, false);
+    } else {
+      logger.warn(`[MICROSOFT_CALENDAR] Transient sync failure, keeping source active ${sourceId}`);
+    }
+    throw err;
+  }
+}
+
+async function performIncrementalSync(
+  sourceId: string,
+  jobData: CalendarSyncJobData,
+): Promise<MicrosoftIncrementalContinuation | null> {
+  const credentials = await getCalendarCredentialsBySourceId(sourceId, AuthProvider.MICROSOFT);
+  if (!credentials) {
+    throw new Error(`No active Microsoft calendar credentials found for source ${sourceId}`);
   }
 
-  return events;
-}
+  const userId = credentials.userId;
+  const user = await repositories.users.findById(userId);
+  if (!user) {
+    throw new Error(`User not found: ${userId}`);
+  }
 
-// ─── Per-user sync ────────────────────────────────────────────────────────────
+  const subscription = await repositories.externalSources.findById(sourceId);
 
-interface SessionData {
-  id: string;
-  refreshToken: string;
-  accessToken: string | null;
-  accessTokenExpiry: Date | null;
-  user: { id: string; email: string };
-}
+  if (!subscription?.lastSyncCursor) {
+    logger.info(`[MICROSOFT_CALENDAR] No deltaLink, establishing baseline for user ${user.email}`);
 
-async function syncUserCalendar(session: SessionData): Promise<void> {
-  const { id: sessionId, user } = session;
+    const { events, deltaLink, truncated } = await fetchAllMicrosoftEventsForBaseline(
+      credentials.accessToken,
+      CALENDAR_SYNC_LOOKAHEAD_DAYS,
+      MAX_CALENDAR_EVENTS_PER_SYNC,
+    );
 
-  let accessToken = session.accessToken;
-  let needsUpdate = false;
-
-  const isExpired =
-    !accessToken ||
-    !session.accessTokenExpiry ||
-    new Date(session.accessTokenExpiry).getTime() - Date.now() < TOKEN_REFRESH_BUFFER_MS;
-
-  if (isExpired) {
-    const refreshed = await refreshMicrosoftToken(session.refreshToken);
-    accessToken = refreshed.accessToken;
-    needsUpdate = true;
-
-    await prisma.userSession.update({
-      where: { id: sessionId },
-      data: {
-        accessToken: refreshed.accessToken,
-        accessTokenExpiry: refreshed.accessTokenExpiry,
-      },
+    await storeMsCalEventsAsCallsForUser(events, userId, user.email, {
+      isFullSync: true,
+      skipCancelRemoved: truncated,
     });
-  }
+    await MicrosoftCalendarSubscriptionService.updateSyncStateBySourceId(sourceId, deltaLink, true);
 
-  if (!accessToken) {
-    throw new Error(`No access token available for session ${sessionId}`);
-  }
-
-  const events = await fetchCalendarEvents(accessToken);
-
-  logger.info(
-    `[MICROSOFT_CALENDAR] User ${user.email}: ${events.length} event(s) fetched${needsUpdate ? ' (token refreshed)' : ''}`,
-  );
-
-  await storeMsCalEventsAsCallsForUser(events, user.id, user.email);
-}
-
-// ─── Scan all Microsoft users ─────────────────────────────────────────────────
-
-async function syncAllMicrosoftCalendars(): Promise<void> {
-  const sessions = await prisma.userSession.findMany({
-    where: {
-      status: 'ACTIVE',
-      user: { authProvider: AuthProvider.MICROSOFT },
-    },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      accessToken: true,
-      accessTokenExpiry: true,
-      refreshToken: true,
-      user: { select: { id: true, email: true } },
-    },
-  });
-
-  // Deduplicate: keep only the newest session per user
-  const latestByUser = new Map<string, typeof sessions[number]>();
-  for (const session of sessions) {
-    if (!latestByUser.has(session.user.id)) {
-      latestByUser.set(session.user.id, session);
+    logger.info(`[MICROSOFT_CALENDAR] Baseline established for user ${user.email}: ${events.length} event(s)`);
+    if (truncated) {
+      logger.warn(`[MICROSOFT_CALENDAR] Baseline sync hit event cap for user ${user.email}`);
     }
+    return null;
   }
-  const uniqueSessions = Array.from(latestByUser.values());
 
-  logger.info(`[MICROSOFT_CALENDAR] Polling ${uniqueSessions.length} Microsoft session(s)`);
+  logger.info(`[MICROSOFT_CALENDAR] Incremental sync for user ${user.email}`);
 
-  for (const session of uniqueSessions) {
-    try {
-      await syncUserCalendar(session);
-    } catch (err) {
-      logger.error(
-        `[MICROSOFT_CALENDAR] Failed for user ${session.user.email}: ${err instanceof Error ? err.message : err}`,
+  try {
+    const deltaLink = jobData.deltaLink ?? subscription.lastSyncCursor;
+    const result = await fetchMicrosoftDeltaChanges(
+      credentials.accessToken,
+      deltaLink,
+      MAX_CALENDAR_EVENTS_PER_SYNC,
+    );
+
+    if (result.needsFullSync) {
+      logger.warn(`[MICROSOFT_CALENDAR] deltaLink expired, re-establishing baseline for user ${user.email}`);
+
+      const { events, deltaLink: newDeltaLink, truncated } = await fetchAllMicrosoftEventsForBaseline(
+        credentials.accessToken,
+        CALENDAR_SYNC_LOOKAHEAD_DAYS,
+        MAX_CALENDAR_EVENTS_PER_SYNC,
       );
+
+      await storeMsCalEventsAsCallsForUser(events, userId, user.email, {
+        isFullSync: true,
+        skipCancelRemoved: truncated,
+      });
+      await MicrosoftCalendarSubscriptionService.updateSyncStateBySourceId(sourceId, newDeltaLink, true);
+
+      logger.info(`[MICROSOFT_CALENDAR] Baseline re-established for user ${user.email}: ${events.length} event(s)`);
+      if (truncated) {
+        logger.warn(`[MICROSOFT_CALENDAR] Baseline re-sync hit event cap for user ${user.email}`);
+      }
+      return null;
     }
+
+    await storeMsCalEventsAsCallsForUser(result.events, userId, user.email, { isFullSync: false });
+
+    if (result.nextLink) {
+      logger.warn(`[MICROSOFT_CALENDAR] Incremental sync hit event cap, scheduling continuation`, {
+        sourceId,
+      });
+      return { sourceId, deltaLink: result.nextLink };
+    }
+
+    if (result.newDeltaLink) {
+      await MicrosoftCalendarSubscriptionService.updateSyncStateBySourceId(sourceId, result.newDeltaLink, true);
+    }
+
+    logger.info(`[MICROSOFT_CALENDAR] Incremental sync complete for user ${user.email}: ${result.events.length} changed event(s)`);
+    return null;
+  } catch (err) {
+    if (isPermanentCalendarAuthError(err)) {
+      logger.error(`[MICROSOFT_CALENDAR] Permanent auth failure, deactivating source ${sourceId}`, {
+        error: calendarSyncErrorMessage(err),
+      });
+      await MicrosoftCalendarSubscriptionService.updateSyncStateBySourceId(
+        sourceId,
+        subscription?.lastSyncCursor,
+        false,
+      );
+    } else {
+      logger.warn(`[MICROSOFT_CALENDAR] Transient sync failure, keeping source active ${sourceId}`, {
+        error: calendarSyncErrorMessage(err),
+      });
+    }
+    throw err;
   }
 }
 
-// ─── Queue setup ──────────────────────────────────────────────────────────────
+async function deactivateSourceOnPermanentAuthError(sourceId: string, err: unknown): Promise<void> {
+  if (!isPermanentCalendarAuthError(err)) return;
+
+  logger.error(`[MICROSOFT_CALENDAR] Permanent auth failure, deactivating source ${sourceId}`, {
+    error: calendarSyncErrorMessage(err),
+  });
+  await MicrosoftCalendarSubscriptionService.updateSyncStateBySourceId(sourceId, undefined, false);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// QUEUE SETUP
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class MicrosoftCalendarSyncQueue {
   private queue: Bull.Queue | null = null;
@@ -235,44 +247,59 @@ class MicrosoftCalendarSyncQueue {
     const queue = await this.ensureQueue();
     if (this.workerInitialized) return;
 
-    queue.process('sync-all', async () => {
-      await syncAllMicrosoftCalendars();
+    queue.process('manual-sync', async (job) => {
+      const sourceId = await resolveSourceId(job.data as CalendarSyncJobData);
+      try {
+        await performManualSync(sourceId);
+      } catch (err) {
+        await deactivateSourceOnPermanentAuthError(sourceId, err);
+        throw err;
+      }
+    });
+
+    queue.process('incremental-sync', async (job) => {
+      const jobData = job.data as CalendarSyncJobData;
+      const sourceId = await resolveSourceId(jobData);
+      let continuation: MicrosoftIncrementalContinuation | null;
+      try {
+        continuation = await performIncrementalSync(sourceId, jobData);
+      } catch (err) {
+        await deactivateSourceOnPermanentAuthError(sourceId, err);
+        throw err;
+      }
+      if (continuation) {
+        await queue.add('incremental-sync', continuation, {
+          jobId: continuationJobId(continuation.sourceId, continuation.deltaLink),
+          delay: 0,
+        });
+      }
     });
 
     queue.on('failed', (job, err) => {
-      logger.error('[MICROSOFT_CALENDAR] Job failed', {
+      logger.error('[MICROSOFT_CALENDAR] Sync job failed', {
         jobName: job.name,
         jobId: job.id,
+        sourceId: job.data?.sourceId,
         error: err.message,
       });
     });
 
-    queue.on('error', err => {
-      logger.error('[MICROSOFT_CALENDAR] Queue error:', err);
-    });
-
-    // Remove stale repeatable, then re-register
-    const repeatableJobs = await queue.getRepeatableJobs();
-    for (const job of repeatableJobs) {
-      if (job.name === 'sync-all') {
-        await queue.removeRepeatableByKey(job.key);
-      }
-    }
-
-    // TODO: cron disabled — re-enable in dedicated PR
-    // await queue.add(
-    //   'sync-all',
-    //   {},
-    //   {
-    //     repeat: { cron: MICROSOFT_CALENDAR_SYNC_CRON },
-    //     jobId: 'microsoft-calendar-scan-repeatable',
-    //   },
-    // );
-
     this.workerInitialized = true;
-    logger.info(
-      `[MICROSOFT_CALENDAR] Sync queue initialized (${MICROSOFT_CALENDAR_SYNC_CRON})`,
-    );
+    logger.info('[MICROSOFT_CALENDAR] Microsoft Calendar sync queue initialized');
+  }
+
+  async enqueueManualSync(sourceId: string): Promise<void> {
+    const queue = await this.ensureQueue();
+    await queue.add('manual-sync', { sourceId }, {
+      jobId: `microsoft-calendar-manual-${sourceId}`,
+    });
+  }
+
+  async enqueueIncrementalSync(sourceId: string): Promise<void> {
+    const queue = await this.ensureQueue();
+    await queue.add('incremental-sync', { sourceId }, {
+      jobId: `microsoft-calendar-incremental-${sourceId}`,
+    });
   }
 
   async close(): Promise<void> {
@@ -280,35 +307,11 @@ class MicrosoftCalendarSyncQueue {
       await this.queue.close();
       this.queue = null;
     }
-    this.workerInitialized = false;
   }
 }
 
 export const microsoftCalendarSyncQueue = new MicrosoftCalendarSyncQueue();
 
-/**
- * Manually trigger a Microsoft Calendar sync for a single user.
- * Exposed for use by the manual-sync API endpoint.
- */
-export async function syncMicrosoftCalendarForUser(userId: string): Promise<void> {
-  const session = await prisma.userSession.findFirst({
-    where: {
-      status: 'ACTIVE',
-      user: { id: userId, authProvider: AuthProvider.MICROSOFT },
-    },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      accessToken: true,
-      accessTokenExpiry: true,
-      refreshToken: true,
-      user: { select: { id: true, email: true } },
-    },
-  });
-
-  if (!session) {
-    throw new Error(`No active Microsoft session found for user ${userId}`);
-  }
-
-  await syncUserCalendar(session);
+export async function syncMicrosoftCalendarManually(sourceId: string): Promise<void> {
+  await microsoftCalendarSyncQueue.enqueueManualSync(sourceId);
 }

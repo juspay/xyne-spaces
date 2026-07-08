@@ -1604,4 +1604,159 @@ export class CallRepository {
     }));
   }
 
+  async findByExternalIdSelect(
+    externalId: string,
+    select: Prisma.CallSelect,
+  ): Promise<Record<string, unknown> | null> {
+    return DatabaseClient.getInstance().call.findUnique({
+      where: { externalId },
+      select,
+    }) as Promise<Record<string, unknown> | null>;
+  }
+
+  async findExternalCalendarCalls(params: {
+    callOrigin: CallOrigin;
+    externalIdPrefix: string;
+    statusNot?: CallStatus;
+    timeRange?: { startsAfter?: Date; startsBefore?: Date };
+  }): Promise<Array<{ id: string; externalId: string }>> {
+    const where: Prisma.CallWhereInput = {
+      callOrigin: params.callOrigin,
+      externalId: { startsWith: params.externalIdPrefix },
+      ...(params.statusNot && { status: { not: params.statusNot } }),
+    };
+
+    if (params.timeRange?.startsAfter || params.timeRange?.startsBefore) {
+      where.startsAt = {
+        ...(params.timeRange.startsAfter ? { gte: params.timeRange.startsAfter } : {}),
+        ...(params.timeRange.startsBefore ? { lte: params.timeRange.startsBefore } : {}),
+      };
+    }
+
+    return DatabaseClient.getInstance().call.findMany({
+      where,
+      select: { id: true, externalId: true },
+    });
+  }
+
+  async cancelByIds(ids: string[]): Promise<number> {
+    const result = await DatabaseClient.getInstance().call.updateMany({
+      where: { id: { in: ids } },
+      data: { status: CallStatus.CANCELLED, updatedAt: new Date() },
+    });
+    return result.count;
+  }
+
+  async upsertExternalCalendarCall(data: {
+    externalId: string;
+    id: string;
+    title: string;
+    description?: string;
+    createdByUserId: string;
+    callType: CallType;
+    callOrigin: CallOrigin;
+    status: CallStatus;
+    roomLink?: string;
+    startsAt?: Date;
+    endsAt?: Date;
+    timezone: string;
+    channelId: null;
+    isRecurring: boolean;
+    recordingEnabled: boolean;
+    startedAt: Date;
+    lastActivityAt: Date;
+    createdAt: Date;
+    updatedAt: Date;
+    metadata: Prisma.InputJsonObject;
+  }): Promise<void> {
+    const existing = await this.findByExternalIdSelect(data.externalId, {
+      id: true,
+      title: true,
+      description: true,
+      status: true,
+      roomLink: true,
+      startsAt: true,
+      endsAt: true,
+      timezone: true,
+      metadata: true,
+    });
+
+    if (!existing) {
+      await DatabaseClient.getInstance().call.create({ data });
+      return;
+    }
+
+    if (!hasExternalCallChanged(existing as unknown as ExistingCallRow, data)) return;
+
+    await DatabaseClient.getInstance().call.update({
+      where: { externalId: data.externalId },
+      data: {
+        title: data.title,
+        description: data.description,
+        status: data.status,
+        roomLink: data.roomLink,
+        startsAt: data.startsAt,
+        endsAt: data.endsAt,
+        timezone: data.timezone,
+        metadata: data.metadata,
+        updatedAt: data.updatedAt,
+        lastActivityAt: data.lastActivityAt,
+      },
+      select: { id: true },
+    });
+  }
+
+  async cancelByExternalId(externalId: string): Promise<void> {
+    await DatabaseClient.getInstance().call.updateMany({
+      where: { externalId, status: { not: CallStatus.CANCELLED } },
+      data: { status: CallStatus.CANCELLED, updatedAt: new Date() },
+    });
+  }
+}
+
+interface ExistingCallRow {
+  title: string | null;
+  description: string | null;
+  status: CallStatus;
+  roomLink: string | null;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  timezone: string;
+  metadata: Prisma.JsonValue;
+}
+
+function stableStringify(val: unknown): string {
+  if (val === undefined) return 'null';
+  if (val === null || typeof val !== 'object') return JSON.stringify(val);
+  if (Array.isArray(val)) return `[${val.map(stableStringify).join(',')}]`;
+  const sorted = Object.keys(val as object)
+    .filter(k => (val as Record<string, unknown>)[k] !== undefined)
+    .sort()
+    .map(k => `${JSON.stringify(k)}:${stableStringify((val as Record<string, unknown>)[k])}`);
+  return `{${sorted.join(',')}}`;
+}
+
+function hasExternalCallChanged(
+  existing: ExistingCallRow,
+  data: {
+    title: string;
+    description?: string;
+    status: CallStatus;
+    roomLink?: string;
+    startsAt?: Date;
+    endsAt?: Date;
+    timezone: string;
+    metadata: Prisma.InputJsonObject;
+  },
+): boolean {
+  return (
+    existing.title !== (data.title ?? null) ||
+    existing.description !== (data.description ?? null) ||
+    existing.status !== data.status ||
+    existing.roomLink !== (data.roomLink ?? null) ||
+    existing.startsAt?.getTime() !== data.startsAt?.getTime() ||
+    existing.endsAt?.getTime() !== data.endsAt?.getTime() ||
+    existing.timezone !== data.timezone ||
+    stableStringify(existing.metadata) !== stableStringify(data.metadata)
+  );
 }

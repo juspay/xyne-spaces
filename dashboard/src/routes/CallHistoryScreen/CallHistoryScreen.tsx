@@ -128,6 +128,7 @@ const CallHistoryScreen = (): ReactElement => {
   const {
     calls,
     scheduledCalls,
+    calendarScheduledCalls,
     missedCalls,
     isLoading,
     isScheduledCallsLoading,
@@ -274,9 +275,18 @@ const CallHistoryScreen = (): ReactElement => {
       setSyncMessage({ text: 'Synced!', ok: true });
       setIsSyncing(false);
       setTimeout(() => setSyncMessage(null), 3000);
-    } catch {
+    } catch (error) {
       setIsSyncing(false);
-      if (!isRetry) {
+      const responseError = axios.isAxiosError(error)
+        ? (error.response?.data as { error?: string } | undefined)?.error
+        : undefined;
+      const shouldReauthorize =
+        !isRetry &&
+        axios.isAxiosError(error) &&
+        error.response?.status === 401 &&
+        responseError === 'calendar_reauth_required';
+
+      if (shouldReauthorize) {
         const isElectron = typeof window.electronAPI?.openExternal === 'function';
         const platformParam = isElectron ? '&platform=electron' : '';
         const loginUrl =
@@ -553,6 +563,10 @@ const CallHistoryScreen = (): ReactElement => {
     ? filterCallsBySearchQuery(scheduledCalls || [], searchQuery)
     : scheduledCalls;
 
+  const filteredCalendarScheduledCalls = searchQuery.trim()
+    ? filterCallsBySearchQuery(calendarScheduledCalls || [], searchQuery)
+    : calendarScheduledCalls;
+
   const limitedScheduledCalls = useMemo(() => {
     if (!filteredScheduledCalls) return filteredScheduledCalls;
     return filteredScheduledCalls.filter(call => !isExternalCalendarEvent(call));
@@ -571,14 +585,14 @@ const CallHistoryScreen = (): ReactElement => {
   )?.filter(call => !isExternalCalendarEvent(call));
 
   const calendarCalls = useMemo(() => {
-    const combined = [...(filteredRecentCalls || []), ...(filteredScheduledCalls || [])];
+    const combined = [...(filteredRecentCalls || []), ...(filteredCalendarScheduledCalls || [])];
     const seenCallIds = new Set<string>();
     return combined.filter(call => {
       if (seenCallIds.has(call.id)) return false;
       seenCallIds.add(call.id);
       return true;
     });
-  }, [filteredRecentCalls, filteredScheduledCalls]);
+  }, [filteredRecentCalls, filteredCalendarScheduledCalls]);
 
   const displayRecentCalls = useMemo(() => {
     const base = filteredRecentCallsNoGcal || [];

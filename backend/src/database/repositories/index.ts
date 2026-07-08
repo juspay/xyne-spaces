@@ -66,6 +66,7 @@ export { DataSourceColumnRepository } from './dataSourceColumns';
 export { DataSourceRelationshipRepository } from './dataSourceRelationships';
 export { DashboardActivityRepository } from './dashboardActivity';
 export { FormsRepository } from './formsRepository';
+export { ExternalSourceRepository } from './externalSourceRepository';
 
 // Import statements for the container
 import { AgentRepository } from './agents';
@@ -124,6 +125,7 @@ import { DataSourceColumnRepository } from './dataSourceColumns';
 import { DataSourceRelationshipRepository } from './dataSourceRelationships';
 import { DashboardActivityRepository } from './dashboardActivity';
 import { FormsRepository } from './formsRepository';
+import { ExternalSourceRepository } from './externalSourceRepository';
 
 // Repository container for dependency injection
 export class RepositoryContainer {
@@ -140,6 +142,7 @@ export class RepositoryContainer {
   public agentSteps: AgentStepRepository;
   public externalStepResponses: ExternalStepResponseRepository;
   public userGroups: UserGroupRepository;
+  
   public users: UserRepository;
   public resources: ResourceRepository;
   public resourceAccess: ResourceAccessRepository;
@@ -182,6 +185,7 @@ export class RepositoryContainer {
   public dataSourceRelationships: DataSourceRelationshipRepository;
   public dashboardActivity: DashboardActivityRepository;
   public forms: FormsRepository;
+  public externalSources: ExternalSourceRepository;
 
   private constructor() {
     this.agents = new AgentRepository();
@@ -238,6 +242,7 @@ export class RepositoryContainer {
     this.dataSourceRelationships = new DataSourceRelationshipRepository();
     this.dashboardActivity = new DashboardActivityRepository();
     this.forms = new FormsRepository();
+    this.externalSources = new ExternalSourceRepository();
   }
 
   static getInstance(): RepositoryContainer {

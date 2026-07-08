@@ -13,6 +13,10 @@ import type { BotExecutionContext } from '@/bots/core/types/bot';
 
 // Store display info for external sources
 const externalSourceDisplayInfo = new Map<string, { name: string; email: string }>();
+const DISPLAY_BOT_EXCLUDED_SOURCE_TYPES = new Set([
+  'google_calendar',
+  'microsoft_calendar',
+]);
 
 /**
  * Register a single external source as a bot for display purposes
@@ -88,7 +92,9 @@ export function registerExternalSource(
 export async function registerAllExternalSources() {
   try {
     const repo = new ExternalSourceRepository();
-    const sources = await repo.findAll({ isActive: true });
+    const sources = (await repo.findAll({ isActive: true })).filter(
+      source => !DISPLAY_BOT_EXCLUDED_SOURCE_TYPES.has(source.sourceType),
+    );
 
     logger.info(`Registering ${sources.length} active external sources as bots...`);
 

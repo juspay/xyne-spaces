@@ -1,191 +1,228 @@
 /**
  * Google Calendar Sync Queue
  *
- * Bull cron job that runs every minute (configurable via GOOGLE_CALENDAR_SYNC_CRON).
- * For every active Google SSO UserSession it:
- *  1. Refreshes the access token if needed.
- *  2. Calls the Google Calendar API to fetch events for the next 30 days.
- *  3. Hands the raw events off to googleCalendarCallStore to persist them.
+ * Two distinct sync modes:
+ *  1. MANUAL SYNC — Triggered by user button press. Fetches next 30 days, compares with DB,
+ *                   upserts all, cancels ones not in the 30-day window.
+ *  2. INCREMENTAL SYNC — Triggered by webhook push. Uses syncToken to fetch only changes
+ *                        from Google, upserts ONLY changed events, never touches other calls.
  */
 
 import Bull from 'bull';
+import { createHash } from 'crypto';
 import { redisService } from '@/services/redisService';
-import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { AuthProvider } from '@prisma/client';
-import { storeGCalEventsAsCallsForUser, type GCalEvent, type GCalListResponse } from '@/services/googleCalendarCallStore';
+import { repositories } from '@/database/repositories';
+import { getCalendarCredentialsBySourceId } from '@/services/calendarTokenRefresh';
+import {
+  fetchGoogleEventsInRange,
+  fetchGoogleIncrementalChanges,
+  fetchAllGoogleEventsForBaseline,
+} from '@/services/googleCalendarApi';
+import { storeGCalEventsAsCallsForUser } from '@/services/googleCalendarCallStore';
+import { GoogleCalendarWatchService } from '@/services/googleCalendarWatchService';
+import {
+  CALENDAR_SYNC_LOOKAHEAD_DAYS,
+  MAX_CALENDAR_EVENTS_PER_SYNC,
+} from '@/services/calendarSyncConfig';
+import {
+  calendarSyncErrorMessage,
+  isPermanentCalendarAuthError,
+} from './calendarSyncErrorUtils';
 
-const prisma = DatabaseClient.getInstance();
+type CalendarSyncJobData = {
+  sourceId?: string;
+  syncToken?: string;
+  pageToken?: string;
+};
 
-const GOOGLE_CALENDAR_SYNC_CRON =
-  process.env.GOOGLE_CALENDAR_SYNC_CRON || '*/5 * * * *';
+type GoogleIncrementalContinuation = {
+  sourceId: string;
+  syncToken: string;
+  pageToken: string;
+};
 
-const LOOKAHEAD_DAYS = 30;
+type EnqueueIncrementalSyncOptions = {
+  delayMs?: number;
+  jobIdSuffix?: string;
+};
 
-// ─── Calendar fetch ───────────────────────────────────────────────────────────
+function continuationJobId(sourceId: string, pageToken: string): string {
+  const tokenHash = createHash('sha1').update(pageToken).digest('hex');
+  return `google-calendar-incremental-${sourceId}-${tokenHash}`;
+}
 
-async function fetchGoogleCalendarEvents(accessToken: string): Promise<GCalEvent[]> {
+async function resolveSourceId(jobData: CalendarSyncJobData): Promise<string> {
+  if (jobData.sourceId) return jobData.sourceId;
+  throw new Error('Google calendar sync job missing sourceId; email-based calendar jobs are not supported');
+}
+
+async function performManualSync(sourceId: string): Promise<void> {
+  const credentials = await getCalendarCredentialsBySourceId(sourceId, AuthProvider.GOOGLE);
+  if (!credentials) {
+    throw new Error(`No active Google calendar credentials found for source ${sourceId}`);
+  }
+
+  const userId = credentials.userId;
+  const user = await repositories.users.findById(userId);
+  if (!user) {
+    throw new Error(`User not found: ${userId}`);
+  }
+
+  logger.info(`[GOOGLE_CALENDAR] Manual sync for user ${user.email}`);
+
   const now = new Date();
   const future = new Date(now);
-  future.setDate(future.getDate() + LOOKAHEAD_DAYS);
+  future.setDate(future.getDate() + CALENDAR_SYNC_LOOKAHEAD_DAYS);
 
-  const events: GCalEvent[] = [];
-  let pageToken: string | undefined;
-
-  do {
-    const params = new URLSearchParams({
-      timeMin: now.toISOString(),
-      timeMax: future.toISOString(),
-      singleEvents: 'true',
-      orderBy: 'startTime',
-      maxResults: '250',
-      ...(pageToken ? { pageToken } : {}),
-    });
-
-    const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        signal: AbortSignal.timeout(30_000),
-      },
+  try {
+    const { events, truncated } = await fetchGoogleEventsInRange(
+      credentials.accessToken,
+      now,
+      future,
+      MAX_CALENDAR_EVENTS_PER_SYNC,
     );
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Google Calendar API ${res.status}: ${text}`);
-    }
-
-    const page = (await res.json()) as GCalListResponse;
-    events.push(...(page.items ?? []));
-    pageToken = page.nextPageToken;
-  } while (pageToken);
-
-  return events;
-}
-
-// ─── Token refresh ────────────────────────────────────────────────────────────
-
-const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
-
-async function refreshGoogleToken(
-  refreshToken: string,
-): Promise<{ accessToken: string; accessTokenExpiry: Date }> {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required');
-  }
-
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Google token refresh failed: ${res.status} ${text}`);
-  }
-
-  const tokens = (await res.json()) as { access_token: string; expires_in: number };
-
-  return {
-    accessToken: tokens.access_token,
-    accessTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
-  };
-}
-
-// ─── Per-session sync ─────────────────────────────────────────────────────────
-
-interface GoogleSessionData {
-  id: string;
-  refreshToken: string;
-  accessToken: string | null;
-  accessTokenExpiry: Date | null;
-  user: { id: string; email: string };
-}
-
-async function syncSessionCalendar(session: GoogleSessionData): Promise<void> {
-  let accessToken = session.accessToken;
-
-  const isExpired =
-    !accessToken ||
-    !session.accessTokenExpiry ||
-    new Date(session.accessTokenExpiry).getTime() - Date.now() < TOKEN_REFRESH_BUFFER_MS;
-
-  if (isExpired) {
-    const refreshed = await refreshGoogleToken(session.refreshToken);
-    accessToken = refreshed.accessToken;
-
-    await prisma.userSession.update({
-      where: { id: session.id },
-      data: {
-        accessToken: refreshed.accessToken,
-        accessTokenExpiry: refreshed.accessTokenExpiry,
-      },
+    await storeGCalEventsAsCallsForUser(events, userId, user.email, {
+      isFullSync: true,
+      timeRange: { startsAfter: now, startsBefore: future },
+      skipCancelRemoved: truncated,
     });
+
+    await GoogleCalendarWatchService.updateSyncStateBySourceId(sourceId, undefined, true);
+
+    logger.info(`[GOOGLE_CALENDAR] Manual sync complete for user ${user.email}: ${events.length} event(s)`);
+    if (truncated) {
+      logger.warn(`[GOOGLE_CALENDAR] Manual sync hit event cap for user ${user.email}`);
+    }
+  } catch (err) {
+    const errorMessage = calendarSyncErrorMessage(err);
+    logger.error(`[GOOGLE_CALENDAR] Sync failed for source ${sourceId}: ${errorMessage}`);
+    if (isPermanentCalendarAuthError(err)) {
+      logger.error(`[GOOGLE_CALENDAR] Permanent auth failure, deactivating source ${sourceId}`);
+      await GoogleCalendarWatchService.updateSyncStateBySourceId(sourceId, undefined, false);
+    } else {
+      logger.warn(`[GOOGLE_CALENDAR] Transient sync failure, keeping source active ${sourceId}`);
+    }
+    throw err;
   }
-
-  if (!accessToken) {
-    throw new Error(`No access token available for session ${session.id}`);
-  }
-
-  const events = await fetchGoogleCalendarEvents(accessToken);
-
-  logger.info(
-    `[GOOGLE_CALENDAR] User ${session.user.email}: ${events.length} event(s) fetched`,
-  );
-
-  // Hand off to the store — all DB logic lives there
-  await storeGCalEventsAsCallsForUser(events, session.user.id, session.user.email);
 }
 
-async function syncAllGoogleSsoCalendars(): Promise<void> {
-  const sessions = await prisma.userSession.findMany({
-    where: {
-      status: 'ACTIVE',
-      user: { authProvider: AuthProvider.GOOGLE },
-    },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      accessToken: true,
-      accessTokenExpiry: true,
-      refreshToken: true,
-      user: { select: { id: true, email: true } },
-    },
-  });
-
-  // Deduplicate: keep only the newest session per user
-  const latestByUser = new Map<string, typeof sessions[number]>();
-  for (const session of sessions) {
-    if (!latestByUser.has(session.user.id)) {
-      latestByUser.set(session.user.id, session);
-    }
+async function performIncrementalSync(
+  sourceId: string,
+  jobData: CalendarSyncJobData,
+): Promise<GoogleIncrementalContinuation | null> {
+  const credentials = await getCalendarCredentialsBySourceId(sourceId, AuthProvider.GOOGLE);
+  if (!credentials) {
+    throw new Error(`No active Google calendar credentials found for source ${sourceId}`);
   }
-  const uniqueSessions = Array.from(latestByUser.values());
 
-  logger.info(`[GOOGLE_CALENDAR] Polling ${uniqueSessions.length} Google SSO session(s)`);
+  const userId = credentials.userId;
+  const user = await repositories.users.findById(userId);
+  if (!user) {
+    throw new Error(`User not found: ${userId}`);
+  }
 
-  for (const session of uniqueSessions) {
-    try {
-      await syncSessionCalendar(session);
-    } catch (err) {
-      logger.error(
-        `[GOOGLE_CALENDAR] Failed for user ${session.user.email}: ${err instanceof Error ? err.message : err}`,
+  const subscription = await repositories.externalSources.findById(sourceId);
+
+  if (!subscription?.lastSyncCursor) {
+    logger.info(`[GOOGLE_CALENDAR] No syncToken, establishing baseline for user ${user.email}`);
+
+    const { events, nextSyncToken, truncated } = await fetchAllGoogleEventsForBaseline(
+      credentials.accessToken,
+      MAX_CALENDAR_EVENTS_PER_SYNC,
+    );
+
+    await storeGCalEventsAsCallsForUser(events, userId, user.email, {
+      isFullSync: true,
+      skipCancelRemoved: truncated,
+    });
+    await GoogleCalendarWatchService.updateSyncStateBySourceId(sourceId, nextSyncToken, true);
+
+    logger.info(`[GOOGLE_CALENDAR] Baseline established for user ${user.email}: ${events.length} event(s)`);
+    if (truncated) {
+      logger.warn(`[GOOGLE_CALENDAR] Baseline sync hit event cap for user ${user.email}`);
+    }
+    return null;
+  }
+
+  logger.info(`[GOOGLE_CALENDAR] Incremental sync for user ${user.email}`);
+
+  try {
+    const syncToken = jobData.syncToken ?? subscription.lastSyncCursor;
+    const result = await fetchGoogleIncrementalChanges(credentials.accessToken, syncToken, {
+      maxEvents: MAX_CALENDAR_EVENTS_PER_SYNC,
+      pageToken: jobData.pageToken,
+    });
+
+    if (result.needsFullSync) {
+      logger.warn(`[GOOGLE_CALENDAR] syncToken expired, re-establishing baseline for user ${user.email}`);
+
+      const { events, nextSyncToken, truncated } = await fetchAllGoogleEventsForBaseline(
+        credentials.accessToken,
+        MAX_CALENDAR_EVENTS_PER_SYNC,
       );
+
+      await storeGCalEventsAsCallsForUser(events, userId, user.email, {
+        isFullSync: true,
+        skipCancelRemoved: truncated,
+      });
+      await GoogleCalendarWatchService.updateSyncStateBySourceId(sourceId, nextSyncToken, true);
+
+      logger.info(`[GOOGLE_CALENDAR] Baseline re-established for user ${user.email}: ${events.length} event(s)`);
+      if (truncated) {
+        logger.warn(`[GOOGLE_CALENDAR] Baseline re-sync hit event cap for user ${user.email}`);
+      }
+      return null;
     }
+
+    await storeGCalEventsAsCallsForUser(result.events, userId, user.email, { isFullSync: false });
+
+    if (result.nextPageToken) {
+      logger.warn(`[GOOGLE_CALENDAR] Incremental sync hit event cap, scheduling continuation`, {
+        sourceId,
+      });
+      return { sourceId, syncToken, pageToken: result.nextPageToken };
+    }
+
+    if (result.nextSyncToken) {
+      await GoogleCalendarWatchService.updateSyncStateBySourceId(sourceId, result.nextSyncToken, true);
+    }
+
+    logger.info(`[GOOGLE_CALENDAR] Incremental sync complete for user ${user.email}: ${result.events.length} changed event(s)`);
+    return null;
+  } catch (err) {
+    if (isPermanentCalendarAuthError(err)) {
+      logger.error(`[GOOGLE_CALENDAR] Permanent auth failure, deactivating source ${sourceId}`, {
+        error: calendarSyncErrorMessage(err),
+      });
+      await GoogleCalendarWatchService.updateSyncStateBySourceId(
+        sourceId,
+        subscription?.lastSyncCursor,
+        false,
+      );
+    } else {
+      logger.warn(`[GOOGLE_CALENDAR] Transient sync failure, keeping source active ${sourceId}`, {
+        error: calendarSyncErrorMessage(err),
+      });
+    }
+    throw err;
   }
 }
 
-// ─── Queue setup ──────────────────────────────────────────────────────────────
+async function deactivateSourceOnPermanentAuthError(sourceId: string, err: unknown): Promise<void> {
+  if (!isPermanentCalendarAuthError(err)) return;
+
+  logger.error(`[GOOGLE_CALENDAR] Permanent auth failure, deactivating source ${sourceId}`, {
+    error: calendarSyncErrorMessage(err),
+  });
+  await GoogleCalendarWatchService.updateSyncStateBySourceId(sourceId, undefined, false);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// QUEUE SETUP
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class GoogleCalendarSyncQueue {
   private queue: Bull.Queue | null = null;
@@ -214,44 +251,64 @@ class GoogleCalendarSyncQueue {
     const queue = await this.ensureQueue();
     if (this.workerInitialized) return;
 
-    queue.process('sync-all', async () => {
-      await syncAllGoogleSsoCalendars();
+    queue.process('manual-sync', async (job) => {
+      const sourceId = await resolveSourceId(job.data as CalendarSyncJobData);
+      try {
+        await performManualSync(sourceId);
+      } catch (err) {
+        await deactivateSourceOnPermanentAuthError(sourceId, err);
+        throw err;
+      }
+    });
+
+    queue.process('incremental-sync', async (job) => {
+      const jobData = job.data as CalendarSyncJobData;
+      const sourceId = await resolveSourceId(jobData);
+      let continuation: GoogleIncrementalContinuation | null;
+      try {
+        continuation = await performIncrementalSync(sourceId, jobData);
+      } catch (err) {
+        await deactivateSourceOnPermanentAuthError(sourceId, err);
+        throw err;
+      }
+      if (continuation) {
+        await queue.add('incremental-sync', continuation, {
+          jobId: continuationJobId(continuation.sourceId, continuation.pageToken),
+          delay: 0,
+        });
+      }
     });
 
     queue.on('failed', (job, err) => {
-      logger.error('[GOOGLE_CALENDAR] Job failed', {
+      logger.error('[GOOGLE_CALENDAR] Sync job failed', {
         jobName: job.name,
         jobId: job.id,
+        sourceId: job.data?.sourceId,
         error: err.message,
       });
     });
 
-    queue.on('error', err => {
-      logger.error('[GOOGLE_CALENDAR] Queue error:', err);
-    });
-
-    // Remove stale repeatable, then re-register
-    const repeatableJobs = await queue.getRepeatableJobs();
-    for (const job of repeatableJobs) {
-      if (job.name === 'sync-all') {
-        await queue.removeRepeatableByKey(job.key);
-      }
-    }
-
-    // TODO: cron disabled — re-enable in dedicated PR
-    // await queue.add(
-    //   'sync-all',
-    //   {},
-    //   {
-    //     repeat: { cron: GOOGLE_CALENDAR_SYNC_CRON },
-    //     jobId: 'google-calendar-scan-repeatable',
-    //   },
-    // );
-
     this.workerInitialized = true;
-    logger.info(
-      `[GOOGLE_CALENDAR] Sync queue initialized (${GOOGLE_CALENDAR_SYNC_CRON})`,
-    );
+    logger.info('[GOOGLE_CALENDAR] Google Calendar sync queue initialized');
+  }
+
+  async enqueueManualSync(sourceId: string): Promise<void> {
+    const queue = await this.ensureQueue();
+    await queue.add('manual-sync', { sourceId }, {
+      jobId: `google-calendar-manual-${sourceId}`,
+    });
+  }
+
+  async enqueueIncrementalSync(
+    sourceId: string,
+    options?: EnqueueIncrementalSyncOptions,
+  ): Promise<void> {
+    const queue = await this.ensureQueue();
+    const jobIdSuffix = options?.jobIdSuffix ? `-${options.jobIdSuffix}` : '';
+    await queue.add('incremental-sync', { sourceId }, {
+      jobId: `google-calendar-incremental-${sourceId}${jobIdSuffix}`,
+      delay: options?.delayMs ?? 0,
+    });
   }
 
   async close(): Promise<void> {
@@ -259,35 +316,11 @@ class GoogleCalendarSyncQueue {
       await this.queue.close();
       this.queue = null;
     }
-    this.workerInitialized = false;
   }
 }
 
 export const googleCalendarSyncQueue = new GoogleCalendarSyncQueue();
 
-/**
- * Manually trigger a Google Calendar sync for a single user.
- * Exposed for use by the manual-sync API endpoint.
- */
-export async function syncGoogleCalendarForUser(userId: string): Promise<void> {
-  const session = await prisma.userSession.findFirst({
-    where: {
-      status: 'ACTIVE',
-      user: { id: userId, authProvider: AuthProvider.GOOGLE },
-    },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      accessToken: true,
-      accessTokenExpiry: true,
-      refreshToken: true,
-      user: { select: { id: true, email: true } },
-    },
-  });
-
-  if (!session) {
-    throw new Error(`No active Google session found for user ${userId}`);
-  }
-
-  await syncSessionCalendar(session);
+export async function syncGoogleCalendarManually(sourceId: string): Promise<void> {
+  await googleCalendarSyncQueue.enqueueManualSync(sourceId);
 }

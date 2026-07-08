@@ -90,6 +90,7 @@ export interface OAuthCallbackOutput {
   isNewUser?: boolean;
   userExistsButRemoved?: boolean;
   selfDmChannelId?: string | null;
+  connectCalendar?: boolean;
 }
 
 interface XStateEvent {
@@ -378,6 +379,12 @@ export const authMachine = createMachine(
                 };
               }),
               'trackLoginSuccess',
+              ({ event }) => {
+                const output = (event as XStateEvent).output;
+                if (output?.connectCalendar && output.user?.workspaceId) {
+                  window.location.href = `/${output.user.workspaceId}/calls?tab=upcoming&syncCalendar=true`;
+                }
+              },
             ],
           },
           onError: {
@@ -1024,12 +1031,14 @@ export const authMachine = createMachine(
             user: User;
             isNewUser?: boolean;
             selfDmChannelId?: string;
+            connectCalendar?: boolean;
           };
           if (data.user) {
             return {
               user: data.user,
               isNewUser: data.isNewUser ?? false,
               selfDmChannelId: data.selfDmChannelId,
+              connectCalendar: data.connectCalendar,
             };
           }
           throw new Error('Login to workspace failed: No user data');

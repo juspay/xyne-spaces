@@ -10,6 +10,8 @@ import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
 import { channelService } from '../services/channelService';
+import { persistCalendarOAuthCredentials } from '@/services/calendarTokenRefresh';
+
 import '../types/express';
 import { config } from '@/config/env';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
@@ -85,6 +87,47 @@ export class AuthV2Controller {
       logger.error(`[ensureSelfDmForUser] Failed to ensure self-DM for user ${userId}:`, error);
       return null;
     }
+  }
+
+  private normalizeCalendarAuthProvider(provider: string | AuthProvider): AuthProvider | null {
+    const normalized = provider.toUpperCase();
+    if (normalized === AuthProvider.GOOGLE) return AuthProvider.GOOGLE;
+    if (normalized === AuthProvider.MICROSOFT) return AuthProvider.MICROSOFT;
+    return null;
+  }
+
+  private async persistOAuthCalendarCredentials(
+    provider: AuthProvider,
+    email: string,
+    refreshToken: string | null | undefined,
+    accessToken: string | null | undefined,
+    accessTokenExpiry?: Date,
+    ownerUserId?: string,
+  ): Promise<boolean> {
+    const sourceId = await persistCalendarOAuthCredentials({
+      provider,
+      email,
+      refreshToken,
+      accessToken,
+      accessTokenExpiry,
+      ownerUserId,
+    });
+
+    if (!sourceId) {
+      logger.warn('[AuthV2] Calendar reauth did not include a refresh token', {
+        provider,
+        email,
+      });
+      return false;
+    }
+
+    logger.info('[AuthV2] Calendar credentials persisted', {
+      provider,
+      email,
+      sourceId,
+      ownerUserId,
+    });
+    return true;
   }
 
   /**
@@ -374,6 +417,7 @@ export class AuthV2Controller {
       });
 
       const { id_token, refresh_token, access_token } = tokens;
+      const accessTokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : undefined;
 
       if (!id_token) {
         logger.error(`[${requestId}] No ID token received`);
@@ -419,10 +463,9 @@ export class AuthV2Controller {
       // At this point platform is always 'web' | 'mobile' (electron is handled above and returns early).
       // Prefer cookie (set by the browser invite redirect) but fall back to state (set by mobile/other flows).
       const pendingInvitationId = cookieInvitationId || stateInvitationId;
-
+      
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
-      // Store pending auth data in cookie for later loginWorkspace/createOrg call
       const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
@@ -432,6 +475,8 @@ export class AuthV2Controller {
         provider: AuthProvider.GOOGLE,
         refreshToken: refresh_token,
         accessToken: access_token,
+        accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        connectCalendar: stateData.connectCalendar,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -469,7 +514,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+        const { workspaceUser, sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -477,6 +522,18 @@ export class AuthV2Controller {
           req,
           'web'
         );
+
+        let calendarReauthRequired = false;
+        if (stateData.connectCalendar) {
+          calendarReauthRequired = !(await this.persistOAuthCalendarCredentials(
+            AuthProvider.GOOGLE,
+            googleUserData.email,
+            refresh_token,
+            access_token,
+            accessTokenExpiry,
+            workspaceUser.id,
+          ));
+        }
 
         // Set workspace cookies
         // NOTE: sameSite must be 'lax' (not 'strict') for OAuth callback
@@ -510,7 +567,14 @@ export class AuthV2Controller {
 
         // If this was a "connect calendar" re-auth, redirect straight to the calls page
         if (stateData.connectCalendar) {
-          res.redirect(`${getFrontendUrl(req)}/${workspaceId}/calls?tab=upcoming&syncCalendar=true`);
+          const params = new URLSearchParams({
+            tab: 'upcoming',
+            syncCalendar: 'true',
+          });
+          if (calendarReauthRequired) {
+            params.set('calendarReauthRequired', 'true');
+          }
+          res.redirect(`${getFrontendUrl(req)}/${workspaceId}/calls?${params.toString()}`);
           return;
         }
 
@@ -711,6 +775,7 @@ export class AuthV2Controller {
       });
 
       const { id_token, refresh_token, access_token } = tokens;
+      const accessTokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : undefined;
 
       if (!id_token) {
         logger.error(`[${requestId}] No ID token received`);
@@ -791,7 +856,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+        const { workspaceUser, sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -799,6 +864,18 @@ export class AuthV2Controller {
           req,
           'electron'
         );
+
+        let calendarReauthRequired = false;
+        if (stateData.connectCalendar) {
+          calendarReauthRequired = !(await this.persistOAuthCalendarCredentials(
+            AuthProvider.GOOGLE,
+            googleUserData.email,
+            refresh_token,
+            access_token,
+            accessTokenExpiry,
+            workspaceUser.id,
+          ));
+        }
 
         // Set workspace cookies using electron cookie options
         const cookieBase = {
@@ -834,7 +911,7 @@ export class AuthV2Controller {
           picture: googleUserData.picture,
           workspaces,
           userExistsButRemoved,
-          ...(stateData.connectCalendar ? { connectCalendar: true, workspaceId } : {}),
+          ...(stateData.connectCalendar ? { connectCalendar: true, workspaceId, calendarReauthRequired } : {}),
         });
         return;
       }
@@ -848,6 +925,8 @@ export class AuthV2Controller {
         provider: AuthProvider.GOOGLE,
         refreshToken: refresh_token,
         accessToken: access_token,
+        accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        connectCalendar: stateData.connectCalendar,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -1173,6 +1252,8 @@ export class AuthV2Controller {
       let provider: string;
       let pendingRefreshToken: string | undefined;
       let pendingAccessToken: string | undefined;
+      let pendingAccessTokenExpiry: Date | undefined;
+      let pendingConnectCalendar = false;
 
       if (pendingAuthCookie) {
         const parsed = this.parsePendingAuthCookie(pendingAuthCookie);
@@ -1190,6 +1271,8 @@ export class AuthV2Controller {
           provider = parsed.provider;
           pendingRefreshToken = parsed.pendingRefreshToken;
           pendingAccessToken = parsed.pendingAccessToken;
+          pendingAccessTokenExpiry = parsed.pendingAccessTokenExpiry;
+          pendingConnectCalendar = parsed.connectCalendar;
         } else {
           res.status(401).json({
             error: 'Invalid auth data',
@@ -1222,6 +1305,7 @@ export class AuthV2Controller {
         provider = session.user.authProvider || 'GOOGLE';
         pendingRefreshToken = session.refreshToken;
         pendingAccessToken = session.accessToken || undefined;
+        pendingAccessTokenExpiry = session.accessTokenExpiry || undefined;
       } else {
         res.status(401).json({
           error: 'Unauthorized',
@@ -1283,6 +1367,7 @@ export class AuthV2Controller {
             refreshToken: pendingRefreshToken,
             refreshTokenExpiry,
             accessToken: pendingAccessToken,
+            accessTokenExpiry: pendingAccessTokenExpiry,
             deviceInfo,
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
           });
@@ -1292,6 +1377,19 @@ export class AuthV2Controller {
         } catch (sessionError) {
           logger.error(`[LOGIN-WORKSPACE] Session creation failed:`, sessionError);
         }
+      }
+
+      const calendarAuthProvider = this.normalizeCalendarAuthProvider(provider);
+      let calendarReauthRequired = false;
+      if (pendingConnectCalendar && calendarAuthProvider) {
+        calendarReauthRequired = !(await this.persistOAuthCalendarCredentials(
+          calendarAuthProvider,
+          oauthUserData.email,
+          pendingRefreshToken,
+          pendingAccessToken,
+          pendingAccessTokenExpiry,
+          workspaceUser.id,
+        ));
       }
 
       const token = jwtService.generateToken({
@@ -1364,6 +1462,7 @@ export class AuthV2Controller {
         },
         isNewUser,
         selfDmChannelId,
+        ...(pendingConnectCalendar ? { connectCalendar: true, calendarReauthRequired } : {}),
       });
     } catch (error) {
       logger.error('Error logging into workspace:', error);
@@ -1769,6 +1868,8 @@ export class AuthV2Controller {
     provider: string;
     pendingRefreshToken: string | undefined;
     pendingAccessToken: string | undefined;
+    pendingAccessTokenExpiry: Date | undefined;
+    connectCalendar: boolean;
   } | null {
     try {
       const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
@@ -1780,8 +1881,13 @@ export class AuthV2Controller {
         provider?: string;
         refreshToken?: string | null;
         accessToken?: string | null;
+        accessTokenExpiry?: string | null;
+        connectCalendar?: boolean;
       };
       if (!decoded?.email) throw new Error('Invalid JWT payload');
+      const pendingAccessTokenExpiry = decoded.accessTokenExpiry
+        ? new Date(decoded.accessTokenExpiry)
+        : undefined;
       return {
         oauthUserData: {
           email: decoded.email,
@@ -1793,6 +1899,11 @@ export class AuthV2Controller {
         provider: decoded.provider || AuthProvider.GOOGLE,
         pendingRefreshToken: decoded.refreshToken || undefined,
         pendingAccessToken: decoded.accessToken || undefined,
+        pendingAccessTokenExpiry:
+          pendingAccessTokenExpiry && !Number.isNaN(pendingAccessTokenExpiry.getTime())
+            ? pendingAccessTokenExpiry
+            : undefined,
+        connectCalendar: decoded.connectCalendar === true,
       };
     } catch {
       return null;
