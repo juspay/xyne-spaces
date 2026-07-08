@@ -464,7 +464,7 @@ export const AppsTable = ({
           }}
           title={`Edit App: ${editingApp.name}`}
           description='Update the app description and webhook URL'
-          className='max-w-lg max-h-[85vh]'
+          className='max-w-3xl max-h-[85vh] overflow-hidden'
         >
           <EditAppForm
             appId={editingApp.id}

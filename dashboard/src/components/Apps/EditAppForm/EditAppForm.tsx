@@ -5,6 +5,7 @@ import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { Dialog } from '../../ui/Dialog/Dialog';
+import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import type { InstalledApps } from '@xyne/shared';
 import {
   Upload,
@@ -18,7 +19,12 @@ import {
   X,
   Lock,
   Zap,
+  Info,
+  Command,
+  Shield,
+  Link2,
 } from 'lucide-react';
+import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import {
@@ -566,6 +572,17 @@ const PermissionsSection = ({
     });
   };
 
+  // Select-all reflects every available permission scope; the button toggles between
+  // granting them all and clearing the selection.
+  const allScopes = useMemo(
+    () => available.map(perm => `${perm.name}:${(perm.type ?? '').toLowerCase()}`),
+    [available],
+  );
+  const allSelected = allScopes.length > 0 && allScopes.every(scope => selected.has(scope));
+  const handleToggleSelectAll = () => {
+    setSelected(allSelected ? new Set() : new Set(allScopes));
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -628,6 +645,18 @@ const PermissionsSection = ({
           <Button
             type='button'
             size='sm'
+            variant='ghost'
+            className='h-7 text-xs'
+            onClick={handleToggleSelectAll}
+            disabled={saving || !loaded || available.length === 0}
+            data-track-category='Apps'
+            data-track-name='ToggleSelectAllPermissions'
+          >
+            {allSelected ? 'Deselect all' : 'Select all'}
+          </Button>
+          <Button
+            type='button'
+            size='sm'
             variant='outline'
             className='h-7 text-xs'
             onClick={() => void handleSave()}
@@ -650,6 +679,11 @@ const PermissionsSection = ({
           )}
         </div>
       </div>
+      <p className='text-[11px] leading-snug text-muted-foreground bg-muted/40 border border-border rounded-md px-2.5 py-2'>
+        {isInstallMode
+          ? 'Permission changes only affect this app in your workspace. Use “Apply & activate” after saving to re-install with the updated permissions.'
+          : 'These permission changes need workspace admin approval before they take effect in the workspace.'}
+      </p>
       {!loaded || available.length === 0 ? (
         <p className='text-xs text-muted-foreground py-2'>Loading permissions…</p>
       ) : (
@@ -657,19 +691,37 @@ const PermissionsSection = ({
           {available.map(perm => {
             const scope = `${perm.name}:${(perm.type ?? '').toLowerCase()}`;
             return (
-              <label
+              <div
                 key={scope}
-                className='flex items-start gap-2.5 cursor-pointer group px-3 py-2'
+                role='button'
+                tabIndex={saving ? -1 : 0}
+                aria-pressed={selected.has(scope)}
+                className={`flex items-start gap-2.5 group px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                  saving ? 'cursor-not-allowed' : 'cursor-pointer'
+                }`}
+                onClick={() => {
+                  if (!saving) handleToggle(scope, !selected.has(scope));
+                }}
+                onKeyDown={e => {
+                  if (saving) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleToggle(scope, !selected.has(scope));
+                  }
+                }}
+                data-track-category='Apps'
+                data-track-name='TogglePermission'
               >
-                <input
-                  type='checkbox'
-                  className='mt-0.5 rounded accent-primary'
-                  checked={selected.has(scope)}
-                  disabled={saving}
-                  onChange={e => handleToggle(scope, e.target.checked)}
-                  data-track-category='Apps'
-                  data-track-name='TogglePermission'
-                />
+                {/* Purely visual — the row (role=button) owns all interaction, so
+                    pointer-events-none avoids a double toggle from the inner input. */}
+                <span className='mt-0.5 pointer-events-none'>
+                  <Checkbox
+                    checked={selected.has(scope)}
+                    disabled={saving}
+                    onChange={checked => handleToggle(scope, checked)}
+                    label=''
+                  />
+                </span>
                 <div className='flex-1 min-w-0'>
                   <div className='flex items-center gap-2 flex-wrap'>
                     <span className='text-xs font-mono text-foreground group-hover:text-primary transition-colors'>
@@ -683,7 +735,7 @@ const PermissionsSection = ({
                     </p>
                   )}
                 </div>
-              </label>
+              </div>
             );
           })}
         </div>
@@ -769,6 +821,29 @@ function WebhookNameInput({
   );
 }
 
+// ─── Sectioned navigation ─────────────────────────────────────────────────────
+
+type EditAppSection = 'basic' | 'commands' | 'shortcuts' | 'permissions' | 'incoming';
+
+interface EditAppNavItem {
+  id: EditAppSection;
+  label: string;
+  icon: ReactElement;
+}
+
+const SectionHeading = ({
+  title,
+  subtitle,
+}: {
+  title: string;
+  subtitle?: string;
+}): ReactElement => (
+  <div>
+    <p className='text-base font-semibold text-foreground'>{title}</p>
+    {subtitle && <p className='text-sm text-muted-foreground mt-0.5'>{subtitle}</p>}
+  </div>
+);
+
 export const EditAppForm = ({
   appId,
   appName,
@@ -785,6 +860,7 @@ export const EditAppForm = ({
   // Install mode = editing this workspace's install (admin). Template mode = editing the app
   // (creator). In install mode commands and name/description are read-only (template-owned).
   const isInstallMode = editMode === 'install';
+  const [activeSection, setActiveSection] = useState<EditAppSection>('basic');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [botChannels, setBotChannels] = useState<BotChannel[]>([]);
   const [webhooks, setWebhooks] = useState<IncomingWebhook[]>([]);
@@ -1128,193 +1204,243 @@ export const EditAppForm = ({
   const hasPrev = webhookOffset > 0;
   const hasNext = webhookOffset + WEBHOOK_PAGE_SIZE < webhookTotal;
 
+  // Incoming webhooks are install-scoped, so the section only appears when editing an install.
+  const showIncomingSection = isInstallMode && !!incomingInstalledAppId;
+  const navItems: EditAppNavItem[] = [
+    { id: 'basic', label: 'Basic info', icon: <Info className='size-4' /> },
+    { id: 'commands', label: 'Commands', icon: <Command className='size-4' /> },
+    { id: 'shortcuts', label: 'Shortcuts', icon: <Zap className='size-4' /> },
+    { id: 'permissions', label: 'Permissions', icon: <Shield className='size-4' /> },
+    ...(showIncomingSection
+      ? [
+          {
+            id: 'incoming' as const,
+            label: 'Incoming Webhooks',
+            icon: <Link2 className='size-4' />,
+          },
+        ]
+      : []),
+  ];
+
   return (
     <form
       onSubmit={e => {
         e.preventDefault();
         void handleSubmit(onSubmit)(e);
       }}
-      className='flex flex-col max-h-[85vh]'
+      className='flex flex-col h-[85vh] max-h-[820px]'
     >
-      <div className='flex-1 overflow-y-auto p-6 space-y-6'>
-        <div className='space-y-2'>
-          <label htmlFor='appName' className='block text-md font-medium text-foreground'>
-            App Name
-          </label>
-          <Input
-            id='appName'
-            type='text'
-            value={appName}
-            disabled={true}
-            className='bg-muted text-foreground'
-          />
-        </div>
+      {/* Header */}
+      <div className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0'>
+        <p className='text-base font-semibold text-foreground truncate'>Edit {appName}</p>
+        <button
+          type='button'
+          onClick={onCancel}
+          className='p-1.5 rounded-md hover:bg-muted transition-colors'
+          aria-label='Close'
+          data-track-category='Apps'
+          data-track-name='CloseEditApp'
+        >
+          <X className='size-4 text-muted-foreground' />
+        </button>
+      </div>
 
-        <div className='space-y-2'>
-          <label htmlFor='description' className='block text-sm font-medium text-foreground'>
-            Description
-          </label>
-          <Controller
-            name='description'
-            control={control}
-            render={({ field }) => (
-              <Textarea
-                id='description'
-                placeholder='Enter app description (optional)'
-                rows={3}
-                disabled={isLoading || isInstallMode}
-                className='text-foreground'
-                {...field}
-              />
-            )}
-          />
-          {isInstallMode && (
-            <p className='text-xs text-muted-foreground'>
-              Description is set on the app template. Edit it from the Org Apps screen.
-            </p>
-          )}
-          {errors.description && (
-            <p className='text-xs text-destructive'>{errors.description.message}</p>
-          )}
-        </div>
-
-        <div className='space-y-2'>
-          <label htmlFor='webhookUrl' className='block text-sm font-medium text-foreground'>
-            Webhook URL
-          </label>
-          <Controller
-            name='webhookUrl'
-            control={control}
-            rules={{
-              validate: value => {
-                if (!value || value.trim() === '') return true;
-                try {
-                  new URL(value);
-                  return true;
-                } catch {
-                  return 'Please enter a valid URL';
-                }
-              },
-            }}
-            render={({ field }) => (
-              <Input
-                id='webhookUrl'
-                type='url'
-                placeholder='https://your-app.com/webhook'
-                disabled={isLoading}
-                className='text-foreground'
-                {...field}
-              />
-            )}
-          />
-          <p className='text-xs text-muted-foreground'>
-            {isInstallMode
-              ? "This install's backend endpoint for your workspace. Overrides the template URL."
-              : "The app's backend endpoint. Editable any time (even before install); installs pick it up on Update."}
-          </p>
-          {errors.webhookUrl && (
-            <p className='text-xs text-destructive'>{errors.webhookUrl.message}</p>
-          )}
-        </div>
-
-        {isInstallMode && (
-          <div className='space-y-2'>
-            <label htmlFor='profilePicture' className='block text-sm font-medium text-foreground'>
-              Profile Picture
-            </label>
-            <div className='flex gap-2'>
-              <input
-                type='file'
-                ref={fileInputRef}
-                onChange={e => void handleFileSelect(e)}
-                accept='image/jpeg,image/png,image/webp'
-                className='hidden'
-              />
-              <Button
+      <div className='flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden'>
+        {/* Left navigation */}
+        <div
+          role='tablist'
+          aria-label='App settings sections'
+          className='flex md:flex-col md:w-52 shrink-0 border-b md:border-b-0 md:border-r border-border p-2 gap-0.5 overflow-x-auto md:overflow-visible'
+        >
+          {navItems.map(item => {
+            const isActive = activeSection === item.id;
+            return (
+              <button
+                key={item.id}
                 type='button'
-                variant='outline'
-                size='sm'
-                onClick={handleUploadClick}
-                disabled={isLoading}
-                className='gap-1'
-                title='Upload bot profile picture'
+                role='tab'
+                aria-selected={isActive}
+                onClick={() => setActiveSection(item.id)}
+                className={cn(
+                  'flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors text-left whitespace-nowrap shrink-0 md:w-full',
+                  isActive
+                    ? 'bg-accent text-accent-foreground font-medium'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                )}
+                data-track-category='Apps'
+                data-track-name={`EditAppSection_${item.id}`}
               >
-                <Upload size={14} />
-                Upload Picture
-              </Button>
-            </div>
-            <p className='text-xs text-muted-foreground'>
-              Supported formats: JPG, PNG, WebP. Max size: 5MB.
-            </p>
-          </div>
-        )}
+                {item.icon}
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
 
-        {isInstallMode && incomingInstalledAppId && (
-          <div className='space-y-2'>
-            <div className='border-t border-border pt-4'>
-              <span className='block text-sm font-medium text-foreground'>Incoming Webhooks</span>
-              <p className='text-xs text-muted-foreground mt-1'>
-                Generate webhook URLs for external services to post messages as this bot. Supports
-                Slack and SentinelOne webhook URL formats.
-              </p>
-              {botChannels.length > 0 && !showCreateForm && (
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  onClick={() => setShowCreateForm(true)}
-                  className='gap-1 w-full mt-2'
-                >
-                  <Plus size={14} />
-                  Create Incoming Webhook
-                </Button>
-              )}
-            </div>
+        {/* Section content */}
+        <div role='tabpanel' className='flex-1 overflow-y-auto p-6 space-y-6'>
+          {activeSection === 'basic' && (
+            <>
+              <SectionHeading
+                title='Basic info'
+                subtitle='Set the description, webhook URL, and profile picture for this app.'
+              />
+              <div className='space-y-2'>
+                <label htmlFor='appName' className='block text-md font-medium text-foreground'>
+                  App Name
+                </label>
+                <Input
+                  id='appName'
+                  type='text'
+                  value={appName}
+                  disabled={true}
+                  className='bg-muted text-foreground'
+                />
+              </div>
 
-            {showCreateForm && botChannels.length > 0 && (
-              <div className='border border-border rounded-md p-3 space-y-3'>
+              <div className='space-y-2'>
+                <label htmlFor='description' className='block text-sm font-medium text-foreground'>
+                  Description
+                </label>
+                <Controller
+                  name='description'
+                  control={control}
+                  render={({ field }) => (
+                    <Textarea
+                      id='description'
+                      placeholder='Enter app description (optional)'
+                      rows={3}
+                      disabled={isLoading || isInstallMode}
+                      className='text-foreground'
+                      {...field}
+                    />
+                  )}
+                />
+                {isInstallMode && (
+                  <p className='text-xs text-muted-foreground'>
+                    Description is set on the app template. Edit it from the Org Apps screen.
+                  </p>
+                )}
+                {errors.description && (
+                  <p className='text-xs text-destructive'>{errors.description.message}</p>
+                )}
+              </div>
+
+              <div className='space-y-2'>
+                <label htmlFor='webhookUrl' className='block text-sm font-medium text-foreground'>
+                  Webhook URL
+                </label>
+                <Controller
+                  name='webhookUrl'
+                  control={control}
+                  rules={{
+                    validate: value => {
+                      if (!value || value.trim() === '') return true;
+                      try {
+                        new URL(value);
+                        return true;
+                      } catch {
+                        return 'Please enter a valid URL';
+                      }
+                    },
+                  }}
+                  render={({ field }) => (
+                    <Input
+                      id='webhookUrl'
+                      type='url'
+                      placeholder='https://your-app.com/webhook'
+                      disabled={isLoading}
+                      className='text-foreground'
+                      {...field}
+                    />
+                  )}
+                />
+                <p className='text-xs text-muted-foreground'>
+                  {isInstallMode
+                    ? "This install's backend endpoint for your workspace. Overrides the template URL."
+                    : "The app's backend endpoint. Editable any time (even before install); installs pick it up on Update."}
+                </p>
+                {errors.webhookUrl && (
+                  <p className='text-xs text-destructive'>{errors.webhookUrl.message}</p>
+                )}
+              </div>
+
+              {isInstallMode && (
                 <div className='space-y-2'>
                   <label
-                    htmlFor='webhook-type-select'
-                    className='block text-xs font-medium text-foreground'
+                    htmlFor='profilePicture'
+                    className='block text-sm font-medium text-foreground'
                   >
-                    Webhook Type
+                    Profile Picture
                   </label>
-                  <Select
-                    value={selectedWebhookType}
-                    onValueChange={value => setSelectedWebhookType(value as IncomingWebhookType)}
-                  >
-                    <SelectTrigger id='webhook-type-select' className='w-full'>
-                      <SelectValue placeholder='Select a webhook type' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {WEBHOOK_TYPE_OPTIONS.map(option => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className='flex gap-2'>
+                    <input
+                      type='file'
+                      ref={fileInputRef}
+                      onChange={e => void handleFileSelect(e)}
+                      accept='image/jpeg,image/png,image/webp'
+                      className='hidden'
+                    />
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={handleUploadClick}
+                      disabled={isLoading}
+                      className='gap-1'
+                      title='Upload bot profile picture'
+                    >
+                      <Upload size={14} />
+                      Upload Picture
+                    </Button>
+                  </div>
+                  <p className='text-xs text-muted-foreground'>
+                    Supported formats: JPG, PNG, WebP. Max size: 5MB.
+                  </p>
                 </div>
-                {selectedWebhookType === 'SENTINELONE' && (
+              )}
+            </>
+          )}
+
+          {activeSection === 'incoming' && showIncomingSection && (
+            <div className='space-y-2'>
+              <div>
+                <SectionHeading
+                  title='Incoming Webhooks'
+                  subtitle='Generate webhook URLs for external services to post messages as this bot. Supports Slack and SentinelOne webhook URL formats.'
+                />
+                {botChannels.length > 0 && !showCreateForm && (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={() => setShowCreateForm(true)}
+                    className='gap-1 w-full mt-2'
+                  >
+                    <Plus size={14} />
+                    Create Incoming Webhook
+                  </Button>
+                )}
+              </div>
+
+              {showCreateForm && botChannels.length > 0 && (
+                <div className='border border-border rounded-md p-3 space-y-3'>
                   <div className='space-y-2'>
                     <label
-                      htmlFor='webhook-action-select'
+                      htmlFor='webhook-type-select'
                       className='block text-xs font-medium text-foreground'
                     >
-                      Action
+                      Webhook Type
                     </label>
                     <Select
-                      value={selectedWebhookAction}
-                      onValueChange={value =>
-                        setSelectedWebhookAction(value as IncomingWebhookAction)
-                      }
+                      value={selectedWebhookType}
+                      onValueChange={value => setSelectedWebhookType(value as IncomingWebhookType)}
                     >
-                      <SelectTrigger id='webhook-action-select' className='w-full'>
-                        <SelectValue placeholder='Select a webhook action' />
+                      <SelectTrigger id='webhook-type-select' className='w-full'>
+                        <SelectValue placeholder='Select a webhook type' />
                       </SelectTrigger>
                       <SelectContent>
-                        {WEBHOOK_ACTION_OPTIONS.map(option => (
+                        {WEBHOOK_TYPE_OPTIONS.map(option => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
                           </SelectItem>
@@ -1322,435 +1448,470 @@ export const EditAppForm = ({
                       </SelectContent>
                     </Select>
                   </div>
-                )}
-                <div className='space-y-2'>
-                  <label
-                    htmlFor='webhook-channel-select'
-                    className='block text-xs font-medium text-foreground'
-                  >
-                    Channel
-                  </label>
-                  <Select
-                    value={selectedChannelId}
-                    onValueChange={channelId => {
-                      setSelectedChannelId(channelId);
-                      const channel = botChannels.find(c => c.id === channelId);
-                      if (channel)
-                        setWebhookName(`${channel.name}-ich`.slice(0, WEBHOOK_NAME_MAX_LENGTH));
-                    }}
-                  >
-                    <SelectTrigger id='webhook-channel-select' className='w-full'>
-                      <SelectValue placeholder='Select a channel' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {botChannels.map(channel => (
-                        <SelectItem key={channel.id} value={channel.id}>
-                          <span className='inline-flex items-center gap-1'>
-                            <span className='w-3.5 flex-shrink-0 flex items-center justify-center'>
-                              {channel.visibility === 'PRIVATE' ? <Lock size={12} /> : '#'}
-                            </span>
-                            {channel.name}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {selectedWebhookType === 'SENTINELONE' && selectedWebhookAction === 'TICKET' && (
+                  {selectedWebhookType === 'SENTINELONE' && (
+                    <div className='space-y-2'>
+                      <label
+                        htmlFor='webhook-action-select'
+                        className='block text-xs font-medium text-foreground'
+                      >
+                        Action
+                      </label>
+                      <Select
+                        value={selectedWebhookAction}
+                        onValueChange={value =>
+                          setSelectedWebhookAction(value as IncomingWebhookAction)
+                        }
+                      >
+                        <SelectTrigger id='webhook-action-select' className='w-full'>
+                          <SelectValue placeholder='Select a webhook action' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {WEBHOOK_ACTION_OPTIONS.map(option => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                   <div className='space-y-2'>
                     <label
-                      htmlFor='webhook-board-select'
+                      htmlFor='webhook-channel-select'
                       className='block text-xs font-medium text-foreground'
                     >
-                      Board
+                      Channel
                     </label>
-                    <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
-                      <SelectTrigger
-                        id='webhook-board-select'
-                        className='w-full'
-                        disabled={!selectedChannelId || projectBoards.length === 0}
-                      >
-                        <SelectValue
-                          placeholder={
-                            !selectedChannelId
-                              ? 'Select a channel first'
-                              : projectBoards.length === 0
-                                ? 'No boards available'
-                                : 'Select a board'
-                          }
-                        />
+                    <Select
+                      value={selectedChannelId}
+                      onValueChange={channelId => {
+                        setSelectedChannelId(channelId);
+                        const channel = botChannels.find(c => c.id === channelId);
+                        if (channel)
+                          setWebhookName(`${channel.name}-ich`.slice(0, WEBHOOK_NAME_MAX_LENGTH));
+                      }}
+                    >
+                      <SelectTrigger id='webhook-channel-select' className='w-full'>
+                        <SelectValue placeholder='Select a channel' />
                       </SelectTrigger>
                       <SelectContent>
-                        {projectBoards.map(board => (
-                          <SelectItem key={board.id} value={board.id}>
-                            {board.name}
+                        {botChannels.map(channel => (
+                          <SelectItem key={channel.id} value={channel.id}>
+                            <span className='inline-flex items-center gap-1'>
+                              <span className='w-3.5 flex-shrink-0 flex items-center justify-center'>
+                                {channel.visibility === 'PRIVATE' ? <Lock size={12} /> : '#'}
+                              </span>
+                              {channel.name}
+                            </span>
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    {!selectedChannelId && (
-                      <p className='text-xs text-muted-foreground'>
-                        Choose a channel first so we can load boards from that project.
-                      </p>
-                    )}
-                    {selectedChannelId && projectBoards.length === 0 && (
-                      <p className='text-xs text-muted-foreground'>
-                        No boards found for the selected channel&apos;s project.
-                      </p>
-                    )}
                   </div>
-                )}
-                <div className='space-y-1'>
-                  <label
-                    htmlFor='webhook-name-input'
-                    className='block text-xs font-medium text-foreground'
-                  >
-                    Webhook Name
-                  </label>
-                  <WebhookNameInput
-                    id='webhook-name-input'
-                    value={webhookName}
-                    onChange={setWebhookName}
-                    placeholder='e.g., GitHub CI, Monitoring'
-                    className='text-sm'
-                  />
-                </div>
-                <div className='flex gap-2'>
-                  <Button
-                    type='button'
-                    size='sm'
-                    onClick={() => void handleCreateWebhook()}
-                    disabled={
-                      isCreating ||
-                      !webhookName.trim() ||
-                      !selectedChannelId ||
-                      (selectedWebhookType === 'SENTINELONE' &&
-                        selectedWebhookAction === 'TICKET' &&
-                        !selectedBoardId)
-                    }
-                  >
-                    {isCreating ? 'Creating...' : 'Create'}
-                  </Button>
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='sm'
-                    onClick={() => {
-                      setShowCreateForm(false);
-                      setWebhookName('');
-                      setSelectedChannelId('');
-                      setSelectedWebhookType('SLACK');
-                      setSelectedWebhookAction('MESSAGE');
-                      setProjectBoards([]);
-                      setSelectedBoardId('');
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {botChannels.length === 0 && (
-              <div className='bg-amber-500/10 border border-amber-500/30 text-amber-600 px-3 py-2 rounded-md text-sm dark:bg-amber-500/10 dark:text-amber-400'>
-                Add the bot to a channel first to create incoming webhooks.
-              </div>
-            )}
-
-            {webhooks.map(webhook => (
-              <div key={webhook.id} className='border border-border rounded-md p-3 space-y-2'>
-                {editingWebhookId === webhook.id ? (
-                  <div className='flex items-center gap-1.5'>
-                    <div className='flex-1 min-w-0'>
-                      <WebhookNameInput
-                        value={editingName}
-                        onChange={setEditingName}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') void handleRenameWebhook(webhook.id);
-                          if (e.key === 'Escape') {
-                            setEditingWebhookId(null);
-                            setEditingName('');
-                          }
-                        }}
-                        className='text-sm h-7'
-                        focusOnMount
-                      />
+                  {selectedWebhookType === 'SENTINELONE' && selectedWebhookAction === 'TICKET' && (
+                    <div className='space-y-2'>
+                      <label
+                        htmlFor='webhook-board-select'
+                        className='block text-xs font-medium text-foreground'
+                      >
+                        Board
+                      </label>
+                      <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
+                        <SelectTrigger
+                          id='webhook-board-select'
+                          className='w-full'
+                          disabled={!selectedChannelId || projectBoards.length === 0}
+                        >
+                          <SelectValue
+                            placeholder={
+                              !selectedChannelId
+                                ? 'Select a channel first'
+                                : projectBoards.length === 0
+                                  ? 'No boards available'
+                                  : 'Select a board'
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {projectBoards.map(board => (
+                            <SelectItem key={board.id} value={board.id}>
+                              {board.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {!selectedChannelId && (
+                        <p className='text-xs text-muted-foreground'>
+                          Choose a channel first so we can load boards from that project.
+                        </p>
+                      )}
+                      {selectedChannelId && projectBoards.length === 0 && (
+                        <p className='text-xs text-muted-foreground'>
+                          No boards found for the selected channel&apos;s project.
+                        </p>
+                      )}
                     </div>
+                  )}
+                  <div className='space-y-1'>
+                    <label
+                      htmlFor='webhook-name-input'
+                      className='block text-xs font-medium text-foreground'
+                    >
+                      Webhook Name
+                    </label>
+                    <WebhookNameInput
+                      id='webhook-name-input'
+                      value={webhookName}
+                      onChange={setWebhookName}
+                      placeholder='e.g., GitHub CI, Monitoring'
+                      className='text-sm'
+                    />
+                  </div>
+                  <div className='flex gap-2'>
                     <Button
                       type='button'
-                      variant='ghost'
                       size='sm'
-                      onClick={() => void handleRenameWebhook(webhook.id)}
-                      disabled={!editingName.trim()}
-                      className='h-7 w-7 p-0 flex-shrink-0 text-muted-foreground hover:text-foreground'
-                      data-track-category='INCOMING_WEBHOOKS'
-                      data-track-name='Confirm_Rename_Webhook'
+                      onClick={() => void handleCreateWebhook()}
+                      disabled={
+                        isCreating ||
+                        !webhookName.trim() ||
+                        !selectedChannelId ||
+                        (selectedWebhookType === 'SENTINELONE' &&
+                          selectedWebhookAction === 'TICKET' &&
+                          !selectedBoardId)
+                      }
                     >
-                      <Check size={14} />
+                      {isCreating ? 'Creating...' : 'Create'}
                     </Button>
                     <Button
                       type='button'
                       variant='ghost'
                       size='sm'
                       onClick={() => {
-                        setEditingWebhookId(null);
-                        setEditingName('');
+                        setShowCreateForm(false);
+                        setWebhookName('');
+                        setSelectedChannelId('');
+                        setSelectedWebhookType('SLACK');
+                        setSelectedWebhookAction('MESSAGE');
+                        setProjectBoards([]);
+                        setSelectedBoardId('');
                       }}
-                      className='h-7 w-7 p-0 flex-shrink-0 text-muted-foreground hover:text-foreground'
-                      data-track-category='INCOMING_WEBHOOKS'
-                      data-track-name='Cancel_Rename_Webhook'
                     >
-                      <X size={14} />
+                      Cancel
                     </Button>
                   </div>
-                ) : (
-                  <div className='flex items-center justify-between'>
-                    <div className='flex items-center gap-1.5 min-w-0'>
-                      <span className='text-sm font-medium text-foreground truncate'>
-                        {webhook.name}
-                      </span>
-                      <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
-                        {webhook.type === 'SENTINELONE' ? 'SentinelOne' : 'Slack'}
-                      </span>
-                      <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
-                        {webhook.action === 'TICKET' ? 'Ticket' : 'Message'}
-                      </span>
-                      <span className='text-xs text-muted-foreground inline-flex items-center gap-0.5'>
-                        <span className='w-3 flex-shrink-0 flex items-center justify-center'>
-                          {webhook.channelVisibility === 'PRIVATE' ? <Lock size={10} /> : '#'}
-                        </span>
-                        {webhook.channelName}
-                      </span>
-                      {webhook.boardName && (
-                        <span className='text-xs text-muted-foreground'>
-                          Board: {webhook.boardName}
-                        </span>
-                      )}
-                    </div>
-                    <div className='flex items-center gap-0.5'>
+                </div>
+              )}
+
+              {botChannels.length === 0 && (
+                <div className='bg-amber-500/10 border border-amber-500/30 text-amber-600 px-3 py-2 rounded-md text-sm dark:bg-amber-500/10 dark:text-amber-400'>
+                  Add the bot to a channel first to create incoming webhooks.
+                </div>
+              )}
+
+              {webhooks.map(webhook => (
+                <div key={webhook.id} className='border border-border rounded-md p-3 space-y-2'>
+                  {editingWebhookId === webhook.id ? (
+                    <div className='flex items-center gap-1.5'>
+                      <div className='flex-1 min-w-0'>
+                        <WebhookNameInput
+                          value={editingName}
+                          onChange={setEditingName}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') void handleRenameWebhook(webhook.id);
+                            if (e.key === 'Escape') {
+                              setEditingWebhookId(null);
+                              setEditingName('');
+                            }
+                          }}
+                          className='text-sm h-7'
+                          focusOnMount
+                        />
+                      </div>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='sm'
+                        onClick={() => void handleRenameWebhook(webhook.id)}
+                        disabled={!editingName.trim()}
+                        className='h-7 w-7 p-0 flex-shrink-0 text-muted-foreground hover:text-foreground'
+                        data-track-category='INCOMING_WEBHOOKS'
+                        data-track-name='Confirm_Rename_Webhook'
+                      >
+                        <Check size={14} />
+                      </Button>
                       <Button
                         type='button'
                         variant='ghost'
                         size='sm'
                         onClick={() => {
-                          setEditingWebhookId(webhook.id);
-                          setEditingName(webhook.name);
+                          setEditingWebhookId(null);
+                          setEditingName('');
                         }}
-                        className='h-7 w-7 p-0 text-muted-foreground hover:text-foreground'
-                        title='Rename'
+                        className='h-7 w-7 p-0 flex-shrink-0 text-muted-foreground hover:text-foreground'
                         data-track-category='INCOMING_WEBHOOKS'
-                        data-track-name='Edit_Webhook_Name'
+                        data-track-name='Cancel_Rename_Webhook'
                       >
-                        <Pencil size={11} />
-                      </Button>
-                      <Button
-                        type='button'
-                        variant='ghost'
-                        size='sm'
-                        onClick={() => setRevokeTargetId(webhook.id)}
-                        className='h-7 w-7 p-0 text-muted-foreground hover:text-destructive'
-                        title='Revoke webhook'
-                        data-track-category='INCOMING_WEBHOOKS'
-                        data-track-name='Revoke_Webhook'
-                      >
-                        <Trash2 size={14} />
+                        <X size={14} />
                       </Button>
                     </div>
+                  ) : (
+                    <div className='flex items-center justify-between'>
+                      <div className='flex items-center gap-1.5 min-w-0'>
+                        <span className='text-sm font-medium text-foreground truncate'>
+                          {webhook.name}
+                        </span>
+                        <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
+                          {webhook.type === 'SENTINELONE' ? 'SentinelOne' : 'Slack'}
+                        </span>
+                        <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
+                          {webhook.action === 'TICKET' ? 'Ticket' : 'Message'}
+                        </span>
+                        <span className='text-xs text-muted-foreground inline-flex items-center gap-0.5'>
+                          <span className='w-3 flex-shrink-0 flex items-center justify-center'>
+                            {webhook.channelVisibility === 'PRIVATE' ? <Lock size={10} /> : '#'}
+                          </span>
+                          {webhook.channelName}
+                        </span>
+                        {webhook.boardName && (
+                          <span className='text-xs text-muted-foreground'>
+                            Board: {webhook.boardName}
+                          </span>
+                        )}
+                      </div>
+                      <div className='flex items-center gap-0.5'>
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='sm'
+                          onClick={() => {
+                            setEditingWebhookId(webhook.id);
+                            setEditingName(webhook.name);
+                          }}
+                          className='h-7 w-7 p-0 text-muted-foreground hover:text-foreground'
+                          title='Rename'
+                          data-track-category='INCOMING_WEBHOOKS'
+                          data-track-name='Edit_Webhook_Name'
+                        >
+                          <Pencil size={11} />
+                        </Button>
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='sm'
+                          onClick={() => setRevokeTargetId(webhook.id)}
+                          className='h-7 w-7 p-0 text-muted-foreground hover:text-destructive'
+                          title='Revoke webhook'
+                          data-track-category='INCOMING_WEBHOOKS'
+                          data-track-name='Revoke_Webhook'
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  <div className='flex items-center gap-2'>
+                    <Input
+                      type='text'
+                      value={getFullWebhookUrl(webhook.webhookUrl)}
+                      readOnly
+                      className='text-xs bg-muted font-mono'
+                    />
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() => handleCopyWebhookUrl(webhook.webhookUrl)}
+                      className='shrink-0'
+                    >
+                      <Copy size={14} />
+                    </Button>
                   </div>
-                )}
-                <div className='flex items-center gap-2'>
-                  <Input
-                    type='text'
-                    value={getFullWebhookUrl(webhook.webhookUrl)}
-                    readOnly
-                    className='text-xs bg-muted font-mono'
-                  />
-                  <Button
-                    type='button'
-                    variant='outline'
-                    size='sm'
-                    onClick={() => handleCopyWebhookUrl(webhook.webhookUrl)}
-                    className='shrink-0'
-                  >
-                    <Copy size={14} />
-                  </Button>
                 </div>
-              </div>
-            ))}
+              ))}
 
-            {(hasPrev || hasNext) && (
+              {(hasPrev || hasNext) && (
+                <div className='flex items-center justify-between'>
+                  <span className='text-xs text-muted-foreground'>
+                    {webhookOffset + 1}–{Math.min(webhookOffset + WEBHOOK_PAGE_SIZE, webhookTotal)}{' '}
+                    of {webhookTotal}
+                  </span>
+                  <div className='flex gap-1'>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      disabled={!hasPrev}
+                      onClick={() => fetchWebhooks(webhookOffset - WEBHOOK_PAGE_SIZE)}
+                      className='h-7 w-7 p-0'
+                    >
+                      <ChevronLeft size={14} />
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      disabled={!hasNext}
+                      onClick={() => fetchWebhooks(webhookOffset + WEBHOOK_PAGE_SIZE)}
+                      className='h-7 w-7 p-0'
+                    >
+                      <ChevronRight size={14} />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Commands */}
+          {activeSection === 'commands' && (
+            <div className='space-y-2'>
               <div className='flex items-center justify-between'>
-                <span className='text-xs text-muted-foreground'>
-                  {webhookOffset + 1}–{Math.min(webhookOffset + WEBHOOK_PAGE_SIZE, webhookTotal)} of{' '}
-                  {webhookTotal}
-                </span>
-                <div className='flex gap-1'>
+                <label htmlFor='app-commands' className='block text-sm font-medium text-foreground'>
+                  Commands
+                </label>
+                {!showCommandForm && !isInstallMode && (
                   <Button
                     type='button'
                     variant='outline'
                     size='sm'
-                    disabled={!hasPrev}
-                    onClick={() => fetchWebhooks(webhookOffset - WEBHOOK_PAGE_SIZE)}
-                    className='h-7 w-7 p-0'
+                    className='gap-1 h-7 text-xs'
+                    onClick={() => {
+                      setEditingCommand(null);
+                      setShowCommandForm(true);
+                    }}
                   >
-                    <ChevronLeft size={14} />
+                    <Plus size={12} /> Add Command
                   </Button>
-                  <Button
-                    type='button'
-                    variant='outline'
-                    size='sm'
-                    disabled={!hasNext}
-                    onClick={() => fetchWebhooks(webhookOffset + WEBHOOK_PAGE_SIZE)}
-                    className='h-7 w-7 p-0'
-                  >
-                    <ChevronRight size={14} />
-                  </Button>
-                </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
 
-        {/* Commands */}
-        <div className='space-y-2'>
-          <div className='flex items-center justify-between'>
-            <label htmlFor='app-commands' className='block text-sm font-medium text-foreground'>
-              Commands
-            </label>
-            {!showCommandForm && !isInstallMode && (
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                className='gap-1 h-7 text-xs'
-                onClick={() => {
-                  setEditingCommand(null);
-                  setShowCommandForm(true);
-                }}
-              >
-                <Plus size={12} /> Add Command
-              </Button>
-            )}
-          </div>
-
-          {showCommandForm && (
-            <CommandFormInline
-              appId={appId}
-              initial={editingCommand}
-              onSaved={handleCommandSaved}
-              onCancel={() => {
-                setShowCommandForm(false);
-                setEditingCommand(null);
-              }}
-            />
-          )}
-
-          {isInstallMode && (
-            <p className='text-xs text-muted-foreground'>
-              Commands come from the app template. Click Update to sync the latest.
-            </p>
-          )}
-          {commandsLoading ? (
-            <p className='text-xs text-muted-foreground py-2'>Loading commands…</p>
-          ) : commands.length === 0 && !showCommandForm ? (
-            <p className='text-xs text-muted-foreground py-2'>
-              No commands yet. Add one to let users trigger actions with{' '}
-              <span className='font-mono'>/commandname</span>.
-            </p>
-          ) : (
-            <div className='space-y-1.5'>
-              {commands.map(cmd => (
-                <CommandRow
-                  key={cmd.commandName}
-                  command={cmd}
-                  onEdit={handleEditCommand}
-                  onDelete={commandName => void handleDeleteCommand(commandName)}
-                  readOnly={isInstallMode}
+              {showCommandForm && (
+                <CommandFormInline
+                  appId={appId}
+                  initial={editingCommand}
+                  onSaved={handleCommandSaved}
+                  onCancel={() => {
+                    setShowCommandForm(false);
+                    setEditingCommand(null);
+                  }}
                 />
-              ))}
+              )}
+
+              {isInstallMode && (
+                <p className='text-xs text-muted-foreground'>
+                  Commands come from the app template. Click Update to sync the latest.
+                </p>
+              )}
+              {commandsLoading ? (
+                <p className='text-xs text-muted-foreground py-2'>Loading commands…</p>
+              ) : commands.length === 0 && !showCommandForm ? (
+                <p className='text-xs text-muted-foreground py-2'>
+                  No commands yet. Add one to let users trigger actions with{' '}
+                  <span className='font-mono'>/commandname</span>.
+                </p>
+              ) : (
+                <div className='space-y-1.5'>
+                  {commands.map(cmd => (
+                    <CommandRow
+                      key={cmd.commandName}
+                      command={cmd}
+                      onEdit={handleEditCommand}
+                      onDelete={commandName => void handleDeleteCommand(commandName)}
+                      readOnly={isInstallMode}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
-        </div>
 
-        {/* Shortcuts */}
-        <div className='space-y-2'>
-          <div className='flex items-center justify-between'>
-            <span className='block text-sm font-medium text-foreground'>Shortcuts</span>
-            {!showShortcutForm && !isInstallMode && (
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                className='gap-1 h-7 text-xs'
-                onClick={() => {
-                  setEditingShortcut(null);
-                  setShowShortcutForm(true);
-                }}
-              >
-                <Plus size={12} /> Add Shortcut
-              </Button>
-            )}
-          </div>
+          {/* Shortcuts */}
+          {activeSection === 'shortcuts' && (
+            <div className='space-y-2'>
+              <div className='flex items-center justify-between'>
+                <span className='block text-sm font-medium text-foreground'>Shortcuts</span>
+                {!showShortcutForm && !isInstallMode && (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    className='gap-1 h-7 text-xs'
+                    onClick={() => {
+                      setEditingShortcut(null);
+                      setShowShortcutForm(true);
+                    }}
+                  >
+                    <Plus size={12} /> Add Shortcut
+                  </Button>
+                )}
+              </div>
 
-          {showShortcutForm && (
-            <ShortcutFormInline
-              appId={appId}
-              initial={editingShortcut}
-              onSaved={handleShortcutSaved}
-              onCancel={() => {
-                setShowShortcutForm(false);
-                setEditingShortcut(null);
-              }}
-            />
-          )}
-
-          {shortcutsLoading ? (
-            <p className='text-xs text-muted-foreground py-2'>Loading shortcuts…</p>
-          ) : shortcuts.length === 0 && !showShortcutForm ? (
-            <p className='text-xs text-muted-foreground py-2'>
-              No shortcuts yet. Add a <span className='font-semibold'>Global</span> shortcut
-              (accessible from the ⚡ button in the composer) or a{' '}
-              <span className='font-semibold'>Message</span> shortcut (accessible from the message
-              action menu).
-            </p>
-          ) : (
-            <div className='space-y-1.5'>
-              {shortcuts.map(s => (
-                <ShortcutRow
-                  key={s.commandName}
-                  shortcut={s}
-                  onEdit={handleEditShortcut}
-                  onDelete={callbackId => void handleDeleteShortcut(callbackId)}
-                  readOnly={isInstallMode}
+              {showShortcutForm && (
+                <ShortcutFormInline
+                  appId={appId}
+                  initial={editingShortcut}
+                  onSaved={handleShortcutSaved}
+                  onCancel={() => {
+                    setShowShortcutForm(false);
+                    setEditingShortcut(null);
+                  }}
                 />
-              ))}
+              )}
+
+              {shortcutsLoading ? (
+                <p className='text-xs text-muted-foreground py-2'>Loading shortcuts…</p>
+              ) : shortcuts.length === 0 && !showShortcutForm ? (
+                <p className='text-xs text-muted-foreground py-2'>
+                  No shortcuts yet. Add a <span className='font-semibold'>Global</span> shortcut
+                  (accessible from the ⚡ button in the composer) or a{' '}
+                  <span className='font-semibold'>Message</span> shortcut (accessible from the
+                  message action menu).
+                </p>
+              ) : (
+                <div className='space-y-1.5'>
+                  {shortcuts.map(s => (
+                    <ShortcutRow
+                      key={s.commandName}
+                      shortcut={s}
+                      onEdit={handleEditShortcut}
+                      onDelete={callbackId => void handleDeleteShortcut(callbackId)}
+                      readOnly={isInstallMode}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
-        </div>
 
-        {/* Permissions */}
-        <div className='border-t border-border pt-4'>
-          <PermissionsSection
-            appId={appId}
-            isInstalled={isInstallMode || isAppInstalled}
-            editMode={editMode}
-            installedAppId={installedAppId}
-          />
+          {/* Permissions */}
+          {activeSection === 'permissions' && (
+            <PermissionsSection
+              appId={appId}
+              isInstalled={isInstallMode || isAppInstalled}
+              editMode={editMode}
+              installedAppId={installedAppId}
+            />
+          )}
         </div>
       </div>
 
-      <div className='flex gap-2 justify-end p-6 border-t border-border bg-background'>
+      <div className='flex gap-2 justify-end p-4 border-t border-border bg-background shrink-0'>
         <Button variant='outline' onClick={onCancel} disabled={isLoading} type='button'>
-          Cancel
+          {activeSection === 'basic' ? 'Cancel' : 'Close'}
         </Button>
-        <Button
-          type='submit'
-          disabled={isLoading}
-          data-track-category='Apps'
-          data-track-name='EditApp'
-        >
-          {isLoading ? 'Saving...' : 'Save Changes'}
-        </Button>
+        {/* Save Changes only persists the Basic info fields (description + webhook URL); the other
+            sections manage their own saves inline, so the button is scoped to Basic info. */}
+        {activeSection === 'basic' && (
+          <Button
+            type='submit'
+            disabled={isLoading}
+            data-track-category='Apps'
+            data-track-name='EditApp'
+          >
+            {isLoading ? 'Saving...' : 'Save Changes'}
+          </Button>
+        )}
       </div>
 
       <Dialog
