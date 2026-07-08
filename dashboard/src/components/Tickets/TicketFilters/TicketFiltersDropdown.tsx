@@ -57,6 +57,10 @@ import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { TabType } from '../../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useCanViewAnalytics } from '../../../hooks/usePermissions';
+import {
+  resolveDisplayFormFields,
+  type ResolvedDisplayFormField,
+} from '../../../utils/board/resolveDisplayFormFields';
 
 interface FilterMenuItem {
   id: string;
@@ -295,14 +299,17 @@ export const TicketFiltersDropdown = ({
     if (!formMappings || formMappings.length === 0) return [];
 
     // Collect all unique form fields by field ID
-    const fieldsMap = new Map<string, { field: FormFields }>();
+    const fieldsMap = new Map<string, { field: ResolvedDisplayFormField }>();
     formMappings.forEach(mapping => {
       const mappingWithFields = mapping as unknown as {
+        formId?: string;
         formFields?: FormFields[];
       };
-      const fields = mappingWithFields.formFields;
+      const fields = mappingWithFields.formId
+        ? resolveDisplayFormFields(mappingWithFields.formId, mappingWithFields.formFields ?? [])
+        : [];
 
-      fields?.forEach((field: FormFields) => {
+      fields.forEach(field => {
         // Use field ID as key to ensure uniqueness
         if (!fieldsMap.has(field.id)) {
           fieldsMap.set(field.id, { field });
@@ -676,11 +683,20 @@ export const TicketFiltersDropdown = ({
         if (activeSubmenu.startsWith('dynamic-')) {
           const fieldId = activeSubmenu.replace('dynamic-', '');
           // Find the field across all form mappings
-          let field: FormFields | undefined;
+          let field: ResolvedDisplayFormField | undefined;
           for (const mapping of formMappings || []) {
             // Type assertion needed because Zero ORM doesn't auto-infer related fields
-            const fields = (mapping as unknown as { formFields?: FormFields[] }).formFields;
-            field = fields?.find((f: FormFields) => f.id === fieldId);
+            const mappingWithFields = mapping as unknown as {
+              formId?: string;
+              formFields?: FormFields[];
+            };
+            const fields = mappingWithFields.formId
+              ? resolveDisplayFormFields(
+                  mappingWithFields.formId,
+                  mappingWithFields.formFields ?? [],
+                )
+              : [];
+            field = fields.find(f => f.id === fieldId);
             if (field) break;
           }
 
@@ -695,7 +711,7 @@ export const TicketFiltersDropdown = ({
                 fieldId={fieldId}
                 fieldName={field.fieldName}
                 fieldType={field.fieldType}
-                fieldEnum={field.fieldEnum as string[] | null}
+                fieldEnum={field.fieldEnum ?? null}
                 selectedValue={currentValue}
                 onChange={value =>
                   handleDynamicFieldChange(

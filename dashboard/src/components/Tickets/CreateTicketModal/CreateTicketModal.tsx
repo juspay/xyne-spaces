@@ -92,6 +92,10 @@ import { useDraftAttachments } from '../../../hooks/useDraft';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { openCreateTicketWindow, subscribeCreateTicketResult } from '../../../utils/electronApp';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import {
+  resolveDisplayFormFields,
+  type ResolvedDisplayFormField,
+} from '../../../utils/board/resolveDisplayFormFields';
 
 interface CreateTicketModalProps {
   isOpen: boolean;
@@ -477,6 +481,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     { enabled: !!formValues.boardId },
   );
 
+  const resolvedFormFields = useMemo(
+    (): ResolvedDisplayFormField[] =>
+      formMapping?.formFields
+        ? resolveDisplayFormFields(formMapping.formId, [...formMapping.formFields])
+        : [],
+    [formMapping?.formFields, formMapping?.formId],
+  );
+
   const titleValue = formValues?.title ?? '';
   const descriptionValue = formValues?.description ?? '';
 
@@ -497,10 +509,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   }, [selectedBoard, form]);
 
   useEffect(() => {
-    if (!isOpen || !formMapping?.formFields) return;
+    if (!isOpen || resolvedFormFields.length === 0) return;
     if (!selectedBoard || !isReleaseBoard(selectedBoard.boardType)) return;
 
-    const hasDeployedCommitField = formMapping.formFields.some(
+    const hasDeployedCommitField = resolvedFormFields.some(
       field => field.fieldName === 'deployedCommitId',
     );
     if (!hasDeployedCommitField) return;
@@ -531,7 +543,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     };
 
     void fetchLatestDeployedCommitId();
-  }, [isOpen, formMapping?.formFields, selectedBoard, form]);
+  }, [isOpen, resolvedFormFields, selectedBoard, form, formValues?.dynamicFields]);
   const {
     duplicateCheck,
     // duplicateCandidate,
@@ -950,7 +962,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       getMissingMandatoryFieldMessage({
         formValues,
         boards,
-        formMapping,
+        formMapping: { formFields: resolvedFormFields },
         showUserGroupsOnly,
         showAssignee,
         showTodo,
@@ -971,7 +983,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     [
       formValues,
       boards,
-      formMapping,
+      resolvedFormFields,
       showUserGroupsOnly,
       showAssignee,
       showTodo,
@@ -1034,14 +1046,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
 
       // Validate dynamic fields if form mapping exists
-      if (formMapping?.formFields && formMapping.formFields.length > 0) {
+      if (requiredDynamicFields.length > 0) {
         const errors: Record<string, string> = {};
         let hasErrors = false;
 
-        for (const field of formMapping.formFields) {
-          // Only validate required fields (isOptional must be true to skip, otherwise validate)
-          if (field.isOptional === true) continue;
-
+        for (const field of requiredDynamicFields) {
           const fieldName = field.fieldName;
           const value = formData.dynamicFields[fieldName];
 
@@ -1527,8 +1536,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Get required dynamic fields
   const requiredDynamicFields = useMemo(
-    () => formMapping?.formFields.filter(field => field.isOptional === false) || [],
-    [formMapping?.formFields],
+    () => resolvedFormFields.filter(field => field.isOptional === false),
+    [resolvedFormFields],
   );
 
   // Field error
@@ -2091,7 +2100,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         items={[
                           {
                             items:
-                              (field.fieldEnum as string[] | undefined)?.map(opt => ({
+                              field.fieldEnum?.map(opt => ({
                                 label: opt,
                                 value: opt,
                               })) || [],
@@ -2123,7 +2132,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         label={`${fieldName}${!isOptional ? ' *' : ''}`}
                         placeholder={`Select ${fieldName.toLowerCase()}`}
                         options={
-                          (field.fieldEnum as string[] | undefined)?.map(opt => ({
+                          field.fieldEnum?.map(opt => ({
                             label: opt,
                             value: opt,
                           })) || []

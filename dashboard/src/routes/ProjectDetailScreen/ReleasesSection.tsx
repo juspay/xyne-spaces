@@ -76,6 +76,7 @@ export const ReleasesSection = ({ projectId }: ReleasesSectionProps): ReactEleme
                 <ReleaseStagePicker
                   ticketId={ticket.id}
                   stageName={ticket.stageName}
+                  boardId={ticket.boardId}
                   stages={stagesByBoard.get(ticket.boardId) ?? []}
                 />
               </td>

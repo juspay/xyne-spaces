@@ -2,7 +2,12 @@ import { ReactElement, useState, useCallback, useRef, useEffect, useMemo } from 
 import { GripVertical, Trash2, CornerDownLeft, Check, ChevronDown } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import type { TicketField } from '../BoardEditScreen/BoardEditScreen.types';
+import { mapFromFormFieldType, mapToFormFieldType } from '../BoardEditScreen/BoardEditScreen.types';
 import { type FieldType, type CustomFieldProps } from './CustomField.types';
+import {
+  GlobalFieldNameAutocomplete,
+  type GlobalFieldSuggestion,
+} from '../GlobalFieldNameAutocomplete';
 import {
   MAX_FIELD_OPTIONS,
   mergeFieldOptions,
@@ -27,11 +32,28 @@ const fieldTypeOptions = [
   { value: 'user', label: 'User' },
 ];
 
-export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps): ReactElement => {
+export const CustomField = ({
+  mode,
+  field,
+  projectId,
+  onSave,
+  onCancel,
+}: CustomFieldProps): ReactElement => {
   const [fieldName, setFieldName] = useState(field?.label || '');
   const [fieldType, setFieldType] = useState<FieldType>((field?.type as FieldType) || 'text');
   const [fieldRequired, setFieldRequired] = useState(field?.required || false);
   const [fieldOptions, setFieldOptions] = useState<string[]>(field?.options || []);
+  const [createAsNew, setCreateAsNew] = useState(false);
+  const [selectedField, setSelectedField] = useState<GlobalFieldSuggestion | undefined>(() =>
+    field?.id
+      ? {
+          id: field.id,
+          fieldName: field.label || field.name,
+          fieldType: mapToFormFieldType(field.type),
+          ...(field.options ? { fieldEnum: field.options } : {}),
+        }
+      : undefined,
+  );
   const [optionInput, setOptionInput] = useState('');
   const [optionsEditMode, setOptionsEditMode] = useState<OptionsEditMode>('individual');
   const [bulkDraft, setBulkDraft] = useState('');
@@ -76,7 +98,11 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
       label: fieldName.trim(),
       required: fieldRequired,
       visibleInCreate: true,
-      ...(field?.id && { id: field.id }),
+      ...(!createAsNew && selectedField
+        ? { id: selectedField.id }
+        : !createAsNew && field?.id
+          ? { id: field.id }
+          : {}),
     };
 
     // Only add options for select/multiselect types
@@ -95,6 +121,8 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
     onCancel,
     onSave,
     optionsEditMode,
+    createAsNew,
+    selectedField,
   ]);
 
   // Click outside to save
@@ -223,16 +251,32 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
 
         {/* Left side: Input + Dropdown */}
         <div className='flex items-center gap-3 flex-1'>
-          <input
-            ref={inputRef}
-            type='text'
+          <GlobalFieldNameAutocomplete
             value={fieldName}
-            onChange={e => setFieldName(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onChange={setFieldName}
+            projectId={projectId}
+            inputRef={inputRef}
             placeholder={mode === 'create' ? 'Custom Field' : 'Field name'}
             className='w-40 px-3 py-2 border-0 bg-transparent text-[14px] focus:outline-none focus:ring-0 placeholder:text-muted-foreground'
-            data-track-category='form'
-            data-track-name='field-name-input'
+            onSelectExisting={suggestion => {
+              setFieldName(suggestion.fieldName);
+              setFieldType(mapFromFormFieldType(suggestion.fieldType) as FieldType);
+              setCreateAsNew(false);
+              setSelectedField(suggestion);
+              if (suggestion.fieldEnum?.length) {
+                setFieldOptions(suggestion.fieldEnum);
+              }
+            }}
+            selectedField={!createAsNew ? selectedField : undefined}
+            onCreateNew={
+              selectedField
+                ? () => {
+                    setCreateAsNew(true);
+                    setSelectedField(undefined);
+                  }
+                : undefined
+            }
+            onKeyDown={handleKeyDown}
           />
 
           <div className='relative w-[140px] shrink-0' ref={fieldTypeDropdownRef}>
@@ -278,8 +322,8 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
           </div>
         </div>
 
-        {/* Right side: Required + Delete */}
-        <div className='flex items-center gap-3'>
+        {/* Right side: Required + Show in Create + Delete */}
+        <div className='flex items-center gap-3 ml-3'>
           <div className='flex items-center gap-2'>
             <span className='text-[13px] text-[#505b62] whitespace-nowrap leading-[18px] tracking-[-0.2px]'>
               Required

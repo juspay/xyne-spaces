@@ -69,6 +69,7 @@ import {
   FormsACL,
   FormContextMappingsACL,
   FormFieldsACL,
+  GlobalFieldsACL,
   FormEntityValuesACL,
   EmailsACL,
   EmailDraftsACL,
@@ -247,6 +248,8 @@ export class QueryACLFactory {
         return new FormEntityValuesACL(ctx) as BaseQueryACL<TTable>;
       case 'form_fields':
         return new FormFieldsACL(ctx) as BaseQueryACL<TTable>;
+      case 'global_fields':
+        return new GlobalFieldsACL(ctx) as BaseQueryACL<TTable>;
       case 'forms_context_mapping':
         return new FormContextMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'dashboards':

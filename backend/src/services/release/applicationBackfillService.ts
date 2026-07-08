@@ -81,7 +81,7 @@ export class ApplicationBackfillService {
     }
   }
 
-  async backFillReleaseForms(createdBy: string, workspaceId: string): Promise<void> {
+  async backFillReleaseForms(createdBy: string, workspaceId: string, projectId: string): Promise<void> {
     logger.info('Setting up forms...');
 
     // Create or get MIGRATION form
@@ -102,6 +102,7 @@ export class ApplicationBackfillService {
           formDescription: 'Form for tracking database migrations in releases',
           entityType: FormEntityType.RELEASE_MIGRATION_FORM,
           contextType: FormContextType.RELEASE_CHANGE,
+          projectId,
           workspaceId,
           createdBy,
           fields: formSchema.fields.map(field => ({
@@ -133,6 +134,7 @@ export class ApplicationBackfillService {
           formDescription: 'Form for tracking environment variable changes in releases',
           entityType: FormEntityType.RELEASE_ENV_FORM,
           contextType: FormContextType.RELEASE_CHANGE,
+          projectId,
           workspaceId,
           createdBy,
           fields: formSchema.fields.map(field => ({
@@ -164,6 +166,7 @@ export class ApplicationBackfillService {
           formDescription: 'Form for getting release specs',
           entityType: FormEntityType.TICKET,
           contextType: FormContextType.BOARD,
+          projectId,
           workspaceId,
           createdBy,
           fields: formSchema.fields.map(field => ({
@@ -236,7 +239,7 @@ export class ApplicationBackfillService {
       }
 
       // Setup ReleaseChangeType, forms, and lookup values first
-      await this.backFillReleaseForms(createdBy, validChannel.workspaceId);
+      await this.backFillReleaseForms(createdBy, validChannel.workspaceId, validChannel.projectId);
       await this.backFillTicketTypeLookups();
 
       const mainReleaseBoard = await db.board.findFirst({

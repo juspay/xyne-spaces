@@ -6,6 +6,7 @@ import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { getStageColor } from '../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { cn } from '../../utils/classNames';
+import { StagePicker } from '../Tickets/TicketListView/StagePicker';
 
 export interface ReleaseStageOption {
   name: string;
@@ -20,6 +21,8 @@ interface ReleaseStagePickerProps {
   // Stages sourced from the ticket's board (queries.stagesByBoards). Pass
   // an empty array if the board has no stages configured yet.
   stages: readonly ReleaseStageOption[];
+  // Board id for transition form gates (opens StageFormModal with merged fields).
+  boardId?: string;
   // Optional callback fired after the stage mutation, with the new stage name.
   onAfterChange?: (stageName: string) => void;
   // When provided, replaces the default ticket.update mutation entirely.
@@ -40,11 +43,28 @@ export function ReleaseStagePicker({
   ticketId,
   stageName,
   stages,
+  boardId,
   onAfterChange,
   onSelect,
 }: ReleaseStagePickerProps): ReactElement {
   const [open, setOpen] = useState(false);
   const zero = useZero();
+
+  // Release tickets with board context use the shared StagePicker so transition
+  // forms (including reusable board fields) gate stage changes correctly.
+  if (boardId && !onSelect) {
+    return (
+      <StagePicker
+        ticketId={ticketId}
+        stageName={stageName}
+        stageLabel={stageName ?? '—'}
+        boardId={boardId}
+        onStageChange={(_id, nextStageName) => {
+          onAfterChange?.(nextStageName);
+        }}
+      />
+    );
+  }
 
   const currentStage = stageName ?? '';
 

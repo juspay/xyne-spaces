@@ -40,6 +40,8 @@ import {
   mapToCreateModalFields,
   getFieldConfigKey,
 } from '../../../utils/board';
+import { resolveDisplayFormFields } from '../../../utils/board/resolveDisplayFormFields';
+import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 
 // Type for board data passed to onNext callback
 interface BoardData {
@@ -163,6 +165,7 @@ const BoardEditScreen = ({
   sourceBoardId,
 }: BoardEditScreenProps): ReactElement | null => {
   const zero = useZero();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const [board] = useCachedQuery(queries.getBoardById({ boardId: boardId || '' }), {
     enabled: !!boardId && mode === 'edit',
@@ -297,35 +300,69 @@ const BoardEditScreen = ({
   // Load custom fields from form mapping (use source form mapping when duplicating)
   const activeFormMapping =
     mode === 'create' && sourceFormMapping ? sourceFormMapping : formMapping;
+
+  const customFieldsFormId = activeFormMapping?.formId ?? boardMetadata.customFieldsFormId;
+
+  const activeResolvedCustomFields = useMemo(() => {
+    if (!customFieldsFormId) {
+      return [];
+    }
+
+    return resolveDisplayFormFields(
+      customFieldsFormId,
+      activeFormMapping?.formFields ? [...activeFormMapping.formFields] : [],
+    );
+  }, [activeFormMapping?.formFields, customFieldsFormId]);
+
   useEffect(() => {
-    if (activeFormMapping?.formFields && activeFormMapping.formFields.length > 0) {
-      const customFields: TicketField[] = activeFormMapping.formFields.map(field => {
+    if (activeResolvedCustomFields.length > 0) {
+      const customFields: TicketField[] = activeResolvedCustomFields.map(field => {
         const ticketField: TicketField = {
           id: field.id,
+          ...(field.membershipId ? { membershipId: field.membershipId } : {}),
           name: field.fieldName,
           type: mapFromFormFieldType(field.fieldType),
           label: field.fieldName,
           required: !field.isOptional,
-          order: DEFAULT_TICKET_FIELDS.length + 1,
+          order: DEFAULT_TICKET_FIELDS.length + field.sequenceNumber,
           visibleInCreate: true,
         };
 
-        // Only add options if they exist
-        if (field.fieldEnum && Array.isArray(field.fieldEnum)) {
-          ticketField.options = field.fieldEnum as string[];
+        if (field.fieldEnum && field.fieldEnum.length > 0) {
+          ticketField.options = field.fieldEnum;
         }
 
         return ticketField;
       });
 
       setFields(prev => {
-        // Only add if not already present (avoid duplicates)
-        const existingIds = new Set(prev.map(f => f.id));
-        const newFields = customFields.filter(f => !existingIds.has(f.id));
-        return [...prev, ...newFields];
+        const customFieldsById = new Map(customFields.map(field => [field.id, field]));
+
+        const updatedFields = prev.map(field => {
+          const updatedCustomField = customFieldsById.get(field.id);
+          if (!updatedCustomField) return field;
+
+          const mergedField: TicketField = {
+            ...field,
+            ...updatedCustomField,
+            order: field.order,
+            visibleInCreate: field.visibleInCreate,
+          };
+
+          if (updatedCustomField.options) {
+            return mergedField;
+          }
+
+          const { options: _removed, ...fieldWithoutOptions } = mergedField;
+          return fieldWithoutOptions;
+        });
+
+        const existingIds = new Set(updatedFields.map(field => field.id));
+        const newFields = customFields.filter(field => !existingIds.has(field.id));
+        return [...updatedFields, ...newFields];
       });
     }
-  }, [activeFormMapping]);
+  }, [activeResolvedCustomFields]);
 
   // Apply field order and required from metadata when board loads
   useEffect(() => {
@@ -502,8 +539,11 @@ const BoardEditScreen = ({
       );
     } else {
       // Creating new field
+      const membershipId = uuidv4();
+      const globalFieldId = uuidv4();
       const newField: TicketField = {
-        id: uuidv4(),
+        id: globalFieldId,
+        membershipId,
         name: newFieldName,
         type: newFieldType,
         label: newFieldName,
@@ -596,6 +636,7 @@ const BoardEditScreen = ({
           ...(sourceForm.formDescription && { formDescription: sourceForm.formDescription }),
           contextType: sourceForm.contextType,
           entityType: sourceForm.entityType,
+          projectId,
           fields: sourceForm.fields.map(field => ({
             fieldName: field.fieldName,
             fieldType: field.fieldType,
@@ -778,7 +819,7 @@ const BoardEditScreen = ({
 
       return { ...clonedBoardBase, stages: clonedStagesForInitialBoard };
     },
-    [sourceBoard, sourceBoardId, sourceStageTransitions, zero],
+    [projectId, sourceBoard, sourceBoardId, sourceStageTransitions, zero],
   );
 
   const handleSave = useCallback(async () => {
@@ -800,7 +841,9 @@ const BoardEditScreen = ({
             formDescription: `Custom fields for ${boardName.trim()}`,
             contextType: FormContextType.BOARD,
             entityType: FormEntityType.TICKET,
+            projectId,
             fields: customFields.map(f => ({
+              fieldId: f.id,
               fieldName: f.name,
               fieldType: mapToFormFieldType(f.type),
               ...(f.options && f.options.length > 0 && { fieldEnum: f.options }),
@@ -1007,22 +1050,21 @@ const BoardEditScreen = ({
       // Get existing metadata
       const existingMetadata = boardMetadata;
 
-      let customFieldsFormId = existingMetadata.customFieldsFormId;
-
-      // Check if form already exists via formMapping
-      const existingFormId = formMapping?.formId;
+      let nextCustomFieldsFormId = customFieldsFormId;
+      const existingFormId = customFieldsFormId;
 
       // Create or update form for custom fields
       // Update if there are custom fields OR if there's an existing form (to handle deletions)
       if (customFields.length > 0 || existingFormId) {
         if (existingFormId) {
-          // Update existing form (this will also delete fields not in the array)
-          zero.mutate(
+          const formUpdateResult = zero.mutate(
             mutators.form.update({
               formId: existingFormId,
+              projectId,
               formDescription: `Custom fields for ${boardName || 'board'}`,
               fields: customFields.map(f => ({
-                id: f.id, // Include existing field ID for updates
+                id: f.id ?? uuidv4(),
+                membershipId: f.membershipId ?? uuidv4(),
                 fieldName: f.name,
                 fieldType: mapToFormFieldType(f.type),
                 ...(f.options && f.options.length > 0 && { fieldEnum: f.options }),
@@ -1031,7 +1073,15 @@ const BoardEditScreen = ({
               timestamp: Date.now(),
             }),
           );
-          customFieldsFormId = existingFormId;
+          const formUpdateRes = await formUpdateResult.server;
+          if (formUpdateRes.type === 'error') {
+            toast.error('Failed to update custom fields', {
+              description: formUpdateRes.error.message,
+              duration: 5000,
+            });
+            return;
+          }
+          nextCustomFieldsFormId = existingFormId;
         } else if (customFields.length > 0) {
           // Create new form via API (only if there are fields and no existing form)
           const formResponse = await formService.createForm({
@@ -1039,7 +1089,9 @@ const BoardEditScreen = ({
             formDescription: `Custom fields for ${boardName || 'board'}`,
             contextType: FormContextType.BOARD,
             entityType: FormEntityType.TICKET,
+            projectId,
             fields: customFields.map(f => ({
+              ...(f.id && { id: f.id }),
               fieldName: f.name,
               fieldType: mapToFormFieldType(f.type),
               ...(f.options && f.options.length > 0 && { fieldEnum: f.options }),
@@ -1047,7 +1099,7 @@ const BoardEditScreen = ({
             })),
           });
 
-          customFieldsFormId = formResponse.id;
+          nextCustomFieldsFormId = formResponse.id;
 
           // Create form context mapping
           zero.mutate(
@@ -1055,7 +1107,7 @@ const BoardEditScreen = ({
               contextId: boardId,
               contextType: FormContextType.BOARD,
               entityType: FormEntityType.TICKET,
-              formId: customFieldsFormId,
+              formId: nextCustomFieldsFormId,
               mappingId: uuidv4(),
             }),
           );
@@ -1068,7 +1120,7 @@ const BoardEditScreen = ({
         fieldOrder,
         ticketFormConfig,
         ...(!isNonLinearBoardData && { showNextStageFormInTicketDetails }),
-        ...(customFieldsFormId && { customFieldsFormId }),
+        ...(nextCustomFieldsFormId && { customFieldsFormId: nextCustomFieldsFormId }),
       };
 
       const mutatorArgs = {
@@ -1106,7 +1158,7 @@ const BoardEditScreen = ({
     onNext,
     zero,
     fields,
-    formMapping?.formId,
+    customFieldsFormId,
     mode,
     projectId,
     boardMetadata,
@@ -1158,476 +1210,558 @@ const BoardEditScreen = ({
   }
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
-        <header className='flex items-center justify-between px-[18px] py-4'>
-          <div className='flex items-center gap-2'>
-            <Button
-              onClick={() => (onBack ? onBack() : onClose())}
-              variant='ghost'
-              size='iconSm'
-              className='w-[16px] h-[16px] text-foreground hover:opacity-70'
-              data-track-category='BOARD_EDIT'
-              data-track-name='NAVIGATE_BACK'
-            >
-              <ChevronLeft size={16} />
-            </Button>
-            <span className='text-[16px] font-semibold text-foreground'>
-              Edit Board - {boardData?.name || 'Board'}
-            </span>
-          </div>
-          <div className='flex items-center gap-3'>
-            <Button variant='secondary' onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              className='bg-[#6276BE] hover:bg-[#5060A0] text-white'
-              onClick={() => void handleSave()}
-            >
-              Next
-            </Button>
-          </div>
-        </header>
-
-        <div className='flex-1 flex overflow-hidden'>
-          <div className='w-[50%] flex flex-col bg-background overflow-hidden'>
-            <div className='p-6 flex-shrink-0'>
-              <h2 className='text-[16px] font-semibold text-foreground'>Define Fields</h2>
-              <p className='text-[14px] text-xyne-gray-600 mt-1'>
-                Choose the fields needed in your tickets, arrange their order, and preview how
-                they&apos;ll appear.
-              </p>
+    <>
+      <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
+        <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
+          <header className='flex items-center justify-between px-[18px] py-4'>
+            <div className='flex items-center gap-2'>
+              <Button
+                onClick={() => (onBack ? onBack() : onClose())}
+                variant='ghost'
+                size='iconSm'
+                className='w-[16px] h-[16px] text-foreground hover:opacity-70'
+                data-track-category='BOARD_EDIT'
+                data-track-name='NAVIGATE_BACK'
+              >
+                <ChevronLeft size={16} />
+              </Button>
+              <span className='text-[16px] font-semibold text-foreground'>
+                Edit Board - {boardData?.name || 'Board'}
+              </span>
             </div>
+            <div className='flex items-center gap-3'>
+              <Button variant='secondary' onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                className='bg-[#6276BE] hover:bg-[#5060A0] text-white'
+                onClick={() => void handleSave()}
+              >
+                Next
+              </Button>
+            </div>
+          </header>
 
-            <div className='flex-1 overflow-y-auto p-6 space-y-6'>
-              <div className='mt-2 pl-5'>
-                <input
-                  type='text'
-                  value={boardName}
-                  onChange={e => setBoardName(e.target.value)}
-                  className={`text-[22px] font-semibold bg-transparent border-none focus:outline-none focus:ring-0 p-0 w-full ${
-                    boardName ? 'text-foreground' : 'text-xyne-gray-300'
-                  } placeholder:text-muted-foreground/50 tracking-[-0.44px]`}
-                  placeholder='Enter Board Name'
-                  data-track-category='form'
-                  data-track-name='board-name-input'
-                />
+          <div className='flex-1 flex overflow-hidden'>
+            <div className='w-[50%] flex flex-col bg-background overflow-hidden'>
+              <div className='p-6 flex-shrink-0'>
+                <h2 className='text-[16px] font-semibold text-foreground'>Define Fields</h2>
+                <p className='text-[14px] text-xyne-gray-600 mt-1'>
+                  Choose the fields needed in your tickets, arrange their order, and preview how
+                  they&apos;ll appear.
+                </p>
               </div>
-              <div className='bg-background rounded-lg'>
-                <div className='divide'>
-                  {fields
-                    .sort((a, b) => a.order - b.order)
-                    .map(field => (
-                      <div key={field.id}>
-                        {editingFieldId === field.id ? (
-                          // Edit mode - use CustomField component
+
+              <div className='flex-1 overflow-y-auto p-6 space-y-6'>
+                <div className='mt-2 pl-5'>
+                  <input
+                    type='text'
+                    value={boardName}
+                    onChange={e => setBoardName(e.target.value)}
+                    className={`text-[22px] font-semibold bg-transparent border-none focus:outline-none focus:ring-0 p-0 w-full ${
+                      boardName ? 'text-foreground' : 'text-xyne-gray-300'
+                    } placeholder:text-muted-foreground/50 tracking-[-0.44px]`}
+                    placeholder='Enter Board Name'
+                    data-track-category='form'
+                    data-track-name='board-name-input'
+                  />
+                </div>
+                <div className='bg-background rounded-lg'>
+                  <div className='divide'>
+                    {fields
+                      .sort((a, b) => a.order - b.order)
+                      .map(field => (
+                        <div key={field.id}>
+                          {editingFieldId === field.id ? (
+                            // Edit mode - use CustomField component
+                            <CustomField
+                              mode='edit'
+                              field={field}
+                              projectId={projectId}
+                              onSave={updatedField => {
+                                setFields(prev =>
+                                  prev.map(f => {
+                                    if (f.id !== field.id) return f;
+
+                                    const nextFieldId = updatedField.id ?? uuidv4();
+                                    const identityChanged = nextFieldId !== field.id;
+                                    const nextField: TicketField = {
+                                      ...f,
+                                      ...updatedField,
+                                      id: nextFieldId,
+                                      ...(identityChanged ? { membershipId: uuidv4() } : {}),
+                                    };
+
+                                    if (updatedField.options) {
+                                      return nextField;
+                                    }
+
+                                    const { options: _removed, ...fieldWithoutOptions } = nextField;
+                                    return fieldWithoutOptions;
+                                  }),
+                                );
+                                setEditingFieldId(null);
+                                setNewFieldName('');
+                                setNewFieldType('text');
+                                setNewFieldRequired(false);
+                                setNewFieldOptions([]);
+                              }}
+                              onCancel={() => {
+                                setEditingFieldId(null);
+                                setNewFieldName('');
+                                setNewFieldType('text');
+                                setNewFieldRequired(false);
+                                setNewFieldOptions([]);
+                              }}
+                            />
+                          ) : (
+                            // Normal view mode
+                            <div
+                              draggable
+                              onDragStart={() => handleDragStart(field.id)}
+                              onDragOver={e => handleDragOver(e, field.id)}
+                              onDragEnd={handleDragEnd}
+                              onMouseEnter={() => setHoveredFieldId(field.id)}
+                              onMouseLeave={() => setHoveredFieldId(null)}
+                              onKeyDown={() => {}}
+                              role='button'
+                              tabIndex={0}
+                              onClick={e => {
+                                // Make entire row clickable for custom fields
+                                if (!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)) {
+                                  // Only trigger if clicking on the row background, not on interactive elements
+                                  const target = e.target as HTMLElement;
+                                  if (
+                                    target.tagName !== 'BUTTON' &&
+                                    target.tagName !== 'INPUT' &&
+                                    target.tagName !== 'SPAN' &&
+                                    !target.closest('button')
+                                  ) {
+                                    e.stopPropagation();
+                                    startEditField(field);
+                                  }
+                                }
+                              }}
+                              className={`flex items-center gap-3 px-4 py-2 transition-colors rounded-[12px] ${
+                                isDragging === field.id
+                                  ? 'bg-muted opacity-50'
+                                  : hoveredFieldId === field.id
+                                    ? 'bg-muted'
+                                    : ''
+                              } ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer' : 'cursor-move'}`}
+                              data-track-category='form'
+                              data-track-name='field-row'
+                            >
+                              {/* Grip icon - visible only on hover, but space is reserved */}
+                              <div className='w-4 flex-shrink-0'>
+                                {hoveredFieldId === field.id && (
+                                  <GripVertical size={16} className='text-xyne-gray-300' />
+                                )}
+                              </div>
+                              <div className='flex-1 flex items-center gap-3'>
+                                {editingFieldLabelId === field.id ? (
+                                  <div className='flex items-center min-w-[150px] flex-shrink-0'>
+                                    <input
+                                      ref={editLabelInputRef}
+                                      type='text'
+                                      value={editLabelValue}
+                                      onChange={e => setEditLabelValue(e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          saveFieldLabel();
+                                        } else if (e.key === 'Escape') {
+                                          cancelEditFieldLabel();
+                                        }
+                                      }}
+                                      onBlur={saveFieldLabel}
+                                      className='font-medium text-muted-foreground text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-none focus:ring-0'
+                                      data-track-category='board_edit'
+                                      data-track-name='edit_label_input'
+                                    />
+                                    {field.required && (
+                                      <span className='text-[#ff4f4f] ml-1'>*</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <button
+                                    type='button'
+                                    onClick={e => {
+                                      if (!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)) {
+                                        e.stopPropagation();
+                                        startEditFieldLabel(field);
+                                      }
+                                    }}
+                                    className={`font-medium text-muted-foreground text-[14px] leading-[20px] min-w-[150px] flex-shrink-0 text-left bg-transparent border-0 p-0 ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer hover:text-foreground' : ''}`}
+                                    disabled={DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)}
+                                    data-track-category='board_edit'
+                                    data-track-name='edit_field_label'
+                                  >
+                                    {field.label}
+                                    {field.required && (
+                                      <span className='text-[#ff4f4f] ml-1'>*</span>
+                                    )}
+                                  </button>
+                                )}
+                                <button
+                                  type='button'
+                                  className={`w-[140px] shrink-0 text-left ${
+                                    DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) &&
+                                    field.name !== 'assignedTo'
+                                      ? 'bg-muted text-muted-foreground'
+                                      : field.name === 'assignedTo'
+                                        ? 'cursor-pointer'
+                                        : 'cursor-pointer'
+                                  }`}
+                                  onClick={e => {
+                                    if (
+                                      !DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ||
+                                      field.name === 'assignedTo'
+                                    ) {
+                                      e.stopPropagation();
+                                      if (field.name === 'assignedTo') {
+                                        setAssigneeTypeDropdownOpen(!assigneeTypeDropdownOpen);
+                                      } else {
+                                        startEditField(field);
+                                      }
+                                    }
+                                  }}
+                                  disabled={
+                                    DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) &&
+                                    field.name !== 'assignedTo'
+                                  }
+                                  data-track-category='board_edit'
+                                  data-track-name='edit_field_type'
+                                >
+                                  {field.name === 'assignedTo' ? (
+                                    <div className='relative' ref={assigneeTypeDropdownRef}>
+                                      <div className='h-8 w-[140px] rounded-md border border-input bg-background px-3 py-1.5 text-[13px] flex items-center justify-between'>
+                                        <span>
+                                          {assigneeType === 'user' ? 'User' : 'User Group'}
+                                        </span>
+                                        <ChevronDown className='h-4 w-4 text-muted-foreground' />
+                                      </div>
+                                      {assigneeTypeDropdownOpen && (
+                                        <div className='absolute top-full left-0 mt-1 w-[140px] bg-background border border-input rounded-md shadow-lg z-50 overflow-hidden'>
+                                          <Button
+                                            variant='ghost'
+                                            size='sm'
+                                            onClick={e => {
+                                              e.stopPropagation();
+                                              setAssigneeType('user');
+                                              setAssigneeTypeDropdownOpen(false);
+                                            }}
+                                            className='w-full justify-start px-3 py-2 text-[13px] hover:bg-muted'
+                                            data-track-category='board_edit'
+                                            data-track-name='select_assignee_type_user'
+                                          >
+                                            <span>User</span>
+                                            {assigneeType === 'user' && (
+                                              <Check className='h-4 w-4 ml-auto' />
+                                            )}
+                                          </Button>
+                                          <Button
+                                            variant='ghost'
+                                            size='sm'
+                                            onClick={e => {
+                                              e.stopPropagation();
+                                              setAssigneeType('userGroup');
+                                              setAssigneeTypeDropdownOpen(false);
+                                            }}
+                                            className='w-full justify-start px-3 py-2 text-[13px] hover:bg-muted'
+                                            data-track-category='board_edit'
+                                            data-track-name='select_assignee_type_user_group'
+                                          >
+                                            <span>User Group</span>
+                                            {assigneeType === 'userGroup' && (
+                                              <Check className='h-4 w-4 ml-auto' />
+                                            )}
+                                          </Button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div
+                                      className={`h-8 w-[140px] rounded-md border border-input px-3 py-1.5 text-[13px] flex items-center justify-between ${
+                                        DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)
+                                          ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                                          : 'bg-background text-foreground cursor-pointer hover:bg-muted'
+                                      }`}
+                                    >
+                                      <span>{getFieldTypeLabel(field.type)}</span>
+                                      <ChevronDown className='h-4 w-4 text-muted-foreground' />
+                                    </div>
+                                  )}
+                                </button>
+                              </div>
+
+                              {/* Hover controls - Required toggle and Delete button - space always reserved */}
+                              {/* Hide Required toggle for mandatory fields: board, project, channel, status, priority */}
+                              <div
+                                className={`flex items-center gap-2 ${hoveredFieldId === field.id ? 'visible' : 'invisible'}`}
+                              >
+                                {!['status', 'priority'].includes(field.name) && (
+                                  <div className='flex items-center gap-2'>
+                                    <span className='text-[13px] text-[#505b62] leading-[18px] tracking-[-0.2px]'>
+                                      Required
+                                    </span>
+                                    <button
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setFields(prev =>
+                                          prev.map(f => {
+                                            if (f.id === field.id) {
+                                              return {
+                                                ...f,
+                                                required: !f.required,
+                                                visibleInCreate: !f.required
+                                                  ? true
+                                                  : f.visibleInCreate,
+                                              };
+                                            }
+                                            return f;
+                                          }),
+                                        );
+                                      }}
+                                      className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
+                                        field.required ? 'bg-[#6276BE]' : 'bg-gray-600'
+                                      }`}
+                                      data-track-category='form'
+                                      data-track-name='required-toggle-hover'
+                                    >
+                                      <span
+                                        className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
+                                          field.required ? 'translate-x-[10px]' : 'translate-x-0'
+                                        }`}
+                                      />
+                                    </button>
+                                  </div>
+                                )}
+
+                                {/* Show in Create toggle - for fields that can be hidden in create modal */}
+                                {[
+                                  'dueDate',
+                                  'assignedTo',
+                                  'workflowType',
+                                  'merchantId',
+                                  'tags',
+                                  'ticketType',
+                                ].includes(field.name) && (
+                                  <div
+                                    className='flex items-center gap-2'
+                                    title='Shown when creating a ticket; field remains available for stage transition forms'
+                                  >
+                                    <span className='text-[13px] text-[#505b62] leading-[18px] tracking-[-0.2px]'>
+                                      Show in Create
+                                    </span>
+                                    <button
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setFields(prev =>
+                                          prev.map(f => {
+                                            if (f.id === field.id) {
+                                              return {
+                                                ...f,
+                                                visibleInCreate: !f.visibleInCreate,
+                                                required: !f.visibleInCreate ? f.required : false,
+                                              };
+                                            }
+                                            return f;
+                                          }),
+                                        );
+                                      }}
+                                      className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
+                                        field.visibleInCreate ? 'bg-[#6276BE]' : 'bg-gray-600'
+                                      }`}
+                                      data-track-category='form'
+                                      data-track-name='show-in-create-toggle'
+                                    >
+                                      <span
+                                        className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
+                                          field.visibleInCreate
+                                            ? 'translate-x-[10px]'
+                                            : 'translate-x-0'
+                                        }`}
+                                      />
+                                    </button>
+                                  </div>
+                                )}
+
+                                {!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) && (
+                                  <div
+                                    className='flex items-center gap-2'
+                                    title='Shown when creating a ticket; field remains available for stage transition forms'
+                                  >
+                                    <span className='text-[13px] text-[#505b62] leading-[18px] tracking-[-0.2px]'>
+                                      Show in Create
+                                    </span>
+                                    <button
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setFields(prev =>
+                                          prev.map(f => {
+                                            if (f.id === field.id) {
+                                              return {
+                                                ...f,
+                                                visibleInCreate: !f.visibleInCreate,
+                                                required: !f.visibleInCreate ? f.required : false,
+                                              };
+                                            }
+                                            return f;
+                                          }),
+                                        );
+                                      }}
+                                      className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
+                                        field.visibleInCreate ? 'bg-[#6276BE]' : 'bg-gray-600'
+                                      }`}
+                                      data-track-category='form'
+                                      data-track-name='show-in-create-toggle'
+                                    >
+                                      <span
+                                        className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
+                                          field.visibleInCreate
+                                            ? 'translate-x-[10px]'
+                                            : 'translate-x-0'
+                                        }`}
+                                      />
+                                    </button>
+                                  </div>
+                                )}
+
+                                {/* Show delete button only for custom fields */}
+                                {!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) && (
+                                  <>
+                                    <div className='w-[1px] h-[20px] bg-muted mx-1' />
+                                    <Button
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        void confirm({
+                                          title: 'Delete Board Field',
+                                          description: `Delete "${field.label}" from this board?`,
+                                          confirmLabel: 'Delete',
+                                          variant: 'destructive',
+                                        }).then(confirmed => {
+                                          if (!confirmed) return;
+                                          setFields(prev => prev.filter(f => f.id !== field.id));
+                                        });
+                                      }}
+                                      variant='ghost'
+                                      size='iconSm'
+                                      className='w-6 h-6 text-muted-foreground hover:text-red-500'
+                                      data-track-category='form'
+                                      data-track-name='delete-field-hover'
+                                    >
+                                      <Trash2 size={16} />
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+
+                  {/* Inline Custom Field Creation */}
+                  {!editingFieldId && (
+                    <div>
+                      {isAddingField ? (
+                        <div ref={customFieldRef}>
                           <CustomField
-                            mode='edit'
-                            field={field}
-                            onSave={updatedField => {
-                              setFields(prev =>
-                                prev.map(f =>
-                                  f.id === field.id ? { ...f, ...updatedField, id: field.id } : f,
-                                ),
-                              );
-                              setEditingFieldId(null);
+                            mode='create'
+                            projectId={projectId}
+                            onSave={newField => {
+                              const membershipId = uuidv4();
+                              const reusedGlobalId = newField.id;
+                              const globalFieldId = reusedGlobalId ?? uuidv4();
+                              const field: TicketField = {
+                                ...newField,
+                                id: globalFieldId,
+                                membershipId,
+                                ...(reusedGlobalId ? {} : { globalFieldId }),
+                                order: fields.length + 1,
+                              };
+                              setFields(prev => [...prev, field]);
+                              setIsAddingField(false);
                               setNewFieldName('');
                               setNewFieldType('text');
                               setNewFieldRequired(false);
                               setNewFieldOptions([]);
                             }}
                             onCancel={() => {
-                              setEditingFieldId(null);
+                              setIsAddingField(false);
                               setNewFieldName('');
                               setNewFieldType('text');
                               setNewFieldRequired(false);
                               setNewFieldOptions([]);
                             }}
+                            existingFieldCount={fields.length}
                           />
-                        ) : (
-                          // Normal view mode
-                          <div
-                            draggable
-                            onDragStart={() => handleDragStart(field.id)}
-                            onDragOver={e => handleDragOver(e, field.id)}
-                            onDragEnd={handleDragEnd}
-                            onMouseEnter={() => setHoveredFieldId(field.id)}
-                            onMouseLeave={() => setHoveredFieldId(null)}
-                            onKeyDown={() => {}}
-                            role='button'
-                            tabIndex={0}
-                            onClick={e => {
-                              // Make entire row clickable for custom fields
-                              if (!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)) {
-                                // Only trigger if clicking on the row background, not on interactive elements
-                                const target = e.target as HTMLElement;
-                                if (
-                                  target.tagName !== 'BUTTON' &&
-                                  target.tagName !== 'INPUT' &&
-                                  target.tagName !== 'SPAN' &&
-                                  !target.closest('button')
-                                ) {
-                                  e.stopPropagation();
-                                  startEditField(field);
-                                }
-                              }
-                            }}
-                            className={`flex items-center gap-3 px-4 py-2 transition-colors rounded-[12px] ${
-                              isDragging === field.id
-                                ? 'bg-muted opacity-50'
-                                : hoveredFieldId === field.id
-                                  ? 'bg-muted'
-                                  : ''
-                            } ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer' : 'cursor-move'}`}
-                            data-track-category='form'
-                            data-track-name='field-row'
-                          >
-                            {/* Grip icon - visible only on hover, but space is reserved */}
-                            <div className='w-4 flex-shrink-0'>
-                              {hoveredFieldId === field.id && (
-                                <GripVertical size={16} className='text-xyne-gray-300' />
-                              )}
-                            </div>
-                            <div className='flex-1 flex items-center gap-3'>
-                              {editingFieldLabelId === field.id ? (
-                                <div className='flex items-center min-w-[150px] flex-shrink-0'>
-                                  <input
-                                    ref={editLabelInputRef}
-                                    type='text'
-                                    value={editLabelValue}
-                                    onChange={e => setEditLabelValue(e.target.value)}
-                                    onKeyDown={e => {
-                                      if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        saveFieldLabel();
-                                      } else if (e.key === 'Escape') {
-                                        cancelEditFieldLabel();
-                                      }
-                                    }}
-                                    onBlur={saveFieldLabel}
-                                    className='font-medium text-muted-foreground text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-none focus:ring-0'
-                                    data-track-category='board_edit'
-                                    data-track-name='edit_label_input'
-                                  />
-                                  {field.required && <span className='text-[#ff4f4f] ml-1'>*</span>}
-                                </div>
-                              ) : (
-                                <button
-                                  type='button'
-                                  onClick={e => {
-                                    if (!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)) {
-                                      e.stopPropagation();
-                                      startEditFieldLabel(field);
-                                    }
-                                  }}
-                                  className={`font-medium text-muted-foreground text-[14px] leading-[20px] min-w-[150px] flex-shrink-0 text-left bg-transparent border-0 p-0 ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer hover:text-foreground' : ''}`}
-                                  disabled={DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)}
-                                  data-track-category='board_edit'
-                                  data-track-name='edit_field_label'
-                                >
-                                  {field.label}
-                                  {field.required && <span className='text-[#ff4f4f] ml-1'>*</span>}
-                                </button>
-                              )}
-                              <button
-                                type='button'
-                                className={`w-[140px] shrink-0 text-left ${
-                                  DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) &&
-                                  field.name !== 'assignedTo'
-                                    ? 'bg-muted text-muted-foreground'
-                                    : field.name === 'assignedTo'
-                                      ? 'cursor-pointer'
-                                      : 'cursor-pointer'
-                                }`}
-                                onClick={e => {
-                                  if (
-                                    !DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ||
-                                    field.name === 'assignedTo'
-                                  ) {
-                                    e.stopPropagation();
-                                    if (field.name === 'assignedTo') {
-                                      setAssigneeTypeDropdownOpen(!assigneeTypeDropdownOpen);
-                                    } else {
-                                      startEditField(field);
-                                    }
-                                  }
-                                }}
-                                disabled={
-                                  DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) &&
-                                  field.name !== 'assignedTo'
-                                }
-                                data-track-category='board_edit'
-                                data-track-name='edit_field_type'
-                              >
-                                {field.name === 'assignedTo' ? (
-                                  <div className='relative' ref={assigneeTypeDropdownRef}>
-                                    <div className='h-8 w-[140px] rounded-md border border-input bg-background px-3 py-1.5 text-[13px] flex items-center justify-between'>
-                                      <span>{assigneeType === 'user' ? 'User' : 'User Group'}</span>
-                                      <ChevronDown className='h-4 w-4 text-muted-foreground' />
-                                    </div>
-                                    {assigneeTypeDropdownOpen && (
-                                      <div className='absolute top-full left-0 mt-1 w-[140px] bg-background border border-input rounded-md shadow-lg z-50 overflow-hidden'>
-                                        <Button
-                                          variant='ghost'
-                                          size='sm'
-                                          onClick={e => {
-                                            e.stopPropagation();
-                                            setAssigneeType('user');
-                                            setAssigneeTypeDropdownOpen(false);
-                                          }}
-                                          className='w-full justify-start px-3 py-2 text-[13px] hover:bg-muted'
-                                          data-track-category='board_edit'
-                                          data-track-name='select_assignee_type_user'
-                                        >
-                                          <span>User</span>
-                                          {assigneeType === 'user' && (
-                                            <Check className='h-4 w-4 ml-auto' />
-                                          )}
-                                        </Button>
-                                        <Button
-                                          variant='ghost'
-                                          size='sm'
-                                          onClick={e => {
-                                            e.stopPropagation();
-                                            setAssigneeType('userGroup');
-                                            setAssigneeTypeDropdownOpen(false);
-                                          }}
-                                          className='w-full justify-start px-3 py-2 text-[13px] hover:bg-muted'
-                                          data-track-category='board_edit'
-                                          data-track-name='select_assignee_type_user_group'
-                                        >
-                                          <span>User Group</span>
-                                          {assigneeType === 'userGroup' && (
-                                            <Check className='h-4 w-4 ml-auto' />
-                                          )}
-                                        </Button>
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div
-                                    className={`h-8 w-[140px] rounded-md border border-input px-3 py-1.5 text-[13px] flex items-center justify-between ${
-                                      DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)
-                                        ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                                        : 'bg-background text-foreground cursor-pointer hover:bg-muted'
-                                    }`}
-                                  >
-                                    <span>{getFieldTypeLabel(field.type)}</span>
-                                    <ChevronDown className='h-4 w-4 text-muted-foreground' />
-                                  </div>
-                                )}
-                              </button>
-                            </div>
+                        </div>
+                      ) : null}
 
-                            {/* Hover controls - Required toggle and Delete button - space always reserved */}
-                            {/* Hide Required toggle for mandatory fields: board, project, channel, status, priority */}
-                            <div
-                              className={`flex items-center gap-2 ${hoveredFieldId === field.id ? 'visible' : 'invisible'}`}
-                            >
-                              {!['status', 'priority'].includes(field.name) && (
-                                <div className='flex items-center gap-2'>
-                                  <span className='text-[13px] text-[#505b62] leading-[18px] tracking-[-0.2px]'>
-                                    Required
-                                  </span>
-                                  <button
-                                    onClick={e => {
-                                      e.stopPropagation();
-                                      setFields(prev =>
-                                        prev.map(f => {
-                                          if (f.id === field.id) {
-                                            return {
-                                              ...f,
-                                              required: !f.required,
-                                              visibleInCreate: !f.required
-                                                ? true
-                                                : f.visibleInCreate,
-                                            };
-                                          }
-                                          return f;
-                                        }),
-                                      );
-                                    }}
-                                    className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
-                                      field.required ? 'bg-[#6276BE]' : 'bg-gray-600'
-                                    }`}
-                                    data-track-category='form'
-                                    data-track-name='required-toggle-hover'
-                                  >
-                                    <span
-                                      className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
-                                        field.required ? 'translate-x-[10px]' : 'translate-x-0'
-                                      }`}
-                                    />
-                                  </button>
-                                </div>
-                              )}
-
-                              {/* Show in Create toggle - for fields that can be hidden in create modal */}
-                              {[
-                                'dueDate',
-                                'assignedTo',
-                                'workflowType',
-                                'merchantId',
-                                'tags',
-                                'ticketType',
-                              ].includes(field.name) && (
-                                <div className='flex items-center gap-2'>
-                                  <span className='text-[13px] text-[#505b62] leading-[18px] tracking-[-0.2px]'>
-                                    Show in Create
-                                  </span>
-                                  <button
-                                    onClick={e => {
-                                      e.stopPropagation();
-                                      setFields(prev =>
-                                        prev.map(f => {
-                                          if (f.id === field.id) {
-                                            const newVisibleInCreate = !f.visibleInCreate;
-                                            // If hiding the field, it cannot be required
-                                            return {
-                                              ...f,
-                                              visibleInCreate: newVisibleInCreate,
-                                              required: newVisibleInCreate ? f.required : false,
-                                            };
-                                          }
-                                          return f;
-                                        }),
-                                      );
-                                    }}
-                                    className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
-                                      field.visibleInCreate ? 'bg-[#6276BE]' : 'bg-gray-600'
-                                    }`}
-                                    data-track-category='form'
-                                    data-track-name='show-in-create-toggle'
-                                  >
-                                    <span
-                                      className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
-                                        field.visibleInCreate
-                                          ? 'translate-x-[10px]'
-                                          : 'translate-x-0'
-                                      }`}
-                                    />
-                                  </button>
-                                </div>
-                              )}
-
-                              {/* Show delete button only for custom fields */}
-                              {!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) && (
-                                <>
-                                  <div className='w-[1px] h-[20px] bg-muted mx-1' />
-                                  <Button
-                                    onClick={e => {
-                                      e.stopPropagation();
-                                      setFields(prev => prev.filter(f => f.id !== field.id));
-                                    }}
-                                    variant='ghost'
-                                    size='iconSm'
-                                    className='w-6 h-6 text-muted-foreground hover:text-red-500'
-                                    data-track-category='form'
-                                    data-track-name='delete-field-hover'
-                                  >
-                                    <Trash2 size={16} />
-                                  </Button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        )}
+                      {/* + Custom Field button */}
+                      <div className='px-4 py-3'>
+                        <Button
+                          onClick={() => setIsAddingField(true)}
+                          variant='ghost'
+                          size='sm'
+                          className='flex items-center gap-2 text-xyne-primary-600 hover:text-xyne-primary-700 font-medium'
+                          data-track-category='form'
+                          data-track-name='add-custom-field'
+                        >
+                          <Plus size={16} />
+                          Custom Field
+                        </Button>
                       </div>
-                    ))}
-                </div>
-
-                {/* Inline Custom Field Creation */}
-                {!editingFieldId && (
-                  <div>
-                    {isAddingField ? (
-                      <div ref={customFieldRef}>
-                        <CustomField
-                          mode='create'
-                          onSave={newField => {
-                            const field: TicketField = {
-                              ...newField,
-                              id: uuidv4(),
-                              order: fields.length + 1,
-                            };
-                            setFields(prev => [...prev, field]);
-                            setIsAddingField(false);
-                            setNewFieldName('');
-                            setNewFieldType('text');
-                            setNewFieldRequired(false);
-                            setNewFieldOptions([]);
-                          }}
-                          onCancel={() => {
-                            setIsAddingField(false);
-                            setNewFieldName('');
-                            setNewFieldType('text');
-                            setNewFieldRequired(false);
-                            setNewFieldOptions([]);
-                          }}
-                          existingFieldCount={fields.length}
-                        />
-                      </div>
-                    ) : null}
-
-                    {/* + Custom Field button */}
-                    <div className='px-4 py-3'>
-                      <Button
-                        onClick={() => setIsAddingField(true)}
-                        variant='ghost'
-                        size='sm'
-                        className='flex items-center gap-2 text-xyne-primary-600 hover:text-xyne-primary-700 font-medium'
-                        data-track-category='form'
-                        data-track-name='add-custom-field'
-                      >
-                        <Plus size={16} />
-                        Custom Field
-                      </Button>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Right Panel - Preview */}
-          <TicketPreviewPanel
-            onClose={() => {}}
-            trackCategory='BOARD_EDIT'
-            ticketPreviewContent={
-              <TicketPreviewContent
-                boardId={boardId || ''}
-                ticket={{
-                  title: `Sample ticket in ${boardName || 'Board'}`,
-                  description:
-                    'This is a sample ticket description showing how tickets will look in this board. Users can add detailed descriptions, attachments, and links here.',
-                  status: 'Open',
-                  statusV2: TicketStatusV2.TODO,
-                  priority: TicketPriority.MEDIUM,
-                  assignee: 'Neha Joshi',
-                  assigneeAvatar: 'NJ',
-                  dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(
-                    'en-US',
-                    {
-                      day: '2-digit',
-                      month: 'short',
-                      year: 'numeric',
-                    },
-                  ),
-                  createdBy: 'Neha Joshi',
-                  channel: 'Support',
-                }}
-                fields={mapToPreviewFields(filterFieldsForPreview(fields, ticketFormConfig))}
-              />
-            }
-            createTicketContent={
-              <CreateTicketModal
-                boardId={boardId || ''}
-                fields={mapToCreateModalFields(filterFieldsForPreview(fields, ticketFormConfig))}
-              />
-            }
-          />
+            {/* Right Panel - Preview */}
+            <TicketPreviewPanel
+              onClose={() => {}}
+              trackCategory='BOARD_EDIT'
+              ticketPreviewContent={
+                <TicketPreviewContent
+                  boardId={boardId || ''}
+                  ticket={{
+                    title: `Sample ticket in ${boardName || 'Board'}`,
+                    description:
+                      'This is a sample ticket description showing how tickets will look in this board. Users can add detailed descriptions, attachments, and links here.',
+                    status: 'Open',
+                    statusV2: TicketStatusV2.TODO,
+                    priority: TicketPriority.MEDIUM,
+                    assignee: 'Neha Joshi',
+                    assigneeAvatar: 'NJ',
+                    dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(
+                      'en-US',
+                      {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                      },
+                    ),
+                    createdBy: 'Neha Joshi',
+                    channel: 'Support',
+                  }}
+                  fields={mapToPreviewFields(filterFieldsForPreview(fields, ticketFormConfig))}
+                />
+              }
+              createTicketContent={
+                <CreateTicketModal
+                  boardId={boardId || ''}
+                  fields={mapToCreateModalFields(filterFieldsForPreview(fields, ticketFormConfig))}
+                />
+              }
+            />
+          </div>
         </div>
       </div>
-    </div>
+      <ConfirmDialog />
+    </>
   );
 };
 

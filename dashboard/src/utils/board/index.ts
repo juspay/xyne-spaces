@@ -34,6 +34,11 @@ export {
 } from './boardEditUtils';
 
 export {
+  resolveDisplayFormFields,
+  type ResolvedDisplayFormField,
+} from './resolveDisplayFormFields';
+
+export {
   MAX_FIELD_OPTIONS,
   parseBulkOptions,
   normalizeFieldOptions,

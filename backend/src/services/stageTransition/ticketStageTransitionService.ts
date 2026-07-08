@@ -12,6 +12,7 @@ import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { FormEntityType } from '@xyne/shared';
+import { formService } from '@/services/formService';
 import { decideVisitVersion, foldFormRowsToValues } from './visitVersioning';
 
 const prisma = DatabaseClient.getInstance();
@@ -351,9 +352,16 @@ export class TicketStageTransitionService {
             });
             const formFieldsForVersioning = await tx.formFields.findMany({
               where: { formId: transition.formId },
+              include: { globalField: true },
             });
             const fieldIdToName = new Map(
-              formFieldsForVersioning.map(f => [f.id, f.fieldName]),
+              formFieldsForVersioning
+                .map(f => {
+                  const resolvedId = f.globalFieldId ?? f.id;
+                  const name = f.globalField?.fieldName ?? f.fieldName;
+                  return name ? ([resolvedId, name] as const) : null;
+                })
+                .filter((entry): entry is readonly [string, string] => entry !== null),
             );
             // latestValues = the prior visit's submission, at version === maxVisitIndex.
             const atMax = priorRows.filter(r => (r.version ?? 1) === maxVisitIndex);
@@ -497,11 +505,9 @@ export class TicketStageTransitionService {
     version: number,
     formValues: Record<string, any>,
   ): Promise<void> {
-    const formFields = await tx.formFields.findMany({
-      where: { formId },
-    });
+    const resolvedFields = await formService.resolveFormFieldsForFormId(formId);
 
-    if (formFields.length === 0) {
+    if (resolvedFields.length === 0) {
       logger.warn(
         `[TicketStageTransitionService] No fields found for form ${formId}; skipping form value persistence`,
       );
@@ -510,7 +516,7 @@ export class TicketStageTransitionService {
 
     const entries = [];
     for (const [fieldName, value] of Object.entries(formValues)) {
-      const field = formFields.find((f) => f.fieldName === fieldName);
+      const field = resolvedFields.find(f => f.fieldName === fieldName);
       if (!field) continue;
 
       entries.push({

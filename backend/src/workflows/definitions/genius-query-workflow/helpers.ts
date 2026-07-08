@@ -30,6 +30,7 @@ import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import type { BoardMetadata } from '@xyne/shared';
 import {logger} from '@/utils/logger';
+import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
 const prisma = DatabaseClient.getInstance();
@@ -244,14 +245,10 @@ export const storeCategorizationInForms = async (
       'Zoho Ticket Id': categorization['Ticket Id'],
     };
 
-    const formFields = await prisma.formFields.findMany({
-      where: {
-        formId: formMapping.formId,
-        fieldName: {
-          in: Object.keys(fieldsToStore),
-        },
-      },
-    });
+    const fieldNamesToStore = new Set(Object.keys(fieldsToStore));
+    const formFields = (
+      await resolveFormFieldDefinitionsForForm(prisma, formMapping.formId)
+    ).filter(field => fieldNamesToStore.has(field.fieldName));
 
     if (formFields.length === 0) {
       logger.info(`[storeCategorizationInForms] No categorization fields found in form: ${formMapping.formId}`);

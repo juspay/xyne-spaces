@@ -2180,15 +2180,31 @@ export const formContextMappingTable = table('forms_context_mapping')
   })
   .primaryKey('id');
 
-export const formFieldsTable = table('form_fields')
+// Project-scoped reusable field definitions. All new field definitions live here.
+export const globalFieldsTable = table('global_fields') // Prisma model: GlobalField
   .columns({
     id: string(),
-    formId: string(),
+    projectId: string(),
     fieldName: string(),
     fieldType: enumeration<FormFieldType>(),
     fieldEnum: json().optional(),
-    isOptional: boolean().optional(),
-    sequenceNumber: number(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+// Per-form field membership. New rows point at global_fields via globalFieldId.
+// Legacy (deployed) rows carry their own definition columns (globalFieldId = null).
+export const formFieldsTable = table('form_fields') // Prisma model: FormFields
+  .columns({
+    id: string(),
+    formId: string(),
+    globalFieldId: string().optional(), // definition in global_fields (null for legacy rows)
+    fieldName: string().optional(), // DEPRECATED: legacy definition only
+    fieldType: enumeration<FormFieldType>().optional(), // DEPRECATED: legacy definition only
+    fieldEnum: json().optional(), // DEPRECATED: legacy definition only
+    isOptional: boolean().optional(), // per-form optional
+    sequenceNumber: number().optional(), // per-form order
     createdAt: number(),
     updatedAt: number(),
   })
@@ -3058,6 +3074,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     sourceField: ['id'],
     destField: ['projectId'],
     destSchema: boardTable,
+  }),
+  globalFields: many({
+    sourceField: ['id'],
+    destField: ['projectId'],
+    destSchema: globalFieldsTable,
   }),
   channels: many({
     sourceField: ['id'],
@@ -4491,11 +4512,30 @@ export const formContextMappingTableRelationships = relationships(formContextMap
   }),
 }));
 
+export const globalFieldsTableRelationships = relationships(globalFieldsTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
+  }),
+  formFields: many({
+    sourceField: ['id'],
+    destField: ['globalFieldId'],
+    destSchema: formFieldsTable,
+  }),
+}));
+
 export const formFieldsTableRelationships = relationships(formFieldsTable, ({ one, many }) => ({
   form: one({
     sourceField: ['formId'],
     destField: ['id'],
     destSchema: formTable,
+  }),
+  // Definition for new (non-legacy) membership rows.
+  globalField: one({
+    sourceField: ['globalFieldId'],
+    destField: ['id'],
+    destSchema: globalFieldsTable,
   }),
   formEntityValues: many({
     sourceField: ['id'],
@@ -4505,10 +4545,18 @@ export const formFieldsTableRelationships = relationships(formFieldsTable, ({ on
 }));
 
 export const formEntityValuesTableRelationships = relationships(formEntityValuesTable, ({ one, many }) => ({
+  // Legacy definition lookup (fieldId = form_fields.id).
   formField: one({
     sourceField: ['fieldId'],
     destField: ['id'],
     destSchema: formFieldsTable,
+  }),
+  // New definition lookup (fieldId = global_fields.id). Only one of formField/globalField
+  // resolves per row; consumers coalesce.
+  globalField: one({
+    sourceField: ['fieldId'],
+    destField: ['id'],
+    destSchema: globalFieldsTable,
   }),
   form: one({
     sourceField: ['formId'],
@@ -4838,6 +4886,7 @@ export const schema = createSchema({
     boardSlaPolicyTable,
     formTable,
     formContextMappingTable,
+    globalFieldsTable,
     formFieldsTable,
     formEntityValuesTable,
     stageApproversTable,
@@ -4958,6 +5007,7 @@ export const schema = createSchema({
     boardSlaPolicyTableRelationships,
     formTableRelationships,
     formContextMappingTableRelationships,
+    globalFieldsTableRelationships,
     formFieldsTableRelationships,
     formEntityValuesTableRelationships,
     ticketStageRequestTableRelationships,
@@ -5080,6 +5130,7 @@ export type ClassificationMapping = Row<typeof schema.tables.classification_mapp
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
 export type FormFields = Row<typeof schema.tables.form_fields>;
+export type GlobalField = Row<typeof schema.tables.global_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type TicketStageRequest = Row<typeof schema.tables.ticket_stage_requests>;

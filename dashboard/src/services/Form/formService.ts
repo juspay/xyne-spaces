@@ -3,8 +3,8 @@ import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
 export interface CreateFormField {
   fieldId?: string;
-  fieldName: string;
-  fieldType: FormFieldType;
+  fieldName?: string;
+  fieldType?: FormFieldType;
   fieldEnum?: string[];
   isOptional?: boolean | undefined;
 }
@@ -14,11 +14,20 @@ export interface CreateFormRequest {
   formDescription?: string;
   contextType: FormContextType;
   entityType: FormEntityType;
+  projectId?: string;
   fields: CreateFormField[];
 }
 
 export interface UpdateFormRequest extends CreateFormRequest {
   formId: string;
+}
+
+export interface GlobalFieldListResult {
+  id: string;
+  projectId: string;
+  fieldName: string;
+  fieldType: FormFieldType;
+  fieldEnum: string[] | null;
 }
 
 export interface CreateFormResponse {
@@ -44,6 +53,28 @@ export interface FormFieldResponse {
   updatedAt: number;
 }
 
+export interface LinkedFormFieldResponse {
+  id: string;
+  formId: string;
+  fieldId: string;
+  sequenceNumber: number;
+  isOptional: boolean | null;
+  createdAt: number;
+  updatedAt: number;
+  field: FormFieldResponse;
+}
+
+export interface ResolvedFormFieldResponse {
+  id: string;
+  formId: string;
+  fieldName: string;
+  fieldType: FormFieldType;
+  fieldEnum: string[] | null;
+  isOptional: boolean;
+  sequenceNumber: number;
+  linkId?: string;
+}
+
 export interface FormDetailResponse {
   id: string;
   formName: string;
@@ -54,6 +85,8 @@ export interface FormDetailResponse {
   createdAt: number;
   updatedAt: number;
   fields: FormFieldResponse[];
+  linkedFields?: LinkedFormFieldResponse[];
+  resolvedFields?: ResolvedFormFieldResponse[];
 }
 
 export class FormService {
@@ -64,6 +97,15 @@ export class FormService {
 
   async getFormById(formId: string): Promise<FormDetailResponse> {
     const response = await apiInstance.get<FormDetailResponse>(`/forms/${formId}`);
+    return response.data;
+  }
+
+  async getGlobalFields(params: { projectId: string }): Promise<GlobalFieldListResult[]> {
+    const response = await apiInstance.get<GlobalFieldListResult[]>('/forms/global-fields', {
+      params: {
+        projectId: params.projectId,
+      },
+    });
     return response.data;
   }
 

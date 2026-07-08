@@ -12,6 +12,7 @@ import {
   isValidFormEntityType,
 } from './types';
 import { PrismaFieldType, getFieldMetadata, getModelFields, hasField } from './genericFieldRegistry';
+import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
 
 const MAX_QUERY_LIMIT = 10000;
 const QUERY_TIMEOUT = 30000;
@@ -301,15 +302,14 @@ export class GenericQueryBuilder {
     };
     collectFieldIds(customFieldFilters);
 
-    // Fetch field types for proper JSON casting
-    const formFields = await withTimeout(
-      this.prisma.formFields.findMany({
-        where: { id: { in: Array.from(fieldIds) } },
-        select: { id: true, fieldType: true },
-      })
+    // Fetch field types for proper JSON casting (resolved across global + legacy definitions)
+    const definitions = await withTimeout(
+      resolveFieldDefinitionsByIds(this.prisma, Array.from(fieldIds)),
     );
 
-    const fieldTypeMap = new Map(formFields.map(f => [f.id, f.fieldType]));
+    const fieldTypeMap = new Map(
+      Array.from(definitions.values()).map(d => [d.id, d.fieldType as string]),
+    );
 
     const formEntityWhere = this.buildFormEntityValuesWhere(customFieldFilters, entityType, fieldTypeMap);
 

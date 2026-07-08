@@ -820,7 +820,7 @@ export const queries = defineQueries({
       // All dynamic field filtering is done client-side via applyTicketFilters
       if (formEntityValueFieldIds && formEntityValueFieldIds.length > 0) {
         finalQuery = finalQuery.related('formEntityValues', fev =>
-          fev.where('fieldId', 'IN', formEntityValueFieldIds).related('formField'),
+          fev.where('fieldId', 'IN', formEntityValueFieldIds).related('formField').related('globalField'),
         );
       }
 
@@ -847,7 +847,7 @@ export const queries = defineQueries({
 
       if (args.formEntityValueFieldIds?.length) {
         finalQuery = finalQuery.related('formEntityValues', (fev: any) =>
-          fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField'),
+          fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField').related('globalField'),
         );
       }
 
@@ -874,7 +874,7 @@ export const queries = defineQueries({
 
       if (args.formEntityValueFieldIds?.length) {
         finalQuery = finalQuery.related('formEntityValues', (fev: any) =>
-          fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField'),
+          fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField').related('globalField'),
         );
       }
 
@@ -2882,7 +2882,7 @@ export const queries = defineQueries({
           .related('approvers')
           .related('formContextMappings', fcm => fcm.related('form')),
       )
-      .related('formContextMappings', mappingQuery => mappingQuery.related('formFields'))
+      .related('formContextMappings', mappingQuery => mappingQuery.related('formFields', q => q.related('globalField')))
       .one();
   }),
   // Full board detail for editing - includes prStatusMappings for stage PR status config.
@@ -2897,7 +2897,7 @@ export const queries = defineQueries({
           .related('prStatusMappings')
           .related('formContextMappings', fcm => fcm.related('form')),
       )
-      .related('formContextMappings', mappingQuery => mappingQuery.related('formFields'))
+      .related('formContextMappings', mappingQuery => mappingQuery.related('formFields', q => q.related('globalField')))
       .one();
   }),
   // Query for all ticket entity mappings
@@ -2993,7 +2993,7 @@ export const queries = defineQueries({
   ),
   getAllForms: defineQuery(() => {
     return zql.forms
-      .related('formFields')
+      .related('formFields', q => q.related('globalField'))
       .related('formContextMappings')
       .orderBy('createdAt', 'desc');
   }),
@@ -3004,7 +3004,11 @@ export const queries = defineQueries({
   // Query for form fields by form ID
   // Order by sequenceNumber first; fall back to createdAt for rows where all sequenceNumbers are 0 (e.g. legacy data before backfill)
   getFormFieldsByFormId: defineQuery(z.object({ formId: z.string() }), ({ args: { formId } }) => {
-    return zql.form_fields.where('formId', formId).orderBy('sequenceNumber', 'asc').orderBy('createdAt', 'asc');
+    return zql.form_fields
+      .where('formId', formId)
+      .related('globalField')
+      .orderBy('sequenceNumber', 'asc')
+      .orderBy('createdAt', 'asc');
   }),
   // Generic query to fetch all form fields (name and value) for a given entity
   getFormEntityValuesByEntityId: defineQuery(
@@ -3015,6 +3019,7 @@ export const queries = defineQueries({
       return zql.form_entity_values
         .where('entityId', entityId)
         .related('formField')
+        .related('globalField')
         .related('attachments')
         .orderBy('createdAt', 'asc');
     },
@@ -3025,7 +3030,7 @@ export const queries = defineQueries({
     ({ args: { contextType } }) => {
       return zql.forms
         .where('contextType', contextType)
-        .related('formFields')
+        .related('formFields', q => q.related('globalField'))
         .related('formContextMappings')
         .orderBy('createdAt', 'desc');
     },
@@ -3042,7 +3047,7 @@ export const queries = defineQueries({
         .where('contextId', contextId)
         .where('contextType', contextType)
         .where('entityType', entityType)
-        .related('formFields')
+        .related('formFields', q => q.related('globalField'))
         .one();
     },
   ),
@@ -3177,8 +3182,14 @@ export const queries = defineQueries({
             cmp('entityType', 'RELEASE_MIGRATION_FORM'),
           ),
         )
-        .whereExists('formField', q => q.where('fieldName', '!=', 'changeLog'))
-        .related('formField');
+        .where(({ or, exists }) =>
+          or(
+            exists('formField', q => q.where('fieldName', '!=', 'changeLog')),
+            exists('globalField', q => q.where('fieldName', '!=', 'changeLog')),
+          ),
+        )
+        .related('formField')
+        .related('globalField');
     },
   ),
 
@@ -3195,8 +3206,14 @@ export const queries = defineQueries({
             cmp('entityType', 'RELEASE_MIGRATION_FORM'),
           ),
         )
-        .whereExists('formField', q => q.where('fieldName', 'changeLog'))
-        .related('formField');
+        .where(({ or, exists }) =>
+          or(
+            exists('formField', q => q.where('fieldName', 'changeLog')),
+            exists('globalField', q => q.where('fieldName', 'changeLog')),
+          ),
+        )
+        .related('formField')
+        .related('globalField');
     },
   ),
 

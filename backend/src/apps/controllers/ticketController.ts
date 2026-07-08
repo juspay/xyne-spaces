@@ -29,6 +29,7 @@ import type { MerchantTicketListItem } from '../types';
 import { validateChannelIdsAccess } from '../middelware/channelValidation';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { generateKeyBetween } from 'fractional-indexing';
+import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import {
   fetchTicketInfoByIdentifier,
   normalizeCustomFieldValue,
@@ -251,16 +252,7 @@ const buildCustomFieldWritePayload = async (
     return undefined;
   }
 
-  const formFields = await prismaClient.formFields.findMany({
-    where: { formId: formMapping.formId },
-    select: {
-      id: true,
-      fieldName: true,
-      fieldType: true,
-      fieldEnum: true,
-      isOptional: true,
-    },
-  });
+  const formFields = await resolveFormFieldDefinitionsForForm(prismaClient, formMapping.formId);
 
   const fieldByName = new Map(formFields.map(field => [field.fieldName, field]));
   const unknownFields = Object.keys(normalizedInput).filter(fieldName => !fieldByName.has(fieldName));
@@ -345,16 +337,7 @@ const buildPartialCustomFieldWritePayload = async (
     return { validationErrors };
   }
 
-  const formFields = await prismaClient.formFields.findMany({
-    where: { formId: formMapping.formId },
-    select: {
-      id: true,
-      fieldName: true,
-      fieldType: true,
-      fieldEnum: true,
-      isOptional: true,
-    },
-  });
+  const formFields = await resolveFormFieldDefinitionsForForm(prismaClient, formMapping.formId);
 
   const fieldByName = new Map(formFields.map(field => [field.fieldName, field]));
 
@@ -1458,11 +1441,9 @@ export class TicketController {
         return;
       }
 
-      // Get the field by name
-      const field = await prismaClient.formFields.findFirst({
-        where: { formId: formMapping.formId, fieldName: fieldName },
-        select: { id: true, fieldName: true, fieldType: true, fieldEnum: true },
-      });
+      // Get the field by name (resolved across global + legacy definitions)
+      const resolvedFormFields = await resolveFormFieldDefinitionsForForm(prismaClient, formMapping.formId);
+      const field = resolvedFormFields.find(f => f.fieldName === fieldName);
 
       if (!field) {
         res.status(404).json({ error: `Field "${fieldName}" not found`, code: 'FIELD_NOT_FOUND' });

@@ -5,6 +5,7 @@ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import { Checkbox } from '../../../ui/Checkbox/Checkbox';
 import { cn } from '../../../../utils/classNames';
+import { resolveDisplayFormFields } from '../../../../utils/board/resolveDisplayFormFields';
 
 interface TicketUpdatedFormFieldsSectionProps {
   boardIds: string[];
@@ -46,7 +47,7 @@ export function TicketUpdatedFormFieldsSection({
           ),
         );
         const fields = boardForms
-          .flatMap(f => f.formFields ?? [])
+          .flatMap(f => resolveDisplayFormFields(f.id, [...(f.formFields ?? [])]))
           .map(f => ({ id: f.id, fieldName: f.fieldName }))
           .filter((f, i, arr) => arr.findIndex(t => t.id === f.id) === i);
         return {

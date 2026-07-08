@@ -1,8 +1,17 @@
 import { randomUUID } from 'crypto';
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { BaseRepository } from './base';
-import { Form, FormFields, Prisma } from '@prisma/client';
+import { Form, FormFields, Prisma, PrismaClient, FormFieldType as PrismaFormFieldType } from '@prisma/client';
 import { logger } from '@/utils/logger';
+import {
+  assertNoNameCollisions,
+  FormFieldInput,
+  normalizeFormFieldInput,
+  resolveFormFields,
+  ResolvedFormField,
+  validateFormFieldInputs,
+} from '@/utils/formFieldResolution';
+import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
 
 export interface UpsertTicketFormFieldsResult {
   updatedFields: string[];
@@ -32,12 +41,34 @@ export interface CreateFormInput {
 }
 
 export interface CreateFormWithFieldsInput extends CreateFormInput {
+  projectId?: string;
   fields: Array<{
-    fieldName: string;
-    fieldType: FormFieldType;
+    fieldId?: string;
+    fieldName?: string;
+    fieldType?: FormFieldType;
     fieldEnum?: Prisma.InputJsonValue;
     isOptional?: boolean;
   }>;
+}
+
+export interface FormWithFieldsAndLinks extends Form {
+  /** Per-form membership rows (form_fields). */
+  fields: FormFields[];
+  resolvedFields: ResolvedFormField[];
+}
+
+export interface GlobalFieldListResult {
+  id: string;
+  projectId: string;
+  fieldName: string;
+  fieldType: PrismaFormFieldType;
+  fieldEnum: Prisma.JsonValue | null;
+}
+
+interface LocalFieldDefinitionInput {
+  fieldName: string;
+  fieldType: FormFieldType;
+  fieldEnum?: Prisma.InputJsonValue;
 }
 
 export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prisma.FormUpdateInput> {
@@ -74,27 +105,11 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
   async createWithFields(data: CreateFormWithFieldsInput): Promise<Form> {
     await this.validateString(data.formName, 'formName', 100);
 
-    // Validate that at least one field is provided
-    if (!data.fields || data.fields.length === 0) {
-      throw new Error('At least one field is required');
-    }
+    // Normalize + validate (duplicate input field IDs / duplicate local names).
+    const normalizedFields = data.fields.map(normalizeFormFieldInput);
+    validateFormFieldInputs(normalizedFields);
+    this.validateLocalFieldDefinitions(normalizedFields);
 
-    // Validate all fields have names
-    const invalidFields = data.fields.filter(field => !field.fieldName || !field.fieldName.trim());
-    if (invalidFields.length > 0) {
-      throw new Error('All fields must have a name');
-    }
-
-    // Validate all fields have valid field types
-    const validFieldTypes = Object.values(FormFieldType);
-    const invalidFieldTypes = data.fields.filter(field => !validFieldTypes.includes(field.fieldType));
-    if (invalidFieldTypes.length > 0) {
-      throw new Error(
-        `Invalid field type(s): ${invalidFieldTypes.map(f => f.fieldType).join(', ')}. Valid types: ${validFieldTypes.join(', ')}`
-      );
-    }
-
-    // Use transaction to create form and form fields together
     return await this.db.$transaction(async (tx) => {
       const form = await tx.form.create({
         data: {
@@ -107,18 +122,13 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         },
       });
 
-      // Create form fields
-      await tx.formFields.createMany({
-        data: data.fields.map((field, index) => ({
-          formId: form.id,
-          fieldName: field.fieldName.trim(),
-          fieldType: field.fieldType,
-          fieldEnum: field.fieldEnum,
-          isOptional: field.isOptional,
-          sequenceNumber: index + 1,
-        })),
+      const scopedProjectId = await this.resolveProjectIdForFormFields(tx, {
+        workspaceId: data.workspaceId,
+        projectId: data.projectId,
       });
 
+      await this.syncFormFields(tx, form.id, data.workspaceId, scopedProjectId, normalizedFields);
+      await this.assertResolvedFieldNameUniqueness(tx, form.id);
       return form;
     });
   }
@@ -152,18 +162,55 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     });
   }
 
-  /**
-   * Get form with fields by form ID
-   */
-  async findFormWithFields(id: string): Promise<(Form & { fields: FormFields[] }) | null> {
-    return await this.db.form.findUnique({
-      where: { id },
+  async findFormFields(formId: string): Promise<ResolvedFormField[]> {
+    const membershipRows = await this.db.formFields.findMany({
+      where: { formId },
+      orderBy: { sequenceNumber: 'asc' },
+    });
+
+    return await this.resolveMembershipRows(this.db, formId, membershipRows);
+  }
+
+  async findFormWithFields(formId: string): Promise<FormWithFieldsAndLinks | null> {
+    const form = await this.db.form.findUnique({
+      where: { id: formId },
       include: {
         fields: {
-          orderBy: {
-            sequenceNumber: 'asc',
-          },
+          orderBy: { sequenceNumber: 'asc' },
         },
+      },
+    });
+
+    if (!form) {
+      return null;
+    }
+
+    const resolvedFields = await this.resolveMembershipRows(this.db, form.id, form.fields);
+
+    return {
+      ...form,
+      resolvedFields,
+    };
+  }
+
+  async getGlobalFields(input: {
+    projectId: string;
+    workspaceId: string;
+  }): Promise<GlobalFieldListResult[]> {
+    return await this.db.globalField.findMany({
+      where: {
+        projectId: input.projectId,
+        project: {
+          workspaceId: input.workspaceId,
+        },
+      },
+      orderBy: [{ fieldName: 'asc' }, { fieldType: 'asc' }],
+      select: {
+        id: true,
+        projectId: true,
+        fieldName: true,
+        fieldType: true,
+        fieldEnum: true,
       },
     });
   }
@@ -176,10 +223,11 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     data: {
       formName: string;
       formDescription?: string;
+      projectId?: string;
       fields: Array<{
         fieldId?: string;
-        fieldName: string;
-        fieldType: FormFieldType;
+        fieldName?: string;
+        fieldType?: FormFieldType;
         fieldEnum?: Prisma.InputJsonValue;
         isOptional?: boolean;
       }>;
@@ -187,52 +235,20 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
   ): Promise<Form> {
     await this.validateString(data.formName, 'formName', 100);
 
-    // Validate that at least one field is provided
-    if (!data.fields || data.fields.length === 0) {
-      throw new Error('At least one field is required');
-    }
-
-    // Validate all fields have names
-    const invalidFields = data.fields.filter(field => !field.fieldName || !field.fieldName.trim());
-    if (invalidFields.length > 0) {
-      throw new Error('All fields must have a name');
-    }
-
-    // Validate all fields have valid field types
-    const validFieldTypes = Object.values(FormFieldType);
-    const invalidFieldTypes = data.fields.filter(field => !validFieldTypes.includes(field.fieldType));
-    if (invalidFieldTypes.length > 0) {
-      throw new Error(
-        `Invalid field type(s): ${invalidFieldTypes.map(f => f.fieldType).join(', ')}. Valid types: ${validFieldTypes.join(', ')}`
-      );
-    }
-
-    const providedFieldIds = data.fields
-      .map(field => field.fieldId)
-      .filter((fieldId): fieldId is string => typeof fieldId === 'string' && fieldId.length > 0);
-
-    if (providedFieldIds.length !== new Set(providedFieldIds).size) {
-      throw new Error('Duplicate field IDs are not allowed');
-    }
-
-    const normalizedFieldNames = data.fields.map(field => field.fieldName.trim().toLowerCase());
-    if (normalizedFieldNames.length !== new Set(normalizedFieldNames).size) {
-      throw new Error('Duplicate field names are not allowed');
-    }
+    // Normalize + validate (duplicate input field IDs / duplicate local names).
+    const normalizedFields = data.fields.map(normalizeFormFieldInput);
+    validateFormFieldInputs(normalizedFields);
+    this.validateLocalFieldDefinitions(normalizedFields);
 
     return await this.db.$transaction(async (tx) => {
-      const existingFields = await tx.formFields.findMany({
-        where: { formId: id },
-        orderBy: { sequenceNumber: 'asc' },
+      const existingForm = await tx.form.findUnique({
+        where: { id },
+        select: { workspaceId: true },
       });
-
-      const existingFieldIds = new Set(existingFields.map(field => field.id));
-      const invalidFieldId = providedFieldIds.find(fieldId => !existingFieldIds.has(fieldId));
-      if (invalidFieldId) {
-        throw new Error(`Field ${invalidFieldId} does not belong to this form`);
+      if (!existingForm) {
+        throw new Error('Form not found');
       }
 
-      // Update the form
       const form = await tx.form.update({
         where: { id },
         data: {
@@ -241,67 +257,391 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         },
       });
 
-      const incomingFieldIds = new Set(providedFieldIds);
-      const fieldIdsToDelete = existingFields
-        .filter(field => !incomingFieldIds.has(field.id))
-        .map(field => field.id);
+      const scopedProjectId = await this.resolveProjectIdForFormFields(tx, {
+        workspaceId: existingForm.workspaceId,
+        projectId: data.projectId,
+        formId: id,
+      });
 
-      if (fieldIdsToDelete.length > 0) {
-        const referencedValues = await tx.formEntityValues.count({
-          where: {
-            formId: id,
-            fieldId: { in: fieldIdsToDelete },
-          },
-        });
-
-        if (referencedValues > 0) {
-          throw new Error('Cannot delete form fields that already contain saved values');
-        }
-
-        await tx.formFields.deleteMany({
-          where: { id: { in: fieldIdsToDelete } },
-        });
-      }
-
-      for (const [index, field] of data.fields.entries()) {
-        const baseData = {
-          formId: id,
-          fieldName: field.fieldName.trim(),
-          fieldType: field.fieldType,
-          fieldEnum: field.fieldEnum,
-          isOptional: field.isOptional ?? false,
-          sequenceNumber: index + 1,
-        };
-
-        if (field.fieldId) {
-          await tx.formFields.update({
-            where: { id: field.fieldId },
-            data: baseData,
-          });
-          continue;
-        }
-
-        await tx.formFields.create({
-          data: {
-            id: randomUUID(),
-            ...baseData,
-          },
-        });
-      }
+      await this.syncFormFields(tx, id, existingForm.workspaceId, scopedProjectId, normalizedFields);
+      await this.assertResolvedFieldNameUniqueness(tx, id);
 
       return form;
     });
   }
 
-  /**
-   * Get form fields by form ID
-   */
-  async findFormFields(formId: string): Promise<FormFields[]> {
-    return await this.db.formFields.findMany({
+  async resolveFormFieldsForFormId(formId: string): Promise<ResolvedFormField[]> {
+    const membershipRows = await this.db.formFields.findMany({
       where: { formId },
+      orderBy: { sequenceNumber: 'asc' },
     });
+    return await this.resolveMembershipRows(this.db, formId, membershipRows);
   }
 
+  private async resolveMembershipRows(
+    client: Pick<PrismaClient, 'globalField'>,
+    formId: string,
+    membershipRows: FormFields[],
+  ): Promise<ResolvedFormField[]> {
+    const globalFieldIds = membershipRows
+      .map(row => row.globalFieldId)
+      .filter((value): value is string => Boolean(value));
+    const globalDefinitions = globalFieldIds.length
+      ? await client.globalField.findMany({ where: { id: { in: globalFieldIds } } })
+      : [];
+    return resolveFormFields(formId, membershipRows, globalDefinitions);
+  }
+
+  private validateLocalFieldDefinitions(fields: FormFieldInput[]): void {
+    const validFieldTypes = Object.values(FormFieldType);
+    const invalidFieldTypes = fields.filter(field => !validFieldTypes.includes(field.fieldType));
+
+    if (invalidFieldTypes.length > 0) {
+      throw new Error(
+        `Invalid field type(s): ${invalidFieldTypes.map(f => f.fieldType).join(', ')}. Valid types: ${validFieldTypes.join(', ')}`,
+      );
+    }
+  }
+
+  /**
+   * Reconcile a form's per-form membership rows (form_fields) against the incoming
+   * field list. New definitions live in global_fields; legacy rows are kept in place.
+   */
+  private async syncFormFields(
+    tx: Prisma.TransactionClient,
+    formId: string,
+    workspaceId: string,
+    projectId: string,
+    fields: FormFieldInput[],
+  ): Promise<void> {
+    await this.assertProjectScope(tx, projectId, workspaceId);
+    const existingRows = await tx.formFields.findMany({ where: { formId } });
+    const existingByGlobalId = new Map<string, FormFields>();
+    const existingById = new Map<string, FormFields>();
+    for (const row of existingRows) {
+      existingById.set(row.id, row);
+      if (row.globalFieldId) {
+        existingByGlobalId.set(row.globalFieldId, row);
+      }
+    }
+
+    const keptRowIds = new Set<string>();
+
+    for (const [index, field] of fields.entries()) {
+      const sequenceNumber = index + 1;
+      const isOptional = field.isOptional ?? false;
+
+      if (field.fieldId) {
+        const existingGlobalRow = existingByGlobalId.get(field.fieldId);
+        if (existingGlobalRow) {
+          await this.updateGlobalFieldDefinition(tx, field.fieldId, field);
+          await tx.formFields.update({
+            where: { id: existingGlobalRow.id },
+            data: { sequenceNumber, isOptional },
+          });
+          keptRowIds.add(existingGlobalRow.id);
+          continue;
+        }
+
+        const existingLegacyRow = existingById.get(field.fieldId);
+        if (existingLegacyRow && !existingLegacyRow.globalFieldId) {
+          // Update the legacy row in place to keep its id + saved values stable.
+          await tx.formFields.update({
+            where: { id: existingLegacyRow.id },
+            data: {
+              fieldName: field.fieldName.trim(),
+              fieldType: field.fieldType,
+              fieldEnum: field.fieldEnum ?? Prisma.DbNull,
+              sequenceNumber,
+              isOptional,
+            },
+          });
+          keptRowIds.add(existingLegacyRow.id);
+          continue;
+        }
+
+        // Reuse an existing project global field (e.g. picked from autocomplete) by
+        // linking it to this form without mutating the shared definition.
+        const reusableGlobal = await tx.globalField.findUnique({
+          where: { id: field.fieldId },
+        });
+        if (reusableGlobal) {
+          if (reusableGlobal.projectId !== projectId) {
+            throw new Error(`Field ${field.fieldId} does not belong to this form`);
+          }
+          await this.updateGlobalFieldDefinition(tx, reusableGlobal.id, field);
+          const rowId = await this.upsertGlobalMembershipRow(
+            tx,
+            formId,
+            reusableGlobal.id,
+            sequenceNumber,
+            isOptional,
+            existingByGlobalId.get(reusableGlobal.id),
+          );
+          keptRowIds.add(rowId);
+          continue;
+        }
+
+        throw new Error(`Field ${field.fieldId} does not belong to this form`);
+      }
+
+      // New local field → find-or-create the global definition by (projectId, name + type).
+      const globalFieldId = await this.findOrCreateGlobalField(tx, projectId, field);
+      const rowId = await this.upsertGlobalMembershipRow(
+        tx,
+        formId,
+        globalFieldId,
+        sequenceNumber,
+        isOptional,
+        existingByGlobalId.get(globalFieldId),
+      );
+      keptRowIds.add(rowId);
+    }
+
+    const removedRows = existingRows.filter(row => !keptRowIds.has(row.id));
+    await this.deleteRemovedMembershipRows(tx, formId, projectId, removedRows);
+  }
+
+  private async upsertGlobalMembershipRow(
+    tx: Prisma.TransactionClient,
+    formId: string,
+    globalFieldId: string,
+    sequenceNumber: number,
+    isOptional: boolean,
+    existing?: FormFields,
+  ): Promise<string> {
+    if (existing) {
+      await tx.formFields.update({
+        where: { id: existing.id },
+        data: {
+          globalFieldId,
+          sequenceNumber,
+          isOptional,
+          fieldName: null,
+          fieldType: null,
+          fieldEnum: Prisma.DbNull,
+        },
+      });
+      return existing.id;
+    }
+
+    const created = await tx.formFields.create({
+      data: {
+        id: randomUUID(),
+        formId,
+        globalFieldId,
+        sequenceNumber,
+        isOptional,
+      },
+    });
+    return created.id;
+  }
+
+  private async findOrCreateGlobalField(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    def: LocalFieldDefinitionInput,
+  ): Promise<string> {
+    const fieldName = def.fieldName.trim();
+    const existing = await tx.globalField.findFirst({
+      where: {
+        projectId,
+        fieldName,
+        fieldType: def.fieldType,
+      },
+    });
+
+    if (existing) {
+      if (def.fieldEnum !== undefined) {
+        await tx.globalField.update({
+          where: { id: existing.id },
+          data: { fieldEnum: def.fieldEnum },
+        });
+      }
+      return existing.id;
+    }
+
+    const now = new Date();
+    const created = await tx.globalField.create({
+      data: {
+        id: randomUUID(),
+        projectId,
+        fieldName,
+        fieldType: def.fieldType,
+        ...(def.fieldEnum !== undefined ? { fieldEnum: def.fieldEnum } : {}),
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    return created.id;
+  }
+
+  private async updateGlobalFieldDefinition(
+    tx: Prisma.TransactionClient,
+    globalFieldId: string,
+    def: LocalFieldDefinitionInput,
+  ): Promise<void> {
+    const existing = await tx.globalField.findUnique({
+      where: { id: globalFieldId },
+      select: { fieldName: true, fieldType: true, fieldEnum: true },
+    });
+    if (!existing) {
+      throw new Error(`Field ${globalFieldId} does not belong to this form`);
+    }
+
+    try {
+      await tx.globalField.update({
+        where: { id: globalFieldId },
+        data: {
+          fieldName: def.fieldName.trim(),
+          fieldType: def.fieldType,
+          fieldEnum: def.fieldEnum ?? Prisma.DbNull,
+        },
+      });
+    } catch (error: unknown) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        (error as { code?: string }).code === 'P2002'
+      ) {
+        throw new Error('A field with this name and type already exists in this project');
+      }
+      throw error;
+    }
+  }
+
+  private async assertProjectScope(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const project = await tx.project.findUnique({
+      where: { id: projectId },
+      select: { workspaceId: true },
+    });
+    if (!project || project.workspaceId !== workspaceId) {
+      throw new Error(`Project ${projectId} does not belong to this workspace`);
+    }
+
+  }
+
+  private async resolveProjectIdForFormFields(
+    tx: Prisma.TransactionClient,
+    input: {
+      workspaceId: string;
+      projectId?: string;
+      formId?: string;
+    },
+  ): Promise<string> {
+    const { workspaceId, projectId, formId } = input;
+
+    if (projectId) {
+      await this.assertProjectScope(tx, projectId, workspaceId);
+      return projectId;
+    }
+
+    if (formId) {
+      const mappings = await tx.formContextMapping.findMany({
+        where: { formId },
+        select: { contextId: true, contextType: true },
+      });
+
+      const boardMapping = mappings.find(mapping => mapping.contextType === FormContextType.BOARD);
+      if (boardMapping) {
+        const board = await tx.board.findUnique({
+          where: { id: boardMapping.contextId },
+          select: { projectId: true, workspaceId: true },
+        });
+        if (board?.workspaceId === workspaceId) {
+          return board.projectId;
+        }
+      }
+
+      const stageMappings = mappings.filter(mapping => mapping.contextType === FormContextType.STAGE);
+      if (stageMappings.length > 0) {
+        const stage = await tx.stage.findFirst({
+          where: { id: { in: stageMappings.map(mapping => mapping.contextId) } },
+          select: { board: { select: { projectId: true, workspaceId: true } } },
+        });
+        if (stage?.board.workspaceId === workspaceId) {
+          return stage.board.projectId;
+        }
+      }
+    }
+
+    throw new Error('Cannot resolve project for form fields');
+  }
+
+  private async deleteRemovedMembershipRows(
+    tx: Prisma.TransactionClient,
+    formId: string,
+    projectId: string,
+    removedRows: FormFields[],
+  ): Promise<void> {
+    if (removedRows.length === 0) {
+      return;
+    }
+
+    for (const row of removedRows) {
+      const definitionId = await this.ensureLegacyGlobalField(tx, projectId, row);
+      if (definitionId && definitionId !== row.id) {
+        await tx.formEntityValues.updateMany({
+          where: { formId, fieldId: row.id },
+          data: { fieldId: definitionId, updatedAt: new Date() },
+        });
+      }
+
+      await tx.formFields.delete({ where: { id: row.id } });
+    }
+  }
+
+  private async ensureLegacyGlobalField(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    row: FormFields,
+  ): Promise<string | undefined> {
+    if (row.globalFieldId) {
+      return row.globalFieldId;
+    }
+    if (!row.fieldName || !row.fieldType) {
+      return undefined;
+    }
+
+    const existing = await tx.globalField.findFirst({
+      where: {
+        projectId,
+        fieldName: row.fieldName,
+        fieldType: row.fieldType,
+      },
+    });
+    if (existing) {
+      return existing.id;
+    }
+
+    const now = new Date();
+    const created = await tx.globalField.create({
+      data: {
+        id: row.id,
+        projectId,
+        fieldName: row.fieldName,
+        fieldType: row.fieldType,
+        ...(row.fieldEnum !== null ? { fieldEnum: row.fieldEnum } : {}),
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    return created.id;
+  }
+
+  private async assertResolvedFieldNameUniqueness(
+    tx: Prisma.TransactionClient,
+    formId: string,
+  ): Promise<void> {
+    const membershipRows = await tx.formFields.findMany({ where: { formId } });
+    const resolvedFields = await this.resolveMembershipRows(tx, formId, membershipRows);
+    assertNoNameCollisions(resolvedFields);
+  }
 
   /**
    * Save multiple form entity values at once
@@ -351,7 +691,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       return { updatedFields: [], skippedFields: fieldPairs.map(f => f.fieldName) };
     }
 
-    const formFields = await this.db.formFields.findMany({ where: { formId: formMapping.formId } });
+    const formFields = await this.resolveFormFieldsForFormId(formMapping.formId);
     const fieldsByName = new Map(formFields.map(f => [f.fieldName, f]));
 
     const updatedFields: string[] = [];
@@ -424,12 +764,15 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       },
     });
 
+    const definitions = await resolveFieldDefinitionsByIds(
+      this.db,
+      values.map(v => v.fieldId),
+    );
+
     const result: Record<string, any> = {};
-    
+
     for (const v of values) {
-      const field = await this.db.formFields.findUnique({
-        where: { id: v.fieldId },
-      });
+      const field = definitions.get(v.fieldId);
       if (field) {
         result[field.fieldName] = v.actualFieldValue ?? v.fieldValue;
       }
@@ -473,11 +816,8 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     });
     const currentVersion = currentVersionRow?.version ?? 1;
 
-    const [formFields, formValues] = await Promise.all([
-      this.db.formFields.findMany({
-        where: { formId: form.id },
-        orderBy: { sequenceNumber: 'asc' },
-      }),
+    const [resolvedFormFields, formValues] = await Promise.all([
+      this.resolveFormFieldsForFormId(form.id),
       this.db.formEntityValues.findMany({
         where: {
           entityId: ticketId,
@@ -524,7 +864,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       validValueByFieldId.set(value.fieldId, value);
     }
 
-    const fields: TicketCustomFormFieldValue[] = formFields.map((field) => {
+    const fields: TicketCustomFormFieldValue[] = resolvedFormFields.map((field) => {
       const savedValue = validValueByFieldId.get(field.id);
       const value = (savedValue?.actualFieldValue as Prisma.JsonValue | null | undefined) ?? null;
 

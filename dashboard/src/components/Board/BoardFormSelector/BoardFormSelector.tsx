@@ -10,6 +10,7 @@ interface BoardFormSelectorProps {
   selectedFormIds: Set<string>;
   onFormSelect: (formId: string) => void;
   onFormDeselect: (formId: string) => void;
+  projectId?: string | undefined;
   disabled?: boolean;
 }
 
@@ -17,6 +18,7 @@ export const BoardFormSelector = ({
   selectedFormIds,
   onFormSelect,
   onFormDeselect,
+  projectId,
   disabled = false,
 }: BoardFormSelectorProps): ReactElement => {
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -246,6 +248,7 @@ export const BoardFormSelector = ({
         <CreateFormModal
           open={showCreateModal}
           onOpenChange={setShowCreateModal}
+          projectId={projectId}
           onSuccess={handleFormCreated}
         />
       )}
