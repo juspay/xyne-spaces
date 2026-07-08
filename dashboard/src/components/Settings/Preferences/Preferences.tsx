@@ -52,6 +52,10 @@ import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords'
 import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
+import {
+  CALL_MEDIA_QUALITY_OPTIONS,
+  type CallMediaQuality,
+} from '../../../hooks/useCallMediaQualitySettings';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
 import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
@@ -100,6 +104,33 @@ const KeyCap: FC<{ children: ReactNode }> = ({ children }) => (
   <kbd className='inline-flex items-center rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-medium leading-none text-foreground align-middle'>
     {children}
   </kbd>
+);
+
+const QualitySelect: FC<{
+  id: string;
+  label: string;
+  value: CallMediaQuality;
+  onChange: (value: CallMediaQuality) => void;
+}> = ({ id, label, value, onChange }) => (
+  <div className='flex items-center justify-between gap-4'>
+    <label htmlFor={id} className='text-sm font-medium text-foreground'>
+      {label}
+    </label>
+    <select
+      id={id}
+      value={value}
+      onChange={event => onChange(event.target.value as CallMediaQuality)}
+      className='h-8 min-w-32 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+      data-track-category='PREFERENCES'
+      data-track-name={id}
+    >
+      {CALL_MEDIA_QUALITY_OPTIONS.map(option => (
+        <option key={option.value} value={option.value}>
+          {option.label} - {option.description}
+        </option>
+      ))}
+    </select>
+  </div>
 );
 
 // ─── Appearance ─────────────────────────────────────────────────────────────
@@ -458,6 +489,27 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         id='call-join-without-video'
         checked={state.callJoinWithoutVideo}
         onCheckedChange={state.setCallJoinWithoutVideo}
+      />
+    </div>
+
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Call media quality</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Target capture quality for new camera and screen-share tracks.
+        </p>
+      </div>
+      <QualitySelect
+        id='call-video-quality'
+        label='Video'
+        value={state.callVideoQuality}
+        onChange={state.setCallVideoQuality}
+      />
+      <QualitySelect
+        id='call-screen-share-quality'
+        label='Screen share'
+        value={state.callScreenShareQuality}
+        onChange={state.setCallScreenShareQuality}
       />
     </div>
   </div>

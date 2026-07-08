@@ -6,7 +6,6 @@ import {
   RemoteTrack,
   RemoteTrackPublication,
   LocalTrackPublication,
-  VideoPresets,
   ConnectionState,
   RoomConnectOptions,
   Participant,
@@ -36,6 +35,10 @@ import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 import { toast } from 'sonner';
 import { MACOS_PRIVACY_URLS } from '../constants/permissions';
+import {
+  CALL_MEDIA_QUALITY_CONFIG,
+  getCallMediaQualitySettings,
+} from '../hooks/useCallMediaQualitySettings';
 import {
   reactNativeBridge,
   detectReactNativeWebView,
@@ -998,11 +1001,20 @@ export const roomMachine = setup({
           return null;
         }
 
+        const mediaQualitySettings = getCallMediaQualitySettings();
+        const videoQuality = CALL_MEDIA_QUALITY_CONFIG[mediaQualitySettings.videoQuality];
+        const screenShareQuality =
+          CALL_MEDIA_QUALITY_CONFIG[mediaQualitySettings.screenShareQuality];
+
         const room = new Room({
           adaptiveStream: true,
           dynacast: true,
           videoCaptureDefaults: {
-            resolution: VideoPresets.h2160.resolution,
+            resolution: {
+              width: videoQuality.width,
+              height: videoQuality.height,
+              frameRate: videoQuality.frameRate,
+            },
           },
           audioCaptureDefaults: {
             autoGainControl: true,
@@ -1010,11 +1022,9 @@ export const roomMachine = setup({
             noiseSuppression: true,
           },
           publishDefaults: {
-            // Custom ultra-high quality encoding for screen sharing
-            // 10 Mbps bitrate ensures crystal clear screen sharing from the start
             screenShareEncoding: {
-              maxBitrate: 10_000_000, // 10 Mbps for maximum quality
-              maxFramerate: 30,
+              maxBitrate: screenShareQuality.maxBitrate,
+              maxFramerate: screenShareQuality.frameRate,
               priority: 'high',
             },
             // Maintain resolution over framerate for screen sharing
@@ -1775,13 +1785,14 @@ export const roomMachine = setup({
               reactNativeBridge.livekitToggleScreenShare(!currentState);
             } else if (context.room) {
               const currentState = context.room.localParticipant.isScreenShareEnabled;
+              const { screenShareQuality } = getCallMediaQualitySettings();
+              const quality = CALL_MEDIA_QUALITY_CONFIG[screenShareQuality];
               void context.room.localParticipant
                 .setScreenShareEnabled(!currentState, {
-                  // Request 4K resolution for maximum quality capture
                   resolution: {
-                    width: 3840,
-                    height: 2160,
-                    frameRate: 30,
+                    width: quality.width,
+                    height: quality.height,
+                    frameRate: quality.frameRate,
                   },
                 })
                 .catch((error: Error) => {

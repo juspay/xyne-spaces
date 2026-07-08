@@ -10,6 +10,7 @@ import { useEnterSendsMessage } from './useEnterSendsMessage';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import { useCallJoinSettings } from './useCallJoinSettings';
+import { useCallMediaQualitySettings } from './useCallMediaQualitySettings';
 import {
   getLinkOpenExternalDefault,
   setLinkOpenExternalDefault,
@@ -48,6 +49,12 @@ export function usePreferencesState(enabled: boolean) {
     setJoinMuted: setCallJoinMuted,
     setJoinWithoutVideo: setCallJoinWithoutVideo,
   } = useCallJoinSettings();
+  const {
+    videoQuality: callVideoQuality,
+    screenShareQuality: callScreenShareQuality,
+    setVideoQuality: setCallVideoQuality,
+    setScreenShareQuality: setCallScreenShareQuality,
+  } = useCallMediaQualitySettings();
   const linksOpenExternalByDefault = useSyncExternalStore(
     subscribeLinkOpenPref,
     getLinkOpenExternalDefault,
@@ -147,6 +154,10 @@ export function usePreferencesState(enabled: boolean) {
     callJoinWithoutVideo,
     setCallJoinMuted,
     setCallJoinWithoutVideo,
+    callVideoQuality,
+    callScreenShareQuality,
+    setCallVideoQuality,
+    setCallScreenShareQuality,
   };
 }
 
