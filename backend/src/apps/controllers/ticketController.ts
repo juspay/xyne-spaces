@@ -22,6 +22,8 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketSchema } from '@/vespa/src/types';
 
 import { resolveChannelId } from '../utils/channelUtils';
 import { decodeCursor, paginateResults } from '../core/paginationUtils';
@@ -478,6 +480,25 @@ const syncCustomFieldValues = async (
       });
     }),
   );
+};
+
+const queueTicketVespaFeed = async (
+  ticketId: string,
+  userId: string,
+  workspaceId?: string,
+): Promise<void> => {
+  await vespaQueue.addJob({
+    schema: ticketSchema,
+    jobType: 'feed',
+    docId: ticketId,
+    userId,
+    ...(workspaceId ? { workspaceId } : {}),
+  }).catch((error) => {
+    logger.error('[TicketController] Failed to queue ticket Vespa feed:', {
+      ticketId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 };
 
 const replaceTicketTags = async (ticketId: string, tags: string[]): Promise<void> => {
@@ -2174,6 +2195,7 @@ export class TicketController {
 
             if (customFieldValues && customFieldValues.fieldValues.length > 0) {
               await syncCustomFieldValues(existingTicket.id, customFieldValues, userId);
+              await queueTicketVespaFeed(existingTicket.id, userId, workspaceId);
             }
           }
         }
@@ -2248,6 +2270,7 @@ export class TicketController {
 
       if (customFieldValues && customFieldValues.fieldValues.length > 0 && ticket?.id) {
         await syncCustomFieldValues(ticket.id, customFieldValues, userId);
+        await queueTicketVespaFeed(ticket.id, userId, workspaceId);
       }
 
       await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, initialEmail.id);
