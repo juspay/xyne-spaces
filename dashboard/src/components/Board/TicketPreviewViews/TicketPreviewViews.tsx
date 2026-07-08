@@ -30,6 +30,7 @@ import {
   getDefaultPreviewFields,
   getDefaultCreateFields,
 } from '../../../utils/board';
+import { resolveDisplayFormFields } from '../../../utils/board/resolveDisplayFormFields';
 
 // Ticket Preview Content Component (used in right panel)
 const TicketPreviewContent = ({
@@ -57,12 +58,16 @@ const TicketPreviewContent = ({
 
     const defaultFields = getDefaultPreviewFields();
 
-    if (formMapping?.formFields && formMapping.formFields.length > 0) {
-      const customFields = formMapping.formFields.map(field => ({
+    const resolvedFormFields = formMapping?.formFields
+      ? resolveDisplayFormFields(formMapping.formId, [...formMapping.formFields])
+      : [];
+
+    if (resolvedFormFields.length > 0) {
+      const customFields = resolvedFormFields.map(field => ({
         id: field.id,
         label: field.fieldName,
         type: mapFromFormFieldType(field.fieldType),
-        options: (Array.isArray(field.fieldEnum) ? field.fieldEnum : []) as readonly string[],
+        options: field.fieldEnum ?? [],
         required: !field.isOptional,
       }));
       return [...defaultFields, ...customFields];
@@ -235,8 +240,12 @@ const CreateTicketModal = ({
 
     const defaultFields = getDefaultCreateFields();
 
-    if (formMapping?.formFields && formMapping.formFields.length > 0) {
-      const customFields: CreateField[] = formMapping.formFields.map((field, idx: number) => ({
+    const resolvedFormFields = formMapping?.formFields
+      ? resolveDisplayFormFields(formMapping.formId, [...formMapping.formFields])
+      : [];
+
+    if (resolvedFormFields.length > 0) {
+      const customFields: CreateField[] = resolvedFormFields.map((field, idx: number) => ({
         id: field.id,
         name: field.fieldName,
         label: field.fieldName,
@@ -244,9 +253,7 @@ const CreateTicketModal = ({
         required: !field.isOptional,
         order: defaultFields.length + idx + 1,
         visibleInCreate: true,
-        options: (Array.isArray(field.fieldEnum)
-          ? field.fieldEnum.map(String)
-          : []) as readonly string[],
+        options: field.fieldEnum ?? [],
       }));
       return [...defaultFields, ...customFields];
     }

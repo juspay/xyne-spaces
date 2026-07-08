@@ -65,6 +65,7 @@ import { UserPreferencesACL } from '../tables/user-preferences-acl';
 import { FormsACL } from '../tables/forms-acl';
 import { FormContextMappingsACL } from '../tables/form-context-mappings-acl';
 import { FormFieldsACL } from '../tables/form-fields-acl';
+import { GlobalFieldsACL } from '../tables/global-fields-acl';
 import { FormEntityValuesACL } from '../tables/form-entity-values-acl';
 import { DelayedMessagesACL } from '../tables/delayed-messages-acl';
 
@@ -211,6 +212,8 @@ export class ACLFactory {
         return new FormContextMappingsACL(ctx);
       case 'form_fields':
         return new FormFieldsACL(ctx);
+      case 'global_fields':
+        return new GlobalFieldsACL(ctx);
       case 'form_entity_values':
         return new FormEntityValuesACL(ctx);
       case 'rcas':

@@ -20,6 +20,8 @@ export interface SelectOption {
 // Types for field configuration
 export interface TicketField {
   id: string;
+  /** form_fields membership row id (present for fields loaded from the server). */
+  membershipId?: string;
   name: string;
   type:
     | 'text'

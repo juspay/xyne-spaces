@@ -221,12 +221,48 @@ interface TicketReferenceWithTicket extends TicketReferenceMapping {
 
 // Type for form entity values with the related form field
 interface FormEntityValueWithField extends FormEntityValues {
-  formField?: FormFields & {
-    form?: {
-      formContextMappings?: Array<{ contextId: string; contextType: string }>;
-    };
-  };
+  formField?:
+    | (FormFields & {
+        globalField?:
+          | {
+              fieldName?: string | null;
+              fieldType?: FormFieldType | null;
+              fieldEnum?: unknown;
+            }
+          | null
+          | undefined;
+        form?: {
+          formContextMappings?: Array<{ contextId: string; contextType: string }>;
+        };
+      })
+    | null;
+  globalField?: {
+    fieldName?: string | null;
+    fieldType?: FormFieldType | null;
+    fieldEnum?: unknown;
+  } | null;
 }
+
+const getFormEntityFieldName = (fieldValue: FormEntityValueWithField): string =>
+  fieldValue.globalField?.fieldName ??
+  fieldValue.formField?.globalField?.fieldName ??
+  fieldValue.formField?.fieldName ??
+  'Unknown Field';
+
+const getFormEntityFieldType = (fieldValue: FormEntityValueWithField): FormFieldType =>
+  fieldValue.globalField?.fieldType ??
+  fieldValue.formField?.globalField?.fieldType ??
+  fieldValue.formField?.fieldType ??
+  FormFieldType.STRING;
+
+const getFormEntityFieldEnum = (fieldValue: FormEntityValueWithField): string[] | undefined => {
+  const fieldEnum =
+    fieldValue.globalField?.fieldEnum ??
+    fieldValue.formField?.globalField?.fieldEnum ??
+    fieldValue.formField?.fieldEnum;
+  if (!Array.isArray(fieldEnum)) return undefined;
+  return fieldEnum.filter((option): option is string => typeof option === 'string');
+};
 
 // ── Stage Form Submissions Component ──────────────────────────────────────────
 interface StageFormSubmissionsProps {
@@ -1116,15 +1152,19 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     { enabled: !!ticket?.boardId },
   );
 
+  const boardCustomFieldsFormId = formMapping?.formId;
+
   // Merge form field definitions with entity values to show all fields including optional ones
   const allFormFields = useMemo((): FormEntityValueWithField[] | undefined => {
-    const currentFormId = formMapping?.formFields?.[0]?.formId;
-
     const formValues = (formEntityValues as FormEntityValueWithField[] | undefined)?.filter(
-      fev => fev.formField?.formId === currentFormId,
+      fev => !boardCustomFieldsFormId || fev.formId === boardCustomFieldsFormId,
     );
 
-    if (!formMapping?.formFields || formMapping.formFields.length === 0) {
+    if (
+      !formMapping?.formFields ||
+      formMapping.formFields.length === 0 ||
+      !boardCustomFieldsFormId
+    ) {
       return formValues;
     }
 
@@ -1137,16 +1177,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     });
 
     // Create array of all fields - defined fields from form mapping, with values if they exist
-    return (formMapping.formFields as FormFields[]).map((formField): FormEntityValueWithField => {
-      const existingValue = existingValuesMap.get(formField.id);
+    return formMapping.formFields.map((formField): FormEntityValueWithField => {
+      const resolvedFieldId = formField.globalFieldId ?? formField.id;
+      const existingValue = existingValuesMap.get(resolvedFieldId);
       if (existingValue) {
         return existingValue;
       }
       // Field exists in form definition but has no value - create a placeholder entry
       return {
-        id: `placeholder-${formField.id}`,
-        formId: formMapping.formId,
-        fieldId: formField.id,
+        id: `placeholder-${resolvedFieldId}`,
+        formId: boardCustomFieldsFormId,
+        fieldId: resolvedFieldId,
         entityId: ticketId,
         entityType: FormEntityType.TICKET,
         contextId: ticket?.boardId || '',
@@ -1158,7 +1199,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         formField,
       };
     });
-  }, [formMapping, formEntityValues, ticketId, ticket?.boardId]);
+  }, [formMapping, boardCustomFieldsFormId, formEntityValues, ticketId, ticket?.boardId]);
 
   // Group form values by stage+version — no ETA join needed
   const stageVisitFormValues = useMemo(() => {
@@ -2320,19 +2361,32 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     });
   };
 
-  const handleFormFieldSave = (formEntityValueId: string, newValue: string[]): void => {
+  const handleFormFieldSave = (
+    formEntityValueId: string,
+    newValue: string[],
+    formId?: string,
+  ): void => {
     // Check if this is a placeholder field (no existing record)
     const isPlaceholder = formEntityValueId.startsWith('placeholder-');
     const formFieldId = isPlaceholder ? formEntityValueId.replace('placeholder-', '') : '';
 
     if (isPlaceholder) {
+      const resolvedFormId = formId ?? boardCustomFieldsFormId;
+      if (!resolvedFormId) {
+        toast.error('Cannot save field', {
+          description: 'Board custom fields form is not available yet. Please try again.',
+        });
+        return;
+      }
+
       // Create a new form entity value record
       void zero.mutate(
-        mutators.formEntityValue.create({
+        mutators.formEntityValue.createV2({
           id: uuidv4(),
           entityId: ticketId,
           entityType: FormEntityType.TICKET,
           fieldId: formFieldId,
+          formId: resolvedFormId,
           newValue,
           timestamp: Date.now(),
           contextId: ticket.boardId,
@@ -3356,13 +3410,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               {allFormFields.map(fieldValue => (
                 <EditableFormField
                   key={fieldValue.id}
-                  fieldName={fieldValue.formField?.fieldName || 'Unknown Field'}
+                  fieldName={getFormEntityFieldName(fieldValue)}
                   fieldValue={fieldValue.actualFieldValue ?? fieldValue.fieldValue}
-                  fieldType={
-                    (fieldValue.formField?.fieldType as FormFieldType) || FormFieldType.STRING
+                  fieldType={getFormEntityFieldType(fieldValue)}
+                  fieldEnum={getFormEntityFieldEnum(fieldValue)}
+                  onSave={newValue =>
+                    handleFormFieldSave(fieldValue.id, newValue, fieldValue.formId)
                   }
-                  fieldEnum={fieldValue.formField?.fieldEnum as string[] | undefined}
-                  onSave={newValue => handleFormFieldSave(fieldValue.id, newValue)}
                 />
               ))}
             </div>

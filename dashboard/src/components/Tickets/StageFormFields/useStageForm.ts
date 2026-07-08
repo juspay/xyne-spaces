@@ -2,15 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import { FormEntityType, FormFieldType, ReenterMode, TicketStageRequestStatus } from '@xyne/shared';
-import type { FormEntityValues, FormFields, Ticket, TicketStageRequest } from '@xyne/shared';
+import type { FormEntityValues, Ticket, TicketStageRequest } from '@xyne/shared';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import { useAuth } from '../../../hooks/useAuth';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useZero } from '../../../hooks/useZero';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import type { StageFormDocLocalChange } from './StageFormFields';
+import {
+  resolveDisplayFormFields,
+  type ResolvedDisplayFormField,
+} from '../../../utils/board/resolveDisplayFormFields';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 export type PersistMode = 'save' | 'submit' | 'move' | 'review';
 
@@ -56,8 +60,11 @@ const computeFreshVisitVersion = (
   return maxVersion + 1;
 };
 
+const asArray = <T>(value: T[] | readonly T[] | undefined | null): T[] =>
+  Array.isArray(value) ? [...value] : [];
+
 export interface UseStageFormResult {
-  fields: FormFields[];
+  fields: ResolvedDisplayFormField[];
   valuesForRender: FormEntityValues[];
   isFieldsLoading: boolean;
   hydrated: boolean;
@@ -68,7 +75,7 @@ export interface UseStageFormResult {
   isSaving: boolean;
   isUploadingDocs: boolean;
   isDirty: boolean;
-  missingRequiredFields: FormFields[];
+  missingRequiredFields: ResolvedDisplayFormField[];
   isApproved: boolean;
   isSubmitted: boolean;
   hasActiveRequestForDocPrefill: boolean;
@@ -125,7 +132,17 @@ export const useStageForm = ({
   const zero = useZero();
   const { user } = useAuth();
 
-  const [formFields, formFieldsDetails] = useCachedQuery(queries.getFormFieldsByFormId({ formId }));
+  const [membershipRows, formFieldsDetails] = useCachedQuery(
+    queries.getFormFieldsByFormId({ formId }),
+    { enabled: !!formId },
+  );
+  const resolvedFields = useMemo((): ResolvedDisplayFormField[] => {
+    if (!formId) {
+      return [];
+    }
+
+    return resolveDisplayFormFields(formId, asArray(membershipRows));
+  }, [formId, membershipRows]);
   const [formEntityValues] = useCachedQuery(
     queries.getFormEntityValuesByEntityId({ entityId: ticket.id }),
   );
@@ -147,7 +164,7 @@ export const useStageForm = ({
   const draftValueIdsRef = useRef<Map<string, string>>(new Map());
   const draftVersionRef = useRef(1);
 
-  const fields = useMemo(() => (Array.isArray(formFields) ? formFields : []), [formFields]);
+  const fields = useMemo(() => resolvedFields, [resolvedFields]);
   const values = useMemo(
     () => (Array.isArray(formEntityValues) ? formEntityValues : []),
     [formEntityValues],
@@ -208,7 +225,7 @@ export const useStageForm = ({
   }, [latestValueRowByField]);
 
   useEffect(() => {
-    if (!Array.isArray(formFields) || !Array.isArray(formEntityValues)) return;
+    if (!Array.isArray(formEntityValues)) return;
     if (ticketStageRequestsForTicket === undefined) return;
 
     const hydrateKey = `${ticket.id}:${targetStage.id}:${formId}`;
@@ -247,7 +264,6 @@ export const useStageForm = ({
     latestValueRowByField,
     fields,
     formEntityValues,
-    formFields,
     formId,
     hasActiveRequest,
     isContinueReentry,
@@ -286,7 +302,7 @@ export const useStageForm = ({
   }, [currentSavedFormData, fields, formData, localDocChanges]);
 
   const isFieldFilled = useCallback(
-    (field: FormFields): boolean => {
+    (field: ResolvedDisplayFormField): boolean => {
       const change = localDocChanges.get(field.id);
       if (change && 'file' in change) return true;
       if (change && 'removed' in change) return false;
@@ -411,11 +427,12 @@ export const useStageForm = ({
               docUploadsByField.get(field.id)?.formEntityValueId ?? uuidv4();
             draftValueIdsRef.current.set(field.id, formEntityValueId);
             const mutationResult = zero.mutate(
-              mutators.formEntityValue.create({
+              mutators.formEntityValue.createV2({
                 id: formEntityValueId,
                 entityId: ticket.id,
                 entityType: FormEntityType.TICKET,
                 fieldId: field.id,
+                formId,
                 newValue: fieldValue,
                 timestamp,
                 contextId: targetStage.id,

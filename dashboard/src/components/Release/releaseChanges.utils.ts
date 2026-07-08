@@ -37,7 +37,8 @@ export interface ChangeFormValueInput {
   entityId: string;
   fieldValue: string | null | undefined;
   actualFieldValue: unknown;
-  formField?: { fieldName: string } | null | undefined;
+  formField?: { fieldName?: string | null } | null | undefined;
+  globalField?: { fieldName?: string | null } | null | undefined;
 }
 
 export interface ReleaseChangeInput {
@@ -67,7 +68,7 @@ export function buildValuesByChangeId(
 ): Map<string, Record<string, string>> {
   const map = new Map<string, Record<string, string>>();
   for (const fv of changeFormValues ?? []) {
-    const fieldName = fv.formField?.fieldName;
+    const fieldName = fv.globalField?.fieldName ?? fv.formField?.fieldName;
     if (!fieldName) continue;
     const bag = map.get(fv.entityId) ?? {};
     const raw = fv.actualFieldValue;

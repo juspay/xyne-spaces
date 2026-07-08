@@ -1,9 +1,10 @@
 import { useMemo, type Dispatch, type SetStateAction } from 'react';
 import { FormFieldType } from '@xyne/shared';
-import type { FormEntityValues, FormFields, MessageAttachment } from '@xyne/shared';
+import type { FormEntityValues, MessageAttachment } from '@xyne/shared';
 import { StageFormDocField } from '../StageFormModal/StageFormDocField';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
+import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
 
 export type StageFormDocLocalChange = { file: File } | { removed: true };
 type FormEntityValueForRender = FormEntityValues & {
@@ -24,7 +25,7 @@ const stringValuesFromJson = (value: unknown): string[] => {
 };
 
 interface StageFormFieldsProps {
-  fields: FormFields[];
+  fields: ResolvedDisplayFormField[];
   formData: Record<string, string[]>;
   setFormData: Dispatch<SetStateAction<Record<string, string[]>>>;
   localDocChanges: Map<string, StageFormDocLocalChange>;
@@ -256,7 +257,7 @@ export const StageFormFields = ({
             )}
 
             {field.fieldType === FormFieldType.DOC &&
-              (() => {
+              ((): React.JSX.Element => {
                 const latestValue = showPersistedDocValues
                   ? valuesForRender
                       .filter(

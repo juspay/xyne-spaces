@@ -55,6 +55,13 @@ export class FormService {
     return await this.formsRepository.findFormWithFields(formId);
   }
 
+  async getGlobalFields(input: {
+    projectId: string;
+    workspaceId: string;
+  }) {
+    return await this.formsRepository.getGlobalFields(input);
+  }
+
   /**
    * Update form with fields
    */
@@ -63,16 +70,21 @@ export class FormService {
     data: {
       formName: string;
       formDescription?: string;
+      projectId?: string;
       fields: Array<{
         fieldId?: string;
-        fieldName: string;
-        fieldType: FormFieldType;
+        fieldName?: string;
+        fieldType?: FormFieldType;
         fieldEnum?: Prisma.InputJsonValue;
         isOptional?: boolean;
       }>;
     }
   ) {
     return await this.formsRepository.updateWithFields(formId, data);
+  }
+
+  async resolveFormFieldsForFormId(formId: string) {
+    return await this.formsRepository.resolveFormFieldsForFormId(formId);
   }
 
 }

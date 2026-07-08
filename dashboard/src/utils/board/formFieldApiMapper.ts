@@ -1,0 +1,132 @@
+import { FormFieldType } from '@xyne/shared';
+import type { CreateFormField } from '../../services/Form/formService';
+import type { FormDetailResponse } from '../../services/Form/formService';
+import type { FormField } from '../../components/Board/CreateFormSlideOut/CreateFormSlideOut.types';
+import { v4 as uuidv4 } from 'uuid';
+
+export const isSelectFormFieldType = (fieldType: FormFieldType): boolean =>
+  fieldType === FormFieldType.SINGLE_SELECT || fieldType === FormFieldType.MULTI_SELECT;
+
+/** Fields the user has started. */
+export const getStartedFormFields = (fields: FormField[]): FormField[] =>
+  fields.filter(field => field.fieldName.trim().length > 0);
+
+const normalizeSelectOptions = (options: string[] | undefined): string[] | undefined => {
+  if (!options) return undefined;
+  const normalized = options.map(option => option.trim()).filter(Boolean);
+  return normalized.length > 0 ? normalized : undefined;
+};
+
+/** Trim select options and drop blank draft rows before save/API mapping. */
+export const getSavableFormFields = (fields: FormField[]): FormField[] =>
+  getStartedFormFields(fields).map(field => {
+    if (!isSelectFormFieldType(field.fieldType)) {
+      return field;
+    }
+    const fieldEnum = normalizeSelectOptions(field.fieldEnum);
+    if (fieldEnum) {
+      return { ...field, fieldEnum };
+    }
+    const { fieldEnum: _removed, ...withoutOptions } = field;
+    return withoutOptions;
+  });
+
+export const hasDuplicateFormFieldNames = (fields: FormField[]): boolean => {
+  const names = new Set<string>();
+  for (const field of getStartedFormFields(fields)) {
+    const normalized = field.fieldName.trim().toLowerCase();
+    if (!normalized) continue;
+    if (names.has(normalized)) return true;
+    names.add(normalized);
+  }
+  return false;
+};
+
+const fieldHasValidSelectOptions = (field: FormField): boolean => {
+  if (!isSelectFormFieldType(field.fieldType)) return true;
+  const options = (field.fieldEnum ?? []).map(option => option.trim()).filter(Boolean);
+  return options.length > 0;
+};
+
+export const isFormBuilderSavable = (formName: string, fields: FormField[]): boolean => {
+  const startedFields = getStartedFormFields(fields);
+  if (!formName.trim() || startedFields.length === 0) return false;
+  if (hasDuplicateFormFieldNames(fields)) return false;
+  return startedFields.every(
+    field => field.fieldName.trim().length > 0 && fieldHasValidSelectOptions(field),
+  );
+};
+
+export const buildFieldTypeChangeUpdates = (
+  currentType: FormFieldType,
+  nextType: FormFieldType,
+): Partial<FormField> => {
+  const wasSelect = isSelectFormFieldType(currentType);
+  const isSelect = isSelectFormFieldType(nextType);
+
+  if (isSelect && !wasSelect) {
+    return { fieldType: nextType, fieldEnum: [''] };
+  }
+  if (wasSelect && !isSelect) {
+    return { fieldType: nextType };
+  }
+  return { fieldType: nextType };
+};
+
+export const mapFormFieldsToApiPayload = (fields: FormField[]): CreateFormField[] =>
+  getSavableFormFields(fields).map(field => {
+    const fieldEnum = isSelectFormFieldType(field.fieldType)
+      ? normalizeSelectOptions(field.fieldEnum)
+      : field.fieldEnum;
+
+    return {
+      ...(field.persistedFieldId ? { fieldId: field.persistedFieldId } : {}),
+      fieldName: field.fieldName.trim(),
+      fieldType: field.fieldType,
+      ...(fieldEnum ? { fieldEnum } : {}),
+      isOptional: field.isOptional,
+    };
+  });
+
+export const hasFormFieldNameCollision = (fields: FormField[], candidateName: string): boolean => {
+  const normalized = candidateName.trim().toLowerCase();
+  if (!normalized) return false;
+  return fields.some(field => field.fieldName.trim().toLowerCase() === normalized);
+};
+
+export const getFieldTypeLabel = (fieldType: FormFieldType): string => {
+  switch (fieldType) {
+    case FormFieldType.STRING:
+      return 'String';
+    case FormFieldType.NUMBER:
+      return 'Number';
+    case FormFieldType.BOOLEAN:
+      return 'Boolean';
+    case FormFieldType.DATE:
+      return 'Date';
+    case FormFieldType.SINGLE_SELECT:
+      return 'Single Select';
+    case FormFieldType.MULTI_SELECT:
+      return 'Multi Select';
+    case FormFieldType.USER:
+      return 'User';
+    case FormFieldType.DOC:
+      return 'Document';
+    default:
+      return fieldType;
+  }
+};
+
+export const mapFormDetailsToBuilderFields = (formDetails: FormDetailResponse): FormField[] =>
+  (formDetails.resolvedFields?.length ? formDetails.resolvedFields : formDetails.fields).map(
+    field => {
+      return {
+        id: uuidv4(),
+        persistedFieldId: field.id,
+        fieldName: field.fieldName,
+        fieldType: field.fieldType,
+        isOptional: field.isOptional,
+        ...(field.fieldEnum ? { fieldEnum: field.fieldEnum } : {}),
+      };
+    },
+  );

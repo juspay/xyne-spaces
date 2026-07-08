@@ -2,7 +2,7 @@ import { FormFieldType } from '@xyne/shared';
 
 export interface FormField {
   id: string;
-  persistedFieldId?: string;
+  persistedFieldId?: string | undefined;
   fieldName: string;
   fieldType: FormFieldType;
   isOptional: boolean;
@@ -12,6 +12,7 @@ export interface FormField {
 export interface CreateFormSlideOutProps {
   isOpen: boolean;
   onClose: () => void;
+  projectId?: string;
   onSave: (formData: { formName: string; formDescription: string; fields: FormField[] }) => void;
   /** Called when updating an existing form (provides formId along with data) */
   onUpdate?: (formData: {

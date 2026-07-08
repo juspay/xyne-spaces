@@ -3,7 +3,15 @@ import { useForm, Controller } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
 import { useZero } from '../../../hooks/useZero';
 import { Plus, Trash2, Edit2, X } from 'lucide-react';
-import { Form, FormContextType, FormEntityType, FormFieldType, FormFields } from '@xyne/shared';
+import {
+  Form,
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+  FormFields,
+  type GlobalField,
+  type Project,
+} from '@xyne/shared';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input/Input';
@@ -27,7 +35,10 @@ interface FormField {
   fieldType: FormFieldType;
   fieldEnum?: string[]; // Array of options for SELECT fields
   isOptional?: boolean | null; // Whether the field is optional
+  membershipId?: string; // Membership ID for the field
 }
+
+type FormFieldRow = FormFields & { globalField?: GlobalField | null | undefined };
 
 interface CreateFormFormData {
   formName: string;
@@ -40,6 +51,7 @@ interface CreateFormModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   form?: Form;
+  projectId?: string | undefined;
   onSuccess?: (formId: string) => void;
 }
 
@@ -47,13 +59,17 @@ export const CreateFormModal = ({
   open,
   onOpenChange,
   form,
+  projectId,
   onSuccess,
 }: CreateFormModalProps): ReactElement => {
   const zero = useZero();
   const [fields, setFields] = useState<FormField[]>([]);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Set<number>>(new Set());
+  const [selectedProjectId, setSelectedProjectId] = useState('');
   const isEditMode = !!form;
+  const shouldSelectProject = !projectId;
+  const effectiveProjectId = projectId ?? selectedProjectId;
 
   // Query form fields if in edit mode
   const [formFields] = useCachedQuery(
@@ -62,6 +78,10 @@ export const CreateFormModal = ({
       : queries.getFormFieldsByFormId({ formId: '' }),
     { enabled: isEditMode && !!form },
   );
+
+  const [projects] = useCachedQuery(queries.getAllProjectsList(), {
+    enabled: open && shouldSelectProject,
+  });
 
   const {
     control,
@@ -80,6 +100,27 @@ export const CreateFormModal = ({
 
   const selectedContextType = watch('contextType');
 
+  useEffect(() => {
+    if (projectId) {
+      setSelectedProjectId(projectId);
+      return;
+    }
+
+    if (!open || !projects) return;
+
+    const selectedProjectExists = projects.some(project => project.id === selectedProjectId);
+    if (selectedProjectExists) return;
+
+    if (projects.length === 1) {
+      setSelectedProjectId(projects[0]?.id ?? '');
+      return;
+    }
+
+    if (selectedProjectId) {
+      setSelectedProjectId('');
+    }
+  }, [open, projectId, projects, selectedProjectId]);
+
   // Initialize form data when opening in edit mode
   useEffect(() => {
     if (open && form) {
@@ -95,18 +136,27 @@ export const CreateFormModal = ({
       // Set fields from query result
       if (formFields) {
         setFields(
-          formFields.map((field: FormFields) => {
+          formFields.flatMap((field: FormFieldRow) => {
+            const fieldName = field.globalField?.fieldName ?? field.fieldName;
+            const fieldType = field.globalField?.fieldType ?? field.fieldType;
+            const fieldEnum = field.globalField?.fieldEnum ?? field.fieldEnum;
+
+            if (!fieldName || !fieldType) {
+              return [];
+            }
+
             const baseField: FormField = {
-              id: field.id,
-              fieldName: field.fieldName,
-              fieldType: field.fieldType,
+              id: field.globalFieldId ?? field.id,
+              fieldName,
+              fieldType,
               isOptional: field.isOptional,
+              membershipId: field.id,
             };
             // Only add fieldEnum if it exists and is a non-empty array
-            if (field.fieldEnum && Array.isArray(field.fieldEnum) && field.fieldEnum.length > 0) {
-              return { ...baseField, fieldEnum: field.fieldEnum as string[] };
+            if (fieldEnum && Array.isArray(fieldEnum) && fieldEnum.length > 0) {
+              return [{ ...baseField, fieldEnum: fieldEnum as string[] }];
             }
-            return baseField;
+            return [baseField];
           }),
         );
       }
@@ -246,7 +296,7 @@ export const CreateFormModal = ({
     return fieldType === FormFieldType.SINGLE_SELECT || fieldType === FormFieldType.MULTI_SELECT;
   };
 
-  const handleSubmit = (formData: CreateFormFormData) => {
+  const handleSubmit = async (formData: CreateFormFormData): Promise<void> => {
     try {
       // Validation: check for duplicate field names
       if (hasDuplicateFieldNames()) {
@@ -260,13 +310,12 @@ export const CreateFormModal = ({
         // Filter out empty field names and prepare fields with fieldEnum
         const validFields: Array<{
           id?: string;
+          membershipId?: string;
           fieldName: string;
           fieldType: FormFieldType;
           fieldEnum?: string[];
           isOptional?: boolean;
         }> = [];
-
-        const fieldIds: Record<string, string> = {};
 
         fields
           .filter(field => field.fieldName.trim() !== '')
@@ -278,6 +327,7 @@ export const CreateFormModal = ({
                 if (field.id) {
                   validFields.push({
                     id: field.id,
+                    ...(field.membershipId ? { membershipId: field.membershipId } : {}),
                     fieldName: field.fieldName.trim(),
                     fieldType: field.fieldType,
                     fieldEnum: nonEmptyOptions,
@@ -285,6 +335,7 @@ export const CreateFormModal = ({
                   });
                 } else {
                   validFields.push({
+                    ...(field.membershipId ? { membershipId: field.membershipId } : {}),
                     fieldName: field.fieldName.trim(),
                     fieldType: field.fieldType,
                     fieldEnum: nonEmptyOptions,
@@ -298,12 +349,14 @@ export const CreateFormModal = ({
             if (field.id) {
               validFields.push({
                 id: field.id,
+                ...(field.membershipId ? { membershipId: field.membershipId } : {}),
                 fieldName: field.fieldName.trim(),
                 fieldType: field.fieldType,
                 isOptional: field.isOptional || false,
               });
             } else {
               validFields.push({
+                ...(field.membershipId ? { membershipId: field.membershipId } : {}),
                 fieldName: field.fieldName.trim(),
                 fieldType: field.fieldType,
                 isOptional: field.isOptional || false,
@@ -312,10 +365,9 @@ export const CreateFormModal = ({
           });
 
         // Generate unique IDs for new fields and create mapping
-        const processedFields = validFields.map((field, index) => {
+        const processedFields = validFields.map(field => {
           if (!field.id) {
             const newFieldId = uuidv4();
-            fieldIds[index.toString()] = newFieldId;
             return { ...field, id: newFieldId };
           }
           return field;
@@ -326,32 +378,58 @@ export const CreateFormModal = ({
           timestamp: number;
           formDescription?: string;
           fields: Array<{
-            id?: string;
+            id: string;
+            membershipId: string;
             fieldName: string;
             fieldType: FormFieldType;
             fieldEnum?: string[];
             isOptional?: boolean;
           }>;
-          fieldIds?: Record<string, string>;
         } = {
           formId: form.id,
           timestamp: Date.now(),
-          fields: processedFields,
+          fields: processedFields.map(field => {
+            const resolvedId = field.id ?? uuidv4();
+            const resolvedMembershipId = field.membershipId ?? uuidv4();
+            return {
+              id: resolvedId,
+              membershipId: resolvedMembershipId,
+              fieldName: field.fieldName,
+              fieldType: field.fieldType,
+              ...(field.fieldEnum ? { fieldEnum: field.fieldEnum } : {}),
+              ...(field.isOptional !== undefined ? { isOptional: field.isOptional } : {}),
+            };
+          }),
         };
-
-        // Add fieldIds only if there are new fields
-        if (Object.keys(fieldIds).length > 0) {
-          updateData.fieldIds = fieldIds;
-        }
 
         if (formDescription) {
           updateData.formDescription = formDescription;
         }
 
-        zero.mutate(mutators.form.update(updateData));
+        if (!effectiveProjectId) {
+          throw new Error('Project is required to update form fields');
+        }
+
+        const result = zero.mutate(
+          mutators.form.update({ ...updateData, projectId: effectiveProjectId }),
+        );
+        const response = await result.server;
+        if (response.type === 'error') {
+          toast.error('Form Update Failed', {
+            description: response.error.message || 'Operation failed. Please try again.',
+          });
+          return;
+        }
+
+        toast.success('Form updated');
+        onOpenChange(false);
       } else {
         // Create mode - use API
         const { formName, formDescription, contextType, entityType } = formData;
+
+        if (!effectiveProjectId) {
+          throw new Error('Project is required to create form fields');
+        }
 
         // Validation: at least one field required
         if (fields.length === 0) {
@@ -380,6 +458,7 @@ export const CreateFormModal = ({
           formName: string;
           contextType: FormContextType;
           entityType: FormEntityType;
+          projectId?: string;
           fields: Array<{
             fieldName: string;
             fieldType: FormFieldType;
@@ -415,6 +494,8 @@ export const CreateFormModal = ({
         if (formDescription.trim()) {
           requestData.formDescription = formDescription.trim();
         }
+
+        requestData.projectId = effectiveProjectId;
 
         createFormMutation.mutate(requestData);
       }
@@ -460,6 +541,56 @@ export const CreateFormModal = ({
               {createFormMutation.error instanceof Error
                 ? createFormMutation.error.message
                 : 'Operation failed'}
+            </div>
+          )}
+
+          {shouldSelectProject && (
+            <div>
+              <label
+                htmlFor='form-project-select'
+                className='block text-sm font-medium text-foreground mb-1.5'
+              >
+                Project {!isReadOnly && <span className='text-red-500'>*</span>}
+              </label>
+              {isReadOnly ? (
+                <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
+                  {projects?.find(project => project.id === selectedProjectId)?.name || '-'}
+                </div>
+              ) : (
+                <>
+                  <select
+                    id='form-project-select'
+                    value={selectedProjectId}
+                    onChange={event => setSelectedProjectId(event.target.value)}
+                    className='w-full px-3 py-2 text-sm border border-input bg-card text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:bg-muted'
+                    disabled={
+                      projects === undefined ||
+                      projects.length === 0 ||
+                      createFormMutation.isPending
+                    }
+                    required
+                    data-track-event='change'
+                    data-track-category='Forms'
+                    data-track-name='SelectProject'
+                  >
+                    <option value=''>
+                      {projects === undefined
+                        ? 'Loading projects...'
+                        : projects.length === 0
+                          ? 'No projects available'
+                          : 'Select a project'}
+                    </option>
+                    {projects?.map((project: Project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className='mt-1 text-xs text-muted-foreground'>
+                    Form fields are scoped to the selected project.
+                  </p>
+                </>
+              )}
             </div>
           )}
 
@@ -865,6 +996,7 @@ export const CreateFormModal = ({
               disabled={
                 (isEditMode && isReadOnly) ||
                 (isEditMode && fields.length === 0) ||
+                !effectiveProjectId ||
                 createFormMutation.isPending
               }
               data-track-category='Forms'

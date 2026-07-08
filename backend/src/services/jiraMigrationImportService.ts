@@ -5,6 +5,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { encrypt } from '@/services/encryptionService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { logger } from '@/utils/logger';
+import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import {
   ActivityType,
   AttachmentEntityType,
@@ -1080,10 +1081,7 @@ export class JiraMigrationImportService {
     }
 
     const formId = await this.ensureBoardForm(boardId, boardName, actorUserId, workspaceId);
-    const existingFields = await db.formFields.findMany({
-      where: { formId },
-      orderBy: { createdAt: 'asc' },
-    });
+    const existingFields = await resolveFormFieldDefinitionsForForm(db, formId);
 
     const fieldMap = new Map<string, { fieldId: string; fieldType: string }>();
     let createdCount = 0;
@@ -1149,12 +1147,7 @@ export class JiraMigrationImportService {
         skipDuplicates: true,
       });
 
-      const refreshedFields = await db.formFields.findMany({
-        where: {
-          formId,
-          fieldName: { in: fieldsToCreate.map(field => field.fieldName) },
-        },
-      });
+      const refreshedFields = await resolveFormFieldDefinitionsForForm(db, formId);
 
       for (const field of refreshedFields) {
         existingFieldsByNormalizedName.set(normalize(field.fieldName), field);

@@ -52,6 +52,21 @@ export function StagePicker({
     hasApprovers: boolean;
   } | null>(null);
 
+  const [ticketStageRequests] = useCachedQuery(queries.getTicketStageRequests({ ticketId }), {
+    enabled: formModal !== null,
+  });
+
+  const existingStageRequest = useMemo(() => {
+    if (!formModal) return null;
+    return (
+      ticketStageRequests?.find(
+        request =>
+          request.stageId === formModal.targetStage.id &&
+          request.status === TicketStageRequestStatus.SUBMITTED,
+      ) ?? null
+    );
+  }, [formModal, ticketStageRequests]);
+
   // Lazy-fetch the full ticket (only non-linear form modals need it) so a list doesn't fetch every row.
   const [ticketData] = useCachedQuery(queries.ticketByIdV2({ ticketId }), {
     enabled: !!boardId && (open || formModal !== null),
@@ -205,6 +220,9 @@ export function StagePicker({
                 name: next,
                 color: getStageColor(next),
                 sequenceNumber: targetStageObj.sequenceNumber ?? undefined,
+                ...(targetStageObj.defaultTicketStatusV2 && {
+                  defaultTicketStatusV2: targetStageObj.defaultTicketStatusV2,
+                }),
               },
               transitionFormId,
               hasApproversForTarget,
@@ -281,6 +299,9 @@ export function StagePicker({
                 name: next,
                 color: getStageColor(next),
                 sequenceNumber: capturedTargetStageObj.sequenceNumber ?? undefined,
+                ...(capturedTargetStageObj.defaultTicketStatusV2 && {
+                  defaultTicketStatusV2: capturedTargetStageObj.defaultTicketStatusV2,
+                }),
               }
             : null;
 
@@ -341,7 +362,14 @@ export function StagePicker({
       });
     } else {
       void zero.mutate(
-        mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
+        mutators.ticket.update({
+          id: ticketId,
+          stageName: next,
+          ...(targetStageObj?.defaultTicketStatusV2 && {
+            statusV2: targetStageObj.defaultTicketStatusV2,
+          }),
+          updatedAt: Date.now(),
+        }),
       );
     }
     setOpen(false);
@@ -417,7 +445,8 @@ export function StagePicker({
           sourceStageName={stageName || ''}
           formId={formModal.formId}
           hasApprovers={formModal.hasApprovers}
-          isNonLinearBoard
+          isNonLinearBoard={isNonLinear}
+          existingRequest={existingStageRequest}
         />
       )}
     </>

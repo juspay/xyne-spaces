@@ -6,6 +6,7 @@
 import { randomUUID } from 'crypto';
 import { config as envConfig } from '../config/env.js';
 import { logger } from '../utils/logger.js';
+import { resolveFormFieldDefinitionsForForm } from '../utils/fieldDefinition.js';
 import { EmailClassificationRepository } from '../database/repositories/emailClassificationRepository.js';
 import { DatabaseClient } from '../database/client.js';
 import { LLMClient, createUserMessage } from 'agentic-framework';
@@ -357,10 +358,8 @@ export class EmailClassificationService {
     });
     if (!formMapping) return;
 
-    // Get all fields for this form
-    const formFields = await db.formFields.findMany({
-      where: { formId: formMapping.formId },
-    });
+    // Get all fields for this form (resolved across global + legacy definitions)
+    const formFields = await resolveFormFieldDefinitionsForForm(db, formMapping.formId);
     if (formFields.length === 0) return;
 
     const now = new Date();

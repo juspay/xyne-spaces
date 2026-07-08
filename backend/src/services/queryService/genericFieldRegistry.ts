@@ -176,26 +176,44 @@ export class GenericFieldRegistry {
 
       const formFields = await this.prisma.formFields.findMany({
         where: { formId: { in: formIds } },
-        select: { id: true, fieldName: true, fieldType: true },
+        select: {
+          id: true,
+          globalFieldId: true,
+          fieldName: true,
+          fieldType: true,
+          globalField: { select: { id: true, fieldName: true, fieldType: true } },
+        },
       });
 
-      return formFields.map(ff => {
-        const fieldType = FORM_FIELD_TYPE_MAPPING[ff.fieldType];
+      // Resolve definitions (global or legacy) and dedupe by resolved field id, since
+      // a single global field can be referenced by many forms.
+      const byFieldId = new Map<string, FieldInfo>();
+      for (const ff of formFields) {
+        const resolvedId = ff.globalFieldId ?? ff.id;
+        const resolvedName = ff.globalField?.fieldName ?? ff.fieldName;
+        const rawFieldType = ff.globalField?.fieldType ?? ff.fieldType;
+        if (!resolvedName || !rawFieldType || byFieldId.has(resolvedId)) {
+          continue;
+        }
+
+        const fieldType = FORM_FIELD_TYPE_MAPPING[rawFieldType];
 
         // Determine sortable, filterable, aggregatable based on field type
         const sortable = fieldType === 'string' || fieldType === 'number' || fieldType === 'date' || fieldType === 'boolean';
         const aggregatable = fieldType === 'number' || fieldType === 'date';
 
-        return {
-          name: ff.fieldName,
-          fieldId: ff.id,
+        byFieldId.set(resolvedId, {
+          name: resolvedName,
+          fieldId: resolvedId,
           type: fieldType,
           sortable,
           filterable: true,
           aggregatable,
-          description: `Custom field: ${ff.fieldName}`,
-        };
-      });
+          description: `Custom field: ${resolvedName}`,
+        });
+      }
+
+      return Array.from(byFieldId.values());
     } catch (error) {
       logger.error('Error fetching custom fields:', error);
       return [];

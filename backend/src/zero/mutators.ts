@@ -9671,11 +9671,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       update: defineMutator(
         z.object({
           formId: z.string(),
+          projectId: z.string().optional(),
           formDescription: z.string().optional(),
           fields: z
             .array(
               z.object({
-                id: z.string().optional(), // Existing field ID for updates
+                id: z.string().optional(), // Existing resolved definition id (global or legacy) when editing
+                membershipId: z.string().optional(), // client id for the form_fields membership row
                 fieldName: z.string(),
                 fieldType: z.nativeEnum(FormFieldType),
                 fieldEnum: z.array(z.string()).optional(),
@@ -9686,7 +9688,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           fieldIds: z.record(z.string(), z.string()).optional(),
         }),
-        async ({ tx, args: { formId, formDescription, fields, timestamp, fieldIds = {} } }) => {
+        async ({ tx, args: { formId, projectId, formDescription, fields, timestamp, fieldIds = {} } }) => {
           // Validate form exists
           const form = await tx.run(zql.forms.where('id', formId).one());
           if (!form) {
@@ -9703,138 +9705,242 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           }
 
-          // Handle field operations if provided
+          // Handle field operations if provided.
+          // New definitions live in global_fields (project-scoped); form_fields holds
+          // per-form membership. Legacy (deployed) form_fields rows carry their own
+          // definition columns and are edited in place to keep ids + values stable.
           if (fields) {
-            const existingFields = await tx.run(zql.form_fields.where('formId', formId));
-            const fieldsToBeDeleted = existingFields.filter(field => !fields.map(f => f.id).includes(field.id))
-
             const now = timestamp;
+            const workspaceId = form.workspaceId;
+            const existingRows = await tx.run(zql.form_fields.where('formId', formId));
+            const resolveScopedProjectId = async (): Promise<string> => {
+              const validateProject = async (candidateProjectId: string): Promise<string> => {
+                const project = await tx.run(zql.projects.where('id', candidateProjectId).one());
+                if (!project || project.workspaceId !== workspaceId) {
+                  throw new Error('Project not found for form');
+                }
+                return candidateProjectId;
+              };
 
-            for (const field of fieldsToBeDeleted) {
-              // Delete the field
-              await tx.mutate.form_fields.delete({
-                id: field.id,
+              if (projectId) {
+                return validateProject(projectId);
+              }
+
+              const mappings = await tx.run(zql.forms_context_mapping.where('formId', formId));
+              for (const mapping of mappings) {
+                if (mapping.contextType === FormContextType.BOARD) {
+                  const board = await tx.run(zql.boards.where('id', mapping.contextId).one());
+                  if (board?.workspaceId === workspaceId) return board.projectId;
+                }
+                if (mapping.contextType === FormContextType.STAGE) {
+                  const stage = await tx.run(zql.stages.where('id', mapping.contextId).one());
+                  if (!stage) continue;
+                  const board = await tx.run(zql.boards.where('id', stage.boardId).one());
+                  if (board?.workspaceId === workspaceId) return board.projectId;
+                }
+              }
+
+              throw new Error('Cannot resolve project for form fields');
+            };
+            const scopedProjectId = await resolveScopedProjectId();
+            const existingById = new Map(existingRows.map(row => [row.id, row]));
+            const existingByGlobalId = new Map(
+              existingRows
+                .filter(row => row.globalFieldId)
+                .map(row => [row.globalFieldId as string, row]),
+            );
+            const keptRowIds = new Set<string>();
+
+            const ensureLegacyGlobalDefinition = async (
+              row: (typeof existingRows)[number],
+            ): Promise<string | undefined> => {
+              if (row.globalFieldId) {
+                return row.globalFieldId;
+              }
+              if (!row.fieldName || !row.fieldType) {
+                return undefined;
+              }
+
+              const found = await tx.run(
+                zql.global_fields
+                  .where('projectId', scopedProjectId)
+                  .where('fieldName', row.fieldName)
+                  .where('fieldType', row.fieldType)
+                  .one(),
+              );
+              if (found) {
+                return found.id;
+              }
+
+              await tx.mutate.global_fields.insert({
+                id: row.id,
+                projectId: scopedProjectId,
+                fieldName: row.fieldName,
+                fieldType: row.fieldType,
+                ...(row.fieldEnum ? { fieldEnum: row.fieldEnum } : {}),
+                createdAt: now,
+                updatedAt: now,
               });
-            }
+              return row.id;
+            };
+
+            const ensureGlobalField = async (
+              candidateId: string,
+              fieldName: string,
+              fieldType: FormFieldType,
+              fieldEnum: string[] | undefined,
+            ): Promise<string> => {
+              const found = await tx.run(
+                zql.global_fields
+                  .where('projectId', scopedProjectId)
+                  .where('fieldName', fieldName)
+                  .where('fieldType', fieldType)
+                  .one(),
+              );
+              if (found) {
+                if (fieldEnum) {
+                  await tx.mutate.global_fields.update({ id: found.id, fieldEnum, updatedAt: now });
+                }
+                return found.id;
+              }
+              await tx.mutate.global_fields.insert({
+                id: candidateId,
+                projectId: scopedProjectId,
+                fieldName,
+                fieldType,
+                ...(fieldEnum ? { fieldEnum } : {}),
+                createdAt: now,
+                updatedAt: now,
+              });
+              return candidateId;
+            };
 
             for (const [index, field] of fields.entries()) {
-              if (field.id) {
-                // Check if field actually exists in the database
-                const existingField = existingFields.find(f => f.id === field.id);
+              const sequenceNumber = index + 1;
+              const isOptional = field.isOptional ?? false;
+              const fieldName = field.fieldName.trim();
+              const cleanedEnum = field.fieldEnum?.filter(opt => opt.trim() !== '');
+              const fieldEnum = cleanedEnum && cleanedEnum.length > 0 ? cleanedEnum : undefined;
+              const legacyFieldId = field.id ?? fieldIds[index];
 
-                if (existingField) {
-                  // Update existing field
-                  const updateData: {
-                    id: string;
-                    formId: string;
-                    fieldName: string;
-                    fieldType: FormFieldType;
-                    sequenceNumber: number;
-                    updatedAt: number;
-                    fieldEnum?: ReadonlyJSONValue;
-                    isOptional?: boolean;
-                  } = {
-                    id: field.id,
-                    formId,
-                    fieldName: field.fieldName.trim(),
+              // Editing a legacy row in place (keeps its id + saved values stable).
+              if (legacyFieldId) {
+                const legacyRow = existingById.get(legacyFieldId);
+                if (!field.membershipId) {
+                  if (legacyRow) {
+                    await tx.mutate.form_fields.update({
+                      id: legacyRow.id,
+                      globalFieldId: null,
+                      fieldName,
+                      fieldType: field.fieldType,
+                      fieldEnum: fieldEnum ?? null,
+                      isOptional,
+                      sequenceNumber,
+                      updatedAt: now,
+                    });
+                  } else {
+                    await tx.mutate.form_fields.insert({
+                      id: legacyFieldId,
+                      formId,
+                      fieldName,
+                      fieldType: field.fieldType,
+                      fieldEnum: fieldEnum ?? null,
+                      isOptional,
+                      sequenceNumber,
+                      createdAt: now,
+                      updatedAt: now,
+                    });
+                  }
+                  keptRowIds.add(legacyFieldId);
+                  continue;
+                }
+
+                if (legacyRow && !legacyRow.globalFieldId) {
+                  await tx.mutate.form_fields.update({
+                    id: legacyRow.id,
+                    fieldName,
                     fieldType: field.fieldType,
-                    sequenceNumber: index + 1,
+                    fieldEnum: fieldEnum ?? null,
+                    isOptional,
+                    sequenceNumber,
                     updatedAt: now,
-                  };
+                  });
+                  keptRowIds.add(legacyRow.id);
+                  continue;
+                }
+              }
 
-                  // Add fieldEnum if present
-                  if (field.fieldEnum && field.fieldEnum.length > 0) {
-                    const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
-                    if (nonEmptyOptions.length > 0) {
-                      updateData.fieldEnum = nonEmptyOptions;
-                    }
+              // Resolve the global definition id.
+              let definitionId = field.id ?? fieldIds[index];
+              if (definitionId) {
+                const existingGlobal = await tx.run(zql.global_fields.where('id', definitionId).one());
+                if (existingGlobal) {
+                  if (existingGlobal.projectId !== scopedProjectId) {
+                    throw new Error(`Field ${field.id} does not belong to this form`);
                   }
-
-                  // Add isOptional if defined
-                  if (field.isOptional !== undefined) {
-                    updateData.isOptional = field.isOptional;
-                  }
-
-                  await tx.mutate.form_fields.update(updateData);
+                  await tx.mutate.global_fields.update({
+                    id: definitionId,
+                    fieldName,
+                    fieldType: field.fieldType,
+                    fieldEnum: fieldEnum ?? null,
+                    updatedAt: now,
+                  });
                 } else {
-                  // Field has ID but doesn't exist in DB - treat as new field
-                  const insertData: {
-                    id: string;
-                    formId: string;
-                    fieldName: string;
-                    fieldType: FormFieldType;
-                    sequenceNumber: number;
-                    createdAt: number;
-                    updatedAt: number;
-                    fieldEnum?: ReadonlyJSONValue;
-                    isOptional?: boolean;
-                  } = {
-                    id: field.id,
-                    formId: formId,
-                    fieldName: field.fieldName.trim(),
-                    fieldType: field.fieldType,
-                    sequenceNumber: index + 1,
-                    createdAt: now,
-                    updatedAt: now,
-                  };
-
-                  // Add fieldEnum if present
-                  if (field.fieldEnum && field.fieldEnum.length > 0) {
-                    const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
-                    if (nonEmptyOptions.length > 0) {
-                      insertData.fieldEnum = nonEmptyOptions;
-                    }
-                  }
-
-                  // Add isOptional if defined
-                  if (field.isOptional !== undefined) {
-                    insertData.isOptional = field.isOptional;
-                  }
-
-                  await tx.mutate.form_fields.insert(insertData);
+                  definitionId = await ensureGlobalField(definitionId, fieldName, field.fieldType, fieldEnum);
                 }
-
               } else {
-                // Create new field
-                const newFieldId = fieldIds[index];
-                if (!newFieldId) {
-                  throw new Error(`fieldId is required for new field at index ${index}`);
-                }
-                const insertData: {
-                  id: string;
-                  formId: string;
-                  fieldName: string;
-                  fieldType: FormFieldType;
-                  sequenceNumber: number;
-                  createdAt: number;
-                  updatedAt: number;
-                  fieldEnum?: ReadonlyJSONValue;
-                  isOptional?: boolean;
-                } = {
-                  id: newFieldId,
-                  formId: formId,
-                  fieldName: field.fieldName.trim(),
-                  fieldType: field.fieldType,
-                  sequenceNumber: index + 1,
+                continue;
+              }
+
+              // Upsert the per-form membership row.
+              const existingMembership = existingByGlobalId.get(definitionId);
+              if (existingMembership) {
+                await tx.mutate.form_fields.update({
+                  id: existingMembership.id,
+                  globalFieldId: definitionId,
+                  fieldName: null,
+                  fieldType: null,
+                  fieldEnum: null,
+                  isOptional,
+                  sequenceNumber,
+                  updatedAt: now,
+                });
+                keptRowIds.add(existingMembership.id);
+              } else if (field.membershipId) {
+                await tx.mutate.form_fields.insert({
+                  id: field.membershipId,
+                  formId,
+                  globalFieldId: definitionId,
+                  isOptional,
+                  sequenceNumber,
                   createdAt: now,
                   updatedAt: now,
-                };
-
-                // Add fieldEnum if present
-                if (field.fieldEnum && field.fieldEnum.length > 0) {
-                  const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
-                  if (nonEmptyOptions.length > 0) {
-                    insertData.fieldEnum = nonEmptyOptions;
-                  }
-                }
-
-                // Add isOptional if defined
-                if (field.isOptional !== undefined) {
-                  insertData.isOptional = field.isOptional;
-                }
-
-                await tx.mutate.form_fields.insert(insertData);
+                });
+                keptRowIds.add(field.membershipId);
               }
+            }
+
+            // Remove membership rows that are no longer present.
+            for (const row of existingRows) {
+              if (keptRowIds.has(row.id)) {
+                continue;
+              }
+
+              const definitionId = await ensureLegacyGlobalDefinition(row);
+              if (definitionId && definitionId !== row.id) {
+                const legacyValues = await tx.run(
+                  zql.form_entity_values.where('formId', formId).where('fieldId', row.id),
+                );
+                for (const value of legacyValues) {
+                  await tx.mutate.form_entity_values.update({
+                    id: value.id,
+                    fieldId: definitionId,
+                    updatedAt: now,
+                  });
+                }
+              }
+
+              await tx.mutate.form_fields.delete({ id: row.id });
             }
           }
         },
@@ -9926,14 +10032,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             version,
           },
         }) => {
-          // Fetch the form field to determine field type
-          const formField = await tx.run(zql.form_fields.where('id', fieldId).one());
-
-          if (!formField) {
-            throw new Error('Form field not found');
+          // Legacy create path: older clients only know form_fields ids, so resolve
+          // formId from the legacy row. global fields must use createV2.
+          const legacyField = await tx.run(
+            zql.form_fields.where('id', fieldId).related('globalField').one(),
+          );
+          const resolvedFieldId = legacyField?.globalFieldId ?? legacyField?.id;
+          const fieldType = legacyField?.globalField?.fieldType ?? legacyField?.fieldType;
+          if (!legacyField || !resolvedFieldId || !fieldType) {
+            throw new Error('Form field not found, cannot make an entry');
           }
-
-          const fieldType = formField.fieldType;
+          const formId = legacyField.formId;
+          const fieldName = legacyField.globalField?.fieldName ?? legacyField.fieldName;
 
           // Determine actualFieldValue based on field type
           const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
@@ -9949,10 +10059,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Upsert the form entity value
           await tx.mutate.form_entity_values.insert({
             id,
-            formId: formField.formId,
+            formId,
             entityId,
             entityType,
-            fieldId,
+            fieldId: resolvedFieldId,
             ...(contextId && { contextId }),
             version: version ?? 1,
             fieldValue: '',
@@ -9974,7 +10084,103 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          if (entityType === FormEntityType.TICKET && formField.fieldName === 'releaseVersion') {
+          if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
+            asyncTasks.push(async () => {
+              await versionReleaseMappingService.syncTicketById(entityId);
+            });
+          }
+        },
+      ),
+      createV2: defineMutator(
+        z.object({
+          id: z.string(),
+          entityId: z.string(),
+          entityType: z.nativeEnum(FormEntityType),
+          fieldId: z.string(),
+          formId: z.string(),
+          newValue: z.array(z.string()),
+          timestamp: z.number(),
+          contextId: z.string().optional(),
+          version: z.number().optional(),
+        }),
+        async ({
+          tx,
+          args: {
+            id,
+            entityId,
+            entityType,
+            fieldId,
+            formId,
+            newValue,
+            timestamp,
+            contextId,
+            version,
+          },
+        }) => {
+          // Resolve the field definition. fieldId may reference a new global_fields
+          // definition or a legacy form_fields row.
+          const globalField = await tx.run(zql.global_fields.where('id', fieldId).one());
+          const legacyField = globalField
+            ? null
+            : await tx.run(zql.form_fields.where('id', fieldId).related('globalField').one());
+
+          const resolvedFieldId = globalField?.id ?? legacyField?.globalFieldId ?? legacyField?.id;
+          const fieldType = globalField?.fieldType ?? legacyField?.globalField?.fieldType ?? legacyField?.fieldType;
+          if (!resolvedFieldId || !fieldType) {
+            throw new Error('Form field not found');
+          }
+          if (globalField) {
+            const membership = await tx.run(
+              zql.form_fields.where('formId', formId).where('globalFieldId', globalField.id).one(),
+            );
+            if (!membership) {
+              throw new Error('Form field not found in this form');
+            }
+          } else if (legacyField?.formId !== formId) {
+            throw new Error('Form field not found in this form');
+          }
+          const fieldName = globalField?.fieldName ?? legacyField?.globalField?.fieldName ?? legacyField?.fieldName;
+
+          // Determine actualFieldValue based on field type
+          const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
+          const actualFieldValue = isMultiValue ? newValue : newValue[0] || null;
+
+          // DOC fields no longer require a claim here — the upload pipeline
+          // (POST /attachments/upload from StageFormModal.handleSubmit) writes
+          // the MessageAttachment row directly with entityType=FORM_ENTITY_VALUE
+          // and entityId = this row's id (pre-allocated client-side). So by the
+          // time we insert the form value row, the attachment is already
+          // pointing at it correctly.
+
+          // Upsert the form entity value
+          await tx.mutate.form_entity_values.insert({
+            id,
+            formId,
+            entityId,
+            entityType,
+            fieldId: resolvedFieldId,
+            ...(contextId && { contextId }),
+            version: version ?? 1,
+            fieldValue: '',
+            actualFieldValue,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+
+          const nextAttachmentId =
+            fieldType === FormFieldType.DOC ? stringFromFormValue(actualFieldValue) : null;
+          if (entityType === FormEntityType.TICKET && fieldType === FormFieldType.DOC && nextAttachmentId) {
+            const nextAttachment = await tx.run(zql.message_attachments.where('id', nextAttachmentId).one());
+            if (
+              nextAttachment &&
+              (nextAttachment.entityId !== id ||
+                nextAttachment.entityType !== AttachmentEntityType.FORM_ENTITY_VALUE)
+            ) {
+              throw new Error('Attachment is not bound to this form value');
+            }
+          }
+
+          if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
             asyncTasks.push(async () => {
               await versionReleaseMappingService.syncTicketById(entityId);
             });
@@ -10002,6 +10208,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             zql.form_entity_values
               .where('id', formEntityValueId)
               .related('formField')
+              .related('globalField')
               .one(),
           );
 
@@ -10016,7 +10223,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error(FORM_VALUE_CHANGED_MESSAGE);
           }
 
-          const fieldType = formEntityValue.formField?.fieldType;
+          const fieldType = formEntityValue.globalField?.fieldType ?? formEntityValue.formField?.fieldType;
+          const resolvedFieldName =
+            formEntityValue.globalField?.fieldName ?? formEntityValue.formField?.fieldName;
 
           // Determine what to store based on field type
           const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
@@ -10051,7 +10260,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (
             formEntityValue.entityType === FormEntityType.TICKET &&
-            formEntityValue.formField?.fieldName === 'releaseVersion'
+            resolvedFieldName === 'releaseVersion'
           ) {
             asyncTasks.push(async () => {
               await versionReleaseMappingService.syncTicketById(formEntityValue.entityId);
@@ -11225,9 +11434,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               let fieldIdToName = new Map<string, string>();
               if (transition?.formId) {
                 const transitionFormFields = await tx.run(
-                  zql.form_fields.where('formId', transition.formId),
+                  zql.form_fields.where('formId', transition.formId).related('globalField'),
                 );
-                fieldIdToName = new Map(transitionFormFields.map(f => [f.id, f.fieldName]));
+                fieldIdToName = new Map(
+                  transitionFormFields
+                    .map(f => {
+                      const resolvedId = f.globalFieldId ?? f.id;
+                      const name = f.globalField?.fieldName ?? f.fieldName;
+                      return name ? ([resolvedId, name] as const) : null;
+                    })
+                    .filter((entry): entry is readonly [string, string] => entry !== null),
+                );
               }
 
               // Read all form values for (ticket, stage) once; both the guessed submission and
@@ -14789,9 +15006,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           let latestValues: Record<string, unknown> = {};
           if (maxVersion > 0 && effectiveFormId) {
             const priorFormFields = await tx.run(
-              zql.form_fields.where('formId', effectiveFormId),
+              zql.form_fields.where('formId', effectiveFormId).related('globalField'),
             );
-            const fieldIdToName = new Map(priorFormFields.map(f => [f.id, f.fieldName]));
+            const fieldIdToName = new Map(
+              priorFormFields
+                .map(f => {
+                  const resolvedId = f.globalFieldId ?? f.id;
+                  const name = f.globalField?.fieldName ?? f.fieldName;
+                  return name ? ([resolvedId, name] as const) : null;
+                })
+                .filter((entry): entry is readonly [string, string] => entry !== null),
+            );
             const priorRows = await tx.run(
               zql.form_entity_values
                 .where('entityId', ticketId)

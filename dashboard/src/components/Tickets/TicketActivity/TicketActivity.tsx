@@ -37,7 +37,8 @@ type FormValueEntry = {
   fieldId: string;
   fieldValue?: unknown;
   actualFieldValue?: unknown;
-  formField?: { fieldName: string } | null;
+  formField?: { fieldName?: string | null } | null;
+  globalField?: { fieldName?: string | null } | null;
 };
 
 type StageVisitFormValues = {
@@ -782,7 +783,7 @@ export const ActivityComponent = ({
                 {matchedFormVisit.formValues.map(fv => (
                   <div key={fv.id} className='px-3 py-2 flex items-start justify-between gap-4'>
                     <span className='text-[11px] text-muted-foreground shrink-0'>
-                      {fv.formField?.fieldName ?? fv.fieldId}
+                      {fv.globalField?.fieldName ?? fv.formField?.fieldName ?? fv.fieldId}
                     </span>
                     <span className='text-[11px] text-foreground text-right break-words min-w-0'>
                       {renderFormFieldValue(fv)}

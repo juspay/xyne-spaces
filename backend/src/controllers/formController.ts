@@ -39,13 +39,64 @@ const isFormAccessibleToUser = async (
   return hasFormsAccess(user.id, requiredAccess);
 };
 
+const isExpectedFormInputError = (error: unknown): error is Error => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const { message } = error;
+  return (
+    message === 'At least one field is required' ||
+    message === 'All fields must have a name' ||
+    message === 'Fields must include fieldName and fieldType' ||
+    message === 'Duplicate field IDs are not allowed' ||
+    message === 'Duplicate field names are not allowed' ||
+    message === 'Field names must be unique within a form' ||
+    message.includes('must have at least one option') ||
+    message.includes('Invalid field type') ||
+    message.includes('does not belong to this form') ||
+    message.includes('does not belong to this workspace') ||
+    message.includes('Cannot resolve project for form fields') ||
+    message.includes('A field with this name and type already exists')
+  );
+};
+
 export class FormController {
+  /**
+   * Get project reusable/global fields for autocomplete.
+   */
+  getGlobalFields = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!req.user?.id || !req.user.workspaceId) {
+        res.status(403).json({ error: 'Authentication required' });
+        return;
+      }
+
+      const projectId = typeof req.query.projectId === 'string' ? req.query.projectId : '';
+
+      if (!projectId) {
+        res.status(400).json({ error: 'Project ID is required' });
+        return;
+      }
+
+      const fields = await formService.getGlobalFields({
+        projectId,
+        workspaceId: req.user.workspaceId,
+      });
+
+      res.status(200).json(fields);
+    } catch (error: any) {
+      logger.error('Error getting global fields:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
   /**
    * Create form
    */
   createForm = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { formName, formDescription, contextType, entityType, fields } = req.body;
+      const { formName, formDescription, contextType, entityType, fields, projectId } = req.body;
 
       if (!req.user?.id) {
         res.status(403).json({ error: 'Authentication required' });
@@ -95,6 +146,7 @@ export class FormController {
           formDescription,
           contextType,
           entityType,
+          ...(projectId ? { projectId } : {}),
           workspaceId: req.user!.workspaceId!,
           fields,
           createdBy: req.user?.id || '',
@@ -105,8 +157,7 @@ export class FormController {
     } catch (error: any) {
       logger.error('Error creating form:', error);
 
-      // Handle validation errors from repository
-      if (error.message.includes('field')) {
+      if (isExpectedFormInputError(error)) {
         res.status(400).json({ error: error.message });
         return;
       }
@@ -161,7 +212,7 @@ export class FormController {
   updateForm = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const { formName, formDescription, fields } = req.body;
+      const { formName, formDescription, fields, projectId } = req.body;
 
       if (!req.user?.id) {
         res.status(403).json({ error: 'Authentication required' });
@@ -210,12 +261,19 @@ export class FormController {
       const form = await formService.updateFormWithFields(id, {
         formName,
         formDescription,
-        fields: fields.map(field => ({
-          fieldId: field.fieldId,
-          fieldName: field.fieldName,
-          fieldType: field.fieldType as FormFieldType,
-          fieldEnum: field.fieldEnum,
-          isOptional: field.isOptional,
+        ...(projectId ? { projectId } : {}),
+        fields: fields.map((field: {
+          fieldId?: string;
+          fieldName?: string;
+          fieldType?: FormFieldType;
+          fieldEnum?: string[];
+          isOptional?: boolean;
+        }) => ({
+          ...(field.fieldId !== undefined ? { fieldId: field.fieldId } : {}),
+          ...(field.fieldName !== undefined ? { fieldName: field.fieldName } : {}),
+          ...(field.fieldType !== undefined ? { fieldType: field.fieldType } : {}),
+          ...(field.fieldEnum !== undefined ? { fieldEnum: field.fieldEnum } : {}),
+          ...(field.isOptional !== undefined ? { isOptional: field.isOptional } : {}),
         })),
       });
 
@@ -223,13 +281,7 @@ export class FormController {
     } catch (error: any) {
       logger.error('Error updating form:', error);
 
-      // Handle validation errors from repository
-      if (
-        error.message.includes('field') ||
-        error.message.includes('Field ') ||
-        error.message.includes('Duplicate field') ||
-        error.message.includes('Cannot delete form fields')
-      ) {
+      if (isExpectedFormInputError(error)) {
         res.status(400).json({ error: error.message });
         return;
       }

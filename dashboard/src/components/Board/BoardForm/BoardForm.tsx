@@ -854,6 +854,7 @@ export const BoardForm = ({
             selectedFormIds={selectedFormIds}
             onFormSelect={handleFormSelect}
             onFormDeselect={handleFormDeselect}
+            projectId={projectId}
             disabled={isLoading}
           />
         </div>

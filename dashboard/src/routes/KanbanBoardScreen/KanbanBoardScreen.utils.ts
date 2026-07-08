@@ -11,6 +11,7 @@ import { TicketStatusV2 } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { FormFieldType, type FormFields } from '@xyne/shared';
+import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
 
 /**
  * Returns the color for a given stage name
@@ -671,9 +672,16 @@ export const extractBoardFormFields = (
   const fieldsMap = new Map<string, { id: string; fieldName: string; fieldType: FormFieldType }>();
 
   formMappings.forEach(mapping => {
-    const mappingWithFields = mapping as { formFields?: readonly FormFields[] };
-    const fields = mappingWithFields.formFields;
-    fields?.forEach(field => {
+    const mappingWithFields = mapping as {
+      formId?: string;
+      formFields?: readonly FormFields[];
+    };
+    const fields = mappingWithFields.formId
+      ? resolveDisplayFormFields(mappingWithFields.formId, [
+          ...(mappingWithFields.formFields ?? []),
+        ])
+      : [];
+    fields.forEach(field => {
       if (!fieldsMap.has(field.id)) {
         fieldsMap.set(field.id, {
           id: field.id,

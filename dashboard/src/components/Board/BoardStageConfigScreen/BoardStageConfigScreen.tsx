@@ -25,21 +25,20 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '../../../components/ui/dropdown-menu';
-import {
-  TicketStatusV2,
-  PRStatusEvent,
-  FormContextType,
-  FormFieldType,
-  BoardType,
-} from '@xyne/shared';
+import { TicketStatusV2, PRStatusEvent, FormContextType, BoardType } from '@xyne/shared';
 import { toast } from 'sonner';
 import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 import type { StageNode as Stage, StageCondition } from './BoardStageConfigScreen.types';
 import { ConditionBuilder } from '../../../components/Board/ConditionBuilder/ConditionBuilder';
 import { CreateFormSlideOut } from '../../../components/Board/CreateFormSlideOut/CreateFormSlideOut';
+import type { FormField } from '../../../components/Board/CreateFormSlideOut/CreateFormSlideOut.types';
 import { TransitionFormPicker } from '../TransitionFormPicker/TransitionFormPicker';
 import { formService } from '../../../services/Form/formService';
 import { FormEntityType } from '@xyne/shared';
+import {
+  mapFormFieldsToApiPayload,
+  mapFormDetailsToBuilderFields,
+} from '../../../utils/board/formFieldApiMapper';
 import { StatusIndicator } from '../../../components/Board/StatusIndicator';
 import { STATUS_OPTIONS, getStatusOption } from './BoardStageConfigScreen.types.tsx';
 import { SlaSettings } from '../../xyne-desk/SlaSettings/SlaSettings';
@@ -564,6 +563,19 @@ const BoardStageConfigScreen = ({
     [allForms],
   );
 
+  const buildStageFormRequest = useCallback(
+    (formData: { formName: string; formDescription: string; fields: FormField[] }) => ({
+      formName: formData.formName,
+      formDescription: formData.formDescription,
+      contextType: FormContextType.STAGE,
+      entityType: FormEntityType.TICKET,
+      projectId,
+      boardId,
+      fields: mapFormFieldsToApiPayload(formData.fields),
+    }),
+    [boardId, projectId],
+  );
+
   // Track if we've initialized stages to prevent re-syncing
   const hasInitializedStages = useRef(false);
 
@@ -600,14 +612,7 @@ const BoardStageConfigScreen = ({
   const [editingFormData, setEditingFormData] = useState<{
     formName: string;
     formDescription: string;
-    fields: Array<{
-      id: string;
-      persistedFieldId?: string;
-      fieldName: string;
-      fieldType: FormFieldType;
-      isOptional: boolean;
-      fieldEnum?: string[];
-    }>;
+    fields: FormField[];
   } | null>(null);
   const [selectedStageForEditForm, setSelectedStageForEditForm] = useState<number | null>(null);
 
@@ -656,14 +661,7 @@ const BoardStageConfigScreen = ({
   const [edgeEditFormData, setEdgeEditFormData] = useState<{
     formName: string;
     formDescription: string;
-    fields: Array<{
-      id: string;
-      persistedFieldId?: string;
-      fieldName: string;
-      fieldType: FormFieldType;
-      isOptional: boolean;
-      fieldEnum?: string[];
-    }>;
+    fields: FormField[];
   } | null>(null);
 
   // ── Stage Transitions (non-linear boards) ────────────────────────────────────
@@ -791,77 +789,111 @@ const BoardStageConfigScreen = ({
     }
   }, [board]);
 
-  // ── Load stage transitions for all board types ─────────────────────────────
+  // Reset initialization flags when modal closes so the next open reloads from DB.
   useEffect(() => {
     if (!isOpen) {
+      hasInitializedStages.current = false;
       hasLoadedTransitions.current = false;
+    }
+  }, [isOpen]);
+
+  // ── Load stage transitions for all board types ─────────────────────────────
+  const applyLoadedTransitions = useCallback(
+    (
+      transitions: Array<{
+        id: string;
+        fromStageId: string | null;
+        toStageId: string;
+        formId: string | null;
+        requiresApproval: boolean | null;
+        visitSlaMode: string | null;
+        fixedEtaHours: number | null;
+        onReenter: string | null;
+        transitionApprovers?: readonly {
+          approverType?: string | null;
+          userId: string | null;
+          roleId: string | null;
+        }[];
+      }>,
+      stageSnapshot: Stage[],
+    ) => {
+      const map = new Map<number, Set<number>>();
+      const metaMap = new Map<string, TransitionMeta>();
+      for (const t of transitions) {
+        const fromStage = stageSnapshot.find(s => s.id === t.fromStageId);
+        const toStage = stageSnapshot.find(s => s.id === t.toStageId);
+        if (fromStage && toStage) {
+          if (!map.has(fromStage.tempId)) {
+            map.set(fromStage.tempId, new Set());
+          }
+          map.get(fromStage.tempId)!.add(toStage.tempId);
+
+          metaMap.set(`${fromStage.tempId}->${toStage.tempId}`, {
+            id: t.id,
+            formId: t.formId,
+            requiresApproval: t.requiresApproval ?? false,
+            approvers: (t.transitionApprovers ?? [])
+              .map(
+                (a: {
+                  approverType?: string | null;
+                  userId: string | null;
+                  roleId: string | null;
+                }) => {
+                  const type = a.approverType ?? 'USER';
+                  if (type === 'ROLE') {
+                    return a.roleId
+                      ? { approverId: a.roleId, approverType: 'ROLE' as const }
+                      : null;
+                  }
+                  return a.userId ? { approverId: a.userId, approverType: 'USER' as const } : null;
+                },
+              )
+              .filter(
+                (x): x is { approverId: string; approverType: 'USER' | 'ROLE' } => x !== null,
+              ),
+            visitSlaMode: t.visitSlaMode ?? 'STAGE_DEFAULT',
+            fixedEtaHours: t.fixedEtaHours,
+            onReenter: t.onReenter ?? 'RESET',
+          });
+        }
+      }
+      setTransitionsByTempId(map);
+      setTransitionsMeta(metaMap);
+    },
+    [],
+  );
+
+  const reloadTransitionsFromServer = useCallback(async (): Promise<boolean> => {
+    if (!boardId || !stages.some(s => s.id)) {
+      return false;
+    }
+
+    setIsTransitionsLoading(true);
+    try {
+      const transitions = await zero.run(queries.getStageTransitionsByBoardId({ boardId }), {
+        type: 'complete',
+      });
+      applyLoadedTransitions(transitions, stages);
+      return true;
+    } catch (err) {
+      console.error('Failed to load stage transitions:', err);
+      return false;
+    } finally {
+      setIsTransitionsLoading(false);
+    }
+  }, [applyLoadedTransitions, boardId, stages, zero]);
+
+  useEffect(() => {
+    if (!isOpen) {
       return;
     }
     if (hasLoadedTransitions.current) return;
     if (!boardId) return;
-    // Need real stage IDs to map transitions
-    const hasRealStageIds = stages.some(s => s.id);
-    if (!hasRealStageIds) return;
+    if (!stages.some(s => s.id)) return;
 
     hasLoadedTransitions.current = true;
-    setIsTransitionsLoading(true);
-
-    zero
-      .run(queries.getStageTransitionsByBoardId({ boardId }), { type: 'complete' })
-      .then(transitions => {
-        const map = new Map<number, Set<number>>();
-        const metaMap = new Map<string, TransitionMeta>();
-        for (const t of transitions) {
-          const fromStage = stages.find(s => s.id === t.fromStageId);
-          const toStage = stages.find(s => s.id === t.toStageId);
-          if (fromStage && toStage) {
-            if (!map.has(fromStage.tempId)) {
-              map.set(fromStage.tempId, new Set());
-            }
-            map.get(fromStage.tempId)!.add(toStage.tempId);
-
-            metaMap.set(`${fromStage.tempId}->${toStage.tempId}`, {
-              id: t.id,
-              formId: t.formId,
-              // NULL columns are treated as their defaults in code.
-              requiresApproval: t.requiresApproval ?? false,
-              approvers: (t.transitionApprovers ?? [])
-                .map(
-                  (a: {
-                    approverType?: string | null;
-                    userId: string | null;
-                    roleId: string | null;
-                  }) => {
-                    const type = a.approverType ?? 'USER';
-                    if (type === 'ROLE') {
-                      return a.roleId
-                        ? { approverId: a.roleId, approverType: 'ROLE' as const }
-                        : null;
-                    }
-                    return a.userId
-                      ? { approverId: a.userId, approverType: 'USER' as const }
-                      : null;
-                  },
-                )
-                .filter(
-                  (x): x is { approverId: string; approverType: 'USER' | 'ROLE' } => x !== null,
-                ),
-              visitSlaMode: t.visitSlaMode ?? 'STAGE_DEFAULT',
-              fixedEtaHours: t.fixedEtaHours,
-              onReenter: t.onReenter ?? 'RESET',
-            });
-          }
-        }
-        setTransitionsByTempId(map);
-        setTransitionsMeta(metaMap);
-      })
-      .catch(err => {
-        console.error('Failed to load stage transitions:', err);
-      })
-      .finally(() => setIsTransitionsLoading(false));
-    // formMap is read inside to resolve form/user display names; the
-    // hasLoadedTransitions ref guard prevents this effect from re-running.
-  }, [isOpen, boardId, boardType, stages, formMap]);
+    void reloadTransitionsFromServer();
+  }, [isOpen, boardId, stages, reloadTransitionsFromServer]);
 
   // ── Load stages from board (same approach as BoardForm) ─────────────────────
   useEffect(() => {
@@ -1351,33 +1383,11 @@ const BoardStageConfigScreen = ({
   }, []);
 
   const handleCreateFormSave = useCallback(
-    async (formData: {
-      formName: string;
-      formDescription: string;
-      fields: Array<{
-        id: string;
-        fieldName: string;
-        fieldType: string;
-        isOptional: boolean;
-        fieldEnum?: string[];
-      }>;
-    }) => {
-      if (!projectId) return;
+    async (formData: { formName: string; formDescription: string; fields: FormField[] }) => {
+      if (!boardId) return;
 
       try {
-        // Create the form via API
-        const createdForm = await formService.createForm({
-          formName: formData.formName,
-          formDescription: formData.formDescription,
-          contextType: FormContextType.STAGE,
-          entityType: FormEntityType.TICKET,
-          fields: formData.fields.map(f => ({
-            fieldName: f.fieldName,
-            fieldType: f.fieldType as FormFieldType,
-            ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
-            isOptional: f.isOptional,
-          })),
-        });
+        const createdForm = await formService.createForm(buildStageFormRequest(formData));
 
         // Show success message
         toast.success(`Form "${formData.formName}" created successfully`);
@@ -1458,7 +1468,14 @@ const BoardStageConfigScreen = ({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pendingFormCondition, projectId, selectedStageForCondition],
+    [
+      pendingFormCondition,
+      boardId,
+      selectedStageForCondition,
+      buildStageFormRequest,
+      stages,
+      handleSaveCondition,
+    ],
   );
 
   // ── Direct Transition Form Handlers ─────────────────────────────────────────
@@ -1526,37 +1543,164 @@ const BoardStageConfigScreen = ({
     setPendingEdgeFormCondition(null);
   }, []);
 
+  const syncStageTransitions = useCallback(
+    async (
+      stageIdLookup: Record<string, string> = {},
+      metaOverrides: Map<string, Partial<TransitionMeta>> = new Map(),
+      transitionOverrides?: Map<number, Set<number>>,
+    ): Promise<void> => {
+      if (!boardId) return;
+
+      const resolvedStageIds: Record<string, string> = { ...stageIdLookup };
+      for (const stage of stages) {
+        if (stage.id) {
+          resolvedStageIds[String(stage.sequenceNumber)] = stage.id;
+        }
+      }
+
+      const transitionMap = transitionOverrides ?? transitionsByTempId;
+
+      const desiredTransitions: Array<{
+        transitionId?: string;
+        fromStageId: string | null;
+        toStageId: string;
+        formId?: string | null;
+        requiresApproval?: boolean;
+        approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
+        visitSlaMode?: string;
+        fixedEtaHours?: number | null;
+        onReenter?: string;
+      }> = [];
+
+      for (const [fromTempId, targetTempIds] of transitionMap.entries()) {
+        const fromStage = stages.find(s => s.tempId === fromTempId);
+        const fromStageId = fromStage?.id || resolvedStageIds[String(fromStage?.sequenceNumber)];
+        if (!fromStageId) continue;
+
+        for (const toTempId of targetTempIds) {
+          const toStage = stages.find(s => s.tempId === toTempId);
+          const toStageId = toStage?.id || resolvedStageIds[String(toStage?.sequenceNumber)];
+          if (!toStageId || toStageId === fromStageId) continue;
+
+          const edgeKey = `${fromTempId}->${toTempId}`;
+          const meta = {
+            ...transitionsMeta.get(edgeKey),
+            ...metaOverrides.get(edgeKey),
+          };
+          desiredTransitions.push({
+            ...(meta.id !== undefined && { transitionId: meta.id }),
+            fromStageId,
+            toStageId,
+            ...(meta.formId !== undefined && { formId: meta.formId }),
+            ...(meta.requiresApproval !== undefined && {
+              requiresApproval: meta.requiresApproval,
+            }),
+            ...(meta.approvers !== undefined && { approvers: meta.approvers }),
+            ...(meta.visitSlaMode !== undefined && { visitSlaMode: meta.visitSlaMode }),
+            ...(meta.fixedEtaHours !== undefined && { fixedEtaHours: meta.fixedEtaHours }),
+            ...(meta.onReenter !== undefined && { onReenter: meta.onReenter }),
+          });
+        }
+      }
+
+      const invalidApprovalTransitions = desiredTransitions.filter(
+        t => t.requiresApproval && !t.approvers?.length,
+      );
+      if (invalidApprovalTransitions.length > 0) {
+        throw new Error(
+          'Some transitions require approval but have no approvers assigned. Add approvers before saving.',
+        );
+      }
+
+      const transitionsWithIds = desiredTransitions.map(t => ({
+        id: t.transitionId ?? uuidv4(),
+        fromStageId: t.fromStageId ?? null,
+        toStageId: t.toStageId,
+        ...(t.formId !== undefined && { formId: t.formId }),
+        requiresApproval: t.requiresApproval ?? false,
+        ...(t.visitSlaMode !== undefined && { visitSlaMode: t.visitSlaMode }),
+        ...(t.fixedEtaHours !== undefined && { fixedEtaHours: t.fixedEtaHours }),
+        ...(t.onReenter !== undefined && { onReenter: t.onReenter }),
+        approvers: (t.approvers ?? []).map(entry => ({
+          id: uuidv4(),
+          approverId: entry.approverId,
+          approverType: entry.approverType,
+        })),
+      }));
+
+      const syncResult = zero.mutate(
+        mutators.nonLinear.syncTransitions({
+          boardId,
+          transitions: transitionsWithIds,
+          now: Date.now(),
+        }),
+      );
+      const syncRes = await (
+        syncResult as {
+          server: Promise<{ type: string; error?: { message: string } } | undefined>;
+        }
+      ).server;
+      if (syncRes?.type === 'error') {
+        throw new Error(syncRes.error?.message ?? 'Failed to sync stage transitions');
+      }
+    },
+    [boardId, stages, transitionsByTempId, transitionsMeta, zero],
+  );
+
+  const persistEdgeTransitionForm = useCallback(
+    async (fromTempId: number, toTempId: number, formId: string): Promise<void> => {
+      const edgeKey = `${fromTempId}->${toTempId}`;
+      const metaOverride = new Map<string, Partial<TransitionMeta>>([
+        [edgeKey, { formId, ...transitionsMeta.get(edgeKey) }],
+      ]);
+
+      updateTransitionMeta(fromTempId, toTempId, { formId });
+      setTransitionsByTempId(prev => {
+        const next = new Map(prev);
+        const targets = new Set(next.get(fromTempId) ?? []);
+        targets.add(toTempId);
+        next.set(fromTempId, targets);
+        return next;
+      });
+
+      const fromStage = stages.find(s => s.tempId === fromTempId);
+      const toStage = stages.find(s => s.tempId === toTempId);
+      if (!fromStage?.id || !toStage?.id) {
+        toast.info(
+          'Form saved. Click Save on the board configuration to link it to this transition.',
+        );
+        return;
+      }
+
+      const edgeTransitions = new Map(transitionsByTempId);
+      const targets = new Set(edgeTransitions.get(fromTempId) ?? []);
+      targets.add(toTempId);
+      edgeTransitions.set(fromTempId, targets);
+
+      await syncStageTransitions({}, metaOverride, edgeTransitions);
+      hasLoadedTransitions.current = false;
+      await reloadTransitionsFromServer();
+    },
+    [
+      reloadTransitionsFromServer,
+      stages,
+      syncStageTransitions,
+      transitionsByTempId,
+      transitionsMeta,
+      updateTransitionMeta,
+    ],
+  );
+
   const handleEdgeCreateFormSave = useCallback(
-    async (formData: {
-      formName: string;
-      formDescription: string;
-      fields: Array<{
-        id: string;
-        fieldName: string;
-        fieldType: string;
-        isOptional: boolean;
-        fieldEnum?: string[];
-      }>;
-    }) => {
-      if (!projectId || !selectedEdgeForCondition) return;
+    async (formData: { formName: string; formDescription: string; fields: FormField[] }) => {
+      if (!boardId || !selectedEdgeForCondition) return;
       try {
-        const createdForm = await formService.createForm({
-          formName: formData.formName,
-          formDescription: formData.formDescription,
-          contextType: FormContextType.STAGE,
-          entityType: FormEntityType.TICKET,
-          fields: formData.fields.map(f => ({
-            fieldName: f.fieldName,
-            fieldType: f.fieldType as FormFieldType,
-            ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
-            isOptional: f.isOptional,
-          })),
-        });
+        const createdForm = await formService.createForm(buildStageFormRequest(formData));
         toast.success(`Form "${formData.formName}" created successfully`);
         setIsEdgeCreateFormOpen(false);
         setPendingEdgeFormCondition(null);
         const { fromTempId, toTempId } = selectedEdgeForCondition;
-        updateTransitionMeta(fromTempId, toTempId, { formId: createdForm.id });
+        await persistEdgeTransitionForm(fromTempId, toTempId, createdForm.id);
         handleCloseEdgeConditionModal();
       } catch (error) {
         toast.error('Failed to create form', {
@@ -1564,7 +1708,13 @@ const BoardStageConfigScreen = ({
         });
       }
     },
-    [projectId, selectedEdgeForCondition, updateTransitionMeta, handleCloseEdgeConditionModal],
+    [
+      boardId,
+      selectedEdgeForCondition,
+      handleCloseEdgeConditionModal,
+      buildStageFormRequest,
+      persistEdgeTransitionForm,
+    ],
   );
 
   // ── Edit Form Handlers ───────────────────────────────────────────────────────
@@ -1580,14 +1730,7 @@ const BoardStageConfigScreen = ({
       setEditingFormData({
         formName: formDetails.formName,
         formDescription: formDetails.formDescription || '',
-        fields: formDetails.fields.map(field => ({
-          id: field.id,
-          persistedFieldId: field.id,
-          fieldName: field.fieldName,
-          fieldType: field.fieldType,
-          isOptional: field.isOptional,
-          ...(field.fieldEnum ? { fieldEnum: field.fieldEnum } : {}),
-        })),
+        fields: mapFormDetailsToBuilderFields(formDetails),
       });
       setSelectedStageForEditForm(stageTempId);
       setIsEditFormOpen(true);
@@ -1613,36 +1756,18 @@ const BoardStageConfigScreen = ({
       formId: string;
       formName: string;
       formDescription: string;
-      fields: Array<{
-        id: string;
-        persistedFieldId?: string;
-        fieldName: string;
-        fieldType: FormFieldType;
-        isOptional: boolean;
-        fieldEnum?: string[];
-      }>;
+      fields: FormField[];
     }) => {
-      if (!projectId) return;
+      if (!boardId) return;
 
       try {
         await formService.updateForm({
           formId: formData.formId,
-          formName: formData.formName,
-          formDescription: formData.formDescription,
-          contextType: FormContextType.STAGE,
-          entityType: FormEntityType.TICKET,
-          fields: formData.fields.map(f => ({
-            ...(f.persistedFieldId ? { fieldId: f.persistedFieldId } : {}),
-            fieldName: f.fieldName,
-            fieldType: f.fieldType,
-            ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
-            isOptional: f.isOptional,
-          })),
+          ...buildStageFormRequest(formData),
         });
 
         toast.success(`Form "${formData.formName}" updated successfully`);
 
-        // Update the form map with the new name
         setEditingFormId(null);
         setEditingFormData(null);
         setSelectedStageForEditForm(null);
@@ -1654,7 +1779,7 @@ const BoardStageConfigScreen = ({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId],
+    [boardId, buildStageFormRequest],
   );
 
   /**
@@ -1662,32 +1787,11 @@ const BoardStageConfigScreen = ({
    * The form will appear when a ticket is moved INTO that stage.
    */
   const handleDirectFormSave = useCallback(
-    async (formData: {
-      formName: string;
-      formDescription: string;
-      fields: Array<{
-        id: string;
-        fieldName: string;
-        fieldType: string;
-        isOptional: boolean;
-        fieldEnum?: string[];
-      }>;
-    }) => {
-      if (!projectId || selectedStageForDirectForm === null) return;
+    async (formData: { formName: string; formDescription: string; fields: FormField[] }) => {
+      if (!boardId || selectedStageForDirectForm === null) return;
 
       try {
-        const createdForm = await formService.createForm({
-          formName: formData.formName,
-          formDescription: formData.formDescription,
-          contextType: FormContextType.STAGE,
-          entityType: FormEntityType.TICKET,
-          fields: formData.fields.map(f => ({
-            fieldName: f.fieldName,
-            fieldType: f.fieldType as FormFieldType,
-            ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
-            isOptional: f.isOptional,
-          })),
-        });
+        const createdForm = await formService.createForm(buildStageFormRequest(formData));
 
         toast.success(`Transition form "${formData.formName}" added`);
 
@@ -1709,7 +1813,7 @@ const BoardStageConfigScreen = ({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, selectedStageForDirectForm],
+    [boardId, selectedStageForDirectForm, buildStageFormRequest],
   );
 
   /** Remove the transition form from a stage. */
@@ -1750,14 +1854,7 @@ const BoardStageConfigScreen = ({
             setEdgeEditFormData({
               formName: formDetails.formName,
               formDescription: formDetails.formDescription || '',
-              fields: formDetails.fields.map(f => ({
-                id: f.id,
-                persistedFieldId: f.id,
-                fieldName: f.fieldName,
-                fieldType: f.fieldType,
-                isOptional: f.isOptional,
-                ...(f.fieldEnum ? { fieldEnum: f.fieldEnum } : {}),
-              })),
+              fields: mapFormDetailsToBuilderFields(formDetails),
             });
             setIsEdgeFormOpen(true);
           })
@@ -1787,54 +1884,24 @@ const BoardStageConfigScreen = ({
   }, []);
 
   const handleEdgeFormSave = useCallback(
-    async (formData: {
-      formName: string;
-      formDescription: string;
-      fields: Array<{
-        id: string;
-        fieldName: string;
-        fieldType: string;
-        isOptional: boolean;
-        fieldEnum?: string[];
-      }>;
-    }) => {
-      if (!projectId || !edgeFormTarget) return;
+    async (formData: { formName: string; formDescription: string; fields: FormField[] }) => {
+      if (!boardId || !edgeFormTarget) return;
       try {
         const { fromTempId, toTempId } = edgeFormTarget;
         let formId: string;
         if (edgeEditFormId) {
           await formService.updateForm({
             formId: edgeEditFormId,
-            formName: formData.formName,
-            formDescription: formData.formDescription,
-            contextType: FormContextType.STAGE,
-            entityType: FormEntityType.TICKET,
-            fields: formData.fields.map(f => ({
-              fieldName: f.fieldName,
-              fieldType: f.fieldType as FormFieldType,
-              ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
-              isOptional: f.isOptional,
-            })),
+            ...buildStageFormRequest(formData),
           });
           formId = edgeEditFormId;
           toast.success(`Form "${formData.formName}" updated`);
         } else {
-          const created = await formService.createForm({
-            formName: formData.formName,
-            formDescription: formData.formDescription,
-            contextType: FormContextType.STAGE,
-            entityType: FormEntityType.TICKET,
-            fields: formData.fields.map(f => ({
-              fieldName: f.fieldName,
-              fieldType: f.fieldType as FormFieldType,
-              ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
-              isOptional: f.isOptional,
-            })),
-          });
+          const created = await formService.createForm(buildStageFormRequest(formData));
           formId = created.id;
           toast.success(`Form "${formData.formName}" added`);
         }
-        updateTransitionMeta(fromTempId, toTempId, { formId });
+        await persistEdgeTransitionForm(fromTempId, toTempId, formId);
         setIsEdgeFormOpen(false);
         setEdgeFormTarget(null);
         setEdgeEditFormId(null);
@@ -1845,7 +1912,7 @@ const BoardStageConfigScreen = ({
         });
       }
     },
-    [projectId, edgeFormTarget, edgeEditFormId, updateTransitionMeta],
+    [boardId, edgeFormTarget, edgeEditFormId, buildStageFormRequest, persistEdgeTransitionForm],
   );
 
   // ── Save ───────────────────────────────────────────────────────────────────
@@ -1923,56 +1990,6 @@ const BoardStageConfigScreen = ({
         ...(stageApprovers.length > 0 && { stageApprovers }),
       };
 
-      const desiredTransitions: Array<{
-        fromStageId: string | null;
-        toStageId: string;
-        formId?: string | null;
-        requiresApproval?: boolean;
-        approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
-        visitSlaMode?: string;
-        fixedEtaHours?: number | null;
-        onReenter?: string;
-      }> = [];
-
-      for (const [fromTempId, targetTempIds] of transitionsByTempId.entries()) {
-        const fromStage = stages.find(s => s.tempId === fromTempId);
-        const fromStageId = fromStage?.id || stageIds[String(fromStage?.sequenceNumber)];
-        if (!fromStageId) continue;
-
-        for (const toTempId of targetTempIds) {
-          const toStage = stages.find(s => s.tempId === toTempId);
-          const toStageId = toStage?.id || stageIds[String(toStage?.sequenceNumber)];
-          if (!toStageId || toStageId === fromStageId) continue;
-
-          const meta = transitionsMeta.get(`${fromTempId}->${toTempId}`);
-          desiredTransitions.push({
-            fromStageId,
-            toStageId,
-            ...(meta?.formId !== undefined && { formId: meta.formId }),
-            ...(meta?.requiresApproval !== undefined && {
-              requiresApproval: meta.requiresApproval,
-            }),
-            ...(meta?.approvers !== undefined && {
-              approvers: meta.approvers,
-            }),
-            ...(meta?.visitSlaMode !== undefined && { visitSlaMode: meta.visitSlaMode }),
-            ...(meta?.fixedEtaHours !== undefined && { fixedEtaHours: meta.fixedEtaHours }),
-            ...(meta?.onReenter !== undefined && { onReenter: meta.onReenter }),
-          });
-        }
-      }
-
-      const invalidApprovalTransitions = desiredTransitions.filter(
-        t => t.requiresApproval && !t.approvers?.length,
-      );
-      if (invalidApprovalTransitions.length > 0) {
-        toast.error('Some transitions require approval but have no approvers assigned.', {
-          description:
-            'Please add at least one approver to each approval-required transition before saving.',
-        });
-        return;
-      }
-
       const result = zero.mutate(mutators.board.update(mutatorArgs));
       const res = await result.server;
 
@@ -1984,52 +2001,26 @@ const BoardStageConfigScreen = ({
       } else {
         // Sync stage transitions for all board types
         try {
-          const transitionsWithIds = desiredTransitions.map(t => ({
-            id: uuidv4(),
-            fromStageId: t.fromStageId ?? null,
-            toStageId: t.toStageId,
-            ...(t.formId !== undefined && { formId: t.formId }),
-            requiresApproval: t.requiresApproval ?? false,
-            ...(t.visitSlaMode !== undefined && { visitSlaMode: t.visitSlaMode }),
-            ...(t.fixedEtaHours !== undefined && { fixedEtaHours: t.fixedEtaHours }),
-            ...(t.onReenter !== undefined && { onReenter: t.onReenter }),
-            approvers: (t.approvers ?? []).map(entry => ({
-              id: uuidv4(),
-              approverId: entry.approverId,
-              approverType: entry.approverType,
-            })),
-          }));
-          const syncResult = zero.mutate(
-            mutators.nonLinear.syncTransitions({
-              boardId,
-              transitions: transitionsWithIds,
-              now: Date.now(),
-            }),
-          );
-          const syncRes = await (
-            syncResult as {
-              server: Promise<{ type: string; error?: { message: string } } | undefined>;
-            }
-          ).server;
-          if (syncRes?.type === 'error') {
-            throw new Error(syncRes.error?.message ?? 'Failed to sync stage transitions');
+          await syncStageTransitions(stageIds);
+          hasLoadedTransitions.current = false;
+          await reloadTransitionsFromServer();
+          toast.success('Board stages updated successfully');
+          hasInitializedStages.current = false;
+          if (onNext) {
+            onNext();
+          } else {
+            onSave?.();
+            onClose();
           }
         } catch (transitionErr) {
           console.error('Stage transition sync failed:', transitionErr);
           const errMsg =
             transitionErr instanceof Error ? transitionErr.message : String(transitionErr);
           toast.warning('Board saved, but stage transitions could not be synced', {
-            description: `${errMsg}. Please reopen board settings and save transitions again.`,
+            description: `${errMsg}. Please save again to retry transition sync.`,
             duration: 8000,
           });
           return;
-        }
-        toast.success('Board stages updated successfully');
-        if (onNext) {
-          onNext();
-        } else {
-          onSave?.();
-          onClose();
         }
       }
     } catch (error) {
@@ -2050,8 +2041,8 @@ const BoardStageConfigScreen = ({
     slaPolicyType,
     showNextStageFormInTicketDetails,
     boardType,
-    transitionsByTempId,
-    transitionsMeta,
+    syncStageTransitions,
+    reloadTransitionsFromServer,
   ]);
 
   if (!isOpen) return null;
@@ -2286,6 +2277,7 @@ const BoardStageConfigScreen = ({
                   isOpen={true}
                   onClose={handleCloseEdgeCreateForm}
                   onSave={formData => void handleEdgeCreateFormSave(formData)}
+                  projectId={projectId}
                 />
               </div>
             )}
@@ -2362,6 +2354,7 @@ const BoardStageConfigScreen = ({
                     isOpen={true}
                     onClose={handleCloseCreateForm}
                     onSave={formData => void handleCreateFormSave(formData)}
+                    projectId={projectId}
                   />
                 </div>
               )}
@@ -2374,6 +2367,7 @@ const BoardStageConfigScreen = ({
                     onClose={handleCloseDirectForm}
                     onSave={formData => void handleDirectFormSave(formData)}
                     title='Configure Transition Form'
+                    projectId={projectId}
                   />
                 </div>
               )}
@@ -2390,6 +2384,7 @@ const BoardStageConfigScreen = ({
                     {...(editingFormId ? { formId: editingFormId } : {})}
                     initialData={editingFormData}
                     title='Edit Transition Form'
+                    projectId={projectId}
                   />
                 </div>
               )}
@@ -2400,6 +2395,7 @@ const BoardStageConfigScreen = ({
                   isOpen={true}
                   onClose={handleCloseEdgeForm}
                   onSave={formData => void handleEdgeFormSave(formData)}
+                  projectId={projectId}
                   {...(edgeEditFormId ? { formId: edgeEditFormId } : {})}
                   {...(edgeEditFormData
                     ? {

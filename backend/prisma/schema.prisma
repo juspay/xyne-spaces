@@ -1956,6 +1956,7 @@ model Project {
   tickets  Ticket[]
   channels Channel[]
   boards   Board[]
+  globalFields GlobalField[]
   canvasFolders CanvasFolder[]
   canvases      Canvas[]
 
@@ -3603,22 +3604,50 @@ model FormContextMapping {
   @@schema("public")
 }
 
-model FormFields {
-  id         String   @id @default(cuid())
-  formId     String   // Reference to Form
-  fieldName  String   // Name of the field
-  fieldType  FormFieldType
-  fieldEnum  Json?
-  isOptional Boolean  @default(false)
-  sequenceNumber Int @default(0) // Order of fields in the form
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+// Project-scoped reusable field definitions.
+// All newly created field definitions live here (unique per project by name + type).
+model GlobalField {
+  id          String        @id @default(cuid())
+  projectId   String        // Project scope for reuse + ACL
+  fieldName   String        // Name of the field
+  fieldType   FormFieldType
+  fieldEnum   Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   // Relations
-  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+  project    Project      @relation(fields: [projectId], references: [id])
+  formFields FormFields[]
 
-  @@unique([formId, fieldName]) // Prevent duplicate fields per form
+  @@unique([projectId, fieldName, fieldType]) // One definition per name + type per project
+  @@index([projectId])
+  @@map("global_fields")
+  @@schema("public")
+}
+
+// Per-form field membership.
+// New rows point at a global_fields definition via globalFieldId.
+// Legacy (deployed) rows carry their own definition columns (globalFieldId = null).
+model FormFields {
+  id             String         @id @default(cuid())
+  formId         String         // Form this membership row belongs to
+  globalFieldId  String?        // Definition in global_fields (null for legacy rows)
+  fieldName      String?        // DEPRECATED: legacy definition only; new definitions live in global_fields
+  fieldType      FormFieldType? // DEPRECATED: legacy definition only
+  fieldEnum      Json?          // DEPRECATED: legacy definition only
+  isOptional     Boolean        @default(false) // Per-form optional
+  sequenceNumber Int            @default(0)      // Per-form display/submission order
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  // Relations
+  form        Form         @relation(fields: [formId], references: [id], onDelete: Cascade)
+  globalField GlobalField? @relation(fields: [globalFieldId], references: [id], onDelete: Restrict)
+
+  @@unique([formId, fieldName])     // Legacy duplicate protection (nullable fieldName allows multiple NULLs)
+  @@unique([formId, globalFieldId]) // Prevent the same global field twice on one form
   @@index([formId])
+  @@index([globalFieldId])
   @@map("form_fields")
   @@schema("public")
 }
