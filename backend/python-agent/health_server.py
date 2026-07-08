@@ -12,7 +12,7 @@ POST /transcribe-audio -> transcribe_audio (voice dictation STT)
 import asyncio
 from aiohttp import web
 from config import get_logger, Config
-from transcribe_audio_handler import transcribe_audio
+from transcribe_audio_handler import transcribe_audio, transcribe_stream_ws
 from infra import get_user_registry
 
 from embed_voice_handler import embed_voice
@@ -65,6 +65,7 @@ async def start_health_server(host: str = "0.0.0.0", port: int = 8080):
     app.router.add_get("/", health_check)
     app.router.add_post("/embed-voice", embed_voice)
     app.router.add_post("/transcribe-audio", transcribe_audio)
+    app.router.add_get("/transcribe-stream", transcribe_stream_ws)
 
     runner = web.AppRunner(app)
     await runner.setup()

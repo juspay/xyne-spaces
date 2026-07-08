@@ -10,6 +10,7 @@ aiofiles
 pylint
 pyright>=1.1.350
 google-cloud-storage
+google-cloud-speech>=2.26.0
 boto3>=1.28.0
 aiohttp>=3.9.0
 redis>=5.0.0

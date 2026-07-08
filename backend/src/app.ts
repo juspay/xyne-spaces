@@ -66,6 +66,7 @@ import callRoutes from '@/routes/calls';
 import calendarSyncRoutes from '@/routes/calendarSync';
 import callLobbyRoutes from '@/routes/callLobby';
 import voiceInputRoutes from '@/routes/voiceInput';
+import { attachVoiceInputStreamHandler } from '@/routes/voiceInputStream';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
@@ -163,6 +164,7 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { gmailWatchRenewalQueue } from '@/queues/gmailWatchRenewalQueue';
+import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
@@ -814,6 +816,7 @@ export class App {
     // Initialize WebSocket server
     logger.info('Initializing WebSocket server...');
     websocketService.initialize(this.httpServer);
+    attachVoiceInputStreamHandler(this.httpServer);
 
     // Initialize notification service
     logger.info('Initializing notification service...');
@@ -848,6 +851,9 @@ export class App {
 
     logger.info('Initializing Gmail watch renewal queue...');
     await gmailWatchRenewalQueue.initialize();
+
+    logger.info('Initializing warm user registry queue...');
+    await warmUserRegistryQueue.initialize();
 
     // Initialize Superposition client early to fail fast if misconfigured
     logger.info('Initializing Superposition client...');
@@ -948,6 +954,9 @@ export class App {
 
       // Close Gmail watch renewal queue
       await gmailWatchRenewalQueue.close();
+
+      // Close warm user registry queue
+      await warmUserRegistryQueue.close();
 
       // Close presence cleanup queue
       await presenceCleanupQueue.close();

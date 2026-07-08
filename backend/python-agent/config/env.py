@@ -26,8 +26,10 @@ class Config:
     voice_input_stt_model: str  # STT provider for voice-input dictation flow (overrides stt_model for this path)
     google_voice_credentials_json: Optional[str]
     google_stt_model: str  # Model for Google STT (e.g., chirp_3)
+    google_stt_stream_model: str  # Model for Google STT streaming (chirp_3 does not support streaming+adaptation)
     google_stt_language: str
     google_stt_location: str  # Region for Google STT (chirp models require e.g. us-central1, not global)
+    google_stt_stream_location: str  # Region for streaming STT — chirp_2 is not in the "us" multi-region
     
     # Deepgram STT Configuration
     deepgram_api_key: Optional[str]
@@ -126,8 +128,10 @@ class Config:
             voice_input_stt_model=os.getenv("VOICE_INPUT_STT_MODEL", os.getenv("STT_MODEL", "azure")).lower(),
             google_voice_credentials_json=os.getenv("GOOGLE_VOICE_CREDENTIALS_JSON"),
             google_stt_model=os.getenv("GOOGLE_STT_MODEL", "chirp_3"),
+            google_stt_stream_model=os.getenv("GOOGLE_STT_STREAM_MODEL", "chirp_2"),
             google_stt_language=os.getenv("GOOGLE_STT_LANGUAGE", "en-US"),
             google_stt_location=os.getenv("GOOGLE_STT_LOCATION", "us"),
+            google_stt_stream_location=os.getenv("GOOGLE_STT_STREAM_LOCATION", "us-central1"),
             
             # Deepgram STT
             deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
