@@ -641,6 +641,46 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
         }
     };
 
+    /**
+     * Returns the raw Vespa fields for a collection file, so the dashboard file
+     * viewer can inspect chunks/chunks_map exactly as the search tools see them.
+     */
+    getFileVespaDocument = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const { itemId } = req.params;
+            const user = req.user;
+
+            if (!user) { res.status(401).json({ error: 'Unauthorized' }); return; }
+            if (!itemId || typeof itemId !== 'string' || itemId.trim() === '') {
+                res.status(400).json({ error: 'Item ID is required' });
+                return;
+            }
+
+            const file = await this.collectionRepository.findItemById(itemId.trim());
+            if (!file) { res.status(404).json({ error: 'File not found' }); return; }
+
+            const { role } = await this.getCollectionOrRole(file.rootCollectionId, user.id);
+            if (!role) {
+                res.status(403).json({ error: 'Forbidden: You do not have access to this collection' });
+                return;
+            }
+
+            const rawDoc = await vespaClient.crudService.getDocument(file.fileId, fileSchema);
+            const fields = ((rawDoc as { fields?: Record<string, unknown> } | null)?.fields) ?? {};
+
+            res.json({
+                docId: file.fileId,
+                itemId: file.id,
+                collectionId: file.rootCollectionId,
+                name: file.name,
+                fields,
+            });
+        } catch (error) {
+            logger.error('Error resolving file Vespa document:', error);
+            if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+        }
+    };
+
     searchItems = async (req: Request, res: Response): Promise<void> => {
         try {
             const { collectionId } = req.params;

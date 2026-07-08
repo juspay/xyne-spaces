@@ -20,6 +20,9 @@ router.get('/items/:itemId/download', collectionController.downloadFile);
 // Resolve one chunk's highlight snippet (for pdf.js find-based citation highlighting)
 router.get('/items/:itemId/chunk', collectionController.getFileChunk);
 
+// Inspect the raw Vespa fields for a collection file
+router.get('/items/:itemId/vespa-doc', collectionController.getFileVespaDocument);
+
 // Download folder as zip
 router.get('/items/:itemId/download-folder', collectionController.downloadFolder);
 
