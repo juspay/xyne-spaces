@@ -339,8 +339,8 @@ export const ThreadMessages = ({
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Check if the route is /threads
-  const isThreadsRoute = location.pathname.startsWith('/chat/dir/threads');
+  // Check if the route is /threads (with optional workspace prefix)
+  const isThreadsRoute = location.pathname.endsWith('/chat/dir/threads');
 
   // Check if thread summary is currently active
   const isThreadSummaryActive = location.hash.startsWith('#thread-summary');
@@ -1265,17 +1265,19 @@ export const ThreadMessages = ({
                   trackMetadata={{ channelId: channel?.id, conversationId: derivedConversationId }}
                 />
               )}
-              <Tooltip content='Close'>
-                <Button
-                  onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
-                  className='p-2 border border-border rounded-lg h-8 w-8'
-                  variant='ghost'
-                  size='sm'
-                  aria-label='Close Thread Panel'
-                >
-                  <X size={20} />
-                </Button>
-              </Tooltip>
+              {!isThreadsRoute && (
+                <Tooltip content='Close'>
+                  <Button
+                    onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
+                    className='p-2 border border-border rounded-lg h-8 w-8'
+                    variant='ghost'
+                    size='sm'
+                    aria-label='Close Thread Panel'
+                  >
+                    <X size={20} />
+                  </Button>
+                </Tooltip>
+              )}
             </div>
           </div>
         )}
@@ -1334,7 +1336,8 @@ export const ThreadMessages = ({
                 {/* Action Buttons */}
                 <div className='flex items-center justify-end gap-1'>
                   {/* Close Button */}
-                  {isTicketThread &&
+                  {!isThreadsRoute &&
+                    isTicketThread &&
                     (resolvedOnClose ? (
                       <Button
                         variant='ghost'
