@@ -826,6 +826,13 @@ export const router = createBrowserRouter([
                       {
                         path: 'threads',
                         element: <UserThreads />,
+                        children: [
+                          { index: true, element: null },
+                          {
+                            path: ':channelId/:conversationId',
+                            element: <ThreadMessages />,
+                          },
+                        ],
                       },
                       // Unreads inbox (must come before :channelId)
                       {

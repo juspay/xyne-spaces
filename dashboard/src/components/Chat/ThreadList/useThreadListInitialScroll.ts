@@ -47,6 +47,9 @@ export function deriveThreadScrollIntent(params: {
   const targetMessageId = extractMessageIdFromHash(hash);
 
   if (originConversationId === conversationId && targetMessageId) {
+    if (enableCollapsing) {
+      return { type: 'noop' };
+    }
     return { type: 'hash', messageId: targetMessageId };
   }
 
@@ -191,8 +194,8 @@ export function useThreadListInitialScroll({
           if (!messages.some(m => m.messageId === scrollIntent.messageId)) {
             return;
           }
-          const el = document.getElementById(
-            `thread-message-${conversationId}-${scrollIntent.messageId}`,
+          const el = container.querySelector(
+            `[id="thread-message-${conversationId}-${scrollIntent.messageId}"]`,
           );
           if (!el) {
             return;
@@ -205,7 +208,9 @@ export function useThreadListInitialScroll({
           if (!msg) {
             return;
           }
-          const el = document.getElementById(`thread-message-${conversationId}-${msg.messageId}`);
+          const el = container.querySelector(
+            `[id="thread-message-${conversationId}-${msg.messageId}"]`,
+          );
           if (!el) {
             return;
           }

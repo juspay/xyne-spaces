@@ -633,6 +633,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     void navigate(`${baseRoute}/${channelId}/profile/${userId}`);
   };
 
+  const handleTimestampClick = (e: React.MouseEvent | React.KeyboardEvent): void => {
+    e.stopPropagation();
+    const conversationId = conversation?.conversationId || message.conversationId;
+    if (!conversationId || !channelId) return;
+    const isThreadReply = conversation?.initialMessageId
+      ? conversation.initialMessageId !== message.messageId
+      : context === 'thread' && !isFirstInThread;
+    if (window.location.pathname.includes('/chat/dir/threads')) {
+      if (isThreadReply) {
+        void navigate(
+          `/chat/dir/threads/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}`,
+        );
+      } else {
+        void navigate(`/chat/dir/${channelId}#origin=${conversationId}`);
+      }
+      return;
+    }
+    if (isThreadReply) {
+      void navigate(
+        `${baseRoute}/${channelId}/${conversationId}?focusThread=1#origin=${conversationId}&messageId=${message.messageId}`,
+      );
+    } else {
+      void navigate(`${baseRoute}/${channelId}#origin=${conversationId}`);
+    }
+  };
+
   const { settings: debugSettings } = useDebugSettings();
 
   const shouldShowPending = useMemo(() => {
@@ -1020,6 +1046,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
               <Tooltip content={formatFullTimestamp(message.createdAt)} side='top'>
                 <h3
+                  onClick={searchItemView ? undefined : handleTimestampClick}
+                  onKeyDown={
+                    searchItemView
+                      ? undefined
+                      : e => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleTimestampClick(e);
+                          }
+                        }
+                  }
                   className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition-all duration-150 visual-regression-hide ${searchItemView ? 'ml-auto shrink-0' : ''}`}
                 >
                   {searchItemView || context === 'thread'
