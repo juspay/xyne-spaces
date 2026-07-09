@@ -164,10 +164,10 @@ export class TicketUpdatedTrigger extends BaseTrigger<typeof TicketUpdatedConfig
       ) {
         return false;
       }
-      if (
-        rule.newValue !== undefined &&
-        String(change.newValue ?? '') !== String(rule.newValue ?? '')
-      ) {
+      if (rule.newValue !== undefined) {
+        if (String(change.newValue ?? '') !== String(rule.newValue ?? '')) return false;
+      } else if (rule.field === 'assignedTo' && (change.newValue === null || change.newValue === undefined)) {
+        // No specific target user configured — skip unassignment events (newValue=null).
         return false;
       }
       return true;

@@ -29,6 +29,7 @@ export function detectEntityKind(fieldKey: string): EntityKind | null {
       return EntityKind.CHANNEL;
     case 'userId':
     case 'assigneeId':
+    case 'assignedUserId':
     case 'createdById':
     case 'updatedBy':
       return EntityKind.USER;
