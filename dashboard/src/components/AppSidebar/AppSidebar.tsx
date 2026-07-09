@@ -499,21 +499,7 @@ const AppSidebar = (): ReactElement => {
                 data-testid='profile-icon'
               >
                 {/* Status Emoji at Top Center */}
-                <div
-                  onClick={handleStatusClick}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      handleStatusClick();
-                    }
-                  }}
-                  role='button'
-                  tabIndex={0}
-                  data-track-category='App_Sidebar'
-                  data-track-name='Open_Status_Popover'
-                  className='absolute top-1 left-1/2 -translate-x-1/2 cursor-pointer hover:scale-110 transition-transform'
-                  aria-label='Update status'
-                >
+                <div className='absolute top-1 left-1/2 -translate-x-1/2'>
                   <StatusIndicator
                     statusEmoji={currentUser?.statusEmoji}
                     statusContent={currentUser?.statusContent}
