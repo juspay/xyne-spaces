@@ -107,6 +107,21 @@ export class TagRepository {
     });
   }
 
+  async distinctTagsByCategory(
+    workspaceId: string,
+    sourceType: string,
+    tagCategory: string,
+  ): Promise<string[]> {
+    const rows = await this.client().tag.findMany({
+      where: { workspaceId, sourceType, tagCategory, isDeleted: false },
+      distinct: ['tag'],
+      select: { tag: true },
+      orderBy: { tag: 'asc' },
+      take: 50,
+    });
+    return rows.map(r => r.tag);
+  }
+
   async insertTagRow(data: InsertTagRowData, tx?: TxClient): Promise<Tag> {
     const now = new Date();
     return this.client(tx).tag.create({

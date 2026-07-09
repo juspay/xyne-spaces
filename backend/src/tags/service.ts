@@ -1,7 +1,8 @@
 import { Prisma, Tag, TagMethod, TagsConfig } from '@prisma/client';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { TAG_FORMAT_REGEX, TagsConfigShapeSchema } from './schema';
-import type { CategoryConfig, GeneratedTag, PersistedTag, TagsConfigShape } from './types';
+import { TAG_FORMAT_REGEX } from '@xyne/shared';
+import { TagsConfigShapeSchema } from './schema';
+import type { CategoryCatalogEntry, CategoryConfig, GeneratedTag, PersistedTag, TagsConfigShape } from './types';
 
 export class TagServiceError extends Error {
   constructor(
@@ -67,6 +68,31 @@ export class TagService {
     });
   }
 
+  async upsertConfig(
+    configKey: string,
+    sourceType: string,
+    workspaceId: string,
+    newConfig: TagsConfigShape,
+    updatedBy?: string | null,
+  ): Promise<TagsConfig> {
+    return tagRepository.getDb().$transaction(async (tx) => {
+      const existing = await tagRepository.getActiveConfigByKey(configKey, tx);
+
+      if (existing) {
+        await tagRepository.softDeleteConfigRow(existing.id, updatedBy, tx);
+      }
+
+      return tagRepository.insertConfigRow({
+        configKey,
+        sourceType: existing?.sourceType ?? sourceType,
+        workspaceId: existing?.workspaceId ?? workspaceId,
+        config: newConfig as unknown as Prisma.InputJsonValue,
+        createdBy: existing?.createdBy ?? updatedBy,
+        updatedBy,
+      }, tx);
+    });
+  }
+
   async deleteConfig(configKey: string, deletedBy?: string | null): Promise<void> {
     const existing = await tagRepository.getActiveConfigByKey(configKey);
     if (!existing) {
@@ -82,6 +108,27 @@ export class TagService {
 
   async listConfigsBySource(sourceType: string, workspaceId: string): Promise<TagsConfig[]> {
     return tagRepository.listActiveConfigsBySource(sourceType, workspaceId);
+  }
+
+  /**
+   * Aggregates category definitions across all active configs for a source type
+   * within a workspace, deduped by category name — the most recently updated
+   * config's definition wins. Used to power cross-channel category-name
+   * autocomplete + auto-fill.
+   */
+  async getCategoriesCatalog(sourceType: string, workspaceId: string): Promise<CategoryCatalogEntry[]> {
+    const configs = await tagRepository.listActiveConfigsBySource(sourceType, workspaceId);
+
+    const byName = new Map<string, CategoryCatalogEntry>();
+    for (const row of configs) {
+      const shape = row.config as unknown as TagsConfigShape;
+      for (const [name, category] of Object.entries(shape.categories ?? {})) {
+        if (byName.has(name)) continue;
+        byName.set(name, { name, ...category });
+      }
+    }
+
+    return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   // ─── Tag CRUD ────────────────────────────────────────────────────────────────
@@ -186,6 +233,15 @@ export class TagService {
     await this.assertManualCategoryOrOverride(configKey, tagCategory, override);
 
     await tagRepository.softDeleteTagRow(existing.id, deletedBy);
+  }
+
+  async getUniqueTagValues(
+    workspaceId: string,
+    sourceType: string,
+    tagCategory: string,
+  ): Promise<string[]> {
+    this.assertTagNameFormat(tagCategory, 'Tag category');
+    return tagRepository.distinctTagsByCategory(workspaceId, sourceType, tagCategory);
   }
 
   async listTags(sourceId: string, sourceType: string, tagCategory?: string): Promise<Tag[]> {

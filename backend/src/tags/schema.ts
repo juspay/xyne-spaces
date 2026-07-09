@@ -1,27 +1,43 @@
 import { z } from 'zod';
 import { TagMethod } from '@prisma/client';
+import { TAG_FORMAT_MESSAGE, TAG_FORMAT_REGEX, findDuplicateTags } from '@xyne/shared';
 
 export const TagMethodSchema = z.nativeEnum(TagMethod);
 
-export const TAG_FORMAT_REGEX = /^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*$/;
 
-const TAG_FORMAT_MESSAGE = 'must be lowercase, hyphen-separated, alphanumeric segments';
 const TagNameSchema = z.string().regex(TAG_FORMAT_REGEX, TAG_FORMAT_MESSAGE);
 
 export const CategoryConfigSchema = z
   .object({
     method: z.enum(['manual', 'llm']),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'color must be a valid hex color (e.g. #0891b2)').optional(),
     count: z.number().int().positive().optional(),
     tags: z.array(TagNameSchema).optional(),
     is_new_tag_allowed: z.boolean().optional(),
     blacklist: z.array(TagNameSchema).optional(),
     prompt: z.string().optional(),
+  })
+  .superRefine((category, ctx) => {
+    for (const { value, index } of findDuplicateTags(category.tags)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['tags', index],
+        message: `tag "${value}" already exists`,
+      });
+    }
+
+    for (const { value, index } of findDuplicateTags(category.blacklist)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['blacklist', index],
+        message: `tag "${value}" already exists`,
+      });
+    }
   });
 
 export const TagsConfigShapeSchema = z.object({
   categories: z
     .record(z.string(), CategoryConfigSchema)
-    .refine((categories) => Object.keys(categories).length > 0, 'categories must be a non-empty object')
     .superRefine((categories, ctx) => {
       for (const category of Object.keys(categories)) {
         if (!TAG_FORMAT_REGEX.test(category)) {

@@ -71,6 +71,7 @@ import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { TicketTagsBadge } from '../../xyne-desk/EmailBody/TagsBadgePopover';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import {
   formatIncomingReferenceLabel,
@@ -3136,6 +3137,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </div>
               }
             />
+
+            {/* Generated Tags (from the latest email reply) */}
+            {isEmailDeskTicket && (
+              <TicketKeyValuePair
+                ticketKey='Generated Tags'
+                value={<TicketTagsBadge ticketId={ticket.id} />}
+              />
+            )}
 
             {/* Ticket Type */}
             {ticket.ticketType && (

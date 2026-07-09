@@ -66,6 +66,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { tagGenerationPipeline } from '@/tags/pipeline';
+import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { AUTODRAFT_SESSION_TAG } from '@/controllers/xyneAIController';
 import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
 import { runClawAgent } from '@/services/clawAgentService';
@@ -1128,6 +1130,21 @@ export class EmailService {
     }).catch((err: unknown) => {
       logger.error(`[Classification] Failed to enqueue classification job for ticket ${ticket.id}`, err);
     });
+
+    // Enqueue tag generation for this email (fire-and-forget — must not block ingestion).
+    // Priority 1 (high) so live inbound emails are always processed before bulk historical fetches.
+    if (config.enableTagGenerationPipeline) {
+      void tagGenerationPipeline.addGenerationJob({
+        sourceId: email.id,
+        sourceType: DESK_EMAIL_SOURCE_TYPE,
+        workspaceId: channel.workspaceId,
+        configKey: deskEmailConfigKey(channelId),
+      }, 2).then((jobId) => {
+        logger.info(`[TagFramework] Enqueued tag generation job ${jobId} for email ${email.id}`);
+      }).catch((err: unknown) => {
+        logger.error(`[TagFramework] Failed to enqueue tag generation job for email ${email.id}`, err);
+      });
+    }
 
     // Fire-and-forget: enrich the ticket description via the AI agent. Never
     // blocks ingestion; ticket keeps the raw email body if this fails or times out.
@@ -2250,6 +2267,24 @@ export class EmailService {
 
     for (const e of insertedEmails) {
       void dispatchEmailEventForEmailId(e.id);
+    }
+
+    // Bulk-enqueue tag generation for every inserted email (fire-and-forget — must not block ingestion).
+    // Priority 10 (low) so real-time inbound emails (priority 1) always jump ahead in the queue.
+    if (config.enableTagGenerationPipeline && insertedEmails.length > 0) {
+      void tagGenerationPipeline.addGenerationJobs(
+        insertedEmails.map(e => ({
+          sourceId: e.id,
+          sourceType: DESK_EMAIL_SOURCE_TYPE,
+          workspaceId: channel.workspaceId,
+          configKey: deskEmailConfigKey(channelId),
+        })),
+        10,
+      ).then((count) => {
+        logger.info(`[TagFramework] Enqueued ${count} tag generation jobs for thread in channel ${channelId}`);
+      }).catch((err: unknown) => {
+        logger.error(`[TagFramework] Failed to enqueue tag generation jobs for channel ${channelId}`, err);
+      });
     }
 
     for (const e of insertedEmails) {

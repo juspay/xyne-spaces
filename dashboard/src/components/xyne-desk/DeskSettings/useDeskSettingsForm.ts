@@ -8,6 +8,7 @@ import {
 } from '../../../hooks/useDeskChannelPreferenceAutoSave';
 import { useEmailClassification } from '../../../hooks/useEmailClassification';
 import { usePriorityClassification } from '../../../hooks/usePriorityClassification';
+import { useDeskTagsConfig } from '../../../hooks/useDeskTagsConfig';
 import { useVisibleChannel } from '../../../hooks/useChannels';
 import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -97,9 +98,17 @@ export function useDeskSettingsForm(
 
   const clawAgents = useChannelClawAgents(channelId);
   const [aiFeatureConfig, setAiFeatureConfig] = useState<
-    'none' | 'auto-classification' | 'priority'
+    'none' | 'auto-classification' | 'priority' | 'tag-generation'
   >('none');
   const [saving, setSaving] = useState(false);
+
+  const {
+    categories: tagCategories,
+    isLoading: isTagConfigLoading,
+    isSaving: isTagConfigSaving,
+    error: tagConfigError,
+    saveCategories: saveTagCategories,
+  } = useDeskTagsConfig(channelId, !!channelId);
 
   const {
     config: classificationConfig,
@@ -370,6 +379,10 @@ export function useDeskSettingsForm(
   const openClassificationConfig = useCallback(() => setAiFeatureConfig('auto-classification'), []);
   const openPriorityConfig = useCallback(() => setAiFeatureConfig('priority'), []);
 
+  const openTagGenerationConfig = useCallback(() => {
+    setAiFeatureConfig('tag-generation');
+  }, []);
+
   return {
     canManage,
     isEmail,
@@ -431,5 +444,12 @@ export function useDeskSettingsForm(
     setAiFeatureConfig,
     openClassificationConfig,
     openPriorityConfig,
+    openTagGenerationConfig,
+    tagCategories,
+    isTagConfigLoading,
+    isTagConfigSaving,
+    tagConfigError,
+    saveTagCategories,
+    channelId,
   };
 }

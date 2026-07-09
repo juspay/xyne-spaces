@@ -129,6 +129,7 @@ import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
 import emailRoutes from '@/routes/email';
 import emailDemergeRoutes from '@/routes/emailDemerge';
 import emailClassificationRoutes from '@/routes/emailClassification';
+import deskTagsConfigRoutes from '@/routes/deskTagsConfig';
 import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
 import docsRoutes from '@/routes/docs';
@@ -136,7 +137,7 @@ import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import userSkillsRoutes from '@/routes/userSkills';
 import scheduledMessageRoutes from '@/routes/scheduledMessages';
-import { tagRoutes } from '@/tags';
+import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
@@ -329,6 +330,7 @@ export class App {
     this.app.use('/api/email', emailRoutes);
     this.app.use('/api/email', emailDemergeRoutes);
     this.app.use('/api/channels/:channelId/classification', authMiddleware.authenticate, emailClassificationRoutes);
+    this.app.use('/api/channels/:channelId/tags-config', authMiddleware.authenticate, deskTagsConfigRoutes);
     this.app.use('/api/channels/:channelId/priority-classification', authMiddleware.authenticate, priorityClassificationRoutes);
     this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
 
@@ -932,6 +934,7 @@ export class App {
 
     if (config.enableTagGenerationPipeline) {
       logger.info('Initializing tag generation pipeline queue (producer)...');
+      registerDeskEmailTags(tagGenerationPipeline);
       await tagGenerationPipeline.connectQueue();
     }
 
