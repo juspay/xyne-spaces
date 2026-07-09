@@ -390,6 +390,23 @@ async function addMentionedConversationParticipants(
   }
 }
 
+async function deleteConversationWithParticipants(
+  tx: Transaction<Schema>,
+  conversationId: string,
+): Promise<void> {
+  const participants = await tx.run(
+    zql.conversation_participants.where('conversationId', conversationId),
+  );
+
+  await Promise.all(
+    participants.map(participant =>
+      tx.mutate.conversation_participants.delete({ id: participant.id })
+    )
+  );
+
+  await tx.mutate.conversations.delete({ conversationId });
+}
+
 async function assertCanvasChannelNotArchived(
   tx: Transaction<Schema>,
   channelId: string | null | undefined,
@@ -3727,9 +3744,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (systemMessageConversation) {
             if (systemMessageConversation.initialMessageId === messageId) {
               // This was the initial message - delete the entire conversation
-              await tx.mutate.conversations.delete({
-                conversationId: systemMessageConversation.conversationId
-              });
+              await deleteConversationWithParticipants(tx, systemMessageConversation.conversationId);
             }
           }
 
@@ -3905,9 +3920,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               continue;
             }
 
-            await tx.mutate.conversations.delete({
-              conversationId: channelCopy.conversationId,
-            });
+            await deleteConversationWithParticipants(tx, channelCopy.conversationId);
           }
 
           // 5. Final Delete Logic
@@ -3939,7 +3952,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               if (isInitialMessageDeleted && otherMessages[0]) {
                 await tx.mutate.messages.delete({ messageId: otherMessages[0].messageId });
               }
-              await tx.mutate.conversations.delete({ conversationId: conversation.conversationId });
+              await deleteConversationWithParticipants(tx, conversation.conversationId);
             } else {
               // Just a normal reply deletion, update the count
               await tx.mutate.conversations.update({
@@ -4928,6 +4941,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           } else {
             await tx.mutate.conversation_participants.update({
               id: participant.id,
+              ...(participant.channelId !== channelId ? { channelId } : {}),
               lastReadAt: timestamp,
             });
           }
