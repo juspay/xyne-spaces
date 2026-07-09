@@ -35,7 +35,7 @@ import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
-import { tagGenerationPipeline } from '@/tags';
+import { tagGenerationPipeline, registerDeskEmailTags } from '@/tags';
 import { recoveryService } from './workflows/services/recovery-service'
 config()
 
@@ -244,6 +244,7 @@ class WorkerService {
 
       if (appConfig.enableTagGenerationPipeline) {
         logger.info('Initializing tag generation pipeline...');
+        registerDeskEmailTags(tagGenerationPipeline);
         await tagGenerationPipeline.initialize();
       }
 

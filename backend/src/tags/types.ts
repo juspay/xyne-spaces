@@ -29,3 +29,6 @@ export type PersistedTag = z.infer<typeof PersistedTagSchema>;
 export type TagGenerationResult = z.infer<typeof TagGenerationResultSchema>;
 
 export type TagGenerationError = z.infer<typeof TagGenerationErrorSchema>;
+
+/** A category definition aggregated across channels for cross-channel autocomplete/auto-fill. */
+export type CategoryCatalogEntry = CategoryConfig & { name: string };

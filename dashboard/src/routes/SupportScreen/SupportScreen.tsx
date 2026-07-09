@@ -138,6 +138,7 @@ import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBod
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
+import { TicketTagsRow } from '../../components/xyne-desk/EmailBody/TagsBadgePopover';
 import { useEmailDraft } from '../../hooks/useEmailDraft';
 import {
   useComposeDrafts,
@@ -3459,7 +3460,7 @@ export const SupportTicketDetail = ({
                   </>
                 )}
               </div>
-              <div className='flex items-center gap-2 flex-shrink-0'>
+              <div className='flex flex-col gap-1 flex-shrink-0'>
                 <div className='pl-9 flex items-center gap-3 flex-wrap'>
                   <TicketMetaRow ticket={ticket} boardId={boardId} />
                   {initiator && (
@@ -3477,6 +3478,11 @@ export const SupportTicketDetail = ({
                     </div>
                   )}
                 </div>
+                {ticket && (
+                  <div className='pl-9'>
+                    <TicketTagsRow ticketId={ticket.id} />
+                  </div>
+                )}
               </div>
             </div>
             <div
@@ -4415,6 +4421,7 @@ const EmailThreadItem = ({
           isRead={isRead}
           deskEmail={deskEmail}
           extras={demergeButton}
+          emailId={email.id}
         />
       </div>
       {!isCollapsed && (

@@ -35,11 +35,15 @@ function buildSystemPrompt(categories: Record<string, CategoryConfig>): string {
     .map(([name, category]) => renderCategoryBlock(name, category))
     .join('\n\n');
 
-  return `You are a tagging assistant. Read the CONTEXT below and decide which tags apply to it, organized by category.
+  return `You are a tagging assistant. The CONTEXT below is an email thread. It may contain one or more emails labeled as follows:
+- [Previous conversation]: earlier emails in the thread, provided as background context only
+- [Latest email]: the most recent email — this is what you must base your tagging decision on
+
+Base your tags on the [Latest email]. Use [Previous conversation] emails only to understand background context (e.g. who the customer is, what the original issue was).
 
 HOW TO DECIDE TAGS, FOR EACH CATEGORY BELOW:
-1. Read the context and judge whether this category is relevant to it at all. If it is NOT relevant, skip this category entirely - do not output any tag for it.
-2. If relevant, look at "Allowed tags" - this is the existing list of tags already defined for this category. Prefer reusing one of these if it fits the context.
+1. Read the [Latest email] and judge whether this category is relevant to it. If it is NOT relevant, skip this category entirely - do not output any tag for it.
+2. If relevant, look at "Allowed tags" - this is the existing list of tags already defined for this category. Prefer reusing one of these if it fits.
 3. Only if none of the allowed tags fit, AND "You MAY invent new tags for this category" is "yes", you may create a new tag following the naming format below. If it says "no", you MUST pick only from "Allowed tags" - if none fit, skip this category.
 4. Never output a tag listed under "Blacklisted tags".
 5. Never output more than "Max tags for this category" tags for that category - pick the best matches if more could apply.

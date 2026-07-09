@@ -3,6 +3,7 @@ import { JSX, ReactNode, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useAuth } from '../../../hooks/useAuth';
 import { Popover } from '../../ui/Popover/Popover';
+import { EmailTagsBadge } from './TagsBadgePopover';
 import {
   avatarColorFor,
   avatarInitial,
@@ -23,6 +24,7 @@ interface EmailThreadHeaderProps {
   extras?: ReactNode;
   isRead?: boolean;
   deskEmail?: string | null | undefined;
+  emailId?: string;
 }
 
 const EmailAvatar = ({ name, email }: { name: string; email: string | null }): JSX.Element => {
@@ -79,6 +81,7 @@ export const EmailThreadHeader = ({
   extras,
   isRead = true,
   deskEmail,
+  emailId,
 }: EmailThreadHeaderProps): JSX.Element => {
   const { user } = useAuth();
   const meEmail = deskEmail ?? user?.email ?? null;
@@ -147,24 +150,26 @@ export const EmailThreadHeader = ({
                 {previewText || ''}
               </div>
             ) : (
-              <Popover
-                trigger={trigger}
-                open={detailsOpen}
-                onOpenChange={setDetailsOpen}
-                side='bottom'
-                align='start'
-                sideOffset={6}
-                className='p-4 shadow-lg'
-              >
-                {detailsContent}
-              </Popover>
+              <div className='flex items-center gap-3'>
+                <Popover
+                  trigger={trigger}
+                  open={detailsOpen}
+                  onOpenChange={setDetailsOpen}
+                  side='bottom'
+                  align='start'
+                  sideOffset={6}
+                  className='p-4 shadow-lg'
+                >
+                  {detailsContent}
+                </Popover>
+              </div>
             )}
           </div>
-          <div
-            className='text-xs text-muted-foreground shrink-0 whitespace-nowrap'
-            title={date.full}
-          >
-            {date.short}
+          <div className='flex items-center gap-1.5 shrink-0'>
+            {emailId && <EmailTagsBadge emailId={emailId} />}
+            <div className='text-xs text-muted-foreground whitespace-nowrap' title={date.full}>
+              {date.short}
+            </div>
           </div>
         </div>
       </div>

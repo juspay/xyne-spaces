@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { TagServiceError, tagService } from './service';
+import { invalidateTagConfigCache } from './pipeline';
 import type {
   CreateTagBody,
   CreateTagsConfigBody,
@@ -149,14 +150,58 @@ export async function setManualTags(req: Request, res: Response) {
   }
 }
 
+// ─── Unique tag values (for Allowed Tags auto-fill) ───────────────────────────
+
+export async function getUniqueTagValues(req: Request, res: Response) {
+  const { categoryName, sourceType } = req.query;
+  if (typeof categoryName !== 'string' || typeof sourceType !== 'string') {
+    return res.status(400).json({ error: 'categoryName and sourceType are required query params' });
+  }
+  const workspaceId = requireWorkspaceId(req, res);
+  if (!workspaceId) return;
+
+  try {
+    const values = await tagService.getUniqueTagValues(workspaceId, sourceType, categoryName);
+    return res.json({ values });
+  } catch (error) {
+    logger.error('[TAG][CTRL] Get unique tag values failed:', error);
+    const { status, message } = mapServiceError(error);
+    return res.status(status).json({ error: message });
+  }
+}
+
 // ─── TagsConfig ──────────────────────────────────────────────────────────────────
+
+export async function getCategoriesCatalog(req: Request, res: Response) {
+  const { sourceType } = req.query;
+
+  if (typeof sourceType !== 'string') {
+    return res.status(400).json({ error: 'sourceType is a required query param' });
+  }
+
+  const workspaceId = requireWorkspaceId(req, res);
+  if (!workspaceId) return;
+
+  try {
+    const catalog = await tagService.getCategoriesCatalog(sourceType, workspaceId);
+    return res.json({ catalog });
+  } catch (error) {
+    logger.error('[TAG][CTRL] Get categories catalog failed:', error);
+    const { status, message } = mapServiceError(error);
+    return res.status(status).json({ error: message });
+  }
+}
 
 export async function getConfig(req: Request, res: Response) {
   const { configKey } = req.params;
+  const workspaceId = requireWorkspaceId(req, res);
+  if (!workspaceId) return;
 
   try {
     const config = await tagService.getConfig(configKey);
-    if (!config) return res.status(404).json({ error: `No active config found for configKey "${configKey}"` });
+    if (!config || config.workspaceId !== workspaceId) {
+      return res.status(404).json({ error: `No active config found for configKey "${configKey}"` });
+    }
     return res.json({ config });
   } catch (error) {
     logger.error('[TAG][CTRL] Get config failed:', error);
@@ -193,6 +238,7 @@ export async function createConfig(req: Request, res: Response) {
 
   try {
     const created = await tagService.createConfig(configKey, sourceType, workspaceId, config, userId);
+    await invalidateTagConfigCache(configKey);
     return res.status(201).json({ config: created });
   } catch (error) {
     logger.error('[TAG][CTRL] Create config failed:', error);
@@ -204,11 +250,18 @@ export async function createConfig(req: Request, res: Response) {
 export async function updateConfig(req: Request, res: Response) {
   const userId = requireUserId(req, res);
   if (!userId) return;
+  const workspaceId = requireWorkspaceId(req, res);
+  if (!workspaceId) return;
   const { configKey } = req.params;
   const { config } = req.body as UpdateTagsConfigBody;
 
   try {
+    const existing = await tagService.getConfig(configKey);
+    if (!existing || existing.workspaceId !== workspaceId) {
+      return res.status(404).json({ error: `No active config found for configKey "${configKey}"` });
+    }
     const updated = await tagService.updateConfig(configKey, config, userId);
+    await invalidateTagConfigCache(configKey);
     return res.json({ config: updated });
   } catch (error) {
     logger.error('[TAG][CTRL] Update config failed:', error);
@@ -220,10 +273,17 @@ export async function updateConfig(req: Request, res: Response) {
 export async function deleteConfig(req: Request, res: Response) {
   const userId = requireUserId(req, res);
   if (!userId) return;
+  const workspaceId = requireWorkspaceId(req, res);
+  if (!workspaceId) return;
   const { configKey } = req.params;
 
   try {
+    const existing = await tagService.getConfig(configKey);
+    if (!existing || existing.workspaceId !== workspaceId) {
+      return res.status(404).json({ error: `No active config found for configKey "${configKey}"` });
+    }
     await tagService.deleteConfig(configKey, userId);
+    await invalidateTagConfigCache(configKey);
     return res.json({ success: true });
   } catch (error) {
     logger.error('[TAG][CTRL] Delete config failed:', error);

@@ -1,4 +1,4 @@
-export { tagGenerationPipeline, TagGenerationPipeline } from './pipeline';
+export { tagGenerationPipeline, TagGenerationPipeline, invalidateTagConfigCache } from './pipeline';
 export { tagService, TagService } from './service';
 export { tagRoutes } from './routes';
 export {
@@ -17,6 +17,9 @@ export {
   UpdateTagBodySchema,
   UpdateTagsConfigBodySchema,
 } from './schema';
+export { registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from './deskEmail';
+export { getGroupedTagsWithConfig } from './presentation';
+export type { TagGroup, TagGroupWithConfig, TagGroupConfigOptions } from './presentation';
 export type {
   CategoryConfig,
   ContextBuilderFn,

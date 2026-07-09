@@ -8,6 +8,8 @@ import { ChannelRepository } from '../database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { MessageRepository } from '../database/repositories/messageRepository';
 import { MessageAttachmentRepository, CreateMessageAttachmentInput } from '../database/repositories/messageAttachmentRepository';
+import { EmailRepository } from '../database/repositories/emailRepository';
+import { getGroupedTagsWithConfig, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import {
   CreateTicketRequest,
   GetTicketDetailsResponse,
@@ -1414,6 +1416,55 @@ export class TicketController {
     } catch (error) {
       logger.error('Error checking ticket duplicates:', error);
       res.status(500).json({ error: 'Failed to check ticket duplicates' });
+    }
+  };
+
+  /**
+   * GET /api/tickets/:ticketId/latest-email-tags
+   * Returns the active tags on the ticket's most recent email reply,
+   * grouped by category with the channel's configured color (if any).
+   */
+  getLatestEmailTags = async (req: Request, res: Response): Promise<void> => {
+    const { ticketId } = req.params;
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { conversationId: true, channelId: true, workspaceId: true },
+      });
+      if (!ticket || ticket.workspaceId !== req.user?.workspaceId) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+
+      // ACL: Private channels require membership; public channels are open
+      const channel = await this.channelRepository.findById(ticket.channelId);
+      if (channel && channel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(ticket.channelId, userId);
+        if (!isParticipant) {
+          res.status(403).json({ error: 'Access denied - you do not have permission to access this conversation' });
+          return;
+        }
+      }
+
+      const emailRepository = new EmailRepository();
+      const emails = await emailRepository.findByConversationIdOrdered(ticket.conversationId);
+      const lastEmail = emails[emails.length - 1];
+      if (!lastEmail) {
+        res.json({ groups: [] });
+        return;
+      }
+
+      const groups = await getGroupedTagsWithConfig(lastEmail.id, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey(ticket.channelId));
+      res.json({ groups });
+    } catch (error) {
+      logger.error('[TicketController] getLatestEmailTags failed:', error);
+      res.status(500).json({ error: 'Failed to fetch email tags' });
     }
   };
 

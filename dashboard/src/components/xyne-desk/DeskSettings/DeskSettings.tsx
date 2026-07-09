@@ -9,7 +9,8 @@ import { AssignmentTab } from './tabs/AssignmentTab';
 import { AutomationTab } from './tabs/AutomationTab';
 import { AIFeaturesTab } from './tabs/AIFeaturesTab';
 import { AiSyncTab } from './tabs/AiSyncTab';
-import { Inbox, Route, Zap, Bot, RefreshCw, X } from 'lucide-react';
+import { TagsTab } from './tabs/TagsTab';
+import { Inbox, Route, Zap, Bot, RefreshCw, Tag, X } from 'lucide-react';
 
 /** Props for the DeskSettings modal component */
 export interface DeskSettingsProps {
@@ -19,11 +20,26 @@ export interface DeskSettingsProps {
   userID: string | null | undefined;
 }
 
-export type TabId = 'inbox' | 'assignment' | 'automation' | 'ai-features' | 'ai-sync';
+export type TabId = 'inbox' | 'assignment' | 'automation' | 'ai-features' | 'ai-sync' | 'tags';
+
+/** Configuration for a single settings tab */
+export interface TabConfig {
+  id: TabId;
+  label: string;
+  icon: string;
+}
+
+export interface DeskSignature {
+  id: string;
+  name: string;
+  content: string;
+}
+
 export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'inbox', label: 'Inbox', icon: Inbox },
   { id: 'assignment', label: 'Assignment & Routing', icon: Route },
   { id: 'automation', label: 'Automation', icon: Zap },
+  { id: 'tags', label: 'Tag Generation', icon: Tag },
   { id: 'ai-features', label: 'AI Features', icon: Bot },
   { id: 'ai-sync', label: 'AI Sync', icon: RefreshCw },
 ];
@@ -51,7 +67,9 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
 
   const availableTabs = useMemo(
     () =>
-      isEmail ? DESK_SETTINGS_TABS : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'automation'),
+      isEmail
+        ? DESK_SETTINGS_TABS
+        : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'automation' && tab.id !== 'tags'),
     [isEmail],
   );
 
@@ -124,12 +142,13 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                   )}
                   {activeTab === 'assignment' && <AssignmentTab form={form} />}
                   {activeTab === 'automation' && <AutomationTab form={form} />}
+                  {activeTab === 'tags' && <TagsTab form={form} />}
                   {activeTab === 'ai-features' && <AIFeaturesTab form={form} />}
                   {activeTab === 'ai-sync' && <AiSyncTab channelId={channelId} form={form} />}
                 </div>
               </div>
             </div>
-            {isDirty && activeTab !== 'ai-sync' && (
+            {isDirty && activeTab !== 'ai-sync' && activeTab !== 'tags' && (
               <div className='shrink-0 border-t border-desk-border px-6 md:px-12 lg:px-[86px] py-[12px] dark:border-border'>
                 <div className='flex items-center justify-end gap-[8px]'>
                   <button

@@ -15,9 +15,23 @@ import type {
   TagGenerationError,
   TagGenerationJobData,
   TagGenerationResult,
+  TagsConfigShape,
 } from './types';
 
 export type GeneratorMethod = 'llm';
+
+// Config is the same for every email in a channel — cache it per worker job cycle
+// to avoid hitting Postgres once per email during bulk ingestion.
+const CONFIG_CACHE_TTL_SECONDS = 120;
+const configCacheKey = (key: string) => `tag-config:${key}`;
+
+export async function invalidateTagConfigCache(configKey: string): Promise<void> {
+  try {
+    await redisService.del(configCacheKey(configKey));
+  } catch (err) {
+    logger.warn(`[TAG][PIPELINE] Failed to invalidate config cache for "${configKey}":`, err);
+  }
+}
 
 export class TagGenerationPipeline extends EventEmitter {
   private queue: Bull.Queue<TagGenerationJobData> | null = null;
@@ -119,12 +133,10 @@ export class TagGenerationPipeline extends EventEmitter {
 
   // ─── Job submission ──────────────────────────────────────────────────────────
 
-  async addGenerationJob(data: {
-    sourceId: string;
-    sourceType: string;
-    workspaceId: string;
-    configKey: string;
-  }): Promise<string> {
+  async addGenerationJob(
+    data: { sourceId: string; sourceType: string; workspaceId: string; configKey: string },
+    priority = 5,
+  ): Promise<string> {
     if (!appConfig.enableTagGenerationPipeline) {
       throw new Error('[TAG][PIPELINE] Disabled by ENABLE_TAG_GENERATION_PIPELINE=false');
     }
@@ -136,9 +148,47 @@ export class TagGenerationPipeline extends EventEmitter {
     }
 
     const jobId = `tag-gen-${data.sourceType}-${data.sourceId}-${data.configKey}`;
-    await this.queue.add('generate-tags', { jobId, ...data }, { jobId });
+    await this.queue.add('generate-tags', { jobId, ...data }, { jobId, priority });
 
     return jobId;
+  }
+
+  // Bulk submission for refetch ingestion paths (one thread at a time from the fetch worker).
+  // Uses addBulk so all jobs in a thread are sent in a single Redis pipeline call
+  // instead of N individual round-trips. Priority 10 keeps these below live inbound
+  // emails (priority 1) so real-time emails always jump ahead.
+  async addGenerationJobs(
+    items: Array<{ sourceId: string; sourceType: string; workspaceId: string; configKey: string }>,
+    priority = 10,
+  ): Promise<number> {
+    if (!appConfig.enableTagGenerationPipeline) {
+      throw new Error('[TAG][PIPELINE] Disabled by ENABLE_TAG_GENERATION_PIPELINE=false');
+    }
+    if (!this.queue) {
+      throw new Error('[TAG][PIPELINE] Queue not initialized — call initialize() first');
+    }
+
+    const bulkJobs = items
+      .filter(item => {
+        if (!this.contextBuilders.has(item.sourceType)) {
+          logger.warn(`[TAG][PIPELINE] Skipping bulk job — no context builder for sourceType "${item.sourceType}"`);
+          return false;
+        }
+        return true;
+      })
+      .map(item => {
+        const jobId = `tag-gen-${item.sourceType}-${item.sourceId}-${item.configKey}`;
+        return {
+          name: 'generate-tags',
+          data: { jobId, ...item } as TagGenerationJobData,
+          opts: { jobId, priority },
+        };
+      });
+
+    if (bulkJobs.length === 0) return 0;
+
+    await this.queue.addBulk(bulkJobs);
+    return bulkJobs.length;
   }
 
   // ─── Events ──────────────────────────────────────────────────────────────────
@@ -205,17 +255,45 @@ export class TagGenerationPipeline extends EventEmitter {
       throw new Error(`[TAG][PIPELINE] No context builder registered for sourceType "${sourceType}"`);
     }
 
-    const configRow = await tagRepository.getActiveConfigByKey(configKey);
-    if (!configRow) {
-      throw new Error(`[TAG][PIPELINE] No active TagsConfig found for configKey "${configKey}"`);
+    // During bulk ingestion every email in a channel shares the same config.
+    // Read from Redis first to avoid N identical Postgres queries; fall through
+    // to DB on a miss and repopulate the cache for the next job.
+    const cacheKey = configCacheKey(configKey);
+    let configShape: TagsConfigShape | null = null;
+
+    try {
+      const cached = await redisService.get(cacheKey);
+      if (cached) {
+        const parsed = TagsConfigShapeSchema.safeParse(JSON.parse(cached));
+        if (parsed.success) {
+          configShape = parsed.data;
+        }
+      }
+    } catch (err) {
+      // Cache read failure is non-fatal — fall through to DB.
+      logger.warn(`[TAG][PIPELINE] Config cache read failed for "${configKey}", falling back to DB:`, err);
     }
 
-    const parsedConfig = TagsConfigShapeSchema.safeParse(configRow.config);
-    if (!parsedConfig.success) {
-      throw new Error(`[TAG][PIPELINE] Invalid TagsConfig for configKey "${configKey}"`);
+    if (!configShape) {
+      const configRow = await tagRepository.getActiveConfigByKey(configKey);
+      if (!configRow) {
+        throw new Error(`[TAG][PIPELINE] No active TagsConfig found for configKey "${configKey}"`);
+      }
+      const parsedConfig = TagsConfigShapeSchema.safeParse(configRow.config);
+      if (!parsedConfig.success) {
+        throw new Error(`[TAG][PIPELINE] Invalid TagsConfig for configKey "${configKey}"`);
+      }
+      configShape = parsedConfig.data;
+
+      try {
+        await redisService.set(cacheKey, JSON.stringify(configShape), CONFIG_CACHE_TTL_SECONDS);
+      } catch (err) {
+        // Cache write failure is non-fatal — next job will just hit DB again.
+        logger.warn(`[TAG][PIPELINE] Failed to cache config for "${configKey}":`, err);
+      }
     }
 
-    const { categories } = parsedConfig.data;
+    const { categories } = configShape;
 
     const context = await buildContext(sourceId, sourceType);
     const byMethod = this.groupCategoriesByMethod(categories);
@@ -240,12 +318,11 @@ export class TagGenerationPipeline extends EventEmitter {
     if (changed) {
       await tagService.updateConfig(
         configKey,
-        {
-          ...parsedConfig.data,
-          categories: mergedCategories,
-        },
+        { ...configShape, categories: mergedCategories },
         undefined,
       );
+      // Config changed — evict cache so subsequent jobs read the updated vocabulary.
+      await invalidateTagConfigCache(configKey);
     }
 
     const persisted = await tagService.replaceTagsForCategories(

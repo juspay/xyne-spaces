@@ -1,4 +1,4 @@
-import { TAG_FORMAT_REGEX } from '../schema.js';
+import { TAG_FORMAT_REGEX } from '@xyne/shared';
 import type { CategoryConfig, GeneratedTag } from '../types.js';
 
 export function validateGeneratedTags(
