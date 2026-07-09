@@ -28,6 +28,12 @@ const envSchema = Joi.object({
   WORKFLOW_LOCK_DURATION_MS: Joi.number().default(3600000), // 30 minutes in milliseconds
   API_KEYS_ENABLED: Joi.boolean().default(false),
   API_KEYS_CONFIG: Joi.string().default(''),
+  // Digital Twin: the email of the Digital Twin app's bot user (unique per
+  // workspace). USER_MENTIONED is delivered to THIS app at workspace scope (in
+  // addition to the existing channel-scoped app delivery) so the twin fires for
+  // @mentions in any channel it isn't a member of. Empty string disables the
+  // extra twin delivery. Prod: digital-twin@app.xyne.ai.
+  DIGITAL_TWIN_APP_EMAIL: Joi.string().allow('').default(''),
   GOOGLE_CLIENT_ID: Joi.string().allow('').default(''),
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').default(''),
   // Email sender configuration (Google OAuth2 via nodemailer)
@@ -409,6 +415,8 @@ export const config = {
   research_agent_api_key: envVars.RESEARCH_AGENT_API_KEY,
   use_mock_analysis: envVars.USE_MOCK_ANALYSIS,
   use_mock_build: envVars.USE_MOCK_BUILD,
+  // Email of the Digital Twin app's bot user (empty = twin delivery disabled).
+  digitalTwinAppEmail: envVars.DIGITAL_TWIN_APP_EMAIL as string,
   port: envVars.PORT,
   host: envVars.HOST,
   cors: {
