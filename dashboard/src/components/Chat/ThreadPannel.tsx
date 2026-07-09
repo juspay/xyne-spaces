@@ -341,6 +341,7 @@ export const ThreadMessages = ({
 
   // Check if the route is /threads (with optional workspace prefix)
   const isThreadsRoute = location.pathname.endsWith('/chat/dir/threads');
+  const isUnderThreadsRoute = location.pathname.includes('/chat/dir/threads');
 
   // Check if thread summary is currently active
   const isThreadSummaryActive = location.hash.startsWith('#thread-summary');
@@ -1495,7 +1496,7 @@ export const ThreadMessages = ({
           /* Regular Thread or Simple View */
           <>
             {/* Header with tabs for simpleView, or simple header for regular view */}
-            {!hideHeader && !isThreadsRoute && (
+            {!hideHeader && (!isUnderThreadsRoute || !previewCardMode) && (
               <div
                 className={cn(
                   'h-[88px] flex items-start self-stretch bg-background border-b border-border',
