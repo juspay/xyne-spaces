@@ -37,13 +37,17 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
   showText = false,
   showButton = false,
 }) => {
-  const { channelId } = useParams<{ channelId: string }>();
+  const { channelId: routeChannelId } = useParams<{ channelId: string }>();
+  // Use metadata.channelId first (best source of truth), then fallback to route param (unless it's "threads")
+  const activeChannelId =
+    metadata?.channelId || (routeChannelId !== 'threads' ? routeChannelId : undefined);
+
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const zero = useZero();
   // Query for channel information to check scopeType
-  const channel = useChannel(channelId || '');
+  const channel = useChannel(activeChannelId || '');
 
   // Mutation for adding participants to GROUP_DM via backend API
   const addGroupDmParticipantsMutation = useMutation({
@@ -98,7 +102,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
   };
 
   const handleAddToChannel = (): void => {
-    if (!channelId || !zero) return;
+    if (!activeChannelId || !zero) return;
 
     setIsLoading(true);
     setError(null);
@@ -109,7 +113,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
     if (channel?.scopeType === ChannelScopeType.GROUP_DM) {
       // Use API for GROUP_DM channels
       addGroupDmParticipantsMutation.mutate({
-        channelId,
+        channelId: activeChannelId,
         userIds,
         includeHistory: true, // Default to including history for GROUP_DM
       });
@@ -121,7 +125,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
             messageId,
             action: 'add_all',
             userIds,
-            channelId,
+            channelId: activeChannelId,
           }),
         );
         setIsLoading(false);
@@ -133,7 +137,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
   };
 
   const handleIgnore = (): void => {
-    if (!channelId || !zero) return;
+    if (!activeChannelId || !zero) return;
 
     setIsLoading(true);
     setError(null);
@@ -145,7 +149,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
           messageId,
           action: 'ignore_all',
           userIds,
-          channelId,
+          channelId: activeChannelId,
         }),
       );
 

@@ -267,6 +267,23 @@ async function hasCanvasVersionEditAccess(
   return Boolean(participant);
 }
 
+async function deleteConversationWithParticipants(
+  tx: Transaction<Schema>,
+  conversationId: string,
+): Promise<void> {
+  const participants = await tx.run(
+    zql.conversation_participants.where('conversationId', conversationId),
+  );
+
+  await Promise.all(
+    participants.map(participant =>
+      tx.mutate.conversation_participants.delete({ id: participant.id })
+    )
+  );
+
+  await tx.mutate.conversations.delete({ conversationId });
+}
+
 const FORM_VALUE_CHANGED_MESSAGE =
   'Form value changed. Review the latest form changes before saving.';
 
@@ -2622,9 +2639,7 @@ export const mutators = defineMutators({
             continue;
           }
 
-          await tx.mutate.conversations.delete({
-            conversationId: channelCopy.conversationId,
-          });
+          await deleteConversationWithParticipants(tx, channelCopy.conversationId);
         }
 
         // 5. Final Delete Logic
@@ -2669,7 +2684,7 @@ export const mutators = defineMutators({
             }
 
             // Delete the conversation
-            await tx.mutate.conversations.delete({ conversationId: conversation.conversationId });
+            await deleteConversationWithParticipants(tx, conversation.conversationId);
           } else {
             // Just a normal reply deletion, update the count
             await tx.mutate.conversations.update({
@@ -3400,7 +3415,7 @@ export const mutators = defineMutators({
               conversationId,
               userId: ctx.userID,
               joinedAt: timestamp,
-              channelId: channelId || conversation?.channelId || '',
+              channelId,
               lastReadAt: timestamp,
               isSubscribed: false,
               participationType: null,
@@ -3409,6 +3424,7 @@ export const mutators = defineMutators({
           } else {
             await tx.mutate.conversation_participants.update({
               id: participant.id,
+              ...(participant.channelId !== channelId ? { channelId } : {}),
               lastReadAt: timestamp,
             });
           }
