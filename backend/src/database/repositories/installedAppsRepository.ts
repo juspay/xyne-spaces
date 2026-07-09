@@ -89,4 +89,25 @@ export class InstalledAppsRepository extends BaseRepository<
       },
     });
   }
+
+  /**
+   * Resolve the Digital Twin's installed app for a workspace, matched by the
+   * twin bot user's email (unique per workspace, case-insensitive). Returns the
+   * twin's app-bot userId + webhookUrl so USER_MENTIONED can be delivered to it
+   * at workspace scope regardless of channel membership. Requires a configured,
+   * non-empty webhookUrl. Null when the workspace has no such app installed.
+   */
+  async findTwinByWorkspaceId(workspaceId: string, twinEmail: string) {
+    return this.db.installedApps.findFirst({
+      where: {
+        user: { workspaceId, email: { equals: twinEmail, mode: 'insensitive' } },
+        webhookUrl: { not: null },
+        AND: [{ webhookUrl: { not: '' } }],
+      },
+      select: {
+        userId: true,
+        webhookUrl: true,
+      },
+    });
+  }
 }

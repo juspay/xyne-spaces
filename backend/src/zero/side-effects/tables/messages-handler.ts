@@ -26,6 +26,7 @@ import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionU
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
+import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
 import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
 import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
 import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
@@ -39,6 +40,7 @@ import { prefetchFilterData, type PrefetchedFilterData } from '@/services/notifi
 
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
+const installedAppsRepository = new InstalledAppsRepository();
 
 /**
  * Extract plaintext content strings from a FlowJSON payload for notification
@@ -474,21 +476,32 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       .map(u => u.userId);
     const observerAppUserIds = appUserIds.filter(id => !mentionedAppUsersIds.includes(id) && id !== senderId);
 
+    const userMentionedPayload: UserMentionedEventPayload = {
+      conversationId,
+      messageId,
+      content: content,
+      cleanContent: cleanContent,
+      createdAt: message.createdAt,
+      userId: senderId,
+      senderName,
+      channelId,
+      channelName: channel?.name ?? channelId,
+      ...(channel?.projectId ? { projectId: channel.projectId } : {}),
+      ...(channelProject?.name ? { projectName: channelProject.name } : {}),
+      mentionedUserIds: nonAppMentionedUserIds,
+    };
+
+    // Existing flow (UNCHANGED): deliver to channel-member apps only.
     if (nonAppMentionedUserIds.length > 0 && observerAppUserIds.length > 0) {
-      void this.handlleMessageAppEvents(AppEventType.USER_MENTIONED, {
-        conversationId,
-        messageId,
-        content: content,
-        cleanContent: cleanContent,
-        createdAt: message.createdAt,
-        userId: senderId,
-        senderName,
-        channelId,
-        channelName: channel?.name ?? channelId,
-        ...(channel?.projectId ? { projectId: channel.projectId } : {}),
-        ...(channelProject?.name ? { projectName: channelProject.name } : {}),
-        mentionedUserIds: nonAppMentionedUserIds,
-      }, observerAppUserIds);
+      void this.handlleMessageAppEvents(AppEventType.USER_MENTIONED, userMentionedPayload, observerAppUserIds);
+    }
+
+    // Additive: also deliver to the Digital Twin at workspace scope so it fires
+    // in channels it isn't a member of. De-duped against observerAppUserIds so a
+    // twin that IS a channel member isn't notified twice. No other app's
+    // delivery changes.
+    if (nonAppMentionedUserIds.length > 0) {
+      void this.emitUserMentionedToTwin(workspaceId, userMentionedPayload, observerAppUserIds);
     }
     
     const finalMentionedUserIds = validMentionedUsers
@@ -1412,6 +1425,22 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             .map(u => ({ userId: u.userId, mentionSource: u.mentionSource as 'direct' | 'group' }));
           groupDMThreadMentionedUserIds = groupDMThreadMentionedUsers.map(u => u.userId);
 
+          // Digital Twin: deliver USER_MENTIONED for group-DM thread @mentions.
+          // Group DMs never had channel-scoped app delivery, so this only adds
+          // the twin (no de-dupe set needed).
+          void this.emitUserMentionedToTwin(this.ctx.workspaceId, {
+            conversationId,
+            messageId,
+            content: htmlContent,
+            cleanContent,
+            createdAt,
+            userId: senderId,
+            senderName,
+            channelId,
+            channelName,
+            mentionedUserIds: groupDMThreadMentionedUserIds,
+          });
+
           if (groupDMThreadMentionedUserIds.length > 0) {
             try {
               await notificationService.createMentionNotifications(
@@ -1529,6 +1558,22 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
               && participantSet.has(u.userId) && u.userId !== senderId)
             .map(u => ({ userId: u.userId, mentionSource: u.mentionSource as 'direct' | 'group' }));
           groupDMMentionedUserIds = groupDMMentionedUsers.map(u => u.userId);
+
+          // Digital Twin: deliver USER_MENTIONED for group-DM @mentions. Group
+          // DMs never had channel-scoped app delivery, so this only adds the
+          // twin (no de-dupe set needed).
+          void this.emitUserMentionedToTwin(this.ctx.workspaceId, {
+            conversationId,
+            messageId,
+            content: htmlContent,
+            cleanContent,
+            createdAt,
+            userId: senderId,
+            senderName,
+            channelId,
+            channelName,
+            mentionedUserIds: groupDMMentionedUserIds,
+          });
         }
 
         // Mention notifications for explicitly @mentioned users.
@@ -1963,6 +2008,49 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         eventType,
         payload,
         userIds,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Deliver a USER_MENTIONED event to the Digital Twin app ONLY, resolved at
+   * WORKSPACE scope (by config.digitalTwinAppEmail → the twin bot user's email),
+   * so the twin fires for @mentions in ANY channel type — public/private and group
+   * DMs — even when the twin app was never added to the channel. This is
+   * ADDITIVE: it does not change delivery to any other app. The existing
+   * channel-scoped delivery still handles apps that are channel members.
+   *
+   * `alreadyNotifiedAppUserIds` (e.g. the channel-scoped observer recipients)
+   * is used to de-dupe: if the twin already received the event via the existing
+   * flow (it IS a channel member), we skip the workspace-scoped send. No-op when
+   * there are no mentioned users, the feature is unconfigured, or the workspace
+   * has no twin app installed.
+   */
+  private async emitUserMentionedToTwin(
+    workspaceId: string,
+    payload: UserMentionedEventPayload,
+    alreadyNotifiedAppUserIds: string[] = [],
+  ): Promise<void> {
+    if (!payload.mentionedUserIds || payload.mentionedUserIds.length === 0) return;
+    const twinEmail = config.digitalTwinAppEmail;
+    if (!twinEmail) return; // feature disabled when unconfigured
+    try {
+      const twin = await installedAppsRepository.findTwinByWorkspaceId(workspaceId, twinEmail);
+      if (!twin?.userId) return;
+      // Don't double-deliver: skip if the twin is the sender, or was already
+      // notified via the existing channel-scoped path (it's a channel member).
+      if (twin.userId === payload.userId) return;
+      if (alreadyNotifiedAppUserIds.includes(twin.userId)) return;
+      const event: BaseAppEvent = {
+        eventType: AppEventType.USER_MENTIONED,
+        payload,
+        timestamp: new Date().toISOString(),
+      };
+      await handleEventSubscriptionsForUsers(event, [twin.userId]);
+    } catch (error) {
+      logger.error('[emitUserMentionedToTwin] Failed to deliver USER_MENTIONED to twin', {
+        workspaceId,
         error: error instanceof Error ? error.message : String(error),
       });
     }
