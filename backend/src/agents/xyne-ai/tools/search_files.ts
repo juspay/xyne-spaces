@@ -352,7 +352,7 @@ export async function searchFilesImpl(
       switch (subApp) {
         case 'canvas':
           entityType = 'canvas';
-          canvasId = parsedMetadata.viewAccessId || doc.docId;
+          canvasId = doc.docId;
           break;
         case 'transcript':
           entityType = 'call';

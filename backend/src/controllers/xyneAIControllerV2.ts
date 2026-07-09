@@ -34,7 +34,7 @@ const ResearchContextSchema = z.object({
 
 // Selection context schema - selected text from canvas
 const SelectionContextSchema = z.object({
-  canvas_view_access_id: z.string().min(1),
+  canvas_id: z.string().min(1),
   selected_text: z.string().min(1),
   canvas_title: z.string().optional(),
 });
@@ -67,8 +67,8 @@ const XyneAIRequestSchemaV2 = z.object({
   channel_ids: z.array(z.string().min(1)).default([]),
   conversationId: z.preprocess(emptyToUndefined, z.string().optional()),
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
-  canvasViewAccessId: z.string().optional(),
-  canvas_view_access_id: z.string().optional(),
+  canvasId: z.string().optional(),
+  canvas_id: z.string().optional(),
   selectionContexts: z.array(SelectionContextSchema).optional(),
   createCanvasEnabled: z.boolean().optional().default(false),
   create_canvas_enabled: z.boolean().optional().default(false),
@@ -182,8 +182,8 @@ export class XyneAIControllerV2 {
       channel_ids,
       conversationId,
       conversation_id,
-      canvasViewAccessId,
-      canvas_view_access_id,
+      canvasId,
+      canvas_id,
       selectionContexts: _selectionContexts,
       createCanvasEnabled: createCanvasEnabledCC,
       create_canvas_enabled: createCanvasEnabledSC,
@@ -228,7 +228,7 @@ export class XyneAIControllerV2 {
     const effectiveChannelIds = channelIds.length > 0 ? channelIds : channel_ids;
     const effectiveResearchContext = researchContext || research_context;
     const effectiveConversationId = conversationId || conversation_id;
-    const effectiveCanvasViewAccessId = canvasViewAccessId || canvas_view_access_id;
+    const effectiveCanvasId = canvasId || canvas_id;
     const effectiveAttachedContext = attachedContext || attached_context;
     const createCanvasEnabled = createCanvasEnabledCC || createCanvasEnabledSC;
     const webSearchEnabled = webSearchEnabledCC || webSearchEnabledSC;
@@ -366,7 +366,7 @@ export class XyneAIControllerV2 {
           canvasIds: effectiveCanvasIds,
           ticketIds: effectiveTicketIds,
           callIds: effectiveCallIds,
-          ...(effectiveCanvasViewAccessId && { canvasViewAccessId: effectiveCanvasViewAccessId }),
+          ...(effectiveCanvasId && { canvasId: effectiveCanvasId }),
           attachedContext: mergedAttachedContext,
           attachments,
           messageAttachmentIds,

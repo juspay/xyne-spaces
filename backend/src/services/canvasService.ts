@@ -188,7 +188,7 @@ export interface KnowledgeCanvasMetadata {
  * @param createdByUserId - User ID to set as canvas creator (from workflow.createdBy)
  * @param metadata - Additional metadata including projectId, conversationId, etc.
  * @param canvasTitle - Optional custom title for the canvas (defaults to workflow/ticket name or date-based title)
- * @returns viewAccessId for generating shareable link, or null on failure
+ * @returns canonical canvas id for generating shareable link, or null on failure
  */
 export async function createKnowledgeCanvas(
   workflowExecutionId: string,
@@ -208,7 +208,6 @@ export async function createKnowledgeCanvas(
 
     // Generate IDs
     const canvasId = uuidv4();
-    const viewAccessId = uuidv4();
     const participantId = uuidv4();
 
     // Generate title with fallback to default
@@ -224,8 +223,6 @@ export async function createKnowledgeCanvas(
         title: finalTitle,
         content: content as any, // BlockNote JSON array
         createdBy: createdByUserId,
-        viewAccessId,
-        editAccessId: null, // View-only for knowledge canvases
         visibility: 'PUBLIC',
         isTemplate: false,
         lastEditedBy: createdByUserId,
@@ -278,7 +275,7 @@ export async function createKnowledgeCanvas(
       // Don't fail the canvas creation if Vespa queueing fails
     }
     
-    return viewAccessId;
+    return canvasId;
   } catch (error) {
     logger.error('[CanvasService] Failed to create knowledge canvas:', error);
     return null;
@@ -286,12 +283,17 @@ export async function createKnowledgeCanvas(
 }
 
 /**
- * Generate the shareable canvas URL from viewAccessId
+ * Generate the shareable canvas URL from the canonical canvas id. When
+ * workspaceId is provided, the URL is workspace-scoped
+ * (`/{workspaceId}/chat/canvas/{canvasId}`); otherwise it falls back to the
+ * unscoped form.
  */
-export function getCanvasUrl(viewAccessId: string, workspaceId?: string | null): string {
-  const frontendUrl = (process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net').replace(/\/+$/, '');
-  const workspacePrefix = workspaceId ? `/${encodeURIComponent(workspaceId)}` : '';
-  return `${frontendUrl}${workspacePrefix}/chat/canvas/${encodeURIComponent(viewAccessId)}`;
+export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net';
+  const path = workspaceId
+    ? `/${workspaceId}/chat/canvas/${canvasId}`
+    : `/chat/canvas/${canvasId}`;
+  return `${frontendUrl}${path}`;
 }
 
 /**
@@ -450,12 +452,12 @@ export async function approveKnowledgeCanvas(
 }
 
 /**
- * Get canvas by viewAccessId
+ * Get canvas by canonical id.
  */
-export async function getCanvasByViewAccessId(viewAccessId: string) {
+export async function getCanvasById(canvasId: string) {
   const prisma = DatabaseClient.getInstance();
-  return prisma.canvas.findFirst({
-    where: { viewAccessId },
+  return prisma.canvas.findUnique({
+    where: { id: canvasId },
     select: {
       id: true,
       title: true,
@@ -472,7 +474,7 @@ export async function getCanvasByViewAccessId(viewAccessId: string) {
  */
 export async function findExistingDetailedSummaryCanvas(
   callId: string
-): Promise<{ canvasId: string; viewAccessId: string; version: number } | null> {
+): Promise<{ canvasId: string; version: number } | null> {
   try {
     const prisma = DatabaseClient.getInstance();
 
@@ -495,17 +497,15 @@ export async function findExistingDetailedSummaryCanvas(
       },
       select: {
         id: true,
-        viewAccessId: true,
         metadata: true,
       },
     });
 
-    if (existingCanvas && existingCanvas.viewAccessId) {
+    if (existingCanvas) {
       const metadata = existingCanvas.metadata as Record<string, any> | null;
       const version = typeof metadata?.version === 'number' ? metadata.version : 1;
       return {
         canvasId: existingCanvas.id,
-        viewAccessId: existingCanvas.viewAccessId,
         version,
       };
     }

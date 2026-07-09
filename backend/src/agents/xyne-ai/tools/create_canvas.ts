@@ -64,7 +64,6 @@ export function createCreateCanvasTool(): Tool<{ markdown: string; title: string
         
         // Generate IDs
         const canvasId = uuidv4();
-        const viewAccessId = uuidv4();
         const botParticipantId = uuidv4();
         const userParticipantId = uuidv4();
         
@@ -81,8 +80,6 @@ export function createCreateCanvasTool(): Tool<{ markdown: string; title: string
               title,
               content: [], // Empty - Y-Sweet is the source of truth
               createdBy: askAIBot.id, // Ask AI bot is the creator
-              viewAccessId,
-              editAccessId: null,
               visibility: 'PRIVATE',
               isTemplate: false,
               isCollaborative: true, // Enable collaborative editing for real-time updates
@@ -124,7 +121,7 @@ export function createCreateCanvasTool(): Tool<{ markdown: string; title: string
         }
         
         // Generate canvas URL using shared utility
-        const canvasUrl = getCanvasUrl(viewAccessId, user.workspaceId);
+        const canvasUrl = getCanvasUrl(canvasId, user.workspaceId);
         
         logger.info(`[Tool] [${context.sessionId}] create_canvas: created canvas ${canvasId} with Ask AI bot and user as owners`);
         

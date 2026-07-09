@@ -41,7 +41,7 @@ const ResearchContextSchema = z.object({
 
 // Selection context schema - selected text from canvas
 const SelectionContextSchema = z.object({
-  canvas_view_access_id: z.string().min(1),
+  canvas_id: z.string().min(1),
   selected_text: z.string().min(1),
   canvas_title: z.string().optional(),
 });
@@ -55,7 +55,7 @@ const XyneAIRequestSchema = z.object({
   collection_ids: z.array(z.string().min(1)).optional(), // Selected collections for KB search
   file_ids: z.array(z.string().min(1)).optional(), // Scope KB search to specific file document(s)
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
-  canvas_view_access_id: z.string().optional(), // Canvas context when Ask AI is triggered from canvas
+  canvas_id: z.string().optional(), // Canvas context when Ask AI is triggered from canvas
   selection_contexts: z.array(SelectionContextSchema).optional(), // Selected text contexts from canvases
   create_canvas_enabled: z.boolean().optional().default(false), // Enable create canvas instruction
   web_search_enabled: z.boolean().optional().default(false), // Enable/disable web search tool, defaults to false
@@ -115,7 +115,7 @@ export class XyneAIController {
       session_id,
       channel_ids,
       collection_ids, file_ids, conversation_id,
-      canvas_view_access_id,
+      canvas_id,
       selection_contexts,
       create_canvas_enabled,
       web_search_enabled, deep_research_enabled,
@@ -234,7 +234,7 @@ export class XyneAIController {
 
       // Transform selection_contexts from snake_case to camelCase
       const transformedSelectionContexts = selection_contexts?.map(ctx => ({
-        canvasViewAccessId: ctx.canvas_view_access_id,
+        canvasId: ctx.canvas_id,
         selectedText: ctx.selected_text,
         ...(ctx.canvas_title && { canvasTitle: ctx.canvas_title }),
       }));
@@ -246,7 +246,7 @@ export class XyneAIController {
         collectionIds: collection_ids,
         fileIds: file_ids,
         conversationId: conversation_id,
-        canvasViewAccessId: canvas_view_access_id,
+        canvasId: canvas_id,
         selectionContexts: transformedSelectionContexts,
         createCanvasEnabled: create_canvas_enabled,
         userId,

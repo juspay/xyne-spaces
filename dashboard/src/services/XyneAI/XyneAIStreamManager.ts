@@ -86,7 +86,7 @@ export interface StreamRequest {
   conversationId: string;
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined;
-  canvasViewAccessId?: string | null | undefined;
+  canvasId?: string | null | undefined;
   webSearchEnabled: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
@@ -939,7 +939,7 @@ class XyneAIStreamManager {
                 }
               : { type: request.researchContext.type, name: request.researchContext.name }
             : null,
-          ...(request.canvasViewAccessId && { canvasViewAccessId: request.canvasViewAccessId }),
+          ...(request.canvasId && { canvasId: request.canvasId }),
           ...(request.attachmentIds &&
             request.attachmentIds.length > 0 && { messageAttachmentIds: request.attachmentIds }),
           ...(request.attachments.length > 0 && {
@@ -1127,7 +1127,7 @@ class XyneAIStreamManager {
                 conversationId?: string;
                 channelName?: string;
                 channelType?: string;
-                viewAccessId?: string;
+                canvasId?: string;
                 ticketId?: string;
                 url?: string;
               }>;

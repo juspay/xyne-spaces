@@ -1063,8 +1063,8 @@ export const MessageItem = React.memo(
     // loading row.
 
     // Handle clicking selection context to navigate to canvas
-    const handleSelectionContextClick = (canvasViewAccessId: string): void => {
-      void navigate(`/chat/canvas/${canvasViewAccessId}`);
+    const handleSelectionContextClick = (canvasId: string): void => {
+      void navigate(`/chat/canvas/${canvasId}`);
     };
 
     // Display streaming content directly without character reveal slicing.
@@ -1252,7 +1252,7 @@ export const MessageItem = React.memo(
                       <SelectionContextPreview
                         key={index}
                         selection={selection}
-                        onClick={() => handleSelectionContextClick(selection.canvasViewAccessId)}
+                        onClick={() => handleSelectionContextClick(selection.canvasId)}
                       />
                     ))}
                   </div>

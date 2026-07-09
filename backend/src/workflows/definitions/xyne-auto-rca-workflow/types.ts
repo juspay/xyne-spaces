@@ -97,7 +97,6 @@ export interface XyneAutoRcaWorkflowContext extends BaseWorkflowContext {
  */
 export interface CanvasResult {
   canvasId: string;
-  viewAccessId: string;
   canvasUrl: string;
 }
 

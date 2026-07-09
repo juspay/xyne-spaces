@@ -2,7 +2,6 @@ import { db } from '@/database/client';
 import { CanvasRole } from '@prisma/client';
 import { resolveCanvasHierarchy } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { v4 as uuidv4 } from 'uuid';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 
@@ -20,24 +19,16 @@ export interface CanvasAuthResult {
 
 class CanvasAuthService {
   async checkCanvasAccess(
-    canvasIdOrAccessId: string,
+    canvasId: string,
     userId: string
   ): Promise<CanvasAuthResult> {
     try {
-      const canvas = await db.canvas.findFirst({
-        where: {
-          OR: [
-            { id: canvasIdOrAccessId },
-            { editAccessId: canvasIdOrAccessId },
-            { viewAccessId: canvasIdOrAccessId },
-          ],
-        },
+      const canvas = await db.canvas.findUnique({
+        where: { id: canvasId },
         select: {
           id: true,
           createdBy: true,
           visibility: true,
-          editAccessId: true,
-          viewAccessId: true,
           channelId: true,
           folderId: true,
           projectId: true,
@@ -45,7 +36,7 @@ class CanvasAuthService {
       });
 
       if (!canvas) {
-        logger.warn(`[CanvasAuth] Canvas not found: ${canvasIdOrAccessId}`);
+        logger.warn(`[CanvasAuth] Canvas not found: ${canvasId}`);
         return {
           hasAccess: false,
           canEdit: false,
@@ -97,33 +88,10 @@ class CanvasAuthService {
           })
         : null;
 
-      const hasEditAccessLink = canvas.editAccessId === canvasIdOrAccessId;
-      const hasViewAccessLink = canvas.viewAccessId === canvasIdOrAccessId;
-
-      let hasPublicVisibilityAccess = false;
-      if (canvas.visibility === 'PUBLIC') {
-        if (canvas.channelId) {
-          const membership = await db.channelParticipant.findUnique({
-            where: {
-              channelId_userId: {
-                channelId: canvas.channelId,
-                userId,
-              },
-            },
-          });
-          hasPublicVisibilityAccess = !!membership;
-        } else if (canvas.projectId) {
-          const membership = await db.channelParticipant.findFirst({
-            where: {
-              userId,
-              channel: {
-                projectId: canvas.projectId,
-              },
-            },
-          });
-          hasPublicVisibilityAccess = !!membership;
-        }
-      }
+      // PUBLIC canvases are open to everyone in the workspace. Workspace
+      // scoping is enforced upstream (a canvas is only reachable by users in
+      // its creator's workspace via the Zero ACL layer).
+      const hasPublicVisibilityAccess = canvas.visibility === 'PUBLIC';
 
       const roleRank = (r: CanvasRole | undefined): number =>
         r === CanvasRole.OWNER ? 3 : r === CanvasRole.EDITOR ? 2 : r === CanvasRole.VIEWER ? 1 : 0;
@@ -143,11 +111,9 @@ class CanvasAuthService {
       const hasEditorRole = effectiveRole === CanvasRole.EDITOR;
       const hasViewerRole = effectiveRole === CanvasRole.VIEWER;
 
-      const canEdit =
-        isCreator || hasOwnerRole || hasEditorRole || hasEditAccessLink;
+      const canEdit = isCreator || hasOwnerRole || hasEditorRole;
 
-      const canView =
-        canEdit || hasViewerRole || hasViewAccessLink || hasPublicVisibilityAccess;
+      const canView = canEdit || hasViewerRole || hasPublicVisibilityAccess;
 
       const hasAccess = canView;
 
@@ -155,8 +121,6 @@ class CanvasAuthService {
         userId,
         isCreator,
         participantRole: effectiveRole,
-        hasEditAccessLink,
-        hasViewAccessLink,
         hasPublicVisibilityAccess,
         canEdit,
         canView,
@@ -221,8 +185,6 @@ class CanvasAuthService {
       projectId?: string;
       folderId?: string;
       title?: string;
-      viewAccessId?: string;
-      editAccessId?: string;
     }
   ): Promise<void> {
     try {
@@ -291,8 +253,6 @@ class CanvasAuthService {
             createdBy: userId,
             visibility: 'PRIVATE',
             title: options?.title || 'Untitled Canvas',
-            editAccessId: options?.editAccessId || uuidv4(),
-            viewAccessId: options?.viewAccessId || uuidv4(),
             content: [],
             isCollaborative: true,
             ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),

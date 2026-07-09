@@ -26,8 +26,6 @@ export interface CanvasEditorProps {
   canvasId?: string | undefined;
   /** Canvas title for mention notifications */
   canvasTitle?: string | undefined;
-  /** Canvas view access ID for selection context in Ask AI */
-  viewAccessId?: string | undefined;
   /** Called when a user/group is selected from @ menu - used for event-based mention notifications */
   onMentionInsert?: (params: { type: 'user' | 'group'; id: string; blockId: string }) => void;
   /** When set, focus and scroll to this block on load (e.g. from activity notification) */
@@ -112,8 +110,6 @@ export interface Canvas {
   createdAt: number;
   updatedAt: number;
   metadata?: Record<string, unknown> | KnowledgeCanvasMetadata;
-  viewAccessId?: string;
-  editAccessId?: string;
   accessLevel?: CanvasRole;
   docType?: DocType;
   userRepo?: string;

@@ -17,7 +17,7 @@ export interface ThreadInfo {
 
 // Canvas info interface for canvas context
 export interface CanvasInfo {
-  viewAccessId: string;
+  canvasId: string;
   title?: string;
 }
 
@@ -25,14 +25,14 @@ export interface CanvasInfo {
 export interface SelectionInfo {
   text: string;
   preview: string; // First 50 chars for display
-  canvasViewAccessId: string;
+  canvasId: string;
   canvasTitle?: string;
 }
 
 // Canvas selection context - groups canvas with its selections
 // This enforces hierarchy: selections belong to a specific canvas
 export interface CanvasSelectionContext {
-  viewAccessId: string;
+  canvasId: string;
   title?: string;
   selections: SelectionInfo[];
 }
@@ -93,9 +93,9 @@ export type XyneAIEvent =
   | { type: 'SET_CHANNEL'; channelId: string }
   | { type: 'SET_TICKET_CONTEXT'; channelId: string; threadInfo: ThreadInfo }
   | { type: 'CLEAR_TICKET_CONTEXT' }
-  | { type: 'REMOVE_CANVAS_CONTEXT'; viewAccessId: string }
-  | { type: 'CLEAR_SELECTIONS'; viewAccessId?: string }
-  | { type: 'REMOVE_SELECTION'; viewAccessId: string; selectionIndex: number };
+  | { type: 'REMOVE_CANVAS_CONTEXT'; canvasId: string }
+  | { type: 'CLEAR_SELECTIONS'; canvasId?: string }
+  | { type: 'REMOVE_SELECTION'; canvasId: string; selectionIndex: number };
 
 // Interface for panel handle (to avoid importing react-resizable-panels here)
 interface PanelHandle {
@@ -132,14 +132,14 @@ function buildCanvasContexts(
 
   // Add existing contexts to map
   for (const ctx of existingContexts) {
-    contextMap.set(ctx.viewAccessId, { ...ctx, selections: [...ctx.selections] });
+    contextMap.set(ctx.canvasId, { ...ctx, selections: [...ctx.selections] });
   }
 
   // Add or update with new selections
   if (newSelections) {
     for (const selection of newSelections) {
-      const viewAccessId = selection.canvasViewAccessId;
-      const existing = contextMap.get(viewAccessId);
+      const canvasId = selection.canvasId;
+      const existing = contextMap.get(canvasId);
 
       if (existing) {
         // Check for duplicate selection
@@ -150,30 +150,30 @@ function buildCanvasContexts(
       } else {
         // Create new context - only include title if defined
         const newContext: CanvasSelectionContext = {
-          viewAccessId,
+          canvasId,
           selections: [selection],
         };
         if (selection.canvasTitle) {
           newContext.title = selection.canvasTitle;
         }
-        contextMap.set(viewAccessId, newContext);
+        contextMap.set(canvasId, newContext);
       }
     }
   }
 
   // If canvasInfo provided, ensure context exists for it
   if (canvasInfo) {
-    const existing = contextMap.get(canvasInfo.viewAccessId);
+    const existing = contextMap.get(canvasInfo.canvasId);
     if (!existing) {
       // Create new context - only include title if defined
       const newContext: CanvasSelectionContext = {
-        viewAccessId: canvasInfo.viewAccessId,
+        canvasId: canvasInfo.canvasId,
         selections: [],
       };
       if (canvasInfo.title) {
         newContext.title = canvasInfo.title;
       }
-      contextMap.set(canvasInfo.viewAccessId, newContext);
+      contextMap.set(canvasInfo.canvasId, newContext);
     } else if (canvasInfo.title && !existing.title) {
       existing.title = canvasInfo.title;
     }
@@ -593,13 +593,12 @@ export const xyneAIMachine = setup({
     removeCanvasContext: assign(({ event, context }) => {
       if (event.type === 'REMOVE_CANVAS_CONTEXT') {
         const newCanvasContexts = context.canvasContexts.filter(
-          ctx => ctx.viewAccessId !== event.viewAccessId,
+          ctx => ctx.canvasId !== event.canvasId,
         );
         return {
           canvasContexts: newCanvasContexts,
           // Clear canvasInfo if it matches
-          canvasInfo:
-            context.canvasInfo?.viewAccessId === event.viewAccessId ? null : context.canvasInfo,
+          canvasInfo: context.canvasInfo?.canvasId === event.canvasId ? null : context.canvasInfo,
         };
       }
       return {};
@@ -607,10 +606,10 @@ export const xyneAIMachine = setup({
     // Clear selections from a canvas (keeps the canvas context)
     clearSelections: assign(({ event, context }) => {
       if (event.type === 'CLEAR_SELECTIONS') {
-        if (event.viewAccessId) {
+        if (event.canvasId) {
           // Clear selections for specific canvas
           const newCanvasContexts = context.canvasContexts.map(ctx => {
-            if (ctx.viewAccessId === event.viewAccessId) {
+            if (ctx.canvasId === event.canvasId) {
               return { ...ctx, selections: [] };
             }
             return ctx;
@@ -635,7 +634,7 @@ export const xyneAIMachine = setup({
     removeSelection: assign(({ event, context }) => {
       if (event.type === 'REMOVE_SELECTION') {
         const newCanvasContexts = context.canvasContexts.map(ctx => {
-          if (ctx.viewAccessId === event.viewAccessId) {
+          if (ctx.canvasId === event.canvasId) {
             return {
               ...ctx,
               selections: ctx.selections.filter((_, i) => i !== event.selectionIndex),

@@ -1389,10 +1389,10 @@ Output ONLY the processed transcript, nothing else.`;
   private async postNotesCanvasReplyIfPresent(conversationId: string, callId: string): Promise<void> {
     try {
       const call = await repositories.calls.findByExternalId(callId);
-      const notesCanvasViewAccessId = (call?.metadata as Record<string, unknown> | null)
-        ?.notesCanvasViewAccessId;
+      const notesCanvasId = (call?.metadata as Record<string, unknown> | null)
+        ?.notesCanvasId;
 
-      if (typeof notesCanvasViewAccessId !== 'string' || !notesCanvasViewAccessId) {
+      if (typeof notesCanvasId !== 'string' || !notesCanvasId) {
         return;
       }
 
@@ -1412,7 +1412,7 @@ Output ONLY the processed transcript, nothing else.`;
       await callDocumentService.postNotesCanvasToConversation(
         conversationId,
         callId,
-        getCanvasUrl(notesCanvasViewAccessId),
+        getCanvasUrl(notesCanvasId),
         channel.workspaceId,
       );
     } catch (notesError) {

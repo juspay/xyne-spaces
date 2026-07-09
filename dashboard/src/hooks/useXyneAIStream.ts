@@ -39,7 +39,7 @@ interface UseXyneAIStreamParams {
   streamSessionKey: string;
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined; // Attachment IDs to fetch from GCS on backend
-  canvasViewAccessId?: string | null;
+  canvasId?: string | null;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConversationId: React.Dispatch<React.SetStateAction<string>>;
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>;
@@ -100,7 +100,7 @@ export const useXyneAIStream = ({
   streamSessionKey,
   threadConversationId,
   attachmentIds,
-  canvasViewAccessId,
+  canvasId,
   setMessages,
   setConversationId,
   setCurrentTraceId,
@@ -279,21 +279,18 @@ export const useXyneAIStream = ({
       const eAttachedContext = ov?.attachedContext ?? attachedContext;
 
       // Build internal query with selection context format
-      // Format: from canvas(canvas_view_access_id) ```selected_text```
+      // Format: from canvas(canvas_id) ```selected_text```
       let internalQuery = query;
       if (selectionContexts && selectionContexts.length > 0) {
         const selectionFormatted = selectionContexts
-          .map(
-            ctx =>
-              `\n\nfrom canvas(${ctx.canvasViewAccessId})\n\`\`\`\n${ctx.selectedText}\n\`\`\``,
-          )
+          .map(ctx => `\n\nfrom canvas(${ctx.canvasId})\n\`\`\`\n${ctx.selectedText}\n\`\`\``)
           .join('');
         internalQuery = query + selectionFormatted;
       }
 
       // Append canvas context hint for better accuracy when Ask AI is triggered from a canvas
-      if (canvasViewAccessId) {
-        const canvasContextHint = `\n\ncanvas view_access_id: ${canvasViewAccessId}`;
+      if (canvasId) {
+        const canvasContextHint = `\n\ncanvas_id: ${canvasId}`;
         internalQuery = internalQuery + canvasContextHint;
       }
 
@@ -384,7 +381,7 @@ export const useXyneAIStream = ({
           conversationId,
           threadConversationId,
           attachmentIds,
-          canvasViewAccessId,
+          canvasId,
           webSearchEnabled: eWebSearchEnabled,
           deepResearchEnabled: eDeepResearchEnabled,
           createCanvasEnabled: eCreateCanvasEnabled,
@@ -415,7 +412,7 @@ export const useXyneAIStream = ({
       conversationId,
       threadConversationId,
       attachmentIds,
-      canvasViewAccessId,
+      canvasId,
       fileIds,
       researchContext,
       webSearchEnabled,

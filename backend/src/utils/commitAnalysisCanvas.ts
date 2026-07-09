@@ -83,7 +83,6 @@ export async function createCommitAnalysisCanvas(
 
     // Generate IDs
     const canvasId = uuidv4();
-    const viewAccessId = uuidv4();
     const participantId = uuidv4();
 
     const dateStr = now.toLocaleDateString('en-US', {
@@ -110,8 +109,6 @@ export async function createCommitAnalysisCanvas(
         title: finalTitle,
         content: content as any,
         createdBy: createdByUserId,
-        viewAccessId,
-        editAccessId: null,
         visibility: 'PUBLIC',
         isTemplate: false,
         isCollaborative: false,
@@ -199,7 +196,7 @@ export async function createCommitAnalysisCanvas(
       logger.error(`[CanvasService] Failed to queue Vespa job for commit analysis canvas ${canvasId}:`, vespaError);
     }
 
-    return viewAccessId;
+    return canvasId;
   } catch (error) {
     logger.error('[CanvasService] Failed to create commit analysis canvas:', error);
     return null;

@@ -20,7 +20,7 @@ import { type Tool } from '@juspay-jaf/jaf';
 import { db } from '../../../database/client.js';
 import { logger } from '../../../utils/logger.js';
 import { aiContextService } from '../../../services/aiContextService.js';
-import { getCanvasByViewAccessId } from '../../../services/canvasService.js';
+import { getCanvasById } from '../../../services/canvasService.js';
 import { readFromYSweet } from '../../../utils/ysweetUtils.js';
 import { convertBlockNoteToMarkdown } from '../../../services/canvasService.js';
 import type {
@@ -180,25 +180,25 @@ async function fetchThreadMessagesImpl(
     );
 
     // ============================================================================
-    // Fetch canvases from canvasViewIds found in message content
+    // Fetch canvases from canvasIds found in message content
     // ============================================================================
 
-    // Collect all unique canvasViewIds from message entities
-    const allCanvasViewIds = new Set<string>();
+    // Collect all unique canvasIds from message entities
+    const allCanvasIds = new Set<string>();
     messageEntities.forEach(msg => {
-      if (msg.canvasViewIds && msg.canvasViewIds.length > 0) {
-        msg.canvasViewIds.forEach(id => allCanvasViewIds.add(id));
+      if (msg.canvasIds && msg.canvasIds.length > 0) {
+        msg.canvasIds.forEach(id => allCanvasIds.add(id));
       }
     });
 
-    // Fetch canvases by viewAccessId and convert to markdown
+    // Fetch canvases by canonical id and convert to markdown
     const canvasEntities: ToolEntity[] = [];
-    if (allCanvasViewIds.size > 0) {
-      logger.info(`[Tool] [${sessionId}] fetch_thread_messages: Fetching ${allCanvasViewIds.size} canvases from message content`);
+    if (allCanvasIds.size > 0) {
+      logger.info(`[Tool] [${sessionId}] fetch_thread_messages: Fetching ${allCanvasIds.size} canvases from message content`);
 
-      const canvasViewIdArray = Array.from(allCanvasViewIds);
+      const canvasIdArray = Array.from(allCanvasIds);
       const canvasResults = await Promise.all(
-        canvasViewIdArray.map(viewAccessId => getCanvasByViewAccessId(viewAccessId))
+        canvasIdArray.map(canvasId => getCanvasById(canvasId))
       );
 
       for (let i = 0; i < canvasResults.length; i++) {

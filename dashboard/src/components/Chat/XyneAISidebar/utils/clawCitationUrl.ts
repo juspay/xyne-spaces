@@ -69,8 +69,8 @@ export function buildClawCitationUrl(citation: ClawCitation): string | null {
     return `/chat/dir/${citation.channelId}`;
   }
 
-  if (citation.kind === 'canvas' && citation.viewAccessId) {
-    return `/chat/canvas/${citation.viewAccessId}`;
+  if (citation.kind === 'canvas' && citation.canvasId) {
+    return `/chat/canvas/${citation.canvasId}`;
   }
 
   if (

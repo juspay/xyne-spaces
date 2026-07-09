@@ -3184,7 +3184,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
     const learningIds = savedLearnings.map(l => l.id)
     
     // Create the canvas with metadata for approval
-    const viewAccessId = await createKnowledgeCanvas(
+    const canvasId = await createKnowledgeCanvas(
       workflowExecutionId,
       learnings,
       userId,
@@ -3196,13 +3196,13 @@ export class DBWorkflowStorage implements WorkflowStorage {
       },
       canvasTitle
     )
-    
-    if (!viewAccessId) {
+
+    if (!canvasId) {
       logger.info(`ℹ️ [KNOWLEDGE] No canvas created (possibly no learnings)`)
       return
     }
-    
-    const canvasUrl = getCanvasUrl(viewAccessId)
+
+    const canvasUrl = getCanvasUrl(canvasId)
     logger.info(`📋 [KNOWLEDGE] Created canvas with URL: ${canvasUrl}`)
     
     // Post message to conversation

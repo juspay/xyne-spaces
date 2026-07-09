@@ -1938,7 +1938,6 @@ export class JiraMigrationController {
   ): Promise<string> {
     const now = new Date();
     const canvasId = randomUUID();
-    const viewAccessId = randomUUID();
     const participantId = randomUUID();
     try {
       await db.$transaction(async tx => {
@@ -1949,8 +1948,6 @@ export class JiraMigrationController {
             content: this.buildMigrationReportCanvasBlocks(result) as any,
             channelId,
             createdBy: actorUserId,
-            viewAccessId,
-            editAccessId: null,
             visibility: 'PUBLIC',
             isTemplate: false,
             isCollaborative: false,
@@ -1992,19 +1989,17 @@ export class JiraMigrationController {
         channelId,
         actorUserId,
         canvasId,
-        viewAccessId,
       });
       throw error;
     }
 
-    const canvasUrl = getCanvasUrl(viewAccessId);
+    const canvasUrl = getCanvasUrl(canvasId);
     logger.info('[JiraMigration] Canvas report created', {
       jiraProjectKey: result.jiraProjectKey,
       externalSourceId: result.externalSourceId || null,
       channelId,
       actorUserId,
       canvasId,
-      viewAccessId,
       canvasUrl,
     });
 

@@ -1083,7 +1083,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
         // Insert canvas link into editor if attached
         if (attachedCanvas) {
-          const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.viewAccessId || attachedCanvas.id}`;
+          const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.id}`;
           // Insert as plain link - platform will unfurl to show preview
           editor?.commands.insertContent(` ${canvasLink}`);
         }
@@ -1125,7 +1125,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const handleCreateNewCanvas = useCallback(async () => {
       // Create canvas immediately, attach to composer, then open canvas editor
       const newCanvasId = uuidv4();
-      const viewAccessId = uuidv4();
       const now = Date.now();
 
       try {
@@ -1133,7 +1132,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         await canvasService.createCollaborativeCanvas({
           id: newCanvasId,
           title: 'Untitled Canvas',
-          viewAccessId,
           ...(channelId ? { channelId } : {}),
         });
 
@@ -1141,7 +1139,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         const newCanvas: Canvas = {
           id: newCanvasId,
           title: 'Untitled Canvas',
-          viewAccessId,
           createdBy: '',
           visibility: CanvasVisibility.PRIVATE,
           isTemplate: false,

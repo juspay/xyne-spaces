@@ -16,7 +16,7 @@ import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { ActivityClassification } from '@prisma/client';
 import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
-import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasByViewAccessId } from '../services/canvasService.js';
+import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
 
 export class CanvasController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -45,7 +45,6 @@ export class CanvasController {
       const creatorId = userId;
 
       const canvasId = uuidv4();
-      const viewAccessId = uuidv4();
       const participantId = uuidv4();
 
       const blocks = await convertMarkdownToBlockNote(markdown);
@@ -57,8 +56,6 @@ export class CanvasController {
             title,
             content: [],
             createdBy: creatorId,  // <-- AUTHENTICATED USER
-            viewAccessId,
-            editAccessId: null,
             channelId: channelId || null,  // <-- ASSOCIATE WITH CHANNEL IF PROVIDED
             visibility: visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
             isTemplate: false,
@@ -87,11 +84,10 @@ export class CanvasController {
         return;
       }
 
-      const canvasUrl = getCanvasUrl(viewAccessId, req.user?.workspaceId);
+      const canvasUrl = getCanvasUrl(canvasId, req.user?.workspaceId);
 
       res.status(201).json({
         id: canvasId,
-        viewAccessId,
         title,
         url: canvasUrl,
         visibility: visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
@@ -410,13 +406,13 @@ export class CanvasController {
         return;
       }
 
-      const { viewAccessId } = req.params;
-      if (!viewAccessId) {
-        res.status(400).json({ error: 'viewAccessId is required' });
+      const { canvasId } = req.params;
+      if (!canvasId) {
+        res.status(400).json({ error: 'canvasId is required' });
         return;
       }
 
-      const canvas = await getCanvasByViewAccessId(viewAccessId);
+      const canvas = await getCanvasById(canvasId);
       if (!canvas) {
         res.status(404).json({ error: 'Canvas not found' });
         return;
@@ -433,16 +429,14 @@ export class CanvasController {
 
       // Read content from Y-Sweet
       const { readFromYSweet } = await import('../utils/ysweetUtils.js');
-      // const { convertBlockNoteToMarkdown } = await import('../services/canvasService.js');
       const blocks = await readFromYSweet(canvas.id);
       const markdown = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
 
       res.status(200).json({
         id: canvas.id,
-        viewAccessId,
         title: canvas.title,
         markdown,
-        url: getCanvasUrl(viewAccessId, req.user?.workspaceId),
+        url: getCanvasUrl(canvas.id, req.user?.workspaceId),
       });
     } catch (error) {
       logger.error('[CANVAS-READ] Error:', error);
@@ -458,11 +452,11 @@ export class CanvasController {
         return;
       }
 
-      const { viewAccessId } = req.params;
+      const { canvasId } = req.params;
       const { markdown } = req.body;
 
-      if (!viewAccessId) {
-        res.status(400).json({ error: 'viewAccessId is required' });
+      if (!canvasId) {
+        res.status(400).json({ error: 'canvasId is required' });
         return;
       }
 
@@ -471,7 +465,7 @@ export class CanvasController {
         return;
       }
 
-      const canvas = await getCanvasByViewAccessId(viewAccessId);
+      const canvas = await getCanvasById(canvasId);
       if (!canvas) {
         res.status(404).json({ error: 'Canvas not found' });
         return;
@@ -507,9 +501,8 @@ export class CanvasController {
 
       res.status(200).json({
         id: canvas.id,
-        viewAccessId,
         title: canvas.title,
-        url: getCanvasUrl(viewAccessId, req.user?.workspaceId),
+        url: getCanvasUrl(canvas.id, req.user?.workspaceId),
       });
     } catch (error) {
       logger.error('[CANVAS-UPDATE] Error:', error);

@@ -1072,8 +1072,8 @@ export class CallController {
       }
 
       const recordingAttachment = await repositories.messageAttachments.findRecordingByCallId(callId).catch(() => null);
-      const notesCanvasViewAccessId = (call.metadata as Record<string, unknown> | null)
-        ?.notesCanvasViewAccessId;
+      const notesCanvasId = (call.metadata as Record<string, unknown> | null)
+        ?.notesCanvasId;
 
       res.json({
         success: true,
@@ -1096,8 +1096,8 @@ export class CallController {
           messageId,
           conversationId,
           channelId,
-          notesCanvasViewAccessId:
-            typeof notesCanvasViewAccessId === 'string' ? notesCanvasViewAccessId : null,
+          notesCanvasId:
+            typeof notesCanvasId === 'string' ? notesCanvasId : null,
           hasRecording: !!recordingAttachment,
         },
       });

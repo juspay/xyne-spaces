@@ -6,7 +6,6 @@ import { logger, Event } from '../utils/logger';
 interface CanvasPrefetchItem {
   id: string;
   channelId?: string;
-  viewAccessId?: string;
   isCollaborative?: boolean;
   title?: string;
 }
@@ -47,7 +46,6 @@ export function useCanvasPrefetch(): UseCanvasPrefetchReturn {
       try {
         await canvasPrefetchService.prefetchCanvas(queryClient, canvas.id, {
           ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
-          ...(canvas.viewAccessId ? { viewAccessId: canvas.viewAccessId } : {}),
           ...(canvas.title ? { title: canvas.title } : {}),
         });
         logger.info(Event.CANVAS_PREFETCH_SUCCESS, {

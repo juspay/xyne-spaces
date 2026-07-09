@@ -29,9 +29,9 @@ interface PublishReleaseReportInput {
 
 const ENV_VAR_REGEX = /^\s*([A-Za-z][A-Za-z0-9_]*)\s*[=:]/gm;
 
-function buildReleaseReportCanvasUrl(workspaceId: string, viewAccessId: string): string {
+function buildReleaseReportCanvasUrl(workspaceId: string, canvasId: string): string {
   const frontendUrl = config.slackFrontendUrl.replace(/\/$/, '');
-  return `${frontendUrl}/${workspaceId}/chat/canvas/${viewAccessId}`;
+  return `${frontendUrl}/${workspaceId}/chat/canvas/${canvasId}`;
 }
 
 function extractEnvironmentVariableNames(...values: string[]): Set<string> {
@@ -304,7 +304,7 @@ export class ReleaseReportService {
       version,
       existingMetadata.releaseReportCanvasId
     );
-    const canvasUrl = buildReleaseReportCanvasUrl(report.release.workspaceId, canvas.viewAccessId);
+    const canvasUrl = buildReleaseReportCanvasUrl(report.release.workspaceId, canvas.canvasId);
 
     const baseMetadata = {
       releaseReportCanvasId: canvas.canvasId,

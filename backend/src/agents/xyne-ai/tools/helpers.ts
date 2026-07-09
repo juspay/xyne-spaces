@@ -72,7 +72,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     deep_research: deepResearch || 'Performs comprehensive multi-step deep research on a topic: generates sub-queries, runs parallel web searches, synthesizes a report, and saves it to a canvas. Use for complex research questions. Takes 1–10 minutes.',
     research_agent: researchAgent || 'Query the Research Agent for codebase analysis and technical investigation.',
     create_canvas: createCanvas || 'Create a canvas from markdown content.',
-    read_canvas: readCanvas || 'Read a canvas by its viewAccessId and return the content as markdown.',
+    read_canvas: readCanvas || 'Read a canvas by its canonical id and return the content as markdown.',
     edit_canvas: editCanvas || 'Edit an existing canvas by replacing its content.',
     fetch_link_content: fetchLinkContent || 'Fetch content from a Xyne Spaces link (message, conversation, ticket, or canvas).',
     fetch_skill_instructions: fetchSkillInstructions || 'Fetch the full instructions for a skill by name. Use this when you need to load a skill that the user has enabled.',
@@ -144,10 +144,10 @@ export function getISTTimestampForGenius(): string {
 // ============================================================================
 
 /**
- * Extract canvas viewAccessIds from message content
- * Matches patterns like /chat/canvas/{viewAccessId}
+ * Extract canvas ids from message content
+ * Matches patterns like /chat/canvas/{canvasId}
  */
-export function extractCanvasViewIds(content: string): string[] {
+export function extractCanvasIds(content: string): string[] {
   const regex = /\/chat\/canvas\/([a-zA-Z0-9-]+)/g;
   const matches: string[] = [];
   let match;
@@ -792,8 +792,8 @@ export function transformMessageToEntity(
 ): ToolEntity {
   const user = userMap.get(message.senderId);
   
-  // Extract canvas viewAccessIds from message content
-  const canvasViewIds = extractCanvasViewIds(message.content);
+  // Extract canvas ids from message content
+  const canvasIds = extractCanvasIds(message.content);
   
   return {
     entityType: 'message',
@@ -809,7 +809,7 @@ export function transformMessageToEntity(
     conversationId: message.conversationId,
     messageId: message.messageId,
     hasAttachment: message.hasAttachment,
-    ...(canvasViewIds.length > 0 && { canvasViewIds }),
+    ...(canvasIds.length > 0 && { canvasIds }),
   };
 }
 

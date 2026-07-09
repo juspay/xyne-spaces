@@ -313,7 +313,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         collaborativeCanvases.map(c => ({
           id: c.id,
           ...(c.channelId ? { channelId: c.channelId } : {}),
-          ...(c.viewAccessId ? { viewAccessId: c.viewAccessId } : {}),
           ...(c.isCollaborative !== undefined ? { isCollaborative: c.isCollaborative } : {}),
           title: c.title,
         })),
@@ -543,7 +542,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             handleMouseEnter({
               id: canvas.id,
               ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
-              ...(canvas.viewAccessId ? { viewAccessId: canvas.viewAccessId } : {}),
               ...(canvas.isCollaborative !== undefined
                 ? { isCollaborative: canvas.isCollaborative }
                 : {}),

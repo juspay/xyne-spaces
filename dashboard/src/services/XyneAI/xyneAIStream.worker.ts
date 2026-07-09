@@ -35,7 +35,7 @@ export interface WorkerStartStreamMessage {
       deepResearchEnabled?: boolean;
       createCanvasEnabled?: boolean;
       researchContext?: { type: string; id?: string; name: string } | null;
-      canvasViewAccessId?: string;
+      canvasId?: string;
       messageAttachmentIds?: string[];
       attachments?: Array<{
         data: string;
@@ -148,8 +148,8 @@ async function executeStream(
         deep_research_enabled: requestBody.deepResearchEnabled ?? false,
         create_canvas_enabled: requestBody.createCanvasEnabled ?? false,
         research_context: requestBody.researchContext ?? null,
-        ...(requestBody.canvasViewAccessId && {
-          canvas_view_access_id: requestBody.canvasViewAccessId,
+        ...(requestBody.canvasId && {
+          canvas_id: requestBody.canvasId,
         }),
         ...(requestBody.messageAttachmentIds &&
           requestBody.messageAttachmentIds.length > 0 && {

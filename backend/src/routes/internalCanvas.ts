@@ -21,7 +21,7 @@ function attachInternalUser(req: Request, _res: Response, next: NextFunction): v
   next();
 }
 
-router.get('/view/:viewAccessId', validateS2SKey, attachInternalUser, canvasController.readCanvas);
-router.patch('/view/:viewAccessId', validateS2SKey, attachInternalUser, canvasController.updateCanvas);
+router.get('/view/:canvasId', validateS2SKey, attachInternalUser, canvasController.readCanvas);
+router.patch('/view/:canvasId', validateS2SKey, attachInternalUser, canvasController.updateCanvas);
 
 export default router;

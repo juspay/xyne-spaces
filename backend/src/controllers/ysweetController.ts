@@ -112,7 +112,7 @@ export class YSweetController {
 
   async getClientToken(req: Request, res: Response): Promise<void> {
     try {
-      const { docId, channelId, projectId, folderId, title, viewAccessId, editAccessId } = req.body;
+      const { docId, channelId, projectId, folderId, title } = req.body;
 
       if (!docId || typeof docId !== 'string') {
         res.status(400).json({ 
@@ -134,10 +134,8 @@ export class YSweetController {
       let authResult;
       let canEdit = false;
 
-      const accessId = (typeof viewAccessId === 'string' && viewAccessId) ? viewAccessId : docId;
-
       try {
-        authResult = await canvasAuthService.checkCanvasAccess(accessId, userId);
+        authResult = await canvasAuthService.checkCanvasAccess(docId, userId);
         canEdit = authResult.canEdit;
       } catch (error) {
         logger.error('[YSweet] Error checking canvas access:', error);
@@ -151,8 +149,6 @@ export class YSweetController {
             projectId: typeof projectId === 'string' ? projectId : undefined,
             folderId: typeof folderId === 'string' ? folderId : undefined,
             title: typeof title === 'string' ? title : undefined,
-            viewAccessId: typeof viewAccessId === 'string' ? viewAccessId : undefined,
-            editAccessId: typeof editAccessId === 'string' ? editAccessId : undefined,
           });
           canEdit = true;
         } catch (error) {

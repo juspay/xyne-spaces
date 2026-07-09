@@ -59,7 +59,6 @@ export type CanvasVersionCopyResult = {
   id: string;
   title: string;
   content: unknown;
-  viewAccessId: string;
   channelId?: string;
   folderId?: string;
   projectId?: string;
@@ -411,7 +410,6 @@ export const useCanvasVersionCopy = <TVersion extends CopyableCanvasVersion>({
       if (!canvas) return;
 
       const newCanvasId = uuidv4();
-      const viewAccessId = uuidv4();
       const canvasTitle = canvas.title?.trim() || 'Untitled Canvas';
       const versionName = version.name?.trim() || formatCanvasVersionName(version.updatedAt);
       const resolvedProjectId =
@@ -426,7 +424,6 @@ export const useCanvasVersionCopy = <TVersion extends CopyableCanvasVersion>({
             id: newCanvasId,
             title,
             content: version.content as ReadonlyJSONValue,
-            viewAccessId,
             ...(canvas.visibility ? { visibility: canvas.visibility } : {}),
             ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
             ...(canvas.folderId ? { folderId: canvas.folderId } : {}),
@@ -446,7 +443,6 @@ export const useCanvasVersionCopy = <TVersion extends CopyableCanvasVersion>({
           id: newCanvasId,
           title,
           content: version.content,
-          viewAccessId,
           ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
           ...(canvas.folderId ? { folderId: canvas.folderId } : {}),
           ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
@@ -501,7 +497,6 @@ export const useCanvasVersionCopyCreatedHandler = <TCanvas, TContent, TPreviewVe
         ...(copy.folderId ? { folderId: copy.folderId } : {}),
         ...(copy.projectId ? { projectId: copy.projectId } : {}),
         createdBy: userId || '',
-        viewAccessId: copy.viewAccessId,
         visibility: copy.visibility || CanvasVisibility.PRIVATE,
         isTemplate: false,
         isCollaborative: false,

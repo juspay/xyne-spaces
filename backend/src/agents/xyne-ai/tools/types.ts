@@ -73,7 +73,7 @@ export interface XyneAIAgentContext {
   repositoryNameToId?: Map<string, string>;
   customInstruction?: string;
   // Canvas context
-  canvasViewAccessId?: string;  // viewAccessId of the canvas when Ask AI is triggered from canvas
+  canvasId?: string;  // canonical canvas id when Ask AI is triggered from canvas
   selectionContexts?: SelectionContext[];  // Selected text contexts from canvases
   createCanvasEnabled?: boolean;  // Flag to add create canvas instruction to prompt
   // Model config
@@ -121,7 +121,7 @@ export interface AgentRequestContext {
   researchContext?: ResearchContext;
   
   // Canvas Context
-  canvasViewAccessId?: string;
+  canvasId?: string;
   selectionContexts?: SelectionContext[];
   
   // Attachments (data is omitted in tracing context)
@@ -218,7 +218,7 @@ export interface ToolEntity {
   ticketStatus?: string;  // For tickets
   hasTranscript?: boolean;  // For calls
   base64Data?: string;  // For image attachments (data URI)
-  canvasViewIds?: string[];  // Array of canvas viewAccessIds found in message content
+  canvasIds?: string[];  // Array of canvas ids found in message content
   fileName?: string;
   mimeType?: string;
   chunkIndex?: number;

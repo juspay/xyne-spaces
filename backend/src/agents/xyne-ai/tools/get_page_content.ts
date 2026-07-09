@@ -146,7 +146,7 @@ export function createGetPageContentTool(): Tool<
         switch (subApp) {
           case 'canvas':
             entityType = 'canvas';
-            canvasId = parsedMetadata.viewAccessId || fields.docId;
+            canvasId = fields.docId;
             break;
           case 'transcript':
             entityType = 'call';

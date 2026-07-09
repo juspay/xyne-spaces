@@ -116,14 +116,14 @@ export class ReleaseNotesController {
         return;
       }
 
-      const canvasViewAccessId = await this.createReleaseNotesCanvas(
+      const canvasIdResult = await this.createReleaseNotesCanvas(
         markdownContent,
         context,
         ticketId,
         xyneReleaseBot
       );
 
-      if (!canvasViewAccessId) {
+      if (!canvasIdResult) {
         res.status(500).json({
           success: false,
           error: 'Failed to create release notes canvas',
@@ -131,7 +131,7 @@ export class ReleaseNotesController {
         return;
       }
 
-      const canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasViewAccessId}`;
+      const canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasIdResult}`;
 
       await this.ticketRepository.updateTicketMetadata(ticketId, {
         releaseNotesCanvasUrl: canvasUrl,
@@ -200,7 +200,6 @@ Release notes have been generated for **${ticket.title}**
     try {
       const now = new Date();
       const canvasId = uuidv4();
-      const viewAccessId = uuidv4();
       const participantId = uuidv4();
 
       const dateStr = now.toLocaleDateString('en-US', {
@@ -218,8 +217,6 @@ Release notes have been generated for **${ticket.title}**
           title: finalTitle,
           content: blocks as any,
           createdBy: botUser.id,
-          viewAccessId,
-          editAccessId: null,
           visibility: 'PUBLIC',
           isTemplate: false,
           isCollaborative: false,
@@ -272,7 +269,7 @@ Release notes have been generated for **${ticket.title}**
         operation: 'insert'
       }).catch(err => logger.error('[CanvasService] Canvas side-effect handler error:', err));
 
-      return viewAccessId;
+      return canvasId;
     } catch (error) {
       logger.error('[CanvasService] Failed to create release notes canvas:', error);
       return null;

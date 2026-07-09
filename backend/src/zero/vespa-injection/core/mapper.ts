@@ -834,8 +834,6 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     image_chunks_pos: [],
     metadata: JSON.stringify({
       channelId: args.channelId,
-      viewAccessId: args.viewAccessId,
-      editAccessId: args.editAccessId,
       lastEditedBy: args.lastEditedBy,
       lastEditedAt: args.lastEditedAt,
       docType: args.docType,
