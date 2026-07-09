@@ -67,6 +67,7 @@ import calendarSyncRoutes from '@/routes/calendarSync';
 import calendarWatchRoutes from '@/routes/calendarWatch';
 import calendarWebhookRoutes from '@/routes/calendarWebhooks';
 import callLobbyRoutes from '@/routes/callLobby';
+import csatRoutes from '@/routes/csat';
 import voiceInputRoutes from '@/routes/voiceInput';
 import { attachVoiceInputStreamHandler } from '@/routes/voiceInputStream';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
@@ -362,6 +363,9 @@ export class App {
 
     // External call lobby — PUBLIC, no auth middleware
     this.app.use('/api/call-lobby', callLobbyRoutes);
+
+    // CSAT satisfaction survey — PUBLIC, no auth middleware, but requires a signed per-ticket token
+    this.app.use('/api/csat', csatRoutes);
 
     this.app.use('/api/transcriptionAgent', verifyTranscriptionAgent, transcriptionAgentRoutes);
 
