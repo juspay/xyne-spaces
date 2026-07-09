@@ -50,6 +50,7 @@ function escapeQueryForUserInput(query: string): string {
     .replace(/\[/g, '\\[')
     .replace(/\]/g, '\\]')
     .replace(/:/g, '\\:')
+    .replace(/-/g, '\\-')
     .replace(/\*/g, '\\*')
     .replace(/\?/g, '\\?')
     .replace(/\|/g, '\\|')
