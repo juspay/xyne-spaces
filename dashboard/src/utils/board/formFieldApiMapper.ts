@@ -7,9 +7,12 @@ import { v4 as uuidv4 } from 'uuid';
 export const isSelectFormFieldType = (fieldType: FormFieldType): boolean =>
   fieldType === FormFieldType.SINGLE_SELECT || fieldType === FormFieldType.MULTI_SELECT;
 
+const getFieldName = (field: { fieldName: unknown }): string =>
+  typeof field.fieldName === 'string' ? field.fieldName : '';
+
 /** Fields the user has started. */
 export const getStartedFormFields = (fields: FormField[]): FormField[] =>
-  fields.filter(field => field.fieldName.trim().length > 0);
+  fields.filter(field => getFieldName(field).trim().length > 0);
 
 const normalizeSelectOptions = (options: string[] | undefined): string[] | undefined => {
   if (!options) return undefined;
@@ -34,7 +37,7 @@ export const getSavableFormFields = (fields: FormField[]): FormField[] =>
 export const hasDuplicateFormFieldNames = (fields: FormField[]): boolean => {
   const names = new Set<string>();
   for (const field of getStartedFormFields(fields)) {
-    const normalized = field.fieldName.trim().toLowerCase();
+    const normalized = getFieldName(field).trim().toLowerCase();
     if (!normalized) continue;
     if (names.has(normalized)) return true;
     names.add(normalized);
@@ -53,7 +56,7 @@ export const isFormBuilderSavable = (formName: string, fields: FormField[]): boo
   if (!formName.trim() || startedFields.length === 0) return false;
   if (hasDuplicateFormFieldNames(fields)) return false;
   return startedFields.every(
-    field => field.fieldName.trim().length > 0 && fieldHasValidSelectOptions(field),
+    field => getFieldName(field).trim().length > 0 && fieldHasValidSelectOptions(field),
   );
 };
 
@@ -81,7 +84,7 @@ export const mapFormFieldsToApiPayload = (fields: FormField[]): CreateFormField[
 
     return {
       ...(field.persistedFieldId ? { fieldId: field.persistedFieldId } : {}),
-      fieldName: field.fieldName.trim(),
+      fieldName: getFieldName(field).trim(),
       fieldType: field.fieldType,
       ...(fieldEnum ? { fieldEnum } : {}),
       isOptional: field.isOptional,
@@ -91,7 +94,7 @@ export const mapFormFieldsToApiPayload = (fields: FormField[]): CreateFormField[
 export const hasFormFieldNameCollision = (fields: FormField[], candidateName: string): boolean => {
   const normalized = candidateName.trim().toLowerCase();
   if (!normalized) return false;
-  return fields.some(field => field.fieldName.trim().toLowerCase() === normalized);
+  return fields.some(field => getFieldName(field).trim().toLowerCase() === normalized);
 };
 
 export const getFieldTypeLabel = (fieldType: FormFieldType): string => {
@@ -118,15 +121,13 @@ export const getFieldTypeLabel = (fieldType: FormFieldType): string => {
 };
 
 export const mapFormDetailsToBuilderFields = (formDetails: FormDetailResponse): FormField[] =>
-  (formDetails.resolvedFields?.length ? formDetails.resolvedFields : formDetails.fields).map(
-    field => {
-      return {
-        id: uuidv4(),
-        persistedFieldId: field.id,
-        fieldName: field.fieldName,
-        fieldType: field.fieldType,
-        isOptional: field.isOptional,
-        ...(field.fieldEnum ? { fieldEnum: field.fieldEnum } : {}),
-      };
-    },
-  );
+  formDetails.fields.map(field => {
+    return {
+      id: uuidv4(),
+      persistedFieldId: field.id,
+      fieldName: getFieldName(field),
+      fieldType: field.fieldType,
+      isOptional: field.isOptional,
+      ...(field.fieldEnum ? { fieldEnum: field.fieldEnum } : {}),
+    };
+  });

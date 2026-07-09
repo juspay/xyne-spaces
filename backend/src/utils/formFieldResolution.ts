@@ -17,6 +17,8 @@ export interface ResolvedFormField {
   fieldEnum: Prisma.JsonValue | null;
   isOptional: boolean;
   sequenceNumber: number;
+  createdAt: Date;
+  updatedAt: Date;
   membershipId?: string; // form_fields row id (per-form membership)
 }
 
@@ -129,6 +131,8 @@ export const resolveFormFields = (
       fieldEnum,
       isOptional: row.isOptional,
       sequenceNumber: row.sequenceNumber,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
       membershipId: row.id,
     }];
   });
