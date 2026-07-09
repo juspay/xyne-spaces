@@ -11,7 +11,7 @@ import { ConversationRepository } from '../../database/repositories/conversation
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '../../database/repositories/emailChannelPreferenceRepository';
-import { ExternalSource, ExternalMessage, ExternalEntityType, EmailType } from '@prisma/client';
+import { ExternalSource, ExternalMessage, ExternalEntityType, EmailType, EmailMergeMode } from '@prisma/client';
 import { isDeskChannelType } from '@xyne/shared';
 import { logger } from '../../utils/logger';
 import { conversationService } from '../../services/conversationService';
@@ -457,6 +457,7 @@ export class ExternalSourceCore {
           emailFrom: normalizedData.emailData.from,
           emailCc: normalizedData?.emailData?.cc,
           emailBcc: normalizedData?.emailData?.bcc,
+          emailReplyTo: normalizedData.emailData.replyTo || [],
           externalThreadId: normalizedData.externalThreadId,
           externalMessageId: normalizedData.externalId,
           rfcMessageId: normalizedData.rfcMessageId,
@@ -552,6 +553,7 @@ export class ExternalSourceCore {
             emailFrom: normalizedData.emailData.from || '',
             emailCc: normalizedData.emailData.cc || [],
             emailBcc: normalizedData.emailData.bcc || [],
+            emailReplyTo: normalizedData.emailData.replyTo || [],
             externalThreadId: normalizedData.externalThreadId,
             externalMessageId: normalizedData.externalId,
             rfcMessageId: normalizedData.rfcMessageId,
@@ -568,8 +570,12 @@ export class ExternalSourceCore {
     // For email channels, check Vespa for duplicate conversation
     // This handles cases where tickets were created manually (not via Zoho)
     // Vespa duplicate detection only for email channels (not Slack — no subject-based merging)
+    // Gated by per-inbox setting — only runs when auto-merge is enabled for this channel.
     const isSlackSource = normalizedData.metadata.source === 'slack';
-    if (isDeskChannel && !isSlackSource && normalizedData.emailData) {
+    const isEmailMergeEnabled = (isDeskChannel && !isSlackSource)
+      ? ((await this.emailChannelPreferenceRepo.findByChannelId(source.channelId))?.emailMergeMode === EmailMergeMode.ENABLED)
+      : false;
+    if (isDeskChannel && !isSlackSource && normalizedData.emailData && isEmailMergeEnabled) {
       logger.info(`[EMAIL_DUPLICATE_CHECK] Checking Vespa for duplicate email`, {
         channelId: source.channelId,
         emailFrom: normalizedData.emailData.from,
