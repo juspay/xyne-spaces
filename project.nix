@@ -221,7 +221,7 @@
       replicaFile = "./data/zero-cache/replica.db";
       logLevel = "info";
       adminPassword = "dev-admin-password";
-      authSecret = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+      authSecret = builtins.getEnv "ZERO_AUTH_SECRET";
       mutateUrl = "http://127.0.0.1:3001/api/zero/push";
       queryUrl = "http://127.0.0.1:3001/api/zero/query";
       numSyncWorkers = 5;

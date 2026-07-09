@@ -230,6 +230,25 @@ generate_compose() {
   name_under=$(to_underscored "$name")
   local sandbox_dir="$SANDBOXES_DIR/$name"
 
+  # Populate the secrets referenced in the generated compose below. Prefer values
+  # already exported in the environment (CI / prod-like runs); otherwise pull them
+  # from backend/.env.local (direnv loads this automatically for local dev). Fail
+  # fast on the essential ones so we never bake empty auth secrets into a sandbox.
+  local _env_local="$PROJECT_ROOT/backend/.env.local"
+  local _v _line
+  for _v in ZERO_AUTH_SECRET JWT_SECRET VAPID_PRIVATE_KEY GOOGLE_CLIENT_SECRET; do
+    if [ -z "$(eval "printf '%s' \"\${$_v:-}\"")" ] && [ -f "$_env_local" ]; then
+      _line=$(grep -m1 "^$_v=" "$_env_local" || true)
+      if [ -n "$_line" ]; then export "$_v=${_line#*=}"; fi
+    fi
+  done
+  for _v in ZERO_AUTH_SECRET JWT_SECRET; do
+    if [ -z "$(eval "printf '%s' \"\${$_v:-}\"")" ]; then
+      echo -e "${RED}❌ $_v is not set — export it or populate backend/.env.local before creating a sandbox.${NC}" >&2
+      exit 1
+    fi
+  done
+
   cat > "$sandbox_dir/docker-compose.yml" << COMPOSE_EOF
 services:
   zero-cache:
@@ -242,7 +261,7 @@ services:
       - ZERO_CHANGE_DB=postgresql://xyne:xyne123@xyne-sandbox-postgres:5432/${db_name}
       - ZERO_REPLICA_FILE=/var/zero/replica.db
       - ZERO_LOG_LEVEL=info
-      - ZERO_AUTH_SECRET=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      - ZERO_AUTH_SECRET=${ZERO_AUTH_SECRET}
       - ZERO_ADMIN_PASSWORD=dev-admin-password
       - ZERO_MUTATE_URL=http://xyne-sandbox-${name}-backend:3001/api/zero/push
       - ZERO_QUERY_URL=http://xyne-sandbox-${name}-backend:3001/api/zero/query
@@ -297,8 +316,8 @@ services:
       - BACKEND_URL=http://${name}.localhost
       - SLACK_FRONTEND_URL=http://${name}.localhost
       - ZERO_PORT=4848
-      - JWT_SECRET=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-      - ZERO_AUTH_SECRET=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      - JWT_SECRET=${JWT_SECRET}
+      - ZERO_AUTH_SECRET=${ZERO_AUTH_SECRET}
       - CORS_ORIGIN=http://${name}.localhost
       - ENABLE_DEV_AUTH=true
       - LOG_LEVEL=debug
@@ -313,10 +332,10 @@ services:
       - STORAGE_EMULATOR_HOST=http://xyne-sandbox-fake-gcs:4443
       - CHOKIDAR_USEPOLLING=true
       - GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
-      - GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - DEFAULT_ADMIN_EMAIL=sandbox@xyne.ai
       - VAPID_PUBLIC_KEY=BNjTYZx-16c9N4G-i19jChp1entqMf8mBZyqla0pn-TgxjdHbrX-2yhSWA8JFkXJAkqTHpTV2MkuslELIVfHW3w
-      - VAPID_PRIVATE_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=mailto:admin@xyne.ai
       - JWT_EXPIRATION_SECONDS=86400
     labels:
