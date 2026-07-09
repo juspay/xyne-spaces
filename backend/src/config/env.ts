@@ -195,6 +195,8 @@ const envSchema = Joi.object({
   METTLE_USER_SYNC_API_KEY: Joi.string().allow('').default(''),
   // Team intelligence sync API Key (for S2S authentication)
   TEAM_INTELLIGENCE_SYNC_API_KEY: Joi.string().allow('').default(''),
+  // API-support CSAT sync API Key (for S2S authentication) — shared by any external system posting CSAT results
+  API_SUPPORT_CSAT_API_KEY: Joi.string().allow('').default(''),
   // Mettle API Configuration (for fetching employee details)
   METTLE_API_BASE_URL: Joi.string().uri().default(''),
   METTLE_TOKEN: Joi.string().allow('').default(''),
@@ -617,6 +619,7 @@ export const config = {
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
   mettleUserSyncApiKey: envVars.METTLE_USER_SYNC_API_KEY,
   teamIntelligenceSyncApiKey: envVars.TEAM_INTELLIGENCE_SYNC_API_KEY,
+  apiSupportCsatApiKey: envVars.API_SUPPORT_CSAT_API_KEY,
   mettleApiBaseUrl: envVars.METTLE_API_BASE_URL,
   mettleToken: envVars.METTLE_TOKEN,
   bitbucket: {
