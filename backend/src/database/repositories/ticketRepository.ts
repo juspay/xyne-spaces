@@ -777,6 +777,12 @@ export class TicketRepository {
   }
 
   async assignUserGroupToTicket(ticketId: string, groupId: string, updatedBy: string): Promise<void> {
+    const previous = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { userGroupId: true },
+    });
+    const previousGroupId = previous?.userGroupId ?? null;
+
     const updatedTicket = await prisma.ticket.update({
       where: { id: ticketId },
       data: {
@@ -787,6 +793,16 @@ export class TicketRepository {
     });
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+
+    if (previousGroupId !== groupId) {
+      void emitTicketUpdated({
+        ticket: updatedTicket,
+        changes: {
+          userGroupId: { previousValue: previousGroupId, newValue: groupId },
+        },
+        performedById: updatedBy,
+      });
+    }
   } 
 
   async updateTicketMetadata(ticketId: string, metadata: Record<string, any>): Promise<void> {

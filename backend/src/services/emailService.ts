@@ -62,6 +62,9 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateDescription } from './agents/description-generator';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { normalizeRfcMessageId } from '@/utils/emailRfcMessageId';
+import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
+import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
+import { eventRouter } from '@/automations/engine/event-router';
 import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
@@ -1117,6 +1120,19 @@ export class EmailService {
     // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
     void dispatchEmailEventForEmailId(email.id);
 
+    void eventRouter.emit(
+      { type: TICKET_CREATED_EVENT, payload: { ticketId: ticket.id } },
+      ticket.workspaceId,
+    ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err));
+
+    if (ticket.userGroupId) {
+      void emitTicketUpdated({
+        ticket,
+        changes: { userGroupId: { previousValue: null, newValue: ticket.userGroupId } },
+        performedById: userId,
+      });
+    }
+
     this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
@@ -1548,6 +1564,19 @@ export class EmailService {
     this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
+
+    void eventRouter.emit(
+      { type: TICKET_CREATED_EVENT, payload: { ticketId: ticket.id } },
+      ticket.workspaceId,
+    ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err));
+
+    if (ticket.userGroupId) {
+      void emitTicketUpdated({
+        ticket,
+        changes: { userGroupId: { previousValue: null, newValue: ticket.userGroupId } },
+        performedById: userId,
+      });
+    }
 
     // Fire-and-forget enrichment — same pattern as createConversationWithEmail.
     void this.enrichTicketDescription({
@@ -2262,6 +2291,20 @@ export class EmailService {
         await messageMetadataService.syncInitialMessageMd(txResult.conversationId);
       } catch (error) {
         logger.warn('[EmailService] failed to sync initial message md', error);
+      }
+
+      void eventRouter.emit(
+        { type: TICKET_CREATED_EVENT, payload: { ticketId: txResult.ticketId } },
+        channel.workspaceId,
+      ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${txResult.ticketId}:`, err));
+
+      if (groupId) {
+        const ticketForEmit = { id: txResult.ticketId, workspaceId: channel.workspaceId, channelId, boardId: boardId!, projectId, createdBy: userId };
+        void emitTicketUpdated({
+          ticket: ticketForEmit as Parameters<typeof emitTicketUpdated>[0]['ticket'],
+          changes: { userGroupId: { previousValue: null, newValue: groupId } },
+          performedById: userId,
+        });
       }
     }
 

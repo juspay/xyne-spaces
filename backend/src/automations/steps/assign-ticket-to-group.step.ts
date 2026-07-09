@@ -13,11 +13,13 @@ const AssignTicketToGroupConfigSchema = z.object({
 const AssignTicketToGroupOutputSchema = z.object({
   ticketId: z.string(),
   groupId: z.string(),
+  assignedUserId: z.string().nullable(),
 });
 
 interface AssignTicketToGroupOutput extends Record<string, unknown> {
   ticketId: string;
   groupId: string;
+  assignedUserId: string | null;
 }
 
 export class AssignTicketToGroupStep extends BaseActionStep<
@@ -38,12 +40,12 @@ export class AssignTicketToGroupStep extends BaseActionStep<
   ): Promise<AssignTicketToGroupOutput> {
     const ticketId = config.ticketId as string;
     const groupId = config.groupId as string;
-    await ticketAssignmentService.assignTicketToGroup({
+    const assignedUserId = await ticketAssignmentService.assignTicketToGroup({
       ticketId,
       groupId,
       actorId: context.automation.createdById,
     });
-    return { ticketId, groupId };
+    return { ticketId, groupId, assignedUserId: assignedUserId ?? null };
   }
 }
 
