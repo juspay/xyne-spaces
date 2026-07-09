@@ -1253,8 +1253,6 @@ export class ConfluenceImportService {
           ...(prepared.destination.type === 'projectFolder' || prepared.destination.type === 'channelFolder'
             ? { folderId: prepared.destination.folderId }
             : {}),
-          viewAccessId: uuidv4(),
-          editAccessId: uuidv4(),
           metadata: this.buildCanvasMetadata(prepared, input, checksum, sourceUrl, undefined, visibilityDecision) as Prisma.InputJsonValue,
         },
       }),
@@ -1669,7 +1667,7 @@ export class ConfluenceImportService {
     const canvasIds = [...pageIdToCanvasId.values()];
     const canvases = await db.canvas.findMany({
       where: { id: { in: canvasIds } },
-      select: { id: true, viewAccessId: true },
+      select: { id: true },
     });
     const canvasById = new Map(canvases.map(canvas => [canvas.id, canvas]));
     const result = new Map<string, string>();
@@ -1677,7 +1675,7 @@ export class ConfluenceImportService {
     for (const [pageId, canvasId] of pageIdToCanvasId.entries()) {
       const canvas = canvasById.get(canvasId);
       if (!canvas) continue;
-      result.set(pageId, this.buildWorkspaceCanvasUrl(canvas.viewAccessId || canvas.id, workspaceId));
+      result.set(pageId, this.buildWorkspaceCanvasUrl(canvas.id, workspaceId));
     }
 
     return result;

@@ -33,10 +33,10 @@ export interface ClawRunRequest {
   ticketIds?: string[];
   callIds?: string[];
   // The canvas the assistant was opened from / a selection was made in, keyed
-  // by its viewAccessId (the id in the /chat/canvas/<viewAccessId> URL — the
-  // same id spaces-read-canvas takes). Forwarded so claw-auth can explain it as
+  // by its canonical id (the id in the /chat/canvas/<canvasId> URL — the same
+  // id spaces-read-canvas takes). Forwarded so claw-auth can explain it as
   // attached context; separate from `canvasIds` (picker canvases, keyed by cuid).
-  canvasViewAccessId?: string;
+  canvasId?: string;
   attachedContext?: Array<{
     // 'collection' + 'file' carry KB picks from the ask-ai v2 picker.
     // claw-auth's resolveSection emits a prompt block that points the agent
@@ -486,7 +486,7 @@ export async function runClawAgentStream(
       deepResearchEnabled: String(request.deepResearchEnabled),
       ...(config.xyneAiExtended.url && { XYNE_AI_EXTENDED_URL: config.xyneAiExtended.url }),
       ...(request.conversationId && { SPACES_CONVERSATION_ID: request.conversationId }),
-      ...(request.canvasViewAccessId && { SPACES_CANVAS_VIEW_ACCESS_ID: request.canvasViewAccessId }),
+      ...(request.canvasId && { SPACES_CANVAS_ID: request.canvasId }),
     },
     ...(additionalInstructions && { additionalInstructions }),
     ...(request.isRegenerate && { isRegenerate: true }),

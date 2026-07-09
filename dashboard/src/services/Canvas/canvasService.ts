@@ -10,8 +10,6 @@ export interface YSweetAuthRequest {
   projectId?: string;
   folderId?: string;
   title?: string;
-  viewAccessId?: string;
-  editAccessId?: string;
 }
 
 export interface CreateCollaborativeCanvasRequest {
@@ -20,8 +18,6 @@ export interface CreateCollaborativeCanvasRequest {
   channelId?: string;
   projectId?: string;
   folderId?: string;
-  viewAccessId?: string;
-  editAccessId?: string;
 }
 
 export interface YSweetAuthToken {
@@ -59,8 +55,6 @@ export class CanvasService {
       projectId: request.projectId,
       folderId: request.folderId,
       title: request.title || 'Untitled Canvas',
-      viewAccessId: request.viewAccessId,
-      editAccessId: request.editAccessId,
     });
     return response.data;
   }
@@ -68,7 +62,7 @@ export class CanvasService {
   async prefetchCanvas(
     queryClient: QueryClient,
     canvasId: string,
-    options?: { channelId?: string; viewAccessId?: string },
+    options?: { channelId?: string },
   ): Promise<void> {
     const cached = prefetchedCanvases.get(canvasId);
     if (cached && Date.now() - cached.timestamp < PREFETCH_CACHE_TTL) {
@@ -79,13 +73,9 @@ export class CanvasService {
       const token = await this.getYSweetAuthToken({
         docId: canvasId,
         ...(options?.channelId ? { channelId: options.channelId } : {}),
-        ...(options?.viewAccessId ? { viewAccessId: options.viewAccessId } : {}),
       });
 
-      queryClient.setQueryData(
-        ['ysweet-auth', canvasId, options?.channelId, options?.viewAccessId],
-        token,
-      );
+      queryClient.setQueryData(['ysweet-auth', canvasId, options?.channelId], token);
 
       prefetchedCanvases.set(canvasId, { token, timestamp: Date.now() });
     } catch (error) {

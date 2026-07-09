@@ -380,23 +380,15 @@ async function fetchCanvasContent(
   sessionId: string
 ): Promise<FetchLinkContentResult> {
   try {
-    // Try to find canvas by ID or viewAccessId
-    let canvas = await db.canvas.findUnique({
+    const canvas = await db.canvas.findUnique({
       where: { id: canvasId }
     });
-
-    // If not found by ID, try viewAccessId
-    if (!canvas) {
-      canvas = await db.canvas.findFirst({
-        where: { viewAccessId: canvasId }
-      });
-    }
 
     if (!canvas) {
       return {
         success: false,
         entities: [],
-        error: `Canvas not found with ID or viewAccessId: ${canvasId}`,
+        error: `Canvas not found with ID: ${canvasId}`,
       };
     }
 

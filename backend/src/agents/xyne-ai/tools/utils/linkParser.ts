@@ -42,7 +42,7 @@ export interface ParsedXyneLink {
     conversationId?: string;
     messageId?: string;
     ticketId?: string;
-    canvasId?: string;  // Could be id or viewAccessId
+    canvasId?: string;  // Canonical canvas id
   };
   /** Original URL that was parsed */
   originalUrl: string;

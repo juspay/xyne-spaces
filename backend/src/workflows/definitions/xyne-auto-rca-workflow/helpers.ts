@@ -280,7 +280,6 @@ export const createInvestigationCanvas = async (
   }
 
   const canvasId = uuidv4();
-  const viewAccessId = uuidv4();
   const participantId = uuidv4();
   const now = new Date();
 
@@ -331,8 +330,6 @@ export const createInvestigationCanvas = async (
         content: canvasContent as any,
         channelId: conversation.channelId,
         createdBy: ticket.createdBy,
-        viewAccessId,
-        editAccessId: null,
         visibility: 'PUBLIC',
         isTemplate: false,
         lastEditedBy: ticket.createdBy,
@@ -359,13 +356,12 @@ export const createInvestigationCanvas = async (
     }),
   ]);
 
-  const canvasUrl = getCanvasUrl(viewAccessId);
+  const canvasUrl = getCanvasUrl(canvasId);
 
   logger.info(`[XyneAutoRCA] Created canvas ${canvasId} for ticket ${ticketId}`);
 
   return {
     canvasId,
-    viewAccessId,
     canvasUrl,
   };
 };

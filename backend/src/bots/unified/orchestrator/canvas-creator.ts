@@ -37,7 +37,6 @@ interface CanvasCreationParams {
 
 interface CreateCanvasResult {
     canvasId: string;
-    viewAccessId: string;
     canvasUrl: string;
 }
 
@@ -49,9 +48,8 @@ export async function createCanvasWithGeniusBlock(
     params: Omit<CanvasCreationParams, 'isFromCanvas'>
 ): Promise<CreateCanvasResult> {
     const { botId, userId, channelId, conversationId, query } = params;
-    
+
     const canvasId = uuidv4();
-    const viewAccessId = uuidv4();
     const participantId = uuidv4();
     const now = new Date();
 
@@ -88,8 +86,6 @@ export async function createCanvasWithGeniusBlock(
                 content: canvasContent as any,
                 channelId,
                 createdBy: userId,
-                viewAccessId,
-                editAccessId: null,
                 visibility: 'PRIVATE',
                 isTemplate: false,
                 lastEditedBy: userId,
@@ -124,8 +120,9 @@ export async function createCanvasWithGeniusBlock(
         logger.error(`[CanvasCreator] Failed to resolve workspace for channel ${channelId}:`, workspaceError);
     }
 
-    const canvasUrl = getCanvasUrl(viewAccessId, workspaceId);
-    
+    const canvasUrl = getCanvasUrl(canvasId, workspaceId);
+
+
     logger.info(`[CanvasCreator] Created canvas ${canvasId} with Genius block for ${botId} query`);
     
     // Queue Vespa indexing for the canvas
@@ -143,7 +140,7 @@ export async function createCanvasWithGeniusBlock(
       logger.error(`[CanvasCreator] Failed to queue Vespa job for canvas ${canvasId}:`, vespaError);
     }
     
-    return { canvasId, viewAccessId, canvasUrl };
+    return { canvasId, canvasUrl };
 }
 
 /**
@@ -259,7 +256,6 @@ export async function processStreamAndCreateCanvas(
 
                 // From canvas with long response: create new canvas
                 const newCanvasId = uuidv4();
-                const newViewAccessId = uuidv4();
                 const newParticipantId = uuidv4();
                 const now = new Date();
 
@@ -296,8 +292,6 @@ export async function processStreamAndCreateCanvas(
                             content: canvasContent as any,
                             channelId,
                             createdBy: userId,
-                            viewAccessId: newViewAccessId,
-                            editAccessId: null,
                             visibility: 'PRIVATE',
                             isTemplate: false,
                             lastEditedBy: userId,
@@ -332,7 +326,7 @@ export async function processStreamAndCreateCanvas(
                     logger.error(`[CanvasCreator] Failed to resolve workspace for channel ${channelId}:`, workspaceError);
                 }
 
-                const newCanvasUrl = getCanvasUrl(newViewAccessId, workspaceId);
+                const newCanvasUrl = getCanvasUrl(newCanvasId, workspaceId);
 
                 // Truncate content for message persistence
                 const maxDbContentLength = 9990;

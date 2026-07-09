@@ -90,13 +90,11 @@ const CanvasPanel = (): ReactElement => {
       setIsPersonalSectionCollapsed(false);
     }
     const newCanvasId = uuidv4();
-    const viewAccessId = uuidv4();
 
     try {
       await canvasService.createCollaborativeCanvas({
         id: newCanvasId,
         title: 'Untitled Canvas',
-        viewAccessId,
       });
 
       void navigate(`/chat/canvas/${newCanvasId}`);
@@ -182,7 +180,6 @@ const CanvasPanel = (): ReactElement => {
 
       try {
         const newCanvasId = uuidv4();
-        const viewAccessId = uuidv4();
 
         const resolvedProjectId =
           originalCanvas.projectId ??
@@ -194,7 +191,6 @@ const CanvasPanel = (): ReactElement => {
             id: newCanvasId,
             title: `${originalCanvas.title} (Copy)`,
             content: originalCanvas.content as ReadonlyJSONValue,
-            viewAccessId,
             visibility: originalCanvas.visibility,
             ...(originalCanvas.channelId ? { channelId: originalCanvas.channelId } : {}),
             ...(originalCanvas.folderId ? { folderId: originalCanvas.folderId } : {}),

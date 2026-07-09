@@ -247,7 +247,7 @@ function handleEventWithEnrichment(
         researchContext: agentRequestContext.researchContext || null,
 
         // Canvas Context
-        canvasViewAccessId: agentRequestContext.canvasViewAccessId || null,
+        canvasId: agentRequestContext.canvasId || null,
         selectionContextsCount: ((agentRequestContext.selectionContexts || []) as unknown[]).length,
 
         // Attachments — mime types and base64 data (masked when masking is enabled)

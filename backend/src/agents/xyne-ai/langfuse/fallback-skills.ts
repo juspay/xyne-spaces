@@ -293,8 +293,8 @@ No meetings → "Day is clear. No interruptions."
 ## Deliver
 
 1. \`create_canvas(title: "Execution Brief — {date}", content: [full brief above])\`
-2. Extract viewAccessId from returned URL (last path segment of /chat/canvas/{id}).
-3. \`read_canvas(canvas_view_access_id: "{viewAccessId}")\` — confirm render.
+2. Extract canvas_id from returned URL (last path segment of /chat/canvas/{id}).
+3. \`read_canvas(canvas_id: "{canvas_id}")\` — confirm render.
 4. \`update_memory(content: "Day plan {date}: Mission=[mission]. STARTED=[N], PAUSED=[N], TODO=[N]. Blockers=[or none].")\`
 5. Reply: > "**Execution Brief — {date}** → [canvas link]. Mission: [mission]. Go."
 

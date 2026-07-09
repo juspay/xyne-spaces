@@ -50,35 +50,23 @@ function isCanvas(value: unknown): value is Canvas {
 
   const isCollaborative = candidate['isCollaborative'];
   const channelId = candidate['channelId'];
-  const viewAccessId = candidate['viewAccessId'];
-  const editAccessId = candidate['editAccessId'];
   const content = candidate['content'];
 
   if (channelId !== undefined && channelId !== null && typeof channelId !== 'string') {
     return false;
   }
-  if (editAccessId !== undefined && typeof editAccessId !== 'string') {
-    return false;
-  }
   if (isCollaborative !== undefined && typeof isCollaborative !== 'boolean') {
-    return false;
-  }
-  if (isCollaborative === true && typeof viewAccessId !== 'string') {
     return false;
   }
 
   return content === undefined || Array.isArray(content);
 }
 
-function RecordingNotesSection({
-  notesCanvasViewAccessId,
-}: {
-  notesCanvasViewAccessId: string;
-}): ReactElement {
+function RecordingNotesSection({ notesCanvasId }: { notesCanvasId: string }): ReactElement {
   const [canvasData, canvasDetails] = useCachedQuery(
-    queries.getCanvas({ canvasId: notesCanvasViewAccessId }),
+    queries.getCanvas({ canvasId: notesCanvasId }),
     {
-      enabled: !!notesCanvasViewAccessId,
+      enabled: !!notesCanvasId,
     },
   );
   const canvas = isCanvas(canvasData) ? canvasData : null;
@@ -109,8 +97,6 @@ function RecordingNotesSection({
             canvasId={canvas.id}
             channelId={canvas.channelId || undefined}
             title={canvas.title}
-            viewAccessId={canvas.viewAccessId}
-            editAccessId={canvas.editAccessId}
             editable={false}
             placeholder='Recording notes...'
             autoFocus={false}
@@ -510,18 +496,16 @@ export default function RecordingDetailScreen(): ReactElement {
         )}
 
         {/* Notes */}
-        {recording.notesCanvasViewAccessId && (
-          <RecordingNotesSection notesCanvasViewAccessId={recording.notesCanvasViewAccessId} />
+        {recording.notesCanvasId && (
+          <RecordingNotesSection notesCanvasId={recording.notesCanvasId} />
         )}
 
         {/* No content message */}
-        {!recording.hasTranscript &&
-          !recording.hasSummary &&
-          !recording.notesCanvasViewAccessId && (
-            <div className='bg-background rounded-lg border border-border p-12 text-center'>
-              <p className='text-muted-foreground'>Transcript and summary are being processed...</p>
-            </div>
-          )}
+        {!recording.hasTranscript && !recording.hasSummary && !recording.notesCanvasId && (
+          <div className='bg-background rounded-lg border border-border p-12 text-center'>
+            <p className='text-muted-foreground'>Transcript and summary are being processed...</p>
+          </div>
+        )}
       </div>
 
       {/* Share Recording Dialog */}

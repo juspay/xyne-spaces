@@ -4392,12 +4392,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
         },
       ),
-      // Persist the notes-canvas viewAccessId onto the call as soon as the user creates the
+      // Persist the notes-canvas id onto the call as soon as the user creates the
       // canvas mid-recording. The link is posted to the thread later by the automatic summary
       // pipeline (transcriptService.postSummaryAsReply), so it survives any stop path.
       linkNotesCanvas: defineMutator(
-        z.object({ callId: z.string(), notesCanvasViewAccessId: z.string().min(1) }),
-        async ({ tx, args: { callId, notesCanvasViewAccessId } }) => {
+        z.object({ callId: z.string(), notesCanvasId: z.string().min(1) }),
+        async ({ tx, args: { callId, notesCanvasId } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call) {
             throw new Error('Call not found');
@@ -4411,7 +4411,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               : {};
           await tx.mutate.calls.update({
             id: call.id,
-            metadata: { ...currentMetadata, notesCanvasViewAccessId },
+            metadata: { ...currentMetadata, notesCanvasId },
           });
         },
       ),
@@ -7850,14 +7850,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           channelId: z.string().optional(),
           folderId: z.string().optional(),
           projectId: z.string().optional(),
-          viewAccessId: z.string().optional(),
-          editAccessId: z.string().optional(),
           visibility: z.nativeEnum(CanvasVisibility).optional(),
           content: z.any().optional(),
           timestamp: z.number(),
           participantId: z.string(),
         }),
-        async ({ tx, args: { id, title, channelId, folderId, projectId, viewAccessId, editAccessId, visibility, content, timestamp, participantId } }) => {
+        async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId } }) => {
           const now = timestamp;
           const {
             projectId: resolvedProjectId,
@@ -7880,8 +7878,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             folderId,
             projectId: resolvedProjectId,
             createdBy: authData.sub,
-            viewAccessId,
-            editAccessId,
             visibility: visibility || CanvasVisibility.PRIVATE,
             isTemplate: false,
             isCollaborative: false,
@@ -8424,7 +8420,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         z.object({
           id: z.string(),
           title: z.string().optional(),
-          editAccessId: z.string().optional(),
           content: z.any().optional(),
           visibility: z.nativeEnum(CanvasVisibility).optional(),
           isCollaborative: z.boolean().optional(),
@@ -8440,42 +8435,39 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Canvas not found');
           }
 
-          const isEditLink = params.editAccessId && canvas.editAccessId === params.editAccessId;
           const isMoveOperation =
             params.folderId !== undefined ||
             params.projectId !== undefined ||
             params.channelId !== undefined;
 
-          if (!isEditLink) {
-            const participant = await tx.run(zql.canvas_participants
-              .where('canvasId', canvas.id)
-              .where('userId', authData.sub)
-              .one());
+          const participant = await tx.run(zql.canvas_participants
+            .where('canvasId', canvas.id)
+            .where('userId', authData.sub)
+            .one());
 
-            const currentFolder = canvas.folderId
-              ? await tx.run(zql.canvas_folders.where('id', canvas.folderId).one())
-              : null;
-            const currentChannelId = canvas.channelId ?? currentFolder?.channelId ?? null;
-            const isChannelAdmin = currentChannelId
-              ? Boolean(
-                await tx.run(
-                  zql.channel_participants
-                    .where('channelId', currentChannelId)
-                    .where('userId', authData.sub)
-                    .where('role', ChannelRole.ADMIN)
-                    .one(),
-                ),
-              )
-              : false;
+          const currentFolder = canvas.folderId
+            ? await tx.run(zql.canvas_folders.where('id', canvas.folderId).one())
+            : null;
+          const currentChannelId = canvas.channelId ?? currentFolder?.channelId ?? null;
+          const isChannelAdmin = currentChannelId
+            ? Boolean(
+              await tx.run(
+                zql.channel_participants
+                  .where('channelId', currentChannelId)
+                  .where('userId', authData.sub)
+                  .where('role', ChannelRole.ADMIN)
+                  .one(),
+              ),
+            )
+            : false;
 
-            const canEdit =
-              canvas.createdBy === authData.sub ||
-              (participant &&
-                (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER));
+          const canEdit =
+            canvas.createdBy === authData.sub ||
+            (participant &&
+              (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER));
 
-            if (!canEdit && !(isMoveOperation && isChannelAdmin)) {
-              throw new Error('You do not have permission to edit this canvas');
-            }
+          if (!canEdit && !(isMoveOperation && isChannelAdmin)) {
+            throw new Error('You do not have permission to edit this canvas');
           }
 
           const {

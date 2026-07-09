@@ -53,8 +53,6 @@ export interface CanvasYjsProviderOptions {
   userColor?: string;
   channelId?: string | undefined;
   title?: string | undefined;
-  viewAccessId?: string | undefined;
-  editAccessId?: string | undefined;
 }
 
 export interface CanvasYjsProviderState {
@@ -69,7 +67,7 @@ export interface CanvasYjsProviderState {
 }
 
 export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasYjsProviderState {
-  const { canvasId, userId, userName, channelId, title, viewAccessId } = options;
+  const { canvasId, userId, userName, channelId, title } = options;
   const userColor = options.userColor ?? generateUserColor(userId);
 
   const prefetchedCanvas = useMemo(() => {
@@ -167,13 +165,12 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     error: authError,
     refetch,
   } = useQuery<YSweetAuthToken>({
-    queryKey: ['ysweet-auth', canvasId, channelId, viewAccessId],
+    queryKey: ['ysweet-auth', canvasId, channelId],
     queryFn: () =>
       canvasService.getYSweetAuthToken({
         docId: canvasId,
         ...(channelId ? { channelId } : {}),
         ...(title ? { title } : {}),
-        ...(viewAccessId ? { viewAccessId } : {}),
       }),
     staleTime: 1000 * 60 * 50,
     retry: 3,
@@ -185,6 +182,12 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       toast.error('Connection Failed', {
         description: 'Could not authorize collaboration access.',
       });
+      if (providerRef.current) {
+        providerRef.current.destroy();
+        providerRef.current = null;
+        setAwareness(null);
+      }
+      setIsReadOnly(true);
     }
   }, [authError]);
 

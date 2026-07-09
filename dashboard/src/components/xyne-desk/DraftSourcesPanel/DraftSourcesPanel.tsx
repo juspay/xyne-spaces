@@ -22,7 +22,7 @@ interface DraftSourcesPanelProps {
 function citationKey(c: ClawCitation): string {
   return (
     buildClawCitationUrl(c) ||
-    `${c.kind}:${c.channelId ?? ''}:${c.conversationId ?? ''}:${c.ticketId ?? ''}:${c.viewAccessId ?? ''}`
+    `${c.kind}:${c.channelId ?? ''}:${c.conversationId ?? ''}:${c.ticketId ?? ''}:${c.canvasId ?? ''}`
   );
 }
 

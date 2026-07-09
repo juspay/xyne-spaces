@@ -724,15 +724,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     // Handle removing canvas info - cascades to remove all its selections
     const handleRemoveCanvasInfo = (e: React.MouseEvent): void => {
       e.stopPropagation(); // Prevent triggering the pill click
-      const viewAccessId = activeCanvasInfo?.viewAccessId;
+      const canvasIdToRemove = activeCanvasInfo?.canvasId;
 
       // Clear canvas info
       setActiveCanvasInfo(null);
 
-      if (viewAccessId) {
+      if (canvasIdToRemove) {
         // Cascade: remove all selections for this canvas
         setActiveSelectionInfos(prev => {
-          const newSelections = prev.filter(s => s.canvasViewAccessId !== viewAccessId);
+          const newSelections = prev.filter(s => s.canvasId !== canvasIdToRemove);
           onSelectionInfosChange?.(newSelections);
           return newSelections;
         });
@@ -740,7 +740,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         // Send event to machine
         xyneAIActor.send({
           type: 'REMOVE_CANVAS_CONTEXT',
-          viewAccessId,
+          canvasId: canvasIdToRemove,
         });
       }
     };
@@ -753,13 +753,13 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       // Calculate the selection index relative to this canvas BEFORE modifying state
       // Use reference comparison for exact match to avoid issues with duplicate text
       const selectionIndex = activeSelectionInfos
-        .filter(s => s.canvasViewAccessId === selection.canvasViewAccessId)
+        .filter(s => s.canvasId === selection.canvasId)
         .findIndex(s => s === selection);
 
       // Sync removal to the machine BEFORE state update
       xyneAIActor.send({
         type: 'REMOVE_SELECTION',
-        viewAccessId: selection.canvasViewAccessId,
+        canvasId: selection.canvasId,
         selectionIndex,
       });
 
@@ -772,10 +772,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
     // Handle clicking selection pill to navigate
     const handleSelectionPillClick = (selection: SelectionInfo): void => {
-      if (!selection?.canvasViewAccessId) return;
+      if (!selection?.canvasId) return;
 
       // Navigate to the canvas
-      void navigate(`/chat/canvas/${selection.canvasViewAccessId}`);
+      void navigate(`/chat/canvas/${selection.canvasId}`);
 
       // Close XyneAI modal on mobile after navigation
       if (isMobile) {
@@ -788,7 +788,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       if (!activeCanvasInfo) return;
 
       // Navigate to the canvas
-      void navigate(`/chat/canvas/${activeCanvasInfo.viewAccessId}`);
+      void navigate(`/chat/canvas/${activeCanvasInfo.canvasId}`);
 
       // Close XyneAI modal on mobile after navigation
       if (isMobile) {
@@ -1684,7 +1684,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       data-track-category='XYNE_AI'
                       data-track-name='ClickCanvasContextPill'
                       data-track-metadata={JSON.stringify({
-                        canvasId: activeCanvasInfo.viewAccessId,
+                        canvasId: activeCanvasInfo.canvasId,
                       })}
                     >
                       <FileText className='w-3.5 h-3.5 text-muted-foreground' />
@@ -1700,7 +1700,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       data-track-category='XYNE_AI'
                       data-track-name='RemoveCanvasContext'
                       data-track-metadata={JSON.stringify({
-                        canvasId: activeCanvasInfo.viewAccessId,
+                        canvasId: activeCanvasInfo.canvasId,
                       })}
                     >
                       <X className='w-3 h-3' />
@@ -1711,7 +1711,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 {/* Selection Context Pills (multiple) */}
                 {activeSelectionInfos.map((selection, index) => (
                   <div
-                    key={`${selection.canvasViewAccessId}-${index}`}
+                    key={`${selection.canvasId}-${index}`}
                     className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border bg-muted/50 flex-shrink-0`}
                   >
                     <button
@@ -1722,7 +1722,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       data-track-category='XYNE_AI'
                       data-track-name='ClickSelectionContextPill'
                       data-track-metadata={JSON.stringify({
-                        canvasId: selection.canvasViewAccessId,
+                        canvasId: selection.canvasId,
                       })}
                     >
                       <FileText className='w-3.5 h-3.5 text-primary' />
@@ -1738,7 +1738,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       data-track-category='XYNE_AI'
                       data-track-name='RemoveSelectionContext'
                       data-track-metadata={JSON.stringify({
-                        canvasId: selection.canvasViewAccessId,
+                        canvasId: selection.canvasId,
                       })}
                     >
                       <X className='w-3 h-3 text-primary' />

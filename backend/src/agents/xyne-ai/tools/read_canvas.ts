@@ -1,17 +1,17 @@
 /**
  * Read Canvas Tool
  *
- * Reads a canvas by its viewAccessId and returns the full content
+ * Reads a canvas by its canonical id and returns the full content
  * converted from BlockNote format to Markdown.
  *
- * The canvas_view_access_id is mandatory - the agent must provide it.
+ * The canvas_id is mandatory - the agent must provide it.
  * Content is read from Y-Sweet (collaborative document store).
  */
 
 import { z } from 'zod';
 import { type Tool } from '@juspay-jaf/jaf';
 import { logger } from '../../../utils/logger.js';
-import { getCanvasByViewAccessId } from '../../../services/canvasService.js';
+import { getCanvasById } from '../../../services/canvasService.js';
 import { readFromYSweet } from '../../../utils/ysweetUtils.js';
 import { convertBlockNoteToMarkdown } from '../../../services/canvasService.js';
 import { db } from '../../../database/client.js';
@@ -33,7 +33,7 @@ import {
 // ============================================================================
 
 const ReadCanvasArgsSchema = z.object({
-  canvas_view_access_id: z.string().optional().describe('The viewAccessId of the canvas to read. This is the ID from the canvas URL (e.g., from /chat/canvas/{viewAccessId}). If not provided, uses the canvas context from where Ask AI was triggered.'),
+  canvas_id: z.string().optional().describe('The canonical id of the canvas to read (from the /chat/canvas/{canvasId} URL). If not provided, uses the canvas context from where Ask AI was triggered.'),
 });
 
 type ReadCanvasArgs = z.infer<typeof ReadCanvasArgsSchema>;
@@ -44,23 +44,22 @@ type ReadCanvasArgs = z.infer<typeof ReadCanvasArgsSchema>;
 
 /**
  * Read Canvas Implementation
- * Fetches canvas by viewAccessId and converts to markdown
+ * Fetches canvas by canonical id and converts to markdown
  */
 async function readCanvasImpl(
-  viewAccessId: string,
+  canvasId: string,
   sessionId: string
 ): Promise<EnhancedToolResult> {
   try {
-    logger.info(`[Tool] [${sessionId}] read_canvas: viewAccessId=${viewAccessId}`);
+    logger.info(`[Tool] [${sessionId}] read_canvas: canvasId=${canvasId}`);
 
-    // Fetch canvas metadata by viewAccessId
-    const canvas = await getCanvasByViewAccessId(viewAccessId);
+    const canvas = await getCanvasById(canvasId);
 
     if (!canvas) {
       return {
         success: false,
         entities: [],
-        error: `Canvas not found for viewAccessId: ${viewAccessId}`,
+        error: `Canvas not found for canvasId: ${canvasId}`,
       };
     }
 
@@ -122,7 +121,7 @@ async function readCanvasImpl(
 
 /**
  * Create read_canvas tool with description from Langfuse
- * This tool requires canvas_view_access_id as a mandatory parameter
+ * This tool requires canvas_id as a mandatory parameter
  */
 export function createReadCanvasTool(): Tool<ReadCanvasArgs, XyneAIAgentContext> {
   return {
@@ -132,16 +131,15 @@ export function createReadCanvasTool(): Tool<ReadCanvasArgs, XyneAIAgentContext>
       parameters: ReadCanvasArgsSchema,
     },
     execute: async (args, context) => {
-      // Use provided canvas_view_access_id or fall back to context's canvasViewAccessId
-      const canvasViewAccessId = args.canvas_view_access_id?.trim() || context.canvasViewAccessId;
+      // Use provided canvas_id or fall back to the ambient canvas context
+      const canvasId = args.canvas_id?.trim() || context.canvasId;
 
-      // Validate that canvas_view_access_id is available
-      if (!canvasViewAccessId || canvasViewAccessId.trim() === '') {
-        return 'Error: canvas_view_access_id is required. Please provide the viewAccessId from the canvas URL, or trigger Ask AI from within a canvas.';
+      if (!canvasId || canvasId.trim() === '') {
+        return 'Error: canvas_id is required. Please provide the canonical canvas id from the URL, or trigger Ask AI from within a canvas.';
       }
 
       const result = await readCanvasImpl(
-        canvasViewAccessId,
+        canvasId,
         context.sessionId
       );
 

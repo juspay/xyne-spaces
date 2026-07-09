@@ -51,8 +51,6 @@ export interface RecordingState {
   pendingStop: boolean;
   /** Canvas (cuid/uuid) for notes taken during this recording — null until the user creates one */
   notesCanvasId: string | null;
-  /** Public view-access id used to build the canvas share link */
-  notesCanvasViewAccessId: string | null;
 }
 
 const initialContext: RecordingState = {
@@ -68,7 +66,6 @@ const initialContext: RecordingState = {
   pendingAutoStart: false,
   pendingStop: false,
   notesCanvasId: null,
-  notesCanvasViewAccessId: null,
 };
 
 export const recordingStore = createStore({
@@ -282,7 +279,6 @@ export const recordingStore = createStore({
         pendingAutoStart: false,
         pendingStop: false,
         notesCanvasId: null,
-        notesCanvasViewAccessId: null,
       };
     },
 
@@ -325,7 +321,6 @@ export const recordingStore = createStore({
       pendingAutoStart: false,
       pendingStop: false,
       notesCanvasId: null,
-      notesCanvasViewAccessId: null,
     }),
 
     addTranscript: (context, event: { entry: TranscriptEntry }): RecordingState => ({
@@ -338,13 +333,9 @@ export const recordingStore = createStore({
       transcripts: [],
     }),
 
-    setNotesCanvas: (
-      context,
-      event: { canvasId: string; viewAccessId: string },
-    ): RecordingState => ({
+    setNotesCanvas: (context, event: { canvasId: string }): RecordingState => ({
       ...context,
       notesCanvasId: event.canvasId,
-      notesCanvasViewAccessId: event.viewAccessId,
     }),
   },
 });

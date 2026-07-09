@@ -247,7 +247,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
 
   const handleCreatePersonalCanvas = useCallback(async () => {
     const canvasId = uuidv4();
-    const viewAccessId = uuidv4();
     setIsCreatingCanvas(true);
     onSetPersonalSectionCollapsed(false);
 
@@ -255,7 +254,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
       await canvasService.createCollaborativeCanvas({
         id: canvasId,
         title: 'Untitled Canvas',
-        viewAccessId,
       });
 
       void navigate(`/chat/canvas/${canvasId}`);
@@ -269,7 +267,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   const handleCreateCanvasInProject = useCallback(
     async (project: CanvasProject, projectFolders: CanvasFolder[]) => {
       const canvasId = uuidv4();
-      const viewAccessId = uuidv4();
       setIsCreatingCanvas(true);
 
       try {
@@ -280,7 +277,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           title: 'Untitled Canvas',
           projectId: project.id,
           ...(targetFolderId ? { folderId: targetFolderId } : {}),
-          viewAccessId,
         });
 
         setCollapsedProjects(prev => {
@@ -446,7 +442,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   const handleCreateCanvasInFolder = useCallback(
     async (folder: CanvasFolder) => {
       const canvasId = uuidv4();
-      const viewAccessId = uuidv4();
       const folderProjectId = folder.projectId;
       setIsCreatingCanvas(true);
 
@@ -457,7 +452,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           folderId: folder.id,
           ...(folderProjectId ? { projectId: folderProjectId } : {}),
           ...(folder.channelId ? { channelId: folder.channelId } : {}),
-          viewAccessId,
         });
 
         if (folderProjectId) {
@@ -500,7 +494,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
       }
 
       const canvasId = uuidv4();
-      const viewAccessId = uuidv4();
       setIsCreatingCanvas(true);
 
       try {
@@ -509,7 +502,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           title: 'Untitled Canvas',
           channelId: channel.id,
           projectId: channel.projectId,
-          viewAccessId,
         });
         handleCloseChannelCreateDialog();
         void navigate(`/chat/canvas/${canvasId}`);

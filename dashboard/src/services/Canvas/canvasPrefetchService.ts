@@ -24,7 +24,6 @@ class CanvasPrefetchService {
     canvasId: string,
     options?: {
       channelId?: string;
-      viewAccessId?: string;
       title?: string;
     },
   ): Promise<void> {
@@ -45,13 +44,12 @@ class CanvasPrefetchService {
       await canvasService.prefetchCanvas(queryClient, canvasId, options);
 
       const authToken = await queryClient.fetchQuery<YSweetAuthToken>({
-        queryKey: ['ysweet-auth', canvasId, options?.channelId, options?.viewAccessId],
+        queryKey: ['ysweet-auth', canvasId, options?.channelId],
         queryFn: () =>
           canvasService.getYSweetAuthToken({
             docId: canvasId,
             ...(options?.channelId ? { channelId: options.channelId } : {}),
             ...(options?.title ? { title: options.title } : {}),
-            ...(options?.viewAccessId ? { viewAccessId: options.viewAccessId } : {}),
           }),
       });
 
@@ -74,7 +72,6 @@ class CanvasPrefetchService {
           'ysweet-auth',
           canvasId,
           options?.channelId,
-          options?.viewAccessId,
         ]);
         if (!data) {
           return Promise.reject(new Error('Auth token not found in cache'));

@@ -25,14 +25,12 @@ export interface KnowledgeDocument {
 
 /**
  * Approve a knowledge canvas and create a KnowledgeDocument
- * @param viewAccessId - The canvas view access ID (from URL)
+ * @param canvasId - The canvas id
  * @returns Approval result with success status and document IDs
  */
-export async function approveKnowledgeCanvas(
-  viewAccessId: string,
-): Promise<ApproveKnowledgeResponse> {
+export async function approveKnowledgeCanvas(canvasId: string): Promise<ApproveKnowledgeResponse> {
   const response = await apiInstance.post<ApproveKnowledgeResponse>('/knowledge/approve', {
-    viewAccessId,
+    canvasId,
   });
   return response.data;
 }

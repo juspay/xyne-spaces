@@ -264,9 +264,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   };
 
   const handleCopyLink = (): void => {
-    const viewLink = canvas.viewAccessId
-      ? `${shareableOrigin}/chat/canvas/${canvas.viewAccessId}`
-      : `${shareableOrigin}/chat/canvas/${canvas.id}`;
+    const viewLink = `${shareableOrigin}/chat/canvas/${canvas.id}`;
     void navigator.clipboard.writeText(viewLink);
     toast.success('Link Copied', {
       description: 'The link has been copied to your clipboard.',

@@ -302,7 +302,7 @@ export class CommitAnalysisController {
       const shouldCreateCanvas = results.length > 0;
 
       if (shouldCreateCanvas) {
-        const canvasViewAccessId = await createCommitAnalysisCanvas(
+        const canvasId = await createCommitAnalysisCanvas(
           results,
           affectedApplications,
           envChanges,
@@ -323,8 +323,8 @@ export class CommitAnalysisController {
           }
         );
 
-        if (canvasViewAccessId) {
-          canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasViewAccessId}`;
+        if (canvasId) {
+          canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasId}`;
         }
       }
 
@@ -409,7 +409,7 @@ export class CommitAnalysisController {
 
       let canvasUrl: string | undefined;
       if (results.length > 0) {
-        const canvasViewAccessId = await createCommitAnalysisCanvas(
+        const canvasId = await createCommitAnalysisCanvas(
           results,
           affectedApplications,
           envChanges,
@@ -427,8 +427,8 @@ export class CommitAnalysisController {
           }
         );
 
-        if (canvasViewAccessId) {
-          canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasViewAccessId}`;
+        if (canvasId) {
+          canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasId}`;
         }
       }
 

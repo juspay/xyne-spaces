@@ -321,7 +321,7 @@ const {
   sessionId,
   channelIds,
   collectionIds, fileIds, conversationId,
-  canvasViewAccessId,
+  canvasId,
   selectionContexts,
   createCanvasEnabled,
   userId,
@@ -518,7 +518,7 @@ const {
       const builtContext = {
         selectedChannels: channelIds.map(id => ({ id, name: contextChannelIdToName.get(id) ?? id })),
         threadConversationId: conversationId,
-        canvasViewAccessId: request.canvasViewAccessId,
+        canvasId: request.canvasId,
         webSearchEnabled: request.webSearchEnabled ?? false,
         deepResearchEnabled: request.deepResearchEnabled ?? false,
         createCanvasEnabled: request.createCanvasEnabled ?? false,
@@ -639,7 +639,7 @@ const {
     researchContext,
 
     // Canvas Context
-    canvasViewAccessId,
+    canvasId,
     selectionContexts,
 
     // Attachments — full data (base64 included) for traces
@@ -711,7 +711,7 @@ const {
     collectionIds,
     fileIds,
     conversationId,
-    canvasViewAccessId,
+    canvasId,
     selectionContexts,
     createCanvasEnabled,
     userId,

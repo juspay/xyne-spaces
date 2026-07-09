@@ -31,29 +31,28 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 /**
  * Edit canvas tool for updating existing canvases
  */
-export function createEditCanvasTool(): Tool<{ canvasViewId?: string; content: string; title?: string }, XyneAIAgentContext> {
+export function createEditCanvasTool(): Tool<{ canvas_id?: string; content: string; title?: string }, XyneAIAgentContext> {
   return {
     schema: {
       name: 'edit_canvas',
       description: getDescription('edit_canvas'),
       parameters: z.object({
-        canvasViewId: z.string().optional().describe('The viewAccessId of the canvas to edit. If not provided, uses the canvas context from where Ask AI was triggered.'),
+        canvas_id: z.string().optional().describe('The canonical id of the canvas to edit. If not provided, uses the canvas context from where Ask AI was triggered.'),
         content: z.string().max(5 * 1024 * 1024, 'Content exceeds 5MB limit').describe('The new content in markdown format'),
         title: z.string().optional().describe('Optional new title for the canvas'),
       }),
     },
     execute: async (args, context) => {
-      // Use provided canvasViewId or fall back to context's canvasViewAccessId
-      const canvasViewId = args.canvasViewId?.trim() || context.canvasViewAccessId;
+      // Use provided canvas_id or fall back to the ambient canvas context
+      const canvasId = args.canvas_id?.trim() || context.canvasId;
       const { content, title } = args;
       const { userId } = context;
-      
-      // Validate that canvasViewId is available
-      if (!canvasViewId || canvasViewId.trim() === '') {
-        return 'Error: canvasViewId is required. Please provide the viewAccessId of the canvas to edit, or trigger Ask AI from within a canvas.';
+
+      if (!canvasId || canvasId.trim() === '') {
+        return 'Error: canvas_id is required. Please provide the canonical canvas id to edit, or trigger Ask AI from within a canvas.';
       }
-      
-      logger.info(`[Tool] [${context.sessionId}] edit_canvas: canvasViewId="${canvasViewId}"`);
+
+      logger.info(`[Tool] [${context.sessionId}] edit_canvas: canvasId="${canvasId}"`);
 
       const prisma = DatabaseClient.getInstance();
 
@@ -75,21 +74,21 @@ export function createEditCanvasTool(): Tool<{ canvasViewId?: string; content: s
         }
 
         // Check edit access using canvasAuthService (also validates canvas exists)
-        const authResult = await canvasAuthService.checkCanvasAccess(canvasViewId, userId);
-        
+        const authResult = await canvasAuthService.checkCanvasAccess(canvasId, userId);
+
         if (!authResult.canvas) {
-          logger.warn(`[Tool] [${context.sessionId}] edit_canvas: Canvas not found for viewAccessId="${canvasViewId}"`);
-          return `Canvas not found with ID: ${canvasViewId}`;
+          logger.warn(`[Tool] [${context.sessionId}] edit_canvas: Canvas not found for canvasId="${canvasId}"`);
+          return `Canvas not found with ID: ${canvasId}`;
         }
-        
+
         if (!authResult.canEdit) {
           logger.warn(`[Tool] [${context.sessionId}] edit_canvas: User ${userId} does not have edit access to canvas ${authResult.canvas.id}`);
-          return `You don't have edit access to this canvas. Only the creator, owners, editors, or users with the edit link can modify it.`;
+          return `You don't have edit access to this canvas. Only the creator, owners, or editors can modify it.`;
         }
-        
+
         // Convert markdown content to BlockNote blocks
         const blocks = await convertMarkdownToBlockNote(content);
-        
+
         // Update the canvas metadata (content is stored in Y-Sweet only)
         const now = new Date();
         await prisma.canvas.update({
@@ -102,10 +101,10 @@ export function createEditCanvasTool(): Tool<{ canvasViewId?: string; content: s
             ...(title && { title }),
           },
         });
-        
+
         // Generate canvas URL using shared utility
-        const canvasUrl = getCanvasUrl(canvasViewId, user.workspaceId);
-        
+        const canvasUrl = getCanvasUrl(authResult.canvas.id, user.workspaceId);
+
         logger.info(`[Tool] [${context.sessionId}] edit_canvas: Updated canvas ${authResult.canvas.id}`);
         
         // Sync content to Y-Sweet for collaborative editing

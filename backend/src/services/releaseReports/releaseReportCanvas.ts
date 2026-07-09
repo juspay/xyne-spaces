@@ -10,7 +10,6 @@ import { logger } from '@/utils/logger';
 
 interface ReleaseReportCanvasResult {
   canvasId: string;
-  viewAccessId: string;
   action: 'created' | 'updated';
 }
 
@@ -221,7 +220,7 @@ export class ReleaseReportCanvasService {
                 },
               ],
             },
-            select: { id: true, viewAccessId: true },
+            select: { id: true },
           })
         : null;
       const existingCanvas =
@@ -238,11 +237,11 @@ export class ReleaseReportCanvasService {
               },
             ],
           },
-          select: { id: true, viewAccessId: true },
+          select: { id: true },
           orderBy: { createdAt: 'asc' },
         }));
 
-      if (existingCanvas?.viewAccessId) {
+      if (existingCanvas) {
         await tx.canvas.update({
           where: { id: existingCanvas.id },
           data: {
@@ -255,7 +254,6 @@ export class ReleaseReportCanvasService {
             lastEditedAt: now,
             visibility: CanvasVisibility.PUBLIC,
             isCollaborative: false,
-            editAccessId: null,
             metadata,
           },
         });
@@ -282,13 +280,11 @@ export class ReleaseReportCanvasService {
 
         return {
           canvasId: existingCanvas.id,
-          viewAccessId: existingCanvas.viewAccessId,
           action: 'updated' as const,
         };
       }
 
       const canvasId = uuidv4();
-      const viewAccessId = uuidv4();
       await tx.canvas.create({
         data: {
           id: canvasId,
@@ -297,8 +293,6 @@ export class ReleaseReportCanvasService {
           channelId: report.release.channelId,
           projectId: report.release.projectId,
           createdBy: owner.id,
-          viewAccessId,
-          editAccessId: null,
           visibility: CanvasVisibility.PUBLIC,
           isTemplate: false,
           isCollaborative: false,
@@ -318,7 +312,7 @@ export class ReleaseReportCanvasService {
         },
       });
 
-      return { canvasId, viewAccessId, action: 'created' as const };
+      return { canvasId, action: 'created' as const };
     });
 
     await this.runSideEffects(result, owner);

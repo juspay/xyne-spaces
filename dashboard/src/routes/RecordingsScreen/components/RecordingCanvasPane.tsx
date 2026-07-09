@@ -16,7 +16,6 @@ import { toast } from 'sonner';
 interface RecordingCanvasPaneProps {
   channelId: string | null;
   notesCanvasId: string;
-  notesCanvasViewAccessId: string;
   title: string;
   onTitleChange: (title: string) => void;
   onClose?: () => void;
@@ -25,7 +24,6 @@ interface RecordingCanvasPaneProps {
 export function RecordingCanvasPane({
   channelId,
   notesCanvasId,
-  notesCanvasViewAccessId,
   title,
   onTitleChange,
   onClose,
@@ -180,7 +178,6 @@ export function RecordingCanvasPane({
         <CollaborativeCanvasEditor
           canvasId={notesCanvasId}
           channelId={channelId ?? undefined}
-          viewAccessId={notesCanvasViewAccessId}
           editable
           autoFocus
           placeholder='Jot down notes while you record…'

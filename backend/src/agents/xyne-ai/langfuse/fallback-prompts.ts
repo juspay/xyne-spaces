@@ -149,7 +149,7 @@ KNOWLEDGE BASE - {{knowledge_base_instruction}}
 
 10. <tool>read_canvas</tool>
 **Usage:** Read and retrieve full markdown content from a canvas.
-**Parameters:** 'canvas_view_access_id' (optional).
+**Parameters:** 'canvas_id' (optional).
 **ID Resolution Priority:**
 1. **Implicit Context (Priority 0):** If Ask AI is triggered from a canvas, the ID is implicit. Call WITHOUT parameters: 'read_canvas()'.
 2. Extract from user message URLs ('/chat/canvas/{id}').
@@ -1126,7 +1126,7 @@ The tool returns the canvas URL that can be shared with others.`;
 /**
  * Fallback description for read_canvas tool
  */
-const READ_CANVAS_FALLBACK = `Read a canvas document by its viewAccessId and return the full content as markdown.
+const READ_CANVAS_FALLBACK = `Read a canvas document by its canonical id and return the full content as markdown.
 
 Use this tool when:
 - User shares a canvas link and asks about its content
@@ -1134,18 +1134,18 @@ Use this tool when:
 - User wants to know what's in a canvas mentioned in the conversation
 
 **Parameters:**
-- canvas_view_access_id: (optional) The viewAccessId from the canvas URL. If not provided, uses the canvas context from where Ask AI was triggered.
+- canvas_id: (optional) The canonical canvas id from the canvas URL. If not provided, uses the canvas context from where Ask AI was triggered.
 
-**How to get the viewAccessId (TRY IN THIS ORDER):**
+**How to get the canvas_id (TRY IN THIS ORDER):**
 
 **Priority 0: From request context (IMPLICIT - HIGHEST PRIORITY)**
-- If Ask AI was triggered from within a canvas, the canvas_view_access_id is automatically available in the request context
+- If Ask AI was triggered from within a canvas, the canvas_id is automatically available in the request context
 - You can call read_canvas() WITHOUT any parameters and it will use this context
 - Example: User clicks "Ask AI" while viewing a canvas and asks "see this canvas" → Just call read_canvas({}) or read_canvas() without parameters
 
 **Priority 1: From user's current query/message**
 - Look for canvas URLs in the user's message
-- Pattern: /chat/canvas/{viewAccessId}
+- Pattern: /chat/canvas/{canvasId}
 - Example: For URL /chat/canvas/abc123-def456, extract "abc123-def456"
 
 **Priority 2: From session's conversation history**
@@ -1155,20 +1155,20 @@ Use this tool when:
 **Priority 3: From thread messages (if thread context is available)**
 - If in thread context, use <tool>fetch_thread_messages</tool> to get thread content
 - Look for canvas links in the thread messages
-- Extract viewAccessId from any /chat/canvas/{viewAccessId} patterns
+- Extract canvas_id from any /chat/canvas/{canvasId} patterns
 
 **Priority 4 (ABSOLUTE FALLBACK): Ask the user**
 - Only if you cannot find any canvas link from above sources, ask: "Could you share the canvas link or ID you'd like me to read?"
 
 **Examples:**
 - User clicks "Ask AI" on a canvas and asks: "see this canvas"
-  → Canvas context is implicit (Priority 0) → read_canvas({}) or just call without canvas_view_access_id parameter
+  → Canvas context is implicit (Priority 0) → read_canvas({}) or just call without canvas_id parameter
 
 - User: "What's in this canvas https://spaces.xyne.juspay.net/chat/canvas/abc123-def456?"
-  → Extract "abc123-def456" from the message (Priority 1) → read_canvas({canvas_view_access_id: "abc123-def456"})
+  → Extract "abc123-def456" from the message (Priority 1) → read_canvas({canvas_id: "abc123-def456"})
 
 - User: "Read the canvas I shared earlier"
-  → Check conversation history (Priority 2) → if not found, check thread via fetch_thread_messages (Priority 3) → extract viewAccessId → call tool
+  → Check conversation history (Priority 2) → if not found, check thread via fetch_thread_messages (Priority 3) → extract canvas_id → call tool
 
 - User: "Show me the canvas content"
   → Check all sources in order → if not found anywhere, ask user (Priority 4)
@@ -1191,7 +1191,7 @@ Use this tool when:
 - Messages: /chat/{channelId}/{conversationId}#origin={conversationId}&messageId={messageId}
 - Conversations/Threads: /chat/{channelId}/{conversationId}
 - Tickets: /chat/{channelId}/{conversationId}?ticket={ticketId}
-- Canvases: /chat/canvas/{canvasId} or /chat/canvas/{viewAccessId}
+- Canvases: /chat/canvas/{canvasId}
 
 **Supported Domains:**
 - spaces.xyne.juspay.net
@@ -1224,18 +1224,17 @@ Use this tool when the user wants to:
 The user must have edit access to the canvas. Edit access is granted if the user:
 - Is the creator of the canvas
 - Is an OWNER or EDITOR participant
-- Has the edit access link
 
 If the user doesn't have edit access, the tool will return an error message.
 
 **Parameters:**
-- canvasViewId: (required) The viewAccessId of the canvas to edit
+- canvas_id: (required) The canonical canvas id to edit
 - content: (required) The new content in markdown format (will replace existing content)
 - title: (optional) New title for the canvas
 
 **Examples:**
-- edit_canvas({canvasViewId: "abc-123-def", content: "# Updated Content\\n\\nNew text here.", title: "Updated Title"})
-- edit_canvas({canvasViewId: "abc-123-def", content: "## New Section\\n\\n- Item 1\\n- Item 2"})
+- edit_canvas({canvas_id: "abc-123-def", content: "# Updated Content\\n\\nNew text here.", title: "Updated Title"})
+- edit_canvas({canvas_id: "abc-123-def", content: "## New Section\\n\\n- Item 1\\n- Item 2"})
 
 The tool returns the updated canvas URL.`;
 

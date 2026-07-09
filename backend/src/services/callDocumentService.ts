@@ -773,8 +773,6 @@ export class CallDocumentService {
       const now = new Date();
 
       const canvasId = uuidv4();
-      const viewAccessId = uuidv4();
-      const editAccessId = uuidv4();
       const participantId = uuidv4();
 
       const title = `📋 PRD: ${prd.title}`;
@@ -788,8 +786,6 @@ export class CallDocumentService {
           content: [],
           channelId,
           createdBy: createdByUserId,
-          viewAccessId,
-          editAccessId,
           visibility: 'PUBLIC',
           isTemplate: false,
           isCollaborative: true,
@@ -844,7 +840,7 @@ export class CallDocumentService {
       // Queue Vespa indexing for the canvas
       await this.queueVespaIndexing(canvasId, createdByUserId, 'create', channel?.workspaceId);
 
-      return viewAccessId;
+      return canvasId;
     } catch (error) {
       logger.error('[CallDocumentService] Failed to create PRD canvas:', error);
       return null;
@@ -869,8 +865,6 @@ export class CallDocumentService {
       const now = new Date();
 
       const canvasId = uuidv4();
-      const viewAccessId = uuidv4();
-      const editAccessId = uuidv4();
       const participantId = uuidv4();
 
       // Prepare canvas content (title, content, mentions)
@@ -889,8 +883,6 @@ export class CallDocumentService {
           content: [],
           channelId,
           createdBy: createdByUserId,
-          viewAccessId,
-          editAccessId,
           visibility: 'PUBLIC',
           isTemplate: false,
           isCollaborative: true,
@@ -976,7 +968,7 @@ export class CallDocumentService {
       // Queue Vespa indexing for the canvas
       await this.queueVespaIndexing(canvasId, createdByUserId, 'create', user.workspaceId);
 
-      return viewAccessId;
+      return canvasId;
     } catch (error) {
       logger.error('[CallDocumentService] Failed to create detailed summary canvas:', error);
       return null;
@@ -985,14 +977,13 @@ export class CallDocumentService {
 
   /**
    * Update an existing detailed summary Canvas with new content.
-   * Preserves viewAccessId and editAccessId so existing links remain valid.
+   * Same canonical canvas id is used, so existing links remain valid.
    */
   async updateDetailedSummaryCanvas(
     canvasId: string,
     markdownSummary: string,
     updatedByUserId: string,
     channelId: string,
-    existingViewAccessId: string,
     currentVersion: number,
     callId: string,
     callTitle?: string | null
@@ -1011,8 +1002,7 @@ export class CallDocumentService {
 
       const newVersion = currentVersion + 1;
 
-      // Update existing canvas - preserve viewAccessId and editAccessId
-      // Content is kept empty in DB (Y-Sweet is source of truth)
+      // Update existing canvas; content is kept empty in DB (Y-Sweet is source of truth)
       await prisma.canvas.update({
         where: { id: canvasId },
         data: {
@@ -1044,7 +1034,7 @@ export class CallDocumentService {
       // Queue Vespa re-indexing for the updated canvas
       await this.queueVespaIndexing(canvasId, updatedByUserId, 'update');
 
-      return existingViewAccessId;
+      return canvasId;
     } catch (error) {
       logger.error('[CallDocumentService] Failed to update detailed summary canvas:', error);
       return null;
@@ -1064,31 +1054,30 @@ export class CallDocumentService {
     callStartedAt: Date,
     callCreatorUserId: string,
     callTitle?: string | null
-  ): Promise<{ viewAccessId: string | null; version: number }> {
+  ): Promise<{ canvasId: string | null; version: number }> {
     // Check if an existing canvas exists for this call
     const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
 
     if (existingCanvas) {
       // Update existing canvas instead of creating a new one
-      const updatedViewAccessId = await this.updateDetailedSummaryCanvas(
+      const updatedCanvasId = await this.updateDetailedSummaryCanvas(
         existingCanvas.canvasId,
         markdownSummary,
         createdByUserId,
         channelId,
-        existingCanvas.viewAccessId,
         existingCanvas.version,
         callId,
         callTitle
       );
 
       return {
-        viewAccessId: updatedViewAccessId,
+        canvasId: updatedCanvasId,
         version: existingCanvas.version + 1,
       };
     }
 
     // No existing canvas, create a new one
-    const viewAccessId = await this.createDetailedSummaryCanvas(
+    const canvasId = await this.createDetailedSummaryCanvas(
       callId,
       markdownSummary,
       createdByUserId,
@@ -1100,7 +1089,7 @@ export class CallDocumentService {
     );
 
     return {
-      viewAccessId,
+      canvasId,
       version: 1,
     };
   }
@@ -1387,7 +1376,7 @@ A comprehensive detailed summary has been generated from this call.
 
 
       // 2. Create Canvas with bot as creator and call initiator as co-owner
-      const viewAccessId = await this.createPRDCanvas(
+      const canvasId = await this.createPRDCanvas(
         callId,
         prd,
         xyneAutomaticBot.id,
@@ -1395,11 +1384,11 @@ A comprehensive detailed summary has been generated from this call.
         conversation.channelId,
         createdByUserId
       );
-      if (!viewAccessId) {
+      if (!canvasId) {
         return { success: false, error: 'Failed to create PRD canvas' };
       }
 
-      const canvasUrl = getCanvasUrl(viewAccessId);
+      const canvasUrl = getCanvasUrl(canvasId);
 
       // 3. Post to conversation
       await this.postPRDToConversation(
@@ -1460,7 +1449,7 @@ A comprehensive detailed summary has been generated from this call.
       }
 
       // 2. Create or Update Canvas (handles rejoin scenario)
-      const { viewAccessId, version } = await this.createOrUpdateDetailedSummaryCanvas(
+      const { canvasId, version } = await this.createOrUpdateDetailedSummaryCanvas(
         callId,
         detailedSummaryMarkdown,
         xyneAutomaticBot.id,
@@ -1470,11 +1459,11 @@ A comprehensive detailed summary has been generated from this call.
         call.createdByUserId,
         call.title
       );
-      if (!viewAccessId) {
+      if (!canvasId) {
         return { success: false, error: 'Failed to create or update detailed summary canvas' };
       }
 
-      const canvasUrl = getCanvasUrl(viewAccessId);
+      const canvasUrl = getCanvasUrl(canvasId);
       // Use call title as suffix, or fall back to IST timestamp
       const suffix = call.title || formatToISTLocaleString(new Date(call.startedAt));
       const canvasTitle = `Detailed Summary - ${suffix}`;

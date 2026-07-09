@@ -115,7 +115,6 @@ export class CanvasesACL extends BaseACL<'canvases'> {
    * 1. ACL layer here only enforces workspace scoping / row existence.
    * 2. Fine-grained authorization lives in `canvas.update` mutator because it depends on
    *    request-level semantics that are not available in this generic table ACL, such as:
-   *    - `editAccessId` link-based editing
    *    - treating folder/project/channel changes as move operations
    *    - allowing channel admins to move canvases even when they are not canvas editors
    *

@@ -30,7 +30,7 @@ export type RecordingStoreEvent =
   | { type: 'reset' }
   | { type: 'addTranscript'; entry: RecordingState['transcripts'][number] }
   | { type: 'clearTranscripts' }
-  | { type: 'setNotesCanvas'; canvasId: string; viewAccessId: string };
+  | { type: 'setNotesCanvas'; canvasId: string };
 
 interface TypedRecordingStore {
   subscribe: (cb: () => void) => { unsubscribe: () => void };

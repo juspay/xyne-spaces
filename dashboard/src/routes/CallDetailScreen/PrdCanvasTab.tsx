@@ -26,8 +26,6 @@ export function PrdCanvasTab({ canvasId }: { canvasId: string }): ReactElement {
         canvasId={canvas.id}
         channelId={canvas.channelId || undefined}
         title={canvas.title}
-        viewAccessId={canvas.viewAccessId}
-        editAccessId={canvas.editAccessId}
         editable={false}
         placeholder='PRD content...'
         autoFocus={false}

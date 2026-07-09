@@ -376,7 +376,6 @@ const applyKanbanTicketPageV2Conditions = (
 const applyCanvasVisibilityQueryFilter = (
   query: any,
   userId: string,
-  requestedCanvasId?: string,
   includePublicVisibility = true,
 ) =>
   query.where((helpers: any) =>
@@ -396,12 +395,6 @@ const applyCanvasVisibilityQueryFilter = (
         ),
       ),
       ...(includePublicVisibility ? [helpers.cmp('visibility', CanvasVisibility.PUBLIC)] : []),
-      ...(requestedCanvasId
-        ? [
-            helpers.cmp('viewAccessId', requestedCanvasId),
-            helpers.cmp('editAccessId', requestedCanvasId),
-          ]
-        : []),
     )
   );
 
@@ -1924,7 +1917,7 @@ export const queries = defineQueries({
     }),
     ({ ctx, args }) => {
       const isBackward = args.direction === 'backward';
-      let query = applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID, undefined, false);
+      let query = applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID, false);
 
       if (!args.includeQuartoDocs) {
         query = query.where('docType', DocType.Canvas);
@@ -2339,7 +2332,6 @@ export const queries = defineQueries({
         applyCanvasVisibilityQueryFilter(
           query,
           ctx.userID,
-          undefined,
           resolvedScope !== 'personal_root',
         ).orderBy('updatedAt', 'desc'),
         ctx.userID,
@@ -2545,15 +2537,12 @@ export const queries = defineQueries({
       .where((helpers) => {
         return helpers.or(
           helpers.cmp('id', canvasId),
-          helpers.cmp('viewAccessId', canvasId),
-          helpers.cmp('editAccessId', canvasId),
-          helpers.cmp('userRepo', canvasId) // Also allow lookup by userRepo
+          helpers.cmp('userRepo', canvasId) // Also allow lookup by userRepo (Quarto docs)
         );
       })
       .related('participants')
       .related('channel'),
-      ctx.userID,
-      canvasId
+      ctx.userID
     ).one();
   }),
 

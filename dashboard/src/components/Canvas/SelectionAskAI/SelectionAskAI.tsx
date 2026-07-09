@@ -3,7 +3,7 @@ import { xyneAIActor, type SelectionInfo } from '../../../machines/xyneAIMachine
 
 interface SelectionAskAIProps {
   canvasTitle?: string;
-  viewAccessId?: string;
+  canvasId?: string;
   containerRef: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -15,7 +15,7 @@ interface SelectionPosition {
 
 export const SelectionAskAI = ({
   canvasTitle,
-  viewAccessId,
+  canvasId,
   containerRef,
 }: SelectionAskAIProps): ReactElement | null => {
   const [selectionPosition, setSelectionPosition] = useState<SelectionPosition>({
@@ -90,10 +90,10 @@ export const SelectionAskAI = ({
   const handleAskAI = useCallback(() => {
     if (!selectedText) return;
 
-    // CRITICAL: viewAccessId is required for proper hierarchy in canvasContexts
+    // CRITICAL: canvasId is required for proper hierarchy in canvasContexts
     // Without it, selections cannot be properly associated with a canvas
-    if (!viewAccessId) {
-      console.warn('[SelectionAskAI] Cannot create selection without viewAccessId');
+    if (!canvasId) {
+      console.warn('[SelectionAskAI] Cannot create selection without canvasId');
       return;
     }
 
@@ -104,7 +104,7 @@ export const SelectionAskAI = ({
     const selectionInfo: SelectionInfo = {
       text: selectedText,
       preview,
-      canvasViewAccessId: viewAccessId,
+      canvasId,
       ...(canvasTitle && { canvasTitle }),
     };
 
@@ -112,7 +112,7 @@ export const SelectionAskAI = ({
     xyneAIActor.send({
       type: 'OPEN',
       canvasInfo: {
-        viewAccessId,
+        canvasId,
         ...(canvasTitle ? { title: canvasTitle } : {}),
       },
       selectionInfo,
@@ -127,7 +127,7 @@ export const SelectionAskAI = ({
     // Hide the button after clicking
     setSelectionPosition(prev => ({ ...prev, show: false }));
     setSelectedText('');
-  }, [selectedText, viewAccessId, canvasTitle]);
+  }, [selectedText, canvasId, canvasTitle]);
 
   useEffect(() => {
     // Listen for selection changes
@@ -164,7 +164,7 @@ export const SelectionAskAI = ({
         data-track-category='CANVAS'
         data-track-name='Selection_Ask_AI'
         data-track-metadata={JSON.stringify({
-          viewAccessId,
+          canvasId,
           textLength: selectedText.length,
         })}
       >

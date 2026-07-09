@@ -32,7 +32,7 @@ export interface SelectedRecording {
 }
 
 export interface SelectionContextInput {
-  canvasViewAccessId: string;
+  canvasId: string;
   selectedText: string;
   preview?: string;
   canvasTitle?: string;
@@ -51,7 +51,7 @@ export interface LastInputContext {
   selectedTickets?: SelectedTicket[];
   selectedTranscripts?: SelectedTranscript[];
   selectedRecordings?: SelectedRecording[];
-  canvasViewAccessId?: string;
+  canvasId?: string;
   selectionContexts?: SelectionContextInput[];
   webSearchEnabled: boolean;
   deepResearchEnabled: boolean;
@@ -116,7 +116,7 @@ export interface ClawCitation {
   channelName?: string;
   channelType?: string;
   channelKind?: string;
-  viewAccessId?: string;
+  canvasId?: string;
   ticketId?: string;
   xyneId?: string;
   mailId?: string;
@@ -143,7 +143,7 @@ export interface ClawCitation {
   /**
    * 1-based index of the chunk in the tool's result text this citation
    * corresponds to. Used to resolve inline `[clf-<toolCallId>#<N>]` tokens
-   * back to the (channelId, conversationId, viewAccessId, ...) tuple they
+   * back to the (channelId, conversationId, canvasId, ...) tuple they
    * point at via `citations.find(c => c.chunkIndex === N)`. Optional —
    * older agent versions don't emit per-chunk citations.
    */
@@ -353,7 +353,7 @@ export interface MessageAttachment {
 
 // Selection context from canvas
 export interface SelectionContext {
-  canvasViewAccessId: string;
+  canvasId: string;
   selectedText: string;
   canvasTitle?: string;
   preview: string; // Truncated preview for display

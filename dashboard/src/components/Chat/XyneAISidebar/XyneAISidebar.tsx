@@ -422,7 +422,7 @@ const XyneAISidebar = ({
   // Sync processedSelectionKeysRef with activeSelectionInfos to handle removals
   useEffect(() => {
     // Build the current set of active selection keys
-    const activeKeys = new Set(activeSelectionInfos.map(s => `${s.canvasViewAccessId}-${s.text}`));
+    const activeKeys = new Set(activeSelectionInfos.map(s => `${s.canvasId}-${s.text}`));
     // Remove keys from processedSelectionKeysRef that are no longer active
     // This allows re-adding the same selection if user removed it and selects again
     processedSelectionKeysRef.current = activeKeys;
@@ -440,7 +440,7 @@ const XyneAISidebar = ({
         const newSelections: SelectionInfo[] = [];
 
         for (const selection of allSelections) {
-          const selectionKey = `${selection.canvasViewAccessId}-${selection.text}`;
+          const selectionKey = `${selection.canvasId}-${selection.text}`;
 
           if (!processedSelectionKeysRef.current.has(selectionKey)) {
             processedSelectionKeysRef.current.add(selectionKey);
@@ -639,7 +639,7 @@ const XyneAISidebar = ({
     streamSessionKey: streamThreadKey,
     threadConversationId: activeThreadInfo?.conversationId,
     attachmentIds: activeThreadInfo?.attachmentIds,
-    canvasViewAccessId: canvasInfo?.viewAccessId ?? null,
+    canvasId: canvasInfo?.canvasId ?? null,
     setMessages,
     setConversationId,
     setCurrentTraceId,
@@ -1726,7 +1726,7 @@ const XyneAISidebar = ({
     const selectionContexts =
       activeSelectionInfos.length > 0
         ? activeSelectionInfos.map(selection => ({
-            canvasViewAccessId: selection.canvasViewAccessId,
+            canvasId: selection.canvasId,
             selectedText: selection.text,
             preview: selection.preview,
             ...(selection.canvasTitle && { canvasTitle: selection.canvasTitle }),

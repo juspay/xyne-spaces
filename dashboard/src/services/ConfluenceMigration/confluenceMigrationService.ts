@@ -178,7 +178,6 @@ export interface ConfluenceMigrationHistoryItem {
   projectId: string | null;
   channelId: string | null;
   folderId: string | null;
-  viewAccessId: string | null;
   spaceKey: string | null;
   confluencePageId: string | null;
   externalSourceUrl: string | null;

@@ -81,7 +81,6 @@ export default function RecordingsScreen(): ReactElement {
   const externalId = useRecordingStore(ctx => ctx.externalId);
   const channelId = useRecordingStore(ctx => ctx.channelId);
   const notesCanvasId = useRecordingStore(ctx => ctx.notesCanvasId);
-  const notesCanvasViewAccessId = useRecordingStore(ctx => ctx.notesCanvasViewAccessId);
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
   const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
   const room = useRecordingStore(ctx => ctx.room);
@@ -90,7 +89,7 @@ export default function RecordingsScreen(): ReactElement {
   const [isCanvasPaneOpen, setIsCanvasPaneOpen] = useState(true);
   const [notesCanvasTitle, setNotesCanvasTitle] = useState('Recording Notes');
 
-  const hasCanvas = !!notesCanvasId && !!notesCanvasViewAccessId;
+  const hasCanvas = !!notesCanvasId;
 
   const isActive =
     recordingStatus === 'recording' ||
@@ -147,14 +146,12 @@ export default function RecordingsScreen(): ReactElement {
     setIsCreatingCanvas(true);
     try {
       const canvasId = uuidv4();
-      const viewAccessId = uuidv4();
       await canvasService.createCollaborativeCanvas({
         id: canvasId,
         title: notesCanvasTitle,
         ...(channelId ? { channelId } : {}),
-        viewAccessId,
       });
-      sendRecordingEvent({ type: 'setNotesCanvas', canvasId, viewAccessId });
+      sendRecordingEvent({ type: 'setNotesCanvas', canvasId });
       setIsCanvasPaneOpen(true);
       // Persist the link on the call now; the thread post happens in the summary pipeline
       if (externalId) {
@@ -162,7 +159,7 @@ export default function RecordingsScreen(): ReactElement {
           const linkResult = await zero.mutate(
             mutators.calls.linkNotesCanvas({
               callId: externalId,
-              notesCanvasViewAccessId: viewAccessId,
+              notesCanvasId: canvasId,
             }),
           ).server;
           if (linkResult.type === 'error') {
@@ -604,7 +601,7 @@ export default function RecordingsScreen(): ReactElement {
         {/* ─── Active Recording Workspace (overlay when active & not minimized) ───── */}
         {isActive && !isTranscriptMinimized && (
           <div className='absolute inset-0 z-10 bg-background flex flex-col'>
-            {notesCanvasId && notesCanvasViewAccessId && isCanvasPaneOpen ? (
+            {notesCanvasId && isCanvasPaneOpen ? (
               /* Split view — only after a notes canvas is created */
               <PanelGroup direction='horizontal' autoSaveId='recording-split-view'>
                 <Panel defaultSize={50} minSize={30}>
@@ -625,7 +622,6 @@ export default function RecordingsScreen(): ReactElement {
                   <RecordingCanvasPane
                     channelId={channelId}
                     notesCanvasId={notesCanvasId}
-                    notesCanvasViewAccessId={notesCanvasViewAccessId}
                     title={notesCanvasTitle}
                     onTitleChange={setNotesCanvasTitle}
                     onClose={() => setIsCanvasPaneOpen(false)}
