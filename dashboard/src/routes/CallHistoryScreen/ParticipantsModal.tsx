@@ -57,14 +57,11 @@ function CallParticipantsContent({
                     External
                   </span>
                 )}
-                {participant.isExternal && (
-                  <span className='ml-1.5 text-[10px] font-medium bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1.5 py-0.5 rounded'>
-                    External
-                  </span>
-                )}
               </h4>
               <p className='text-xs text-muted-foreground truncate'>
-                {!participant.isExternal && (usersById.get(participant.userId)?.email ?? '')}
+                {participant.isExternal
+                  ? (participant.email ?? '')
+                  : (usersById.get(participant.userId)?.email ?? '')}
               </p>
             </div>
           </div>

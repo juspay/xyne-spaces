@@ -29,7 +29,7 @@ class CallSideEffectService {
 
         // Filter for invited participants who haven't joined or responded
         const invitedParticipants = allParticipants.filter(
-            p => p.response === InvitationResponse.INVITED && p.joinedAt === null && p.userId !== p.invitedBy
+            p => !p.isExternal && p.response === InvitationResponse.INVITED && p.joinedAt === null && p.userId !== p.invitedBy
         );
 
         if (invitedParticipants.length === 0) {

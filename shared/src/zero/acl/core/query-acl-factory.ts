@@ -36,6 +36,7 @@ import {
   PullRequestsACL,
   ReactionCountsACL,
   ReactionsACL,
+  RecurringCallParticipantsACL,
   StagesACL,
   StageTransitionsACL,
   StagePRStatusMappingsACL,
@@ -154,6 +155,8 @@ export class QueryACLFactory {
         return new ReactionCountsACL(ctx) as BaseQueryACL<TTable>;
       case 'reactions':
         return new ReactionsACL(ctx) as BaseQueryACL<TTable>;
+      case 'recurring_call_participants':
+        return new RecurringCallParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'stages':
         return new StagesACL(ctx) as BaseQueryACL<TTable>;
       case 'stage_transitions':

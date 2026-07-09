@@ -74,6 +74,19 @@ export const SaveWhiteboardAttachmentSchema = z
 
 export type SaveWhiteboardAttachmentInput = z.infer<typeof SaveWhiteboardAttachmentSchema>;
 
+const CallInvitationSchema = z.object({
+  bodyHtml: z.string().min(1),
+  // Organizer-supplied overrides for the rendered email header.
+  // Date/time values are NOT accepted — they come from the scheduler —
+  // but the timezone used to FORMAT them is the organizer's local zone.
+  title: z.string().min(1).max(200).optional(),
+  organizerName: z.string().min(1).max(200).optional(),
+  organizerEmail: z.string().email().optional(),
+  orgName: z.string().max(200).optional(),
+  /** IANA timezone (e.g. "Asia/Kolkata") used to display the time in the email. */
+  timezone: z.string().min(1).max(64).optional(),
+});
+
 /**
  * Validation schema for scheduling a call
  */
@@ -89,18 +102,8 @@ export const ScheduleCallSchema = z.object({
   callUpdatesChannel: z.string().optional(), // Explicit broadcast channel for summaries/action items
   conversationId: z.string().optional(), // Optional: for thread-initiated scheduled calls
   externalInvitees: z.array(z.string().email()).optional(),
-  invitation: z.object({
-    bodyHtml: z.string().min(1),
-    // Organizer-supplied overrides for the rendered email header.
-    // Date/time values are NOT accepted — they come from the scheduler —
-    // but the timezone used to FORMAT them is the organizer's local zone.
-    title: z.string().min(1).max(200).optional(),
-    organizerName: z.string().min(1).max(200).optional(),
-    organizerEmail: z.string().email().optional(),
-    orgName: z.string().max(200).optional(),
-    /** IANA timezone (e.g. "Asia/Kolkata") used to display the time in the email. */
-    timezone: z.string().min(1).max(64).optional(),
-  }).optional(),
+  externalInviteDelivery: z.enum(['standalone', 'conversation_reply']).optional(),
+  invitation: CallInvitationSchema.optional(),
 }).refine(
   (data) => data.channelId || (data.targetUserIds && data.targetUserIds.length > 0),
   'Either channelId or targetUserIds is required'
@@ -111,8 +114,8 @@ export const ScheduleCallSchema = z.object({
   (data) => !data.externalInvitees || data.externalInvitees.length === 0 || !!data.invitation,
   'invitation is required when externalInvitees is non-empty'
 ).refine(
-  (data) => !data.externalInvitees || data.externalInvitees.length === 0 || !!data.conversationId,
-  'conversationId is required when externalInvitees is non-empty'
+  (data) => data.externalInviteDelivery !== 'conversation_reply' || !!data.conversationId,
+  'conversationId is required when externalInviteDelivery is conversation_reply'
 );
 
 // Type inference from schema
@@ -152,6 +155,8 @@ export const RecurringScheduleCallSchema = z
         'startsOn must not be in the past',
       ),
     endsOn: z.number().optional(),
+    externalInvitees: z.array(z.string().email()).optional(),
+    invitation: CallInvitationSchema.optional(),
   })
   .refine(
     (data) => data.channelId || (data.targetUserIds && data.targetUserIds.length > 0),
@@ -164,6 +169,10 @@ export const RecurringScheduleCallSchema = z
   .refine(
     (data) => data.startTime !== data.endTime,
     'startTime and endTime must not be the same',
+  )
+  .refine(
+    (data) => !data.externalInvitees || data.externalInvitees.length === 0 || !!data.invitation,
+    'invitation is required when externalInvitees is non-empty',
   );
 
 export type RecurringScheduleCallInput = z.infer<typeof RecurringScheduleCallSchema>;
@@ -183,6 +192,7 @@ export const UpdateScheduleCallSchema = z
     targetUserIds: z.array(z.string()).optional(),
     channelId: z.string().optional(),
     callUpdatesChannel: z.string().optional(),
+    externalInvitees: z.array(z.string().email()).optional(),
   })
   .refine(
     (data) => !data.startsAt || !data.endsAt || data.startsAt < data.endsAt,
@@ -213,6 +223,7 @@ export const UpdateRecurringSeriesSchema = z
     targetUserIds: z.array(z.string()).optional(),
     channelId: z.string().optional(),
     callUpdatesChannel: z.string().optional(),
+    externalInvitees: z.array(z.string().email()).optional(),
   })
   .refine(
     (data) => !data.startTime || !data.endTime || data.startTime !== data.endTime,

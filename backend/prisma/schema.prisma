@@ -3127,14 +3127,17 @@ model CallParticipant {
   leftAt       DateTime?           // NULL = still in call
   metadata     Json?               // Connection quality, device info, etc.
   displayName  String?             // Name for external users
+  email        String?             // Email for external invitees
   isExternal   Boolean             @default(false)  // True for external lobby users
 
   // Relations
   call Call @relation(fields: [callId], references: [id])
 
   @@unique([callId, userId]) // Prevent duplicate participants
+  @@unique([callId, email]) // Prevent duplicate external email invitees
   @@index([callId]) // Fast call participant lookup
   @@index([userId]) // Fast user call lookup
+  @@index([email]) // Fast external invitee lookup
   @@index([callId, leftAt]) // Fast active participants lookup
   @@index([response]) // Fast response lookup
   @@map("call_participants")
@@ -3190,11 +3193,39 @@ model RecurringCallSeries {
 
   // Relations
   instances Call[] // All Call instances generated from this series
+  participants RecurringCallParticipant[]
 
   @@index([organizerId])  // Fast lookup of series created by a user
   @@index([channelId])    // Fast lookup of series in a channel
   @@index([status])       // Fast lookup of active series
   @@map("recurring_call_series")
+  @@schema("public")
+}
+
+model RecurringCallParticipant {
+  id                String              @id @default(cuid())
+  recurringSeriesId String              // RecurringCallSeries ID
+  userId            String              // User ID for internal participants; synthetic ID for external invitees
+  invitedBy         String              // User who sent invitation (no FK constraint)
+  invitedAt         DateTime
+  response          InvitationResponse? // INVITED | REQUESTED | ACCEPTED | null (rejected/left)
+  meetingStatus     MeetingStatus       @default(PENDING)
+  respondedAt       DateTime?           // When they accepted/rejected
+  metadata          Json?               // Future participant-level metadata
+  displayName       String?             // Name for external users
+  email             String?             // Email for external invitees
+  isExternal        Boolean             @default(false)
+
+  // Relations
+  recurringSeries RecurringCallSeries @relation(fields: [recurringSeriesId], references: [id], onDelete: Cascade)
+
+  @@unique([recurringSeriesId, userId])
+  @@unique([recurringSeriesId, email])
+  @@index([recurringSeriesId])
+  @@index([userId])
+  @@index([email])
+  @@index([isExternal])
+  @@map("recurring_call_participants")
   @@schema("public")
 }
 

@@ -920,7 +920,7 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
   // Get call participants for permissions using call ID
   let permissions: string[] = [];
   const callParticipants = await db.callParticipant.findMany({
-    where: { callId: args.id }
+    where: { callId: args.id, isExternal: false }
   });
   permissions = callParticipants.map(p => p.userId);
 

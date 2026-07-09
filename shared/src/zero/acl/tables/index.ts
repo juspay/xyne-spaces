@@ -37,6 +37,7 @@ export { PullRequestsACL } from './pull-requests-acl';
 export { ReactionCountsACL } from './reaction-counts-acl';
 export { ReactionsACL } from './reactions-acl';
 export { ReposACL } from './repos-acl';
+export { RecurringCallParticipantsACL } from './recurring-call-participants-acl';
 export { RolesACL } from './roles-acl';
 export { ResourcesACL } from './resources-acl';
 export { ResourceAccessACL } from './resource-access-acl';

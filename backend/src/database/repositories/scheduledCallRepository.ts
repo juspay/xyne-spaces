@@ -3,13 +3,45 @@ import { CallStatus, RecurringCallSeriesStatus, type Prisma } from '@prisma/clie
 import { logger } from '@/utils/logger';
 
 export class ScheduledCallRepository {
+  private client(tx?: Prisma.TransactionClient) {
+    return tx ?? DatabaseClient.getInstance();
+  }
+
   /**
    * Cancel a single SCHEDULED call instance by marking it as CANCELLED.
    */
   async cancelCall(callId: string): Promise<void> {
-    await DatabaseClient.getInstance().call.update({
+    await this.client().call.update({
       where: { id: callId },
       data: { status: CallStatus.CANCELLED },
+    });
+  }
+
+  async findFirstUpcomingSeriesInstance(params: {
+    seriesId: string;
+    fromDate?: Date;
+    tx?: Prisma.TransactionClient;
+  }): Promise<{
+    externalId: string;
+    title: string | null;
+    startsAt: Date | null;
+    endsAt: Date | null;
+  } | null> {
+    const { seriesId, fromDate = new Date(), tx } = params;
+
+    return this.client(tx).call.findFirst({
+      where: {
+        recurringSeriesId: seriesId,
+        status: CallStatus.SCHEDULED,
+        startsAt: { gte: fromDate },
+      },
+      select: {
+        externalId: true,
+        title: true,
+        startsAt: true,
+        endsAt: true,
+      },
+      orderBy: { startsAt: 'asc' },
     });
   }
 
@@ -140,6 +172,45 @@ export class ScheduledCallRepository {
     });
   }
 
+  async updateScheduledInstanceTimes(params: {
+    callId: string;
+    startsAt: Date;
+    endsAt: Date;
+    tx?: Prisma.TransactionClient;
+  }): Promise<void> {
+    const { callId, startsAt, endsAt, tx } = params;
+
+    await this.client(tx).call.update({
+      where: { id: callId },
+      data: { startsAt, endsAt },
+    });
+  }
+
+  async updateScheduledInstanceFields(params: {
+    callIds: string[];
+    title?: string | null;
+    channelId?: string | null;
+    callUpdatesChannel?: string | null;
+    tx?: Prisma.TransactionClient;
+  }): Promise<number> {
+    const { callIds, title, channelId, callUpdatesChannel, tx } = params;
+    if (callIds.length === 0) return 0;
+
+    const data: Prisma.CallUncheckedUpdateManyInput = {};
+    if (title !== undefined) data.title = title;
+    if (channelId !== undefined) data.channelId = channelId;
+    if (callUpdatesChannel !== undefined) data.callUpdatesChannel = callUpdatesChannel;
+
+    if (Object.keys(data).length === 0) return 0;
+
+    const result = await this.client(tx).call.updateMany({
+      where: { id: { in: callIds } },
+      data,
+    });
+
+    return result.count;
+  }
+
   /**
    * Count future SCHEDULED instances from a given date.
    */
@@ -225,7 +296,7 @@ export class ScheduledCallRepository {
   }): Promise<string[]> {
     const { callId, tx } = params;
     const participants = await tx.callParticipant.findMany({
-      where: { callId },
+      where: { callId, isExternal: false },
       select: { userId: true },
     });
     return participants.map((p) => p.userId);

@@ -36,6 +36,8 @@ export { BaseRepository } from './base';
 export { CallRepository } from './callRepository';
 export { CallRecordingRepository } from './callRecordingRepository';
 export { CallWhiteboardRepository } from './callWhiteboardRepository';
+export { RecurringCallSeriesRepository } from './recurringCallSeriesRepository';
+export { RecurringCallParticipantRepository } from './recurringCallParticipantRepository';
 export { ProjectRepository } from './projectRepository';
 export { ChannelRepository } from './channelRepository';
 export { ChannelParticipantRepository } from './channelParticipantRepository';
@@ -93,6 +95,8 @@ import {
 import { CallRepository } from './callRepository';
 import { CallRecordingRepository } from './callRecordingRepository';
 import { CallWhiteboardRepository } from './callWhiteboardRepository';
+import { RecurringCallSeriesRepository } from './recurringCallSeriesRepository';
+import { RecurringCallParticipantRepository } from './recurringCallParticipantRepository';
 import { MessageRepository } from './messageRepository';
 import { ProjectRepository } from './projectRepository';
 import { MessageSearchRepository } from './messageSearchRepository';
@@ -153,6 +157,8 @@ export class RepositoryContainer {
   public calls: CallRepository;
   public callRecordings: CallRecordingRepository;
   public callWhiteboards: CallWhiteboardRepository;
+  public recurringCallSeries: RecurringCallSeriesRepository;
+  public recurringCallParticipants: RecurringCallParticipantRepository;
   public messages: MessageRepository;
   public projects: ProjectRepository;
   public messageSearch: MessageSearchRepository;
@@ -209,6 +215,8 @@ export class RepositoryContainer {
     this.calls = new CallRepository();
     this.callRecordings = new CallRecordingRepository();
     this.callWhiteboards = new CallWhiteboardRepository();
+    this.recurringCallSeries = new RecurringCallSeriesRepository();
+    this.recurringCallParticipants = new RecurringCallParticipantRepository();
     this.messages = new MessageRepository();
     this.projects = new ProjectRepository();
     this.messageSearch = new MessageSearchRepository();

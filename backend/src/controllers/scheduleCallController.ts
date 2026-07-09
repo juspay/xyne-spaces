@@ -4,116 +4,61 @@ import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
-import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus, type Prisma } from '@prisma/client';
 import { ZodError } from 'zod';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema, CancelScheduledCallSchema, CancelRecurringSeriesSchema } from '@/validators/callValidator';
 import { recurringCallService } from '@/services/recurringCallService';
 import { addHHMMDuration } from '@/utils/dateUtils';
-import { emailService } from '@/services/emailService';
-import { renderCallInvitationHtml, buildCallInvitationIcs } from '@xyne/shared';
-import { sanitizeEmailBodyHtml } from '@/utils/contentUtils';
-import { buildCallInviteUrl } from '@/utils/urlUtils';
-import { Prisma } from '@prisma/client';
-import rruleLib from 'rrule';
-
-const { RRule } = rruleLib;
+import { findNewEmails, normalizeEmailList } from '@/utils/email';
+import { deriveEndsOnFromRRule } from '@/utils/recurrenceUtils';
+import {
+  type CallInvitationParams,
+  sendCallInvitationEmail,
+  sendCallInvitationReply,
+} from '@/services/callInvitationEmailService';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
 
-async function sendCallInvitationReply(
-  params: {
-    conversationId: string;
-    externalId: string;
-    callTitle: string;
-    startsAt: Date;
-    endsAt: Date;
-    organizerUserId: string;
-    externalInvitees: string[];
-    invitation: {
-      bodyHtml: string;
-      title?: string;
-      organizerName?: string;
-      organizerEmail?: string;
-      orgName?: string;
-      timezone?: string;
-    };
-  },
-  tx: Prisma.TransactionClient,
-): Promise<void> {
-  const organizer = await repositories.users.findById(params.organizerUserId);
-  const title = params.invitation.title || params.callTitle;
-  const organizerName =
-    params.invitation.organizerName || organizer?.name || organizer?.email || 'A colleague';
-  const organizerEmail = params.invitation.organizerEmail || organizer?.email || '';
-  const timezone = params.invitation.timezone || 'UTC';
-  const joinUrl = buildCallInviteUrl(params.externalId);
+type ExternalInvitationDelivery = 'standalone' | 'conversation_reply';
 
-  const renderedBody = renderCallInvitationHtml({
-    title,
-    startsAt: params.startsAt,
-    endsAt: params.endsAt,
-    timezone,
-    organizerName,
-    organizerEmail,
-    ...(params.invitation.orgName && { orgName: params.invitation.orgName }),
-    joinUrl,
-    userBodyHtml: sanitizeEmailBodyHtml(params.invitation.bodyHtml),
-  });
-
-  const ics = buildCallInvitationIcs({
-    uid: params.externalId,
-    title,
-    startsAt: params.startsAt,
-    endsAt: params.endsAt,
-    organizerName,
-    organizerEmail,
-    attendeeEmails: params.externalInvitees,
-    description: `You have been invited to "${title}" by ${organizerName}.`,
-    joinUrl,
-  });
-
-  await emailService.sendReplyOnConversation(
-    {
-      conversationId: params.conversationId,
-      body: renderedBody,
-      type: 'REPLY',
-      to: params.externalInvitees,
-      fileAttachments: [
-        { name: 'invite.ics', contentType: 'text/calendar', content: ics },
-      ],
-    },
-    tx,
-  );
-}
-
-/**
- * If the RRULE contains UNTIL or COUNT, derive the effective end date so that
- * the series.endsOn is always populated — even when the frontend didn't send
- * an explicit endsOn value.
- */
-function deriveEndsOnFromRRule(recurrenceRule: string, startsOn: Date): Date | null {
-  try {
-    const options = RRule.parseString(recurrenceRule);
-    options.dtstart = startsOn;
-    const rule = new RRule(options);
-    if (options.until) {
-      // UNTIL date is already the last allowed occurrence date
-      return new Date(options.until);
-    }
-    if (options.count) {
-      // Enumerate all occurrences and take the last one
-      const all = rule.all();
-      return all.length > 0 ? all[all.length - 1]! : null;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+function defaultCallInvitation(timezone?: string | null): CallInvitationParams['invitation'] {
+  return {
+    bodyHtml: "<p>You've been invited to a call. Details below.</p>",
+    ...(timezone && { timezone }),
+  };
 }
 
 export class ScheduleCallController {
+  private sendExternalInvitationInBackground(params: {
+    invitationParams: CallInvitationParams;
+    delivery?: ExternalInvitationDelivery;
+    conversationId?: string;
+    context: string;
+  }): void {
+    const { invitationParams, delivery, conversationId, context } = params;
+
+    setImmediate(() => {
+      void (async () => {
+        try {
+          if (delivery === 'conversation_reply' && conversationId) {
+            await sendCallInvitationReply({
+              ...invitationParams,
+              conversationId,
+            });
+          } else {
+            await sendCallInvitationEmail(invitationParams);
+          }
+        } catch (error) {
+          logger.error(
+            `[${context}] Failed to send external call invitation in background | callExternalId=${invitationParams.externalId} invitees=${invitationParams.externalInvitees.join(', ')} error=${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      })();
+    });
+  }
+
   /**
    * Compute the participant add/remove delta for a call.
    * - If `targetUserIds` is provided, use it as the desired final set.
@@ -149,6 +94,23 @@ export class ScheduleCallController {
     return { addUserIds, removeUserIds };
   }
 
+  private async resolveRecurringInternalParticipantUserIds(params: {
+    targetUserIds: string[] | undefined;
+    channelId: string;
+    logPrefix: string;
+  }): Promise<string[]> {
+    const { targetUserIds, channelId, logPrefix } = params;
+
+    if (targetUserIds !== undefined) {
+      return targetUserIds;
+    }
+
+    const channelParticipants = await repositories.channelParticipants.getChannelParticipants(channelId);
+    const participantUserIds = channelParticipants.map((p) => p.userId);
+    logger.info(`${logPrefix} materializing ${participantUserIds.length} participants from channel ${channelId}`);
+    return participantUserIds;
+  }
+
   // POST /api/calls/series - Create a recurring call series
   createRecurringSeries = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -170,7 +132,10 @@ export class ScheduleCallController {
         endTime,
         startsOn,
         endsOn,
+        externalInvitees,
+        invitation,
       } = RecurringScheduleCallSchema.parse(req.body);
+      const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
 
       // Scope is fully decided by the frontend; the backend does NO scopeType inspection:
       //   - channelId present [+ targetUserIds subset] → channel-scoped call, keep channelId
@@ -179,11 +144,6 @@ export class ScheduleCallController {
       // selective channel call can also post its updates to a different channel.
       let finalChannelId = channelId;
       const callUpdatesChannel: string | null = reqCallUpdatesChannel ?? null;
-      // When a channel is supplied with an explicit subset, seed the initial instances with that
-      // subset; whole-channel and group calls leave it undefined (members are derived downstream).
-      const seriesTargetUserIds: string[] | undefined =
-        channelId && targetUserIds?.length ? targetUserIds : undefined;
-
       if (!channelId && targetUserIds?.length) {
         // No channel supplied → direct group call, create a GROUP_DM for the participants.
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
@@ -212,34 +172,51 @@ export class ScheduleCallController {
         return;
       }
 
+      const recurringParticipantUserIds = await this.resolveRecurringInternalParticipantUserIds({
+        targetUserIds,
+        channelId: finalChannelId!,
+        logPrefix: '[createRecurringSeries]',
+      });
+
       // Create series and pre-create all instances for the next 60 days
       // Only the first upcoming instance notifies participants (to avoid spam)
       let createdCallIds: string[] = [];
       await dbClient.$transaction(async (tx) => {
-        const series = await tx.recurringCallSeries.create({
-          data: {
-            id: seriesId,
-            title,
-            description,
-            organizerId: userId,
-            channelId: finalChannelId!,
-            recurrenceRule,
-            timezone,
-            startTime,
-            endTime,
-            startsOn: new Date(startsOn),
-            endsOn: resolvedEndsOn,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            callUpdatesChannel,
-          },
+        const series = await repositories.recurringCallSeries.create({
+          id: seriesId,
+          title,
+          description,
+          organizerId: userId,
+          channelId: finalChannelId!,
+          recurrenceRule,
+          timezone,
+          startTime,
+          endTime,
+          startsOn: new Date(startsOn),
+          endsOn: resolvedEndsOn,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          callUpdatesChannel,
+        }, tx);
+
+        await repositories.recurringCallParticipants.replaceInternalParticipants({
+          recurringSeriesId: series.id,
+          organizerId: userId,
+          userIds: recurringParticipantUserIds,
+          tx,
         });
 
+        if (normalizedExternalInvitees.length > 0) {
+          await repositories.recurringCallParticipants.replaceExternalInvitees({
+            recurringSeriesId: series.id,
+            organizerId: userId,
+            externalInvitees: normalizedExternalInvitees,
+            tx,
+          });
+        }
+
         // Pre-create all instances for the next buffer period.
-        // When a channel call carries a selected subset, pass seriesTargetUserIds so the initial
-        // batch of instances uses only that subset of channel members.
-        // Note: auto-created future instances (via createNextInstance) will use all channel
-        // members since RecurringCallSeries has no targetUserIds storage field.
+        // RecurringCallParticipant rows are the source for internal participants and external invitees.
         const fromDate = new Date(startsOn);
         const toDate = new Date(Date.now() + INSTANCE_BUFFER_DAYS);
         const finalToDate = resolvedEndsOn && resolvedEndsOn < toDate ? resolvedEndsOn : toDate;
@@ -249,7 +226,6 @@ export class ScheduleCallController {
           fromDate,
           finalToDate,
           tx,
-          seriesTargetUserIds,
           callUpdatesChannel,
         );
       });
@@ -257,6 +233,29 @@ export class ScheduleCallController {
       logger.info(
         `Recurring series ${seriesId} created by ${userId} — ${createdCallIds.length} instances pre-created`,
       );
+
+      if (normalizedExternalInvitees.length > 0 && invitation) {
+        const inviteCall = await repositories.scheduledCalls.findFirstUpcomingSeriesInstance({ seriesId });
+        if (inviteCall?.startsAt && inviteCall.endsAt) {
+          this.sendExternalInvitationInBackground({
+            context: 'createRecurringSeries',
+            delivery: 'standalone',
+            invitationParams: {
+              externalId: inviteCall.externalId,
+              callTitle: inviteCall.title ?? title,
+              startsAt: inviteCall.startsAt,
+              endsAt: inviteCall.endsAt,
+              organizerUserId: userId,
+              externalInvitees: normalizedExternalInvitees,
+              invitation,
+            },
+          });
+        } else {
+          logger.warn(
+            `[createRecurringSeries] Skipping external invite email because no upcoming instance was found | seriesId=${seriesId} invitees=${normalizedExternalInvitees.join(', ')}`,
+          );
+        }
+      }
 
       res.json({
         success: true,
@@ -289,6 +288,7 @@ export class ScheduleCallController {
         callUpdatesChannel: reqCallUpdatesChannel,
         conversationId,
         externalInvitees,
+        externalInviteDelivery,
         invitation,
       } = ScheduleCallSchema.parse(req.body);
 
@@ -318,11 +318,21 @@ export class ScheduleCallController {
       // Generate room link for scheduled call
       const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${CallType.AUDIO}`;
 
+      const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
       const hasExternals = !!(
-        externalInvitees && externalInvitees.length > 0 && invitation && conversationId
+        normalizedExternalInvitees.length > 0 && invitation
       );
+      const hasConversation = !!conversationId;
+      const sendAsConversationReply = hasExternals && externalInviteDelivery === 'conversation_reply';
+
+      if (hasExternals) {
+        logger.info(
+          `[scheduleCall] External invitees detected | callId=${callId} externalId=${externalId} inviteeCount=${normalizedExternalInvitees.length} delivery=${externalInviteDelivery ?? 'standalone'} hasConversation=${hasConversation}`,
+        );
+      }
 
       const db = DatabaseClient.getInstance();
+
       const { participantUserIds } = await db.$transaction(async (tx) => {
         const result = await repositories.calls.createCallWithParticipants({
           callId,
@@ -340,26 +350,28 @@ export class ScheduleCallController {
           ...(targetUserIds?.length && { targetUserIds }),
           ...(conversationId && { metadata: { conversationId } }),
           callUpdatesChannel,
+          ...(normalizedExternalInvitees.length && { externalInvitees: normalizedExternalInvitees }),
         }, tx);
-
-        if (hasExternals) {
-          await sendCallInvitationReply(
-            {
-              conversationId: conversationId!,
-              externalId,
-              callTitle: title,
-              startsAt: new Date(startsAt),
-              endsAt: new Date(endsAt),
-              organizerUserId: userId,
-              externalInvitees: externalInvitees!,
-              invitation: invitation!,
-            },
-            tx,
-          );
-        }
 
         return result;
       });
+
+      if (hasExternals) {
+        this.sendExternalInvitationInBackground({
+          context: 'scheduleCall',
+          delivery: sendAsConversationReply ? 'conversation_reply' : 'standalone',
+          ...(conversationId && { conversationId }),
+          invitationParams: {
+            externalId,
+            callTitle: title,
+            startsAt: new Date(startsAt),
+            endsAt: new Date(endsAt),
+            organizerUserId: userId,
+            externalInvitees: normalizedExternalInvitees,
+            invitation: invitation!,
+          },
+        });
+      }
 
       // Send immediate notifications + create activities for all participants (excluding organizer)
       try {
@@ -414,6 +426,15 @@ export class ScheduleCallController {
         channelId: finalChannelId,
       });
     } catch (error) {
+      if (error instanceof ZodError) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid schedule call request',
+          details: error.errors,
+        });
+        return;
+      }
+
       const message = error instanceof Error ? error.message : 'Unknown error';
       logger.error(`Failed to schedule call: ${message}`);
       res.status(500).json({ success: false, error: 'Failed to schedule call', message });
@@ -441,9 +462,12 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateScheduleCallSchema.parse(req.body);
-      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel } = parsedBody;
+      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees } = parsedBody;
+      const normalizedExternalInvitees = externalInvitees !== undefined
+        ? normalizeEmailList(externalInvitees)
+        : undefined;
 
-      logger.info(`[updateScheduledCall] request | externalId=${externalId} userId=${userId} reqChannelId=${reqChannelId} targetUserIds=${JSON.stringify(targetUserIds)} title=${title} startsAt=${startsAt} endsAt=${endsAt}`);
+      logger.info(`[updateScheduledCall] request | externalId=${externalId} userId=${userId} reqChannelId=${reqChannelId} targetUserIds=${JSON.stringify(targetUserIds)} externalInvitees=${JSON.stringify(normalizedExternalInvitees)} title=${title} startsAt=${startsAt} endsAt=${endsAt}`);
 
       const call = await repositories.calls.findByExternalId(externalId);
       if (!call) {
@@ -513,9 +537,18 @@ export class ScheduleCallController {
         ));
       }
 
+      let newlyAddedExternalInvitees: string[] = [];
+      if (normalizedExternalInvitees !== undefined) {
+        const currentExternalInvitees = await repositories.calls.findExternalInviteeEmails(call.id);
+        newlyAddedExternalInvitees = findNewEmails(normalizedExternalInvitees, currentExternalInvitees);
+        logger.info(
+          `[updateScheduledCall] external invitee delta | added=${JSON.stringify(newlyAddedExternalInvitees)} total=${JSON.stringify(normalizedExternalInvitees)}`,
+        );
+      }
+
       logger.info(`[updateScheduledCall] calling updateScheduledCall repo | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
 
-      await repositories.calls.updateScheduledCall({
+      const updatedCall = await repositories.calls.updateScheduledCall({
         callId: call.id,
         title,
         startsAt: startsAt !== undefined ? new Date(startsAt) : undefined,
@@ -524,9 +557,35 @@ export class ScheduleCallController {
         addUserIds,
         removeUserIds,
         callUpdatesChannel: newCallUpdatesChannel,
+        externalInvitees: normalizedExternalInvitees,
       });
 
       logger.info(`[updateScheduledCall] repo update complete | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
+
+      if (newlyAddedExternalInvitees.length > 0) {
+        const inviteStartsAt = updatedCall.startsAt ?? call.startsAt;
+        const inviteEndsAt = updatedCall.endsAt ?? call.endsAt;
+
+        if (inviteStartsAt && inviteEndsAt) {
+          this.sendExternalInvitationInBackground({
+            context: 'updateScheduledCall',
+            delivery: 'standalone',
+            invitationParams: {
+              externalId,
+              callTitle: updatedCall.title ?? call.title ?? 'Scheduled Call',
+              startsAt: inviteStartsAt,
+              endsAt: inviteEndsAt,
+              organizerUserId: userId,
+              externalInvitees: newlyAddedExternalInvitees,
+              invitation: defaultCallInvitation(updatedCall.timezone ?? call.timezone),
+            },
+          });
+        } else {
+          logger.warn(
+            `[updateScheduledCall] Skipping external invite email for newly added invitees because call time is missing | callId=${call.id} invitees=${newlyAddedExternalInvitees.join(', ')}`,
+          );
+        }
+      }
 
       // Fetch participants once for both rescheduling and update notifications
       const allParticipants = await repositories.calls.findParticipants(call.id);
@@ -612,12 +671,15 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateRecurringSeriesSchema.parse(req.body);
-      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel } = parsedBody;
+      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees } = parsedBody;
+      const normalizedExternalInvitees = externalInvitees !== undefined
+        ? normalizeEmailList(externalInvitees)
+        : undefined;
 
-      logger.info(`[updateRecurringSeries] request | seriesId=${seriesId} userId=${userId} reqChannelId=${reqChannelId} targetUserIds=${JSON.stringify(targetUserIds)} title=${title}`);
+      logger.info(`[updateRecurringSeries] request | seriesId=${seriesId} userId=${userId} reqChannelId=${reqChannelId} targetUserIds=${JSON.stringify(targetUserIds)} externalInvitees=${JSON.stringify(normalizedExternalInvitees)} title=${title}`);
 
       const db = DatabaseClient.getInstance();
-      const series = await db.recurringCallSeries.findUnique({ where: { id: seriesId } });
+      const series = await repositories.recurringCallSeries.findById(seriesId);
 
       if (!series) {
         res.status(404).json({ success: false, error: 'Series not found' });
@@ -640,6 +702,16 @@ export class ScheduleCallController {
       // Resolution is the same as scheduleCall: channelId present → keep it; absent → GROUP_DM;
       // callUpdatesChannel is stored orthogonally. No scopeType inspection.
       const seriesModeChanged = reqChannelId !== undefined || targetUserIds !== undefined || reqCallUpdatesChannel !== undefined;
+
+      let newlyAddedExternalInvitees: string[] = [];
+      if (normalizedExternalInvitees !== undefined) {
+        const currentExternalInvitees =
+          await repositories.recurringCallParticipants.findExternalInviteeEmails(seriesId);
+        newlyAddedExternalInvitees = findNewEmails(normalizedExternalInvitees, currentExternalInvitees);
+        logger.info(
+          `[updateRecurringSeries] external invitee delta | added=${JSON.stringify(newlyAddedExternalInvitees)} total=${JSON.stringify(normalizedExternalInvitees)}`,
+        );
+      }
 
       let resolvedChannelId: string | undefined;
       let newCallUpdatesChannel: string | null | undefined; // undefined = don't touch
@@ -668,13 +740,23 @@ export class ScheduleCallController {
         logger.info(`[updateRecurringSeries] no channelId change — keeping existing channelId=${series.channelId}`);
       }
 
+      const shouldReplaceRecurringInternalParticipants =
+        targetUserIds !== undefined || resolvedChannelId !== undefined;
+      const recurringParticipantUserIds = shouldReplaceRecurringInternalParticipants
+        ? await this.resolveRecurringInternalParticipantUserIds({
+          targetUserIds,
+          channelId: resolvedChannelId ?? series.channelId,
+          logPrefix: '[updateRecurringSeries]',
+        })
+        : undefined;
+
       // Detect whether recurrence structure changes require instance regeneration.
       // Only recurrenceRule changes require delete+regenerate.
       const ruleChanged = recurrenceRule !== undefined && recurrenceRule !== series.recurrenceRule;
       const needsRegeneration = ruleChanged;
 
       // Build the series update payload
-      const seriesUpdate: Record<string, unknown> = { updatedAt: new Date() };
+      const seriesUpdate: Prisma.RecurringCallSeriesUncheckedUpdateInput = { updatedAt: new Date() };
       if (title !== undefined) seriesUpdate.title = title;
       if (recurrenceRule !== undefined) seriesUpdate.recurrenceRule = recurrenceRule;
       if (startTime !== undefined) seriesUpdate.startTime = startTime;
@@ -689,14 +771,35 @@ export class ScheduleCallController {
 
       logger.info(`[updateRecurringSeries] seriesUpdate payload=${JSON.stringify(seriesUpdate)}`);
 
-      // Update the series record
-      const updatedSeries = await db.recurringCallSeries.update({
-        where: { id: seriesId },
-        data: seriesUpdate,
+      const updatedSeries = await db.$transaction(async (tx) => {
+        const seriesAfterUpdate = await repositories.recurringCallSeries.update(
+          seriesId,
+          seriesUpdate,
+          tx,
+        );
+
+        if (recurringParticipantUserIds !== undefined) {
+          await repositories.recurringCallParticipants.replaceInternalParticipants({
+            recurringSeriesId: seriesId,
+            organizerId: userId,
+            userIds: recurringParticipantUserIds,
+            tx,
+          });
+        }
+
+        if (normalizedExternalInvitees !== undefined) {
+          await repositories.recurringCallParticipants.replaceExternalInvitees({
+            recurringSeriesId: seriesId,
+            organizerId: userId,
+            externalInvitees: normalizedExternalInvitees,
+            tx,
+          });
+        }
+
+        return seriesAfterUpdate;
       });
 
-      logger.info(`[updateRecurringSeries] series record updated | newChannelId=${updatedSeries.channelId}`);
-
+      logger.info(`[updateRecurringSeries] source transaction committed | newChannelId=${updatedSeries.channelId}`);
 
       if (needsRegeneration) {
         // Delete ALL SCHEDULED instances and recreate them with the new recurrence rule.
@@ -760,10 +863,10 @@ export class ScheduleCallController {
             const newStartsAt = new Date(existingStart.getTime() + startDeltaMs);
             const newEndsAt = new Date(existingEnd.getTime() + endDeltaMs);
 
-            // Update startsAt and endsAt in-place
-            await db.call.update({
-              where: { id: instance.id },
-              data: { startsAt: newStartsAt, endsAt: newEndsAt },
+            await repositories.scheduledCalls.updateScheduledInstanceTimes({
+              callId: instance.id,
+              startsAt: newStartsAt,
+              endsAt: newEndsAt,
             });
 
             instancesNeedingTimeUpdate.push({
@@ -782,9 +885,11 @@ export class ScheduleCallController {
 
         if (Object.keys(instanceCascade).length > 0 && allScheduledInstances.length > 0) {
           logger.info(`[updateRecurringSeries] cascading ${JSON.stringify(instanceCascade)} to ${allScheduledInstances.length} instances`);
-          await db.call.updateMany({
-            where: { id: { in: allScheduledInstances.map((i) => i.id) } },
-            data: instanceCascade,
+          await repositories.scheduledCalls.updateScheduledInstanceFields({
+            callIds: allScheduledInstances.map((i) => i.id),
+            title: title !== undefined ? title : undefined,
+            channelId: resolvedChannelId,
+            callUpdatesChannel: newCallUpdatesChannel,
           });
         }
 
@@ -815,17 +920,14 @@ export class ScheduleCallController {
           }
         }
 
-        // Update participants on ALL scheduled instances if targetUserIds provided, OR if the
-        // channel changed without explicit targetUserIds (use the new channel's members).
-        const seriesChannelChanged = resolvedChannelId !== undefined && resolvedChannelId !== series.channelId;
-
-        if (targetUserIds !== undefined || seriesChannelChanged) {
+        // Update participants on all scheduled instances from the series source table.
+        if (recurringParticipantUserIds !== undefined) {
           const effectiveChannelIdForDelta = resolvedChannelId ?? series.channelId;
           for (const instance of allScheduledInstances) {
             const { addUserIds, removeUserIds } = await this.resolveParticipantDelta(
               instance.id,
               userId,
-              targetUserIds,
+              recurringParticipantUserIds,
               effectiveChannelIdForDelta,
               `[updateRecurringSeries] instance=${instance.id}`,
             );
@@ -837,6 +939,41 @@ export class ScheduleCallController {
               });
             }
           }
+        }
+
+        if (normalizedExternalInvitees !== undefined && allScheduledInstances.length > 0) {
+          logger.info(
+            `[updateRecurringSeries] syncing external invitees to ${allScheduledInstances.length} scheduled instances`,
+          );
+          for (const instance of allScheduledInstances) {
+            await repositories.calls.updateScheduledCall({
+              callId: instance.id,
+              externalInvitees: normalizedExternalInvitees,
+            });
+          }
+        }
+      }
+
+      if (newlyAddedExternalInvitees.length > 0) {
+        const inviteCall = await repositories.scheduledCalls.findFirstUpcomingSeriesInstance({ seriesId });
+        if (inviteCall?.startsAt && inviteCall.endsAt) {
+          this.sendExternalInvitationInBackground({
+            context: 'updateRecurringSeries',
+            delivery: 'standalone',
+            invitationParams: {
+              externalId: inviteCall.externalId,
+              callTitle: inviteCall.title ?? title ?? series.title,
+              startsAt: inviteCall.startsAt,
+              endsAt: inviteCall.endsAt,
+              organizerUserId: userId,
+              externalInvitees: newlyAddedExternalInvitees,
+              invitation: defaultCallInvitation(timezone ?? series.timezone),
+            },
+          });
+        } else {
+          logger.warn(
+            `[updateRecurringSeries] Skipping external invite email because no upcoming instance was found | seriesId=${seriesId} invitees=${newlyAddedExternalInvitees.join(', ')}`,
+          );
         }
       }
 
@@ -850,10 +987,12 @@ export class ScheduleCallController {
       // Notify all participants of the series change
       try {
         const effectiveChannelId = resolvedChannelId ?? series.channelId;
-        const channelParticipants = await repositories.channelParticipants.getChannelParticipants(
-          effectiveChannelId,
-        );
-        const participantIds = channelParticipants.map((p) => p.userId);
+        const storedParticipantIds =
+          await repositories.recurringCallParticipants.findInternalParticipantUserIds(seriesId);
+        const participantIds = storedParticipantIds.length > 0
+          ? storedParticipantIds
+          : (await repositories.channelParticipants.getChannelParticipants(effectiveChannelId))
+            .map((p) => p.userId);
 
         await scheduledCallNotificationService.sendCallUpdatedNotifications({
           callId: seriesId,
@@ -985,8 +1124,7 @@ export class ScheduleCallController {
     try {
       CancelRecurringSeriesSchema.parse(req.body);
 
-      const db = DatabaseClient.getInstance();
-      const series = await db.recurringCallSeries.findUnique({ where: { id: seriesId } });
+      const series = await repositories.recurringCallSeries.findById(seriesId);
 
       if (!series) {
         res.status(404).json({ success: false, error: 'Series not found' });

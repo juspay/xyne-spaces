@@ -31,6 +31,7 @@ export {
   PullRequestsACL,
   ReactionCountsACL,
   ReactionsACL,
+  RecurringCallParticipantsACL,
   StagesACL,
   SubTicketsACL,
   TicketActivitiesACL,

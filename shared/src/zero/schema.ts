@@ -1844,6 +1844,7 @@ export const callParticipantTable = table('call_participants')
     leftAt: number().optional(),
     metadata: json().optional(),
     displayName: string().optional(),
+    email: string().optional(),
     isExternal: boolean(),
   })
   .primaryKey('id');
@@ -1865,6 +1866,23 @@ export const recurringCallSeriesTable = table('recurring_call_series')
     createdAt: number(),
     updatedAt: number(),
     callUpdatesChannel: string().optional(),
+  })
+  .primaryKey('id');
+
+export const recurringCallParticipantTable = table('recurring_call_participants')
+  .columns({
+    id: string(),
+    recurringSeriesId: string(),
+    userId: string(),
+    invitedBy: string(),
+    invitedAt: number(),
+    response: enumeration<InvitationResponse>().optional(),
+    meetingStatus: enumeration<MeetingStatus>(),
+    respondedAt: number().optional(),
+    metadata: json().optional(),
+    displayName: string().optional(),
+    email: string().optional(),
+    isExternal: boolean(),
   })
   .primaryKey('id');
 
@@ -4037,6 +4055,22 @@ export const recurringCallSeriesTableRelationships = relationships(
       destField: ['recurringSeriesId'],
       destSchema: callTable,
     }),
+    participants: many({
+      sourceField: ['id'],
+      destField: ['recurringSeriesId'],
+      destSchema: recurringCallParticipantTable,
+    }),
+  }),
+);
+
+export const recurringCallParticipantTableRelationships = relationships(
+  recurringCallParticipantTable,
+  ({ one }) => ({
+    recurringSeries: one({
+      sourceField: ['recurringSeriesId'],
+      destField: ['id'],
+      destSchema: recurringCallSeriesTable,
+    }),
   }),
 );
 
@@ -4865,6 +4899,7 @@ export const schema = createSchema({
     callTable,
     callParticipantTable,
     recurringCallSeriesTable,
+    recurringCallParticipantTable,
     canvasFolderTable,
     canvasTable,
     canvasVersionTable,
@@ -4980,6 +5015,7 @@ export const schema = createSchema({
     callTableRelationships,
     callParticipantTableRelationships,
     recurringCallSeriesTableRelationships,
+    recurringCallParticipantTableRelationships,
     canvasFolderTableRelationships,
     canvasTableRelationships,
     canvasVersionTableRelationships,
@@ -5109,6 +5145,8 @@ export type SurfaceNudge = Row<typeof schema.tables.surface_nudges>;
 export type SurfaceNudgeCount = Row<typeof schema.tables.surface_nudge_counts>;
 export type Call = Row<typeof schema.tables.calls>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
+export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series>;
+export type RecurringCallParticipant = Row<typeof schema.tables.recurring_call_participants>;
 export type ConversationParticipant = Row<typeof schema.tables.conversation_participants>;
 export type Canvas = Row<typeof schema.tables.canvases>;
 export type CanvasVersion = Row<typeof schema.tables.canvas_versions>;

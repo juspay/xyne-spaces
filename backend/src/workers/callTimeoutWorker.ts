@@ -101,6 +101,11 @@ export class CallTimeoutWorker {
             return;
         }
 
+        if (participant.isExternal) {
+            this.logger.info(`Participant ${participantId} is external, skipping timeout notification`);
+            return;
+        }
+
         // 2. Check status - only timeout if still INVITED
         if (participant.response === InvitationResponse.INVITED) {
             this.logger.info(`Participant ${participantId} timed out (still INVITED). Updating to MISSED.`);

@@ -16,7 +16,7 @@ import { useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
-import { CallStatus } from '@xyne/shared';
+import { CallStatus, InvitationResponse } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { CallConfirmationModal } from '../../components/Call/CallConfirmationModal';
@@ -44,7 +44,6 @@ import { CallCard } from './CallCard';
 import {
   Call,
   isExternalCalendarEvent,
-  hasJoinedExternalParticipant,
   isScheduledCallJoinable,
   RecentCallFilter,
   FILTER_LABELS,
@@ -69,6 +68,12 @@ interface EmptyStateProps {
 
 function isSameMonth(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
+function hasExternalChatAccess(call: Call): boolean {
+  return (
+    call.participants?.some(p => p.isExternal && p.response !== InvitationResponse.INVITED) ?? false
+  );
 }
 
 const CallHistoryScreen = (): ReactElement => {
@@ -542,7 +547,7 @@ const CallHistoryScreen = (): ReactElement => {
       if (channel?.name?.toLowerCase().includes(lowerQuery)) return true;
       const participantNames = call.participants
         ?.map(p => {
-          if (p.isExternal) return (p.displayName || '').toLowerCase();
+          if (p.isExternal) return (p.displayName || p.email || '').toLowerCase();
           const u = allUsersData.find(u => u.id === p.userId);
           return getUserDisplayName(u).toLowerCase();
         })
@@ -550,6 +555,7 @@ const CallHistoryScreen = (): ReactElement => {
       if (participantNames?.includes(lowerQuery)) return true;
       const participantEmails = call.participants
         ?.map(p => {
+          if (p.isExternal) return p.email?.toLowerCase() || '';
           const u = allUsersData.find(u => u.id === p.userId);
           return u?.email?.toLowerCase() || '';
         })
@@ -1086,7 +1092,7 @@ const CallHistoryScreen = (): ReactElement => {
                         handleGotoTranscript={getGotoTranscriptHandler(call)}
                         handleDownloadTranscript={() => handleDownloadTranscript(call)}
                         onViewExternalChat={
-                          hasJoinedExternalParticipant(call.participants)
+                          hasExternalChatAccess(call)
                             ? () => setExternalChatCallId(call.externalId)
                             : undefined
                         }
@@ -1119,7 +1125,7 @@ const CallHistoryScreen = (): ReactElement => {
                             handleGotoTranscript={getGotoTranscriptHandler(call)}
                             handleDownloadTranscript={() => handleDownloadTranscript(call)}
                             onViewExternalChat={
-                              hasJoinedExternalParticipant(call.participants)
+                              hasExternalChatAccess(call)
                                 ? () => setExternalChatCallId(call.externalId)
                                 : undefined
                             }
