@@ -980,8 +980,9 @@ export const ticketAssignmentTable = table("ticket_assignments")
   .columns({
     id: string(),
     ticketId: string(),
-    userId: string(),
-    userResponsibility: enumeration<UserResponsibility>(),
+    userId: string().optional(),
+    userResponsibility: enumeration<UserResponsibility>().optional(),
+    roleId: string().optional(),
     createdAt: number(),
     createdBy: string(),
   })
@@ -1250,6 +1251,29 @@ export const userGroupTable = table("user_groups")
   })
   .primaryKey("id");
 
+export const roleTable = table("roles")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    name: string(),
+    description: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+    isActive: boolean(),
+  })
+  .primaryKey("id");
+
+export const userRoleMappingTable = table("user_role_mappings")
+  .columns({
+    id: string(),
+    userId: string(),
+    roleId: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const userSessionTable = table("user_sessions")
   .columns({
     id: string(),
@@ -1306,10 +1330,11 @@ export const userPreferenceTable = table("user_preferences")
     channelSortOrder: enumeration<ChannelSortOrder>(),
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
-    globalDesktopNotificationLevel: enumeration<NotificationLevel>(),
-    globalMobileNotificationLevel: enumeration<NotificationLevel>(),
+    globalDesktopNotificationLevel: enumeration<NotificationLevel>().optional(),
+    globalMobileNotificationLevel: enumeration<NotificationLevel>().optional(),
     threadReplyNotificationsEnabled: boolean(),
     channelWideMentionsEnabled: boolean(),
+    notificationKeywords: json().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1355,7 +1380,8 @@ export const userGroupMappingTable = table("user_group_mappings")
     id: string(),
     userId: string(),
     userGroupId: string(),
-    responsibility: enumeration<UserResponsibility>(),
+    roleId: string().optional(),
+    responsibility: enumeration<UserResponsibility>().optional(),
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
     createdAt: number(),
@@ -2310,6 +2336,7 @@ export const callParticipantTable = table("call_participants")
     leftAt: number().optional(),
     metadata: json().optional(),
     displayName: string().optional(),
+    email: string().optional(),
     isExternal: boolean(),
   })
   .primaryKey("id");
@@ -2351,6 +2378,23 @@ export const recurringCallSeriesTable = table("recurring_call_series")
     callUpdatesChannel: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const recurringCallParticipantTable = table("recurring_call_participants")
+  .columns({
+    id: string(),
+    recurringSeriesId: string(),
+    userId: string(),
+    invitedBy: string(),
+    invitedAt: number(),
+    response: enumeration<InvitationResponse>().optional(),
+    meetingStatus: enumeration<MeetingStatus>(),
+    respondedAt: number().optional(),
+    metadata: json().optional(),
+    displayName: string().optional(),
+    email: string().optional(),
+    isExternal: boolean(),
   })
   .primaryKey("id");
 
@@ -3682,6 +3726,42 @@ export const userGroupTableRelationships = relationships(userGroupTable, ({ one,
   })
 }));
 
+export const roleTableRelationships = relationships(roleTable, ({ one, many }) => ({
+  createdByUser: one({
+    sourceField: ["createdBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
+  }),
+  userMappings: many({
+    sourceField: ["id"],
+    destField: ["roleId"],
+    destSchema: userRoleMappingTable,
+  }),
+  userGroupMappings: many({
+    sourceField: ["id"],
+    destField: ["roleId"],
+    destSchema: userGroupMappingTable,
+  })
+}));
+
+export const userRoleMappingTableRelationships = relationships(userRoleMappingTable, ({ one }) => ({
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  role: one({
+    sourceField: ["roleId"],
+    destField: ["id"],
+    destSchema: roleTable,
+  })
+}));
+
 export const userSessionTableRelationships = relationships(userSessionTable, ({ one }) => ({
   user: one({
     sourceField: ["userId"],
@@ -3760,6 +3840,16 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["userId"],
     destSchema: userGroupMappingTable,
+  }),
+  userRoleMappings: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: userRoleMappingTable,
+  }),
+  createdRoles: many({
+    sourceField: ["id"],
+    destField: ["createdBy"],
+    destSchema: roleTable,
   }),
   channelParticipations: many({
     sourceField: ["id"],
@@ -3868,6 +3958,11 @@ export const userGroupMappingTableRelationships = relationships(userGroupMapping
     sourceField: ["userGroupId"],
     destField: ["id"],
     destSchema: userGroupTable,
+  }),
+  role: one({
+    sourceField: ["roleId"],
+    destField: ["id"],
+    destSchema: roleTable,
   })
 }));
 
@@ -4119,6 +4214,11 @@ export const workspaceTableRelationships = relationships(workspaceTable, ({ one,
     sourceField: ["id"],
     destField: ["workspaceId"],
     destSchema: userGroupTable,
+  }),
+  roles: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: roleTable,
   })
 }));
 
@@ -4518,6 +4618,19 @@ export const recurringCallSeriesTableRelationships = relationships(recurringCall
     sourceField: ["id"],
     destField: ["recurringSeriesId"],
     destSchema: callTable,
+  }),
+  participants: many({
+    sourceField: ["id"],
+    destField: ["recurringSeriesId"],
+    destSchema: recurringCallParticipantTable,
+  })
+}));
+
+export const recurringCallParticipantTableRelationships = relationships(recurringCallParticipantTable, ({ one }) => ({
+  recurringSeries: one({
+    sourceField: ["recurringSeriesId"],
+    destField: ["id"],
+    destSchema: recurringCallSeriesTable,
   })
 }));
 
@@ -4985,6 +5098,8 @@ export const schema = createSchema(
       externalStepResponseTable,
       apiKeyTable,
       userGroupTable,
+      roleTable,
+      userRoleMappingTable,
       userSessionTable,
       userTable,
       userPreferenceTable,
@@ -5050,6 +5165,7 @@ export const schema = createSchema(
       callParticipantTable,
       callRecordingTable,
       recurringCallSeriesTable,
+      recurringCallParticipantTable,
       canvasFolderTable,
       canvasTable,
       canvasVersionTable,
@@ -5138,6 +5254,8 @@ export const schema = createSchema(
       externalStepResponseTableRelationships,
       apiKeyTableRelationships,
       userGroupTableRelationships,
+      roleTableRelationships,
+      userRoleMappingTableRelationships,
       userSessionTableRelationships,
       userTableRelationships,
       userGroupMappingTableRelationships,
@@ -5181,6 +5299,7 @@ export const schema = createSchema(
       callParticipantTableRelationships,
       callRecordingTableRelationships,
       recurringCallSeriesTableRelationships,
+      recurringCallParticipantTableRelationships,
       canvasFolderTableRelationships,
       canvasTableRelationships,
       canvasVersionTableRelationships,
@@ -5247,6 +5366,8 @@ export type AgentStep = Row<typeof schema.tables.agent_steps>;
 export type ExternalStepResponse = Row<typeof schema.tables.external_step_responses>;
 export type ApiKey = Row<typeof schema.tables.api_keys>;
 export type UserGroup = Row<typeof schema.tables.user_groups>;
+export type Role = Row<typeof schema.tables.roles>;
+export type UserRoleMapping = Row<typeof schema.tables.user_role_mappings>;
 export type UserSession = Row<typeof schema.tables.user_sessions>;
 export type User = Row<typeof schema.tables.users>;
 export type UserPreference = Row<typeof schema.tables.user_preferences>;
@@ -5312,6 +5433,7 @@ export type Call = Row<typeof schema.tables.calls>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type CallRecording = Row<typeof schema.tables.call_recordings>;
 export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series>;
+export type RecurringCallParticipant = Row<typeof schema.tables.recurring_call_participants>;
 export type CanvasFolder = Row<typeof schema.tables.canvas_folders>;
 export type Canvas = Row<typeof schema.tables.canvases>;
 export type CanvasVersion = Row<typeof schema.tables.canvas_versions>;

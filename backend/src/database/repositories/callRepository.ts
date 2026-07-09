@@ -15,6 +15,7 @@ import { repositories } from './index';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import type { CallParticipantMetadata } from '@xyne/shared';
+import { normalizeEmailList } from '@/utils/email';
 
 export type { Call, CallParticipant };
 
@@ -22,6 +23,7 @@ export interface CreateCallParticipantInput {
   id: string;
   callId: string;
   userId: string;
+  email?: string | null;
   invitedBy: string;
   invitedAt: Date;
   response: InvitationResponse;
@@ -59,6 +61,7 @@ export interface CreateCallWithParticipantsInput {
   startsAt: Date;
   endsAt: Date;
   targetUserIds?: string[];
+  externalInvitees?: string[];
   metadata?: Record<string, unknown>; // Optional: e.g. { conversationId } for thread-linked calls
   callUpdatesChannel?: string | null;
 }
@@ -255,7 +258,10 @@ export class CallRepository {
         startsAt: { gte: from, lte: to },
       },
       include: {
-        participants: { select: { userId: true, meetingStatus: true } },
+        participants: {
+          where: { isExternal: false },
+          select: { userId: true, meetingStatus: true },
+        },
       },
       orderBy: { startsAt: 'asc' },
     });
@@ -387,6 +393,31 @@ export class CallRepository {
       })),
     });
 
+    const externalInvitees = normalizeEmailList(params.externalInvitees);
+    if (externalInvitees.length > 0) {
+      await tx.callParticipant.createMany({
+        data: externalInvitees.map((email) => {
+          const participantId = uuidv4();
+          return {
+            id: participantId,
+            callId: params.callId,
+            userId: participantId,
+            email,
+            invitedBy: params.createdByUserId,
+            invitedAt: new Date(),
+            response: InvitationResponse.INVITED,
+            meetingStatus: MeetingStatus.PENDING,
+            respondedAt: null,
+            joinedAt: null,
+            leftAt: null,
+            displayName: email,
+            isExternal: true,
+          };
+        }),
+        skipDuplicates: true,
+      });
+    }
+
     return { callId: params.callId, participantUserIds };
   }
 
@@ -400,7 +431,7 @@ export class CallRepository {
   ): Promise<string[] | undefined> {
     const sibling = await tx.call.findFirst({
       where: { recurringSeriesId: seriesId },
-      select: { participants: { select: { userId: true } } },
+      select: { participants: { where: { isExternal: false }, select: { userId: true } } },
       orderBy: { createdAt: 'desc' },
     });
     return sibling?.participants.map(p => p.userId);
@@ -413,11 +444,29 @@ export class CallRepository {
     return await DatabaseClient.getInstance().callParticipant.findMany({
       where: {
         callId,
+        isExternal: false,
       },
       select: {
         userId: true,
       },
     });
+  }
+
+  async findExternalInviteeEmails(callId: string): Promise<string[]> {
+    const participants = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        callId,
+        isExternal: true,
+        email: { not: null },
+      },
+      select: {
+        email: true,
+      },
+    });
+
+    return participants
+      .map(p => p.email)
+      .filter((email): email is string => Boolean(email));
   }
 
   /**
@@ -446,6 +495,7 @@ export class CallRepository {
     const participants = await DatabaseClient.getInstance().callParticipant.findMany({
       where: {
         callId,
+        isExternal: false,
         response,
       },
       select: {
@@ -459,6 +509,7 @@ export class CallRepository {
     const participants = await DatabaseClient.getInstance().callParticipant.findMany({
       where: {
         callId,
+        isExternal: false,
         meetingStatus,
       },
       select: {
@@ -1228,6 +1279,9 @@ export class CallRepository {
       where: { callId: call.id },
       select: {
         userId: true,
+        email: true,
+        displayName: true,
+        isExternal: true,
         response: true,
         meetingStatus: true,
         joinedAt: true,
@@ -1251,6 +1305,20 @@ export class CallRepository {
 
     return callParticipants.map(p => {
       const user = userMap.get(p.userId);
+      if (p.isExternal) {
+        const externalName = p.displayName || p.email || 'Guest';
+        return {
+          userId: p.userId,
+          userName: externalName,
+          userEmail: p.email ?? '',
+          userPicture: null,
+          response: p.response,
+          meetingStatus: p.meetingStatus,
+          joinedAt: p.joinedAt,
+          leftAt: p.leftAt,
+        };
+      }
+
       return {
         userId: p.userId,
         userName: (user?.displayName || user?.name) ?? 'Unknown',
@@ -1279,8 +1347,9 @@ export class CallRepository {
     removeUserIds?: string[];
     metadata?: Record<string, unknown>;
     callUpdatesChannel?: string | null;
+    externalInvitees?: string[];
   }): Promise<Call> {
-    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, metadata, callUpdatesChannel } = params;
+    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, metadata, callUpdatesChannel, externalInvitees } = params;
     const db = DatabaseClient.getInstance();
 
     return await db.$transaction(async (tx) => {
@@ -1316,6 +1385,50 @@ export class CallRepository {
           })),
           skipDuplicates: true,
         });
+      }
+
+      if (externalInvitees !== undefined) {
+        const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
+
+        if (normalizedExternalInvitees.length === 0) {
+          await tx.callParticipant.deleteMany({
+            where: {
+              callId,
+              isExternal: true,
+              email: { not: null },
+            },
+          });
+        } else {
+          await tx.callParticipant.deleteMany({
+            where: {
+              callId,
+              isExternal: true,
+              AND: [
+                { email: { not: null } },
+                { email: { notIn: normalizedExternalInvitees } },
+              ],
+            },
+          });
+
+          await tx.callParticipant.createMany({
+            data: normalizedExternalInvitees.map((email) => {
+              const participantId = uuidv4();
+              return {
+                id: participantId,
+                callId,
+                userId: participantId,
+                email,
+                invitedBy: updatedCall.createdByUserId,
+                invitedAt: new Date(),
+                response: InvitationResponse.INVITED,
+                meetingStatus: MeetingStatus.PENDING,
+                displayName: email,
+                isExternal: true,
+              };
+            }),
+            skipDuplicates: true,
+          });
+        }
       }
 
       return updatedCall;

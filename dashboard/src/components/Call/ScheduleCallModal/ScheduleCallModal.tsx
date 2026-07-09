@@ -1,5 +1,4 @@
-import React, { useMemo, useCallback, useEffect, useState, useRef } from 'react';
-import { RRule } from 'rrule';
+import React, { useMemo, useCallback, useState, useRef } from 'react';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
 import { ChannelScopeType, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
@@ -16,7 +15,6 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { cn } from '../../../utils/classNames';
 import Dialog from '../../ui/Dialog';
-import type { DropdownListItemType } from '../../ui/Combobox/Combobox.types';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,135 +40,33 @@ import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { ExternalInviteesInput } from './ExternalInviteesInput';
 import { InvitationPreviewStep } from './InvitationPreviewStep';
+import type {
+  MonthlyType,
+  ScheduleCallFormData,
+  ScheduleCallModalProps,
+  SeriesEndsType,
+} from './types';
+import {
+  applyHHMMToDate,
+  getDefaultScheduledStartTime,
+  getWeekdayOccurrence,
+  isValidDate,
+  parseTimeAndUpdateDate,
+  toHHMM,
+} from './dateTime';
+import { DAY_KEYS, DAY_OPTIONS } from './recurrence';
+import { useRecurringCallForm } from './hooks/useRecurringCallForm';
+import { useExternalInviteSuggestions } from './hooks/useExternalInviteSuggestions';
+import { usePostCallUpdates } from './hooks/usePostCallUpdates';
+import { useScheduleCallInitialization } from './hooks/useScheduleCallInitialization';
+import { useChannelMemberExclusions } from './hooks/useChannelMemberExclusions';
 import {
   validateCallDateTimes,
   validateRecurringCallTimes,
   mergeDateWithTime,
 } from '../../../utils/callTimeValidation';
 
-/** Shape of a scheduled call passed in for pre-filling in edit mode. */
-export interface EditCallData {
-  id: string;
-  externalId: string;
-  title: string;
-  startsAt: string | number | Date;
-  endsAt: string | number | Date;
-  participants: Array<{ userId: string }>;
-  channelId?: string | null;
-  recurringSeriesId?: string | null;
-  callUpdatesChannel?: string | null;
-}
-
-interface ScheduleCallModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  /** When provided, opens in edit mode pre-filled with this call. */
-  initialCall?: EditCallData | null;
-  mode?: 'create' | 'edit';
-  /** Called after a successful edit save. */
-  onSuccess?: () => void;
-  /** Pre-fill start/end when opening in create mode from a calendar click. */
-  initialStartsAt?: Date | null;
-  initialEndsAt?: Date | null;
-  /** When set, restricts participants to channel members and hides the recurring option. */
-  channelId?: string;
-  /** When set, links the scheduled call to this thread conversation. */
-  conversationId?: string;
-  /** When set, pre-fills the call title in create mode. */
-  initialTitle?: string;
-  /** When true (ticket threads), shows the Guests email-chip input below the
-   *  participant picker, and routes the submit through Step 2 (invitation
-   *  preview) when at least one guest is added. */
-  enableExternalInvitees?: boolean;
-  /** Pre-fill participants when opening in create mode (e.g. from "Meet With" users). */
-  initialParticipants?: string[] | null;
-}
-
-interface ScheduleCallFormData {
-  title: string;
-  startsAt: Date;
-  endsAt: Date;
-  participants: string[];
-  externalEmails: string[];
-  /** Organizer's free-form invitation message body as HTML (written via TipTap). */
-  invitationMessageHtml: string;
-  /** Editable display-title for the invitation (falls back to `title`). */
-  invitationTitle: string;
-  /** Editable organizer name for the invitation header. */
-  invitationOrganizerName: string;
-  /** Editable organizer email for the invitation header. */
-  invitationOrganizerEmail: string;
-  /** Optional org/team name for the header band. */
-  invitationOrgName: string;
-}
-
-const DAY_OPTIONS: { key: string; label: string }[] = [
-  { key: 'SU', label: 'S' },
-  { key: 'MO', label: 'M' },
-  { key: 'TU', label: 'T' },
-  { key: 'WE', label: 'W' },
-  { key: 'TH', label: 'T' },
-  { key: 'FR', label: 'F' },
-  { key: 'SA', label: 'S' },
-];
-
-const DAY_KEYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const;
-const ORDINAL_WORDS = ['first', 'second', 'third', 'fourth', 'fifth'];
-
-const toHHMM = (date: Date | null | undefined): string => {
-  if (!date) return '00:00';
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-};
-
-const getWeekdayOccurrence = (
-  date: Date,
-): { occurrence: number; weekday: string; isLast: boolean; ordinalWord: string } => {
-  // Return default if date is invalid
-  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
-    return { occurrence: 1, weekday: 'Monday', isLast: false, ordinalWord: 'first' };
-  }
-  const year = date.getFullYear();
-  const month = date.getMonth();
-  const dayOfMonth = date.getDate();
-  const targetWeekday = date.getDay();
-
-  // Count occurrences of this weekday up to and including current date
-  let occurrence = 0;
-  for (let d = 1; d <= dayOfMonth; d++) {
-    const tempDate = new Date(year, month, d);
-    if (tempDate.getDay() === targetWeekday) {
-      occurrence++;
-    }
-  }
-
-  // Check if this is the last occurrence in the month
-  const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
-  let isLast = true;
-  for (let d = dayOfMonth + 1; d <= lastDayOfMonth; d++) {
-    const tempDate = new Date(year, month, d);
-    if (tempDate.getDay() === targetWeekday) {
-      isLast = false;
-      break;
-    }
-  }
-
-  const WEEKDAY_NAMES = [
-    'Sunday',
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
-  ];
-
-  return {
-    occurrence,
-    weekday: WEEKDAY_NAMES[targetWeekday] ?? 'Monday',
-    isLast,
-    ordinalWord: ORDINAL_WORDS[occurrence - 1] || `${occurrence}th`,
-  };
-};
+export type { EditCallData } from './types';
 
 export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   isOpen,
@@ -183,7 +79,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   channelId: threadChannelId,
   conversationId: threadConversationId,
   initialTitle,
-  enableExternalInvitees = false,
+  externalInviteDelivery = 'standalone',
   initialParticipants,
 }) => {
   const user = useSelf();
@@ -205,7 +101,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   // Thread/ticket emails — used to prefill Guests with addresses already on the thread.
   const [ticketEmails] = useCachedQuery(
     queries.getEmailsForTicket({ conversationId: threadConversationId ?? '' }),
-    { enabled: isOpen && !!threadConversationId && enableExternalInvitees },
+    { enabled: isOpen && !!threadConversationId },
   );
 
   const threadChannel = useChannel(threadChannelId ?? '');
@@ -225,71 +121,22 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   }, []);
 
   const isEditMode = mode === 'edit' && !!initialCall;
-  const [showCustomPanel, setShowCustomPanel] = React.useState(false);
-
-  // Store previous recurrence state
-  const [previousRecurrenceState, setPreviousRecurrenceState] = useState<{
-    isRecurring: boolean;
-    recurrenceFrequency: 'DAY' | 'WEEK' | 'MONTH';
-    recurrenceDays: string[];
-    repeatValue: number | '';
-    monthlyType: 'monthly_day' | 'monthly_nth_weekday';
-    seriesEndsType: 'never' | 'on' | 'after';
-    seriesEndsOn: Date | null;
-    occurrenceCount: number | '';
-  } | null>(null);
 
   // For recurring calls in edit mode — checkbox to edit the whole series
   const [editEntireSeries, setEditEntireSeries] = useState(false);
-  const [initialized, setInitialized] = useState(false);
-
-  // Post call updates feature
-  const [postCallUpdates, setPostCallUpdates] = useState(false);
-  const [updateChannelId, setUpdateChannelId] = useState<string | null>(null);
-  const updateChannelError = postCallUpdates && !updateChannelId;
-  const [channelSearchQuery, setChannelSearchQuery] = useState('');
-  const [channelPickerOpen, setChannelPickerOpen] = useState(false);
-  const channelInputRef = useRef<HTMLInputElement>(null);
 
   // Selective participants: tracks which participant IDs were in the original call (edit mode)
   // and whether the exclusion set has been initialized from the channel member list.
   const selectiveEditParticipantIdsRef = useRef<Set<string> | null>(null);
   const selectiveExclusionsInitializedRef = useRef<boolean>(false);
 
-  // Channel member exclusion state for the selective-participants flow
-  const [excludedChannelMembers, setExcludedChannelMembers] = useState<Set<string>>(new Set());
-  const [selectedChannelMembers, setSelectedChannelMembers] = useState<Array<{
-    userId: string;
-  }> | null>(null);
-
   // Fetch recurring call series data via Zero — only when the modal is open and
   // in edit mode for a recurring call, so the query doesn't run when the popup is closed.
-  // Always fetch (not just when editEntireSeries) so the dropdown shows correct values.
+  // This is metadata-only; applying to the series keeps whatever is currently in the form.
   const [seriesData] = useCachedQuery(
     queries.recurringSeriesById({ seriesId: initialCall?.recurringSeriesId ?? '' }),
     { enabled: isOpen && isEditMode && !!initialCall?.recurringSeriesId },
   );
-
-  const getDefaultScheduledStartTime = (): Date => {
-    const now = new Date();
-    const minutes = now.getMinutes();
-
-    const result = new Date(now);
-
-    // Round to nearest 30-minute interval
-    if (minutes < 30) {
-      result.setMinutes(30, 0, 0); // between 00-29, round to 30
-    } else {
-      result.setHours(result.getHours() + 1, 0, 0, 0);
-    }
-
-    const gapMinutes = (result.getTime() - now.getTime()) / (1000 * 60); // check if gap is less than 25 minutes
-    if (gapMinutes < 25) {
-      result.setMinutes(result.getMinutes() + 30);
-    }
-
-    return result;
-  };
 
   // Filter for DEFAULT public channels only (not DMs, not EMAIL/Desk channels)
   const channels = useMemo(() => {
@@ -297,39 +144,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       channel => channel.scopeType === ChannelScopeType.DEFAULT && !isDeskChannelType(channel.type),
     );
   }, [allVisibleChannels]);
-
-  // Combobox items for the "post call updates" channel picker — filtered by search query
-  const channelComboboxItems = useMemo((): DropdownListItemType[] => {
-    const q = channelSearchQuery.toLowerCase();
-    return channels
-      .filter(c => c.name.toLowerCase().includes(q))
-      .map(c => ({
-        value: c.id,
-        label: c.name,
-        leftSlot:
-          c.visibility === ChannelVisibility.PRIVATE ? (
-            <Lock className='size-3.5 text-gray-600' strokeWidth={2.3} />
-          ) : (
-            <Hash className='size-3.5 text-gray-600' strokeWidth={2.3} />
-          ),
-      }));
-  }, [channels, channelSearchQuery]);
-
-  const selectedChannelItem = useMemo((): DropdownListItemType | null => {
-    if (!updateChannelId) return null;
-    const channel = channels.find(c => c.id === updateChannelId);
-    if (!channel) return null;
-    return {
-      value: channel.id,
-      label: channel.name,
-      leftSlot:
-        channel.visibility === ChannelVisibility.PRIVATE ? (
-          <Lock className='size-3.5 text-gray-600' strokeWidth={2.3} />
-        ) : (
-          <Hash className='size-3.5 text-gray-600' strokeWidth={2.3} />
-        ),
-    };
-  }, [updateChannelId, channels]);
 
   const defaultStart = getDefaultScheduledStartTime();
 
@@ -386,48 +200,31 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   });
 
   // Every unique address from the thread; user removes chips they don't want.
-  const suggestedExternalEmails = useMemo<string[]>(() => {
-    if (!enableExternalInvitees || !ticketEmails || ticketEmails.length === 0) return [];
+  const suggestedExternalEmails = useExternalInviteSuggestions({
+    ticketEmails,
+    channelOwnEmail,
+    userEmail: user?.email,
+  });
 
-    const emails = ticketEmails as Array<{
-      type?: string | null;
-      from?: string | null;
-      to?: string[] | null;
-      cc?: string[] | null;
-    }>;
-
-    const extract = (s: string): string => {
-      const trimmed = s.trim();
-      const angle = /<([^>]+)>\s*$/.exec(trimmed);
-      return (angle ? angle[1]! : trimmed).trim().toLowerCase();
-    };
-    const isValidEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-
-    const ownerAddresses = new Set<string>();
-    const selfEmail = user?.email?.trim().toLowerCase();
-    if (selfEmail && isValidEmail(selfEmail)) ownerAddresses.add(selfEmail);
-    if (channelOwnEmail) ownerAddresses.add(channelOwnEmail);
-    for (const e of emails) {
-      if ((e.type === 'REPLY' || e.type === 'REPLY_ALL') && e.from) {
-        const f = extract(e.from);
-        if (isValidEmail(f)) ownerAddresses.add(f);
-      }
-    }
-
-    const addresses = emails
-      .flatMap(e => [e.from, ...(e.to ?? []), ...(e.cc ?? [])])
-      .filter((raw): raw is string => !!raw)
-      .map(extract)
-      .filter(isValidEmail)
-      .filter(addr => !ownerAddresses.has(addr));
-
-    return Array.from(new Set(addresses));
-  }, [enableExternalInvitees, ticketEmails, channelOwnEmail, user?.email]);
-
-  // Show "Post call updates" whenever at least one participant is added. The broadcast channel
-  // is orthogonal to the call's own channel, so a channel-scoped or selective call can also choose
-  // to post its updates to a different channel.
-  const showPostCallUpdates = participants.length > 0 || postCallUpdates;
+  const {
+    channelComboboxItems,
+    channelInputRef,
+    channelPickerOpen,
+    channelSearchQuery,
+    postCallUpdates,
+    resetPostCallUpdates,
+    selectedChannelItem,
+    setChannelPickerOpen,
+    setChannelSearchQuery,
+    setPostCallUpdates,
+    setUpdateChannelId,
+    showPostCallUpdates,
+    updateChannelError,
+    updateChannelId,
+  } = usePostCallUpdates({
+    channels,
+    participantCount: participants.length,
+  });
 
   const participantLabel = useMemo(() => {
     if (participants.some(v => v.startsWith('channel:'))) return 'Selected Channel';
@@ -439,267 +236,93 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   const userGroups = useUserGroupSearch(searchQuery, 10);
   const [notFoundUsers, setNotFoundUsers] = React.useState<string[]>([]);
 
-  // Recurring call state
-  const [isRecurring, setIsRecurring] = React.useState(
-    () => isEditMode && !!initialCall?.recurringSeriesId,
-  );
-  const [repeatValue, setRepeatValue] = useState<number | ''>(1);
-  const [monthlyType, setMonthlyType] = useState<'monthly_day' | 'monthly_nth_weekday'>(
-    'monthly_day',
-  );
-  const [recurrenceFrequency, setRecurrenceFrequency] = React.useState<'DAY' | 'WEEK' | 'MONTH'>(
-    'WEEK',
-  );
-  const [recurrenceDays, setRecurrenceDays] = React.useState<string[]>([]);
-  const [seriesEndsOn, setSeriesEndsOn] = React.useState<Date | null>(null);
-  const [seriesEndsType, setSeriesEndsType] = React.useState<'never' | 'on' | 'after'>('never');
-  const [occurrenceCount, setOccurrenceCount] = React.useState<number | ''>(13);
-  // Dedicated time strings for recurring mode — avoids any Date-mutation bugs
-  const [recurringStartTime, setRecurringStartTime] = React.useState<string>(() =>
-    toHHMM(defaultStart),
-  );
-  const [recurringEndTime, setRecurringEndTime] = React.useState<string>(() =>
-    toHHMM(new Date(defaultStart.getTime() + 60 * 60 * 1000)),
-  );
+  const {
+    applyRRule,
+    buildRrule,
+    isRecurring,
+    monthlyType,
+    occurrenceCount,
+    previousRecurrenceState,
+    recurrenceDays,
+    recurrenceFrequency,
+    recurrenceLabel,
+    recurringEndTime,
+    recurringStartTime,
+    repeatValue,
+    resetRecurringState,
+    seriesEndsOn,
+    seriesEndsType,
+    setIsRecurring,
+    setMonthlyType,
+    setOccurrenceCount,
+    setPreviousRecurrenceState,
+    setRecurrenceDays,
+    setRecurrenceFrequency,
+    setRecurringEndTime,
+    setRecurringStartTime,
+    setRecurringTimesFromDates,
+    setRepeatValue,
+    setSeriesEndsOn,
+    setSeriesEndsType,
+    setShowCustomPanel,
+    showCustomPanel,
+    toggleRecurrenceDay,
+  } = useRecurringCallForm({
+    defaultStart,
+    startsAt,
+    isInitiallyRecurring: isEditMode && !!initialCall?.recurringSeriesId,
+  });
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  // ── Helper: parse an RRULE string into UI state ─────────────────────────
-  const applyRRule = useCallback(
-    (rruleStr: string) => {
-      try {
-        // RRule.fromString needs RRULE: prefix stripped
-        const clean = rruleStr.replace(/^RRULE:/i, '');
-        const rule = RRule.fromString(clean);
-        const opts = rule.options;
+  // Validate start and end times
+  const validateTimes = useCallback(
+    (newStartsAt?: Date, newEndsAt?: Date) => {
+      const currentStartsAt = newStartsAt ?? watch('startsAt');
+      const currentEndsAt = newEndsAt ?? watch('endsAt');
+      const { startsAtError, endsAtError } = validateCallDateTimes(currentStartsAt, currentEndsAt);
 
-        // Frequency
-        const freqMap: Record<number, 'DAY' | 'WEEK' | 'MONTH'> = {
-          [RRule.DAILY]: 'DAY',
-          [RRule.WEEKLY]: 'WEEK',
-          [RRule.MONTHLY]: 'MONTH',
-        };
-        const freq = freqMap[opts.freq];
-        if (freq) setRecurrenceFrequency(freq);
+      if (startsAtError) {
+        setError('startsAt', { type: 'manual', message: startsAtError });
+      } else {
+        clearErrors('startsAt');
+      }
 
-        // Interval
-        setRepeatValue(opts.interval ?? 1);
-
-        // BYDAY — for WEEKLY these are plain weekday codes; for MONTHLY nth-weekday uses bysetpos
-        if (opts.freq === RRule.WEEKLY && opts.byweekday?.length) {
-          const codeMap: Record<number, string> = {
-            0: 'MO',
-            1: 'TU',
-            2: 'WE',
-            3: 'TH',
-            4: 'FR',
-            5: 'SA',
-            6: 'SU',
-          };
-          setRecurrenceDays(
-            (opts.byweekday as Array<number | { weekday: number }>).map(w =>
-              typeof w === 'number' ? (codeMap[w] ?? 'MO') : (codeMap[w.weekday] ?? 'MO'),
-            ),
-          );
-        } else {
-          setRecurrenceDays([]);
-        }
-
-        // Monthly type: bymonthday = specific day, bysetpos/byweekday = nth weekday
-        // Check if any byweekday entry has an 'n' property indicating nth occurrence
-        if (opts.freq === RRule.MONTHLY) {
-          const weekdays = opts.byweekday as
-            | Array<{ weekday?: number; n?: number } | number>
-            | undefined;
-          const hasNthWeekday = weekdays?.some(
-            w => typeof w === 'object' && w !== null && w.n !== undefined,
-          );
-          const hasByMonthDay = opts.bymonthday?.length;
-          if (hasNthWeekday) {
-            setMonthlyType('monthly_nth_weekday');
-          } else if (hasByMonthDay) {
-            setMonthlyType('monthly_day');
-          } else {
-            // Default to monthly_day if neither pattern detected
-            setMonthlyType('monthly_day');
-          }
-        }
-
-        // End condition - only update if the RRULE actually specifies one
-        if (opts.count) {
-          setSeriesEndsType('after');
-          setOccurrenceCount(opts.count);
-        } else if (opts.until) {
-          setSeriesEndsType('on');
-          setSeriesEndsOn(new Date(opts.until));
-        }
-      } catch {
-        // Silently ignore malformed rrule strings
+      if (endsAtError) {
+        setError('endsAt', { type: 'manual', message: endsAtError });
+      } else {
+        clearErrors('endsAt');
       }
     },
-    [], // eslint-disable-line react-hooks/exhaustive-deps
+    [watch, setError, clearErrors],
   );
 
-  // ── On modal open: pre-fill form from initialCall ────────────────────────
-  useEffect(() => {
-    if (!isOpen) {
-      setInitialized(false);
-      return;
-    }
-
-    if (initialized) return;
-
-    if (isEditMode && initialCall) {
-      const callStart = new Date(initialCall.startsAt);
-      const callEnd = new Date(initialCall.endsAt);
-
-      // callUpdatesChannel tells us whether this is a post-to-channel call.
-      // Null means the call is either channel-scoped (channelId is a real DEFAULT channel)
-      // or a direct group call (channelId is an auto-created GROUP_DM).
-      // Non-null means call updates are posted to that channel while participants are in a GROUP_DM.
-      const callChannel = initialCall.channelId
-        ? allVisibleChannels.find(c => c.id === initialCall.channelId)
-        : null;
-      const isExplicitChannel =
-        callChannel &&
-        callChannel.scopeType !== ChannelScopeType.DM &&
-        callChannel.scopeType !== ChannelScopeType.GROUP_DM;
-      const callUpdatesChannel = initialCall.callUpdatesChannel ?? null;
-
-      // For Scenario 3 (Case A) and Scenario 2 (Case B), the call is associated with an explicit
-      // channel, so we show the channel pill (furled list).
-      // For Scenario 1 (Case C) where it's a Group DM, we show individual user pills.
-      const participantValues: string[] = isExplicitChannel
-        ? [`channel:${initialCall.channelId}`]
-        : initialCall.participants.filter(p => p.userId !== user?.id).map(p => `user:${p.userId}`);
-
-      // Record which participant IDs were in the call so the exclusion effect below
-      // can diff against the channel member list once it loads.
-      // We only need this for explicit channel calls to determine who was unchecked.
-      if (isExplicitChannel) {
-        selectiveEditParticipantIdsRef.current = new Set(
-          initialCall.participants.map(p => p.userId),
-        );
-        selectiveExclusionsInitializedRef.current = false;
-      } else {
-        selectiveEditParticipantIdsRef.current = null;
-        selectiveExclusionsInitializedRef.current = true; // nothing to initialize
-      }
-
-      reset({
-        title: initialCall.title,
-        startsAt: callStart,
-        endsAt: callEnd,
-        participants: participantValues,
-      });
-
-      if (callUpdatesChannel) {
-        setPostCallUpdates(true);
-        setUpdateChannelId(callUpdatesChannel);
-      } else {
-        setPostCallUpdates(false);
-        setUpdateChannelId(null);
-      }
-
-      setRecurringStartTime(toHHMM(callStart));
-      setRecurringEndTime(toHHMM(callEnd));
-      // Default to editing single instance (checkbox unchecked)
-      setEditEntireSeries(false);
-      // Set isRecurring based on whether this is a recurring series call
-      setIsRecurring(!!initialCall.recurringSeriesId);
-      validateTimes(callStart, callEnd);
-      setInitialized(true);
-    } else {
-      const displayName = getUserDisplayName(user);
-      const start = initialStartsAt ?? defaultStart;
-      const end = initialEndsAt ?? new Date(start.getTime() + 60 * 60 * 1000);
-      const prefilledParticipants = initialParticipants?.map(id => `user:${id}`) ?? [];
-      if (displayName !== 'Unknown') {
-        reset({
-          title: initialTitle ?? `${displayName.split(' ')[0]}'s Call`,
-          startsAt: start,
-          endsAt: end,
-          participants: prefilledParticipants,
-        });
-        setRecurringStartTime(toHHMM(start));
-        setRecurringEndTime(toHHMM(end));
-        validateTimes(start, end);
-        setInitialized(true);
-      }
-    }
-  }, [isOpen, user, initialized]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── When series data arrives: pre-fill recurrence UI ────────────────────
-  useEffect(() => {
-    if (!seriesData) return;
-
-    setIsRecurring(true);
-
-    // When editing the whole series, only update series-level metadata
-    // (endsOn) — keep the user's current form values intact.
-    if (editEntireSeries && seriesData.endsOn) {
-      setSeriesEndsOn(new Date(seriesData.endsOn));
-      setSeriesEndsType('on');
-    }
-
-    if (seriesData.recurrenceRule) {
-      applyRRule(seriesData.recurrenceRule);
-    }
-  }, [seriesData, editEntireSeries]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Reset edit-series state when checkbox is unchecked ───────────────────
-  useEffect(() => {
-    if (editEntireSeries || !isEditMode || !initialCall) return;
-    // Restore single-occurrence form values
-    const callStart = new Date(initialCall.startsAt);
-    const callEnd = new Date(initialCall.endsAt);
-    setValue('startsAt', callStart);
-    setValue('endsAt', callEnd);
-    setRecurringStartTime(toHHMM(callStart));
-    setRecurringEndTime(toHHMM(callEnd));
-    // Don't reset series end state here - keep the original series settings
-    // so the dropdown label shows the correct recurrence pattern
-  }, [editEntireSeries]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reset post-call-updates state when the checkbox becomes hidden
-  // (user removes all participants, or adds a channel to participants)
-  useEffect(() => {
-    if (!showPostCallUpdates && postCallUpdates) {
-      setPostCallUpdates(false);
-      setUpdateChannelId(null);
-      setChannelSearchQuery('');
-    }
-  }, [showPostCallUpdates]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Initialize default day when custom panel opens for WEEK frequency
-  useEffect(() => {
-    if (showCustomPanel && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
-      const dayIndex = startsAt.getDay();
-      if (dayIndex >= 0 && dayIndex < DAY_KEYS.length) {
-        const todayKey = DAY_KEYS[dayIndex];
-        if (todayKey) {
-          setRecurrenceDays([todayKey]);
-        }
-      }
-    }
-  }, [showCustomPanel, recurrenceFrequency, recurrenceDays.length, startsAt]);
-
-  // Toggle a single member's exclusion, or select/deselect all members at once
-  const toggleExcludedChannelMember = useCallback(
-    (userId: string, isSelectAll?: boolean, allUserIds?: string[]) => {
-      setExcludedChannelMembers(prev => {
-        if (allUserIds !== undefined) {
-          // isSelectAll=true → "select all" checked → clear exclusions
-          // isSelectAll=false → "deselect all" unchecked → exclude everyone
-          return isSelectAll ? new Set() : new Set(allUserIds);
-        }
-        const next = new Set(prev);
-        if (next.has(userId)) next.delete(userId);
-        else next.add(userId);
-        return next;
-      });
-    },
-    [],
-  );
+  useScheduleCallInitialization({
+    allVisibleChannels,
+    applyRRule,
+    defaultStart,
+    editEntireSeries,
+    initialCall,
+    initialEndsAt,
+    initialParticipants,
+    initialStartsAt,
+    initialTitle,
+    isEditMode,
+    isOpen,
+    reset,
+    selectiveEditParticipantIdsRef,
+    selectiveExclusionsInitializedRef,
+    seriesData,
+    setEditEntireSeries,
+    setIsRecurring,
+    setPostCallUpdates,
+    setRecurringTimesFromDates,
+    setSeriesEndsOn,
+    setSeriesEndsType,
+    setUpdateChannelId,
+    setValue,
+    user,
+    validateTimes,
+  });
 
   const buildUserOption = (
     u: Pick<(typeof allUsers)[number], 'id' | 'name'> &
@@ -755,49 +378,19 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     return selectedChannelParticipants.filter(m => m.id !== user?.id).map(buildUserOption);
   }, [selectedChannelId, selectedChannelParticipants, user?.id]);
 
-  // Reactive (like the time-range errors): true when a channel is selected but every one of its
-  // members has been unchecked — an invalid "nobody selected" state. Drives the inline red hint
-  // and feeds `missingRequirements`, which disables submit.
-  const allChannelMembersExcluded =
-    !!channelMembersOptions &&
-    channelMembersOptions.length > 0 &&
-    channelMembersOptions.every(opt => excludedChannelMembers.has(opt.value.replace('user:', '')));
-
-  // Sync selectedChannelMembers state whenever the channel member options change
-  useEffect(() => {
-    if (channelMembersOptions) {
-      setSelectedChannelMembers(
-        channelMembersOptions.map(opt => ({ userId: opt.value.replace('user:', '') })),
-      );
-    } else {
-      setSelectedChannelMembers(null);
-    }
-  }, [channelMembersOptions]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reset exclusions when the selected channel changes
-  useEffect(() => {
-    setExcludedChannelMembers(new Set());
-  }, [selectedChannelId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Edit-mode: once channel members load, seed excludedChannelMembers from the call's original
-  // participant list so unchecked members are pre-populated correctly.
-  useEffect(() => {
-    if (
-      !isEditMode ||
-      selectiveExclusionsInitializedRef.current ||
-      !channelMembersOptions ||
-      !selectiveEditParticipantIdsRef.current
-    )
-      return;
-    const originalIds = selectiveEditParticipantIdsRef.current;
-    const excluded = new Set(
-      channelMembersOptions
-        .map(opt => opt.value.replace('user:', ''))
-        .filter(id => !originalIds.has(id)),
-    );
-    setExcludedChannelMembers(excluded);
-    selectiveExclusionsInitializedRef.current = true;
-  }, [channelMembersOptions, isEditMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  const {
+    allChannelMembersExcluded,
+    excludedChannelMembers,
+    selectedChannelMembers,
+    toggleExcludedChannelMember,
+  } = useChannelMemberExclusions({
+    channelMembersOptions,
+    editEntireSeries,
+    isEditMode,
+    selectedChannelId,
+    selectiveEditParticipantIdsRef,
+    selectiveExclusionsInitializedRef,
+  });
 
   // Build participant options
   const inviteUserOrChannelOptions = useMemo(() => {
@@ -810,7 +403,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       // In edit mode, inject pre-filled participants from the call in case they're missing
       if (isEditMode && initialCall?.participants) {
         initialCall.participants
-          .filter(p => p.userId !== user?.id)
+          .filter(p => !p.isExternal && p.userId !== user?.id)
           .forEach(p => {
             const alreadyIncluded = channelUserOptions.some(u => u.value === `user:${p.userId}`);
             if (!alreadyIncluded) {
@@ -876,7 +469,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     // (useUserSearch is limited). Inject them so their pills always render.
     if (isEditMode && initialCall?.participants) {
       initialCall.participants
-        .filter(p => p.userId !== user?.id)
+        .filter(p => !p.isExternal && p.userId !== user?.id)
         .forEach(p => {
           const alreadyIncluded = userOptions.some(u => u.value === `user:${p.userId}`);
           if (!alreadyIncluded) {
@@ -912,207 +505,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     userGroups,
     fullUserList,
   ]);
-
-  const parseTimeAndUpdateDate = useCallback(
-    (timeString?: string, currentDate?: Date | null): Date | null => {
-      if (!currentDate || !timeString) return currentDate ?? null;
-
-      const newDate = new Date(currentDate);
-      const timeParts = timeString.match(/(\d+):(\d+)\s*(AM|PM)/i);
-
-      if (!timeParts) return newDate;
-
-      let hours = parseInt(timeParts[1] || '12', 10);
-      const minutes = parseInt(timeParts[2] || '00', 10);
-      const meridiem = (timeParts[3] || 'AM').toUpperCase();
-
-      if (meridiem === 'PM' && hours !== 12) hours += 12;
-      if (meridiem === 'AM' && hours === 12) hours = 0;
-
-      newDate.setHours(hours, minutes, 0, 0);
-      return newDate;
-    },
-    [],
-  );
-
-  const buildRrule = useCallback((): string => {
-    // Map frontend frequencies to RRULE standard frequencies
-    const freqMap: Record<'DAY' | 'WEEK' | 'MONTH', string> = {
-      DAY: 'DAILY',
-      WEEK: 'WEEKLY',
-      MONTH: 'MONTHLY',
-    };
-
-    const rruleFreq = freqMap[recurrenceFrequency];
-    let rule = `FREQ=${rruleFreq}`;
-
-    // Add interval (repeat value) if greater than 1
-    if (typeof repeatValue === 'number' && repeatValue > 1) {
-      rule += `;INTERVAL=${repeatValue}`;
-    }
-
-    if (recurrenceFrequency === 'WEEK' && recurrenceDays.length > 0) {
-      rule += `;BYDAY=${recurrenceDays.join(',')}`;
-    }
-    if (recurrenceFrequency === 'MONTH') {
-      if (monthlyType === 'monthly_day') {
-        rule += `;BYMONTHDAY=${startsAt.getDate()}`; // Monthly on specific day of month (e.g., 15th)
-      } else if (monthlyType === 'monthly_nth_weekday') {
-        const { occurrence, weekday } = getWeekdayOccurrence(startsAt); // Monthly on nth weekday (e.g., second Friday)
-
-        // RRULE format: BYDAY=+2FR (second Friday)
-        const weekdayCode = weekday.substring(0, 2).toUpperCase();
-        rule += `;BYDAY=${occurrence}${weekdayCode}`;
-      }
-    }
-
-    // Add COUNT for 'after' end type
-    if (seriesEndsType === 'after') {
-      rule += `;COUNT=${occurrenceCount}`;
-    }
-
-    return rule;
-  }, [
-    recurrenceFrequency,
-    recurrenceDays,
-    monthlyType,
-    startsAt,
-    repeatValue,
-    seriesEndsType,
-    occurrenceCount,
-  ]);
-
-  const toggleRecurrenceDay = useCallback((day: string): void => {
-    setRecurrenceDays(prev => (prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]));
-  }, []);
-
-  // Generate a human-readable label for the recurrence dropdown button
-  const getRecurrenceLabel = useCallback((): string => {
-    if (!isRecurring) return 'Does not repeat';
-
-    let baseLabel = '';
-
-    // Daily
-    if (recurrenceFrequency === 'DAY') {
-      baseLabel = repeatValue === 1 ? 'Daily' : `Every ${repeatValue} days`;
-    }
-    // Weekly
-    else if (recurrenceFrequency === 'WEEK') {
-      // Check for weekday pattern (Mon-Fri)
-      const weekdaySet = new Set(['MO', 'TU', 'WE', 'TH', 'FR']);
-      const hasWeekdays =
-        recurrenceDays.length === 5 && recurrenceDays.every(d => weekdaySet.has(d));
-      if (hasWeekdays && repeatValue === 1) {
-        baseLabel = 'Every Weekday (Mon – Fri)';
-      }
-      // Check for single day
-      else if (recurrenceDays.length === 1 && repeatValue === 1) {
-        const dayKey = recurrenceDays[0];
-        if (!dayKey) {
-          baseLabel = 'Weekly on selected day';
-        } else {
-          const fullDayName: Record<string, string> = {
-            SU: 'Sunday',
-            MO: 'Monday',
-            TU: 'Tuesday',
-            WE: 'Wednesday',
-            TH: 'Thursday',
-            FR: 'Friday',
-            SA: 'Saturday',
-          };
-          baseLabel = `Weekly on ${fullDayName[dayKey] ?? 'selected day'}`;
-        }
-      }
-      // Check for multiple specific days
-      else if (recurrenceDays.length > 0 && repeatValue === 1) {
-        const dayNameMap: Record<string, string> = {
-          SU: 'Sun',
-          MO: 'Mon',
-          TU: 'Tue',
-          WE: 'Wed',
-          TH: 'Thu',
-          FR: 'Fri',
-          SA: 'Sat',
-        };
-        const dayNames = recurrenceDays.map(d => dayNameMap[d] || d);
-        if (dayNames.length <= 3) {
-          baseLabel = `Weekly on ${dayNames.join(', ')}`;
-        } else {
-          baseLabel = `Weekly on ${dayNames.length} days`;
-        }
-      }
-      // Generic weekly
-      else if (repeatValue === 1) {
-        baseLabel = 'Weekly';
-      } else {
-        baseLabel = `Every ${repeatValue} weeks`;
-      }
-    }
-    // Monthly
-    else if (recurrenceFrequency === 'MONTH') {
-      if (monthlyType === 'monthly_day') {
-        const dayOfMonth = startsAt.getDate();
-        if (repeatValue === 1) {
-          baseLabel = `Monthly on day ${dayOfMonth}`;
-        } else {
-          baseLabel = `Every ${repeatValue} months on day ${dayOfMonth}`;
-        }
-      } else {
-        const { occurrence, weekday } = getWeekdayOccurrence(startsAt);
-        const ordinalWord = ORDINAL_WORDS[occurrence - 1] || `${occurrence}th`;
-        if (repeatValue === 1) {
-          baseLabel = `Monthly on ${ordinalWord} ${weekday}`;
-        } else {
-          baseLabel = `Every ${repeatValue} months on ${ordinalWord} ${weekday}`;
-        }
-      }
-    } else {
-      baseLabel = 'Custom';
-    }
-
-    // Append end condition for "on" or "after" types
-    if (seriesEndsType === 'on' && seriesEndsOn) {
-      const day = seriesEndsOn.getDate();
-      const month = seriesEndsOn.toLocaleString('en-US', { month: 'long' });
-      return `${baseLabel}, ends on ${day} ${month}`;
-    } else if (seriesEndsType === 'after' && occurrenceCount) {
-      return `${baseLabel}, ends after ${occurrenceCount} ${occurrenceCount === 1 ? 'occurrence' : 'occurrences'}`;
-    }
-
-    return baseLabel;
-  }, [
-    isRecurring,
-    recurrenceFrequency,
-    repeatValue,
-    recurrenceDays,
-    monthlyType,
-    startsAt,
-    seriesEndsType,
-    seriesEndsOn,
-    occurrenceCount,
-  ]);
-
-  // Validate start and end times
-  const validateTimes = useCallback(
-    (newStartsAt?: Date, newEndsAt?: Date) => {
-      const currentStartsAt = newStartsAt ?? watch('startsAt');
-      const currentEndsAt = newEndsAt ?? watch('endsAt');
-      const { startsAtError, endsAtError } = validateCallDateTimes(currentStartsAt, currentEndsAt);
-
-      if (startsAtError) {
-        setError('startsAt', { type: 'manual', message: startsAtError });
-      } else {
-        clearErrors('startsAt');
-      }
-
-      if (endsAtError) {
-        setError('endsAt', { type: 'manual', message: endsAtError });
-      } else {
-        clearErrors('endsAt');
-      }
-    },
-    [watch, setError, clearErrors],
-  );
 
   const handleStartTimeChange = useCallback(
     (timeString: string): void => {
@@ -1206,13 +598,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
       // ── Step advance: externals present and still on Step 1 ──────────────
       // Invitation preview + Send happens on Step 2.
-      if (
-        enableExternalInvitees &&
-        !isEditMode &&
-        !isRecurring &&
-        (data.externalEmails ?? []).length > 0 &&
-        step === 'participants'
-      ) {
+      if (!isEditMode && (data.externalEmails ?? []).length > 0 && step === 'participants') {
         goToStep('invitation');
         return;
       }
@@ -1232,6 +618,24 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         if (value.startsWith('user:')) userIds.push(value.replace('user:', ''));
         else if (value.startsWith('channel:')) channelId = value.replace('channel:', '');
       });
+      const effExternals = data.externalEmails ?? [];
+      const buildExternalInvitation = (): NonNullable<ScheduleCallRequest['invitation']> => {
+        // Server re-sanitizes; doing it here too keeps a tampered payload
+        // from ever shipping unsafe HTML over the wire.
+        const safeBody = DOMPurify.sanitize((data.invitationMessageHtml || '').trim());
+        return {
+          bodyHtml: safeBody || '<p></p>',
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          ...(data.invitationTitle?.trim() && { title: data.invitationTitle.trim() }),
+          ...(data.invitationOrganizerName?.trim() && {
+            organizerName: data.invitationOrganizerName.trim(),
+          }),
+          ...(data.invitationOrganizerEmail?.trim() && {
+            organizerEmail: data.invitationOrganizerEmail.trim(),
+          }),
+          ...(data.invitationOrgName?.trim() && { orgName: data.invitationOrgName.trim() }),
+        };
+      };
 
       // hasChannelExclusions: true when user picked a channel but unchecked some members.
       // Used only as a local guard — never sent to the API.
@@ -1273,6 +677,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             startTime: recurringStartTime,
             endTime: recurringEndTime,
             startsOn: data.startsAt.getTime(),
+            externalInvitees: effExternals,
             ...(seriesEndsType === 'on' &&
               seriesEndsOn !== null && { endsOn: seriesEndsOn.getTime() }),
           });
@@ -1289,6 +694,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             ...(postCallUpdates && updateChannelId ? { callUpdatesChannel: updateChannelId } : {}),
             ...(channelId ? { channelId } : {}),
             ...(userIds.length > 0 && { targetUserIds: userIds }),
+            externalInvitees: effExternals,
           });
           toast.success('Call Updated', {
             description: 'This occurrence has been updated.',
@@ -1325,6 +731,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         if (seriesEndsType === 'on' && seriesEndsOn !== null) {
           recurringRequest.endsOn = seriesEndsOn.getTime();
         }
+        if (effExternals.length > 0) {
+          recurringRequest.externalInvitees = effExternals;
+          recurringRequest.invitation = buildExternalInvitation();
+        }
         await callService.createRecurringSeries(recurringRequest);
         toast.success('Recurring Series Created', {
           description: `${data.title} will repeat ${recurrenceFrequency.toLowerCase()}`,
@@ -1348,24 +758,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           if (postCallUpdates && updateChannelId) requestData.callUpdatesChannel = updateChannelId;
           if (userIds.length > 0) requestData.targetUserIds = userIds;
         }
-        const effExternals = data.externalEmails ?? [];
-        if (enableExternalInvitees && effExternals.length > 0) {
-          // Server re-sanitizes; doing it here too keeps a tampered payload
-          // from ever shipping unsafe HTML over the wire.
-          const safeBody = DOMPurify.sanitize((data.invitationMessageHtml || '').trim());
+        if (effExternals.length > 0) {
           requestData.externalInvitees = effExternals;
-          requestData.invitation = {
-            bodyHtml: safeBody || '<p></p>',
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            ...(data.invitationTitle?.trim() && { title: data.invitationTitle.trim() }),
-            ...(data.invitationOrganizerName?.trim() && {
-              organizerName: data.invitationOrganizerName.trim(),
-            }),
-            ...(data.invitationOrganizerEmail?.trim() && {
-              organizerEmail: data.invitationOrganizerEmail.trim(),
-            }),
-            ...(data.invitationOrgName?.trim() && { orgName: data.invitationOrgName.trim() }),
-          };
+          requestData.externalInviteDelivery = externalInviteDelivery;
+          requestData.invitation = buildExternalInvitation();
         }
         await callService.scheduleCall(requestData);
         toast.success('Call Scheduled', {
@@ -1464,26 +860,13 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     setStep('participants');
     setSearchQuery('');
     setNotFoundUsers([]);
-    setIsRecurring(false);
-    setRecurrenceFrequency('WEEK');
-    setRecurrenceDays([]);
-    setSeriesEndsOn(null);
-    setSeriesEndsType('never');
-    setRecurringStartTime(toHHMM(defaultStart));
-    setRecurringEndTime(toHHMM(new Date(defaultStart.getTime() + 60 * 60 * 1000)));
-    setMonthlyType('monthly_day');
-    setRepeatValue(1);
-    setOccurrenceCount(13);
-    setShowCustomPanel(false);
+    resetRecurringState(defaultStart);
     setEditEntireSeries(false);
-    setPostCallUpdates(false);
-    setUpdateChannelId(null);
-    setChannelSearchQuery('');
-    setChannelPickerOpen(false);
+    resetPostCallUpdates();
     onClose();
   }, [reset, onClose, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isDesigningInvitation = enableExternalInvitees && step === 'invitation';
+  const isDesigningInvitation = step === 'invitation';
   const dialogSizing = isDesigningInvitation
     ? 'w-[min(1280px,96vw)] !max-w-[96vw] h-[min(820px,92vh)]'
     : 'max-w-[584px]';
@@ -1499,14 +882,32 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   const resolvedOrganizerEmail =
     (watch('invitationOrganizerEmail') ?? '').trim() || (user?.email ?? '');
   const resolvedOrgName = (watch('invitationOrgName') ?? '').trim();
+  const canUseExternalInvitees = true;
+  const scheduleStartIsValid = isValidDate(startsAt);
+  const scheduleEndIsValid = isRecurring
+    ? recurringStartTime.length > 0 && recurringEndTime.length > 0
+    : isValidDate(endsAt);
+  const fallbackInvitationStart = scheduleStartIsValid ? startsAt : getDefaultScheduledStartTime();
+  const invitationPreviewStartsAt = isRecurring
+    ? applyHHMMToDate(fallbackInvitationStart, recurringStartTime)
+    : fallbackInvitationStart;
+  const rawInvitationPreviewEndsAt = isRecurring
+    ? applyHHMMToDate(fallbackInvitationStart, recurringEndTime)
+    : isValidDate(endsAt)
+      ? endsAt
+      : new Date(invitationPreviewStartsAt.getTime() + 60 * 60 * 1000);
+  const invitationPreviewEndsAt =
+    rawInvitationPreviewEndsAt > invitationPreviewStartsAt
+      ? rawInvitationPreviewEndsAt
+      : new Date(invitationPreviewStartsAt.getTime() + 60 * 60 * 1000);
 
   // Single source of truth for the submit button: drives `disabled`, the
   // hover-tooltip contents, and the label.
   const missingRequirements: string[] = [];
   if (!title.trim()) missingRequirements.push('Add a title');
   if (participants.length === 0) missingRequirements.push('Add at least one participant');
-  if (errors.startsAt) missingRequirements.push('Pick a valid start time');
-  if (errors.endsAt) missingRequirements.push('Pick a valid end time');
+  if (!scheduleStartIsValid || errors.startsAt) missingRequirements.push('Pick a valid start time');
+  if (!scheduleEndIsValid || errors.endsAt) missingRequirements.push('Pick a valid end time');
   if (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
     missingRequirements.push('Pick at least one weekday');
   }
@@ -1523,7 +924,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       : isRecurring
         ? 'Creating...'
         : 'Scheduling...'
-    : enableExternalInvitees && !isEditMode && !isRecurring && externalEmails.length > 0
+    : !isEditMode && canUseExternalInvitees && externalEmails.length > 0
       ? 'Next: Customize invitation'
       : isEditMode
         ? 'Save Changes'
@@ -1561,8 +962,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                   Design the invitation
                 </h2>
                 <p className='text-sidebar-secondary-foreground text-[13px] font-medium leading-5'>
-                  Curate the message and edit header details — the invitation goes out as a reply on
-                  this ticket&apos;s email thread.
+                  Curate the message and edit header details before the invitation is sent.
                 </p>
               </div>
             </div>
@@ -1582,8 +982,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
               onEditableOrgNameChange={(v: string) => setValue('invitationOrgName', v)}
               data={{
                 title: resolvedInvitationTitle,
-                startsAt,
-                endsAt,
+                startsAt: invitationPreviewStartsAt,
+                endsAt: invitationPreviewEndsAt,
                 // Display in the user's local timezone so Step 1 and Step 2 show
                 // the same clock time (they pick times in local tz on Step 1).
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -1914,9 +1314,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       >
                         <DropdownMenuTrigger asChild>
                           <Button className='py-2 px-3 flex gap-2.5 rounded-lg bg-transparent hover:bg-secondary/80 border border-border text-foreground'>
-                            <span className='text-sm font-normal leading-6'>
-                              {getRecurrenceLabel()}
-                            </span>
+                            <span className='text-sm font-normal leading-6'>{recurrenceLabel}</span>
                             <ChevronDown className='size-4' strokeWidth={2.3} />
                           </Button>
                         </DropdownMenuTrigger>
@@ -2163,11 +1561,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         <RadioGroup
                                           className='!gap-1.5 text-[13px]'
                                           value={monthlyType}
-                                          onChange={val =>
-                                            setMonthlyType(
-                                              val as 'monthly_day' | 'monthly_nth_weekday',
-                                            )
-                                          }
+                                          onChange={val => setMonthlyType(val as MonthlyType)}
                                         >
                                           <div className='flex flex-col flex-1 items-start gap-2'>
                                             {(() => {
@@ -2210,7 +1604,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                       className='!gap-1.5'
                                       value={seriesEndsType}
                                       onChange={(val: string) =>
-                                        setSeriesEndsType(val as 'never' | 'on' | 'after')
+                                        setSeriesEndsType(val as SeriesEndsType)
                                       }
                                     >
                                       <Radio value='never'>Never</Radio>
@@ -2423,8 +1817,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 )}
               </div>
 
-              {/* External Users — people outside Xyne, invited by email. */}
-              {enableExternalInvitees && threadConversationId && (
+              {canUseExternalInvitees && (
                 <div className='space-y-2 -mb-3'>
                   <div className='flex items-baseline justify-between'>
                     <p className='text-muted-foreground text-[13px] leading-5'>External Users</p>

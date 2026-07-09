@@ -4068,7 +4068,7 @@ export const SupportTicketDetail = ({
                 <ScheduleCallModal
                   isOpen={isScheduleCallModalOpen}
                   onClose={() => setIsScheduleCallModalOpen(false)}
-                  enableExternalInvitees
+                  externalInviteDelivery='conversation_reply'
                   {...(channelId ? { channelId } : {})}
                   {...(conversationId ? { conversationId } : {})}
                 />

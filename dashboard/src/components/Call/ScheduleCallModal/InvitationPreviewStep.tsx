@@ -7,6 +7,7 @@ import { Calendar as CalendarIcon } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import { EditorToolbar } from '../../ui/EditorToolbar/EditorToolbar';
 import { renderCallInvitationHtml } from '@xyne/shared';
+import { isValidDate } from './dateTime';
 
 export interface InvitationPreviewData {
   title: string;
@@ -128,7 +129,20 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
 
   // Debounce so the preview iframe doesn't reload on every keystroke.
   const debouncedMessage = useDebouncedValue(messageHtml, 200);
-  const debouncedData = useDebouncedValue(data, 200);
+  const safeData = useMemo(() => {
+    const startsAt = isValidDate(data.startsAt) ? data.startsAt : new Date();
+    const endsAt =
+      isValidDate(data.endsAt) && data.endsAt > startsAt
+        ? data.endsAt
+        : new Date(startsAt.getTime() + 60 * 60 * 1000);
+
+    return {
+      ...data,
+      startsAt,
+      endsAt,
+    };
+  }, [data]);
+  const debouncedData = useDebouncedValue(safeData, 200);
 
   const previewHtml = useMemo(
     () =>
@@ -148,7 +162,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
 
   const whenDisplay = useMemo(() => {
     const fmt = new Intl.DateTimeFormat('en-US', {
-      timeZone: data.timezone || 'UTC',
+      timeZone: safeData.timezone || 'UTC',
       weekday: 'short',
       month: 'short',
       day: '2-digit',
@@ -156,8 +170,8 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
       minute: '2-digit',
       hour12: false,
     });
-    return `${fmt.format(data.startsAt)} – ${fmt.format(data.endsAt)} (${data.timezone || 'UTC'})`;
-  }, [data.startsAt, data.endsAt, data.timezone]);
+    return `${fmt.format(safeData.startsAt)} – ${fmt.format(safeData.endsAt)} (${safeData.timezone || 'UTC'})`;
+  }, [safeData]);
 
   return (
     <div className='flex flex-col flex-1 min-h-0'>

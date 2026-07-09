@@ -91,23 +91,31 @@ function RsvpBadge({ status }: { status: MeetingStatus }): React.ReactElement | 
 
 function ParticipantItem({
   userId,
+  displayName,
+  email,
+  isExternal,
   meetingStatus,
   isOrganizer,
 }: {
   userId: string;
+  displayName?: string | null;
+  email?: string | null;
+  isExternal?: boolean | null;
   meetingStatus: MeetingStatus;
   isOrganizer?: boolean;
 }): React.ReactElement {
   const user = useUser(userId);
+  const participantName = isExternal ? displayName || email || 'Guest' : (user?.name ?? '...');
 
   return (
     <div className='flex items-center gap-2.5'>
       <div className='relative shrink-0'>
-        <Avatar userId={userId} size='sm' showActiveStatus={false} rounded />
+        <Avatar userId={isExternal ? null : userId} size='sm' showActiveStatus={false} rounded />
         <RsvpBadge status={meetingStatus} />
       </div>
       <div className='flex flex-row gap-2 items-center min-w-0'>
-        <span className='text-[12px] text-foreground truncate'>{user?.name ?? '…'}</span>
+        <span className='text-[12px] text-foreground truncate'>{participantName}</span>
+        {isExternal && <span className='text-[10px] text-muted-foreground'>External</span>}
         {isOrganizer && <span className='text-[10px] text-muted-foreground'>Organizer</span>}
       </div>
     </div>
@@ -580,6 +588,9 @@ const CalendarCallPopup = ({
                 <ParticipantItem
                   key={p.userId}
                   userId={p.userId}
+                  displayName={p.displayName}
+                  email={p.email}
+                  isExternal={p.isExternal}
                   meetingStatus={
                     p.userId === currentUserId && localRsvp !== null
                       ? localRsvp

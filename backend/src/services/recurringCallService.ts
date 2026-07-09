@@ -62,12 +62,13 @@ class RecurringCallService {
     notifyParticipants: boolean,
     tx: Prisma.TransactionClient,
     scheduleJobs = true,
-    targetUserIds?: string[],
     callUpdatesChannel?: string | null,
   ): Promise<string> {
     const callId = uuidv4();
     const externalId = uuidv4();
     const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${CallType.AUDIO}`;
+    const { targetUserIds, externalInvitees } =
+      await repositories.recurringCallParticipants.findInstanceSeed(recurringSeries.id, tx);
 
     const { participantUserIds } = await repositories.calls.createCallWithParticipants({
       callId,
@@ -84,6 +85,7 @@ class RecurringCallService {
       startsAt,
       endsAt,
       targetUserIds,
+      ...(externalInvitees.length > 0 && { externalInvitees }),
       callUpdatesChannel: callUpdatesChannel ?? null,
     }, tx);
 
@@ -144,7 +146,7 @@ class RecurringCallService {
     notifyParticipants: boolean,
     tx: Prisma.TransactionClient,
   ): Promise<string | null> {
-    const recurringSeries = await tx.recurringCallSeries.findUnique({ where: { id: seriesId } });
+    const recurringSeries = await repositories.recurringCallSeries.findById(seriesId, tx);
 
     if (!recurringSeries) {
       logger.warn(`RecurringCallSeries ${seriesId} not found`);
@@ -160,16 +162,17 @@ class RecurringCallService {
 
     if (!nextOccurrence) {
       logger.info(`Series ${seriesId} has no more occurrences — marking as ENDED`);
-      await tx.recurringCallSeries.update({
-        where: { id: seriesId },
-        data: { status: RecurringCallSeriesStatus.ENDED, updatedAt: new Date() },
-      });
+      await repositories.recurringCallSeries.update(
+        seriesId,
+        { status: RecurringCallSeriesStatus.ENDED, updatedAt: new Date() },
+        tx,
+      );
       return null;
     }
 
     const endsAt = addHHMMDuration(nextOccurrence, recurringSeries.startTime, recurringSeries.endTime);
 
-    return this.createInstance(recurringSeries, nextOccurrence, endsAt, notifyParticipants, tx, true, undefined, recurringSeries.callUpdatesChannel);
+    return this.createInstance(recurringSeries, nextOccurrence, endsAt, notifyParticipants, tx, true, recurringSeries.callUpdatesChannel);
   }
 
   /**
@@ -220,7 +223,6 @@ class RecurringCallService {
     fromDate: Date,
     toDate: Date,
     tx: Prisma.TransactionClient,
-    targetUserIds?: string[],
     callUpdatesChannel?: string | null,
   ): Promise<string[]> {
     const occurrences = this.getOccurrencesInRange(series, fromDate, toDate);
@@ -239,7 +241,7 @@ class RecurringCallService {
         // Only schedule Bull jobs for the FIRST instance (i === 0)
         // Subsequent instances will have their jobs created when the previous instance ends
         const scheduleJobs = i === 0;
-        const callId = await this.createInstance(series, startsAt, endsAt, isFirstUpcoming, tx, scheduleJobs, targetUserIds, callUpdatesChannel);
+        const callId = await this.createInstance(series, startsAt, endsAt, isFirstUpcoming, tx, scheduleJobs, callUpdatesChannel);
         callIds.push(callId);
       } catch (err) {
         logger.error(`Failed to create instance for ${startsAt.toISOString()} in series ${series.id}:`, err);
@@ -259,7 +261,7 @@ class RecurringCallService {
     const db = DatabaseClient.getInstance();
 
     await db.$transaction(async (tx) => {
-      const series = await tx.recurringCallSeries.findUnique({ where: { id: seriesId } });
+      const series = await repositories.recurringCallSeries.findById(seriesId, tx);
 
       if (!series) {
         logger.warn(`Cannot replenish buffer: Series ${seriesId} not found`);
@@ -319,7 +321,7 @@ class RecurringCallService {
         if (!existing) {
           const endsAt = addHHMMDuration(nextOccurrence, series.startTime, series.endTime);
           // Don't schedule jobs during replenishment - jobs are created on instance end
-          await this.createInstance(series, nextOccurrence, endsAt, false, tx, false, undefined, series.callUpdatesChannel);
+          await this.createInstance(series, nextOccurrence, endsAt, false, tx, false, series.callUpdatesChannel);
           createdCount++;
         }
 
@@ -382,7 +384,7 @@ class RecurringCallService {
       const now = new Date();
       const effectiveFromDate = fromDate > now ? fromDate : now;
       const toDate = new Date(now.getTime() + INSTANCE_BUFFER_DAYS);
-      const newCallIds = await this.createInstancesForDateRange(series, effectiveFromDate, toDate, tx, undefined, series.callUpdatesChannel);
+      const newCallIds = await this.createInstancesForDateRange(series, effectiveFromDate, toDate, tx, series.callUpdatesChannel);
       callIds.push(...newCallIds);
     });
 
@@ -397,7 +399,7 @@ class RecurringCallService {
     const db = DatabaseClient.getInstance();
 
     await db.$transaction(async (tx) => {
-      const series = await tx.recurringCallSeries.findUnique({ where: { id: seriesId } });
+      const series = await repositories.recurringCallSeries.findById(seriesId, tx);
 
       if (!series) {
         logger.warn(`Cannot schedule next jobs: Series ${seriesId} not found`);
@@ -497,10 +499,10 @@ class RecurringCallService {
     const db = DatabaseClient.getInstance();
 
     // Remove Bull jobs outside the transaction to avoid Redis calls inside DB transaction
-    const instanceIds = await db.call.findMany({
-      where: { recurringSeriesId: seriesId },
-      select: { id: true },
-    }).then((r) => r.map((i) => i.id));
+    const instanceIds = await repositories.scheduledCalls.findCallIdsBySeriesId({
+      seriesId,
+      tx: db,
+    });
 
     for (const instanceId of instanceIds) {
       try {

@@ -53,8 +53,10 @@ export interface ScheduleCallRequest {
   targetUserIds?: string[];
   callUpdatesChannel?: string; // Explicit broadcast channel for post-call summaries/action items
   conversationId?: string; // Optional: for thread-initiated scheduled calls
-  /** External emails to invite via a reply on the ticket thread. */
+  /** External emails to invite. */
   externalInvitees?: string[];
+  /** How external invite emails should be delivered. Defaults to standalone email. */
+  externalInviteDelivery?: 'standalone' | 'conversation_reply';
   /** Organizer's curated invitation body (rich-text HTML). Required when externalInvitees is non-empty. */
   invitation?: {
     bodyHtml: string;
@@ -87,6 +89,8 @@ export interface CreateRecurringSeriesRequest {
   endTime: string; // HH:mm 24-hour format
   startsOn: number; // epoch ms
   endsOn?: number; // epoch ms — omit for indefinite series
+  externalInvitees?: string[];
+  invitation?: ScheduleCallRequest['invitation'];
 }
 
 export interface CreateRecurringSeriesResponse {
@@ -102,6 +106,7 @@ export interface UpdateScheduleCallRequest {
   targetUserIds?: string[];
   channelId?: string;
   callUpdatesChannel?: string;
+  externalInvitees?: string[];
 }
 
 export interface UpdateRecurringSeriesRequest {
@@ -115,6 +120,7 @@ export interface UpdateRecurringSeriesRequest {
   targetUserIds?: string[];
   channelId?: string;
   callUpdatesChannel?: string;
+  externalInvitees?: string[];
 }
 
 export interface ApiErrorResponse {
@@ -452,6 +458,7 @@ export class CallService {
         ...(data.externalInvitees &&
           data.externalInvitees.length > 0 && {
             externalInvitees: data.externalInvitees,
+            externalInviteDelivery: data.externalInviteDelivery,
             invitation: data.invitation,
           }),
       });
@@ -496,6 +503,8 @@ export class CallService {
         endTime: data.endTime,
         startsOn: data.startsOn,
         endsOn: data.endsOn,
+        externalInvitees: data.externalInvitees,
+        invitation: data.invitation,
       });
 
       return response.data;

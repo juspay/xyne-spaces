@@ -12,3 +12,23 @@ export const extractEmailAddress = (raw: string | null | undefined): string | nu
   const match = raw.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/);
   return match ? match[0].toLowerCase() : null;
 };
+
+export const normalizeEmailList = (
+  emails: readonly string[] | null | undefined,
+): string[] => {
+  if (!emails?.length) return [];
+
+  return [...new Set(
+    emails
+      .map(email => email.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+};
+
+export const findNewEmails = (
+  nextEmails: readonly string[] | null | undefined,
+  existingEmails: readonly string[] | null | undefined,
+): string[] => {
+  const existingEmailSet = new Set(normalizeEmailList(existingEmails));
+  return normalizeEmailList(nextEmails).filter(email => !existingEmailSet.has(email));
+};
