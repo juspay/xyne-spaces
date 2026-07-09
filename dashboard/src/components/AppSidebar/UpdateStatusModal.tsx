@@ -480,7 +480,11 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 </Select.Trigger>
 
                 <Select.Portal>
-                  <Select.Content className='bg-background rounded-lg border border-border shadow-lg overflow-hidden z-50'>
+                  <Select.Content
+                    position='popper'
+                    sideOffset={4}
+                    className='bg-background rounded-lg border border-border shadow-lg overflow-hidden z-50 w-[var(--radix-select-trigger-width)] max-h-[var(--radix-select-content-available-height)]'
+                  >
                     <Select.Viewport className='p-1'>
                       {EXPIRY_OPTIONS.map(option => (
                         <Select.Item
@@ -544,7 +548,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                   void handleSave();
                 }}
                 disabled={!selectedEmoji && !statusText.trim()}
-                className='ml-auto px-6 bg-action-primary text-action-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed'
+                className='ml-auto px-6 bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed'
                 data-track-category='Update_User_Status_Modal'
                 data-track-name='Save_Status'
                 data-track-metadata={JSON.stringify({ statusText, expiryOption })}
