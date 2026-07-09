@@ -51,10 +51,8 @@ export interface CreateFormWithFieldsInput extends CreateFormInput {
   }>;
 }
 
-export interface FormWithFieldsAndLinks extends Form {
-  /** Per-form membership rows (form_fields). */
-  fields: FormFields[];
-  resolvedFields: ResolvedFormField[];
+export interface FormWithResolvedFields extends Form {
+  fields: ResolvedFormField[];
 }
 
 export interface GlobalFieldListResult {
@@ -122,12 +120,14 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         },
       });
 
-      const scopedProjectId = await this.resolveProjectIdForFormFields(tx, {
-        workspaceId: data.workspaceId,
-        projectId: data.projectId,
-      });
+      const scopedProjectId = data.projectId
+        ? await this.resolveProjectIdForFormFields(tx, {
+            workspaceId: data.workspaceId,
+            projectId: data.projectId,
+          })
+        : undefined;
 
-      await this.syncFormFields(tx, form.id, data.workspaceId, scopedProjectId, normalizedFields);
+      await this.syncFormFields(tx, form.id, scopedProjectId, normalizedFields);
       await this.assertResolvedFieldNameUniqueness(tx, form.id);
       return form;
     });
@@ -171,7 +171,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     return await this.resolveMembershipRows(this.db, formId, membershipRows);
   }
 
-  async findFormWithFields(formId: string): Promise<FormWithFieldsAndLinks | null> {
+  async findFormWithFields(formId: string): Promise<FormWithResolvedFields | null> {
     const form = await this.db.form.findUnique({
       where: { id: formId },
       include: {
@@ -189,7 +189,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
 
     return {
       ...form,
-      resolvedFields,
+      fields: resolvedFields,
     };
   }
 
@@ -257,13 +257,14 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         },
       });
 
-      const scopedProjectId = await this.resolveProjectIdForFormFields(tx, {
-        workspaceId: existingForm.workspaceId,
-        projectId: data.projectId,
-        formId: id,
-      });
+      const scopedProjectId = data.projectId
+        ? await this.resolveProjectIdForFormFields(tx, {
+            workspaceId: existingForm.workspaceId,
+            projectId: data.projectId,
+          })
+        : undefined;
 
-      await this.syncFormFields(tx, id, existingForm.workspaceId, scopedProjectId, normalizedFields);
+      await this.syncFormFields(tx, id, scopedProjectId, normalizedFields);
       await this.assertResolvedFieldNameUniqueness(tx, id);
 
       return form;
@@ -310,11 +311,9 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
   private async syncFormFields(
     tx: Prisma.TransactionClient,
     formId: string,
-    workspaceId: string,
-    projectId: string,
+    projectId: string | undefined,
     fields: FormFieldInput[],
   ): Promise<void> {
-    await this.assertProjectScope(tx, projectId, workspaceId);
     const existingRows = await tx.formFields.findMany({ where: { formId } });
     const existingByGlobalId = new Map<string, FormFields>();
     const existingById = new Map<string, FormFields>();
@@ -386,16 +385,21 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       }
 
       // New local field → find-or-create the global definition by (projectId, name + type).
-      const globalFieldId = await this.findOrCreateGlobalField(tx, projectId, field);
-      const rowId = await this.upsertGlobalMembershipRow(
-        tx,
-        formId,
-        globalFieldId,
-        sequenceNumber,
-        isOptional,
-        existingByGlobalId.get(globalFieldId),
-      );
-      keptRowIds.add(rowId);
+      if(projectId) {
+        const globalFieldId = await this.findOrCreateGlobalField(tx, projectId, field);
+        const rowId = await this.upsertGlobalMembershipRow(
+          tx,
+          formId,
+          globalFieldId,
+          sequenceNumber,
+          isOptional,
+            existingByGlobalId.get(globalFieldId),
+        );
+        keptRowIds.add(rowId);
+      } else {
+        const rowId = await this.findOrCreateLegacyField(tx, formId, field, isOptional, sequenceNumber);
+        keptRowIds.add(rowId);
+      }
     }
 
     const removedRows = existingRows.filter(row => !keptRowIds.has(row.id));
@@ -476,6 +480,56 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     return created.id;
   }
 
+  private async findOrCreateLegacyField(
+    tx: Prisma.TransactionClient,
+    formId: string,
+    def: LocalFieldDefinitionInput,
+    isOptional: boolean,
+    sequenceNumber: number,
+  ): Promise<string> {
+    const fieldName = def.fieldName.trim();
+    const existing = await tx.formFields.findFirst({
+      where: {
+        formId,
+        fieldName,
+        fieldType: def.fieldType,
+      },
+    });
+
+    if (existing) {
+      await tx.formFields.update({
+        where: { id: existing.id },
+        data: {
+          globalFieldId: null,
+          fieldName,
+          fieldType: def.fieldType,
+          fieldEnum: def.fieldEnum ?? Prisma.DbNull,
+          isOptional,
+          sequenceNumber,
+          updatedAt: new Date(),
+        },
+      });
+      return existing.id;
+    }
+
+    const now = new Date();
+    const created = await tx.formFields.create({
+      data: {
+        id: randomUUID(),
+        formId,
+        globalFieldId: null,
+        fieldName,
+        fieldType: def.fieldType,
+        fieldEnum: def.fieldEnum ?? Prisma.DbNull,
+        isOptional,
+        sequenceNumber,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    return created.id;
+  }
+
   private async updateGlobalFieldDefinition(
     tx: Prisma.TransactionClient,
     globalFieldId: string,
@@ -531,52 +585,22 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     input: {
       workspaceId: string;
       projectId?: string;
-      formId?: string;
     },
   ): Promise<string> {
-    const { workspaceId, projectId, formId } = input;
+    const { workspaceId, projectId } = input;
 
-    if (projectId) {
-      await this.assertProjectScope(tx, projectId, workspaceId);
-      return projectId;
+    if (!projectId) {
+      throw new Error('Project ID is required for reusable form fields');
     }
 
-    if (formId) {
-      const mappings = await tx.formContextMapping.findMany({
-        where: { formId },
-        select: { contextId: true, contextType: true },
-      });
-
-      const boardMapping = mappings.find(mapping => mapping.contextType === FormContextType.BOARD);
-      if (boardMapping) {
-        const board = await tx.board.findUnique({
-          where: { id: boardMapping.contextId },
-          select: { projectId: true, workspaceId: true },
-        });
-        if (board?.workspaceId === workspaceId) {
-          return board.projectId;
-        }
-      }
-
-      const stageMappings = mappings.filter(mapping => mapping.contextType === FormContextType.STAGE);
-      if (stageMappings.length > 0) {
-        const stage = await tx.stage.findFirst({
-          where: { id: { in: stageMappings.map(mapping => mapping.contextId) } },
-          select: { board: { select: { projectId: true, workspaceId: true } } },
-        });
-        if (stage?.board.workspaceId === workspaceId) {
-          return stage.board.projectId;
-        }
-      }
-    }
-
-    throw new Error('Cannot resolve project for form fields');
+    await this.assertProjectScope(tx, projectId, workspaceId);
+    return projectId;
   }
 
   private async deleteRemovedMembershipRows(
     tx: Prisma.TransactionClient,
     formId: string,
-    projectId: string,
+    projectId: string | undefined,
     removedRows: FormFields[],
   ): Promise<void> {
     if (removedRows.length === 0) {
@@ -584,6 +608,25 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     }
 
     for (const row of removedRows) {
+      if (!projectId) {
+        if (row.globalFieldId) {
+          await tx.formFields.delete({ where: { id: row.id } });
+          continue;
+        }
+
+        const valueCount = await tx.formEntityValues.count({
+          where: {
+            formId,
+            fieldId: row.id,
+          },
+        });
+        if (valueCount > 0) {
+          throw new Error(`Cannot delete field "${row.fieldName ?? row.id}" because it has saved values`);
+        }
+        await tx.formFields.delete({ where: { id: row.id } });
+        continue;
+      }
+
       const definitionId = await this.ensureLegacyGlobalField(tx, projectId, row);
       if (definitionId && definitionId !== row.id) {
         await tx.formEntityValues.updateMany({

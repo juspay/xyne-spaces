@@ -49,30 +49,9 @@ export interface FormFieldResponse {
   fieldEnum: string[] | null;
   isOptional: boolean;
   sequenceNumber: number;
+  membershipId?: string;
   createdAt: number;
   updatedAt: number;
-}
-
-export interface LinkedFormFieldResponse {
-  id: string;
-  formId: string;
-  fieldId: string;
-  sequenceNumber: number;
-  isOptional: boolean | null;
-  createdAt: number;
-  updatedAt: number;
-  field: FormFieldResponse;
-}
-
-export interface ResolvedFormFieldResponse {
-  id: string;
-  formId: string;
-  fieldName: string;
-  fieldType: FormFieldType;
-  fieldEnum: string[] | null;
-  isOptional: boolean;
-  sequenceNumber: number;
-  linkId?: string;
 }
 
 export interface FormDetailResponse {
@@ -85,8 +64,6 @@ export interface FormDetailResponse {
   createdAt: number;
   updatedAt: number;
   fields: FormFieldResponse[];
-  linkedFields?: LinkedFormFieldResponse[];
-  resolvedFields?: ResolvedFormFieldResponse[];
 }
 
 export class FormService {

@@ -7176,7 +7176,7 @@ export const mutators = defineMutators({
           const now = timestamp;
           const workspaceId = form.workspaceId;
           const existingRows = await tx.run(zql.form_fields.where('formId', formId));
-          const resolveScopedProjectId = async (): Promise<string> => {
+          const resolveScopedProjectId = async (): Promise<string | undefined> => {
             const validateProject = async (candidateProjectId: string): Promise<string> => {
               const project = await tx.run(zql.projects.where('id', candidateProjectId).one());
               if (!project || project.workspaceId !== workspaceId) {
@@ -7188,7 +7188,6 @@ export const mutators = defineMutators({
             if (projectId) {
               return validateProject(projectId);
             }
-
             const mappings = await tx.run(zql.forms_context_mapping.where('formId', formId));
             for (const mapping of mappings) {
               if (mapping.contextType === FormContextType.BOARD) {
@@ -7203,7 +7202,7 @@ export const mutators = defineMutators({
               }
             }
 
-            throw new Error('Cannot resolve project for form fields');
+            return undefined;
           };
           const scopedProjectId = await resolveScopedProjectId();
           const existingById = new Map(existingRows.map(row => [row.id, row]));
@@ -7216,6 +7215,7 @@ export const mutators = defineMutators({
 
           const ensureLegacyGlobalDefinition = async (
             row: (typeof existingRows)[number],
+            projectId: string,
           ): Promise<string | undefined> => {
             if (row.globalFieldId) {
               return row.globalFieldId;
@@ -7226,7 +7226,7 @@ export const mutators = defineMutators({
 
             const found = await tx.run(
               zql.global_fields
-                .where('projectId', scopedProjectId)
+                .where('projectId', projectId)
                 .where('fieldName', row.fieldName)
                 .where('fieldType', row.fieldType)
                 .one(),
@@ -7237,7 +7237,7 @@ export const mutators = defineMutators({
 
             await tx.mutate.global_fields.insert({
               id: row.id,
-              projectId: scopedProjectId,
+              projectId,
               fieldName: row.fieldName,
               fieldType: row.fieldType,
               ...(row.fieldEnum ? { fieldEnum: row.fieldEnum } : {}),
@@ -7252,10 +7252,11 @@ export const mutators = defineMutators({
             fieldName: string,
             fieldType: FormFieldType,
             fieldEnum: string[] | undefined,
+            projectId: string,
           ): Promise<string> => {
             const found = await tx.run(
               zql.global_fields
-                .where('projectId', scopedProjectId)
+                .where('projectId', projectId)
                 .where('fieldName', fieldName)
                 .where('fieldType', fieldType)
                 .one(),
@@ -7268,10 +7269,54 @@ export const mutators = defineMutators({
             }
             await tx.mutate.global_fields.insert({
               id: candidateId,
-              projectId: scopedProjectId,
+              projectId,
               fieldName,
               fieldType,
               ...(fieldEnum ? { fieldEnum } : {}),
+              createdAt: now,
+              updatedAt: now,
+            });
+            return candidateId;
+          };
+
+          const ensureLegacyFieldDefinition = async (
+            candidateId: string,
+            formId: string,
+            fieldName: string,
+            fieldType: FormFieldType,
+            fieldEnum: string[] | undefined,
+            isOptional: boolean,
+            sequenceNumber: number,
+          ): Promise<string> => {
+            const found = await tx.run(
+              zql.form_fields
+                .where('formId', formId)
+                .where('fieldName', fieldName)
+                .where('fieldType', fieldType)
+                .one(),
+            );
+            if (found) {
+              await tx.mutate.form_fields.update({
+                id: found.id,
+                globalFieldId: null,
+                fieldName,
+                fieldType,
+                fieldEnum: fieldEnum ?? null,
+                isOptional,
+                sequenceNumber,
+                updatedAt: now,
+              });
+              return found.id;
+            }
+            await tx.mutate.form_fields.insert({
+              id: candidateId,
+              formId,
+              globalFieldId: null,
+              fieldName,
+              fieldType,
+              fieldEnum: fieldEnum ?? null,
+              isOptional,
+              sequenceNumber,
               createdAt: now,
               updatedAt: now,
             });
@@ -7288,36 +7333,21 @@ export const mutators = defineMutators({
 
             // Editing a legacy row in place (keeps its id + saved values stable).
             if (legacyFieldId) {
-              const legacyRow = existingById.get(legacyFieldId);
               if (!field.membershipId) {
-                if (legacyRow) {
-                  await tx.mutate.form_fields.update({
-                    id: legacyRow.id,
-                    globalFieldId: null,
-                    fieldName,
-                    fieldType: field.fieldType,
-                    fieldEnum: fieldEnum ?? null,
-                    isOptional,
-                    sequenceNumber,
-                    updatedAt: now,
-                  });
-                } else {
-                  await tx.mutate.form_fields.insert({
-                    id: legacyFieldId,
-                    formId,
-                    fieldName,
-                    fieldType: field.fieldType,
-                    fieldEnum: fieldEnum ?? null,
-                    isOptional,
-                    sequenceNumber,
-                    createdAt: now,
-                    updatedAt: now,
-                  });
-                }
+                await ensureLegacyFieldDefinition(
+                  legacyFieldId,
+                  formId,
+                  fieldName,
+                  field.fieldType,
+                  fieldEnum,
+                  isOptional,
+                  sequenceNumber,
+                );
                 keptRowIds.add(legacyFieldId);
                 continue;
               }
-
+              
+              const legacyRow = existingById.get(legacyFieldId);
               if (legacyRow && !legacyRow.globalFieldId) {
                 await tx.mutate.form_fields.update({
                   id: legacyRow.id,
@@ -7338,7 +7368,7 @@ export const mutators = defineMutators({
             if (definitionId) {
               const existingGlobal = await tx.run(zql.global_fields.where('id', definitionId).one());
               if (existingGlobal) {
-                if (existingGlobal.projectId !== scopedProjectId) {
+                if (scopedProjectId && existingGlobal.projectId !== scopedProjectId) {
                   throw new Error(`Field ${field.id} does not belong to this form`);
                 }
                 await tx.mutate.global_fields.update({
@@ -7348,8 +7378,18 @@ export const mutators = defineMutators({
                   fieldEnum: fieldEnum ?? null,
                   updatedAt: timestamp,
                 });
+              } else if(scopedProjectId) {
+                definitionId = await ensureGlobalField(definitionId, fieldName, field.fieldType, fieldEnum, scopedProjectId);
               } else {
-                definitionId = await ensureGlobalField(definitionId, fieldName, field.fieldType, fieldEnum);
+                definitionId = await ensureLegacyFieldDefinition(
+                  legacyFieldId,
+                  formId,
+                  fieldName,
+                  field.fieldType,
+                  fieldEnum,
+                  isOptional,
+                  sequenceNumber,
+                );
               }
             } else {
               continue;
@@ -7388,8 +7428,22 @@ export const mutators = defineMutators({
             if (keptRowIds.has(row.id)) {
               continue;
             }
+            if (!scopedProjectId) {
+              if (row.globalFieldId) {
+                await tx.mutate.form_fields.delete({ id: row.id });
+                continue;
+              }
 
-            const definitionId = await ensureLegacyGlobalDefinition(row);
+              const legacyValues = await tx.run(
+                zql.form_entity_values.where('formId', formId).where('fieldId', row.id),
+              );
+              if (legacyValues.length > 0) {
+                throw new Error(`Cannot delete field "${row.fieldName ?? row.id}" because it has saved values`);
+              }
+              await tx.mutate.form_fields.delete({ id: row.id });
+              continue;
+            }
+            const definitionId = await ensureLegacyGlobalDefinition(row, scopedProjectId);
             if (definitionId && definitionId !== row.id) {
               const legacyValues = await tx.run(
                 zql.form_entity_values.where('formId', formId).where('fieldId', row.id),
