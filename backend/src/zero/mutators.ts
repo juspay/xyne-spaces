@@ -9835,7 +9835,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 zql.form_fields
                   .where('formId', formId)
                   .where('fieldName', fieldName)
-                  .where('fieldType', fieldType)
                   .one(),
               );
               if (found) {
@@ -9933,6 +9932,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     isOptional,
                     sequenceNumber,
                   );
+                  keptRowIds.add(definitionId);
                 }
               } else {
                 continue;
