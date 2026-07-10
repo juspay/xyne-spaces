@@ -25,6 +25,8 @@ import {
   type MentionRankingCacConfig,
 } from './mentionRankingCacConfig';
 import { affinityService } from '../services/affinityService';
+import { useCachedQuery } from './useCachedQuery';
+import { queries } from '../zero/queries';
 
 interface UseMentionSearchResult {
   results: MentionResult[];
@@ -206,13 +208,29 @@ export const useMentionSearch = (
     !usesLocalParticipants ? channel?.id : undefined,
     isMentionRequested,
   );
-  // Unified member set: local participants for DM/group-DM, Vespa for channels.
-  const memberIds = useMemo(
-    () =>
-      new Set(usesLocalParticipants ? (localParticipantIds ?? []) : (vespaParticipantIds ?? [])),
-    [usesLocalParticipants, localParticipantIds, vespaParticipantIds],
+
+  const vespaEmpty =
+    !usesLocalParticipants &&
+    isMentionRequested &&
+    vespaParticipantIds !== null &&
+    vespaParticipantIds.length === 0;
+  const [dbParticipantRows] = useCachedQuery(
+    queries.channelParticipants({ channelId: vespaEmpty ? (channel?.id ?? '') : '' }),
+    { enabled: vespaEmpty },
   );
-  const membersLoaded = usesLocalParticipants ? true : vespaParticipantIds !== null;
+  const dbParticipantIds = useMemo(
+    () => (dbParticipantRows ? dbParticipantRows.map(p => p.userId) : null),
+    [dbParticipantRows],
+  );
+  const channelMemberIds =
+    vespaParticipantIds && vespaParticipantIds.length > 0 ? vespaParticipantIds : dbParticipantIds;
+
+  // Unified member set: local participants for DM/group-DM, Vespa→DB fallback for channels.
+  const memberIds = useMemo(
+    () => new Set(usesLocalParticipants ? (localParticipantIds ?? []) : (channelMemberIds ?? [])),
+    [usesLocalParticipants, localParticipantIds, channelMemberIds],
+  );
+  const membersLoaded = usesLocalParticipants ? true : channelMemberIds !== null;
 
   // DM-recency rank — used as the secondary affinity signal when MFU is empty.
   const dmRank = useDmAffinityRank(user?.id);
