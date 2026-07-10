@@ -8,7 +8,8 @@ import {
   type FormFieldChanges,
 } from '../triggers/ticket-updated.trigger';
 import { MESSAGE_RECEIVED_EVENT } from '../triggers/message-received.trigger';
-import type { MessageType } from '@prisma/client';
+import { CALL_EVENT, CALL_STARTED, CALL_ENDED } from '../triggers/call.trigger';
+import type { MessageType, CallType } from '@prisma/client';
 
 export interface TicketCreatedEventPayload {
   ticketId: string;
@@ -41,12 +42,28 @@ export interface MessageReceivedEventPayload {
   msgType: MessageType;
 }
 
+export interface CallEventPayload {
+  callEventType: typeof CALL_STARTED | typeof CALL_ENDED;
+  callId: string;
+  externalId: string;
+  channelId: string | null;
+  title: string | null;
+  callType: CallType;
+  startedAt: Date;
+  endedAt: Date | null;
+  durationSeconds: number | null;
+  aiSummary: string | null;
+  transcript: string | null;
+  conversationId: string | null;
+}
+
 export type AutomationEvent =
   | { type: typeof EMAIL_RECEIVED_EVENT; payload: EmailEventPayload }
   | { type: typeof EMAIL_SENT_EVENT; payload: EmailEventPayload }
   | { type: typeof TICKET_COMMENTED_EVENT; payload: TicketCommentedEventPayload }
   | { type: typeof TICKET_CREATED_EVENT; payload: TicketCreatedEventPayload }
   | { type: typeof TICKET_UPDATED_EVENT; payload: TicketUpdatedEventPayload }
-  | { type: typeof MESSAGE_RECEIVED_EVENT; payload: MessageReceivedEventPayload };
+  | { type: typeof MESSAGE_RECEIVED_EVENT; payload: MessageReceivedEventPayload }
+  | { type: typeof CALL_EVENT; payload: CallEventPayload };
 
 export type AutomationEventType = AutomationEvent['type'];

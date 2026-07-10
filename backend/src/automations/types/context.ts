@@ -18,6 +18,10 @@ import {
   MESSAGE_RECEIVED_EVENT,
   MessageReceivedOutputSchema,
 } from '../triggers/message-received.trigger';
+import {
+  CALL_EVENT,
+  CallEventOutputSchema,
+} from '../triggers/call.trigger';
 import type { TicketContext } from '../triggers/ticket-context';
 import type { TicketChanges } from '../triggers/ticket-updated.trigger';
 
@@ -46,6 +50,10 @@ export type TriggerContext =
     })
   | (z.infer<typeof MessageReceivedOutputSchema> & {
       type: typeof MESSAGE_RECEIVED_EVENT;
+      data: Record<string, unknown>;
+    })
+  | (z.infer<typeof CallEventOutputSchema> & {
+      type: typeof CALL_EVENT;
       data: Record<string, unknown>;
     });
 

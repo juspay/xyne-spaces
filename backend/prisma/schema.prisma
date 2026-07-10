@@ -776,6 +776,7 @@ enum WorkflowEventType {
   EMAIL_SENT
   WEBHOOK
   MESSAGE_RECEIVED
+  CALL_EVENT
 
   @@schema("public")
 }
