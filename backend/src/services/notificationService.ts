@@ -1017,6 +1017,8 @@ class NotificationService {
       }),
     );
 
+    void this.sendOwnMessagePrefetchToMobile(senderId, notificationData);
+
     const deliveredUserIds = [
       ...desktopResults
         .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
@@ -1126,6 +1128,8 @@ class NotificationService {
         return { userId, deliveredViaApp: result.deliveredViaApp };
       })
     );
+
+    void this.sendOwnMessagePrefetchToMobile(senderId, notificationData);
 
     // Collect all users who were successfully notified via Spaces (WebSocket only)
     const deliveredUserIds = [
@@ -1477,6 +1481,8 @@ class NotificationService {
       })
     );
 
+    void this.sendOwnMessagePrefetchToMobile(senderId, notificationData);
+
     // Collect all users who were successfully notified via Spaces
     const deliveredUserIds = [
       ...desktopResults
@@ -1572,6 +1578,8 @@ class NotificationService {
         return { userId: recipientId, deliveredViaApp: result.deliveredViaApp };
       })
     );
+
+    void this.sendOwnMessagePrefetchToMobile(senderId, notificationData);
 
     const deliveredUserIds = [
       ...desktopResults
@@ -2873,6 +2881,69 @@ class NotificationService {
       );
     } catch (error) {
       logger.error('[NotificationService] Failed to send ticket related ticket removed notification:', error);
+    }
+  }
+
+  /**
+   * Silent prefetch push to the sender's own mobile devices so a message they sent
+   * from another platform (web/desktop) warms the mobile cache before the app is
+   * opened. Not fanned out to desktop/WebSocket (Zero already syncs those) and never
+   * writes a DB `sessionNotification` row — this is purely a wake-up hint.
+   *
+   * Fires per message (once). Idempotent on the receiving device: if the sender's
+   * mobile app also originated the message, Zero has already stored the row locally
+   * and the prefetch is a no-op.
+   *
+   * Gated by env `LOTUS_OWN_MESSAGE_PREFETCH_ENABLED=true`. Kept off by default so
+   * lotus can ship the client-side `prefetchOnly` handler first and reach adoption
+   * before the backend starts sending these pushes. Older lotus builds have no
+   * short-circuit and would draw a spurious "New message" banner with empty body
+   * for the sender's own messages.
+   */
+  async sendOwnMessagePrefetchToMobile(
+    senderId: string,
+    data: NotificationData,
+  ): Promise<void> {
+    if (process.env.LOTUS_OWN_MESSAGE_PREFETCH_ENABLED !== 'true') return;
+    try {
+      const sessions = await fcmPushService.getActiveSessionsWithTokens(senderId);
+      const mobileSessions = sessions.filter(
+        s => s.platform === 'ios' || s.platform === 'android',
+      );
+      if (mobileSessions.length === 0) {
+        logger.info('[NOTIFICATION-SERVICE] OWN-PREFETCH SKIPPED (no mobile sessions)', {
+          senderId,
+          type: data.type,
+        });
+        return;
+      }
+
+      await Promise.allSettled(
+        mobileSessions.map(session =>
+          realTimeNotificationService.queueMobilePush(senderId, session, {
+            type: data.type,
+            title: data.title,
+            message: data.message,
+            actionUrl: data.actionUrl,
+            relatedEntityType: data.relatedEntityType,
+            relatedEntityId: data.relatedEntityId,
+            metadata: data.metadata,
+            prefetchOnly: true,
+          }),
+        ),
+      );
+
+      logger.info('[NOTIFICATION-SERVICE] OWN-PREFETCH QUEUED', {
+        senderId,
+        type: data.type,
+        sessions: mobileSessions.length,
+      });
+    } catch (error) {
+      logger.error('[NOTIFICATION-SERVICE] OWN-PREFETCH FAILED', {
+        senderId,
+        type: data.type,
+        error,
+      });
     }
   }
 }
