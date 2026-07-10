@@ -34,7 +34,10 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     }
 
     const userGroup = await this.db.userGroup.create({
-      data,
+      data: {
+        ...data,
+        createdBy: data.createdBy ?? actorUserId ?? null,
+      },
     });
 
     // Log audit event
@@ -63,7 +66,9 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
           alias: data.alias || null,
           description: data.description || null,
           metadata: data.metadata,
-          workspace: data.workspace
+          workspace: data.workspace,
+          // Record the creator so non-admin User Groups views can be scoped to groups they created.
+          createdBy: actorUserId ?? null,
         },
       });
 
@@ -411,4 +416,3 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
   }
 
 }
-

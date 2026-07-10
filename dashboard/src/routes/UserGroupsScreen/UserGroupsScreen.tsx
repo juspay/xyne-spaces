@@ -13,15 +13,19 @@ import type { UserGroup as ZeroUserGroup } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 import { useUserGroups } from '../../hooks/useUserGroup';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useHasResourceAccess } from '../../hooks/usePermissions';
+import { useAuth } from '../../hooks/useAuth';
 
 const UserGroupsScreen = (): ReactElement => {
   const zero = useZero();
+  const { user } = useAuth();
   const { isMobile } = usePlatform();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUserGroup, setEditingUserGroup] = useState<ZeroUserGroup | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
   const userGroups = useUserGroups();
+  const hasUserGroupsAdminAccess = useHasResourceAccess('USER-GROUPS');
 
   const loading = userGroups === undefined;
 
@@ -29,7 +33,9 @@ const UserGroupsScreen = (): ReactElement => {
   const filteredUserGroups = useMemo(() => {
     if (!userGroups) return [];
 
-    let filtered = userGroups;
+    let filtered = hasUserGroupsAdminAccess
+      ? userGroups
+      : userGroups.filter(group => group.createdBy === user?.id);
 
     // Apply search filter
     if (searchQuery.trim()) {
@@ -43,7 +49,7 @@ const UserGroupsScreen = (): ReactElement => {
     }
 
     return filtered;
-  }, [userGroups, searchQuery]);
+  }, [userGroups, hasUserGroupsAdminAccess, user?.id, searchQuery]);
 
   const createUserGroupMutation = useMutation({
     mutationFn: async (data: {

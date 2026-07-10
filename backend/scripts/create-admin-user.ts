@@ -135,6 +135,26 @@ async function createAdminUser() {
       console.log('✅ Already in ADMIN group');
     }
 
+    // Ensure local admin-surface resources exist before granting ADMIN access.
+    // Older local DBs may predate these resources.
+    const requiredResources = [
+      {
+        name: 'USER-MANAGEMENT',
+        description: 'User and user-group administration endpoints (/api/user-management/*)',
+      },
+      {
+        name: 'USER-GROUPS',
+        description: 'User Groups dashboard access and group visibility management',
+      },
+    ];
+    for (const resource of requiredResources) {
+      await prisma.resource.upsert({
+        where: { name: resource.name },
+        update: {},
+        create: resource,
+      });
+    }
+
     // Grant direct ADMIN access to all resources
     console.log('\n🔐 Granting direct ADMIN access to all resources...');
     const allResources = await prisma.resource.findMany();

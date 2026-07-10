@@ -19,6 +19,8 @@ const prisma = new PrismaClient();
 const ESSENTIAL_RESOURCES = [
   { name: 'TICKETS', description: 'Ticket management endpoints (/api/tickets/*)' },
   { name: 'USERS', description: 'User management endpoints (/api/users/*)' },
+  { name: 'USER-MANAGEMENT', description: 'User and user-group administration endpoints (/api/user-management/*)' },
+  { name: 'USER-GROUPS', description: 'User Groups dashboard access and group visibility management' },
   { name: 'WORKFLOWS', description: 'Workflow management endpoints (/api/workflows/*)' },
   { name: 'AGENTS', description: 'Agent management endpoints (/api/agents/*)' },
   { name: 'TOOLS', description: 'Tool management endpoints (/api/tools/*)' },
