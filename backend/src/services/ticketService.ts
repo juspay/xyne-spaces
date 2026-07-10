@@ -5,7 +5,7 @@ import { ActivitySource } from '@/types/ticket';
 import { DatabaseClient } from '@/database/client';
 import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
-import { PRStatusEvent, BoardType } from '@prisma/client';
+import { PRStatusEvent, BoardType, ActivityType, Prisma } from '@prisma/client';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
@@ -14,6 +14,7 @@ import { websocketService } from '@/services/websocketService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType, isReleaseTicket } from '@xyne/shared';
 import { ticketStageTransitionService } from './stageTransition/ticketStageTransitionService';
+import { dualWriteTicketTags, dualDeleteTicketTag } from '@/services/ticketTagDualWriteService';
 
 
 const prisma = DatabaseClient.getInstance();
@@ -177,6 +178,7 @@ export class TicketService {
       priority?: string;
       status?: string;
       eta?: string;
+      tags?: string[];
     },
   ): Promise<string[]> {
     const updates: string[] = [];
@@ -193,12 +195,22 @@ export class TicketService {
     if (params.status) { data['statusV2'] = params.status; updates.push('status'); }
     if (params.eta) { data['eta'] = new Date(params.eta); updates.push('eta'); }
 
-    const previousTicket = params.status === 'COMPLETED'
-      ? await prisma.ticket.findUnique({
-          where: { id: ticketId },
-          select: { statusV2: true },
-        })
-      : null;
+    // Snapshot the fields that can change so we can emit TicketActivity
+    // audit rows (old -> new) after the update, mirroring the activity model
+    // used by the repository and Zero ticket-update paths.
+    const prevSnapshot = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        assignedTo: true,
+        stageName: true,
+        userGroupId: true,
+        title: true,
+        description: true,
+        priority: true,
+        statusV2: true,
+        eta: true,
+      },
+    });
 
     const previousCountsSnapshot = await buildKanbanCountsSnapshot(ticketId);
     const updatedTicket = await prisma.ticket.update({
@@ -208,10 +220,16 @@ export class TicketService {
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
+    let tagDiff: { added: string[]; removed: string[] } = { added: [], removed: [] };
+    if (params.tags) {
+      tagDiff = await this.updateTicketTags(ticketId, params.tags);
+      updates.push('tags');
+    }
+
     if (
       params.status === 'COMPLETED'
-      && previousTicket
-      && previousTicket.statusV2 !== 'COMPLETED'
+      && prevSnapshot
+      && prevSnapshot.statusV2 !== 'COMPLETED'
       && isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
     ) {
       // The ticket update above is already committed; deployed-version
@@ -228,6 +246,93 @@ export class TicketService {
         );
       }
     }
+    // Write TicketActivity audit rows for every field that actually changed.
+    // Best-effort: the ticket update above is already committed, so an audit
+    // write failure must not fail the request.
+    try {
+      const activities: Array<{ activityType: ActivityType; value: Prisma.InputJsonValue }> = [];
+      if (prevSnapshot) {
+        if (params.assigneeId && prevSnapshot.assignedTo !== params.assigneeId) {
+          activities.push({
+            activityType: ActivityType.ASSIGNED_TO,
+            value: { oldValue: prevSnapshot.assignedTo, newValue: params.assigneeId },
+          });
+        }
+        if (params.stage && prevSnapshot.stageName !== params.stage) {
+          activities.push({
+            activityType: ActivityType.STAGE_NAME,
+            value: {
+              field: 'stageName',
+              oldValue: prevSnapshot.stageName,
+              newValue: params.stage,
+              source: ActivitySource.INTERNAL,
+            },
+          });
+        }
+        if (params.groupId && prevSnapshot.userGroupId !== params.groupId) {
+          activities.push({
+            activityType: ActivityType.USER_GROUP_ID,
+            value: { field: 'userGroupId', oldValue: prevSnapshot.userGroupId, newValue: params.groupId },
+          });
+        }
+        if (params.title && prevSnapshot.title !== params.title) {
+          activities.push({
+            activityType: ActivityType.TITLE,
+            value: { field: 'title', oldValue: prevSnapshot.title, newValue: params.title },
+          });
+        }
+        if (params.description && prevSnapshot.description !== params.description) {
+          activities.push({
+            activityType: ActivityType.DESCRIPTION,
+            value: { field: 'description', oldValue: prevSnapshot.description, newValue: params.description },
+          });
+        }
+        if (params.priority && prevSnapshot.priority !== params.priority) {
+          activities.push({
+            activityType: ActivityType.PRIORITY,
+            value: { field: 'priority', oldValue: prevSnapshot.priority, newValue: params.priority },
+          });
+        }
+        if (params.status && prevSnapshot.statusV2 !== params.status) {
+          activities.push({
+            activityType: ActivityType.STATUS,
+            value: { field: 'statusV2', oldValue: prevSnapshot.statusV2, newValue: params.status },
+          });
+        }
+        if (params.eta) {
+          const prevEtaMs = prevSnapshot.eta ? prevSnapshot.eta.getTime() : null;
+          const nextEtaMs = new Date(params.eta).getTime();
+          if (prevEtaMs !== nextEtaMs) {
+            activities.push({
+              activityType: ActivityType.ETA,
+              value: { field: 'eta', oldValue: prevEtaMs, newValue: nextEtaMs },
+            });
+          }
+        }
+      }
+      if (tagDiff.added.length > 0 || tagDiff.removed.length > 0) {
+        activities.push({
+          activityType: ActivityType.TAGS,
+          value: { added: tagDiff.added, removed: tagDiff.removed },
+        });
+      }
+      if (activities.length > 0) {
+        await prisma.ticketActivity.createMany({
+          data: activities.map(activity => ({
+            ticketId,
+            updatedBy: userId,
+            activityType: activity.activityType,
+            value: activity.value,
+          })),
+        });
+      }
+    } catch (error) {
+      logger.error(
+        `[TicketService] Failed to write ticket activities for ticket ${ticketId}:`,
+        error,
+      );
+    }
+
     await vespaQueue.addJob({
       schema: ticketSchema,
       jobType: 'feed',
@@ -251,6 +356,57 @@ export class TicketService {
 
     logger.info(`[TicketService] Updated ticket ${ticketId}: ${updates.join(', ')}`);
     return updates;
+  }
+
+  /**
+   * Replace the set of tags on a ticket with `tagNames`.
+   * Mirrors the create-path write model: old `ticket_tags` table plus the
+   * dual-write to `project_tags` + `ticket_tag_mappings`. Diff-based so we
+   * only add/remove what actually changed, wrapped in a single transaction.
+   */
+  async updateTicketTags(
+    ticketId: string,
+    tagNames: string[],
+  ): Promise<{ added: string[]; removed: string[] }> {
+    const desired = Array.from(
+      new Set(tagNames.map(t => t.trim()).filter(Boolean)),
+    );
+
+    const existing = await prisma.ticketTag.findMany({
+      where: { ticketId },
+      select: { name: true },
+    });
+    const existingNames = new Set(existing.map(t => t.name));
+
+    const toAdd = desired.filter(n => !existingNames.has(n));
+    const toRemove = Array.from(existingNames).filter(n => !desired.includes(n));
+
+    if (toAdd.length === 0 && toRemove.length === 0) {
+      return { added: [], removed: [] };
+    }
+
+    await prisma.$transaction(async tx => {
+      if (toRemove.length > 0) {
+        await tx.ticketTag.deleteMany({
+          where: { ticketId, name: { in: toRemove } },
+        });
+        for (const name of toRemove) {
+          await dualDeleteTicketTag(ticketId, name, tx);
+        }
+      }
+      if (toAdd.length > 0) {
+        await tx.ticketTag.createMany({
+          data: toAdd.map(name => ({ name, ticketId })),
+        });
+        await dualWriteTicketTags(ticketId, toAdd, tx);
+      }
+    });
+
+    logger.info(
+      `[TicketService] Updated tags for ticket ${ticketId}: +${toAdd.length} -${toRemove.length}`,
+    );
+
+    return { added: toAdd, removed: toRemove };
   }
 
   /**
