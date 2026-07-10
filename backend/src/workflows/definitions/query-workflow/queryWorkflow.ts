@@ -234,7 +234,7 @@ const callGeniusInvestigation = async (
         method: 'POST',
         headers: {
           'Accept': 'text/event-stream',
-          'x-source': 'xyne',
+          'x-source': 'XyneSpaces',
           'Authorization': `Basic ${Buffer.from(merchantToken).toString('base64')}`,
           'Connection': 'keep-alive',
         },

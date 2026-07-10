@@ -80,6 +80,7 @@ export function createXyneRcaTool(): Tool<{ query: string }, XyneAIAgentContext>
             'Content-Type': 'application/x-www-form-urlencoded',
             'Authorization': `Basic ${xyneRcaApiKey}`,
             'Accept': 'text/event-stream',
+            'x-source': 'XyneSpaces',
             'X-Source-Config': 'xyne_rca',
             'X-Xyne-User-Email': userEmail,
             'X-Xyne-User-Id': userId,
