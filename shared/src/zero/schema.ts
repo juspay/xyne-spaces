@@ -1261,6 +1261,7 @@ export const userGroupTable = table('user_groups')
     rotationStartDate: number().optional(),
     createdAt: number(),
     updatedAt: number(),
+    createdBy: string().optional(),
   })
   .primaryKey('id');
 
@@ -3439,6 +3440,11 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ['id'],
     destField: ['userId'],
     destSchema: userPresenceTable,
+  }),
+  resourceAccess: many({
+    sourceField: ['id'],
+    destField: ['userId'],
+    destSchema: resourceAccessTable,
   }),
   userGroupMappings: many({
     sourceField: ['id'],

@@ -1102,6 +1102,7 @@ model UserGroup {
   rotationStartDate    DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  createdBy   String?  // User ID of the group creator (no FK constraint; relationMode="prisma"). Nullable: pre-existing groups have no known creator.
 
   // Relations
   resourceAccess       ResourceAccess[]
@@ -1118,6 +1119,7 @@ model UserGroup {
 
   @@index([workspaceId, createdAt(sort: Desc), id])
   @@index([workspaceId, name, id])
+  @@index([createdBy])
   @@map("user_groups")
   @@schema("public")
 }
