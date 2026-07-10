@@ -1357,17 +1357,22 @@ export class TicketController {
         return;
       }
 
-      const { assigneeId, stage, groupId, title, description, priority, status, eta } = req.body ?? {};
+      const { assigneeId, stage, groupId, title, description, priority, status, eta, tags } = req.body ?? {};
 
-      if (!assigneeId && !stage && !groupId && !title && !description && !priority && !status && !eta) {
+      if (!assigneeId && !stage && !groupId && !title && !description && !priority && !status && !eta && tags === undefined) {
         res.status(400).json({
-          error: 'At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, or eta)',
+          error: 'At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, eta, or tags)',
         });
         return;
       }
 
+      if (tags !== undefined && (!Array.isArray(tags) || tags.some((t: unknown) => typeof t !== 'string'))) {
+        res.status(400).json({ error: 'tags must be an array of strings' });
+        return;
+      }
+
       const updates = await ticketService.updateTicket(ticketId, userId, {
-        assigneeId, stage, groupId, title, description, priority, status, eta,
+        assigneeId, stage, groupId, title, description, priority, status, eta, tags,
       });
 
       res.status(200).json({ success: true, updated: updates });
