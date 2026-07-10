@@ -1,19 +1,26 @@
 import { useMemo } from 'react';
+import { CallType } from '@xyne/shared';
 import { ConfigChannelField } from '../SchemaForm/ConfigChannelField';
-import { EntityVariableField, MultiEntityVariableField } from '../SchemaForm/EntityVariableField';
+import { MultiEntityVariableField } from '../SchemaForm/EntityVariableField';
 import { EntityKind } from '../SchemaForm/SchemaForm.utils';
-import { SendMessageRichTextField } from '../SchemaForm/SendMessageRichTextField';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../../ui/Select/Select';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import type { ValidationIssue } from '../../Automation.types';
 
-interface SendMessageConfigShape {
+interface MakeCallConfigShape {
   channelId?: string;
-  userIds?: string[];
-  senderId?: string;
-  content?: string;
+  invitedUserIds?: string[];
+  userGroupIds?: string[];
+  callType?: CallType;
 }
 
-interface SendMessageStepFormProps {
+interface MakeCallStepFormProps {
   value: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
   issues: ValidationIssue[] | null;
@@ -21,14 +28,14 @@ interface SendMessageStepFormProps {
   variableSources: VariablePickerSource[];
 }
 
-export function SendMessageStepForm({
+export function MakeCallStepForm({
   value,
   onChange,
   issues,
   pathPrefix,
   variableSources,
-}: SendMessageStepFormProps): React.ReactElement {
-  const cfg = value as SendMessageConfigShape;
+}: MakeCallStepFormProps): React.ReactElement {
+  const cfg = value as MakeCallConfigShape;
 
   const issuesAt = useMemo(() => {
     const map = new Map<string, string>();
@@ -39,9 +46,9 @@ export function SendMessageStepForm({
     return map;
   }, [issues, pathPrefix]);
 
-  const setField = <K extends keyof SendMessageConfigShape>(
+  const setField = <K extends keyof MakeCallConfigShape>(
     key: K,
-    next: SendMessageConfigShape[K],
+    next: MakeCallConfigShape[K],
   ): void => {
     onChange({ ...cfg, [key]: next });
   };
@@ -50,8 +57,8 @@ export function SendMessageStepForm({
     <div className='flex flex-col gap-5'>
       <FieldRow
         label='Channel (optional)'
+        description='Pick a channel for the call. Leave empty to create a DM call.'
         error={issuesAt.get('channelId')}
-        description='Pick a channel to post in. Leave empty to only send DMs.'
       >
         <ConfigChannelField
           value={cfg.channelId}
@@ -62,46 +69,46 @@ export function SendMessageStepForm({
       </FieldRow>
 
       <FieldRow
-        label='Users (optional)'
-        error={issuesAt.get('userIds')}
-        description='Select users to DM. Leave empty to only post to the channel.'
+        label='Invited users (optional)'
+        description='Individual users to invite to the call.'
+        error={issuesAt.get('invitedUserIds')}
       >
         <MultiEntityVariableField
           entityKind={EntityKind.USER}
-          value={Array.isArray(cfg.userIds) ? cfg.userIds : []}
-          onChange={next => setField('userIds', next)}
+          value={Array.isArray(cfg.invitedUserIds) ? cfg.invitedUserIds : []}
+          onChange={next => setField('invitedUserIds', next)}
           variableSources={variableSources}
-          placeholder='Pick users to DM'
+          placeholder='Pick users to invite'
         />
       </FieldRow>
 
       <FieldRow
-        label='Send as'
-        error={issuesAt.get('senderId')}
-        description='Who the message is posted as. Leave empty to post as the automations bot.'
+        label='User groups (optional)'
+        description='All members of selected groups will be invited.'
+        error={issuesAt.get('userGroupIds')}
       >
-        <EntityVariableField
-          value={cfg.senderId}
-          onChange={next => setField('senderId', next)}
+        <MultiEntityVariableField
+          entityKind={EntityKind.USER_GROUP}
+          value={Array.isArray(cfg.userGroupIds) ? cfg.userGroupIds : []}
+          onChange={next => setField('userGroupIds', next)}
           variableSources={variableSources}
-          entityKind={EntityKind.USER}
-          placeholder='Pick a user (defaults to the automations bot)'
+          placeholder='Pick user groups to invite'
         />
       </FieldRow>
 
-      <FieldRow
-        label='Message'
-        error={issuesAt.get('content')}
-        required
-        description='Type @ to mention a person. Use the Variable button to insert values from the trigger or earlier steps.'
-      >
-        <SendMessageRichTextField
-          value={cfg.content ?? ''}
-          onChange={next => setField('content', next)}
-          variableSources={variableSources}
-          channelId={cfg.channelId ?? null}
-          placeholder='Type your message… use @ to mention someone'
-        />
+      <FieldRow label='Call type'>
+        <Select
+          value={cfg.callType ?? CallType.AUDIO}
+          onValueChange={v => setField('callType', v as CallType)}
+        >
+          <SelectTrigger className='w-full'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={CallType.AUDIO}>Audio</SelectItem>
+            <SelectItem value={CallType.VIDEO}>Video</SelectItem>
+          </SelectContent>
+        </Select>
       </FieldRow>
     </div>
   );

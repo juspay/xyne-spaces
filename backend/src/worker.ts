@@ -22,6 +22,7 @@ import { initializeOpenCode, shutdownOpenCode } from '@/workflows/framework/open
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
+import { initializeBotRegistry } from '@/bots/registry';
 import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
@@ -53,6 +54,7 @@ class WorkerService {
       // Register workflow definitions
       logger.info('Registering workflow definitions in worker...')
       registerAllWorkflows()
+      initializeBotRegistry()
 
       logger.info('Initializing Vespa queue (producer)...')
       await vespaQueue.initialize()

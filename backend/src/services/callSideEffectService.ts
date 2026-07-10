@@ -120,7 +120,10 @@ class CallSideEffectService {
      * - Schedules timeout job
      * - Sends Incoming Call notification
      */
-    async handleParticipantInvited(participantId: string): Promise<void> {
+    async handleParticipantInvited(
+        participantId: string,
+        options: { throwOnFailure?: boolean } = {}
+    ): Promise<void> {
         this.logger.info(`Handling Participant Invited: ${participantId}`);
         // Hoist so the affected user ID is available in the catch block even if the
         // error occurs after participant lookup but before the push is sent.
@@ -249,6 +252,9 @@ class CallSideEffectService {
                     stack: error instanceof Error ? error.stack : undefined,
                 }
             );
+            if (options.throwOnFailure) {
+                throw error;
+            }
         }
     }
 

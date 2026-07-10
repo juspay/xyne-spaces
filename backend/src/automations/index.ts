@@ -36,6 +36,7 @@ import { replyOnMessageStep } from './steps/reply-on-message.step';
 import { promoteMessageToTicketStep } from './steps/promote-message-to-ticket.step';
 import { updateFormFieldsStep } from './steps/update-form-fields.step';
 import { sendCsatRequestStep } from './steps/send-csat-request.step';
+import { makeCallStep } from './steps/make-call.step';
 
 import { automationQueue } from './queue/automation.queue';
 
@@ -79,6 +80,7 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(promoteMessageToTicketStep);
   stepRegistry.register(updateFormFieldsStep);
   stepRegistry.register(sendCsatRequestStep);
+  stepRegistry.register(makeCallStep);
 
   await automationQueue.initialize();
 
