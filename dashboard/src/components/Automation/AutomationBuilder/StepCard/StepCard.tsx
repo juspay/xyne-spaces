@@ -21,6 +21,7 @@ import {
 import { WebhookStepForm } from './WebhookStepForm';
 import { RunAgentStepForm } from './RunAgentStepForm';
 import { SendMessageStepForm } from './SendMessageStepForm';
+import { MakeCallStepForm } from './MakeCallStepForm';
 import { CreateEmailDraftStepForm } from './CreateEmailDraftStepForm';
 import { ReplyOnMessageStepForm } from './ReplyOnMessageStepForm';
 import { NotifyStepForm } from './NotifyStepForm';
@@ -207,6 +208,14 @@ export function StepCard({
                 />
               ) : step.type === 'SEND_MESSAGE' ? (
                 <SendMessageStepForm
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
+                />
+              ) : step.type === 'MAKE_CALL' ? (
+                <MakeCallStepForm
                   value={step.config}
                   onChange={onConfigChange}
                   issues={issues ?? null}
