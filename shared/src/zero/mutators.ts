@@ -7302,7 +7302,6 @@ export const mutators = defineMutators({
               zql.form_fields
                 .where('formId', formId)
                 .where('fieldName', fieldName)
-                .where('fieldType', fieldType)
                 .one(),
             );
             if (found) {
@@ -7400,6 +7399,7 @@ export const mutators = defineMutators({
                   isOptional,
                   sequenceNumber,
                 );
+                keptRowIds.add(definitionId);
               }
             } else {
               continue;
