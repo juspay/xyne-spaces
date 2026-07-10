@@ -8,6 +8,7 @@ import { emailReceivedTrigger } from './triggers/email-received.trigger';
 import { emailSentTrigger } from './triggers/email-sent.trigger';
 import { ticketCommentedTrigger } from './triggers/ticket-commented.trigger';
 import { messageReceivedTrigger } from './triggers/message-received.trigger';
+import { callTrigger } from './triggers/call.trigger';
 import { webhookTrigger } from './triggers/webhook.trigger';
 
 import { conditionalStep } from './steps/conditional.step';
@@ -50,6 +51,7 @@ export async function initializeAutomations(): Promise<void> {
   triggerRegistry.register(emailSentTrigger);
   triggerRegistry.register(ticketCommentedTrigger);
   triggerRegistry.register(messageReceivedTrigger);
+  triggerRegistry.register(callTrigger);
   triggerRegistry.register(webhookTrigger);
 
   stepRegistry.register(conditionalStep);

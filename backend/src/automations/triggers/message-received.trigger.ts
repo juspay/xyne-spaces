@@ -6,6 +6,7 @@ import { eventRouter } from '../engine/event-router';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
 import type { MessageReceivedEventPayload } from '../types/automation-events';
 
 export const MESSAGE_RECEIVED_EVENT = 'MESSAGE_RECEIVED';
@@ -29,6 +30,14 @@ const MessageReceivedConfigSchema = z.object({
     .describe(
       'Message kinds that fire this trigger. Defaults to messages from people (USER); add BOT, SYSTEM, or FORWARDED to include those, or clear it to match every kind.',
     ),
+  mentionedUserIds: z
+    .array(z.string())
+    .optional()
+    .describe('Only fire when at least one of these users is mentioned. Empty matches any mention; omit entirely to not filter on mentions.'),
+  mentionedGroupIds: z
+    .array(z.string())
+    .optional()
+    .describe('Only fire when at least one of these user groups is mentioned. Empty matches any group mention; omit entirely to not filter on group mentions.'),
 });
 
 export const MessageReceivedOutputSchema = z.object({
@@ -51,6 +60,30 @@ export const MessageReceivedOutputSchema = z.object({
   conversationId: z.string(),
   msgType: z.nativeEnum(MessageType),
   deleted: z.boolean(),
+  mentionedUsers: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string().nullable(),
+        email: z.string().nullable(),
+      }),
+    )
+    .optional(),
+  mentionedUserIds: z.array(z.string()).optional(),
+  mentionedUserNames: z.string().optional(),
+  hasMention: z.boolean().optional(),
+  mentionedGroups: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string().nullable(),
+        alias: z.string().nullable(),
+      }),
+    )
+    .optional(),
+  mentionedGroupIds: z.array(z.string()).optional(),
+  mentionedGroupNames: z.string().optional(),
+  hasGroupMention: z.boolean().optional(),
 });
 
 type MessageReceivedConfig = z.infer<typeof MessageReceivedConfigSchema>;
@@ -92,10 +125,62 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
     if (fromUserIds.length > 0) {
       if (!fromUserIds.includes(p.authorId)) return false;
     }
-    if (cfg.contentContains && cfg.contentContains.length > 0) {
-      if (!p.message.content) return false;
-      if (!p.message.content.toLowerCase().includes(cfg.contentContains.toLowerCase())) return false;
+    // Match filters: contentContains, user mentions, group mentions.
+    // These combine with OR logic when multiple are configured:
+    // if ANY of the configured match conditions is satisfied, the trigger fires.
+    //
+    // Mention filters use `undefined` vs `[]` deliberately:
+    //   - undefined  -> the filter was not configured, so it imposes no condition
+    //   - []         -> explicitly "any mention"; the message must contain at least one mention
+    //   - [ids...]   -> the message must mention at least one of the listed users/groups
+    const contentFilterConfigured = cfg.contentContains && cfg.contentContains.length > 0;
+    const userMentionFilterConfigured = cfg.mentionedUserIds !== undefined;
+    const groupMentionFilterConfigured = cfg.mentionedGroupIds !== undefined;
+
+    if (contentFilterConfigured || userMentionFilterConfigured || groupMentionFilterConfigured) {
+      const matchResults: boolean[] = [];
+
+      if (contentFilterConfigured) {
+        const contentPasses = !!(p.message.content && p.message.content.toLowerCase().includes(cfg.contentContains!.toLowerCase()));
+        matchResults.push(contentPasses);
+      }
+
+      if (userMentionFilterConfigured) {
+        const explicitMentionedUserIds = cfg.mentionedUserIds!
+          .map(id => id?.trim())
+          .filter((id): id is string => !!id);
+
+        let userMentionPasses: boolean;
+        if (explicitMentionedUserIds.length === 0) {
+          // Empty configured list means "any user mention", not "no filter".
+          userMentionPasses = !!p.hasMention;
+        } else {
+          const messageMentionedIds = p.mentionedUserIds ?? [];
+          userMentionPasses = explicitMentionedUserIds.some(id => messageMentionedIds.includes(id));
+        }
+        matchResults.push(userMentionPasses);
+      }
+
+      if (groupMentionFilterConfigured) {
+        const explicitMentionedGroupIds = cfg.mentionedGroupIds!
+          .map(id => id?.trim())
+          .filter((id): id is string => !!id);
+
+        let groupMentionPasses: boolean;
+        if (explicitMentionedGroupIds.length === 0) {
+          // Empty configured list means "any group mention", not "no filter".
+          groupMentionPasses = !!p.hasGroupMention;
+        } else {
+          const messageMentionedGroupIds = p.mentionedGroupIds ?? [];
+          groupMentionPasses = explicitMentionedGroupIds.some(id => messageMentionedGroupIds.includes(id));
+        }
+        matchResults.push(groupMentionPasses);
+      }
+
+      // At least one configured match filter must pass (OR logic)
+      if (!matchResults.some(Boolean)) return false;
     }
+
     return true;
   }
 }
@@ -155,6 +240,56 @@ async function hydrateMessageReceivedPayload(
     repositories.users.findById(authorId).catch(() => null),
   ]);
 
+  let mentionedUserIds: string[] = [];
+  let mentionedUsers: Array<{ id: string; name: string | null; email: string | null }> = [];
+  let mentionedUserNames: string | undefined;
+  let hasMention = false;
+
+  let mentionedGroupIds: string[] = [];
+  let mentionedGroups: Array<{ id: string; name: string | null; alias: string | null }> = [];
+  let mentionedGroupNames: string | undefined;
+  let hasGroupMention = false;
+
+  if (messageRow?.content) {
+    mentionedUserIds = extractUserMentions(messageRow.content);
+
+    if (mentionedUserIds.length > 0) {
+      hasMention = true;
+      const mentionedUsersData = await db.user.findMany({
+        where: { id: { in: mentionedUserIds } },
+        select: { id: true, name: true, email: true },
+      });
+      const usersById = new Map(mentionedUsersData.map(u => [u.id, u]));
+      mentionedUsers = mentionedUserIds.flatMap(id => {
+        const user = usersById.get(id);
+        return user ? [{ id: user.id, name: user.name ?? null, email: user.email ?? null }] : [];
+      });
+      mentionedUserNames = mentionedUsers
+        .map(u => u.name)
+        .filter((n): n is string => !!n)
+        .join(', ');
+    }
+
+    mentionedGroupIds = extractGroupMentions(messageRow.content);
+
+    if (mentionedGroupIds.length > 0) {
+      hasGroupMention = true;
+      const mentionedGroupsData = await db.userGroup.findMany({
+        where: { id: { in: mentionedGroupIds } },
+        select: { id: true, name: true, alias: true },
+      });
+      const groupsById = new Map(mentionedGroupsData.map(g => [g.id, g]));
+      mentionedGroups = mentionedGroupIds.flatMap(id => {
+        const group = groupsById.get(id);
+        return group ? [{ id: group.id, name: group.name ?? null, alias: group.alias ?? null }] : [];
+      });
+      mentionedGroupNames = mentionedGroups
+        .map(g => g.name)
+        .filter((n): n is string => !!n)
+        .join(', ');
+    }
+  }
+
   return {
     ...payload,
     message: {
@@ -176,5 +311,13 @@ async function hydrateMessageReceivedPayload(
     conversationId,
     msgType: payload.msgType,
     deleted: !messageRow,
+    mentionedUsers: mentionedUsers.length > 0 ? mentionedUsers : undefined,
+    mentionedUserIds: mentionedUserIds.length > 0 ? mentionedUserIds : undefined,
+    mentionedUserNames,
+    hasMention,
+    mentionedGroups: mentionedGroups.length > 0 ? mentionedGroups : undefined,
+    mentionedGroupIds: mentionedGroupIds.length > 0 ? mentionedGroupIds : undefined,
+    mentionedGroupNames,
+    hasGroupMention,
   };
 }

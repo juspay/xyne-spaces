@@ -2,14 +2,13 @@ import { Request, Response } from 'express';
 import { WebhookReceiver, WebhookEvent } from 'livekit-server-sdk';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { CallStatus, InvitationResponse } from '@prisma/client';
+import { CallOrigin, CallStatus, InvitationResponse, type Call } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { livekitWebhookACL } from './livekitWebhookACL';
 import { transcriptService } from '@/services/transcriptService';
-import { CallOrigin } from '@prisma/client';
 import {
   livekitService,
   getHostControls,
@@ -20,12 +19,38 @@ import { isTrackLockedByHostControls } from '@/services/callHostControlUtils';
 import { callRecordingService } from '@/services/callRecordingService';
 import { EgressStatus } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
+import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
 
   private get db() {
     return DatabaseClient.getInstance();
+  }
+
+  private async emitCallEndedAutomation(
+    call: Call,
+    endedAt: Date,
+    source: 'room_finished' | 'participant_left',
+  ): Promise<void> {
+    try {
+      const metadata = call.metadata as { conversationId?: string } | null;
+      await emitCallEnded({
+        id: call.id,
+        externalId: call.externalId,
+        channelId: call.channelId,
+        title: call.title,
+        callType: call.callType,
+        startedAt: call.startedAt,
+        endedAt,
+        aiSummary: call.aiSummary,
+        transcript: call.transcript,
+        conversationId: metadata?.conversationId ?? null,
+      });
+      logger.info(`[LiveKit Webhook] Emitted call-ended automation event (${source}) for ${call.externalId}`);
+    } catch (autoError) {
+      logger.error(`[LiveKit Webhook] Failed to emit call-ended automation event (${source}):`, autoError);
+    }
   }
 
   constructor() {
@@ -213,7 +238,9 @@ class LiveKitWebhookController {
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] Marked call ${callId} as ENDED`);
 
-        // Emit analytics events (call_ended + per-participant) for the Calls dashboards
+        await this.emitCallEndedAutomation(result.call, now, 'room_finished');
+
+        // Track call metrics (count + duration) as a side effect
         try {
           await callSideEffectService.logCallAnalytics(result.call, now);
         } catch (analyticsError) {
@@ -227,7 +254,7 @@ class LiveKitWebhookController {
           logger.error(`[LiveKit Webhook] Failed to post external chat summary for ${callId}:`, sideEffectError);
         }
       } else {
-        logger.info(`[LiveKit Webhook] Call ${callId} already marked as ENDED`);
+        logger.info(`[LiveKit Webhook] Call ${callId} did not transition to ENDED`);
       }
 
       if (result.messageUpdated) {
@@ -400,6 +427,21 @@ class LiveKitWebhookController {
         if (!result) return;
 
         call = result.call;
+
+        // Emit call-started automation event when the first participant creates the call
+        if (call) {
+          emitCallStarted({
+            id: call.id,
+            externalId: call.externalId,
+            channelId: call.channelId,
+            title: call.title,
+            callType: call.callType,
+            startedAt: call.startedAt,
+          }).catch(autoError => {
+            logger.error(`[LiveKit Webhook] Failed to emit call-started automation event:`, autoError);
+          });
+          logger.info(`[LiveKit Webhook] Emitted call-started automation event for ${roomName}`);
+        }
 
         logger.info(`[LiveKit Webhook] Successfully created all records for first participant in call ${roomName}`);
 
@@ -610,6 +652,8 @@ class LiveKitWebhookController {
         } catch (stopErr) {
           logger.error(`[LiveKit Webhook] Failed to stop recording for call ${callId}:`, stopErr);
         }
+
+        await this.emitCallEndedAutomation(result.call, now, 'participant_left');
 
         // Trigger side effects for call end (missed call notifications, cleanup timeouts, activities)
         try {

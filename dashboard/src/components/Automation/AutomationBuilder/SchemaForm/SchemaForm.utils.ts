@@ -77,6 +77,9 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   groupIds: 'Groups',
   userGroupId: 'User group',
   userGroupIds: 'User groups',
+  mentionedUserIds: 'Mentioned users',
+  mentionedGroupIds: 'Mentioned user groups',
+  participantUserIds: 'Participants',
   stageName: 'Stage',
   senderId: 'Sender',
   createdById: 'Created by',
@@ -95,6 +98,8 @@ export function detectEntityArrayKind(fieldKey: string): EntityKind | null {
     case 'assigneeIds':
     case 'toAssigneeIds':
     case 'memberIds':
+    case 'mentionedUserIds':
+    case 'participantUserIds':
       return EntityKind.USER;
     case 'boardIds':
       return EntityKind.BOARD;
@@ -102,6 +107,7 @@ export function detectEntityArrayKind(fieldKey: string): EntityKind | null {
       return EntityKind.PROJECT;
     case 'groupIds':
     case 'userGroupIds':
+    case 'mentionedGroupIds':
       return EntityKind.USER_GROUP;
     case 'ticketIds':
     case 'subTicketIds':

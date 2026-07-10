@@ -353,6 +353,7 @@ export enum WorkflowEventType {
   EMAIL_SENT = "EMAIL_SENT",
   WEBHOOK = "WEBHOOK",
   MESSAGE_RECEIVED = "MESSAGE_RECEIVED",
+  CALL_EVENT = "CALL_EVENT",
 }
 
 export enum WorkflowMappingEntityType {
