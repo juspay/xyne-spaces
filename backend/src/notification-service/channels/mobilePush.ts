@@ -68,6 +68,7 @@ export class MobilePushChannel {
         relatedEntityType: payload.relatedEntityType,
         relatedEntityId: payload.relatedEntityId,
         metadata: payload.metadata,
+        prefetchOnly: payload.prefetchOnly,
       }, platform, appVersion);
 
       if (isIncomingCall) {

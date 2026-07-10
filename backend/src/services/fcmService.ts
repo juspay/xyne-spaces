@@ -171,6 +171,11 @@ export type FcmNotificationPayload = {
   relatedEntityId?: string;
   actionUrl?: string;
   metadata?: Record<string, unknown>;
+  // Silent prefetch-only push (used for the sender's own messages so cross-platform
+  // sends warm the mobile cache). Forces the silent code path AND surfaces a
+  // `prefetchOnly=1` FCM data field so clients can distinguish it from other
+  // silent pushes (read/edit/delete) that mutate an existing tray.
+  prefetchOnly?: boolean;
 };
 
 type SessionPushTarget = {
@@ -532,7 +537,7 @@ class FcmPushService {
   }
 
   private async dispatchToFcm(token: string, payload: FcmNotificationPayload, platform?: string, appVersion?: string): Promise<void> {
-    const isSilent = payload.type === 'THREAD_READ' || payload.type === 'CHANNEL_READ' || payload.type === 'MESSAGE_DELETED' || payload.type === 'MESSAGE_EDITED';
+    const isSilent = payload.prefetchOnly === true || payload.type === 'THREAD_READ' || payload.type === 'CHANNEL_READ' || payload.type === 'MESSAGE_DELETED' || payload.type === 'MESSAGE_EDITED';
     if (config.env === 'development' && platform === 'ios') {
       await sendLocalIosPush(payload, this.buildDataPayload(payload, isSilent));
       return;
@@ -655,6 +660,7 @@ class FcmPushService {
       const slimMetadata = stripHeavyMetadata(payload.metadata);
       data.metadata = JSON.stringify(slimMetadata);
     }
+    if (payload.prefetchOnly) data.prefetchOnly = '1';
     // TODO: add image support once native clients need rich media notifications.
 
     // Defense-in-depth: guarantee the assembled data map fits FCM's 4KB limit,

@@ -44,6 +44,10 @@ export interface MobilePushPayload {
   relatedEntityType?: string;
   relatedEntityId?: string;
   metadata?: Record<string, any>;
+  // When true, the client uses this push to warm caches only; it must NOT
+  // surface a banner. Sent to the sender's own mobile devices so cross-platform
+  // sends show up instantly on the mobile app.
+  prefetchOnly?: boolean;
 }
 
 export interface MobilePushJobData {
