@@ -4,7 +4,6 @@ import log from 'electron-log/main';
 export interface NotificationData {
   title: string;
   body: string;
-  subtitle?: string;
   actionUrl?: string;
   workspaceId?: string;
 }
@@ -30,7 +29,6 @@ export function showNotification(data: NotificationData, mainWindow: BrowserWind
   try {
     const notification = new Notification({
       title: data.title,
-      subtitle: data.subtitle,
       body: data.body,
       silent: true,
       urgency: 'critical',

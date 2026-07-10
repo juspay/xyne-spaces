@@ -30,7 +30,6 @@ export interface ElectronAPI {
   showNotification: (data: {
     title: string;
     body: string;
-    subtitle?: string;
     actionUrl?: string;
     workspaceId?: string;
   }) => void;
