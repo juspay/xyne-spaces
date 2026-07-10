@@ -54,6 +54,7 @@ async function executeGeniusQuery(
     "Content-Type": "application/json",
     Authorization: apiKey,
     Accept: "text/event-stream",
+    "x-source": "XyneSpaces",
     "X-Xyne-User-Id": userId,
   };
 

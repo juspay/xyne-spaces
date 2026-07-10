@@ -348,6 +348,7 @@ export const initiateQueryRouting = async (
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Basic ${QUERY_ROUTING_AUTH}`,
+      'x-source': 'Zoho',
     },
     body: JSON.stringify(requestBody),
   });
@@ -404,7 +405,7 @@ export const initiateInvestigationAndWaitForWebhook = async (
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Basic ${QUERY_ROUTING_AUTH}`,
-      'x-source': "auto-diagnostics",
+      'x-source': "Zoho",
       'x-source-id': zohoTicketId
     },
     body: JSON.stringify(requestBody),

@@ -147,6 +147,7 @@ export const initiateRcaInvestigationAndWaitForWebhook = async (
       headers: {
         ...formData.getHeaders(),
         'Authorization': `Basic ${config.xyne.apiKey}`,
+        'x-source': 'XyneSpaces',
         'x-source-config': 'xyne_rca',
         'X-Xyne-User-Email': userContext.email,
         'X-Xyne-User-Id': userContext.userId,
@@ -223,6 +224,7 @@ export const fetchCompletedInvestigation = async (
       headers: {
         ...formData.getHeaders(),
         'Authorization': `Basic ${config.xyne.apiKey}`,
+        'x-source': 'XyneSpaces',
         'x-source-config': 'xyne_rca',
         'X-Xyne-User-Email': userContext.email,
         'X-Xyne-User-Id': userContext.userId,

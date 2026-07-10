@@ -81,6 +81,7 @@ const externalBots: ExternalBotDefinition[] = [
       responseType: 'streaming',
       headers: {
         Accept: 'text/event-stream',
+        'x-source': 'XyneSpaces',
       },
       requestBodyTemplate: {
         query: '{{message}}',
@@ -115,6 +116,7 @@ const externalBots: ExternalBotDefinition[] = [
       responseType: 'streaming',
       headers: {
         Accept: 'text/event-stream',
+        'x-source': 'XyneSpaces',
       },
       requestBodyTemplate: {
         query: '{{message}}',
@@ -148,6 +150,7 @@ const externalBots: ExternalBotDefinition[] = [
       responseType: 'streaming',
       headers: {
         Accept: 'text/event-stream',
+        'x-source': 'XyneSpaces',
         'x-username': config.geniusUpiAnalytics.username,
       },
       requestBodyTemplate: {

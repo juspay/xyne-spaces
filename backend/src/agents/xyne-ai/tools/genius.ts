@@ -79,6 +79,7 @@ export function createGeniusTool(): Tool<{ query: string }, XyneAIAgentContext> 
             'Content-Type': 'application/json',
             Authorization: queryRoutingKey,
             Accept: 'text/event-stream',
+            'x-source': 'XyneSpaces',
             'X-Xyne-User-Id': userId,
           },
           body: JSON.stringify({
