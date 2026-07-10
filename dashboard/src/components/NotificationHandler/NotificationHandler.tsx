@@ -247,10 +247,13 @@ export const NotificationHandler: React.FC = () => {
           typeof window.electronAPI.showNotification === 'function'
         ) {
           playNotificationSound();
+          // Fold sender into body
+          const electronBody = bannerSubtitle
+            ? `${bannerSubtitle}\n${data.notification.message}`
+            : data.notification.message;
           window.electronAPI.showNotification({
             title: bannerTitle,
-            ...(bannerSubtitle && { subtitle: bannerSubtitle }),
-            body: data.notification.message,
+            body: electronBody,
             actionUrl:
               resolvedActionUrl ||
               (notificationWorkspaceId ? `/${notificationWorkspaceId}/chat` : '/chat'),
@@ -263,10 +266,15 @@ export const NotificationHandler: React.FC = () => {
           const notificationType =
             data.notification.metadata?.notificationType || data.notification.type;
           const toastFn = getToastFn(notificationType);
-          // Toast has no subtitle field; fold sender into the description.
-          const toastDescription = bannerSubtitle
-            ? `${bannerSubtitle}\n${data.notification.message}`
-            : data.notification.message;
+          const toastDescription = bannerSubtitle ? (
+            <>
+              {bannerSubtitle}
+              <br />
+              {data.notification.message}
+            </>
+          ) : (
+            data.notification.message
+          );
           toastFn(bannerTitle, {
             description: toastDescription,
             action: {

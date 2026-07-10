@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('set-badge-count', count);
   },
 
-  showNotification: (data: { title: string; body: string; subtitle?: string; actionUrl?: string; workspaceId?: string }) => {
+  showNotification: (data: { title: string; body: string; actionUrl?: string; workspaceId?: string }) => {
     ipcRenderer.send('show-notification', data);
   },
 
