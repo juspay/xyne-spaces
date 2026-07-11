@@ -167,9 +167,9 @@ const ComponentTile = ({
   }, [component, visualType, create]);
 
   return (
-    <div className='group/tile flex flex-col h-full bg-white border border-xyne-gray-200 rounded-lg shadow-[0px_2px_1px_0px_rgba(5,5,6,0.05)] overflow-hidden'>
-      <div className='dashboard-grid-drag-handle flex items-center justify-between gap-2 pl-4 pr-2 pt-3 pb-0.5 cursor-move select-none'>
-        <h3 className='text-[13px] leading-[18px] font-medium text-xyne-gray-900 truncate'>
+    <div className='group/tile flex flex-col h-full bg-white border border-xyne-gray-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow overflow-hidden'>
+      <div className='dashboard-grid-drag-handle flex items-center justify-between gap-2 pl-5 pr-2.5 pt-3.5 pb-1 cursor-move select-none'>
+        <h3 className='text-[11px] uppercase tracking-[0.1em] font-semibold text-xyne-gray-500 truncate'>
           {component.title || untitledFor(visualType)}
         </h3>
         {isPersisted ? (
@@ -240,13 +240,13 @@ const ComponentTile = ({
           ) : component.loading ? (
             <LoadingState />
           ) : !fetchEnabled ? (
-            renderBody(visualType, component.data, component.title)
+            renderBody(visualType, component.data, component.title, component.componentConfig)
           ) : query.isLoading ? (
             <LoadingState />
           ) : query.isError ? (
             <ErrorState message={formatFetchError(query.error)} />
           ) : query.data ? (
-            renderBody(visualType, query.data.data, component.title)
+            renderBody(visualType, query.data.data, component.title, component.componentConfig)
           ) : (
             <LoadingState />
           )}
@@ -301,12 +301,20 @@ function renderBody(
   visualType: QueryVisualizationType | null,
   data: unknown,
   title?: string | null,
+  config?: ComponentRuntimeConfig,
 ): ReactElement {
   const Renderer = visualType ? getRendererForType(visualType) : undefined;
   if (!Renderer) {
     return <ErrorState message={`Unknown component type "${String(visualType)}"`} />;
   }
-  return <Renderer data={data} {...(title ? { title } : {})} />;
+  return (
+    <Renderer
+      data={data}
+      {...(title ? { title } : {})}
+      {...(config?.unit ? { unit: config.unit } : {})}
+      {...(config?.unitPosition ? { unitPosition: config.unitPosition } : {})}
+    />
+  );
 }
 
 function ErrorState({ message }: { message: string }): ReactElement {

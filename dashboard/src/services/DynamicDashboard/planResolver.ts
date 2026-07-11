@@ -17,6 +17,8 @@ export interface DashboardRuntimeContext {
 
 export interface ComponentRuntimeConfig {
   timeColumn?: string;
+  unit?: string;
+  unitPosition?: 'prefix' | 'suffix';
 }
 
 const RELATIVE_TO_MS: Record<RelativeRange, number> = {

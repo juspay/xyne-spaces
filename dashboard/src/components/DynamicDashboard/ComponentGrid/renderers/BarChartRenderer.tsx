@@ -8,41 +8,41 @@ import {
   CHART_MAX_BAR_SIZE_PX,
   CHART_MIN_BAR_SLOT_PX,
   CHART_TICK_STYLE,
-  CHART_TOOLTIP_CONTENT_STYLE,
-  CHART_TOOLTIP_ITEM_STYLE,
-  CHART_TOOLTIP_LABEL_STYLE,
   CHART_TOOLTIP_WRAPPER_STYLE,
   CHART_XAXIS_MIN_TICK_GAP,
   CHART_YAXIS_WIDTH,
   DASHBOARD_SERIES_COLORS,
 } from './constants';
-import { defaultLegendLabel } from './utils';
+import { ChartTooltip } from './ChartTooltip';
+import { NoRows } from './NoRows';
+import {
+  coerceLabelValueRows,
+  defaultLegendLabel,
+  formatKpiValue,
+  type UnitPosition,
+} from './utils';
 
 interface BarChartRendererProps {
   data: BarChartData;
   title?: string;
+  unit?: string;
+  unitPosition?: UnitPosition;
 }
 
-const BarChartRenderer = ({ data, title }: BarChartRendererProps): ReactElement => {
+const BarChartRenderer = ({
+  data,
+  title,
+  unit,
+  unitPosition,
+}: BarChartRendererProps): ReactElement => {
   const seriesKey = defaultLegendLabel(title);
-  const rows = (Array.isArray(data) ? data : [])
-    .filter(
-      (r): r is { label: string | number; value: number } =>
-        !!r &&
-        typeof r === 'object' &&
-        (typeof r.label === 'string' || typeof r.label === 'number') &&
-        typeof r.value === 'number' &&
-        Number.isFinite(r.value),
-    )
+  const yTick = (v: number): string => formatKpiValue(v, unit, unitPosition);
+  const rows = coerceLabelValueRows(data)
     .sort((a, b) => b.value - a.value)
-    .map(r => ({ label: String(r.label), [seriesKey]: r.value }));
+    .map(r => ({ label: r.label, [seriesKey]: r.value }));
 
   if (rows.length === 0) {
-    return (
-      <div className='flex items-center justify-center h-full text-xs text-muted-foreground'>
-        No rows to plot.
-      </div>
-    );
+    return <NoRows />;
   }
 
   const minContentWidth = rows.length * CHART_MIN_BAR_SLOT_PX + CHART_YAXIS_WIDTH;
@@ -62,15 +62,14 @@ const BarChartRenderer = ({ data, title }: BarChartRendererProps): ReactElement 
             />
             <YAxis
               tick={CHART_TICK_STYLE}
+              tickFormatter={yTick}
               axisLine={false}
               tickLine={false}
               width={CHART_YAXIS_WIDTH}
             />
             <Tooltip
+              content={<ChartTooltip unit={unit} unitPosition={unitPosition} />}
               wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
-              contentStyle={CHART_TOOLTIP_CONTENT_STYLE}
-              labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-              itemStyle={CHART_TOOLTIP_ITEM_STYLE}
               cursor={{ fill: 'var(--accent)', opacity: 0.4 }}
             />
             <Bar

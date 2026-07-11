@@ -126,9 +126,9 @@ const DynamicDashboardPanel = (): ReactElement => {
   const showInnerSidebar = hasDataSources || !!dashboardId;
 
   return (
-    <div className='flex h-full bg-white md:rounded-2xl overflow-hidden shadow-md'>
+    <div className='flex h-full gap-2'>
       {showInnerSidebar && (
-        <aside className='w-[280px] shrink-0 border-r border-xyne-gray-200 bg-xyne-gray-25 flex flex-col min-h-0'>
+        <aside className='w-[280px] shrink-0 bg-xyne-gray-25 md:rounded-2xl overflow-hidden shadow-md flex flex-col min-h-0'>
           <div className='px-4 h-[52px] flex items-center gap-2'>
             <h2 className='text-[17px] leading-6 font-semibold text-xyne-gray-900'>Dashboard</h2>
             <button

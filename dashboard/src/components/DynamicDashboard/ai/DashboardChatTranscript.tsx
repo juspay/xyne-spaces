@@ -48,25 +48,30 @@ export const DashboardChatTranscript = ({
           {turns.map(t =>
             t.role === 'user' ? (
               <UserBubble key={t.id} content={t.content} />
-            ) : (
+            ) : t.content ||
+              t.toolInvocations.length > 0 ||
+              t.reasoning ||
+              (isStreaming && assistantStreamingId === t.id) ? (
               <AssistantBubble
                 key={t.id}
+                id={t.id}
                 content={t.content}
                 toolInvocations={t.toolInvocations}
+                reasoning={t.reasoning}
                 isStreaming={isStreaming && assistantStreamingId === t.id}
               />
-            ),
+            ) : null,
           )}
           {suggestion && (
             <div className='space-y-2'>
-              <div className='text-sm text-xyne-gray-600'>{suggestion.message}</div>
+              <div className='text-sm text-muted-foreground'>{suggestion.message}</div>
               <div className='flex flex-wrap gap-1.5'>
                 {suggestion.suggestions.map(s => (
                   <button
                     key={s.prompt}
                     type='button'
                     onClick={() => onPickSuggestion?.(s.prompt)}
-                    className='inline-flex items-center px-2.5 py-1 rounded-full border border-xyne-gray-200 bg-white text-[12px] text-xyne-gray-900 hover:bg-xyne-gray-50'
+                    className='inline-flex items-center px-2.5 py-1 rounded-full border border-border bg-card text-[12px] text-foreground hover:bg-accent'
                     data-track-category={trackCategory}
                     data-track-name='Ai_Suggestion_Chip_Click'
                   >

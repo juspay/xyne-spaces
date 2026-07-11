@@ -822,21 +822,21 @@ export const ComponentEditorModal = ({
   }, [visualType, title, previewResult, previewError, planIsValid, formattedPreviewError]);
 
   return (
-    <div className='w-full flex flex-col h-full bg-white'>
-      <ComponentEditorHeader
-        dashboardName={dashboardName ?? 'Dashboard'}
-        title={title}
-        isPreviewing={isPreviewing}
-        isSaving={isSaving}
-        planIsValid={planIsValid}
-        hasPreviewError={!!previewError}
-        onRefresh={() => void handlePreview()}
-        onCancel={onClose}
-        onSave={handleSave}
-      />
+    <div className='w-full h-full flex gap-3 min-h-0'>
+      <div className='flex-1 min-w-0 flex flex-col bg-white rounded-2xl shadow-md overflow-hidden'>
+        <ComponentEditorHeader
+          dashboardName={dashboardName ?? 'Dashboard'}
+          title={title}
+          isPreviewing={isPreviewing}
+          isSaving={isSaving}
+          planIsValid={planIsValid}
+          hasPreviewError={!!previewError}
+          onRefresh={() => void handlePreview()}
+          onCancel={onClose}
+          onSave={handleSave}
+        />
 
-      <div className='flex flex-1 min-h-0'>
-        <div className='flex-1 min-w-0 flex flex-col overflow-auto'>
+        <div className='flex-1 min-h-0 flex flex-col overflow-auto'>
           <div className='px-6 pt-5 pb-3'>
             <div className='relative h-[400px] rounded-xl border border-xyne-gray-200 bg-white overflow-hidden'>
               <div className='absolute inset-2 rounded-lg border border-dashed border-xyne-primary-200 pointer-events-none' />
@@ -932,24 +932,24 @@ export const ComponentEditorModal = ({
             />
           </div>
         </div>
-
-        <aside className='w-[360px] shrink-0 border-l border-xyne-gray-200 bg-white flex flex-col'>
-          <AiSidePanel
-            dashboardName={dashboardName ?? 'Dashboard'}
-            dataSourceId={dataSourceId}
-            setDataSourceId={dsId => {
-              requestSharedFieldChange('data source', () => {
-                setDataSourceId(dsId);
-                setTableName('');
-                resetSchemaScopedState();
-              });
-            }}
-            dataSources={dataSourcesQuery.data ?? []}
-            lastError={formattedPreviewError ?? previewError?.message ?? null}
-            onToolCall={populateFromToolCall}
-          />
-        </aside>
       </div>
+
+      <aside className='w-[360px] shrink-0 bg-white rounded-2xl shadow-md overflow-hidden flex flex-col'>
+        <AiSidePanel
+          dashboardName={dashboardName ?? 'Dashboard'}
+          dataSourceId={dataSourceId}
+          setDataSourceId={dsId => {
+            requestSharedFieldChange('data source', () => {
+              setDataSourceId(dsId);
+              setTableName('');
+              resetSchemaScopedState();
+            });
+          }}
+          dataSources={dataSourcesQuery.data ?? []}
+          lastError={formattedPreviewError ?? previewError?.message ?? null}
+          onToolCall={populateFromToolCall}
+        />
+      </aside>
 
       {pendingFieldChange && (
         <ResetDraftsConfirmOverlay

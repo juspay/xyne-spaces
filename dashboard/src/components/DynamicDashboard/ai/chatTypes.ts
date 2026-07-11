@@ -7,6 +7,7 @@ export interface ChatTurn {
   role: 'user' | 'assistant';
   content: string;
   toolInvocations: ToolInvocation[];
+  reasoning?: string;
 }
 
 export interface ContextChip {

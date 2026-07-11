@@ -28,11 +28,10 @@ import {
 } from '@tanstack/react-table';
 import type { TableData } from '@xyne/shared';
 import { Popover } from '../../../ui/Popover/Popover';
-import { humanize, toStr } from './utils';
+import { formatCellValue, humanize, toStr } from './utils';
 
 interface TableRendererProps {
   data: TableData;
-  title?: string;
 }
 
 type Row_ = Record<string, unknown>;
@@ -42,8 +41,7 @@ const ENUM_THRESHOLD = 20;
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250];
 
 function defaultCell(getValue: () => unknown): string {
-  const v = getValue();
-  return v === null || v === undefined ? '—' : toStr(v);
+  return formatCellValue(getValue());
 }
 
 const booleanFilter: FilterFn<Row_> = (row, columnId, value: unknown) => {
@@ -150,7 +148,7 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
 
       <div className='flex-1 min-h-0 overflow-auto'>
         <table className='w-full text-sm'>
-          <thead className='sticky top-0 bg-xyne-gray-50 border-b border-border z-10'>
+          <thead className='sticky top-0 bg-muted border-b border-border z-10'>
             {table.getHeaderGroups().map(hg => (
               <tr key={hg.id}>
                 {hg.headers.map(header => {
@@ -163,7 +161,7 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
                   return (
                     <th
                       key={header.id}
-                      className={`group px-3 py-2 font-semibold text-foreground/80 text-xs whitespace-nowrap ${
+                      className={`group px-3 py-2.5 font-semibold text-muted-foreground text-[10px] uppercase tracking-[0.1em] whitespace-nowrap ${
                         type === 'number' ? 'text-right' : 'text-left'
                       }`}
                     >
@@ -219,7 +217,7 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
                   return (
                     <td
                       key={cell.id}
-                      className={`px-3 py-2 ${type === 'number' ? 'text-right tabular-nums' : ''}`}
+                      className={`px-3 py-2 ${type === 'number' ? 'text-right tabular-nums font-mono text-[13px] text-foreground' : ''}`}
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
