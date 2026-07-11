@@ -1,7 +1,16 @@
 import { ReactElement, useCallback, useEffect, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Outlet, useNavigate, useParams } from 'react-router-dom';
-import { LayoutDashboard, Plus, Trash2, Database, Workflow, Bell, Loader2 } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Plus,
+  Trash2,
+  Database,
+  Network,
+  Workflow,
+  Bell,
+  Loader2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../hooks/useAuth';
@@ -13,6 +22,7 @@ import { Dialog } from '../ui/Dialog';
 import { DashboardDeleteModal } from './DashboardDeleteModal';
 import { CreateDashboardModal } from './CreateDashboardModal';
 import { DataSourcesAdminModal } from './DataSourcesAdminModal';
+import { DatabaseVisualizerDialog } from './DatabaseVisualizer/DatabaseVisualizerDialog';
 import { PickerHint } from './PickerHint';
 import { SidebarNavItem } from './panel/SidebarNavItem';
 import { EmptyState } from './panel/EmptyState';
@@ -62,6 +72,7 @@ const DynamicDashboardPanel = (): ReactElement => {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [dataSourcesOpen, setDataSourcesOpen] = useState(false);
+  const [schemaVizOpen, setSchemaVizOpen] = useState(false);
 
   const queryClient = useQueryClient();
   const { data: dataSources } = useQuery({
@@ -152,6 +163,12 @@ const DynamicDashboardPanel = (): ReactElement => {
               label='Data Sources'
               onClick={() => setDataSourcesOpen(true)}
               trackName='Open_Data_Sources_Admin'
+            />
+            <SidebarNavItem
+              icon={<Network size={16} />}
+              label='Schema'
+              onClick={() => setSchemaVizOpen(true)}
+              trackName='Open_Database_Visualizer'
             />
             <SidebarNavItem icon={<Workflow size={16} />} label='Automations' disabled />
             <SidebarNavItem icon={<Bell size={16} />} label='Notification' disabled />
@@ -308,6 +325,8 @@ const DynamicDashboardPanel = (): ReactElement => {
       >
         <DataSourcesAdminModal onClose={() => setDataSourcesOpen(false)} />
       </Dialog>
+
+      <DatabaseVisualizerDialog open={schemaVizOpen} onOpenChange={setSchemaVizOpen} />
     </div>
   );
 };
