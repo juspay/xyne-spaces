@@ -1925,6 +1925,14 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   cursor: default !important;
 }
 
+/* ============================================================================
+ * CANVAS TABLE FILTERS
+ * ============================================================================ */
+::highlight(canvas-table-filter-match) {
+  background-color: var(--search-result-highlight-bg, #fde68a);
+  color: inherit;
+}
+
 /* Call summary card */
 .call-summary-card {
   background: var(--surface);
