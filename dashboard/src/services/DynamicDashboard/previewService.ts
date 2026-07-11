@@ -9,6 +9,7 @@ export interface PreviewResponse {
   data: unknown;
   rows: Array<Record<string, unknown>>;
   rowCount: number;
+  debug?: { sql: string; params: unknown[] };
   executedAt: string;
 }
 

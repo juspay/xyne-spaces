@@ -1,6 +1,7 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import {
   fetchComponentData,
+  retryOnServerError,
   type ComponentDataResponse,
   type ComponentDataError,
 } from '../services/DynamicDashboard/componentDataService';
@@ -16,9 +17,6 @@ export function useComponentData(
     enabled: Boolean(componentId),
     staleTime: autoRefreshMs ? 0 : 60 * 1000,
     refetchInterval: autoRefreshMs ?? false,
-    retry: (failureCount, error) => {
-      if (error.status >= 400 && error.status < 500) return false;
-      return failureCount < 2;
-    },
+    retry: retryOnServerError,
   });
 }

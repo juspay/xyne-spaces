@@ -243,6 +243,7 @@ export class DynamicDashboardController {
         data: result.data,
         rows: result.rows,
         rowCount: result.rowCount,
+        debug: result.debug,
         executedAt: new Date().toISOString(),
       });
     } catch (e) {
