@@ -1,21 +1,27 @@
 import { ReactElement } from 'react';
 import { ArrowDown, ArrowUp, Minus } from 'lucide-react';
 import type { KpiCompareData } from '@xyne/shared';
-import { formatCompact } from './utils';
+import { formatKpiValue, type UnitPosition } from './utils';
 
 interface KpiCompareRendererProps {
   data: KpiCompareData;
   title?: string;
+  unit?: string;
+  unitPosition?: UnitPosition;
 }
 
-const KpiCompareRenderer = ({ data, title }: KpiCompareRendererProps): ReactElement => {
+const KpiCompareRenderer = ({
+  data,
+  unit,
+  unitPosition,
+}: KpiCompareRendererProps): ReactElement => {
   const safe: KpiCompareData = {
     current: data && typeof data.current === 'number' ? data.current : NaN,
     previous: data && typeof data.previous === 'number' ? data.previous : NaN,
     label: data?.label,
     deltaPct: data?.deltaPct,
   };
-  const label = safe.label ?? title ?? '';
+  const label = safe.label ?? '';
   const hasPrecomputed = typeof safe.deltaPct === 'number' && Number.isFinite(safe.deltaPct);
   const hasBaseline =
     hasPrecomputed ||
@@ -38,17 +44,21 @@ const KpiCompareRenderer = ({ data, title }: KpiCompareRendererProps): ReactElem
   return (
     <div className='flex flex-col justify-center h-full px-6'>
       {label && (
-        <div className='text-xs uppercase tracking-wider text-muted-foreground mb-1'>{label}</div>
+        <div className='text-[10px] uppercase tracking-[0.16em] font-medium text-muted-foreground mb-2'>
+          {label}
+        </div>
       )}
-      <div className='text-4xl font-semibold text-foreground tabular-nums'>
-        {formatCompact(safe.current)}
+      <div className='font-mono text-5xl font-semibold text-foreground tabular-nums tracking-tight leading-none'>
+        {formatKpiValue(safe.current, unit, unitPosition)}
       </div>
-      <div className={`flex items-center gap-1 mt-2 text-sm ${colorClass}`}>
-        <Icon className='w-3 h-3' />
+      <div className={`flex items-center gap-1.5 mt-3 text-[13px] font-medium ${colorClass}`}>
+        <Icon className='w-3.5 h-3.5' strokeWidth={2.5} />
         <span className='tabular-nums'>
           {hasBaseline ? `${Math.abs(deltaPct).toFixed(1)}%` : '—'}
         </span>
-        <span className='text-muted-foreground ml-1'>vs {formatCompact(safe.previous)}</span>
+        <span className='text-muted-foreground ml-1 font-normal'>
+          vs {formatKpiValue(safe.previous, unit, unitPosition)}
+        </span>
       </div>
     </div>
   );

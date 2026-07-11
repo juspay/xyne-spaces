@@ -18,24 +18,31 @@ import {
   CHART_LEGEND_STYLE,
   CHART_MARGIN,
   CHART_TICK_STYLE,
-  CHART_TOOLTIP_CONTENT_STYLE,
-  CHART_TOOLTIP_ITEM_STYLE,
-  CHART_TOOLTIP_LABEL_STYLE,
   CHART_TOOLTIP_WRAPPER_STYLE,
   CHART_YAXIS_WIDTH,
   DASHBOARD_SERIES_COLORS,
 } from './constants';
-import { defaultLegendLabel } from './utils';
+import { ChartTooltip } from './ChartTooltip';
+import { NoRows } from './NoRows';
+import { defaultLegendLabel, formatKpiValue, type UnitPosition } from './utils';
 
 interface ScatterRendererProps {
   data: ScatterData;
   title?: string;
+  unit?: string;
+  unitPosition?: UnitPosition;
 }
 
 type Point = { x: number; y: number; series: string };
 
-const ScatterRenderer = ({ data, title }: ScatterRendererProps): ReactElement => {
+const ScatterRenderer = ({
+  data,
+  title,
+  unit,
+  unitPosition,
+}: ScatterRendererProps): ReactElement => {
   const defaultSeries = defaultLegendLabel(title);
+  const yTick = (v: number): string => formatKpiValue(v, unit, unitPosition);
   const points: Point[] = [];
   if (Array.isArray(data)) {
     for (const item of data as unknown[]) {
@@ -61,11 +68,7 @@ const ScatterRenderer = ({ data, title }: ScatterRendererProps): ReactElement =>
   const seriesEntries = Array.from(seriesGroups.entries());
 
   if (points.length === 0) {
-    return (
-      <div className='flex items-center justify-center h-full text-xs text-muted-foreground'>
-        No rows to plot.
-      </div>
-    );
+    return <NoRows />;
   }
 
   return (
@@ -86,15 +89,14 @@ const ScatterRenderer = ({ data, title }: ScatterRendererProps): ReactElement =>
             dataKey='y'
             name='y'
             tick={CHART_TICK_STYLE}
+            tickFormatter={yTick}
             axisLine={false}
             tickLine={false}
             width={CHART_YAXIS_WIDTH}
           />
           <Tooltip
+            content={<ChartTooltip unit={unit} unitPosition={unitPosition} />}
             wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
-            contentStyle={CHART_TOOLTIP_CONTENT_STYLE}
-            labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-            itemStyle={CHART_TOOLTIP_ITEM_STYLE}
             cursor={{ strokeDasharray: CHART_GRID_DASH, stroke: 'var(--border)' }}
           />
           {seriesEntries.length > 1 && (

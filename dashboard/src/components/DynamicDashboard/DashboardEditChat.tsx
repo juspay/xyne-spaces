@@ -195,10 +195,11 @@ export const DashboardEditChat = ({
     [applyToolCall],
   );
 
-  const chip: ReactNode = <LayoutDashboard size={11} className='text-xyne-gray-500' />;
+  const chip: ReactNode = <LayoutDashboard size={11} className='text-muted-foreground' />;
 
   return (
     <DashboardAiChat
+      className='flex flex-col h-full w-full rounded-xl bg-background border border-border overflow-hidden'
       dataSourceId={primaryDataSourceId}
       currentPlan={currentPlan}
       buildPrompt={text => text}

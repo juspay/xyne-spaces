@@ -1,5 +1,6 @@
 import { ReactElement } from 'react';
 import { QueryVisualizationType } from '@xyne/shared';
+import type { UnitPosition } from './utils';
 import BarChartRenderer from './BarChartRenderer';
 import LineChartRenderer from './LineChartRenderer';
 import AreaChartRenderer from './AreaChartRenderer';
@@ -20,7 +21,12 @@ export {
   TableRenderer,
 };
 
-export type ComponentRenderer = (props: { data: unknown; title?: string }) => ReactElement;
+export type ComponentRenderer = (props: {
+  data: unknown;
+  title?: string;
+  unit?: string;
+  unitPosition?: UnitPosition;
+}) => ReactElement;
 
 const REGISTRY: Partial<Record<QueryVisualizationType, ComponentRenderer>> = {
   [QueryVisualizationType.BAR_CHART]: BarChartRenderer as ComponentRenderer,

@@ -7,36 +7,24 @@ import {
   CHART_LEGEND_STYLE,
   CHART_PIE_INNER_RADIUS,
   CHART_PIE_OUTER_RADIUS,
-  CHART_TOOLTIP_CONTENT_STYLE,
-  CHART_TOOLTIP_ITEM_STYLE,
-  CHART_TOOLTIP_LABEL_STYLE,
   CHART_TOOLTIP_WRAPPER_STYLE,
   DASHBOARD_SERIES_COLORS,
 } from './constants';
+import { ChartTooltip } from './ChartTooltip';
+import { NoRows } from './NoRows';
+import { coerceLabelValueRows, type UnitPosition } from './utils';
 
 interface PieChartRendererProps {
   data: PieChartData;
-  title?: string;
+  unit?: string;
+  unitPosition?: UnitPosition;
 }
 
-const PieChartRenderer = ({ data }: PieChartRendererProps): ReactElement => {
-  const slices = (Array.isArray(data) ? data : [])
-    .filter(
-      (r): r is { label: string | number; value: number } =>
-        !!r &&
-        typeof r === 'object' &&
-        (typeof r.label === 'string' || typeof r.label === 'number') &&
-        typeof r.value === 'number' &&
-        Number.isFinite(r.value),
-    )
-    .map(r => ({ label: String(r.label), value: r.value }));
+const PieChartRenderer = ({ data, unit, unitPosition }: PieChartRendererProps): ReactElement => {
+  const slices = coerceLabelValueRows(data);
 
   if (slices.length === 0) {
-    return (
-      <div className='flex items-center justify-center h-full text-xs text-muted-foreground'>
-        No rows to plot.
-      </div>
-    );
+    return <NoRows />;
   }
 
   return (
@@ -62,10 +50,8 @@ const PieChartRenderer = ({ data }: PieChartRendererProps): ReactElement => {
             ))}
           </Pie>
           <Tooltip
+            content={<ChartTooltip hideLabel unit={unit} unitPosition={unitPosition} />}
             wrapperStyle={CHART_TOOLTIP_WRAPPER_STYLE}
-            contentStyle={CHART_TOOLTIP_CONTENT_STYLE}
-            labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-            itemStyle={CHART_TOOLTIP_ITEM_STYLE}
           />
           <Legend
             verticalAlign='top'

@@ -1,6 +1,7 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { LayoutDashboard, MoreVertical, Plus, Share, Sparkles } from 'lucide-react';
 import { DashboardRole } from '@xyne/shared';
 import { getApiErrorMessage } from '../../utils/apiError';
@@ -194,145 +195,171 @@ const DynamicDashboardScreen = (): ReactElement => {
   }
 
   return (
-    <div className='flex h-full bg-white min-w-0'>
-      <div className='flex-1 flex flex-col min-w-0'>
-        <div className='flex items-center justify-between gap-3 h-12 px-4 border-b border-xyne-gray-200 shrink-0'>
-          <div className='flex items-center gap-2 min-w-0'>
-            <LayoutDashboard className='w-4 h-4 text-xyne-gray-500 shrink-0' />
-            <span className='text-[13px] leading-[18px] font-medium text-xyne-gray-900 truncate'>
-              {dashboard.name}
-            </span>
-          </div>
-          <div className='flex items-center gap-1.5'>
-            {canShare && (
-              <button
-                type='button'
-                onClick={() => setAddComponentOpen(true)}
-                className='inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-xyne-primary-500 text-[13px] leading-[18px] font-medium text-white transition-colors hover:bg-xyne-primary-600'
-                data-track-category='DYNAMIC_DASHBOARD'
-                data-track-name='Open_Add_Component'
-              >
-                <Plus size={14} />
-                Add Component
-              </button>
-            )}
-            {canShare && (
-              <button
-                type='button'
-                onClick={() => setShareOpen(true)}
-                className='inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-xyne-gray-200 bg-white text-[13px] leading-[18px] font-medium text-xyne-gray-900 transition-colors hover:bg-xyne-gray-50'
-                data-track-category='DYNAMIC_DASHBOARD'
-                data-track-name='Open_Share_Modal'
-              >
-                <Share size={14} className='text-xyne-gray-600' />
-                Share
-              </button>
-            )}
-            {canShare && (
-              <button
-                type='button'
-                onClick={() => setChatOpen(v => !v)}
-                aria-pressed={chatOpen}
-                className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border text-[13px] leading-[18px] font-medium transition-colors ${
-                  chatOpen
-                    ? 'border-xyne-primary-500 bg-xyne-primary-500/10 text-xyne-gray-900'
-                    : 'border-xyne-gray-200 bg-white text-xyne-gray-900 hover:bg-xyne-gray-50'
-                }`}
-                data-track-category='DYNAMIC_DASHBOARD'
-                data-track-name='Toggle_Edit_Chat'
-              >
-                <Sparkles size={14} className='text-xyne-primary-500' />
-                Chat
-              </button>
-            )}
-            <button
-              type='button'
-              className='inline-flex items-center justify-center w-8 h-8 rounded-lg text-xyne-gray-600 hover:bg-xyne-gray-100 transition-colors'
-              aria-label='Dashboard options'
-            >
-              <MoreVertical size={16} />
-            </button>
-          </div>
-        </div>
-
-        <div className='flex items-start justify-between gap-3 px-6 pt-5 pb-4 shrink-0'>
-          <div className='min-w-0'>
-            <h1 className='text-[18px] leading-5 font-medium text-xyne-gray-900 truncate'>
-              {dashboard.name}
-            </h1>
-            {dashboard.description ? (
-              <p className='mt-1 text-sm leading-5 text-xyne-gray-500'>{dashboard.description}</p>
-            ) : (
-              <span className='mt-1 inline-block text-sm leading-5 text-xyne-gray-500'>
-                + Add description..
-              </span>
-            )}
-            <div className='flex items-center gap-2 mt-2 text-xs text-xyne-gray-400'>
-              <span className='capitalize'>{dashboard.visibility}</span>
-              <span>·</span>
-              <span>
-                {participantCount} participant{participantCount === 1 ? '' : 's'}
-              </span>
-              <span>·</span>
-              <span>
-                {componentCount} component{componentCount === 1 ? '' : 's'}
+    <div className='flex h-full min-w-0'>
+      <PanelGroup
+        direction='horizontal'
+        autoSaveId='dynamic-dashboard-chat'
+        className='flex flex-1 min-w-0 h-full'
+      >
+        <Panel
+          id='dashboard-main'
+          order={1}
+          defaultSize={65}
+          minSize={50}
+          className='flex flex-col min-w-0 bg-white md:rounded-2xl overflow-hidden shadow-md'
+        >
+          <div className='flex items-center justify-between gap-3 h-12 px-4 border-b border-xyne-gray-200 shrink-0'>
+            <div className='flex items-center gap-2 min-w-0'>
+              <LayoutDashboard className='w-4 h-4 text-xyne-gray-500 shrink-0' />
+              <span className='text-[13px] leading-[18px] font-medium text-xyne-gray-900 truncate'>
+                {dashboard.name}
               </span>
             </div>
+            <div className='flex items-center gap-1.5'>
+              {canShare && (
+                <button
+                  type='button'
+                  onClick={() => setAddComponentOpen(true)}
+                  className='inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-xyne-gray-900 text-[13px] leading-[18px] font-medium text-white transition-colors hover:bg-xyne-gray-1000'
+                  data-track-category='DYNAMIC_DASHBOARD'
+                  data-track-name='Open_Add_Component'
+                >
+                  <Plus size={14} />
+                  Add Component
+                </button>
+              )}
+              {canShare && (
+                <button
+                  type='button'
+                  onClick={() => setShareOpen(true)}
+                  className='inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-xyne-gray-200 bg-white text-[13px] leading-[18px] font-medium text-xyne-gray-900 transition-colors hover:bg-xyne-gray-50'
+                  data-track-category='DYNAMIC_DASHBOARD'
+                  data-track-name='Open_Share_Modal'
+                >
+                  <Share size={14} className='text-xyne-gray-600' />
+                  Share
+                </button>
+              )}
+              {canShare && (
+                <button
+                  type='button'
+                  onClick={() => setChatOpen(v => !v)}
+                  aria-pressed={chatOpen}
+                  className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border text-[13px] leading-[18px] font-medium transition-colors ${
+                    chatOpen
+                      ? 'border-xyne-primary-500 bg-xyne-primary-500/10 text-xyne-gray-900'
+                      : 'border-xyne-gray-200 bg-white text-xyne-gray-900 hover:bg-xyne-gray-50'
+                  }`}
+                  data-track-category='DYNAMIC_DASHBOARD'
+                  data-track-name='Toggle_Edit_Chat'
+                >
+                  <Sparkles size={14} className='text-xyne-primary-500' />
+                  Chat
+                </button>
+              )}
+              <button
+                type='button'
+                className='inline-flex items-center justify-center w-8 h-8 rounded-lg text-xyne-gray-600 hover:bg-xyne-gray-100 transition-colors'
+                aria-label='Dashboard options'
+              >
+                <MoreVertical size={16} />
+              </button>
+            </div>
           </div>
-          <div className='flex items-center gap-2 shrink-0'>
-            <TimeRangePicker
-              value={dashboardConfig.timeRange}
-              onChange={(next: DashboardTimeRange | null) => persistConfig({ timeRange: next })}
-            />
-            <AutoRefreshPicker
-              value={dashboardConfig.autoRefreshMs}
-              onChange={next => persistConfig({ autoRefreshMs: next })}
-            />
-          </div>
-        </div>
 
-        <DashboardVariablesBar
-          definitions={dashboardConfig.variables}
-          values={dashboardConfig.variableValues}
-          canEdit={Boolean(canShare)}
-          onDefinitionsChange={next => persistConfig({ variables: next })}
-          onValueChange={(name, state) =>
-            persistConfig({
-              variableValues: { ...dashboardConfig.variableValues, [name]: state },
-            })
-          }
-        />
-        <div className='flex-1 overflow-auto min-h-0'>
-          <ComponentGrid
-            components={gridComponents}
-            dashboardId={dashboard.id}
-            runtimeContext={runtimeContext}
-            autoRefreshMs={dashboardConfig.autoRefreshMs}
+          <div className='flex items-start justify-between gap-3 px-6 pt-6 pb-4 shrink-0'>
+            <div className='min-w-0'>
+              <h1 className='text-[24px] leading-7 font-semibold tracking-tight text-xyne-gray-900 truncate'>
+                {dashboard.name}
+              </h1>
+              {dashboard.description ? (
+                <p className='mt-1 text-sm leading-5 text-xyne-gray-500'>{dashboard.description}</p>
+              ) : (
+                <span className='mt-1 inline-block text-sm leading-5 text-xyne-gray-500'>
+                  + Add description..
+                </span>
+              )}
+              <div className='flex items-center gap-2 mt-2 text-xs text-xyne-gray-400'>
+                <span className='capitalize'>{dashboard.visibility}</span>
+                <span>·</span>
+                <span>
+                  {participantCount} participant{participantCount === 1 ? '' : 's'}
+                </span>
+                <span>·</span>
+                <span>
+                  {componentCount} component{componentCount === 1 ? '' : 's'}
+                </span>
+              </div>
+            </div>
+            <div className='flex items-center gap-2 shrink-0'>
+              <TimeRangePicker
+                value={dashboardConfig.timeRange}
+                onChange={(next: DashboardTimeRange | null) => persistConfig({ timeRange: next })}
+              />
+              <AutoRefreshPicker
+                value={dashboardConfig.autoRefreshMs}
+                onChange={next => persistConfig({ autoRefreshMs: next })}
+              />
+            </div>
+          </div>
+
+          <DashboardVariablesBar
+            definitions={dashboardConfig.variables}
+            values={dashboardConfig.variableValues}
             canEdit={Boolean(canShare)}
-            onEditComponent={canShare ? setEditingComponentId : undefined}
-            onAddComponent={canShare ? () => setAddComponentOpen(true) : undefined}
+            onDefinitionsChange={next => persistConfig({ variables: next })}
+            onValueChange={(name, state) =>
+              persistConfig({
+                variableValues: { ...dashboardConfig.variableValues, [name]: state },
+              })
+            }
           />
-        </div>
-      </div>
+          <div className='flex-1 overflow-auto min-h-0 bg-xyne-gray-50'>
+            <ComponentGrid
+              components={gridComponents}
+              dashboardId={dashboard.id}
+              runtimeContext={runtimeContext}
+              autoRefreshMs={dashboardConfig.autoRefreshMs}
+              canEdit={Boolean(canShare)}
+              onEditComponent={canShare ? setEditingComponentId : undefined}
+              onAddComponent={canShare ? () => setAddComponentOpen(true) : undefined}
+            />
+          </div>
+        </Panel>
 
-      {canShare && chatOpen && (
-        <DashboardEditChat
-          key={dashboard.id}
-          dashboardId={dashboard.id}
-          dashboardName={dashboard.name}
-          dashboardDescription={dashboard.description ?? null}
-          components={gridComponents.map(c => ({
-            id: c.id,
-            visualType: c.visualType,
-            title: c.title ?? null,
-            storedPlan: c.storedPlan,
-            componentConfig: c.componentConfig,
-            position: c.position,
-          }))}
-          canRenameOrChangeVisibility={isOwner}
-          onClose={() => setChatOpen(false)}
-        />
-      )}
+        {canShare && chatOpen && (
+          <>
+            <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+              <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full' />
+            </PanelResizeHandle>
+            <Panel
+              id='dashboard-chat'
+              order={2}
+              defaultSize={35}
+              minSize={25}
+              maxSize={50}
+              className='min-w-0 pl-2'
+            >
+              <DashboardEditChat
+                key={dashboard.id}
+                dashboardId={dashboard.id}
+                dashboardName={dashboard.name}
+                dashboardDescription={dashboard.description ?? null}
+                components={gridComponents.map(c => ({
+                  id: c.id,
+                  visualType: c.visualType,
+                  title: c.title ?? null,
+                  storedPlan: c.storedPlan,
+                  componentConfig: c.componentConfig,
+                  position: c.position,
+                }))}
+                canRenameOrChangeVisibility={isOwner}
+                onClose={() => setChatOpen(false)}
+              />
+            </Panel>
+          </>
+        )}
+      </PanelGroup>
 
       <Dialog
         open={shareOpen}

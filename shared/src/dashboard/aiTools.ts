@@ -2,6 +2,13 @@ import { z } from 'zod';
 import { QueryVisualizationType } from '../zero/schema';
 import { QueryPlanSchema } from './queryPlan';
 
+export const ComponentConfigSchema = z.object({
+  timeColumn: z.string().min(1).optional(),
+  unit: z.string().min(1).max(12).optional(),
+  unitPosition: z.enum(['prefix', 'suffix']).optional(),
+});
+export type ComponentConfig = z.infer<typeof ComponentConfigSchema>;
+
 // AI-driven dashboard creation: tool-call event protocol.
 //
 // The dashboard AI route streams Server-Sent Events back to the client.
@@ -40,17 +47,10 @@ export const AddComponentToolSchema = z.object({
         h: z.number().int().positive(),
       })
       .optional(),
-    // Per-component runtime hints. Currently the only field is
-    // `timeColumn`, which tells the dashboard-level time-range picker
-    // which column to filter on for this tile. AI should set this on
-    // any time-series chart (line / area) AND on any tile where the
-    // user might want to scope by time (e.g. "recent N" tables on a
-    // timestamped table). Omitting it = tile ignores the time range.
-    componentConfig: z
-      .object({
-        timeColumn: z.string().min(1).optional(),
-      })
-      .optional(),
+    // Per-component runtime hints (time-range column, value unit). AI should set
+    // `timeColumn` on any time-series or time-scopable tile so the dashboard
+    // time-range picker knows which column to filter on. See ComponentConfigSchema.
+    componentConfig: ComponentConfigSchema.optional(),
   }),
 });
 
@@ -86,11 +86,7 @@ export const UpdateComponentToolSchema = z.object({
         h: z.number().int().positive(),
       })
       .optional(),
-    componentConfig: z
-      .object({
-        timeColumn: z.string().min(1).optional(),
-      })
-      .optional(),
+    componentConfig: ComponentConfigSchema.optional(),
   }),
 });
 
@@ -204,11 +200,7 @@ export const DraftComponentSchema = z.object({
     h: z.number().int().positive(),
   }),
   // Runtime hints — mirrors dashboardComponent.config on the DB row.
-  componentConfig: z
-    .object({
-      timeColumn: z.string().min(1).optional(),
-    })
-    .optional(),
+  componentConfig: ComponentConfigSchema.optional(),
 });
 export type DraftComponent = z.infer<typeof DraftComponentSchema>;
 

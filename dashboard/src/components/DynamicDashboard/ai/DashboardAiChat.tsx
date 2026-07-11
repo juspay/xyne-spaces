@@ -1,6 +1,7 @@
 import { ReactElement, useCallback, useState } from 'react';
-import { ArrowUp, ChevronDown, Loader2, Plus, Sparkles, X } from 'lucide-react';
+import { ArrowUp, Loader2, RotateCcw, X } from 'lucide-react';
 import type { DashboardPlan } from '@xyne/shared';
+import { GlassStar } from '../../icons/xyne-ai';
 import { DashboardChatTranscript } from './DashboardChatTranscript';
 import { useDashboardAiStream } from './useDashboardAiStream';
 import type { ContextChip, ToolCallHandler } from './chatTypes';
@@ -33,7 +34,7 @@ export const DashboardAiChat = ({
   dataSourcePicker,
   trackCategory = 'DYNAMIC_DASHBOARD',
   lastError,
-  className = 'flex flex-col h-full w-[360px] shrink-0 border-l border-xyne-gray-200 bg-white',
+  className = 'flex flex-col h-full w-[360px] shrink-0 border-l border-border bg-background',
 }: DashboardAiChatProps): ReactElement => {
   const { turns, isStreaming, send, abort, suggestion } = useDashboardAiStream({
     dataSourceId,
@@ -66,25 +67,22 @@ export const DashboardAiChat = ({
   const canSend = !isStreaming;
 
   const emptyState = (
-    <div className='flex flex-col items-center justify-center h-full text-center px-6'>
-      <img
-        src='/images/ai-orb.png'
-        alt=''
-        aria-hidden='true'
-        className='w-24 h-24 mb-6 object-contain select-none'
-      />
-      <h3 className='text-base leading-6 font-semibold text-xyne-gray-900 max-w-[260px]'>
+    <div className='flex flex-col items-center justify-center h-full px-4'>
+      <div className='mb-9'>
+        <GlassStar shouldRotate={true} />
+      </div>
+      <h2 className='text-center text-foreground text-[24px] leading-[28px] font-semibold mb-6 md:mb-9 max-w-[300px]'>
         {emptyStatePrompt}
-      </h3>
+      </h2>
       {starterPrompts && starterPrompts.length > 0 && (
-        <div className='mt-6 flex flex-wrap items-center justify-center gap-1.5 max-w-[280px]'>
+        <div className='flex flex-wrap justify-center gap-2 max-w-md'>
           {starterPrompts.map(q => (
             <button
               key={q}
               type='button'
               onClick={() => submit(q)}
               disabled={isStreaming}
-              className='inline-flex items-center px-2.5 py-1 rounded-full border border-xyne-gray-200 bg-white text-[12px] text-xyne-gray-900 hover:bg-xyne-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+              className='px-[12px] py-[6px] rounded-full border border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-[12px] leading-[22px] disabled:opacity-50 disabled:cursor-not-allowed'
               data-track-category={trackCategory}
               data-track-name='Pick_Starter_Prompt'
             >
@@ -101,22 +99,22 @@ export const DashboardAiChat = ({
 
   return (
     <aside className={className}>
-      <div className='flex items-center justify-between h-12 px-4 border-b border-xyne-gray-200 shrink-0'>
+      <div className='flex items-center justify-between h-12 px-4 border-b border-border shrink-0'>
         <button
           type='button'
-          className='inline-flex items-center gap-1 text-[15px] leading-5 font-medium text-xyne-gray-900 hover:bg-xyne-gray-100 rounded-md px-1.5 py-0.5 -mx-1.5'
+          className='inline-flex items-center gap-1.5 text-[15px] leading-5 font-medium text-foreground hover:bg-accent rounded-md px-1.5 py-0.5 -mx-1.5'
           aria-label='Chat history'
           data-track-category={trackCategory}
           data-track-name='Open_Chat_History'
         >
+          <RotateCcw size={14} className='text-muted-foreground' />
           New chat
-          <ChevronDown size={14} className='text-xyne-gray-400' />
         </button>
         {onClose && (
           <button
             type='button'
             onClick={onClose}
-            className='inline-flex items-center justify-center w-7 h-7 rounded-lg text-xyne-gray-600 hover:bg-xyne-gray-100 transition-colors'
+            className='inline-flex items-center justify-center w-7 h-7 rounded-lg text-muted-foreground hover:bg-accent transition-colors'
             aria-label='Close chat'
             data-track-category={trackCategory}
             data-track-name='Close_Chat'
@@ -135,13 +133,13 @@ export const DashboardAiChat = ({
         trackCategory={trackCategory}
       />
 
-      <div className='m-3 mt-0 rounded-xl border border-xyne-orange-200 bg-white p-3 shrink-0'>
+      <div className='m-4 rounded-2xl border border-input bg-card p-3 shrink-0 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/15 transition-colors'>
         {contextChips && contextChips.length > 0 && (
           <div className='flex items-center gap-1.5 mb-2 flex-wrap'>
             {contextChips.map(c => (
               <span
                 key={c.label}
-                className='inline-flex items-center gap-1 h-6 px-2 rounded-md bg-xyne-orange-50 border border-xyne-orange-200 text-[12px] leading-4 text-xyne-gray-900'
+                className='inline-flex items-center gap-1 h-6 px-2 rounded-md bg-muted border border-border text-[12px] leading-4 text-foreground'
               >
                 {c.icon}
                 <span className='truncate' style={{ maxWidth: c.maxWidth ?? 180 }}>
@@ -165,39 +163,19 @@ export const DashboardAiChat = ({
           disabled={isStreaming}
           data-track-category={trackCategory}
           data-track-name='Chat_Input_Change'
-          className='w-full text-sm text-xyne-gray-900 caret-xyne-gray-900 placeholder:text-xyne-gray-400 outline-none resize-none bg-transparent'
+          className='w-full text-sm text-foreground caret-foreground placeholder:text-muted-foreground outline-none resize-none bg-transparent'
         />
-        <div className='flex items-center justify-between mt-1'>
-          <div className='flex items-center gap-1.5'>
-            <button
-              type='button'
-              className='p-1 rounded text-xyne-gray-500 hover:bg-xyne-gray-100'
-              aria-label='Add context'
-              data-track-category={trackCategory}
-              data-track-name='Chat_Add_Context'
-            >
-              <Plus size={14} />
-            </button>
-            <button
-              type='button'
-              className='p-1 rounded text-xyne-gray-500 hover:bg-xyne-gray-100'
-              aria-label='Slash commands'
-              data-track-category={trackCategory}
-              data-track-name='Chat_Slash_Commands'
-            >
-              <Sparkles size={14} />
-            </button>
-          </div>
+        <div className='flex items-center justify-end mt-1'>
           <button
             type='button'
             onClick={handleSendClick}
             disabled={!isStreaming && (!inputValue.trim() || !canSend)}
-            className='inline-flex items-center justify-center w-7 h-7 rounded-full bg-xyne-gray-900 text-white transition-colors hover:bg-xyne-gray-1000 disabled:bg-xyne-gray-300 disabled:cursor-not-allowed'
+            className='inline-flex items-center justify-center w-8 h-8 rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed'
             aria-label={isStreaming ? 'Stop' : 'Send'}
             data-track-category={trackCategory}
             data-track-name={isStreaming ? 'Chat_Abort' : 'Chat_Send'}
           >
-            {isStreaming ? <Loader2 size={12} className='animate-spin' /> : <ArrowUp size={14} />}
+            {isStreaming ? <Loader2 size={14} className='animate-spin' /> : <ArrowUp size={15} />}
           </button>
         </div>
       </div>
