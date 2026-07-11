@@ -37,6 +37,11 @@ export class ComponentDataError extends Error {
   }
 }
 
+export function retryOnServerError(failureCount: number, error: ComponentDataError): boolean {
+  if (error.status >= 400 && error.status < 500) return false;
+  return failureCount < 2;
+}
+
 export async function fetchComponentData(
   componentId: string,
   bypassCache: boolean = false,

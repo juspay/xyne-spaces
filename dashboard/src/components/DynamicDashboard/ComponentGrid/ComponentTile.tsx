@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Eye,
   Lightbulb,
   MoreVertical,
   Pencil,
@@ -30,6 +31,8 @@ import {
 } from '../../ui/dropdown-menu';
 import { getRendererForType } from './renderers';
 import { formatFetchError, isVisualType, untitledFor } from './utils';
+import { ComponentPreviewDialog } from './preview';
+import { getDataSourceId } from '../../../hooks/useComponentPreview';
 
 export interface ComponentTileData {
   id: string;
@@ -99,6 +102,8 @@ const ComponentTile = ({
 
   const isPersisted = fetchEnabled && Boolean(component.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const canPreview = getDataSourceId(component.storedPlan) !== null;
 
   const handleDelete = useCallback(() => {
     remove.mutate(component.id, {
@@ -190,6 +195,16 @@ const ComponentTile = ({
                   Edit
                 </DropdownMenuItem>
               )}
+              {canPreview && (
+                <DropdownMenuItem
+                  onClick={() => setPreviewOpen(true)}
+                  data-track-category='DYNAMIC_DASHBOARD'
+                  data-track-name='Preview_Component'
+                >
+                  <Eye size={14} className='mr-2' />
+                  Preview
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={() => {
                   void handleDuplicate();
@@ -270,6 +285,14 @@ const ComponentTile = ({
           </div>
         </div>
       </Dialog>
+
+      {canPreview && (
+        <ComponentPreviewDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          component={component}
+        />
+      )}
     </div>
   );
 };

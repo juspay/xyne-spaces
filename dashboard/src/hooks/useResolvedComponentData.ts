@@ -4,7 +4,10 @@ import {
   previewQueryPlan,
   type PreviewResponse,
 } from '../services/DynamicDashboard/previewService';
-import type { ComponentDataError } from '../services/DynamicDashboard/componentDataService';
+import {
+  retryOnServerError,
+  type ComponentDataError,
+} from '../services/DynamicDashboard/componentDataService';
 import {
   resolvePlan,
   type DashboardRuntimeContext,
@@ -56,11 +59,7 @@ export function useResolvedComponentData(args: {
     enabled,
     staleTime: autoRefreshMs ? 0 : 60 * 1000,
     refetchInterval: autoRefreshMs ?? false,
-    retry: (failureCount, error) => {
-      const status = typeof error?.status === 'number' ? error.status : 0;
-      if (status >= 400 && status < 500) return false;
-      return failureCount < 2;
-    },
+    retry: retryOnServerError,
   });
 }
 
