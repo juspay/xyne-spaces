@@ -276,6 +276,7 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   boardName: string;
   xyneId: string;
   tags: string[];
+  generatedTags: string[];
   createdByName: string;
   assignedToName: string;
   closedByName: string;
@@ -465,6 +466,7 @@ export interface VespaMailDocument extends VespaDocument {
   cc?: string[];
   bcc?: string[];
   attachmentFilenames?: string[];
+  generatedTags: string[];
 }
 
 /**

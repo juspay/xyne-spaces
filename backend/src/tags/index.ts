@@ -18,6 +18,7 @@ export {
   UpdateTagsConfigBodySchema,
 } from './schema';
 export { registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from './deskEmail';
+export { enqueueTagVespaRefeed } from './vespaSync';
 export { getGroupedTagsWithConfig } from './presentation';
 export type { TagGroup, TagGroupWithConfig, TagGroupConfigOptions } from './presentation';
 export type {
