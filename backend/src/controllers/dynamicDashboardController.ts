@@ -43,7 +43,7 @@ const createDataSourceBodySchema = z.object({
     database: z.string().min(1).max(255),
     ssl: z.boolean().default(true),
   }),
-  includedTables: z.array(includedTableSchema).max(2000).optional(),
+  includedTables: z.array(includedTableSchema).max(10000).optional(),
 });
 
 const discoverTablesBodySchema = createDataSourceBodySchema.pick({

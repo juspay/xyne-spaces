@@ -19,25 +19,44 @@ export class DataSourceTableRepository extends BaseRepository<
     return this.db.dataSourceTable.create({ data });
   }
 
-  async bulkCreateAndReturn(
-    rows: CreateDataSourceTableInput[],
+  async syncForDataSource(
+    dataSourceId: string,
+    rows: Array<{ schemaName: string; tableName: string; rowCountEstimate: bigint | null }>
   ): Promise<DataSourceTable[]> {
-    if (rows.length === 0) return [];
-    const dataSourceId = rows[0]!.dataSourceId;
-    for (const r of rows) {
-      if (r.dataSourceId !== dataSourceId) {
-        throw new Error(
-          'bulkCreateAndReturn: all rows must share the same dataSourceId',
-        );
-      }
+    const existing = await this.db.dataSourceTable.findMany({
+      where: { dataSourceId },
+      select: { id: true, schemaName: true, tableName: true },
+    });
+    const keep = new Set(rows.map((r) => `${r.schemaName}.${r.tableName}`));
+    const staleIds = existing
+      .filter((t) => !keep.has(`${t.schemaName}.${t.tableName}`))
+      .map((t) => t.id);
+    if (staleIds.length > 0) {
+      await this.db.dataSourceTable.deleteMany({ where: { id: { in: staleIds } } });
     }
-    return this.db.$transaction(async (tx) => {
-      await tx.dataSourceTable.deleteMany({ where: { dataSourceId } });
-      await tx.dataSourceTable.createMany({ data: rows });
-      return tx.dataSourceTable.findMany({
-        where: { dataSourceId },
-        orderBy: [{ schemaName: 'asc' }, { tableName: 'asc' }],
-      });
+    await this.db.$transaction(
+      rows.map((r) =>
+        this.db.dataSourceTable.upsert({
+          where: {
+            dataSourceId_schemaName_tableName: {
+              dataSourceId,
+              schemaName: r.schemaName,
+              tableName: r.tableName,
+            },
+          },
+          create: {
+            dataSourceId,
+            schemaName: r.schemaName,
+            tableName: r.tableName,
+            rowCountEstimate: r.rowCountEstimate ?? undefined,
+          },
+          update: { rowCountEstimate: r.rowCountEstimate },
+        })
+      )
+    );
+    return this.db.dataSourceTable.findMany({
+      where: { dataSourceId },
+      orderBy: [{ schemaName: 'asc' }, { tableName: 'asc' }],
     });
   }
 
@@ -57,10 +76,7 @@ export class DataSourceTableRepository extends BaseRepository<
     return this.db.dataSourceTable.findMany({ skip, take, orderBy, where });
   }
 
-  async update(
-    id: string,
-    data: UpdateDataSourceTableInput,
-  ): Promise<DataSourceTable> {
+  async update(id: string, data: UpdateDataSourceTableInput): Promise<DataSourceTable> {
     return this.db.dataSourceTable.update({ where: { id }, data });
   }
 

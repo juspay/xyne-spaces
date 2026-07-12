@@ -27,6 +27,9 @@ import { PickerHint } from './PickerHint';
 import { SidebarNavItem } from './panel/SidebarNavItem';
 import { EmptyState } from './panel/EmptyState';
 import { NoSourceEmptyState } from './panel/NoSourceEmptyState';
+import { useIngestionProgress } from '../../hooks/useIngestionProgress';
+import { IngestionProgressPill } from './ingestionProgress/IngestionProgressPill';
+import { IngestionProgressDialog } from './ingestionProgress/IngestionProgressDialog';
 
 const DynamicDashboardPanel = (): ReactElement => {
   const { user } = useAuth();
@@ -97,8 +100,14 @@ const DynamicDashboardPanel = (): ReactElement => {
     };
   }, [queryClient]);
   const hasDataSources = (dataSources?.length ?? 0) > 0;
+  const { progressById, dismiss: dismissProgress } = useIngestionProgress();
+  const [progressDialogId, setProgressDialogId] = useState<string | null>(null);
+  const progressList = Object.values(progressById);
+  const openProgress = progressDialogId ? progressById[progressDialogId] : undefined;
   const ingestingSources = (dataSources ?? []).filter(
-    s => s.ingestionStatus === 'pending' || s.ingestionStatus === 'in_progress',
+    s =>
+      (s.ingestionStatus === 'pending' || s.ingestionStatus === 'in_progress') &&
+      !progressById[s.id],
   );
 
   const { remove } = useDashboardMutations();
@@ -143,6 +152,14 @@ const DynamicDashboardPanel = (): ReactElement => {
             </button>
           </div>
 
+          {progressList.map(p => (
+            <IngestionProgressPill
+              key={p.dataSourceId}
+              progress={p}
+              onClick={() => setProgressDialogId(p.dataSourceId)}
+              onDismiss={() => dismissProgress(p.dataSourceId)}
+            />
+          ))}
           {ingestingSources.length > 0 && (
             <div
               className='mx-4 mb-2 inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-50 text-amber-700 text-[11px] font-medium border border-amber-200 truncate'
@@ -327,6 +344,18 @@ const DynamicDashboardPanel = (): ReactElement => {
       </Dialog>
 
       <DatabaseVisualizerDialog open={schemaVizOpen} onOpenChange={setSchemaVizOpen} />
+
+      {openProgress && (
+        <IngestionProgressDialog
+          open
+          progress={openProgress}
+          onMinimize={() => setProgressDialogId(null)}
+          onDismiss={() => {
+            dismissProgress(openProgress.dataSourceId);
+            setProgressDialogId(null);
+          }}
+        />
+      )}
     </div>
   );
 };

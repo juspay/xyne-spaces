@@ -1,8 +1,6 @@
-import type {
-  ColumnSummary,
-  ColumnValue,
-  DataTypeCanonical,
-} from '@/types/dataSource';
+import type { DataTypeCanonical, ColumnProfileResult } from '@/types/dataSource';
+
+export type { ColumnProfileResult };
 
 export interface ConnectionConfig {
   host: string;
@@ -14,15 +12,20 @@ export interface ConnectionConfig {
 }
 
 export interface DiscoveredTable {
-  schemaName: string;  tableName: string;
-  rowCountEstimate: bigint | null;}
+  schemaName: string;
+  tableName: string;
+  rowCountEstimate: bigint | null;
+}
 
 export interface DiscoveredColumn {
   columnName: string;
-  ordinalPosition: number;  dataTypeNative: string;  dataTypeCanonical: DataTypeCanonical;
+  ordinalPosition: number;
+  dataTypeNative: string;
+  dataTypeCanonical: DataTypeCanonical;
   isNullable: boolean;
   isPrimaryKey: boolean;
-  pkPosition: number | null;}
+  pkPosition: number | null;
+}
 
 export interface DiscoveredRelationship {
   fromSchema: string;
@@ -40,24 +43,28 @@ export interface TestConnectionResult {
   error?: string;
 }
 
-export interface CategoricalProbeOptions {
+export interface ColumnDescriptor {
+  columnName: string;
+  dataTypeCanonical: DataTypeCanonical;
+}
+
+export interface TableProfileOptions {
   distinctThreshold: number;
   topK: number;
+  columnChunkSize: number;
+  sampleRowThreshold: number;
+  sampleValuesPerColumn: number;
 }
 
-export interface CategoricalProbeResult {
-  distinctCountApprox: number;
-  valuesAreExhaustive: boolean;
-  topValues: ColumnValue[];
+export interface ScanProfileRequest {
+  columns: ReadonlyArray<ColumnDescriptor>;
 }
 
-export interface CountStatsResult {
-  nullCount: number;
-  totalCount: number;
+export interface ScanProfileResult {
+  columns: Map<string, ColumnProfileResult>;
+  sampleValues: Map<string, string[]>;
+  queryCount: number;
 }
-
-export type NumericStats = NonNullable<ColumnSummary['numericStats']>;
-export type TemporalStats = NonNullable<ColumnSummary['temporalStats']>;
 
 export interface Connector {
   connect(): Promise<void>;
@@ -65,33 +72,16 @@ export interface Connector {
   testConnection(): Promise<TestConnectionResult>;
 
   listTables(): Promise<DiscoveredTable[]>;
-  listColumns(schemaName: string, tableName: string): Promise<DiscoveredColumn[]>;
+  listAllColumns(): Promise<Map<string, DiscoveredColumn[]>>;
   listRelationships(): Promise<DiscoveredRelationship[]>;
 
-  computeNumericStats(
+  profileTableByScan(
     schemaName: string,
     tableName: string,
-    columnName: string,
-  ): Promise<NumericStats | null>;
-
-  computeTemporalStats(
-    schemaName: string,
-    tableName: string,
-    columnName: string,
-  ): Promise<TemporalStats | null>;
-
-  computeCategoricalProbe(
-    schemaName: string,
-    tableName: string,
-    columnName: string,
-    options: CategoricalProbeOptions,
-  ): Promise<CategoricalProbeResult>;
-
-  computeCountStats(
-    schemaName: string,
-    tableName: string,
-    columnName: string,
-  ): Promise<CountStatsResult>;
+    request: ScanProfileRequest,
+    rowCountEstimate: bigint | null,
+    options: TableProfileOptions
+  ): Promise<ScanProfileResult>;
 
   runQuery(sql: string, params: ReadonlyArray<unknown>): Promise<RunQueryResult>;
 }
