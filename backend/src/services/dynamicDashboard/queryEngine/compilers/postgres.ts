@@ -1,5 +1,5 @@
-import type { AggregationOp, Measure, QueryPlan } from '@xyne/shared';
-import { CompilerBase, type CompileContext } from './CompilerBase';
+import type { QueryPlan } from '@xyne/shared';
+import { CompilerBase } from './CompilerBase';
 import {
   QueryCompileError,
   type CompiledQuery,
@@ -8,6 +8,8 @@ import {
 } from './types';
 
 export class PostgresCompiler extends CompilerBase {
+  protected readonly dialect = 'pg' as const;
+
   private static readonly VALID_BUCKETS = new Set([
     'day',
     'week',
@@ -27,25 +29,18 @@ export class PostgresCompiler extends CompilerBase {
     return `date_trunc('${bucket}', ${qualifiedCol})`;
   }
 
-  protected compileAggOp(op: AggregationOp, colExpr: string): string {
-    switch (op) {
-      case 'count':          return `COUNT(${colExpr})`;
-      case 'count_distinct': return `COUNT(DISTINCT ${colExpr})`;
-      case 'sum':            return `SUM(${colExpr})`;
-      case 'avg':            return `AVG(${colExpr})`;
-      case 'min':            return `MIN(${colExpr})`;
-      case 'max':            return `MAX(${colExpr})`;
-    }
+  protected castToFloat(sql: string): string {
+    return `(${sql})::float8`;
   }
 
-  protected buildAggSql(m: Measure, colExpr: string, ctx: CompileContext): string {
-    const agg = this.compileAggOp(m.op, colExpr);
-    if (!m.filter) return agg;
-    return `${agg} FILTER (WHERE ${this.compileWhere(m.filter, ctx)})`;
-  }
-
-  protected castAndAliasMeasure(aggSql: string, alias: string): string {
-    return `(${aggSql})::float8 AS ${this.quoteIdent(alias)}`;
+  protected dateDiffExpr(
+    unit: 'second' | 'minute' | 'hour' | 'day',
+    startSql: string,
+    endSql: string,
+  ): string {
+    const seconds = `EXTRACT(EPOCH FROM (CAST(${endSql} AS timestamptz) - CAST(${startSql} AS timestamptz)))`;
+    const divisor = { second: 1, minute: 60, hour: 3600, day: 86400 }[unit];
+    return divisor === 1 ? `(${seconds})` : `(${seconds} / ${divisor})`;
   }
 
   protected compileTextSearch(
@@ -54,12 +49,7 @@ export class PostgresCompiler extends CompilerBase {
     bind: (v: unknown) => string,
     value: unknown,
   ): string {
-    const pattern = this.escapeLikePattern(value);
-    const wrapped =
-      op === 'contains' ? `%${pattern}%` :
-      op === 'startsWith' ? `${pattern}%` :
-      `%${pattern}`;
-    return `${col} ILIKE ${bind(wrapped)} ESCAPE '\\'`;
+    return `${col} ILIKE ${bind(this.buildLikePattern(op, value))} ESCAPE '\\'`;
   }
 
   protected notEqualsOp(): string {

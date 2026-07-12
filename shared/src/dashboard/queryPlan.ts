@@ -1,17 +1,5 @@
 import { z } from 'zod';
 
-// AI-emitted query plan for a single dashboard component.
-//
-// Shape is intentionally Prisma-flavored (`model` / `where` / `take` / `skip`
-// / `orderBy`) because LLMs are heavily trained on Prisma's JSON. The one
-// deliberate departure: analytical aggregations live in a flat top-level
-// `measures: [{ column, op, alias? }]` array instead of Prisma's nested
-// `_count`/`_sum`/`_avg` operators — flat is cleaner for chart concepts
-// and AI emits the flat form more reliably.
-//
-// Scope: single base table + optional INNER/LEFT joins along introspected
-// FK relationships. The compiler still rejects sub-queries, CTEs, window
-// functions — anything beyond what the JOIN form expresses.
 
 export const AggregationOpSchema = z.enum([
   'count',
@@ -20,33 +8,25 @@ export const AggregationOpSchema = z.enum([
   'avg',
   'min',
   'max',
+  'median',
+  'p75',
+  'p90',
+  'p95',
+  'p99',
+  'stddev',
+  'variance',
 ]);
 export type AggregationOp = z.infer<typeof AggregationOpSchema>;
 
-// MeasureSchema is defined further down (after WhereClauseSchema) so the
-// optional `filter` can reference the recursive where shape. Search for
-// `export const MeasureSchema =` to find it.
-
 export const OrderBySchema = z.object({
-  // Refers to either a real column on the model or an alias of a `select`
-  // entry, `groupBy` entry, or measure. The compiler resolves aliases when
-  // emitting SQL.
   column: z.string().min(1),
   dir: z.enum(['asc', 'desc']).default('asc'),
 });
 export type OrderBy = z.infer<typeof OrderBySchema>;
 
-// Time-bucket modifier on a groupBy entry. Maps to `date_trunc('bucket', col)`
-// in Postgres. AI uses this for line/area charts where the x-axis is time —
-// e.g. `groupBy: [{ column: 'placed_at', alias: 'x', bucket: 'day' }]`
-// produces one bucket per day instead of one bucket per timestamp.
 export const TimeBucketSchema = z.enum(['day', 'week', 'month', 'quarter', 'year']);
 export type TimeBucket = z.infer<typeof TimeBucketSchema>;
 
-// A column entry on `select` or `groupBy`. Plain string = the column name;
-// object form supports renaming the output column to match a contract
-// (e.g. `{ column: 'shipping_country', alias: 'label' }` for BarChartData).
-// `bucket` is only valid on groupBy entries (compiler rejects it on select).
 export const ColumnRefSchema = z.union([
   z.string().min(1),
   z.object({
@@ -57,8 +37,6 @@ export const ColumnRefSchema = z.union([
 ]);
 export type ColumnRef = z.infer<typeof ColumnRefSchema>;
 
-// Filter operators. Mirrors Prisma's where-operator surface, narrowed to the
-// ones an analytics UI actually needs.
 export const FilterOpSchema = z.enum([
   'equals',
   'not',
@@ -76,12 +54,9 @@ export const FilterOpSchema = z.enum([
 ]);
 export type FilterOp = z.infer<typeof FilterOpSchema>;
 
-// A single-column condition. Value is unused for isNull / notNull.
 export const ColumnFilterSchema = z.object({
   column: z.string().min(1),
   op: FilterOpSchema,
-  // For `in` / `notIn` this MUST be an array. For string ops a string. For
-  // numeric/date comparisons a number/string. The compiler enforces shape.
   value: z
     .union([
       z.string(),
@@ -94,106 +69,148 @@ export const ColumnFilterSchema = z.object({
 });
 export type ColumnFilter = z.infer<typeof ColumnFilterSchema>;
 
-// Recursive where: either AND/OR/NOT logical groups or a leaf column filter.
-// `AND` / `OR` take arrays of sub-clauses; `NOT` takes a single sub-clause.
-// Top-level convention: an array implies implicit AND.
 export interface WhereClause {
   AND?: WhereClause[];
   OR?: WhereClause[];
   NOT?: WhereClause;
   filter?: ColumnFilter;
 }
-export const WhereClauseSchema: z.ZodType<WhereClause> = z.lazy(() =>
-  z
+
+const WHERE_SCHEMA_DEPTH = 2;
+const MEASURE_FILTER_DEPTH = 1;
+const EXPR_SCHEMA_DEPTH = 5;
+
+function whereClauseAtDepth(depth: number): z.ZodType<WhereClause> {
+  const child: z.ZodType<WhereClause> =
+    depth <= 1
+      ? (z.object({ filter: ColumnFilterSchema }).strict() as unknown as z.ZodType<WhereClause>)
+      : whereClauseAtDepth(depth - 1);
+  return z
     .object({
-      AND: z.array(WhereClauseSchema).optional(),
-      OR: z.array(WhereClauseSchema).optional(),
-      NOT: WhereClauseSchema.optional(),
+      AND: z.array(child).optional(),
+      OR: z.array(child).optional(),
+      NOT: child.optional(),
       filter: ColumnFilterSchema.optional(),
     })
     .refine(
       v =>
-        // At least one of the four keys must be set.
         v.AND !== undefined ||
         v.OR !== undefined ||
         v.NOT !== undefined ||
         v.filter !== undefined,
       { message: 'WhereClause must set at least one of AND/OR/NOT/filter' },
-    ),
-);
+    ) as unknown as z.ZodType<WhereClause>;
+}
+export const WhereClauseSchema: z.ZodType<WhereClause> = whereClauseAtDepth(WHERE_SCHEMA_DEPTH);
+const MeasureFilterSchema: z.ZodType<WhereClause> = whereClauseAtDepth(MEASURE_FILTER_DEPTH);
 
-export const MeasureSchema = z.object({
-  // Column to aggregate. For `count` with no column (COUNT(*)), set column to '*'.
+export const LeafMeasureSchema = z.object({
   column: z.string().min(1),
   op: AggregationOpSchema,
-  // Output column name in the result row. Defaults to `${op}_${column}`.
   alias: z.string().min(1).optional(),
-  // Optional per-measure filter. Scopes THIS aggregate to the matching
-  // rows only, leaving the plan-level WHERE unchanged. Required for
-  // kpi_compare ("current vs previous period") and useful for "% of X"
-  // style ratios, "active vs inactive" splits, etc.
-  //
-  //   measures: [
-  //     { column: "total_amount", op: "sum", alias: "current",
-  //       filter: { filter: { column: "placed_at", op: "gte", value: "2026-05-01" } } },
-  //     { column: "total_amount", op: "sum", alias: "previous",
-  //       filter: { AND: [
-  //         { filter: { column: "placed_at", op: "gte", value: "2026-04-01" } },
-  //         { filter: { column: "placed_at", op: "lt",  value: "2026-05-01" } },
-  //       ]} }
-  //   ]
-  //
-  // Postgres compiles to `SUM(col) FILTER (WHERE ...)` (native operator).
-  // ClickHouse compiles to `sumIf(col, ...)` / `countIf(...)` (native -If
-  // aggregate combinator). Plan-level WHERE still applies via AND with
-  // each per-measure filter (the compiler emits both).
-  filter: WhereClauseSchema.optional(),
-});
+  filter: MeasureFilterSchema.optional(),
+}).strict();
+export type LeafMeasure = z.infer<typeof LeafMeasureSchema>;
+
+export type Expr =
+  | { column: string }
+  | { const: number }
+  | { op: '+' | '-' | '*' | '/'; left: Expr; right: Expr }
+  | {
+      op: 'date_diff';
+      unit: 'second' | 'minute' | 'hour' | 'day';
+      start: { column: string };
+      end: { column: string };
+    }
+  | { agg: AggregationOp; arg: Expr; filter?: WhereClause };
+
+function exprAtDepth(depth: number): z.ZodType<Expr> {
+  const col = z.object({ column: z.string().min(1) }).strict();
+  const konst = z.object({ const: z.number() }).strict();
+  if (depth <= 1) {
+    return z.union([col, konst]) as unknown as z.ZodType<Expr>;
+  }
+  const child = exprAtDepth(depth - 1);
+  const dateDiff = z
+    .object({
+      op: z.literal('date_diff'),
+      unit: z.enum(['second', 'minute', 'hour', 'day']),
+      start: col,
+      end: col,
+    })
+    .strict();
+  return z.union([
+    col,
+    konst,
+    z.object({ op: z.enum(['+', '-', '*', '/']), left: child, right: child }).strict(),
+    dateDiff,
+    z.object({ agg: AggregationOpSchema, arg: child, filter: MeasureFilterSchema.optional() }).strict(),
+  ]) as unknown as z.ZodType<Expr>;
+}
+export const ExprSchema: z.ZodType<Expr> = exprAtDepth(EXPR_SCHEMA_DEPTH);
+
+export const ExprMeasureSchema = z.object({
+  alias: z.string().min(1),
+  expr: ExprSchema,
+}).strict();
+export type ExprMeasure = z.infer<typeof ExprMeasureSchema>;
+
+export const MeasureSchema = z.union([
+  LeafMeasureSchema.describe('Aggregate one column, e.g. sum(amount) or count(*).'),
+  ExprMeasureSchema.describe(
+    'Aggregate of a PER-ROW expression (sum(qty * price), avg(date_diff(...))) OR arithmetic over aggregates (sum(a) / count(b)). Wrap every aggregated column in an {agg, arg} node; never divide two sums to fake a per-row product.',
+  ),
+]);
 export type Measure = z.infer<typeof MeasureSchema>;
 
-// Join spec. Joins extend the base FROM clause with one or more INNER/LEFT
-// joins along introspected FK relationships. The executor only allows
-// joins between columns that are connected via a DataSourceRelationship
-// row, so the AI can't fabricate arbitrary joins (and accidental
-// cartesian products get blocked at compile time, not at run time).
-//
-// `from` is the column reference on the LEFT side of the join — either
-// the base table or an already-joined alias. `to` is the column on the
-// joined table. Both can be bare ("customer_id") or qualified
-// ("orders.customer_id"). When bare, the compiler resolves left-to-right:
-// base table first, then each prior join in order.
+export type NormalizedMeasure = { alias: string; expr: Expr };
+
+export function normalizeMeasure(m: Measure): NormalizedMeasure {
+  if ('expr' in m) return { alias: m.alias, expr: m.expr };
+  const alias =
+    m.alias ?? `${m.op}_${m.column === '*' ? 'all' : m.column.replace(/^.*\./, '')}`;
+  const agg: Expr = {
+    agg: m.op,
+    arg: { column: m.column },
+    ...(m.filter ? { filter: m.filter } : {}),
+  };
+  return { alias, expr: agg };
+}
+
 export const JoinSchema = z.object({
-  model: z.string().min(1),                                   // table to join in
-  schema: z.string().min(1).optional(),                       // defaults to plan.schema or source default
+  model: z
+    .string()
+    .min(1)
+    .describe('Bare table name ONLY of the joined table (e.g. "orders"), never "schema.table".'),
+  schema: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Schema of the joined table (e.g. "public"). Defaults to the base table\'s schema.'),
   type: z.enum(['inner', 'left']).default('inner'),
   on: z.object({
-    from: z.string().min(1),                                  // left side column ref
-    to: z.string().min(1),                                    // column on the joined table
+    from: z.string().min(1),
+    to: z.string().min(1),
   }),
-  // Alias for the joined table. Required when joining the same table more
-  // than once (e.g. self-joins) so column references stay unambiguous;
-  // otherwise optional — the compiler uses `model` as the implicit alias.
   alias: z.string().min(1).optional(),
 });
 export type Join = z.infer<typeof JoinSchema>;
 
-// The root plan. `dataSourceId` ties this plan to a connected source. The
-// executor uses it to look up credentials + introspected metadata.
-//
-// `schema` is optional; when omitted, the compiler uses the source's
-// default schema (`public` for Postgres). `select` is for raw-row queries;
-// mutually exclusive with `measures` + `groupBy` (validated at compile
-// time, not at zod parse).
-//
-// `joins` is optional. When present, column references throughout the
-// plan (select/groupBy/measures/orderBy/where.filter) may be either
-// bare ("amount") — in which case the compiler resolves against the
-// base table first, then joins in order — or qualified ("orders.amount"
-// or "<alias>.amount") for explicit disambiguation.
 export const QueryPlanSchema = z.object({
   dataSourceId: z.string().min(1),
-  schema: z.string().min(1).optional(),
-  model: z.string().min(1), // table name
+  schema: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Schema/namespace of the table, e.g. "public" — the part BEFORE the dot in the "schema.table" names shown to you.',
+    ),
+  model: z
+    .string()
+    .min(1)
+    .describe(
+      'Bare table name ONLY, e.g. "tickets". Tables are displayed to you as "schema.table" (e.g. "public.tickets") — never put that whole string here; put the schema part in the "schema" field and only the bare name here.',
+    ),
   joins: z.array(JoinSchema).optional(),
   select: z.array(ColumnRefSchema).optional(),
   where: WhereClauseSchema.optional(),
@@ -205,8 +222,6 @@ export const QueryPlanSchema = z.object({
 });
 export type QueryPlan = z.infer<typeof QueryPlanSchema>;
 
-// Helper: normalize a ColumnRef to {column, alias?, bucket?} regardless of
-// whether the caller passed a bare string. Used by the compiler.
 export function normalizeColumnRef(ref: ColumnRef): {
   column: string;
   alias?: string;

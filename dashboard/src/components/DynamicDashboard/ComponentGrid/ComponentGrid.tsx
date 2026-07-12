@@ -60,6 +60,8 @@ interface ComponentGridProps {
   autoRefreshMs?: number | null;
   onEditComponent?: ((componentId: string) => void) | undefined;
   onAddComponent?: (() => void) | undefined;
+  selectedComponentId?: string;
+  onSelect?: (componentId: string) => void;
 }
 
 const ComponentGrid = ({
@@ -70,6 +72,8 @@ const ComponentGrid = ({
   autoRefreshMs,
   onEditComponent,
   onAddComponent,
+  selectedComponentId,
+  onSelect,
 }: ComponentGridProps): ReactElement => {
   const { updatePositions } = useComponentMutations(dashboardId);
 
@@ -188,6 +192,8 @@ const ComponentGrid = ({
                 runtimeContext={runtimeContext ?? null}
                 autoRefreshMs={autoRefreshMs ?? null}
                 {...(canEdit && onEditComponent ? { onEdit: onEditComponent } : {})}
+                {...(onSelect ? { onSelect } : {})}
+                isSelected={c.id === selectedComponentId}
               />
             </div>
           ))}

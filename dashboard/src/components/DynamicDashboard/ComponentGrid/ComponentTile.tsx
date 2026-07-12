@@ -10,7 +10,15 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
-import { Component as ReactComponent, ReactElement, ReactNode, useCallback, useState } from 'react';
+import {
+  Component as ReactComponent,
+  ReactElement,
+  ReactNode,
+  useCallback,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react';
 import { toast } from 'sonner';
 import { useComponentData } from '../../../hooks/useComponentData';
 import { useResolvedComponentData } from '../../../hooks/useResolvedComponentData';
@@ -53,6 +61,10 @@ interface ComponentTileProps {
   runtimeContext?: DashboardRuntimeContext | null;
   autoRefreshMs?: number | null;
   onEdit?: (componentId: string) => void;
+  // AI-chat focus: clicking the tile toggles it as the chat's focused
+  // component (ring highlight); the drag-handle header is excluded.
+  isSelected?: boolean;
+  onSelect?: (componentId: string) => void;
 }
 
 const ComponentTile = ({
@@ -60,6 +72,8 @@ const ComponentTile = ({
   runtimeContext,
   autoRefreshMs,
   onEdit,
+  isSelected,
+  onSelect,
 }: ComponentTileProps): ReactElement => {
   const { create, remove } = useComponentMutations(component.dashboardId ?? '');
   const visualType: QueryVisualizationType | null = isVisualType(component.visualType)
@@ -167,7 +181,33 @@ const ComponentTile = ({
   }, [component, visualType, create]);
 
   return (
-    <div className='group/tile flex flex-col h-full bg-white border border-xyne-gray-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow overflow-hidden'>
+    <div
+      className={`group/tile flex flex-col h-full bg-white border rounded-2xl overflow-hidden transition-shadow ${isSelected ? 'border-xyne-green-500 ring-2 ring-xyne-green-500/20 shadow-md' : 'border-xyne-gray-200 shadow-sm hover:shadow-md'}`}
+      {...(onSelect
+        ? {
+            role: 'button',
+            tabIndex: 0,
+            'aria-pressed': !!isSelected,
+            'data-track-category': 'DYNAMIC_DASHBOARD',
+            'data-track-name': 'Dashboard_Tile_Select',
+            onClick: (e: MouseEvent<HTMLDivElement>): void => {
+              // Menus and dialogs render in portals under document.body; React
+              // still bubbles their clicks here, so ignore any target that isn't
+              // physically inside this tile.
+              if (!e.currentTarget.contains(e.target as Node)) return;
+              // The drag-handle header is not a select target — ignore clicks originating there.
+              if ((e.target as HTMLElement).closest('.dashboard-grid-drag-handle')) return;
+              onSelect(component.id);
+            },
+            onKeyDown: (e: KeyboardEvent<HTMLDivElement>): void => {
+              if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                onSelect(component.id);
+              }
+            },
+          }
+        : {})}
+    >
       <div className='dashboard-grid-drag-handle flex items-center justify-between gap-2 pl-5 pr-2.5 pt-3.5 pb-1 cursor-move select-none'>
         <h3 className='text-[11px] uppercase tracking-[0.1em] font-semibold text-xyne-gray-500 truncate'>
           {component.title || untitledFor(visualType)}

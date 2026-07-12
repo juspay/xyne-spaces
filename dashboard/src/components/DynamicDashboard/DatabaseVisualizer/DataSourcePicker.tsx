@@ -9,7 +9,7 @@ interface DataSourcePickerProps {
   onSelect: (id: string) => void;
 }
 
-function healthDotClass(status: string): string {
+export function healthDotClass(status: string): string {
   const s = status.toLowerCase();
   if (s.includes('health') || s === 'ok' || s === 'connected' || s === 'active') {
     return 'bg-emerald-500';

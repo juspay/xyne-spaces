@@ -8,6 +8,7 @@ import Input from '../../ui/Input';
 import { Field, IconBtn, Section } from './atoms';
 import { ColumnMultiSelect, Select } from './formControls';
 import {
+  AGG_OP_LABEL,
   AGG_OPS,
   type AggregationOp,
   FILTER_OPS_BY_KIND,
@@ -23,6 +24,21 @@ import {
   type TimeBucket,
 } from './types';
 import { isColumnCompatibleWithGroupBy, isColumnCompatibleWithOp, isUnaryOp } from './validation';
+
+function patchById<T extends { id: string }>(
+  setter: Dispatch<SetStateAction<T[]>>,
+  id: string,
+  transform: (row: T) => T,
+): void {
+  setter(prev => prev.map(row => (row.id === id ? transform(row) : row)));
+}
+
+function removeById<T extends { id: string }>(
+  setter: Dispatch<SetStateAction<T[]>>,
+  id: string,
+): void {
+  setter(prev => prev.filter(row => row.id !== id));
+}
 
 export interface VisualBuilderProps {
   visualType: QueryVisualizationType;
@@ -219,9 +235,7 @@ export const VisualBuilder = ({
                     trackName='Join_Type'
                     value={j.type}
                     onChange={v =>
-                      setJoins(prev =>
-                        prev.map(x => (x.id === j.id ? { ...x, type: v as 'inner' | 'left' } : x)),
-                      )
+                      patchById(setJoins, j.id, x => ({ ...x, type: v as 'inner' | 'left' }))
                     }
                     options={[
                       { value: 'inner', label: 'inner' },
@@ -237,9 +251,7 @@ export const VisualBuilder = ({
                         trackName='Join_From_Column'
                         value={j.on.from}
                         onChange={v =>
-                          setJoins(prev =>
-                            prev.map(x => (x.id === j.id ? { ...x, on: { ...x.on, from: v } } : x)),
-                          )
+                          patchById(setJoins, j.id, x => ({ ...x, on: { ...x.on, from: v } }))
                         }
                         options={fromColOptions}
                         className='flex-1 min-w-[120px]'
@@ -249,9 +261,7 @@ export const VisualBuilder = ({
                         trackName='Join_To_Column'
                         value={j.on.to}
                         onChange={v =>
-                          setJoins(prev =>
-                            prev.map(x => (x.id === j.id ? { ...x, on: { ...x.on, to: v } } : x)),
-                          )
+                          patchById(setJoins, j.id, x => ({ ...x, on: { ...x.on, to: v } }))
                         }
                         options={toColOptions}
                         className='flex-1 min-w-[120px]'
@@ -335,17 +345,12 @@ export const VisualBuilder = ({
                     trackName='GroupBy_Column'
                     value={g.column}
                     onChange={v =>
-                      setGroupBy(prev =>
-                        prev.map(x => {
-                          if (x.id !== g.id) return x;
-                          const nextCol = inScopeColumns.find(c => c.value === v);
-                          if (nextCol?.dataTypeCanonical === 'temporal') {
-                            return { ...x, column: v };
-                          }
-                          const { bucket: _bucket, ...rest } = x;
-                          return { ...rest, column: v };
-                        }),
-                      )
+                      patchById(setGroupBy, g.id, x => {
+                        const nextCol = inScopeColumns.find(c => c.value === v);
+                        if (nextCol?.dataTypeCanonical === 'temporal') return { ...x, column: v };
+                        const { bucket: _bucket, ...rest } = x;
+                        return { ...rest, column: v };
+                      })
                     }
                     options={inScopeColumns
                       .filter(c => {
@@ -369,16 +374,14 @@ export const VisualBuilder = ({
                         trackName='GroupBy_Bucket'
                         value={g.bucket ?? ''}
                         onChange={v =>
-                          setGroupBy(prev =>
-                            prev.map(x => (x.id === g.id ? { ...x, bucket: v as TimeBucket } : x)),
-                          )
+                          patchById(setGroupBy, g.id, x => ({ ...x, bucket: v as TimeBucket }))
                         }
                         options={TIME_BUCKETS.map(b => ({ value: b, label: b }))}
                         placeholder='bucket'
                         className='w-24'
                       />
                     )}
-                  <IconBtn onClick={() => setGroupBy(prev => prev.filter(x => x.id !== g.id))}>
+                  <IconBtn onClick={() => removeById(setGroupBy, g.id)}>
                     <X size={12} />
                   </IconBtn>
                 </div>
@@ -411,36 +414,31 @@ export const VisualBuilder = ({
                     value={m.op}
                     onChange={v => {
                       const nextOp = v as AggregationOp;
-                      setMeasures(prev =>
-                        prev.map(x => {
-                          if (x.id !== m.id) return x;
-                          const shouldDropStar = nextOp !== 'count' && x.column === '*';
-                          const shouldRestoreStar = nextOp === 'count' && !x.column.trim();
-                          const colMeta = inScopeColumns.find(c => c.value === x.column);
-                          const shouldClearIncompat =
-                            !!x.column &&
-                            x.column !== '*' &&
-                            colMeta !== undefined &&
-                            !isColumnCompatibleWithOp(colMeta.dataTypeCanonical, nextOp);
-                          return {
-                            ...x,
-                            op: nextOp,
-                            ...(shouldDropStar ? { column: '' } : {}),
-                            ...(shouldRestoreStar ? { column: '*' } : {}),
-                            ...(shouldClearIncompat ? { column: '' } : {}),
-                          };
-                        }),
-                      );
+                      patchById(setMeasures, m.id, x => {
+                        const shouldDropStar = nextOp !== 'count' && x.column === '*';
+                        const shouldRestoreStar = nextOp === 'count' && !x.column.trim();
+                        const colMeta = inScopeColumns.find(c => c.value === x.column);
+                        const shouldClearIncompat =
+                          !!x.column &&
+                          x.column !== '*' &&
+                          colMeta !== undefined &&
+                          !isColumnCompatibleWithOp(colMeta.dataTypeCanonical, nextOp);
+                        return {
+                          ...x,
+                          op: nextOp,
+                          ...(shouldDropStar ? { column: '' } : {}),
+                          ...(shouldRestoreStar ? { column: '*' } : {}),
+                          ...(shouldClearIncompat ? { column: '' } : {}),
+                        };
+                      });
                     }}
-                    options={AGG_OPS.map(op => ({ value: op, label: op }))}
+                    options={AGG_OPS.map(op => ({ value: op, label: AGG_OP_LABEL[op] }))}
                     className='w-32'
                   />
                   <Select
                     trackName='Measure_Column'
                     value={m.column}
-                    onChange={v =>
-                      setMeasures(prev => prev.map(x => (x.id === m.id ? { ...x, column: v } : x)))
-                    }
+                    onChange={v => patchById(setMeasures, m.id, x => ({ ...x, column: v }))}
                     options={[
                       ...(m.op === 'count' ? [{ value: '*', label: '* (any row)' }] : []),
                       ...inScopeColumns
@@ -458,7 +456,7 @@ export const VisualBuilder = ({
                     }
                     className='flex-1'
                   />
-                  <IconBtn onClick={() => setMeasures(prev => prev.filter(x => x.id !== m.id))}>
+                  <IconBtn onClick={() => removeById(setMeasures, m.id)}>
                     <X size={12} />
                   </IconBtn>
                 </div>
@@ -495,18 +493,15 @@ export const VisualBuilder = ({
                     trackName='Filter_Column'
                     value={f.column}
                     onChange={v =>
-                      setFilters(prev =>
-                        prev.map(x => {
-                          if (x.id !== f.id) return x;
-                          const nextCol = inScopeColumns.find(c => c.value === v);
-                          const nextKind = nextCol?.dataTypeCanonical ?? 'unknown';
-                          const nextAllowed = FILTER_OPS_BY_KIND[nextKind];
-                          const nextOp = nextAllowed.includes(x.op)
-                            ? x.op
-                            : (nextAllowed[0] ?? 'equals');
-                          return { ...x, column: v, op: nextOp };
-                        }),
-                      )
+                      patchById(setFilters, f.id, x => {
+                        const nextCol = inScopeColumns.find(c => c.value === v);
+                        const nextKind = nextCol?.dataTypeCanonical ?? 'unknown';
+                        const nextAllowed = FILTER_OPS_BY_KIND[nextKind];
+                        const nextOp = nextAllowed.includes(x.op)
+                          ? x.op
+                          : (nextAllowed[0] ?? 'equals');
+                        return { ...x, column: v, op: nextOp };
+                      })
                     }
                     options={inScopeColumns.map(c => ({
                       value: c.value,
@@ -518,11 +513,7 @@ export const VisualBuilder = ({
                   <Select
                     trackName='Filter_Op'
                     value={f.op}
-                    onChange={v =>
-                      setFilters(prev =>
-                        prev.map(x => (x.id === f.id ? { ...x, op: v as FilterOp } : x)),
-                      )
-                    }
+                    onChange={v => patchById(setFilters, f.id, x => ({ ...x, op: v as FilterOp }))}
                     options={allowedOps.map(op => ({ value: op, label: FILTER_OP_LABEL[op] }))}
                     className='w-28'
                   />
@@ -530,15 +521,13 @@ export const VisualBuilder = ({
                     <Input
                       value={f.value}
                       onChange={e =>
-                        setFilters(prev =>
-                          prev.map(x => (x.id === f.id ? { ...x, value: e.target.value } : x)),
-                        )
+                        patchById(setFilters, f.id, x => ({ ...x, value: e.target.value }))
                       }
                       placeholder={f.op === 'in' || f.op === 'notIn' ? 'a, b, c' : 'value'}
                       className='w-28 text-xs'
                     />
                   )}
-                  <IconBtn onClick={() => setFilters(prev => prev.filter(x => x.id !== f.id))}>
+                  <IconBtn onClick={() => removeById(setFilters, f.id)}>
                     <X size={12} />
                   </IconBtn>
                 </div>
@@ -589,9 +578,7 @@ export const VisualBuilder = ({
                   <Select
                     trackName='OrderBy_Column'
                     value={o.column}
-                    onChange={v =>
-                      setOrderBy(prev => prev.map(x => (x.id === o.id ? { ...x, column: v } : x)))
-                    }
+                    onChange={v => patchById(setOrderBy, o.id, x => ({ ...x, column: v }))}
                     options={columnOptions.map(c => ({ value: c, label: c }))}
                     placeholder={
                       columnOptions.length === 0 ? 'Add a measure or group-by first…' : 'Column…'
@@ -602,9 +589,7 @@ export const VisualBuilder = ({
                     trackName='OrderBy_Direction'
                     value={o.dir}
                     onChange={v =>
-                      setOrderBy(prev =>
-                        prev.map(x => (x.id === o.id ? { ...x, dir: v as 'asc' | 'desc' } : x)),
-                      )
+                      patchById(setOrderBy, o.id, x => ({ ...x, dir: v as 'asc' | 'desc' }))
                     }
                     options={[
                       { value: 'asc', label: 'asc' },
@@ -612,7 +597,7 @@ export const VisualBuilder = ({
                     ]}
                     className='w-20'
                   />
-                  <IconBtn onClick={() => setOrderBy(prev => prev.filter(x => x.id !== o.id))}>
+                  <IconBtn onClick={() => removeById(setOrderBy, o.id)}>
                     <X size={12} />
                   </IconBtn>
                 </div>

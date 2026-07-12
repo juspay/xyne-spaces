@@ -166,7 +166,6 @@ export class QueryExecutor {
         targetTable,
         baseColumns: columns,
         tables,
-        sourceType: dataSource.sourceType,
       });
     } catch (e) {
       if (e instanceof JoinResolutionError) {

@@ -1,6 +1,7 @@
 import { ReactElement, ReactNode, useEffect, useRef } from 'react';
 import { UserBubble, AssistantBubble } from './chatBubbles';
-import type { ChatTurn, SuggestComponentsArgs } from './chatTypes';
+import type { ChatTurn, DrillPayload, SuggestComponentsArgs } from './chatTypes';
+import { DrillResultBubble } from './DrillResultBubble';
 
 interface DashboardChatTranscriptProps {
   turns: ReadonlyArray<ChatTurn>;
@@ -8,9 +9,17 @@ interface DashboardChatTranscriptProps {
   emptyState: ReactNode;
   suggestion?: SuggestComponentsArgs | null;
   onPickSuggestion?: (prompt: string) => void;
-  className?: string;
-  innerClassName?: string;
+  onAddDrill?: (args: DrillPayload) => Promise<boolean>;
   trackCategory?: string;
+}
+
+function streamingTurnId(turns: ReadonlyArray<ChatTurn>): string | null {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    if (!t || t.drill) continue;
+    return t.role === 'assistant' ? t.id : null;
+  }
+  return null;
 }
 
 export const DashboardChatTranscript = ({
@@ -19,49 +28,51 @@ export const DashboardChatTranscript = ({
   emptyState,
   suggestion,
   onPickSuggestion,
-  className = 'flex-1 min-h-0 overflow-auto',
-  innerClassName = 'px-4 py-4 space-y-3',
+  onAddDrill,
   trackCategory = 'DYNAMIC_DASHBOARD',
 }: DashboardChatTranscriptProps): ReactElement => {
-  let assistantStreamingId: string | null = null;
-  if (turns.length > 0) {
-    const last = turns[turns.length - 1];
-    if (last && last.role === 'assistant') assistantStreamingId = last.id;
-  }
-
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: 'smooth',
-    });
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [turns]);
 
+  const streamingId = streamingTurnId(turns);
   const isEmpty = turns.length === 0 && !suggestion;
 
   return (
-    <div ref={scrollRef} className={className}>
+    <div ref={scrollRef} className='flex-1 min-h-0 overflow-auto'>
       {isEmpty ? (
         emptyState
       ) : (
-        <div className={innerClassName}>
-          {turns.map(t =>
-            t.role === 'user' ? (
-              <UserBubble key={t.id} content={t.content} />
-            ) : t.content ||
-              t.toolInvocations.length > 0 ||
-              t.reasoning ||
-              (isStreaming && assistantStreamingId === t.id) ? (
+        <div className='px-4 py-4 space-y-3'>
+          {turns.map(t => {
+            if (t.drill) {
+              return (
+                <DrillResultBubble
+                  key={t.id}
+                  title={t.drill.title}
+                  visualType={t.drill.visualType}
+                  queryPlan={t.drill.queryPlan}
+                  onAdd={args => onAddDrill?.(args) ?? Promise.resolve(false)}
+                />
+              );
+            }
+            if (t.role === 'user') return <UserBubble key={t.id} content={t.content} />;
+
+            const streaming = isStreaming && streamingId === t.id;
+            const hasContent = t.content || t.toolInvocations.length > 0 || t.reasoning;
+            if (!hasContent && !streaming) return null;
+            return (
               <AssistantBubble
                 key={t.id}
                 id={t.id}
                 content={t.content}
                 toolInvocations={t.toolInvocations}
                 reasoning={t.reasoning}
-                isStreaming={isStreaming && assistantStreamingId === t.id}
+                isStreaming={streaming}
               />
-            ) : null,
-          )}
+            );
+          })}
           {suggestion && (
             <div className='space-y-2'>
               <div className='text-sm text-muted-foreground'>{suggestion.message}</div>

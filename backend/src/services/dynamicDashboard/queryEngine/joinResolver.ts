@@ -1,15 +1,8 @@
-
 import type { QueryPlan, Join } from '@xyne/shared';
-import type {
-  DataSourceTable,
-  DataSourceColumn,
-  DataSourceRelationship,
-} from '@/types/database';
+import type { DataSourceTable, DataSourceColumn } from '@/types/database';
 import { repositories } from '@/database/repositories';
-import {
-  type TableMetadata,
-  type JoinedTableMetadata,
-} from './compilers/types';
+import { resolveTableRef } from '../tableKeys';
+import type { JoinedTableMetadata } from './compilers/types';
 
 export class JoinResolutionError extends Error {
   constructor(
@@ -32,39 +25,46 @@ export interface JoinResolveInput {
   targetTable: DataSourceTable;
   baseColumns: ReadonlyArray<DataSourceColumn>;
   tables: ReadonlyArray<DataSourceTable>;
-  sourceType: string;
 }
 
 export async function resolveJoinedTablesMetadata(
   input: JoinResolveInput,
 ): Promise<JoinedTableMetadata[]> {
-  const { plan, targetTable, baseColumns, tables, sourceType } = input;
+  const { plan, targetTable, baseColumns, tables } = input;
   if (!plan.joins || plan.joins.length === 0) return [];
 
-  const enforceFkEdges = sourceType !== 'clickhouse';
-  const relationships = enforceFkEdges
-    ? await repositories.dataSourceRelationships.findByDataSource(targetTable.dataSourceId)
-    : [];
-  const fkEdges = buildFkEdgeIndex(relationships);
-
-  const allColumns = await repositories.dataSourceColumns.findByTableIds(
-    tables.map(t => t.id),
-  );
-  const columnsByTableId = new Map<string, DataSourceColumn[]>();
-  for (const col of allColumns) {
-    const list = columnsByTableId.get(col.tableId) ?? [];
-    list.push(col);
-    columnsByTableId.set(col.tableId, list);
-  }
-
-  const tableByKey = new Map(tables.map(t => [`${t.schemaName}.${t.tableName}`, t]));
   const findTable = (
     joinModel: string,
     joinSchema: string | undefined,
   ): DataSourceTable | null => {
-    const schema = joinSchema ?? targetTable.schemaName;
-    return tableByKey.get(`${schema}.${joinModel}`) ?? null;
+    if (joinSchema === undefined && !joinModel.includes('.')) {
+      return (
+        resolveTableRef(tables, joinModel, targetTable.schemaName) ??
+        resolveTableRef(tables, joinModel) ??
+        null
+      );
+    }
+    return resolveTableRef(tables, joinModel, joinSchema) ?? null;
   };
+
+  const joinTargetIds = [
+    ...new Set(
+      plan.joins
+        .map(j => findTable(j.model, j.schema)?.id)
+        .filter((id): id is string => id !== undefined && id !== targetTable.id),
+    ),
+  ];
+  const joinColumns =
+    joinTargetIds.length > 0
+      ? await repositories.dataSourceColumns.findByTableIds(joinTargetIds)
+      : [];
+  const columnsByTableId = new Map<string, DataSourceColumn[]>();
+  for (const col of joinColumns) {
+    const list = columnsByTableId.get(col.tableId) ?? [];
+    list.push(col);
+    columnsByTableId.set(col.tableId, list);
+  }
+  columnsByTableId.set(targetTable.id, [...baseColumns]);
 
   const aliasStack: AliasContext[] = [
     { alias: targetTable.tableName, tableId: targetTable.id, columns: baseColumns },
@@ -82,15 +82,8 @@ export async function resolveJoinedTablesMetadata(
     const joinedColumns = columnsByTableId.get(joinedTable.id) ?? [];
     const alias = join.alias ?? joinedTable.tableName;
 
-    const fromColumnId = resolveOnFromColumnId(join, aliasStack);
-    const toColumnId = resolveOnToColumnId(join, joinedColumns, alias);
-
-    if (enforceFkEdges && !fkEdges.has(edgeKey(fromColumnId, toColumnId))) {
-      throw new JoinResolutionError(
-        `Join between ${join.on.from} and ${alias}.${stripTablePrefix(join.on.to)} is not backed by an introspected FK relationship`,
-        'invalid_plan',
-      );
-    }
+    validateOnFrom(join, aliasStack);
+    validateOnTo(join, joinedColumns, alias);
 
     out.push({
       alias,
@@ -107,25 +100,7 @@ export async function resolveJoinedTablesMetadata(
   return out;
 }
 
-function buildFkEdgeIndex(
-  relationships: ReadonlyArray<DataSourceRelationship>,
-): Set<string> {
-  const out = new Set<string>();
-  for (const rel of relationships) {
-    out.add(edgeKey(rel.fromColumnId, rel.toColumnId));
-    out.add(edgeKey(rel.toColumnId, rel.fromColumnId));
-  }
-  return out;
-}
-
-function edgeKey(a: string, b: string): string {
-  return `${a}|${b}`;
-}
-
-function resolveOnFromColumnId(
-  join: Join,
-  aliasStack: ReadonlyArray<AliasContext>,
-): string {
+function validateOnFrom(join: Join, aliasStack: ReadonlyArray<AliasContext>): void {
   const raw = join.on.from;
   const dotIdx = raw.indexOf('.');
   if (dotIdx >= 0) {
@@ -138,20 +113,15 @@ function resolveOnFromColumnId(
         'invalid_plan',
       );
     }
-    const col = ctx.columns.find(c => c.columnName === colPart);
-    if (!col) {
+    if (!ctx.columns.some(c => c.columnName === colPart)) {
       throw new JoinResolutionError(
         `join.on.from column "${colPart}" not on "${aliasPart}"`,
         'invalid_plan',
       );
     }
-    return col.id;
+    return;
   }
-  const hits: Array<{ alias: string; columnId: string }> = [];
-  for (const ctx of aliasStack) {
-    const col = ctx.columns.find(c => c.columnName === raw);
-    if (col) hits.push({ alias: ctx.alias, columnId: col.id });
-  }
+  const hits = aliasStack.filter(ctx => ctx.columns.some(c => c.columnName === raw));
   if (hits.length === 0) {
     throw new JoinResolutionError(
       `join.on.from column "${raw}" not found on base or prior joined tables`,
@@ -164,14 +134,13 @@ function resolveOnFromColumnId(
       'invalid_plan',
     );
   }
-  return hits[0]!.columnId;
 }
 
-function resolveOnToColumnId(
+function validateOnTo(
   join: Join,
   joinedColumns: ReadonlyArray<DataSourceColumn>,
   alias: string,
-): string {
+): void {
   const raw = join.on.to;
   const dotIdx = raw.indexOf('.');
   let colName: string;
@@ -187,19 +156,10 @@ function resolveOnToColumnId(
   } else {
     colName = raw;
   }
-  const col = joinedColumns.find(c => c.columnName === colName);
-  if (!col) {
+  if (!joinedColumns.some(c => c.columnName === colName)) {
     throw new JoinResolutionError(
       `join.on.to column "${raw}" not present on "${alias}"`,
       'invalid_plan',
     );
   }
-  return col.id;
 }
-
-function stripTablePrefix(raw: string): string {
-  const dot = raw.indexOf('.');
-  return dot >= 0 ? raw.slice(dot + 1) : raw;
-}
-
-void undefined as unknown as TableMetadata;

@@ -170,31 +170,3 @@ export async function updateComponentPositions(
 export async function deleteComponent(queryId: string): Promise<void> {
   await apiInstance.delete(`/dashboards/components/${queryId}`);
 }
-
-// ---- saved queries (QueryBuilder) ----
-export async function upsertQuery(input: {
-  id?: string | undefined;
-  title: string;
-  queryJson: unknown;
-  entityType?: string | undefined;
-  targetEntity?: string | undefined;
-  visualType?: string | undefined;
-  dashboardId?: string | undefined;
-  queryType?: 'internal' | 'external' | undefined;
-}): Promise<Query> {
-  const { data } = await apiInstance.post<{ query: Query }>('/dashboards/queries', input);
-  return data.query;
-}
-
-export async function deleteQuery(id: string): Promise<void> {
-  await apiInstance.delete(`/dashboards/queries/${id}`);
-}
-
-export async function reorderQueries(
-  dashboardId: string,
-  orderedMappingIds: string[],
-): Promise<void> {
-  await apiInstance.patch(`/dashboards/${dashboardId}/queries/reorder`, {
-    orderedMappingIds,
-  });
-}

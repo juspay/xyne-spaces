@@ -1,12 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
-import { QueryVisualizationType } from '@xyne/shared';
 import {
-  GRID_COLS,
-  DEFAULT_TILE_W,
-  DEFAULT_TILE_H,
-  MIN_TILE_W,
-  MIN_TILE_H,
-} from '../ComponentGrid/constants';
+  QueryVisualizationType,
+  defaultSizeFor,
+  nextOpenPosition as sharedNextOpenPosition,
+  parsePosition as sharedParsePosition,
+  serializePosition,
+  type GridPosition,
+} from '@xyne/shared';
+import { DEFAULT_TILE_W, DEFAULT_TILE_H, MIN_TILE_W, MIN_TILE_H } from '../ComponentGrid/constants';
 import type { ColumnKind, FilterOp, FilterRow } from './types';
 import { isUnaryOp } from './validation';
 
@@ -86,24 +87,10 @@ export function coerceLeafValue(
   }
 }
 
-const DEFAULT_TILE_SIZE_BY_TYPE: Partial<Record<QueryVisualizationType, { w: number; h: number }>> =
-  {
-    [QueryVisualizationType.KPI]: { w: 3, h: 2 },
-    [QueryVisualizationType.KPI_COMPARE]: { w: 3, h: 2 },
-    [QueryVisualizationType.BAR_CHART]: { w: 8, h: 4 },
-    [QueryVisualizationType.LINE_CHART]: { w: 8, h: 4 },
-    [QueryVisualizationType.AREA_CHART]: { w: 8, h: 4 },
-    [QueryVisualizationType.SCATTER_CHART]: { w: 8, h: 4 },
-    [QueryVisualizationType.PIE_CHART]: { w: 4, h: 4 },
-    [QueryVisualizationType.DONUT_CHART]: { w: 4, h: 4 },
-    [QueryVisualizationType.FUNNEL]: { w: 4, h: 4 },
-    [QueryVisualizationType.HEATMAP]: { w: 8, h: 5 },
-    [QueryVisualizationType.DATA_TABLE]: { w: 12, h: 5 },
-  };
-
-export function defaultSizeFor(visualType: QueryVisualizationType): { w: number; h: number } {
-  return DEFAULT_TILE_SIZE_BY_TYPE[visualType] ?? { w: DEFAULT_TILE_W, h: DEFAULT_TILE_H };
-}
+// Grid geometry lives in @xyne/shared (tileLayout) so AI-placed and
+// browser-placed tiles use identical math; re-exported here for existing
+// import sites.
+export { defaultSizeFor, serializePosition, type GridPosition };
 
 export function defaultSizeForVisualType(visualType: string | null | undefined): {
   w: number;
@@ -117,60 +104,20 @@ export function defaultSizeForVisualType(visualType: string | null | undefined):
   return { w: DEFAULT_TILE_W, h: DEFAULT_TILE_H };
 }
 
-export interface GridPosition {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-export function serializePosition(pos: GridPosition): string {
-  return JSON.stringify(pos);
-}
-
+// Stricter than the shared parser: additionally rejects react-grid-layout's
+// default 1×1 placeholder sizes and other sub-minimum footprints.
 export function parsePosition(raw: string): GridPosition | null {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const p = parsed as { x?: unknown; y?: unknown; w?: unknown; h?: unknown };
-    if (
-      typeof p.x !== 'number' ||
-      typeof p.y !== 'number' ||
-      typeof p.w !== 'number' ||
-      typeof p.h !== 'number'
-    )
-      return null;
-    // Reject react-grid-layout's default 1×1 placeholder sizes and other invalid footprints.
-    if (p.w < MIN_TILE_W || p.h < MIN_TILE_H) return null;
-    return { x: p.x, y: p.y, w: p.w, h: p.h };
-  } catch {
-    return null;
-  }
-}
-
-function rectsOverlap(a: GridPosition, b: GridPosition): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  const pos = sharedParsePosition(raw);
+  if (!pos || pos.w < MIN_TILE_W || pos.h < MIN_TILE_H) return null;
+  return pos;
 }
 
 export function nextOpenPosition(
   existingPositionStrings: ReadonlyArray<string>,
   size: { w: number; h: number },
 ): GridPosition {
-  const existing = existingPositionStrings
-    .map(parsePosition)
-    .filter((r): r is GridPosition => r !== null);
-
-  const maxBottom = existing.reduce((acc, r) => Math.max(acc, r.y + r.h), 0);
-  const w = Math.min(size.w, GRID_COLS);
-
-  for (let y = 0; y <= maxBottom; y++) {
-    for (let x = 0; x <= GRID_COLS - w; x++) {
-      const candidate: GridPosition = { x, y, w, h: size.h };
-      if (!existing.some(r => rectsOverlap(candidate, r))) {
-        return candidate;
-      }
-    }
-  }
-
-  return { x: 0, y: maxBottom, w, h: size.h };
+  // Filter through the strict parser first so placeholder-sized tiles don't
+  // count as obstacles (same semantics as the previous local implementation).
+  const valid = existingPositionStrings.filter(raw => parsePosition(raw) !== null);
+  return sharedNextOpenPosition(valid, size);
 }

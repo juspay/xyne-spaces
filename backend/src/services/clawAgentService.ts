@@ -66,6 +66,13 @@ export interface ClawRunRequest {
   researchContext?: { type: string; id?: string; name: string } | null;
   createCanvasEnabled: boolean;
   sessionId?: string;
+  dataSourceId?: string;
+  draftId?: string;
+  focusedComponentId?: string;
+  // Per-run schema/draft context for dashboard-ai — goes out via
+  // additionalInstructions so it is fresh each run instead of accumulating
+  // in the conversation history.
+  dashboardContext?: string;
   // Branching: the dashboard already composes JAF/v1 calls with these names;
   // we forward them through to claw-auth's /run/stream which understands the
   // same tree model. `parentMessageId` is the v1-shared name — see the
@@ -413,6 +420,9 @@ function buildAdditionalInstructions(req: ClawRunRequest): string | undefined {
         `This tool takes 1-10 minutes to complete and generates a comprehensive report.`
     );
   }
+  if (req.dashboardContext) {
+    parts.push(req.dashboardContext);
+  }
 
   return parts.length > 0 ? parts.join('\n\n') : undefined;
 }
@@ -487,6 +497,9 @@ export async function runClawAgentStream(
       ...(config.xyneAiExtended.url && { XYNE_AI_EXTENDED_URL: config.xyneAiExtended.url }),
       ...(request.conversationId && { SPACES_CONVERSATION_ID: request.conversationId }),
       ...(request.canvasId && { SPACES_CANVAS_ID: request.canvasId }),
+      ...(request.dataSourceId && { SPACES_DATA_SOURCE_ID: request.dataSourceId }),
+      ...(request.draftId && { SPACES_DASHBOARD_DRAFT_ID: request.draftId }),
+      ...(request.focusedComponentId && { SPACES_FOCUSED_COMPONENT_ID: request.focusedComponentId }),
     },
     ...(additionalInstructions && { additionalInstructions }),
     ...(request.isRegenerate && { isRegenerate: true }),

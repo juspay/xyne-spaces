@@ -165,11 +165,8 @@ const envSchema = Joi.object({
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
   LLM_REQUEST_TIMEOUT_MS: Joi.number().default(120000),
   // Dynamic Dashboard tunables
-  DASHBOARD_AI_REQUEST_TIMEOUT_MS: Joi.number().default(180000),
   DASHBOARD_AI_SSE_PING_INTERVAL_MS: Joi.number().default(20000),
-  DASHBOARD_AI_MODEL: Joi.string().default(''),
-  DASHBOARD_AI_TEMPERATURE: Joi.number().default(0.2),
-  DASHBOARD_AI_TOP_VALUES_INLINE_LIMIT: Joi.number().default(20),
+  DASHBOARD_AI_TOP_VALUES_INLINE_LIMIT: Joi.number().default(30),
   DASHBOARD_QUERY_CACHE_TTL_SEC: Joi.number().default(60),
   DASHBOARD_QUERY_CACHE_MAX_VALUE_BYTES: Joi.number().default(2 * 1024 * 1024),
   DASHBOARD_PG_STATEMENT_TIMEOUT_MS: Joi.number().default(60000),
@@ -588,9 +585,7 @@ export const config = {
     documentOutlineEnabled: envVars.DOCUMENT_OUTLINE_ENABLED,
   },
   dashboard: {
-    aiRequestTimeoutMs: envVars.DASHBOARD_AI_REQUEST_TIMEOUT_MS,
     aiSsePingIntervalMs: envVars.DASHBOARD_AI_SSE_PING_INTERVAL_MS,
-    aiTemperature: envVars.DASHBOARD_AI_TEMPERATURE,
     aiTopValuesInlineLimit: envVars.DASHBOARD_AI_TOP_VALUES_INLINE_LIMIT,
     queryCacheTtlSec: envVars.DASHBOARD_QUERY_CACHE_TTL_SEC,
     queryCacheMaxValueBytes: envVars.DASHBOARD_QUERY_CACHE_MAX_VALUE_BYTES,
@@ -842,5 +837,4 @@ export const config = {
     edaConcurrency: envVars.DATA_SOURCE_EDA_CONCURRENCY as number,
     allowPrivateHosts: envVars.DATA_SOURCE_ALLOW_PRIVATE_HOSTS as boolean,
   },
-  DASHBOARD_AI_MODEL: envVars.DASHBOARD_AI_MODEL as string,
 };
