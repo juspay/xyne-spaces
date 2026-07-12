@@ -20,6 +20,7 @@ import { TextStrategy } from '../strategies/TextStrategy';
 import { getStorageService } from '@/services/storage';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { buildFormFields, type TicketDynamicFieldValue } from './form-fields';
+import { DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 
 type ChannelsSchema = Schema['tables']['channels'];
 type MessagesSchema = Schema['tables']['messages'];
@@ -587,6 +588,25 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
 
   const resolvedChannelName = await resolveChannelName(channel?.name || '', channel?.scopeType);
   const vespaFormFields = buildFormFields(formEntityValues ?? [], fieldTypeByFieldId);
+
+  // Our tag-generation framework's tags, sourced from the latest email in this
+  // ticket's conversation (the framework only tags desk-email, not tickets directly).
+  let generatedTags: string[] = [];
+  if (args.conversationId) {
+    const latestEmail = await db.email.findFirst({
+      where: { conversationId: args.conversationId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (latestEmail) {
+      const emailTagRows = await db.tag.findMany({
+        where: { sourceId: latestEmail.id, sourceType: DESK_EMAIL_SOURCE_TYPE, isDeleted: false, workspaceId: args.workspaceId },
+        select: { tag: true, tagCategory: true },
+      });
+      generatedTags = emailTagRows.map(t => `${t.tagCategory}:${t.tag}`);
+    }
+  }
+
   return {
     docId: args.id,
     docType: VespaDocType.TICKET,
@@ -621,6 +641,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     boardName: board?.name || '',
     xyneId: args.xyneId,
     tags: tags.map(t => t.name),
+    generatedTags,
     createdByName: createdByUser?.name || '',
     assignedToName: assignedToUser?.name || '',
     closedByName: closedByUser?.name || '',
@@ -1248,6 +1269,13 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     .map(a => a.originalFilename)
     .filter((n): n is string => Boolean(n));
 
+  // 6. Generated tags from our tag-generation framework (Tag table)
+  const generatedTagRows = await db.tag.findMany({
+    where: { sourceId: email.id, sourceType: DESK_EMAIL_SOURCE_TYPE, isDeleted: false, workspaceId: effectiveWorkspaceId },
+    select: { tag: true, tagCategory: true },
+  });
+  const generatedTags = generatedTagRows.map(t => `${t.tagCategory}:${t.tag}`);
+
   // Build searchable chunks from plain-text body.
   // Chunks contain ONLY the body — subject is indexed separately in the `subject`
   // field, so prepending "Subject: ..." here would produce a redundant snippet
@@ -1274,6 +1302,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     cc: email.cc.length > 0 ? email.cc : undefined,
     bcc: email.bcc.length > 0 ? email.bcc : undefined,
     attachmentFilenames: attachmentFilenames.length > 0 ? attachmentFilenames : undefined,
+    generatedTags,
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
   };

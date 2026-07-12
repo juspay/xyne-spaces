@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { TagServiceError, tagService } from './service';
 import { invalidateTagConfigCache } from './pipeline';
+import { enqueueTagVespaRefeed } from './vespaSync';
 import type {
   CreateTagBody,
   CreateTagsConfigBody,
@@ -76,6 +77,7 @@ export async function createTag(req: Request, res: Response) {
       override,
       configKey,
     );
+    void enqueueTagVespaRefeed(sourceType, sourceId);
     return res.status(201).json({ tag: created });
   } catch (error) {
     logger.error('[TAG][CTRL] Create tag failed:', error);
@@ -100,6 +102,7 @@ export async function updateTag(req: Request, res: Response) {
       override,
       configKey,
     );
+    void enqueueTagVespaRefeed(sourceType, sourceId);
     return res.json({ tag: updated });
   } catch (error) {
     logger.error('[TAG][CTRL] Update tag failed:', error);
@@ -115,6 +118,7 @@ export async function deleteTag(req: Request, res: Response) {
 
   try {
     await tagService.deleteTag(sourceId, sourceType, tagCategory, tag, userId, override, configKey);
+    void enqueueTagVespaRefeed(sourceType, sourceId);
     return res.json({ success: true });
   } catch (error) {
     logger.error('[TAG][CTRL] Delete tag failed:', error);
@@ -142,6 +146,7 @@ export async function setManualTags(req: Request, res: Response) {
       override,
       configKey,
     );
+    void enqueueTagVespaRefeed(sourceType, sourceId);
     return res.json({ tags: updated });
   } catch (error) {
     logger.error('[TAG][CTRL] Set manual tags failed:', error);

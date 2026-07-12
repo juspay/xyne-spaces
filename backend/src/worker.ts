@@ -36,7 +36,7 @@ import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
-import { tagGenerationPipeline, registerDeskEmailTags } from '@/tags';
+import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { recoveryService } from './workflows/services/recovery-service'
 config()
 
@@ -248,6 +248,10 @@ class WorkerService {
         logger.info('Initializing tag generation pipeline...');
         registerDeskEmailTags(tagGenerationPipeline);
         await tagGenerationPipeline.initialize();
+
+        tagGenerationPipeline.onCompleted(DESK_EMAIL_SOURCE_TYPE, (result) => {
+          void enqueueTagVespaRefeed(DESK_EMAIL_SOURCE_TYPE, result.sourceId);
+        });
       }
 
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
