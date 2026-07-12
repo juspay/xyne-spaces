@@ -4,7 +4,7 @@ import {
   dataSourceIngestQueue,
   type DataSourceIngestJobData,
 } from '@/queues/dataSourceIngestQueue';
-import { runDataSourceIngestion } from '@/services/dynamicDashboard/dataSource/IngestionService';
+import { runDataSourceIngestion } from '@/services/dynamicDashboard/dataSource/ingestion/ingestionService';
 
 class DataSourceIngestionWorker {
   private isInitialized = false;
@@ -28,13 +28,9 @@ class DataSourceIngestionWorker {
 
   private async processJob(job: Bull.Job<DataSourceIngestJobData>): Promise<void> {
     const { dataSourceId, includedTables } = job.data;
-    logger.info(
-      `[DS-INGEST-WORKER] Processing job ${job.id} dataSourceId=${dataSourceId}`,
-    );
+    logger.info(`[DS-INGEST-WORKER] Processing job ${job.id} dataSourceId=${dataSourceId}`);
     await runDataSourceIngestion(dataSourceId, includedTables);
-    logger.info(
-      `[DS-INGEST-WORKER] Completed job ${job.id} dataSourceId=${dataSourceId}`,
-    );
+    logger.info(`[DS-INGEST-WORKER] Completed job ${job.id} dataSourceId=${dataSourceId}`);
   }
 
   async shutdown(): Promise<void> {

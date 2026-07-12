@@ -18,7 +18,7 @@ export class SsrfBlockedError extends Error {
 }
 
 function isAllowPrivate(): boolean {
-  return config.env !== 'production';
+  return config.env !== 'production' || config.dataSource.allowPrivateHosts;
 }
 
 const blockedV4 = new BlockList();
@@ -80,7 +80,10 @@ function isBlockedHostname(host: string): boolean {
 
 export async function assertHostIsExternal(host: string): Promise<void> {
   if (isAllowPrivate()) {
-    logger.debug('[SsrfGuard] non-production env; skipping SSRF check', { host });
+    logger.debug(
+      '[SsrfGuard] private hosts allowed (non-prod or DATA_SOURCE_ALLOW_PRIVATE_HOSTS); skipping check',
+      { host },
+    );
     return;
   }
 

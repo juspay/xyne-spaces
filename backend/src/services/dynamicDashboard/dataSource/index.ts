@@ -1,3 +1,3 @@
 export * from './DataSourceService';
-export * from './IngestionService';
+export * from './ingestion/ingestionService';
 export * from './connectors';

@@ -5,11 +5,9 @@ import type {
   DiscoveredColumn,
   DiscoveredRelationship,
   TestConnectionResult,
-  CategoricalProbeOptions,
-  CategoricalProbeResult,
-  CountStatsResult,
-  NumericStats,
-  TemporalStats,
+  ScanProfileRequest,
+  ScanProfileResult,
+  TableProfileOptions,
   RunQueryResult,
 } from './types';
 
@@ -26,38 +24,18 @@ export abstract class ConnectorBase implements Connector {
   abstract testConnection(): Promise<TestConnectionResult>;
 
   abstract listTables(): Promise<DiscoveredTable[]>;
-  abstract listColumns(
-    schemaName: string,
-    tableName: string,
-  ): Promise<DiscoveredColumn[]>;
+  abstract listAllColumns(): Promise<Map<string, DiscoveredColumn[]>>;
   abstract listRelationships(): Promise<DiscoveredRelationship[]>;
 
-  abstract computeNumericStats(
+  abstract profileTableByScan(
     schemaName: string,
     tableName: string,
-    columnName: string,
-  ): Promise<NumericStats | null>;
-  abstract computeTemporalStats(
-    schemaName: string,
-    tableName: string,
-    columnName: string,
-  ): Promise<TemporalStats | null>;
-  abstract computeCategoricalProbe(
-    schemaName: string,
-    tableName: string,
-    columnName: string,
-    options: CategoricalProbeOptions,
-  ): Promise<CategoricalProbeResult>;
-  abstract computeCountStats(
-    schemaName: string,
-    tableName: string,
-    columnName: string,
-  ): Promise<CountStatsResult>;
+    request: ScanProfileRequest,
+    rowCountEstimate: bigint | null,
+    options: TableProfileOptions
+  ): Promise<ScanProfileResult>;
 
-  abstract runQuery(
-    sql: string,
-    params: ReadonlyArray<unknown>,
-  ): Promise<RunQueryResult>;
+  abstract runQuery(sql: string, params: ReadonlyArray<unknown>): Promise<RunQueryResult>;
 
   protected abstract quoteIdent(s: string): string;
 
@@ -67,9 +45,7 @@ export abstract class ConnectorBase implements Connector {
 
   protected requireClient<T>(): T {
     if (!this.client) {
-      throw new Error(
-        `${this.constructor.name}: not connected. Call connect() first.`,
-      );
+      throw new Error(`${this.constructor.name}: not connected. Call connect() first.`);
     }
     return this.client as T;
   }

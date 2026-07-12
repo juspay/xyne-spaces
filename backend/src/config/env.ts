@@ -394,6 +394,8 @@ const envSchema = Joi.object({
   REDIS_PASSWORD: Joi.string().allow('').default(''),
   REDIS_TLS: Joi.boolean().default(false),
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
+  DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
+  DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -718,7 +720,7 @@ export const config = {
     baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,
     eulerBotEmail: envVars.JIRA_EULER_BOT_EMAIL as string,
     eulerBotAuthToken: envVars.JIRA_EULER_BOT_AUTH_TOKEN as string,
-    migrationBotEmail: envVars.JIRA_MIGRATION_BOT_EMAIL as string, 
+    migrationBotEmail: envVars.JIRA_MIGRATION_BOT_EMAIL as string,
     migrationBotAuthToken: envVars.JIRA_MIGRATION_BOT_AUTH_TOKEN as string,
     migrationUserMapCsvLocation: envVars.JIRA_MIGRATION_USER_MAP_CSV_LOCATION as string,
   },
@@ -837,6 +839,8 @@ export const config = {
   },
   dataSource: {
     ingestTableLimit: envVars.DATA_SOURCE_INGEST_TABLE_LIMIT as number,
+    edaConcurrency: envVars.DATA_SOURCE_EDA_CONCURRENCY as number,
+    allowPrivateHosts: envVars.DATA_SOURCE_ALLOW_PRIVATE_HOSTS as boolean,
   },
   DASHBOARD_AI_MODEL: envVars.DASHBOARD_AI_MODEL as string,
 };
