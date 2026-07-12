@@ -1,19 +1,31 @@
-import { DashboardAiEventSchema, type DashboardAiEvent, type DashboardPlan } from '@xyne/shared';
-import { BASE_URL } from '../clients/apiClient';
+import type { DashboardPlan } from '@xyne/shared';
+import { apiInstance, BASE_URL } from '../clients/apiClient';
 
 export interface StreamHandle {
   abort: () => void;
   done: Promise<void>;
 }
 
+export interface ClawStreamEvent {
+  type: string;
+  [key: string]: unknown;
+}
+
 export interface StreamArgs {
   prompt: string;
   dataSourceId: string;
+  dashboardId?: string | undefined;
   currentPlan?: DashboardPlan | undefined;
   sessionId?: string | undefined;
   lastError?: string;
-  onEvent: (event: DashboardAiEvent) => void;
+  focusedComponentId?: string | undefined;
+  newThread?: boolean;
+  onEvent: (event: ClawStreamEvent) => void;
   onError?: (err: Error) => void;
+}
+
+export async function cancelDashboardAi(runId: string): Promise<void> {
+  await apiInstance.post(`/dashboard/ai/cancel/${encodeURIComponent(runId)}`);
 }
 
 export function streamDashboardAi(args: StreamArgs): StreamHandle {
@@ -30,9 +42,12 @@ export function streamDashboardAi(args: StreamArgs): StreamHandle {
         body: JSON.stringify({
           prompt: args.prompt,
           dataSourceId: args.dataSourceId,
+          ...(args.dashboardId ? { dashboardId: args.dashboardId } : {}),
           ...(args.currentPlan ? { currentPlan: args.currentPlan } : {}),
           ...(args.sessionId ? { sessionId: args.sessionId } : {}),
           ...(args.lastError ? { lastError: args.lastError } : {}),
+          ...(args.focusedComponentId ? { focusedComponentId: args.focusedComponentId } : {}),
+          ...(args.newThread ? { newThread: true } : {}),
         }),
       });
 
@@ -82,19 +97,19 @@ export function streamDashboardAi(args: StreamArgs): StreamHandle {
   };
 }
 
-function parseSseBlock(raw: string, onEvent: (event: DashboardAiEvent) => void): void {
+// Frames the chat has no use for: keep-alive ping, attachment/debug events.
+const IGNORED_EVENT_TYPES = new Set(['ping', 'attachment', 'debug_event', 'debug_artifacts_ready']);
+
+function parseSseBlock(raw: string, onEvent: (event: ClawStreamEvent) => void): void {
   for (const line of raw.split('\n')) {
     if (!line.startsWith('data:')) continue;
     const payload = line.slice(5).trim();
     if (!payload) continue;
     try {
-      const parsed = DashboardAiEventSchema.safeParse(JSON.parse(payload));
-      if (parsed.success) {
-        onEvent(parsed.data);
-      } else {
-        // eslint-disable-next-line no-console
-        console.warn('[dashboardAi] dropped malformed event', parsed.error.issues);
-      }
+      const json = JSON.parse(payload) as ClawStreamEvent;
+      if (!json || typeof json.type !== 'string') continue;
+      if (IGNORED_EVENT_TYPES.has(json.type)) continue;
+      onEvent(json);
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn('[dashboardAi] failed to parse event', e);

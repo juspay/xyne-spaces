@@ -9,44 +9,39 @@ export const ComponentConfigSchema = z.object({
 });
 export type ComponentConfig = z.infer<typeof ComponentConfigSchema>;
 
-// AI-driven dashboard creation: tool-call event protocol.
+// AI-driven dashboard editing: tool schemas + SSE event protocol.
 //
-// The dashboard AI route streams Server-Sent Events back to the client.
-// Three event kinds are relevant to the dashboard creation flow:
+// The dashboard-ai agent runs on xyne-claw; its tools execute server-side
+// against /api/dashboard/claw/* (which validate every queryPlan and PERSIST
+// component writes). The dashboard AI route proxies the run as Server-Sent
+// Events in the shared vocabulary below:
 //
-//   - `delta` — incremental assistant prose (the chat bubble text).
-//   - `tool_call` — structured action AI wants to take on the draft
-//     dashboard (add a component, change visibility, rename, etc.).
+//   - `delta` / `reasoning` — incremental assistant prose / thinking.
+//   - `tool_activity` — a server-side tool started/completed; the client
+//     renders activity badges and refetches the dashboard after writes.
 //   - `complete` — terminal signal the assistant has finished a turn.
 //   - `error` — terminal signal with a user-visible message.
 //
-// The client maintains the "draft DashboardPlan" by reducing the
-// tool_call events as they arrive. This decoupling means AI can emit a
-// long-form explanation in `delta` events while building the dashboard
-// piece-by-piece via `tool_call` events — the user sees both the
-// reasoning and the preview update incrementally.
-//
-// Mirrors the structure of the existing /api/xyne-ai SSE protocol so the
-// XyneAIStreamManager can be lightly extended rather than duplicated.
+// The tool schemas (DashboardToolCallSchema) are what the backend validates
+// tool arguments against before applying them.
 
 // ---------- Tool: add_component ----------
-// Drop a new component onto the draft dashboard. `position` is optional —
-// the client computes a "below existing tiles" position if omitted, the
-// same as ComponentEditorModal's auto-place flow.
+// Drop a new component onto the dashboard. `position` is optional — the
+// server auto-places below existing tiles when omitted.
+const TilePositionSchema = z.object({
+  x: z.number().int().nonnegative(),
+  y: z.number().int().nonnegative(),
+  w: z.number().int().positive().max(12),
+  h: z.number().int().positive(),
+});
+
 export const AddComponentToolSchema = z.object({
   tool: z.literal('add_component'),
   args: z.object({
     visualType: z.nativeEnum(QueryVisualizationType),
     title: z.string().min(1),
     queryPlan: QueryPlanSchema,
-    position: z
-      .object({
-        x: z.number().int().nonnegative(),
-        y: z.number().int().nonnegative(),
-        w: z.number().int().positive().max(12),
-        h: z.number().int().positive(),
-      })
-      .optional(),
+    position: TilePositionSchema.optional(),
     // Per-component runtime hints (time-range column, value unit). AI should set
     // `timeColumn` on any time-series or time-scopable tile so the dashboard
     // time-range picker knows which column to filter on. See ComponentConfigSchema.
@@ -55,11 +50,10 @@ export const AddComponentToolSchema = z.object({
 });
 
 // ---------- Tool: remove_component ----------
-// Drop a component from the draft. Identified by the client-side
-// componentId that was generated when AI emitted `add_component`. The
-// AI doesn't track ids itself — the client wraps each add_component
-// with a uuid and tells AI which ids exist on the draft in the next
-// turn's system context.
+// Drop a component from the dashboard, identified by componentId. Ids come
+// from the persisted dashboard rows (under Claw the server creates them on
+// add_component and returns them in the tool result; the current dashboard
+// summary in the AI's context lists them each turn).
 export const RemoveComponentToolSchema = z.object({
   tool: z.literal('remove_component'),
   args: z.object({
@@ -78,14 +72,7 @@ export const UpdateComponentToolSchema = z.object({
     visualType: z.nativeEnum(QueryVisualizationType).optional(),
     title: z.string().min(1).optional(),
     queryPlan: QueryPlanSchema.optional(),
-    position: z
-      .object({
-        x: z.number().int().nonnegative(),
-        y: z.number().int().nonnegative(),
-        w: z.number().int().positive().max(12),
-        h: z.number().int().positive(),
-      })
-      .optional(),
+    position: TilePositionSchema.optional(),
     componentConfig: ComponentConfigSchema.optional(),
   }),
 });
@@ -128,12 +115,26 @@ export const SuggestComponentsToolSchema = z.object({
   }),
 });
 
+// ---------- Tool: drill_result ----------
+// A one-off drill-down answer ("which orders make up that spike?"). Not
+// persisted on the draft — the client renders the result as a chat bubble
+// the user can optionally pin to the dashboard.
+export const DrillResultToolSchema = z.object({
+  tool: z.literal('drill_result'),
+  args: z.object({
+    title: z.string().min(1),
+    visualType: z.nativeEnum(QueryVisualizationType),
+    queryPlan: QueryPlanSchema,
+  }),
+});
+
 export const DashboardToolCallSchema = z.discriminatedUnion('tool', [
   AddComponentToolSchema,
   RemoveComponentToolSchema,
   UpdateComponentToolSchema,
   SetDashboardMetaToolSchema,
   SuggestComponentsToolSchema,
+  DrillResultToolSchema,
 ]);
 export type DashboardToolCall = z.infer<typeof DashboardToolCallSchema>;
 
@@ -146,9 +147,22 @@ export const DashboardAiEventSchema = z.discriminatedUnion('type', [
     type: z.literal('delta'),
     content: z.string(),
   }),
+  // Progress of a server-side tool invocation. The client renders activity
+  // badges from it and reacts to a few tools by name (suggest_components,
+  // drill_result, and the persisting component writes).
   z.object({
-    type: z.literal('tool_call'),
-    call: DashboardToolCallSchema,
+    type: z.literal('tool_activity'),
+    toolCallId: z.string().min(1),
+    toolName: z.string().min(1),
+    args: z.record(z.unknown()).optional(),
+    result: z.string().optional(),
+    status: z.enum(['running', 'completed', 'error']),
+    durationMs: z.number().optional(),
+  }),
+  // Incremental model reasoning (extended-thinking deltas).
+  z.object({
+    type: z.literal('reasoning'),
+    reasoningDelta: z.string(),
   }),
   z.object({
     type: z.literal('complete'),
@@ -159,9 +173,8 @@ export const DashboardAiEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('error'),
     message: z.string(),
-    // When set, the error is recoverable — typically a malformed
-    // tool_call AI emitted. The client should surface the message and
-    // let the user retry / send a corrective follow-up.
+    // When set, the error is recoverable — the client should surface the
+    // message and let the user retry / send a corrective follow-up.
     recoverable: z.boolean().default(false),
   }),
   z.object({
@@ -176,14 +189,10 @@ export const DashboardAiEventSchema = z.discriminatedUnion('type', [
 ]);
 export type DashboardAiEvent = z.infer<typeof DashboardAiEventSchema>;
 
-// ---------- DashboardPlan (client-side draft state) ----------
-// The reducer over tool_call events produces this shape. The client
-// passes it back to the server on each follow-up turn so AI sees its
-// own work as context, and uses it to render the preview.
-//
-// `components[i].id` is a client-generated uuid set when AI emits
-// add_component. AI doesn't choose ids — when AI wants to reference a
-// prior component it uses the id present in the plan it just received.
+// ---------- DashboardPlan (current dashboard state) ----------
+// Snapshot of the dashboard the client sends with each turn so the AI sees
+// its own work as context. `components[i].id` is the persisted component
+// row's id — the AI references it when editing or removing a tile.
 export const DraftComponentSchema = z.object({
   id: z.string().min(1),
   visualType: z.nativeEnum(QueryVisualizationType),
@@ -193,12 +202,7 @@ export const DraftComponentSchema = z.object({
   // title from AI; that constraint lives on `AddComponentToolSchema`.
   title: z.string(),
   queryPlan: QueryPlanSchema,
-  position: z.object({
-    x: z.number().int().nonnegative(),
-    y: z.number().int().nonnegative(),
-    w: z.number().int().positive().max(12),
-    h: z.number().int().positive(),
-  }),
+  position: TilePositionSchema,
   // Runtime hints — mirrors dashboardComponent.config on the DB row.
   componentConfig: ComponentConfigSchema.optional(),
 });
@@ -230,5 +234,12 @@ export const DashboardAiCreateRequestSchema = z.object({
   // server-side (the LLM is fine with shorter; we don't need to ship
   // the full driver stack).
   lastError: z.string().max(1000).optional(),
+  // Dashboard this chat edits. Doubles as the conversation id, so the
+  // thread survives reloads and pod restarts.
+  dashboardId: z.string().min(1).optional(),
+  // Tile the user has focused in the editor — the AI scopes edits to it.
+  focusedComponentId: z.string().min(1).optional(),
+  // Start a fresh conversation instead of continuing the dashboard's thread.
+  newThread: z.boolean().optional(),
 });
 export type DashboardAiCreateRequest = z.infer<typeof DashboardAiCreateRequestSchema>;

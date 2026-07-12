@@ -134,18 +134,20 @@ function buildGroupBy(raw: unknown): GroupByRow[] {
 
 function buildMeasures(raw: unknown): MeasureRow[] {
   if (Array.isArray(raw)) {
-    return raw.map((m): MeasureRow => {
-      const o = m as Record<string, unknown>;
-      return {
-        id: uuidv4(),
-        column: typeof o['column'] === 'string' ? o['column'] : '*',
-        op: (o['op'] as AggregationOp) ?? 'sum',
-        ...(typeof o['alias'] === 'string' ? { alias: o['alias'] } : {}),
-        ...(o['filter'] && typeof o['filter'] === 'object'
-          ? { filter: o['filter'] as WhereClause }
-          : {}),
-      };
-    });
+    return raw
+      .filter(m => !(m && typeof m === 'object' && 'expr' in m))
+      .map((m): MeasureRow => {
+        const o = m as Record<string, unknown>;
+        return {
+          id: uuidv4(),
+          column: typeof o['column'] === 'string' ? o['column'] : '*',
+          op: (o['op'] as AggregationOp) ?? 'sum',
+          ...(typeof o['alias'] === 'string' ? { alias: o['alias'] } : {}),
+          ...(o['filter'] && typeof o['filter'] === 'object'
+            ? { filter: o['filter'] as WhereClause }
+            : {}),
+        };
+      });
   }
   return [{ id: uuidv4(), column: '*', op: 'count', alias: 'value' }];
 }

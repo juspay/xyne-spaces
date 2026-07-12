@@ -1,11 +1,14 @@
-import { ReactElement, useCallback, useMemo, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { LayoutDashboard, MoreVertical, Plus, Share, Sparkles } from 'lucide-react';
 import { DashboardRole } from '@xyne/shared';
 import { getApiErrorMessage } from '../../utils/apiError';
+import { listDataSources } from '../../services/DynamicDashboard/dataSourcesService';
 import { useDashboardDetail, useUpdateDashboard } from '../../hooks/useDashboards';
+import { dataSourceKeys } from '../../hooks/useDataSources';
 import { useAuth } from '../../hooks/useAuth';
 import { Dialog } from '../ui/Dialog';
 import { DashboardShareModal } from './DashboardShareModal';
@@ -31,6 +34,12 @@ const DynamicDashboardScreen = (): ReactElement => {
   const [addComponentOpen, setAddComponentOpen] = useState(false);
   const [editingComponentId, setEditingComponentId] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [focusedComponentId, setFocusedComponentId] = useState<string | null>(null);
+
+  const dataSourcesQuery = useQuery({
+    queryKey: dataSourceKeys.list,
+    queryFn: listDataSources,
+  });
 
   const { data } = useDashboardDetail(dashboardId || '', 'external');
 
@@ -134,6 +143,35 @@ const DynamicDashboardScreen = (): ReactElement => {
       };
     });
   }, [tiles, dashboard?.id]);
+
+  // Tile focus for the AI chat: clicking a tile marks it as the chat's
+  // focused component (and opens the chat); clicking again clears it.
+  const handleSelectComponent = useCallback(
+    (id: string) => {
+      const isUnfocusing = focusedComponentId === id;
+      setFocusedComponentId(isUnfocusing ? null : id);
+      // Only open the chat when focusing a tile — unfocusing shouldn't force it open.
+      if (!isUnfocusing) setChatOpen(true);
+    },
+    [focusedComponentId],
+  );
+
+  const focusedComponentTitle = useMemo(
+    () => gridComponents.find(c => c.id === focusedComponentId)?.title ?? undefined,
+    [gridComponents, focusedComponentId],
+  );
+
+  useEffect(() => {
+    setFocusedComponentId(null);
+  }, [dashboardId]);
+
+  // Clear focus if the focused tile disappears (deleted here or via the AI),
+  // otherwise a stale component id keeps getting sent to the assistant.
+  useEffect(() => {
+    if (focusedComponentId && !gridComponents.some(c => c.id === focusedComponentId)) {
+      setFocusedComponentId(null);
+    }
+  }, [gridComponents, focusedComponentId]);
 
   if (!dashboardId) {
     return (
@@ -323,6 +361,8 @@ const DynamicDashboardScreen = (): ReactElement => {
               canEdit={Boolean(canShare)}
               onEditComponent={canShare ? setEditingComponentId : undefined}
               onAddComponent={canShare ? () => setAddComponentOpen(true) : undefined}
+              {...(focusedComponentId ? { selectedComponentId: focusedComponentId } : {})}
+              {...(canShare ? { onSelect: handleSelectComponent } : {})}
             />
           </div>
         </Panel>
@@ -353,8 +393,11 @@ const DynamicDashboardScreen = (): ReactElement => {
                   componentConfig: c.componentConfig,
                   position: c.position,
                 }))}
-                canRenameOrChangeVisibility={isOwner}
+                dataSources={dataSourcesQuery.data ?? []}
                 onClose={() => setChatOpen(false)}
+                {...(focusedComponentId ? { focusedComponentId } : {})}
+                {...(focusedComponentTitle ? { focusedComponentTitle } : {})}
+                onClearFocus={() => setFocusedComponentId(null)}
               />
             </Panel>
           </>

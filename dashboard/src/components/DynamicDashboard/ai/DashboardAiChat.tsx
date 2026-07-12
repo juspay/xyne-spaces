@@ -1,32 +1,40 @@
 import { ReactElement, useCallback, useState } from 'react';
-import { ArrowUp, Loader2, RotateCcw, X } from 'lucide-react';
+import { ArrowUp, Loader2, RotateCcw, Trash2, X } from 'lucide-react';
 import type { DashboardPlan } from '@xyne/shared';
 import { GlassStar } from '../../icons/xyne-ai';
 import { DashboardChatTranscript } from './DashboardChatTranscript';
-import { useDashboardAiStream } from './useDashboardAiStream';
-import type { ContextChip, ToolCallHandler } from './chatTypes';
+import { ClearChatConfirmOverlay } from './ClearChatConfirmOverlay';
+import { useDashboardAiStream } from '../../../hooks/useDashboardAiStream';
+import type { ContextChip, DrillPayload } from './chatTypes';
 
 export interface DashboardAiChatProps {
   dataSourceId: string | null;
+  dashboardId?: string;
   currentPlan?: DashboardPlan;
   buildPrompt: (userText: string) => string;
-  onToolCall: ToolCallHandler;
   emptyStatePrompt: string;
   starterPrompts?: ReadonlyArray<string>;
   contextChips?: ReadonlyArray<ContextChip>;
   onClose?: () => void;
   dataSourcePicker?: ReactElement;
-  noDataSourceMessage?: string;
   trackCategory?: string;
   lastError?: string | null;
   className?: string;
+  focusedComponentId?: string;
+  onAddDrill?: (args: DrillPayload) => Promise<boolean>;
+  // Called when a server-persisted tool (add/update/remove component,
+  // set_dashboard_meta) completes, so the host can refetch the dashboard.
+  onDashboardMutated?: () => void;
+  // Intercept a completed drill_result (return true to consume it) — the
+  // component editor uses this to populate the visual builder.
+  onDrillResult?: (drill: DrillPayload, ctx: { abort: () => void }) => boolean | void;
 }
 
 export const DashboardAiChat = ({
   dataSourceId,
+  dashboardId,
   currentPlan,
   buildPrompt,
-  onToolCall,
   emptyStatePrompt,
   starterPrompts,
   contextChips,
@@ -35,16 +43,24 @@ export const DashboardAiChat = ({
   trackCategory = 'DYNAMIC_DASHBOARD',
   lastError,
   className = 'flex flex-col h-full w-[360px] shrink-0 border-l border-border bg-background',
+  focusedComponentId,
+  onAddDrill,
+  onDashboardMutated,
+  onDrillResult,
 }: DashboardAiChatProps): ReactElement => {
-  const { turns, isStreaming, send, abort, suggestion } = useDashboardAiStream({
+  const { turns, isStreaming, send, abort, suggestion, reset } = useDashboardAiStream({
     dataSourceId,
+    ...(dashboardId ? { dashboardId } : {}),
     ...(currentPlan ? { currentPlan } : {}),
     buildPrompt,
-    onToolCall,
     ...(lastError !== undefined ? { lastError } : {}),
+    ...(focusedComponentId ? { focusedComponentId } : {}),
+    ...(onDashboardMutated ? { onDashboardMutated } : {}),
+    ...(onDrillResult ? { onDrillResult } : {}),
   });
 
   const [inputValue, setInputValue] = useState('');
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const submit = useCallback(
     (override?: string) => {
@@ -63,8 +79,6 @@ export const DashboardAiChat = ({
     }
     submit();
   }, [isStreaming, abort, submit]);
-
-  const canSend = !isStreaming;
 
   const emptyState = (
     <div className='flex flex-col items-center justify-center h-full px-4'>
@@ -91,9 +105,6 @@ export const DashboardAiChat = ({
           ))}
         </div>
       )}
-      {dataSourcePicker && (
-        <div className='mt-6 w-full max-w-[280px] text-left'>{dataSourcePicker}</div>
-      )}
     </div>
   );
 
@@ -102,26 +113,39 @@ export const DashboardAiChat = ({
       <div className='flex items-center justify-between h-12 px-4 border-b border-border shrink-0'>
         <button
           type='button'
+          onClick={reset}
           className='inline-flex items-center gap-1.5 text-[15px] leading-5 font-medium text-foreground hover:bg-accent rounded-md px-1.5 py-0.5 -mx-1.5'
-          aria-label='Chat history'
+          aria-label='New chat'
           data-track-category={trackCategory}
-          data-track-name='Open_Chat_History'
+          data-track-name='New_Chat'
         >
           <RotateCcw size={14} className='text-muted-foreground' />
           New chat
         </button>
-        {onClose && (
+        <div className='flex items-center gap-1'>
           <button
             type='button'
-            onClick={onClose}
+            onClick={() => setConfirmClear(true)}
             className='inline-flex items-center justify-center w-7 h-7 rounded-lg text-muted-foreground hover:bg-accent transition-colors'
-            aria-label='Close chat'
+            aria-label='Clear chat history'
             data-track-category={trackCategory}
-            data-track-name='Close_Chat'
+            data-track-name='Clear_Chat'
           >
-            <X size={14} />
+            <Trash2 size={14} />
           </button>
-        )}
+          {onClose && (
+            <button
+              type='button'
+              onClick={onClose}
+              className='inline-flex items-center justify-center w-7 h-7 rounded-lg text-muted-foreground hover:bg-accent transition-colors'
+              aria-label='Close chat'
+              data-track-category={trackCategory}
+              data-track-name='Close_Chat'
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
       </div>
 
       <DashboardChatTranscript
@@ -131,12 +155,14 @@ export const DashboardAiChat = ({
         suggestion={suggestion}
         onPickSuggestion={submit}
         trackCategory={trackCategory}
+        {...(onAddDrill ? { onAddDrill } : {})}
       />
 
       <div className='m-4 rounded-2xl border border-input bg-card p-3 shrink-0 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/15 transition-colors'>
-        {contextChips && contextChips.length > 0 && (
+        {(dataSourcePicker || (contextChips && contextChips.length > 0)) && (
           <div className='flex items-center gap-1.5 mb-2 flex-wrap'>
-            {contextChips.map(c => (
+            {dataSourcePicker}
+            {contextChips?.map(c => (
               <span
                 key={c.label}
                 className='inline-flex items-center gap-1 h-6 px-2 rounded-md bg-muted border border-border text-[12px] leading-4 text-foreground'
@@ -145,6 +171,18 @@ export const DashboardAiChat = ({
                 <span className='truncate' style={{ maxWidth: c.maxWidth ?? 180 }}>
                   {c.label}
                 </span>
+                {c.onRemove && (
+                  <button
+                    type='button'
+                    onClick={c.onRemove}
+                    className='ml-1 text-muted-foreground hover:text-foreground'
+                    aria-label={`Remove ${c.label}`}
+                    data-track-category={trackCategory}
+                    data-track-name='Chat_Remove_Context_Chip'
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </span>
             ))}
           </div>
@@ -169,7 +207,7 @@ export const DashboardAiChat = ({
           <button
             type='button'
             onClick={handleSendClick}
-            disabled={!isStreaming && (!inputValue.trim() || !canSend)}
+            disabled={!isStreaming && !inputValue.trim()}
             className='inline-flex items-center justify-center w-8 h-8 rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed'
             aria-label={isStreaming ? 'Stop' : 'Send'}
             data-track-category={trackCategory}
@@ -179,6 +217,15 @@ export const DashboardAiChat = ({
           </button>
         </div>
       </div>
+      {confirmClear && (
+        <ClearChatConfirmOverlay
+          onCancel={() => setConfirmClear(false)}
+          onConfirm={() => {
+            setConfirmClear(false);
+            reset();
+          }}
+        />
+      )}
     </aside>
   );
 };

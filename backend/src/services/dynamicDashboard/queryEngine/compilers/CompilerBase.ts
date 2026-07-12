@@ -4,10 +4,12 @@ import type {
   WhereClause,
   ColumnFilter,
   Measure,
+  Expr,
   AggregationOp,
   ColumnRef,
 } from '@xyne/shared';
-import { normalizeColumnRef } from '@xyne/shared';
+import { normalizeColumnRef, normalizeMeasure } from '@xyne/shared';
+import { AGGREGATES, fillTemplate, NUMERIC_AGG_OPS } from './aggregates';
 import {
   QueryCompileError,
   type TableMetadata,
@@ -33,17 +35,18 @@ export abstract class CompilerBase {
   protected readonly NUMERIC_TYPES = new Set(['numeric']);
   protected readonly TEMPORAL_TYPES = new Set(['temporal']);
   protected readonly MAX_WHERE_DEPTH = 50;
+  protected readonly MAX_EXPR_DEPTH = 50;
   protected readonly MAX_BIND_PARAMS = 60_000;
 
+  protected abstract readonly dialect: 'pg' | 'ch';
   protected abstract quoteIdent(s: string): string;
   protected abstract bucketExpr(bucket: string, qualifiedCol: string): string;
-  protected abstract compileAggOp(op: AggregationOp, colExpr: string): string;
-  protected abstract buildAggSql(
-    m: Measure,
-    colExpr: string,
-    ctx: CompileContext,
+  protected abstract castToFloat(sql: string): string;
+  protected abstract dateDiffExpr(
+    unit: 'second' | 'minute' | 'hour' | 'day',
+    startSql: string,
+    endSql: string,
   ): string;
-  protected abstract castAndAliasMeasure(aggSql: string, alias: string): string;
   protected abstract compileTextSearch(
     col: string,
     op: 'contains' | 'startsWith' | 'endsWith',
@@ -51,6 +54,35 @@ export abstract class CompilerBase {
     value: unknown,
   ): string;
   protected abstract notEqualsOp(): string;
+
+  protected castAndAliasMeasure(aggSql: string, alias: string): string {
+    return `${this.castToFloat(aggSql)} AS ${this.quoteIdent(alias)}`;
+  }
+
+  protected buildLikePattern(
+    op: 'contains' | 'startsWith' | 'endsWith',
+    value: unknown,
+  ): string {
+    const pattern = this.escapeLikePattern(value);
+    return op === 'contains' ? `%${pattern}%` : op === 'startsWith' ? `${pattern}%` : `%${pattern}`;
+  }
+
+
+  protected buildAggSql(
+    op: AggregationOp,
+    argSql: string,
+    filter: WhereClause | undefined,
+    ctx: CompileContext,
+  ): string {
+    const spec = AGGREGATES[op];
+    if (this.dialect === 'ch') {
+      return filter
+        ? fillTemplate(spec.chIf, { x: argSql, cond: this.compileWhere(filter, ctx), p: spec.p })
+        : fillTemplate(spec.ch, { x: argSql, p: spec.p });
+    }
+    const plain = fillTemplate(spec.pg, { x: argSql, p: spec.p });
+    return filter ? `${plain} FILTER (WHERE ${this.compileWhere(filter, ctx)})` : plain;
+  }
 
   compile(
     plan: QueryPlan,
@@ -128,7 +160,6 @@ export abstract class CompilerBase {
     resolve: (raw: string, ctx: string) => ResolvedColumn;
     qualify: (raw: string, ctx: string) => string;
     baseAlias: string;
-    aliases: ReadonlyArray<{ alias: string; meta: TableMetadata }>;
   } {
     const baseAlias = base.tableName;
     const aliases: Array<{ alias: string; meta: TableMetadata }> = [
@@ -203,7 +234,7 @@ export abstract class CompilerBase {
       return `${quoteIdent(r.alias)}.${quoteIdent(r.columnName)}`;
     }
 
-    return { resolve, qualify, baseAlias, aliases };
+    return { resolve, qualify, baseAlias };
   }
 
   protected collectOutputAliases(plan: QueryPlan): Set<string> {
@@ -217,9 +248,8 @@ export abstract class CompilerBase {
       out.add(n.alias ?? n.column.replace(/^.*\./, ''));
     }
     for (const m of plan.measures ?? []) {
-      out.add(
-        m.alias ?? `${m.op}_${m.column === '*' ? 'all' : m.column.replace(/^.*\./, '')}`,
-      );
+      if ('expr' in m) { out.add(m.alias); continue; }
+      out.add(m.alias ?? `${m.op}_${m.column === '*' ? 'all' : m.column.replace(/^.*\./, '')}`);
     }
     return out;
   }
@@ -321,18 +351,110 @@ export abstract class CompilerBase {
   }
 
   protected compileMeasure(m: Measure, ctx: CompileContext): string {
-    const colExpr = m.column === '*' ? '*' : ctx.qualify(m.column, 'measures');
-    if ((m.op === 'sum' || m.op === 'avg') && m.column !== '*') {
-      const r = ctx.resolve(m.column, 'measures');
-      if (!this.NUMERIC_TYPES.has(r.dataTypeCanonical)) {
+    const { alias, expr } = normalizeMeasure(m);
+    if (!CompilerBase.exprHasAgg(expr)) {
+      throw new QueryCompileError('a measure must contain an aggregate');
+    }
+    return this.castAndAliasMeasure(this.compileExpr(expr, ctx, false, false, 0), alias);
+  }
+
+  /** True if an expression contains at least one aggregate node. */
+  private static exprHasAgg(node: Expr): boolean {
+    if ('agg' in node) return true;
+    if ('op' in node) {
+      if (node.op === 'date_diff') return false;
+      return CompilerBase.exprHasAgg(node.left) || CompilerBase.exprHasAgg(node.right);
+    }
+    return false;
+  }
+
+  protected compileExpr(
+    node: Expr,
+    ctx: CompileContext,
+    insideAgg: boolean,
+    numeric: boolean,
+    depth = 0,
+  ): string {
+    if (depth > this.MAX_EXPR_DEPTH) {
+      throw new QueryCompileError(
+        `Measure expression exceeds maximum nesting depth (${this.MAX_EXPR_DEPTH})`,
+      );
+    }
+
+    if ('agg' in node) {
+      if (insideAgg) {
+        throw new QueryCompileError('cannot nest aggregates (e.g. sum(avg(x)))');
+      }
+      const op = node.agg;
+      let sql: string;
+      if (op === 'count' || op === 'count_distinct') {
+        if (!('column' in node.arg)) {
+          throw new QueryCompileError(`${op} requires a plain column (or '*') argument`);
+        }
+        const colExpr =
+          node.arg.column === '*' ? '*' : ctx.qualify(node.arg.column, 'measures');
+        sql = this.buildAggSql(op, colExpr, node.filter, ctx);
+      } else {
+        const argSql = this.compileExpr(
+          node.arg,
+          ctx,
+          true,
+          NUMERIC_AGG_OPS.has(op),
+          depth + 1,
+        );
+        sql = this.buildAggSql(op, argSql, node.filter, ctx);
+      }
+      return numeric ? this.castToFloat(sql) : sql;
+    }
+
+    if ('const' in node) {
+      return insideAgg ? `(${String(node.const)})` : this.castToFloat(String(node.const));
+    }
+
+    if ('column' in node) {
+      if (!insideAgg) {
         throw new QueryCompileError(
-          `Measure ${m.op}(${m.column}) requires a numeric column; got ${r.dataTypeCanonical}`,
+          'a measure must aggregate its columns; a bare column is not a measure',
         );
       }
+      if (numeric) {
+        const r = ctx.resolve(node.column, 'measures.expr');
+        if (!this.NUMERIC_TYPES.has(r.dataTypeCanonical)) {
+          throw new QueryCompileError(
+            `Row expression operand "${node.column}" must be numeric; got ${r.dataTypeCanonical}` +
+              ` (for temporal columns use the date_diff operator)`,
+          );
+        }
+      }
+      return ctx.qualify(node.column, 'measures.expr');
     }
-    const aggSql = this.buildAggSql(m, colExpr, ctx);
-    const alias = m.alias ?? `${m.op}_${m.column === '*' ? 'all' : m.column.replace(/^.*\./, '')}`;
-    return this.castAndAliasMeasure(aggSql, alias);
+
+    if (node.op === 'date_diff') {
+      if (!insideAgg) {
+        throw new QueryCompileError(
+          'a measure must aggregate its columns; date_diff must be inside an aggregate',
+        );
+      }
+      for (const ref of [node.start.column, node.end.column]) {
+        const r = ctx.resolve(ref, 'measures.expr.date_diff');
+        if (!this.TEMPORAL_TYPES.has(r.dataTypeCanonical)) {
+          throw new QueryCompileError(
+            `date_diff requires temporal columns; "${ref}" is ${r.dataTypeCanonical}`,
+          );
+        }
+      }
+      return this.dateDiffExpr(
+        node.unit,
+        ctx.qualify(node.start.column, 'measures.expr.date_diff'),
+        ctx.qualify(node.end.column, 'measures.expr.date_diff'),
+      );
+    }
+
+    // arithmetic: operands must be numeric (columns checked, aggregates cast)
+    const L = this.compileExpr(node.left, ctx, insideAgg, true, depth + 1);
+    const R = this.compileExpr(node.right, ctx, insideAgg, true, depth + 1);
+    if (node.op === '/') return `(${L} / NULLIF(${R}, 0))`;
+    return `(${L} ${node.op} ${R})`;
   }
 
   protected compileGroupBy(plan: QueryPlan, ctx: CompileContext): string | null {

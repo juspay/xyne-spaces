@@ -1,5 +1,14 @@
-import { QueryVisualizationType, type WhereClause } from '@xyne/shared';
+import {
+  AggregationOpSchema,
+  QueryVisualizationType,
+  type WhereClause,
+  type FilterOp,
+  type TimeBucket,
+  type AggregationOp as SharedAggregationOp,
+} from '@xyne/shared';
 import type { DataSourceColumn } from '../../../services/DynamicDashboard/dataSourceSchemaService';
+
+export type { FilterOp, TimeBucket };
 
 export interface MeasureRow {
   id: string;
@@ -38,31 +47,13 @@ export interface JoinRow {
 }
 
 export interface ScopedColumn {
-  table: string;
   isBase: boolean;
   columnName: string;
   dataTypeCanonical: DataSourceColumn['dataTypeCanonical'];
   value: string;
 }
 
-export type AggregationOp = 'count' | 'count_distinct' | 'sum' | 'avg' | 'min' | 'max';
-
-export type TimeBucket = 'day' | 'week' | 'month' | 'quarter' | 'year';
-
-export type FilterOp =
-  | 'equals'
-  | 'not'
-  | 'in'
-  | 'notIn'
-  | 'gt'
-  | 'gte'
-  | 'lt'
-  | 'lte'
-  | 'contains'
-  | 'startsWith'
-  | 'endsWith'
-  | 'isNull'
-  | 'notNull';
+export type AggregationOp = SharedAggregationOp;
 
 export type ColumnKind = { dataTypeCanonical: DataSourceColumn['dataTypeCanonical'] };
 
@@ -89,14 +80,25 @@ export const ALL_TYPES: ReadonlyArray<{
   { value: QueryVisualizationType.DATA_TABLE, label: 'Table', description: 'Raw rows' },
 ];
 
-export const AGG_OPS: ReadonlyArray<AggregationOp> = [
-  'count',
-  'count_distinct',
-  'sum',
-  'avg',
-  'min',
-  'max',
-];
+export const AGG_OPS: ReadonlyArray<AggregationOp> = AggregationOpSchema.options;
+
+/* eslint-disable @typescript-eslint/naming-convention -- keys mirror the AggregationOp enum values (snake_case) */
+export const AGG_OP_LABEL: Record<AggregationOp, string> = {
+  count: 'count',
+  count_distinct: 'count distinct',
+  sum: 'sum',
+  avg: 'average',
+  min: 'min',
+  max: 'max',
+  median: 'median',
+  p75: '75th percentile',
+  p90: '90th percentile',
+  p95: '95th percentile',
+  p99: '99th percentile',
+  stddev: 'std deviation',
+  variance: 'variance',
+};
+/* eslint-enable @typescript-eslint/naming-convention */
 
 export const TIME_BUCKETS: ReadonlyArray<TimeBucket> = ['day', 'week', 'month', 'quarter', 'year'];
 

@@ -87,6 +87,7 @@ import searchRoutes from '@/routes/search';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
+import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
 import cacConfigRoutes from '@/routes/cacConfig';
@@ -122,8 +123,7 @@ import productInsightsRoutes from '@/routes/productInsights';
 import ysweetRoutes from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 import internalCanvasRoutes from '@/routes/internalCanvas';
-import { dashboardRouter } from '@/routes/dynamicDashboard';
-import { dashboardCrudRouter } from '@/routes/dashboardCrud';
+import { dashboardRouter, dashboardCrudRouter } from '@/routes/dashboard';
 import pythonQueryRoutes from '@/routes/pythonQuery';
 import formsRoutes from '@/routes/forms';
 import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
@@ -550,6 +550,7 @@ export class App {
     this.app.use('/api/canvas/claw', authenticateUserOrApp, canvasRoutes);
     this.app.use('/api/docs/claw', authenticateUserOrApp, docsRoutes);
     this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
+    this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
 
     
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)

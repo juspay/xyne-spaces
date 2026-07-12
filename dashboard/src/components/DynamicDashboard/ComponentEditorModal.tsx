@@ -14,6 +14,7 @@ import {
   updateComponent,
 } from '../../services/DynamicDashboard/dashboardCrudService';
 import { dashboardKeys } from '../../hooks/useDashboards';
+import { dataSourceKeys } from '../../hooks/useDataSources';
 import { ComponentTile, type ComponentTileData, getRendererForType } from './ComponentGrid';
 import {
   ALL_TYPES,
@@ -63,6 +64,32 @@ export interface ComponentEditorModalProps {
   onSaved?: (componentId: string) => void;
 }
 
+// An expression measure (the { alias, expr } form) captured with the position
+// it held in the original plan, so it can be re-attached in place on save.
+interface StashedDerivedMeasure {
+  index: number;
+  measure: Record<string, unknown>;
+}
+
+function stashDerivedMeasures(raw: unknown): StashedDerivedMeasure[] {
+  if (!Array.isArray(raw)) return [];
+  const out: StashedDerivedMeasure[] = [];
+  raw.forEach((m, index) => {
+    if (m && typeof m === 'object' && 'expr' in m) {
+      out.push({ index, measure: m as Record<string, unknown> });
+    }
+  });
+  return out;
+}
+
+function stashedDerivedAliases(stashed: ReadonlyArray<StashedDerivedMeasure>): Set<string> {
+  return new Set(
+    stashed
+      .map(d => (d.measure as { alias?: string }).alias)
+      .filter((a): a is string => typeof a === 'string'),
+  );
+}
+
 export const ComponentEditorModal = ({
   dashboardId,
   dashboardName,
@@ -75,6 +102,10 @@ export const ComponentEditorModal = ({
   const queryClient = useQueryClient();
   const previewSeqRef = useRef(0);
   const isEditing = !!editingComponent;
+
+  const stashedDerivedMeasuresRef = useRef<StashedDerivedMeasure[]>(
+    stashDerivedMeasures(editingComponent?.queryJson?.['measures']),
+  );
 
   const initialFromRow = useMemo(() => {
     if (!editingComponent) return null;
@@ -156,7 +187,7 @@ export const ComponentEditorModal = ({
   const { result: previewResult, error: previewError, isPreviewing, isSaving } = previewStatus;
 
   const dataSourcesQuery = useQuery({
-    queryKey: ['dataSources', 'list'],
+    queryKey: dataSourceKeys.list,
     queryFn: listDataSources,
   });
   useEffect(() => {
@@ -188,7 +219,6 @@ export const ComponentEditorModal = ({
   const inScopeColumns = useMemo<ScopedColumn[]>(() => {
     if (!selectedTable) return [];
     const out: ScopedColumn[] = selectedTable.columns.map(c => ({
-      table: selectedTable.tableName,
       isBase: true,
       columnName: c.columnName,
       dataTypeCanonical: c.dataTypeCanonical,
@@ -201,7 +231,6 @@ export const ComponentEditorModal = ({
       const alias = j.alias ?? tbl.tableName;
       for (const c of tbl.columns) {
         out.push({
-          table: alias,
           isBase: false,
           columnName: c.columnName,
           dataTypeCanonical: c.dataTypeCanonical,
@@ -400,6 +429,7 @@ export const ComponentEditorModal = ({
         columns: columnsRef.current,
         wantsTimeBucket: wantsTimeBucketRef.current,
         selectColsLength: selectColsRef.current.length,
+        reservedAliases: stashedDerivedAliases(stashedDerivedMeasuresRef.current),
       },
       {
         setMeasures: updater => setMeasures(updater),
@@ -437,15 +467,27 @@ export const ComponentEditorModal = ({
           };
         });
     }
-    if (wantsMeasures && measures.length > 0) {
-      plan['measures'] = measures
-        .filter(m => m.column && m.op)
+    if (wantsMeasures) {
+      const derived = stashedDerivedMeasuresRef.current;
+      const derivedAliases = stashedDerivedAliases(derived);
+      // The reshape logic keeps real leaf aliases distinct from derived ones
+      // (see applyVisualTypeReshape), so a leaf sharing a derived alias here is
+      // only the auto-injected placeholder standing in for that derived measure.
+      const leafMeasures: unknown[] = measures
+        .filter(m => m.column && m.op && !derivedAliases.has(m.alias ?? ''))
         .map(m => ({
           column: m.column,
           op: m.op,
           ...(m.alias ? { alias: m.alias } : {}),
           ...(m.filter !== undefined ? { filter: m.filter } : {}),
         }));
+      // Re-insert derived measures at their original positions (they're already
+      // in ascending index order); clamp when the leaf count shrank.
+      const allMeasures = [...leafMeasures];
+      for (const d of derived) {
+        allMeasures.splice(Math.min(d.index, allMeasures.length), 0, d.measure);
+      }
+      if (allMeasures.length > 0) plan['measures'] = allMeasures;
     }
     if (wantsSelect && selectCols.length > 0) {
       if (joins.length > 0) {
@@ -529,7 +571,12 @@ export const ComponentEditorModal = ({
     if (!dataSourceId || !tableName) return false;
     if (invalidMeasure) return false;
     if (invalidOrderBy) return false;
-    const measureAliases = new Set(measures.map(m => m.alias).filter(Boolean));
+    const measureAliases = new Set(
+      [
+        ...measures.map(m => m.alias),
+        ...stashedDerivedAliases(stashedDerivedMeasuresRef.current),
+      ].filter(Boolean),
+    );
     const groupByAliases = new Set(groupBy.map(g => g.alias).filter(Boolean));
     switch (visualType) {
       case QueryVisualizationType.BAR_CHART:
@@ -562,10 +609,22 @@ export const ComponentEditorModal = ({
       if (invalidMeasure.column === '*') {
         return `The "${invalidMeasure.op}" aggregation can't use * — only "count" can. Pick a real column.`;
       }
-      const expected =
-        invalidMeasure.op === 'sum' || invalidMeasure.op === 'avg'
-          ? 'a numeric column'
-          : 'a numeric or date column';
+      // Numeric-only ops (sum/avg + percentiles/stddev/variance) reject dates;
+      // min/max/count accept dates too. Keep this in sync with validation.ts.
+      const numericOnlyOps: ReadonlyArray<string> = [
+        'sum',
+        'avg',
+        'median',
+        'p75',
+        'p90',
+        'p95',
+        'p99',
+        'stddev',
+        'variance',
+      ];
+      const expected = numericOnlyOps.includes(invalidMeasure.op)
+        ? 'a numeric column'
+        : 'a numeric or date column';
       return `"${invalidMeasure.op}" doesn't work on column "${invalidMeasure.column}". Pick ${expected} instead.`;
     }
     if (invalidOrderBy) {
@@ -744,15 +803,20 @@ export const ComponentEditorModal = ({
           };
         }),
       );
+      stashedDerivedMeasuresRef.current = stashDerivedMeasures(plan.measures);
       setMeasures(
-        (plan.measures ?? []).map(
-          (m): MeasureRow => ({
-            id: uuidv4(),
-            column: m.column,
-            op: m.op,
-            ...(m.alias !== undefined ? { alias: m.alias } : {}),
-            ...(m.filter !== undefined ? { filter: m.filter } : {}),
-          }),
+        (plan.measures ?? []).flatMap((m): MeasureRow[] =>
+          'expr' in m
+            ? []
+            : [
+                {
+                  id: uuidv4(),
+                  column: m.column,
+                  op: m.op,
+                  ...(m.alias !== undefined ? { alias: m.alias } : {}),
+                  ...(m.filter !== undefined ? { filter: m.filter } : {}),
+                },
+              ],
         ),
       );
       setOrderBy(
@@ -936,6 +1000,7 @@ export const ComponentEditorModal = ({
 
       <aside className='w-[360px] shrink-0 bg-white rounded-2xl shadow-md overflow-hidden flex flex-col'>
         <AiSidePanel
+          dashboardId={dashboardId}
           dashboardName={dashboardName ?? 'Dashboard'}
           dataSourceId={dataSourceId}
           setDataSourceId={dsId => {

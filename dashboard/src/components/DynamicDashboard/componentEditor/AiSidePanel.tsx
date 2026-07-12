@@ -1,19 +1,23 @@
 import { LayoutDashboard } from 'lucide-react';
-import { useCallback, useMemo, type ReactElement } from 'react';
+import { useCallback, type ReactElement } from 'react';
 import type { DashboardToolCall } from '@xyne/shared';
+import type { DataSourceListItem } from '../../../services/DynamicDashboard/dataSourcesService';
 import { DashboardAiChat } from '../ai/DashboardAiChat';
-import { Select } from './formControls';
+import { DataSourceChip } from '../ai/DataSourceChip';
+import type { DrillPayload } from '../ai/chatTypes';
 
 export interface AiSidePanelProps {
+  dashboardId: string;
   dashboardName: string;
   dataSourceId: string;
   setDataSourceId: (id: string) => void;
-  dataSources: Array<{ id: string; name: string; ingestionStatus: string }>;
+  dataSources: ReadonlyArray<DataSourceListItem>;
   lastError: string | null;
   onToolCall: (call: DashboardToolCall) => void;
 }
 
 export const AiSidePanel = ({
+  dashboardId,
   dashboardName,
   dataSourceId,
   setDataSourceId,
@@ -21,48 +25,48 @@ export const AiSidePanel = ({
   lastError,
   onToolCall,
 }: AiSidePanelProps): ReactElement => {
-  const readyDataSources = useMemo(
-    () => dataSources.filter(d => d.ingestionStatus === 'complete'),
-    [dataSources],
-  );
-
+  // The editor drafts a component locally, so the agent must NOT persist a
+  // tile — drill_result is the validate-only tool that streams back exactly
+  // the { title, visualType, queryPlan } the builder needs.
   const buildPrompt = useCallback(
     (text: string) =>
-      `Generate exactly ONE add_component call (no set_dashboard_meta). ` +
-      `If the requested table or column doesn't exist on this source, call ` +
-      `suggest_components with alternatives instead. The user wants: ${text}`,
+      `Present exactly ONE drill_result call (title, visualType, queryPlan) for the chart described below — the user is drafting a component in the editor, so do NOT call add_component or set_dashboard_meta. ` +
+      `If the requested table or column doesn't exist on this source, call suggest_components with alternatives instead. The user wants: ${text}`,
     [],
   );
 
-  const handleToolCall = useCallback(
-    (call: DashboardToolCall, ctx: { abort: () => void }) => {
-      if (call.tool !== 'add_component') return;
-      onToolCall(call);
+  const handleDrillResult = useCallback(
+    (drill: DrillPayload, ctx: { abort: () => void }): boolean => {
+      onToolCall({
+        tool: 'add_component',
+        args: {
+          visualType: drill.visualType,
+          title: drill.title,
+          queryPlan: drill.queryPlan,
+        },
+      } as DashboardToolCall);
       ctx.abort();
+      return true;
     },
     [onToolCall],
   );
 
-  const picker =
-    readyDataSources.length > 1 ? (
-      <div>
-        <div className='block text-[12px] font-medium text-xyne-gray-500 mb-1.5'>Data source</div>
-        <Select
-          trackName='data-source-picker'
-          value={dataSourceId}
-          onChange={setDataSourceId}
-          options={readyDataSources.map(d => ({ value: d.id, label: d.name }))}
-          placeholder='Select a data source…'
-          className='w-full'
-        />
-      </div>
-    ) : undefined;
+  // DataSourceChip renders null itself when fewer than two sources are ready.
+  const picker = (
+    <DataSourceChip
+      trackName='Component_Editor_Data_Source_Chip'
+      dataSourceId={dataSourceId || null}
+      setDataSourceId={setDataSourceId}
+      dataSources={dataSources}
+    />
+  );
 
   return (
     <DashboardAiChat
       dataSourceId={dataSourceId || null}
+      dashboardId={dashboardId}
       buildPrompt={buildPrompt}
-      onToolCall={handleToolCall}
+      onDrillResult={handleDrillResult}
       emptyStatePrompt='What kind of chart would you like to create?'
       contextChips={[
         {
@@ -71,7 +75,7 @@ export const AiSidePanel = ({
           maxWidth: 120,
         },
       ]}
-      {...(picker ? { dataSourcePicker: picker } : {})}
+      dataSourcePicker={picker}
       lastError={lastError}
       trackCategory='component-editor'
       className='flex flex-col h-full'

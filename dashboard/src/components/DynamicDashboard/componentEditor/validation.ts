@@ -12,6 +12,13 @@ export function isColumnCompatibleWithOp(
       return true;
     case 'sum':
     case 'avg':
+    case 'median':
+    case 'p75':
+    case 'p90':
+    case 'p95':
+    case 'p99':
+    case 'stddev':
+    case 'variance':
       return dataTypeCanonical === 'numeric';
     case 'min':
     case 'max':
