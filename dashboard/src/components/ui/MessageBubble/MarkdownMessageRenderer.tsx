@@ -34,6 +34,14 @@ const messageSanitizeSchema = {
     ...defaultSchema.attributes,
     span: [...(defaultSchema.attributes?.['span'] ?? []), 'className', ...MENTION_DATA_ATTRS],
   },
+  // Preserve the synthetic `cite:` / `cite-group:` link schemes emitted by
+  // `linkifyAndGroupClawCitations` — rehype-sanitize strips unknown href
+  // protocols by default, which would erase the href before the `a` override
+  // can substitute a citation chip. (Harmless for non-citation messages.)
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.['href'] ?? []), 'cite', 'cite-group'],
+  },
 };
 
 interface MarkdownMessageRendererProps {
@@ -146,6 +154,11 @@ export const MarkdownMessageRenderer: FC<MarkdownMessageRendererProps> = ({
     <div className={`${className} min-w-0`}>
       <Markdown
         remarkPlugins={[remarkGfm]}
+        // Bypass react-markdown's built-in href sanitizer so the synthetic
+        // `cite:` / `cite-group:` citation schemes survive to the `a` override.
+        // rehypeSanitize below is the real safety gate (its `protocols.href`
+        // allow-list still governs which schemes render).
+        urlTransform={url => url}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, messageSanitizeSchema]]}
         components={{
           ...markdownComponents,

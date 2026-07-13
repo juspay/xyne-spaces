@@ -15,6 +15,7 @@ import {
   cancelClawAgentRun,
   listClawConversations,
   getClawConversationMessages,
+  streamClawConversationLive,
   getClawDebugArtifacts,
   approveClawAction,
   downloadClawAttachment,
@@ -699,6 +700,56 @@ export class XyneAIControllerV2 {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] getMessages error:', error);
       res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  /**
+   * GET /api/xyne-ai/v2/conversations/:convId/live
+   * SSE proxy to claw-auth's live stream so a Spaces AI tab that reloaded
+   * mid-run can re-attach and stream the in-flight answer (snapshot + deltas)
+   * instead of waiting for the run to finish. Verbatim frame passthrough.
+   */
+  streamConversationLive = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { convId } = req.params;
+    if (!convId) {
+      res.status(400).json({ success: false, error: 'convId is required' });
+      return;
+    }
+    const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Content-Encoding', 'none');
+    if (res.socket) res.socket.setNoDelay(true);
+    res.flushHeaders();
+
+    const pingInterval = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(`: ping\n\n`);
+        if (typeof (res as any).flush === 'function') (res as any).flush();
+      }
+    }, 20_000);
+
+    const upstreamAbort = new AbortController();
+    res.on('close', () => {
+      clearInterval(pingInterval);
+      if (!upstreamAbort.signal.aborted) upstreamAbort.abort();
+    });
+
+    try {
+      await streamClawConversationLive({ headers: req.headers, userId }, res, convId, agentSlug, { signal: upstreamAbort.signal });
+    } catch (error) {
+      logger.error('[XyneAIv2] live proxy error:', error);
+    } finally {
+      clearInterval(pingInterval);
+      if (!res.writableEnded) res.end();
     }
   };
 

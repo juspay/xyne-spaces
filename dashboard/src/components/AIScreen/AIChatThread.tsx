@@ -1192,6 +1192,26 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   // off and back on once reasoning starts.
   const mountedWithSessionIdRef = useRef<boolean>(Boolean(sessionId));
 
+  // Read-only live viewer for a reloaded-mid-run conversation, keyed by the
+  // sessionId it was attached for. Lives OUTSIDE the load-session effect so
+  // effect re-runs can't tear it down mid-stream; detached only on unmount or
+  // when the conversation actually changes.
+  const liveViewerRef = useRef<{ sessionId: string; detach: () => void } | null>(null);
+  useEffect(
+    () => () => {
+      liveViewerRef.current?.detach();
+      liveViewerRef.current = null;
+    },
+    [],
+  );
+  // Conversation switch: drop the previous conversation's viewer.
+  useEffect(() => {
+    if (liveViewerRef.current && liveViewerRef.current.sessionId !== sessionId) {
+      liveViewerRef.current.detach();
+      liveViewerRef.current = null;
+    }
+  }, [sessionId]);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const tailRef = useRef<HTMLDivElement | null>(null);
@@ -1389,6 +1409,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     // stream manager is already streaming the bot reply into local state.
     if (!mountedWithSessionIdRef.current) return;
 
+    let cancelled = false;
     const loadSession = async (): Promise<void> => {
       isLoadingSession.current = true;
       // Clear stale branch selections from any previously-viewed session; the
@@ -1450,6 +1471,24 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           setMessages(loadedMessages);
           setConversationId(sessionId);
           onConversationChange?.(sessionId);
+          // Reload mid-run: no in-memory stream was adopted above, so attach a
+          // read-only live viewer that streams an in-flight answer in. No-op if
+          // the run already finished (the /live snapshot comes back empty).
+          // Always (re)attach here: the MANAGER dedupes (no-ops when a live
+          // viewer/driver already owns the thread, replaces a dead viewer's
+          // leftover state), so a stale same-session ref — e.g. a viewer that
+          // self-closed on `done` — can never block a fresh attach on return.
+          if (!cancelled) {
+            liveViewerRef.current = {
+              sessionId,
+              detach: xyneAIStreamManager.attachLiveViewer(
+                threadId,
+                sessionId,
+                effectiveAgentSlug || 'ask-ai',
+                loadedMessages,
+              ),
+            };
+          }
           return;
         }
 
@@ -1470,6 +1509,14 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     };
 
     void loadSession();
+    // NOTE: no viewer detach here — this cleanup runs on every dep identity
+    // change (e.g. onConversationChange re-created by a parent re-render), and
+    // detaching would kill the live viewer mid-run while the manager state
+    // stays 'streaming' (frozen bubble). Detach lives in the unmount-only
+    // effect + the sessionId-change guard above.
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId, threadId, onConversationChange, effectiveAgentSlug, isV2]);
 
   // Auto-submit initialQuery once on mount, applying the landing composer's

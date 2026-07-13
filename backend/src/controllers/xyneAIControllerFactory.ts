@@ -216,6 +216,15 @@ export class XyneAIControllerFactory {
     return xyneAIControllerV2.getConversationDebug(req, res);
   };
 
+  streamConversationLive = async (req: Request, res: Response): Promise<void> => {
+    const agentSlug = (req.query?.agentSlug || req.query?.agent_slug) as string | undefined;
+    if (config.askAI.version !== 'v2' && !agentSlug) {
+      res.status(404).json({ error: 'v2 endpoints not enabled' });
+      return;
+    }
+    return xyneAIControllerV2.streamConversationLive(req, res);
+  };
+
   /**
    * DELETE /api/xyne-ai/v2/conversations/:convId
    * Delete a conversation in claw (v2 only)

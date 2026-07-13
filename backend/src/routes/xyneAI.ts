@@ -196,6 +196,9 @@ router.get('/v2/conversations', authMiddleware.authenticate, xyneAIControllerFac
 // GET /api/xyne-ai/v2/conversations/:convId/messages - Get conversation messages from claw
 router.get('/v2/conversations/:convId/messages', authMiddleware.authenticate, xyneAIControllerFactory.getConversationMessages);
 router.get('/v2/conversations/:convId/debug', authMiddleware.authenticate, xyneAIControllerFactory.getConversationDebug);
+// SSE proxy to claw-auth's live stream — lets a reloaded Spaces AI tab re-attach
+// to an in-flight run and stream the answer instead of waiting for `done`.
+router.get('/v2/conversations/:convId/live', authMiddleware.authenticate, xyneAIControllerFactory.streamConversationLive);
 
 // DELETE /api/xyne-ai/v2/conversations/:convId - Delete a claw conversation
 router.delete('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerFactory.deleteConversation);

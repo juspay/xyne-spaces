@@ -163,6 +163,10 @@ const XyneAISidebar = ({
     () => initialConversationId ?? newStreamSlotKey(),
   );
   const usesDraftStreamKeyRef = useRef(!initialConversationId);
+  // Detach fn for the read-only live viewer attached on reload-mid-run (see
+  // handleLoadConversation). Detached before re-attaching + on unmount.
+  const liveViewerDetachRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => liveViewerDetachRef.current?.(), []);
   const [loadingHistorySessionId, setLoadingHistorySessionId] = useState<string | null>(null);
   const [streamingSessionIds, setStreamingSessionIds] = useState<string[]>([]);
   const [currentTraceId, setCurrentTraceId] = useState<string | undefined>();
@@ -1147,6 +1151,17 @@ const XyneAISidebar = ({
         setEditingMessageId(null);
         setShowHistorySidebar(false);
         setFeedbackMap({});
+
+        // Reload mid-run: no in-memory stream was adopted above, so attach a
+        // read-only live viewer that streams an in-flight answer in. No-op if
+        // the run already finished (the /live snapshot comes back empty).
+        liveViewerDetachRef.current?.();
+        liveViewerDetachRef.current = xyneAIStreamManager.attachLiveViewer(
+          streamTid,
+          conversation.sessionId,
+          effectiveAgentSlug || 'ask-ai',
+          messagesWithoutStreaming,
+        );
 
         setTimeout(() => {
           scrollToBottom();

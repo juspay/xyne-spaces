@@ -48,6 +48,13 @@ import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePr
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
+import {
+  buildClawCitationToolNumbers,
+  linkifyAndGroupClawCitations,
+  stripCitationMarks,
+} from '../TipTapExtensions/CitationMark';
+import { registerClawIcons } from '../../Chat/XyneAISidebar/utils/clawCitationUrl';
+import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
 import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
@@ -665,10 +672,39 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return debugSettings.showSendIndicators && isMe && !message.isSent;
   }, [debugSettings.showSendIndicators, isMe, message.isSent]);
 
+  // Claw agent citations baked into the reply metadata (by claw-auth at
+  // reply-time) so this thread message can render clickable citation chips
+  // without re-calling claw — re-opened threads are served straight from
+  // Postgres and never hit the /messages sidebar path.
+  const clawCitations = metadata?.['clawCitations'] as ToolInvocation[] | undefined;
+  const clawCitationCtx = useMemo(() => {
+    if (!isMarkdownContent || !clawCitations?.length) return undefined;
+    // Register the de-duplicated icon bytes so chip icons resolve at render time
+    // (mirrors the sidebar's registerClawIcons on the /messages `icons` map).
+    registerClawIcons(metadata?.['clawCitationIcons']);
+    const toolNumbers = buildClawCitationToolNumbers(parsedMarkdown.content);
+    if (toolNumbers.size === 0) return undefined;
+    return { toolInvocations: clawCitations, toolNumbers };
+  }, [isMarkdownContent, clawCitations, metadata, parsedMarkdown.content]);
+
+  // Linkify inline [clf-…#n] tokens into the synthetic cite:/cite-group: links
+  // the `a` override turns into chips. When no citation metadata is present
+  // (old messages, non-citing agents), strip the raw tokens + trailing
+  // <citation> block so they never render as literal text.
+  const citationContent = useMemo(() => {
+    const raw = parsedMarkdown.content;
+    if (!isMarkdownContent) return raw;
+    if (raw.indexOf('clf-') === -1 && !/<citation\b/i.test(raw)) return raw;
+    const linkified = clawCitationCtx
+      ? linkifyAndGroupClawCitations(raw, clawCitationCtx.toolNumbers)
+      : raw;
+    return stripCitationMarks(linkified);
+  }, [isMarkdownContent, parsedMarkdown.content, clawCitationCtx]);
+
   // Memoize markdown components to prevent re-renders on parent updates
   const markdownComponents = useMemo(
-    () => createMarkdownComponents(message.messageId),
-    [message.messageId],
+    () => createMarkdownComponents(message.messageId, clawCitationCtx),
+    [message.messageId, clawCitationCtx],
   );
 
   if (!message) {
@@ -1140,7 +1176,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               ) : isMarkdownContent ? (
                 <>
                   <MarkdownMessageRenderer
-                    content={parsedMarkdown.content}
+                    content={citationContent}
                     markdownComponents={markdownComponents}
                     messageSubtype={metadata?.messageSubtype}
                   />
