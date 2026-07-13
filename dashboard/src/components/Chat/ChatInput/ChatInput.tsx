@@ -155,12 +155,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // Also skips when autoFocus is null (keyboard navigation via ?nofocus=1).
     useEffect(() => {
       // eslint-disable-next-line react-hooks/exhaustive-deps -- autoFocus intentionally not in deps; read once on mount
-      if (hasAutoFocusedRef.current || isMobile || isXyneAIOpen || autoFocus === null) return;
-      hasAutoFocusedRef.current = true;
+      if (hasAutoFocusedRef.current || isMobile || autoFocus === null) return;
 
       const rafId = requestAnimationFrame(() => {
         const activeEl = document.activeElement;
         if (activeEl && activeEl.closest('[contenteditable="true"]')) return;
+        hasAutoFocusedRef.current = true;
         inputBoxRef.current?.focus();
       });
 

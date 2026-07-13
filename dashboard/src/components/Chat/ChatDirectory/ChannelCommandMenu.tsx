@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Popover from '@radix-ui/react-popover';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
 import { PRIORITY_ICON_COLOR } from './FilterChipNode';
 import {
@@ -224,6 +225,12 @@ const ChannelCommandMenu = ({
   // synthetic .click() strips modifier flags, so we prime this ref from
   // onMouseDownCapture and from the Enter branch of handleCommandKeyDown.
   const lastModifierRef = useRef<boolean>(false);
+  const openedAtHrefRef = useRef('');
+  useEffect(() => {
+    if (open) {
+      openedAtHrefRef.current = window.location.pathname + window.location.search;
+    }
+  }, [open]);
 
   useScope('command', open);
 
@@ -3849,40 +3856,54 @@ const ChannelCommandMenu = ({
     );
   }
 
+  // Manual composition of cmdk's Command.Dialog (Radix Dialog > Command): cmdk
+  // doesn't forward onCloseAutoFocus to Dialog.Content, which we need so that a
+  // selection that navigated (e.g. cmd+K → DM) leaves focus with the
+  // destination screen instead of restoring it to the pre-open element.
   return (
-    <Command.Dialog
-      open={open}
-      ref={commandRef}
-      // See inline <Command> above: pin cmdk's value to a sentinel ('__none__') that matches no
-      // item so it never adds a second highlighted row next to the imperatively-managed one.
-      value='__none__'
-      onValueChange={() => {}}
-      data-nav-active={hasNavigated ? 'true' : undefined}
-      data-mention-active={mentionSearchType ? 'true' : undefined}
-      onOpenChange={onOpenChange}
-      shouldFilter={false}
-      onMouseMove={() => {
-        if (suppressHover) {
-          commandRef.current
-            ?.querySelectorAll('[cmdk-item][aria-selected="true"]')
-            .forEach(item => {
-              item.setAttribute('aria-selected', 'false');
-            });
-          setSuppressHover(false);
-        }
-        reconcileHoverSelection();
-      }}
-      className={cn(
-        'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
-        isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
-        contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
-        'md:w-full md:h-auto bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
-        showMergeDialog ? 'z-40' : 'z-[9999]',
-      )}
-      onKeyDownCapture={handleCommandKeyDown}
-    >
-      {commandBody}
-    </Command.Dialog>
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay />
+        <DialogPrimitive.Content
+          onCloseAutoFocus={e => {
+            const href = window.location.pathname + window.location.search;
+            if (href !== openedAtHrefRef.current) e.preventDefault();
+          }}
+        >
+          <Command
+            ref={commandRef}
+            // See inline <Command> above: pin cmdk's value to a sentinel ('__none__') that matches no
+            // item so it never adds a second highlighted row next to the imperatively-managed one.
+            value='__none__'
+            onValueChange={() => {}}
+            data-nav-active={hasNavigated ? 'true' : undefined}
+            data-mention-active={mentionSearchType ? 'true' : undefined}
+            shouldFilter={false}
+            onMouseMove={() => {
+              if (suppressHover) {
+                commandRef.current
+                  ?.querySelectorAll('[cmdk-item][aria-selected="true"]')
+                  .forEach(item => {
+                    item.setAttribute('aria-selected', 'false');
+                  });
+                setSuppressHover(false);
+              }
+              reconcileHoverSelection();
+            }}
+            className={cn(
+              'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
+              isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
+              contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
+              'md:w-full md:h-auto bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
+              showMergeDialog ? 'z-40' : 'z-[9999]',
+            )}
+            onKeyDownCapture={handleCommandKeyDown}
+          >
+            {commandBody}
+          </Command>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 };
 
