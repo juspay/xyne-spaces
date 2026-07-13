@@ -1,5 +1,6 @@
 import { FormFieldType } from '@xyne/shared';
 import type { FormFields, GlobalField, Prisma } from '@prisma/client';
+import { parseGlobalFieldEnum } from './globalFieldEnum';
 
 export interface FormFieldInput {
   fieldId?: string;
@@ -111,7 +112,7 @@ export const resolveFormFields = (
       resolvedId = row.globalFieldId;
       fieldName = def.fieldName;
       fieldTypeValue = def.fieldType;
-      fieldEnum = def.fieldEnum;
+      fieldEnum = parseGlobalFieldEnum(def.fieldEnum);
     } else {
       resolvedId = row.id;
       fieldName = row.fieldName;

@@ -3,6 +3,7 @@ import { FormFieldType } from '@xyne/shared';
 import { useGlobalFieldSearch } from '../../../hooks/useGlobalFieldSearch';
 import { mapFromFormFieldType } from '../BoardEditScreen/BoardEditScreen.types';
 import type { GlobalFieldListResult } from '../../../services/Form/formService';
+import { parseFieldEnumOptions } from '../../../utils/formFieldEnum';
 
 export interface GlobalFieldSuggestion {
   id: string;
@@ -11,14 +12,8 @@ export interface GlobalFieldSuggestion {
   fieldEnum?: string[];
 }
 
-const toStringArray = (value: unknown): string[] | undefined => {
-  if (!Array.isArray(value)) return undefined;
-  const items = value.filter((item): item is string => typeof item === 'string');
-  return items.length > 0 ? items : undefined;
-};
-
 const toSuggestion = (field: GlobalFieldListResult): GlobalFieldSuggestion => {
-  const fieldEnum = toStringArray(field.fieldEnum);
+  const fieldEnum = parseFieldEnumOptions(field.fieldEnum);
   return {
     id: field.id,
     fieldName: field.fieldName,

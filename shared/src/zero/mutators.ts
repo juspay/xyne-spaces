@@ -7222,6 +7222,8 @@ export const mutators = defineMutators({
               .map(row => [row.globalFieldId as string, row]),
           );
           const keptRowIds = new Set<string>();
+          const serializeGlobalFieldEnum = (value: string[] | null | undefined): string | null =>
+            value && value.length > 0 ? JSON.stringify(value) : null;
 
           const ensureLegacyGlobalDefinition = async (
             row: (typeof existingRows)[number],
@@ -7250,7 +7252,7 @@ export const mutators = defineMutators({
               projectId,
               fieldName: row.fieldName,
               fieldType: row.fieldType,
-              ...(row.fieldEnum ? { fieldEnum: row.fieldEnum } : {}),
+              ...(row.fieldEnum ? { fieldEnum: JSON.stringify(row.fieldEnum) } : {}),
               createdAt: now,
               updatedAt: now,
             });
@@ -7273,7 +7275,11 @@ export const mutators = defineMutators({
             );
             if (found) {
               if (fieldEnum) {
-                await tx.mutate.global_fields.update({ id: found.id, fieldEnum, updatedAt: now });
+                  await tx.mutate.global_fields.update({
+                    id: found.id,
+                    fieldEnum: serializeGlobalFieldEnum(fieldEnum),
+                    updatedAt: now,
+                  });
               }
               return found.id;
             }
@@ -7282,7 +7288,7 @@ export const mutators = defineMutators({
               projectId,
               fieldName,
               fieldType,
-              ...(fieldEnum ? { fieldEnum } : {}),
+              ...(fieldEnum ? { fieldEnum: serializeGlobalFieldEnum(fieldEnum) } : {}),
               createdAt: now,
               updatedAt: now,
             });
@@ -7384,7 +7390,7 @@ export const mutators = defineMutators({
                   id: definitionId,
                   fieldName,
                   fieldType: field.fieldType,
-                  fieldEnum: fieldEnum ?? null,
+                  fieldEnum: serializeGlobalFieldEnum(fieldEnum),
                   updatedAt: timestamp,
                 });
               } else if(scopedProjectId) {

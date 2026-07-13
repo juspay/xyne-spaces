@@ -3648,7 +3648,7 @@ model GlobalField {
   projectId   String        // Project scope for reuse + ACL
   fieldName   String        // Name of the field
   fieldType   FormFieldType
-  fieldEnum   Json?
+  fieldEnum   String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 

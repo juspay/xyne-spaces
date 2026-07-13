@@ -1,4 +1,5 @@
 import { FormFieldType, type FormFields, type GlobalField } from '@xyne/shared';
+import { parseFieldEnumOptions } from '../formFieldEnum';
 
 export interface ResolvedDisplayFormField {
   id: string;
@@ -12,12 +13,6 @@ export interface ResolvedDisplayFormField {
 }
 
 type MembershipRow = FormFields & { globalField?: GlobalField | null | undefined };
-
-const toStringArray = (value: unknown): string[] | undefined => {
-  if (!Array.isArray(value)) return undefined;
-  const items = value.filter((item): item is string => typeof item === 'string');
-  return items.length > 0 ? items : undefined;
-};
 
 /**
  * Resolve a form's fields from its per-form membership rows (form_fields).
@@ -40,12 +35,12 @@ export const resolveDisplayFormFields = (
       resolvedId = row.globalFieldId;
       fieldName = row.globalField.fieldName;
       fieldType = row.globalField.fieldType;
-      fieldEnum = toStringArray(row.globalField.fieldEnum);
+      fieldEnum = parseFieldEnumOptions(row.globalField.fieldEnum);
     } else if (row.fieldName && row.fieldType) {
       resolvedId = row.id;
       fieldName = row.fieldName;
       fieldType = row.fieldType;
-      fieldEnum = toStringArray(row.fieldEnum);
+      fieldEnum = parseFieldEnumOptions(row.fieldEnum);
     } else {
       return [];
     }
