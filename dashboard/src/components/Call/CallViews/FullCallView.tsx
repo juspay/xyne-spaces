@@ -2,6 +2,7 @@ import type { Room } from 'livekit-client';
 import { ConnectionQuality, ConnectionState } from 'livekit-client';
 import { WifiLow } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { MutableRefObject } from 'react';
 import {
   useParticipantNetworkQuality,
   useNetworkQualityToast,
@@ -31,6 +32,7 @@ import { useActiveRecording, type ActiveRecording } from '../hooks/useActiveReco
 import { RecordingStopDialog } from '../CallControls/RecordingStopDialog';
 import { CallPrivacyIndicator } from '../CallPrivacyIndicator/CallPrivacyIndicator';
 import { createCallPrivacyActions } from '../CallPrivacyIndicator/callPrivacyActions';
+import type { CallReminderClock } from '../CallPrivacyIndicator/CallPrivacyReminder';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import { hasJoinedExternalParticipant } from '../callParticipant.utils';
 import { CallWhiteboardView } from '../CallWhiteboard';
@@ -119,6 +121,8 @@ interface FullCallViewProps {
   externalActiveRecording?: ActiveRecording | null | undefined;
   /** Delays reminder sound until external recording state is known. */
   privacyReminderEnabled?: boolean | undefined;
+  /** Session-scoped reminder clock, owned by CustomLiveKitRoom so it survives view switches. */
+  reminderClockRef?: MutableRefObject<CallReminderClock> | undefined;
 }
 
 export function FullCallView({
@@ -165,6 +169,7 @@ export function FullCallView({
   isRecording: isRecordingProp = false,
   externalActiveRecording,
   privacyReminderEnabled = true,
+  reminderClockRef,
 }: FullCallViewProps): React.ReactElement {
   // ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS
   const { user } = useAuth();
@@ -467,11 +472,13 @@ export function FullCallView({
         <div className='flex items-center gap-3'>
           <CallPrivacyIndicator
             title='Transcribing'
+            callId={callId}
             description={CALL_PRIVACY_DESCRIPTION}
             actions={callPrivacyActions}
             activeTone={isRecordingActive ? 'recording' : 'ai'}
             reminderTriggerKey={privacyReminderTriggerKey}
             reminderEnabled={privacyReminderEnabled}
+            reminderClockRef={reminderClockRef}
             trackMetadata={{
               isRecordingActive,
               recordingType: displayRecordingType,

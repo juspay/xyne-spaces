@@ -7,6 +7,8 @@ import { playAudio } from '../../../utils/audioPlayer';
 import { roomActor } from '../../../machines/roomMachine';
 import { MiniCallView } from './MiniCallView';
 import { FullCallView } from './FullCallView';
+import { createCallReminderClock } from '../CallPrivacyIndicator/CallPrivacyReminder';
+import type { CallReminderClock } from '../CallPrivacyIndicator/CallPrivacyReminder';
 import { useHandRaise } from '../hooks/useHandRaise';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { AIInviteDialog } from '../CallModals/AIInviteDialog';
@@ -95,6 +97,13 @@ export function CustomLiveKitRoom({
   // Hand raise state, synced over the data channel. Lifted here (always mounted for
   // the call) so it persists and keeps receiving across mini/PIP <-> full view switches.
   const { raisedHands, toggleHandRaise } = useHandRaise(room);
+  // Session-scoped reminder clock lives here (always mounted for the whole call)
+  // so the transcription disclosure timers survive the mini <-> full view switch.
+  // It is passed to FullCallView only; mini call view never needs it.
+  const privacyReminderClockRef = useRef<CallReminderClock>(createCallReminderClock());
+  useEffect(() => {
+    privacyReminderClockRef.current = createCallReminderClock();
+  }, [callId]);
 
   // Compute state from LiveKit instead of storing in context
   const localParticipant = isNativeMode
@@ -508,6 +517,7 @@ export function CustomLiveKitRoom({
         onToggleScreenShare={toggleScreenShare}
         onDisconnect={handleDisconnectClick}
         onMinimize={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+        reminderClockRef={privacyReminderClockRef}
         onToggleThread={handleToggleThread}
         onRequestControl={handleRequestControl}
         requestedAiController={isAiControlRequested}

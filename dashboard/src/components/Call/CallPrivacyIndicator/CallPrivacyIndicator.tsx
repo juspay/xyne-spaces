@@ -2,15 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { Bot } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { useCallPrivacyReminder } from './CallPrivacyReminder';
+import type { MutableRefObject } from 'react';
+import type { CallReminderClock } from './CallPrivacyReminder';
 import type { CallPrivacyAction, CallPrivacyActionTone } from './callPrivacyActions';
 
 interface CallPrivacyIndicatorProps {
   title: string;
   description: string[];
   actions: CallPrivacyAction[];
+  callId?: string | undefined;
   activeTone?: CallPrivacyActionTone | undefined;
   reminderTriggerKey?: number | undefined;
   reminderEnabled?: boolean | undefined;
+  reminderClockRef?: MutableRefObject<CallReminderClock> | undefined;
   trackMetadata?: Record<string, unknown> | undefined;
 }
 
@@ -54,9 +58,11 @@ export function CallPrivacyIndicator({
   title,
   description,
   actions,
+  callId,
   activeTone = 'ai',
   reminderTriggerKey,
   reminderEnabled = true,
+  reminderClockRef,
   trackMetadata,
 }: CallPrivacyIndicatorProps): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false);
@@ -68,8 +74,10 @@ export function CallPrivacyIndicator({
     title,
     actions,
     isRecordingActive: isRecordingTone,
+    callId,
     triggerKey: reminderTriggerKey,
     enabled: reminderEnabled,
+    clockRef: reminderClockRef,
   });
 
   useEffect(() => {
@@ -89,7 +97,7 @@ export function CallPrivacyIndicator({
         type='button'
         onClick={() => setIsOpen(prev => !prev)}
         className={cn(
-          'relative flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors shadow-lg',
+          'relative z-[2] flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors shadow-lg',
           isRecordingTone
             ? 'border-red-300 bg-red-500/15 text-red-200 hover:bg-red-500/25'
             : 'border-sky-300 bg-sky-400/15 text-pink-200 hover:bg-sky-400/25',
@@ -103,11 +111,17 @@ export function CallPrivacyIndicator({
       >
         <span
           className={cn(
-            'absolute inset-[-5px] rounded-full border-4',
+            'absolute inset-[-5px] rounded-full border-4 transition-opacity duration-200',
             isRecordingTone ? 'border-red-400/30' : 'border-sky-400/60',
+            isReminderVisible && 'opacity-0',
           )}
         />
-        <ActiveIcon className='h-5 w-5' />
+        <ActiveIcon
+          className={cn(
+            'h-5 w-5 transition-opacity duration-200',
+            isReminderVisible && 'opacity-0',
+          )}
+        />
       </button>
 
       {reminder}
