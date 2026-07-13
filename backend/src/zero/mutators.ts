@@ -15019,13 +15019,37 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Approval gate: if this transition requires approval, only listed approvers may
           // execute it directly (self-approval path). Non-approvers must go through the
           // ticketStageRequest SUBMITTED → APPROVED flow handled by the upsert mutator.
+          // Mirrors assertCanReviewStageRequest: a user is an approver if listed directly as a
+          // USER approver, OR if they hold (directly or via group) a role listed as a ROLE approver.
           if (transition?.requiresApproval) {
             const approvers = await tx.run(
               zql.stage_approvers.where('transitionId', transition.id),
             );
-            const isApprover = approvers.some(
+            let isApprover = approvers.some(
               a => a.userId === authData.sub && (a.approverType ?? 'USER') === 'USER',
             );
+            if (!isApprover) {
+              const roleIds = approvers
+                .filter(a => (a.approverType ?? 'USER') === 'ROLE' && a.roleId)
+                .map(a => a.roleId as string);
+              if (roleIds.length > 0) {
+                const roleMembership = await tx.run(
+                  zql.user_role_mappings
+                    .where('userId', authData.sub)
+                    .where('roleId', 'IN', roleIds)
+                    .one(),
+                );
+                const groupMembership = roleMembership
+                  ? null
+                  : await tx.run(
+                      zql.user_group_mappings
+                        .where('userId', authData.sub)
+                        .where('roleId', 'IN', roleIds)
+                        .one(),
+                    );
+                isApprover = Boolean(roleMembership) || Boolean(groupMembership);
+              }
+            }
             if (!isApprover) {
               throw new Error('This transition requires approval');
             }
