@@ -369,7 +369,9 @@ export interface MerchantTicketListItem {
   lastEmailAt: Date;
   conversationId: string;
   channelId: string;
-  senderEmail: string;
+  boardId?: string | null;
+  senderEmail?: string;
+  senderName?: string;
 }
 
 export interface MerchantTicketsListResponse extends PaginatedResponse<MerchantTicketListItem> {}

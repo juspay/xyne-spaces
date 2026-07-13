@@ -1,5 +1,13 @@
-import { ReactElement, useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { GripVertical, Plus, Trash2, Check, ChevronDown, ChevronLeft } from 'lucide-react';
+import {
+  ReactElement,
+  type MouseEvent as ReactMouseEvent,
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  useEffect,
+} from 'react';
+import { GripVertical, Plus, Trash2, Check, ChevronDown, ChevronLeft, Copy } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -42,6 +50,8 @@ import {
 } from '../../../utils/board';
 import { resolveDisplayFormFields } from '../../../utils/board/resolveDisplayFormFields';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
+import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import Tooltip from '../../ui/Tooltip';
 
 // Type for board data passed to onNext callback
 interface BoardData {
@@ -214,6 +224,7 @@ const BoardEditScreen = ({
   const [fields, setFields] = useState<TicketField[]>(DEFAULT_TICKET_FIELDS);
   const [isDragging, setIsDragging] = useState<string | null>(null);
   const [hoveredFieldId, setHoveredFieldId] = useState<string | null>(null);
+  const [copiedFieldId, setCopiedFieldId] = useState<string | null>(null);
 
   // Inline custom field creation state
   const [isAddingField, setIsAddingField] = useState(false);
@@ -490,6 +501,21 @@ const BoardEditScreen = ({
   const cancelEditFieldLabel = useCallback(() => {
     setEditingFieldLabelId(null);
     setEditLabelValue('');
+  }, []);
+
+  const handleCopyFieldId = useCallback((e: ReactMouseEvent, fieldId: string) => {
+    e.stopPropagation();
+    void copyTextToClipboard(fieldId)
+      .then(() => {
+        toast.success('Field ID copied to clipboard');
+        setCopiedFieldId(fieldId);
+        window.setTimeout(() => {
+          setCopiedFieldId(current => (current === fieldId ? null : current));
+        }, 1500);
+      })
+      .catch(() => {
+        toast.error('Failed to copy field ID');
+      });
   }, []);
 
   const saveCustomField = useCallback(() => {
@@ -1494,6 +1520,37 @@ const BoardEditScreen = ({
                                   )}
                                 </button>
                               </div>
+                              {!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) && (
+                                <div
+                                  className={`shrink-0 ${hoveredFieldId === field.id ? 'visible' : 'invisible'}`}
+                                >
+                                  <Tooltip
+                                    content={
+                                      copiedFieldId === field.id
+                                        ? 'Field ID copied'
+                                        : 'Copy field ID'
+                                    }
+                                    side='top'
+                                    delayDuration={200}
+                                  >
+                                    <Button
+                                      type='button'
+                                      variant='ghost'
+                                      size='iconSm'
+                                      className='h-6 w-6 p-0 text-muted-foreground hover:text-foreground'
+                                      onClick={e => handleCopyFieldId(e, field.id)}
+                                      data-track-category='board_edit'
+                                      data-track-name='copy_field_id'
+                                    >
+                                      {copiedFieldId === field.id ? (
+                                        <Check size={14} />
+                                      ) : (
+                                        <Copy size={14} />
+                                      )}
+                                    </Button>
+                                  </Tooltip>
+                                </div>
+                              )}
 
                               {/* Hover controls - Required toggle and Delete button - space always reserved */}
                               {/* Hide Required toggle for mandatory fields: board, project, channel, status, priority */}

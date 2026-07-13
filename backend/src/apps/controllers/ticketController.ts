@@ -144,6 +144,24 @@ const ListBySenderQuerySchema = z.object({
   cursor: z.string().optional(),
 });
 
+const SearchTicketsBodySchema = z.object({
+  channelId: z.string().min(1, 'channelId must not be empty').trim(),
+  boardIds: z.array(z.string().min(1, 'boardIds must not contain empty values').trim()).min(1, 'boardIds must not be empty').optional(),
+  senderEmail: z.string().email('senderEmail must be a valid email').trim().optional(),
+  senderName: z.string().trim().min(1, 'senderName must not be empty').optional(),
+  customFields: z.record(z.unknown()).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.customFields && Object.keys(data.customFields).length > 0 && (!data.boardIds || data.boardIds.length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['boardIds'],
+      message: 'boardIds is required when customFields are provided',
+    });
+  }
+});
+
 function parseListBySenderChannelIds(query: Request['query']): string[] {
   const ids = new Set<string>();
 
@@ -643,6 +661,99 @@ const transferTicketToBoard = async (params: {
 };
 
 export class TicketController {
+  private normalizeFilterValue(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    if (value instanceof Date) return value.toISOString();
+    if (Array.isArray(value)) {
+      return value.map(item => this.normalizeFilterValue(item)).sort().join('|');
+    }
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+    return String(value).trim().toLowerCase();
+  }
+
+  private matchesCustomFieldFilter(actualValue: unknown, expectedValue: unknown): boolean {
+    if (Array.isArray(expectedValue)) {
+      if (!Array.isArray(actualValue)) return false;
+      const actualSet = new Set(actualValue.map(value => this.normalizeFilterValue(value)));
+      return expectedValue.every(value => actualSet.has(this.normalizeFilterValue(value)));
+    }
+
+    if (Array.isArray(actualValue)) {
+      return actualValue.some(value => this.normalizeFilterValue(value) === this.normalizeFilterValue(expectedValue));
+    }
+
+    return this.normalizeFilterValue(actualValue) === this.normalizeFilterValue(expectedValue);
+  }
+
+  private async findTicketIdsByCustomFields(
+    ticketIds: string[],
+    customFields: Record<string, unknown>,
+  ): Promise<Set<string>> {
+    if (ticketIds.length === 0) {
+      return new Set();
+    }
+
+    const requestedFilters = Object.entries(customFields)
+      .filter(([fieldId]) => fieldId.trim().length > 0)
+      .map(([fieldId, expectedValue]) => ({
+        fieldId: fieldId.trim(),
+        expectedValue,
+      }));
+
+    if (requestedFilters.length === 0) {
+      return new Set();
+    }
+
+    const formEntityValues = await prismaClient.formEntityValues.findMany({
+      where: {
+        entityType: 'TICKET',
+        entityId: { in: ticketIds },
+        fieldId: { in: requestedFilters.map(filter => filter.fieldId) },
+      },
+      select: {
+        entityId: true,
+        fieldId: true,
+        fieldValue: true,
+        actualFieldValue: true,
+      },
+    });
+
+    const valuesByFieldId = new Map<string, typeof formEntityValues>();
+    for (const value of formEntityValues) {
+      const values = valuesByFieldId.get(value.fieldId) ?? [];
+      values.push(value);
+      valuesByFieldId.set(value.fieldId, values);
+    }
+
+    let candidateIds: Set<string> | null = null;
+
+    for (const { fieldId, expectedValue } of requestedFilters) {
+      const values = valuesByFieldId.get(fieldId) ?? [];
+      const fieldMatches = new Set(
+        values
+          .filter(value =>
+            this.matchesCustomFieldFilter(value.actualFieldValue ?? value.fieldValue, expectedValue),
+          )
+          .map(value => value.entityId),
+      );
+
+      if (candidateIds === null) {
+        candidateIds = fieldMatches;
+      } else {
+        candidateIds = new Set<string>(
+          [...candidateIds].filter((entityId: string) => fieldMatches.has(entityId)),
+        );
+      }
+
+      if (candidateIds.size === 0) {
+        return new Set();
+      }
+    }
+
+    return candidateIds ?? new Set();
+  }
 
   /**
    * Create a ticket
@@ -1320,6 +1431,215 @@ export class TicketController {
   };
 
   /**
+   * Search tickets with dynamic filters using a JSON body.
+   * POST /api/apps/ticket/list/search
+   */
+  searchTickets = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const bodyResult = SearchTicketsBodySchema.safeParse(req.body);
+      if (!bodyResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: bodyResult.error.errors,
+        });
+        return;
+      }
+
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(400).json({
+          error: 'Authenticated user is required',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
+
+      const { channelId, boardIds, senderEmail, senderName, customFields, limit, cursor } = bodyResult.data;
+      const channelIds = [channelId.trim()];
+
+      const access = await validateChannelIdsAccess(channelIds, userId);
+      if (!access.ok) {
+        res.status(access.status).json({
+          error: access.error,
+          message: access.message,
+        });
+        return;
+      }
+
+      const decodedCursor = decodeCursor<MerchantTicketsListCursor>(cursor);
+
+      let conversationIdsBySender: string[] | undefined;
+      const emailWhere: Prisma.EmailWhereInput = {
+        channelId: { in: channelIds },
+        type: EmailType.DEFAULT,
+      };
+
+      if (senderEmail) {
+        const normalizedSenderEmail =
+          extractEmailAddress(senderEmail) ?? senderEmail.trim().toLowerCase();
+        emailWhere.from = { contains: normalizedSenderEmail, mode: 'insensitive' };
+      }
+
+      if (senderName) {
+        emailWhere.AND = [{ from: { contains: senderName.trim(), mode: 'insensitive' } }];
+      }
+
+      if (senderEmail || senderName) {
+        const matchingEmails = await prismaClient.email.findMany({
+          where: emailWhere,
+          select: { conversationId: true },
+          distinct: ['conversationId'],
+        });
+        conversationIdsBySender = matchingEmails.map(email => email.conversationId);
+
+        if (conversationIdsBySender.length === 0) {
+          res.status(200).json({ items: [], hasMore: false });
+          return;
+        }
+      }
+
+      const where: Prisma.TicketWhereInput = {
+        channelId: { in: channelIds },
+        isArchived: false,
+        ...(boardIds && boardIds.length > 0 ? { boardId: { in: boardIds } } : {}),
+        ...(conversationIdsBySender
+          ? {
+              conversationId: { in: conversationIdsBySender },
+            }
+          : ((senderEmail || senderName)
+              ? {
+                  conversationId: { in: [] },
+                }
+              : {})),
+      };
+
+      if (decodedCursor) {
+        where.AND = [{
+          OR: [
+            { createdAt: { lt: new Date(decodedCursor.createdAt) } },
+            { createdAt: new Date(decodedCursor.createdAt), id: { lt: decodedCursor.id } },
+          ],
+        }];
+      }
+
+      const ticketSelect = {
+        id: true,
+        xyneId: true,
+        title: true,
+        statusV2: true,
+        stageName: true,
+        priority: true,
+        createdAt: true,
+        lastEmailAt: true,
+        conversationId: true,
+        channelId: true,
+        boardId: true,
+      } as const;
+
+      const hasCustomFieldFilters = !!(customFields && Object.keys(customFields).length > 0);
+      let tickets: Array<Prisma.TicketGetPayload<{ select: typeof ticketSelect }>>;
+
+      if (!hasCustomFieldFilters) {
+        tickets = await prismaClient.ticket.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: limit + 1,
+          select: ticketSelect,
+        });
+      } else {
+        const batchSize = Math.max(limit * 3, 50);
+        const matchedTickets: Array<Prisma.TicketGetPayload<{ select: typeof ticketSelect }>> = [];
+        let batchCursor = decodedCursor;
+
+        while (matchedTickets.length < limit + 1) {
+          const batchWhere: Prisma.TicketWhereInput = { ...where };
+
+          if (batchCursor) {
+            batchWhere.AND = [{
+              OR: [
+                { createdAt: { lt: new Date(batchCursor.createdAt) } },
+                { createdAt: new Date(batchCursor.createdAt), id: { lt: batchCursor.id } },
+              ],
+            }];
+          }
+
+          const batch = await prismaClient.ticket.findMany({
+            where: batchWhere,
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: batchSize,
+            select: ticketSelect,
+          });
+
+          if (batch.length === 0) {
+            break;
+          }
+
+          const matchingIds = await this.findTicketIdsByCustomFields(
+            batch.map(ticket => ticket.id),
+            customFields!,
+          );
+
+          for (const ticket of batch) {
+            if (matchingIds.has(ticket.id)) {
+              matchedTickets.push(ticket);
+              if (matchedTickets.length >= limit + 1) {
+                break;
+              }
+            }
+          }
+
+          if (batch.length < batchSize) {
+            break;
+          }
+
+          const lastTicket = batch[batch.length - 1];
+          batchCursor = {
+            id: lastTicket.id,
+            createdAt: lastTicket.createdAt.getTime(),
+          };
+        }
+
+        tickets = matchedTickets;
+      }
+
+      const items: MerchantTicketListItem[] = tickets.map(ticket => {
+        return {
+          ticketId: ticket.id,
+          xyneId: ticket.xyneId,
+          title: ticket.title,
+          statusV2: ticket.statusV2,
+          stageName: ticket.stageName,
+          priority: ticket.priority,
+          createdAt: ticket.createdAt,
+          lastEmailAt: ticket.lastEmailAt,
+          conversationId: ticket.conversationId,
+          channelId: ticket.channelId,
+          boardId: ticket.boardId,
+        };
+      });
+
+      const pagination = paginateResults(
+        items,
+        limit,
+        (item): MerchantTicketsListCursor => ({
+          id: item.ticketId,
+          createdAt: item.createdAt.getTime(),
+        }),
+      );
+
+      res.status(200).json(pagination);
+    } catch (error) {
+      logger.error('[TicketController] searchTickets error:', error);
+      if (error instanceof Error && error.message === 'Invalid cursor format') {
+        res.status(400).json({ error: error.message, code: 'VALIDATION_ERROR' });
+        return;
+      }
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    }
+  };
+
+  /**
    * Get ticket information by xyneId
    * GET /:xyneId
    */
@@ -1402,6 +1722,109 @@ export class TicketController {
       });
     } catch (error) {
       logger.error('[TicketController] Error fetching ticket info:', error);
+      res.status(500).json({
+        error: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  };
+
+  /**
+   * Get the full email thread conversation for a ticket by ticket id or xyneId.
+   * This matches appDeskInbound storage, which persists into the Email table.
+   * GET /api/apps/ticket/:ticketId/conversation
+   */
+  getConversation = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { ticketId } = req.params;
+      const workspaceId = req.user?.workspaceId;
+      const userId = req.user?.id;
+
+      if (!ticketId) {
+        res.status(400).json({
+          error: 'ticketId is required',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
+
+      if (!workspaceId) {
+        res.status(400).json({
+          error: 'Authenticated workspace is required',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
+
+      if (!userId) {
+        res.status(400).json({
+          error: 'Authenticated user is required',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
+
+      const ticket = await repositories.tickets.getTicketByXyneIdOrId(ticketId, workspaceId);
+      if (!ticket) {
+        res.status(404).json({
+          error: `Ticket ${ticketId} not found`,
+          code: 'TICKET_NOT_FOUND',
+        });
+        return;
+      }
+
+      if (!ticket.conversationId) {
+        res.status(404).json({
+          error: `Ticket ${ticketId} has no linked conversation`,
+          code: 'CONVERSATION_NOT_FOUND',
+        });
+        return;
+      }
+
+      if (!(await repositories.channels.findById(ticket.channelId))) {
+        res.status(404).json({
+          error: 'Channel not found',
+          code: 'CHANNEL_NOT_FOUND',
+        });
+        return;
+      }
+
+      const isParticipant = await repositories.channelParticipants.isParticipant(ticket.channelId, userId);
+      if (!isParticipant) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Bot does not have channel access',
+        });
+        return;
+      }
+
+      const emails = await repositories.emails.findByConversationIdOrdered(ticket.conversationId);
+
+      res.status(200).json({
+        ticketId: ticket.id,
+        xyneId: ticket.xyneId,
+        conversationId: ticket.conversationId,
+        channelId: ticket.channelId,
+        items: emails.map(email => ({
+          id: email.id,
+          type: email.type,
+          subject: email.subject,
+          body: email.body,
+          to: email.to,
+          from: email.from,
+          cc: email.cc,
+          bcc: email.bcc,
+          replyTo: email.replyTo,
+          externalThreadId: email.externalThreadId,
+          externalMessageId: email.externalMessageId,
+          sentByUserId: email.sentByUserId,
+          createdAt: email.createdAt,
+          updatedAt: email.updatedAt,
+        })),
+        total: emails.length,
+      });
+    } catch (error) {
+      logger.error('[TicketController] Error fetching ticket conversation:', error);
       res.status(500).json({
         error: 'Internal server error',
         code: 'INTERNAL_ERROR',
