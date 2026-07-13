@@ -13,7 +13,7 @@ import type { UserGroup as ZeroUserGroup } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 import { useUserGroups } from '../../hooks/useUserGroup';
 import { usePlatform } from '../../hooks/usePlatform';
-import { useHasResourceAccess } from '../../hooks/usePermissions';
+import { useHasResourceAccess, usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
 
 const UserGroupsScreen = (): ReactElement => {
@@ -25,7 +25,13 @@ const UserGroupsScreen = (): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
   const userGroups = useUserGroups();
+  const permissions = usePermissions();
   const hasUserGroupsAdminAccess = useHasResourceAccess('USER-GROUPS');
+  const canCreateUserGroup = permissions.some(
+    permission =>
+      permission.resourceName === 'USER-GROUPS' &&
+      (permission.accessType === 'WRITE' || permission.accessType === 'ADMIN'),
+  );
 
   const loading = userGroups === undefined;
 
@@ -189,14 +195,16 @@ const UserGroupsScreen = (): ReactElement => {
                   Manage your organization user groups and teams
                 </p>
               </div>
-              <Button
-                onClick={() => setShowCreateModal(true)}
-                data-track-category='UserGroups'
-                data-track-name='CreateUserGroup'
-                data-testid='create-user-group-btn'
-              >
-                Create User Group
-              </Button>
+              {canCreateUserGroup && (
+                <Button
+                  onClick={() => setShowCreateModal(true)}
+                  data-track-category='UserGroups'
+                  data-track-name='CreateUserGroup'
+                  data-testid='create-user-group-btn'
+                >
+                  Create User Group
+                </Button>
+              )}
             </div>
 
             {/* Search and Filter Bar */}
@@ -250,17 +258,19 @@ const UserGroupsScreen = (): ReactElement => {
       </div>
 
       {/* Create Modal */}
-      <Dialog
-        open={showCreateModal}
-        onOpenChange={setShowCreateModal}
-        title='Create New User Group'
-        className='max-w-xl'
-      >
-        <UserGroupForm
-          onSubmit={handleCreateUserGroup}
-          onCancel={() => setShowCreateModal(false)}
-        />
-      </Dialog>
+      {canCreateUserGroup && (
+        <Dialog
+          open={showCreateModal}
+          onOpenChange={setShowCreateModal}
+          title='Create New User Group'
+          className='max-w-xl'
+        >
+          <UserGroupForm
+            onSubmit={handleCreateUserGroup}
+            onCancel={() => setShowCreateModal(false)}
+          />
+        </Dialog>
+      )}
 
       {/* Edit Modal */}
       <Dialog

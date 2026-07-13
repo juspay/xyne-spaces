@@ -110,6 +110,7 @@ type Permissions = ReturnType<typeof usePermissions>;
 export const filterNavItemsByPermission = (
   items: NavigationItem[],
   permissions: Permissions,
+  canManageOwnUserGroups = false,
 ): NavigationItem[] => {
   return items.filter(item => {
     const resourceName = PATH_TO_RESOURCE[item.path];
@@ -123,6 +124,9 @@ export const filterNavItemsByPermission = (
             p.resourceName === resourceName &&
             (p.accessType === 'ADMIN' || p.accessType === 'WRITE'),
         );
+        if (resourceName === 'USER-GROUPS') {
+          hasAccess ||= canManageOwnUserGroups;
+        }
       } else {
         hasAccess = permissions.some(
           p => p.resourceName === resourceName && p.accessType === 'ADMIN',
