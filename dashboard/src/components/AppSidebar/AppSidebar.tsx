@@ -494,7 +494,7 @@ const AppSidebar = (): ReactElement => {
           trigger={
             hasValidStatus ? (
               <div
-                className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90'
+                className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer'
                 style={{ backgroundColor: 'var(--sidebar-divider)' }}
                 data-testid='profile-icon'
               >
