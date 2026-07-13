@@ -18,6 +18,8 @@ import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
 import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
+import { CallWhiteboardView } from '../CallWhiteboard';
+import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
 
 interface MiniCallViewProps {
   participants: ParticipantInfo[];
@@ -109,6 +111,7 @@ export function MiniCallView({
 }: MiniCallViewProps): React.ReactElement {
   const { user } = useAuth();
   const isTelepresenceEnabled = useTelepresenceEnabled(user?.email);
+  const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
 
   const participantCount = participants.length;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -335,7 +338,20 @@ export function MiniCallView({
                   className='flex-1 bg-gray-950/50 p-3 overflow-auto'
                   onPointerDown={(e): void => e.stopPropagation()}
                 >
-                  {focusedScreenShare ? (
+                  {isWhiteboardOpen ? (
+                    <div className='h-full'>
+                      <CallWhiteboardView
+                        participants={participants}
+                        room={room}
+                        className='h-full'
+                        compact={true}
+                        showSidebar={true}
+                        displayOnly={true}
+                        aiController={aiController}
+                        requestedAiController={requestedAiController}
+                      />
+                    </div>
+                  ) : focusedScreenShare ? (
                     <div className='h-full'>
                       <ScreenShareView
                         focusedScreenShare={focusedScreenShare}

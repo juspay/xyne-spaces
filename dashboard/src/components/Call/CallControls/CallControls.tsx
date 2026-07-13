@@ -53,6 +53,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
+import Tooltip from '../../ui/Tooltip';
 import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 
 interface ActiveCallForControls {
@@ -202,6 +203,18 @@ export function CallControls({
   const micLocked = !isHost && hostControls.lockMic;
   const cameraLocked = !isHost && hostControls.lockCamera;
   const screenShareLocked = !isHost && hostControls.lockScreenShare;
+  const screenShareBlockedByWhiteboard = isWhiteboardOpen;
+  const screenShareTooltip = screenShareBlockedByWhiteboard
+    ? 'Close the shared whiteboard to start screen sharing.'
+    : screenShareLocked
+      ? 'The host has locked screen sharing'
+      : isScreenSharing
+        ? 'Stop sharing'
+        : 'Share screen';
+  const handleScreenShareClick = (): void => {
+    if (screenShareLocked || screenShareBlockedByWhiteboard) return;
+    onToggleScreenShare();
+  };
 
   // Keyboard shortcuts: ⌘D toggles mute, ⌘E toggles video
   useShortcutById('huddle.toggleMute', onToggleMic);
@@ -634,45 +647,58 @@ export function CallControls({
         </div>
 
         {/* Screen Share Toggle */}
-        <button
-          onClick={onToggleScreenShare}
-          disabled={screenShareLocked}
+        <Tooltip
+          content={screenShareTooltip}
+          side='top'
+          sideOffset={8}
+          collisionPadding={8}
           className={cn(
-            buttonClasses,
-            isScreenSharing
-              ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/50'
-              : midnightControlClass,
-            screenShareLocked && 'opacity-50 cursor-not-allowed hover:scale-100',
+            'whitespace-normal text-center leading-snug',
+            viewMode === 'mini' ? 'max-w-44' : 'max-w-64',
           )}
-          data-track-event='BUTTON_CLICK'
-          data-track-category='CALLS'
-          data-track-name='TOGGLE_SCREEN_SHARE'
-          data-track-metadata={JSON.stringify({ callId, enabled: isScreenSharing })}
-          style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-          title={
-            screenShareLocked
-              ? 'The host has locked screen sharing'
-              : isScreenSharing
-                ? 'Stop sharing'
-                : 'Share screen'
-          }
         >
-          {isScreenSharing ? (
-            <Monitor
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          ) : (
-            <Monitor
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          )}
-        </button>
+          <span className='inline-flex flex-shrink-0'>
+            <button
+              onClick={handleScreenShareClick}
+              disabled={screenShareLocked && !screenShareBlockedByWhiteboard}
+              aria-disabled={screenShareLocked || screenShareBlockedByWhiteboard}
+              className={cn(
+                buttonClasses,
+                isScreenSharing || screenShareBlockedByWhiteboard
+                  ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/50'
+                  : midnightControlClass,
+                screenShareLocked && 'opacity-50 cursor-not-allowed hover:scale-100',
+                screenShareBlockedByWhiteboard && 'cursor-not-allowed hover:scale-100',
+              )}
+              data-track-event='BUTTON_CLICK'
+              data-track-category='CALLS'
+              data-track-name='TOGGLE_SCREEN_SHARE'
+              data-track-metadata={JSON.stringify({ callId, enabled: isScreenSharing })}
+              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+              title={screenShareTooltip}
+            >
+              {isScreenSharing ? (
+                <Monitor
+                  className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                  style={
+                    hasCustomSizing
+                      ? { width: `${iconSize}px`, height: `${iconSize}px` }
+                      : undefined
+                  }
+                />
+              ) : (
+                <Monitor
+                  className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                  style={
+                    hasCustomSizing
+                      ? { width: `${iconSize}px`, height: `${iconSize}px` }
+                      : undefined
+                  }
+                />
+              )}
+            </button>
+          </span>
+        </Tooltip>
 
         {/* Recording — any participant can start; only the starter can stop (enforced server-side) */}
         {(onStartRecording || onStopRecording) && (
@@ -1045,58 +1071,62 @@ export function CallControls({
         )}
 
         {/* More options */}
-        <DropdownMenu modal={false}>
-          <DropdownMenuTrigger asChild>
-            <button
-              className={cn(
-                buttonClasses,
-                isWhiteboardOpen
-                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/50'
-                  : midnightControlClass,
-              )}
-              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              data-track-event='BUTTON_CLICK'
-              data-track-category='CALLS'
-              data-track-name='OPEN_CALL_TOOLS_MENU'
-              data-track-metadata={JSON.stringify({ callId })}
-              title='More options'
+        {viewMode !== 'mini' && (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(
+                  buttonClasses,
+                  isWhiteboardOpen
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/50'
+                    : midnightControlClass,
+                )}
+                style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+                data-track-event='BUTTON_CLICK'
+                data-track-category='CALLS'
+                data-track-name='OPEN_CALL_TOOLS_MENU'
+                data-track-metadata={JSON.stringify({ callId })}
+                title='More options'
+              >
+                <MoreVertical
+                  className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                  style={
+                    hasCustomSizing
+                      ? { width: `${iconSize}px`, height: `${iconSize}px` }
+                      : undefined
+                  }
+                />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side='top'
+              align='end'
+              sideOffset={12}
+              className='w-52 rounded-xl border-gray-700 bg-gray-800 p-1 text-gray-100 shadow-2xl'
             >
-              <MoreVertical
-                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                style={
-                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-                }
-              />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            side='top'
-            align='end'
-            sideOffset={12}
-            className='w-52 rounded-xl border-gray-700 bg-gray-800 p-1 text-gray-100 shadow-2xl'
-          >
-            {callToolMenuItems.map(item => {
-              const Icon = item.icon;
-              return (
-                <DropdownMenuItem
-                  key={item.id}
-                  onClick={item.onSelect}
-                  className={cn(
-                    'cursor-pointer rounded-lg px-3 py-2 text-sm focus:bg-gray-700 focus:text-white',
-                    item.isActive && 'bg-gray-700 text-white',
-                  )}
-                  data-track-event='BUTTON_CLICK'
-                  data-track-category='CALLS'
-                  data-track-name={item.trackName}
-                  data-track-metadata={JSON.stringify({ callId, enabled: item.isActive })}
-                >
-                  <Icon className='h-4 w-4 text-emerald-300' aria-hidden />
-                  <span>{item.label}</span>
-                </DropdownMenuItem>
-              );
-            })}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              {callToolMenuItems.map(item => {
+                const Icon = item.icon;
+                return (
+                  <DropdownMenuItem
+                    key={item.id}
+                    onClick={item.onSelect}
+                    className={cn(
+                      'cursor-pointer rounded-lg px-3 py-2 text-sm focus:bg-gray-700 focus:text-white',
+                      item.isActive && 'bg-gray-700 text-white',
+                    )}
+                    data-track-event='BUTTON_CLICK'
+                    data-track-category='CALLS'
+                    data-track-name={item.trackName}
+                    data-track-metadata={JSON.stringify({ callId, enabled: item.isActive })}
+                  >
+                    <Icon className='h-4 w-4 text-emerald-300' aria-hidden />
+                    <span>{item.label}</span>
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
 
         {/* Presentation Mode Button */}
         {!hidePresentationMode && onTogglePresentationMode && (
