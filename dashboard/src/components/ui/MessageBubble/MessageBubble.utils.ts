@@ -48,6 +48,12 @@ export interface MessageMetadata {
   mentionedUserId?: string;
   mentionedUserName?: string;
   status?: string;
+  // Claw agent citations baked in at reply-time so a re-opened thread can render
+  // clickable citation chips without re-calling claw. `clawCitations` is a
+  // slimmed toolInvocations list (toolCallId + Citation[]); `clawCitationIcons`
+  // is the de-duplicated iconKey→data:URI map (registered via registerClawIcons).
+  clawCitations?: Array<{ toolCallId: string; citations: unknown[] }>;
+  clawCitationIcons?: Record<string, string>;
   // Forwarded message fields
   originalMessageId?: string;
   optionalText?: string;

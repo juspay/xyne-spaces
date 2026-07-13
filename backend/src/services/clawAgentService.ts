@@ -880,6 +880,52 @@ export async function getClawConversationMessages(
   return (await response.json()) as ClawMessagesResponse;
 }
 
+/**
+ * Proxy claw-auth's live SSE (GET /agent-chat/:slug/chat/:convId/live) VERBATIM
+ * to the dashboard, so a Spaces AI tab that reloaded mid-run can re-attach and
+ * stream the in-flight answer (snapshot + delta/reasoning/invocation/label/done).
+ * Frames are already well-formed `event: <type>\ndata: <json>\n\n` — no re-mapping,
+ * just byte passthrough. On upstream 404 (feature flag off / not found) we emit a
+ * `live-disabled` frame so the client silently falls back to the static transcript.
+ */
+export async function streamClawConversationLive(
+  req: { headers?: { cookie?: string }; userId: string },
+  res: Response,
+  convId: string,
+  agentSlug = 'ask-ai',
+  opts: { signal?: AbortSignal } = {}
+): Promise<void> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(convId)}/live`;
+  const upstream = await fetch(url, {
+    headers: {
+      Accept: 'text/event-stream',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    ...(opts.signal ? { signal: opts.signal } : {}),
+  });
+  if (upstream.status === 404) {
+    if (!res.writableEnded) res.write(`event: live-disabled\ndata: {}\n\n`);
+    return;
+  }
+  if (!upstream.ok || !upstream.body) return;
+  const reader = (upstream.body as unknown as ReadableStream<Uint8Array>).getReader();
+  try {
+    for (;;) {
+      if (opts.signal?.aborted) break;
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (res.writableEnded) break;
+      if (value) {
+        res.write(Buffer.from(value));
+        if (typeof (res as unknown as { flush?: () => void }).flush === 'function') (res as unknown as { flush: () => void }).flush();
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* ignore */ }
+  }
+}
+
 export async function deleteClawConversation(
   req: { headers?: { cookie?: string }; userId: string },
   convId: string,

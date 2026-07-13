@@ -6,6 +6,23 @@ import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
 import { MermaidBlock } from '../components/Markdown/MermaidBlock';
 import { FilesystemBlock } from '../components/Markdown/FilesystemBlock';
+import { ClawCitationGroup } from '../components/Chat/XyneAISidebar/components/ClawCitationGroup';
+import { ThreadCitationChip } from '../components/ui/MessageBubble/ThreadCitationChip';
+import { parseCiteGroupHref } from '../components/ui/TipTapExtensions/CitationMark';
+import type { ToolInvocation } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+
+/**
+ * Optional claw-citation context. When passed, the `a` override intercepts the
+ * synthetic `cite:` / `cite-group:` hrefs produced by `linkifyAndGroupClawCitations`
+ * and substitutes clickable citation chips. Absent for every non-agent markdown
+ * surface, which keeps the default link behavior untouched.
+ */
+export interface ClawCitationContext {
+  /** Slimmed toolInvocations (toolCallId + Citation[]) baked into the message. */
+  toolInvocations: ToolInvocation[];
+  /** Stable `toolCallId → display number` map (from buildClawCitationToolNumbers). */
+  toolNumbers: ReadonlyMap<string, number>;
+}
 
 // ─── Code Block ──────────────────────────────────────────────────────────────
 
@@ -116,7 +133,10 @@ const CodeBlock = ({
  * - Mermaid diagram support
  * - External link handling
  */
-export const createMarkdownComponents = (messageId: string): Components => ({
+export const createMarkdownComponents = (
+  messageId: string,
+  citationCtx?: ClawCitationContext,
+): Components => ({
   // Override <code> — handles both inline and block (via className presence)
   code: (props: CodeProps): React.ReactElement => <CodeBlock {...props} messageId={messageId} />,
 
@@ -148,6 +168,41 @@ export const createMarkdownComponents = (messageId: string): Components => ({
   }: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
     children?: React.ReactNode;
   }): React.ReactElement => {
+    // Claw inline citations: `linkifyAndGroupClawCitations` rewrites
+    // `[clf-<toolCallId>#<N>]` tokens into synthetic `cite:` / `cite-group:`
+    // hrefs. Intercept them here and substitute a chip that resolves against the
+    // citation metadata baked into the message. Only runs on agent surfaces that
+    // pass `citationCtx`; every other markdown message falls through unchanged.
+    if (citationCtx) {
+      if (href && href.startsWith('cite-group:')) {
+        const groupRefs = parseCiteGroupHref(href);
+        if (groupRefs.length >= 2) {
+          return (
+            <ClawCitationGroup refs={groupRefs} toolInvocations={citationCtx.toolInvocations} />
+          );
+        }
+      }
+      if (href && href.startsWith('cite:clf-')) {
+        const body = href.slice('cite:clf-'.length);
+        const hashIdx = body.lastIndexOf('#');
+        if (hashIdx > 0) {
+          const toolCallId = body.slice(0, hashIdx);
+          const chunkIndex = Number(body.slice(hashIdx + 1));
+          const toolNumber = citationCtx.toolNumbers.get(toolCallId) ?? 0;
+          if (toolNumber > 0 && Number.isFinite(chunkIndex)) {
+            return (
+              <ThreadCitationChip
+                toolCallId={toolCallId}
+                chunkIndex={chunkIndex}
+                toolNumber={toolNumber}
+                toolInvocations={citationCtx.toolInvocations}
+              />
+            );
+          }
+        }
+      }
+    }
+
     const isExternal = ((): boolean => {
       if (!href) return false;
       try {

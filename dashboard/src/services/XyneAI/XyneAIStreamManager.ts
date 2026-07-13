@@ -10,6 +10,7 @@ import { parsePartialSummarizerJSON } from '../../utils/partialJsonParser';
 import {
   parseStreamingContent,
   transformToolOutput,
+  resolveActivePath,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAIUtils';
 import { generateToolInputStatus } from '../../components/Chat/XyneAISidebar/utils/toolInputStatus';
 import type {
@@ -20,6 +21,7 @@ import type {
   DraftSource,
   SummarizerOutput,
   DebugEventRecord,
+  ToolInvocation,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import type { ResearchContext } from '@xyne/shared';
@@ -213,6 +215,11 @@ class XyneAIStreamManager {
   // rAF-based batching: accumulate delta content per stream and flush once per frame
   private pendingDeltaMap: Map<string, string> = new Map();
   private rafIdMap: Map<string, number> = new Map();
+
+  // streamIds of live viewers whose SSE connection is CURRENTLY open. Lets the
+  // attach guard tell a live viewer apart from a dead viewer's leftover state
+  // (which must be replaceable, not adopted — else a return visit freezes).
+  private liveViewerStreams: Set<string> = new Set();
 
   private constructor() {
     // Initialize the Web Worker
@@ -1642,6 +1649,375 @@ class XyneAIStreamManager {
    * This ensures the UI renders the authoritative final state rather than
    * potentially misaligned incremental deltas from streaming.
    */
+  /**
+   * Attach a read-only LIVE viewer to an in-progress run after a reload. Opens
+   * the Spaces `/live` SSE proxy; if its snapshot shows a live run (partial
+   * answer text or in-progress tool calls), seeds a streaming bot message and
+   * feeds delta/reasoning/invocation/label into it — reusing the SAME reducers
+   * as the driving path — then reconciles the final transcript on `done`. If no
+   * run is live (empty snapshot) or this tab is already driving/viewing one, it
+   * closes immediately and the static fetched transcript stands. Returns a
+   * detach fn (call on unmount).
+   */
+  public attachLiveViewer(
+    threadId: string,
+    convId: string,
+    agentSlug = 'ask-ai',
+    initialMessages: Message[] = [],
+  ): () => void {
+    if (!convId.startsWith('chat-')) {
+      return () => {};
+    }
+    const existing = this.activeStreams.get(threadId);
+    if (existing && existing.status === 'streaming') {
+      // A genuinely live stream (driving, or a viewer whose SSE is open) owns
+      // the thread — don't double-attach. But a DEAD viewer's leftover
+      // 'streaming' state (detached on navigate-away before `done`) must NOT
+      // block a fresh attach, or returning to the conversation freezes.
+      const isDeadViewer =
+        existing.streamId.startsWith('live-') && !this.liveViewerStreams.has(existing.streamId);
+      if (!isDeadViewer) {
+        return () => {};
+      }
+    }
+
+    const streamId = `live-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const botMessageId = `bot-live-${streamId}`;
+    let started = false;
+    let closed = false;
+    const abort = new AbortController();
+    // Register so a NEW driving send in this thread (sendMessage → abortStream)
+    // cleanly tears this viewer down instead of leaving its SSE open.
+    this.abortControllers.set(streamId, abort);
+    this.liveViewerStreams.add(streamId);
+
+    const close = (): void => {
+      if (closed) return;
+      closed = true;
+      abort.abort();
+      this.abortControllers.delete(streamId);
+      this.liveViewerStreams.delete(streamId);
+      this.streamDataMap.delete(streamId);
+      this.pendingDeltaMap.delete(streamId);
+      const rid = this.rafIdMap.get(streamId);
+      if (rid !== undefined) {
+        cancelAnimationFrame(rid);
+        this.rafIdMap.delete(streamId);
+      }
+      // Detached BEFORE `done` (navigate-away/unmount): drop our still-
+      // 'streaming' state. Left in place it becomes a zombie — the adopt paths
+      // (which PREFER streaming matches) adopt it and early-return, and the
+      // attach guard blocks a fresh viewer → frozen bubble on return. A
+      // finalized state (done/fallback set status='completed' first) is kept
+      // for the 5-min switch-back adoption window.
+      const st = this.activeStreams.get(threadId);
+      if (st && st.streamId === streamId && st.status === 'streaming') {
+        this.activeStreams.delete(threadId);
+      }
+    };
+
+    const ensureViewerStream = (
+      partial?: { content?: string; reasoning?: string },
+      inProgress?: ToolInvocation[],
+    ): void => {
+      if (started) return;
+      started = true;
+      // Base the viewer state on the FETCHED transcript (user messages + prior
+      // turns) — useXyneAIStream does setMessages(state.messages), so without it
+      // the transcript would be replaced by just the streaming bot. It also keeps
+      // mergeRefreshedMessages' positional bot-index reconcile aligned on `done`.
+      const prevMessages = initialMessages.length
+        ? initialMessages
+        : (this.activeStreams.get(threadId)?.messages ?? []);
+      // Parent the streaming bot under the TIP of the transcript's active path.
+      // Branch-aware rendering (resolveActivePath) walks parentIds from the root
+      // picking the newest child at each fork — an orphan bot (no parentId) in a
+      // conversation whose messages carry parentIds becomes the sole selected
+      // ROOT child and hides the entire prior transcript until `done`. (A fresh
+      // conversation has no parentIds anywhere → linear mode → unaffected.)
+      const activePath = prevMessages.length ? resolveActivePath(prevMessages, {}) : [];
+      const parentTip = activePath.length ? activePath[activePath.length - 1] : undefined;
+      const botMsg: Message = {
+        id: botMessageId,
+        type: 'bot',
+        content: '',
+        timestamp: new Date(),
+        isStreaming: true,
+        streamingContent: partial?.content ?? '',
+        sessionId: convId,
+        ...(parentTip ? { parentId: parentTip.id } : {}),
+        ...(partial?.reasoning ? { reasoning: partial.reasoning } : {}),
+        ...(inProgress && inProgress.length ? { toolInvocations: inProgress } : {}),
+      };
+      const streamState: StreamState = {
+        streamId,
+        threadId,
+        streamSlotKey: deriveStreamSlotKey(threadId),
+        sessionId: convId,
+        status: 'streaming',
+        messages: [...prevMessages, botMsg],
+        debugEvents: [],
+        debugArtifactsReadyVersion: 0,
+        startedAt: Date.now(),
+        showInSidebar: true,
+        version: 'v2',
+        agentSlug,
+      };
+      this.activeStreams.set(threadId, streamState);
+      this.streamDataMap.set(streamId, {
+        rawContent: partial?.content ?? '',
+        toolOutputs: [],
+        participants: [],
+      });
+      this.notifySubscribers({ ...streamState });
+    };
+
+    const onEvent = (type: string, data: Record<string, unknown>): void => {
+      if (closed) return;
+      switch (type) {
+        case 'snapshot': {
+          const partial = data['partial'] as { content?: string; reasoning?: string } | undefined;
+          const inProgress = (data['inProgress'] as ToolInvocation[] | undefined) ?? [];
+          if (!started) {
+            if (!partial && inProgress.length === 0) {
+              close(); // run already finished — the fetched transcript stands
+              return;
+            }
+            ensureViewerStream(partial, inProgress);
+            break;
+          }
+          // RECONNECT re-snapshot. If the run finished while we were
+          // disconnected, finalize via the done path; else heal the missed
+          // window from the persisted partial (authoritative accumulated text —
+          // only ever grow, never truncate what already streamed in).
+          if (!partial && inProgress.length === 0) {
+            onEvent('done', {});
+            return;
+          }
+          const sd = this.streamDataMap.get(streamId);
+          const st = this.activeStreams.get(threadId);
+          if (
+            partial &&
+            sd &&
+            st &&
+            st.streamId === streamId &&
+            (partial.content?.length ?? 0) > sd.rawContent.length
+          ) {
+            sd.rawContent = partial.content ?? '';
+            st.messages = st.messages.map(m =>
+              m.id === botMessageId
+                ? {
+                    ...m,
+                    streamingContent: sd.rawContent,
+                    ...(partial.reasoning &&
+                    (!m.reasoning || partial.reasoning.length > m.reasoning.length)
+                      ? { reasoning: partial.reasoning }
+                      : {}),
+                  }
+                : m,
+            );
+            this.notifySubscribers({ ...st });
+          }
+          for (const inv of inProgress) {
+            this.processStreamEvent(
+              { type: 'tool_invocation', toolInvocation: inv },
+              botMessageId,
+              '',
+              [],
+              streamId,
+              threadId,
+            );
+          }
+          break;
+        }
+        case 'delta': {
+          if (!started) ensureViewerStream();
+          const textDelta = data['textDelta'] as string | undefined;
+          const reasoningDelta = data['reasoningDelta'] as string | undefined;
+          if (textDelta) {
+            this.pendingDeltaMap.set(
+              streamId,
+              (this.pendingDeltaMap.get(streamId) ?? '') + textDelta,
+            );
+            this.scheduleDeltaFlush(streamId);
+          }
+          if (reasoningDelta)
+            this.processStreamEvent(
+              { type: 'reasoning_delta', reasoningDelta },
+              botMessageId,
+              '',
+              [],
+              streamId,
+              threadId,
+            );
+          break;
+        }
+        case 'reasoning': {
+          if (!started) ensureViewerStream();
+          const delta = (data['delta'] ?? data['reasoningDelta']) as string | undefined;
+          if (delta)
+            this.processStreamEvent(
+              { type: 'reasoning_delta', reasoningDelta: delta },
+              botMessageId,
+              '',
+              [],
+              streamId,
+              threadId,
+            );
+          break;
+        }
+        case 'invocation': {
+          if (!started) ensureViewerStream();
+          const toolInvocation = data['toolInvocation'];
+          if (toolInvocation)
+            this.processStreamEvent(
+              { type: 'tool_invocation', toolInvocation },
+              botMessageId,
+              '',
+              [],
+              streamId,
+              threadId,
+            );
+          break;
+        }
+        case 'label': {
+          if (!started) ensureViewerStream();
+          const toolLabel = data['toolLabel'] as string | undefined;
+          const st = this.activeStreams.get(threadId);
+          // streamId guard: if a NEW driving stream replaced this thread's state,
+          // this stale viewer must not touch it.
+          if (toolLabel && st && st.streamId === streamId) {
+            st.messages = st.messages.map(m =>
+              m.id === botMessageId ? { ...m, statusMessage: toolLabel } : m,
+            );
+            this.notifySubscribers({ ...st });
+          }
+          break;
+        }
+        case 'done':
+        case 'live-disabled': {
+          if (started) {
+            const st = this.activeStreams.get(threadId);
+            // streamId guard: skip if a newer driving stream owns this thread.
+            if (st && st.streamId === streamId) {
+              st.status = 'completed';
+              // Promote streamingContent → content and clear isStreaming (mirror
+              // completeStream), so it renders as a final message immediately —
+              // not a spinner — before the reconcile lands.
+              st.messages = st.messages.map(m => {
+                if (m.id !== botMessageId) return m;
+                const finalContent =
+                  m.content && m.content.length > 0 ? m.content : (m.streamingContent ?? '');
+                return { ...m, isStreaming: false, content: finalContent };
+              });
+              this.notifySubscribers({ ...st });
+            }
+            // Reconcile the now-finalized transcript (parity with the driver
+            // path; internally streamId-guarded).
+            void this.refreshMessagesFromBackend(streamId, threadId);
+          }
+          close();
+          break;
+        }
+        default:
+          break;
+      }
+    };
+
+    // fetch-based SSE reader (credentials via cookie; the Spaces backend injects
+    // x-user-id upstream) — avoids an EventSource dependency and works everywhere.
+    // Reconnects on silent EOF/transport death (the reconnect snapshot heals the
+    // missed window), and NEVER leaves an infinite spinner: if the stream dies
+    // for good without a `done`, we finalize with what we have + reconcile.
+    void (async () => {
+      let reconnects = 0;
+      const MAX_RECONNECTS = 3;
+      while (!closed && !abort.signal.aborted) {
+        try {
+          // SSE stream: must use fetch for a readable response body
+          // (`res.body.getReader()`) — axios can't stream in the browser.
+          // eslint-disable-next-line local-rules/no-fetch-use-axios
+          const res = await fetch(
+            `${BASE_URL}/xyne-ai/v2/conversations/${encodeURIComponent(convId)}/live?agentSlug=${encodeURIComponent(agentSlug)}`,
+            {
+              credentials: 'include',
+              headers: { Accept: 'text/event-stream' },
+              signal: abort.signal,
+            },
+          );
+          if (res.ok && res.body) {
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let currentEvent = '';
+            let dataLines: string[] = [];
+            const flush = (): void => {
+              if (currentEvent && dataLines.length > 0) {
+                let parsed: Record<string, unknown> = {};
+                try {
+                  parsed = JSON.parse(dataLines.join('\n')) as Record<string, unknown>;
+                } catch {
+                  parsed = {};
+                }
+                reconnects = 0; // events are flowing — reset the retry budget
+                onEvent(currentEvent, parsed);
+              }
+              currentEvent = '';
+              dataLines = [];
+            };
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done || closed) break;
+              buffer += decoder.decode(value, { stream: true });
+              let nl: number;
+              while ((nl = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, nl).replace(/\r$/, '');
+                buffer = buffer.slice(nl + 1);
+                if (line === '') {
+                  flush();
+                  continue;
+                }
+                if (line.startsWith(':')) continue; // heartbeat
+                if (line.startsWith('event:')) currentEvent = line.slice(6).trim();
+                else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
+              }
+            }
+          }
+        } catch {
+          /* aborted or network error — fall through to the retry decision */
+        }
+        if (closed || abort.signal.aborted) break;
+        reconnects += 1;
+        if (reconnects > MAX_RECONNECTS) break;
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      // Ended WITHOUT a `done` (transport died / retries exhausted). Don't leave
+      // the bot spinning forever: finalize with the accumulated content and
+      // reconcile against the backend transcript. streamId-guarded so a newer
+      // driving stream is never touched.
+      if (!closed) {
+        if (started) {
+          const st = this.activeStreams.get(threadId);
+          if (st && st.streamId === streamId) {
+            st.status = 'completed';
+            st.messages = st.messages.map(m => {
+              if (m.id !== botMessageId) return m;
+              const finalContent =
+                m.content && m.content.length > 0 ? m.content : (m.streamingContent ?? '');
+              return { ...m, isStreaming: false, content: finalContent };
+            });
+            this.notifySubscribers({ ...st });
+          }
+          void this.refreshMessagesFromBackend(streamId, threadId);
+        }
+        close();
+      }
+    })();
+
+    return close;
+  }
+
   private async refreshMessagesFromBackend(streamId: string, threadId: string): Promise<void> {
     const currentState = this.activeStreams.get(threadId);
     if (!currentState) return;
