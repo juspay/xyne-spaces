@@ -187,6 +187,7 @@ export const ThreadMessages = ({
     : 'thread';
 
   const isFocusedThread = searchParams.get('focusThread') === '1';
+  const skipInputAutoFocus = searchParams.get('nofocus') === '1';
 
   const participationStatus = useGetChannelUserStatus(derivedChannelId);
   const isMember = !!participationStatus;
@@ -350,6 +351,19 @@ export const ThreadMessages = ({
 
   useChannelSubscription(derivedChannelId, derivedConversationId ? [derivedConversationId] : []);
   useScope('thread', Boolean(derivedConversationId && derivedChannelId));
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- skipInputAutoFocus intentionally not in deps; the param can be stripped from the URL without re-firing
+    if (isMobile || skipInputAutoFocus || !derivedConversationId) return;
+
+    const rafId = requestAnimationFrame(() => {
+      const activeEl = document.activeElement;
+      if (activeEl && activeEl.closest('input, textarea, [contenteditable="true"]')) return;
+      inputRef.current?.focus();
+    });
+
+    return () => cancelAnimationFrame(rafId);
+  }, [derivedConversationId, isMobile]);
 
   const trackMessageLoadedPerformance = (startTime: number, messageType: string) => {
     const scopeType =
@@ -1838,6 +1852,8 @@ export const ThreadMessages = ({
                 {isUserMember || channel?.isArchived ? (
                   <div className='px-4 pb-4 bg-background'>
                     <ChatInput
+                      // eslint-disable-next-line jsx-a11y/no-autofocus
+                      autoFocus={skipInputAutoFocus ? null : 'end'}
                       ref={inputRef}
                       channelId={derivedChannelId}
                       conversation={conversation ?? undefined}

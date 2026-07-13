@@ -86,6 +86,9 @@ const Info = ({
   // If defaultTab is 'members' but it's a DM, use 'about' instead
   const initialTab = defaultTab === 'members' && isDM ? 'about' : defaultTab;
   const [activeTab, setActiveTab] = useState<ChannelTab>(initialTab);
+  useEffect(() => {
+    setActiveTab(defaultTab === 'members' && isDM ? 'about' : defaultTab);
+  }, [defaultTab, isDM]);
   const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);
   const [showPromoteDialog, setShowPromoteDialog] = useState(false);
 
@@ -723,6 +726,20 @@ const ChannelMembers = ({
   const { isMobile } = usePlatform();
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [userToRemove, setUserToRemove] = useState<{ id: string; name: string } | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // The autoFocus attribute alone can lose to the dialog's focus management;
+  // focus after paint so it lands last. Fires once per Members-tab activation
+  // (tab contents remount on every switch).
+  useEffect(() => {
+    if (isMobile) return;
+
+    const rafId = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+
+    return () => cancelAnimationFrame(rafId);
+  }, [isMobile]);
 
   // Simplified pagination state
   const [accumulatedParticipants, setAccumulatedParticipants] = useState<
@@ -913,6 +930,7 @@ const ChannelMembers = ({
         <div className='relative'>
           <Search className='text-muted-foreground absolute left-3 top-1/2 size-4 -translate-y-1/2 pointer-events-none' />
           <Input
+            ref={searchInputRef}
             type='text'
             placeholder='Find members'
             autoFocus={!isMobile}

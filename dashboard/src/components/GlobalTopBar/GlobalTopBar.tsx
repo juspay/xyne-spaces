@@ -45,6 +45,12 @@ const NavigationAndSearch = (): ReactElement => {
   // Cmd+F (screen mode) opens this bar pre-scoped with an in:<channel> chip; the
   // event carries the mention so the input renders cursor-ready with the chip.
   const [pendingMention, setPendingMention] = useState<MentionData | null>(null);
+  const openedAtHrefRef = useRef('');
+  useEffect(() => {
+    if (searchOpen) {
+      openedAtHrefRef.current = window.location.pathname + window.location.search;
+    }
+  }, [searchOpen]);
 
   useEffect(() => {
     const historyState = window.history.state as { idx?: number } | null;
@@ -192,6 +198,10 @@ const NavigationAndSearch = (): ReactElement => {
               align='start'
               sideOffset={-28}
               onOpenAutoFocus={e => e.preventDefault()}
+              onCloseAutoFocus={e => {
+                const href = window.location.pathname + window.location.search;
+                if (href !== openedAtHrefRef.current) e.preventDefault();
+              }}
               onInteractOutside={() => {
                 setSearchOpen(false);
                 setPendingMention(null);
