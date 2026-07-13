@@ -19,6 +19,25 @@ const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
+// Fields matched against the raw user query via userInput(@query), kept as one list so the
+// grammar annotation (see userInputClause) is defined once instead of per OR-clause.
+const LEXICAL_FUZZY_FIELDS = [
+  'text_fuzzy', 'username', 'mentionChannelName', 'title', 'description',
+  'title_fuzzy', 'description_fuzzy', 'initialMessage_fuzzy', 'eta', 'channelName',
+  'boardName', 'xyneId', 'tags', 'createdByName', 'assignedToName', 'closedByName',
+  'projectName', 'ticketMentions', 'threadMentions', 'threadSenders',
+  'parentTicketXyneId', 'childTicketXyneIds', 'stage', 'status', 'subject_fuzzy', 'chunks_fuzzy',
+];
+
+// grammar:"tokenize" tokenizes the user query with syntax parsing off (weakAnd/internal/none),
+// so operator characters match as plain text. Pass a different grammar (e.g. 'grammar:"all"') to opt out.
+const userInputClause = (defaultIndex?: string, grammar = 'grammar:"tokenize"'): string => {
+  const annotations = [defaultIndex ? `defaultIndex: "${defaultIndex}"` : null, grammar]
+    .filter(Boolean)
+    .join(', ');
+  return `({${annotations}} userInput(@query))`;
+};
+
 export interface SlackFilters {
   channelId?: string[];
   projectId?: string[];
@@ -183,73 +202,25 @@ export class YqlBuilder {
 
     if (query && query !== '*') {
       if (useFuzzy) {
+        // Same user-query fields for both fuzzy branches; grammar:"tokenize" applied per clause.
+        const lexicalFieldClauses = LEXICAL_FUZZY_FIELDS.map((field) => userInputClause(field)).join('\n      or ');
         if (useSemantic) {
           // Hybrid: fuzzy lexical + semantic
           whereConditions.push(`(
-      ({defaultIndex: "text_fuzzy"} userInput(@query))
-      or ({defaultIndex: "username"} userInput(@query))
-      or ({defaultIndex: "mentionChannelName"} userInput(@query))
-      or ({defaultIndex: "title"} userInput(@query))
-      or ({defaultIndex: "description"} userInput(@query))
-      or ({defaultIndex: "title_fuzzy"} userInput(@query))
-      or ({defaultIndex: "description_fuzzy"} userInput(@query))
-      or ({defaultIndex: "initialMessage_fuzzy"} userInput(@query))
-      or ({defaultIndex: "eta"} userInput(@query))
-      or ({defaultIndex: "channelName"} userInput(@query))
-      or ({defaultIndex: "boardName"} userInput(@query))
-      or ({defaultIndex: "xyneId"} userInput(@query))
-      or ({defaultIndex: "tags"} userInput(@query))
-      or ({defaultIndex: "createdByName"} userInput(@query))
-      or ({defaultIndex: "assignedToName"} userInput(@query))
-      or ({defaultIndex: "closedByName"} userInput(@query))
-      or ({defaultIndex: "projectName"} userInput(@query))
-      or ({defaultIndex: "ticketMentions"} userInput(@query))
-      or ({defaultIndex: "threadMentions"} userInput(@query))
-      or ({defaultIndex: "threadSenders"} userInput(@query))
-      or ({defaultIndex: "parentTicketXyneId"} userInput(@query))
-      or ({defaultIndex: "childTicketXyneIds"} userInput(@query))
-      or ({defaultIndex: "stage"} userInput(@query))
-      or ({defaultIndex: "status"} userInput(@query))
-      or ({defaultIndex: "subject_fuzzy"} userInput(@query))
-      or ({defaultIndex: "chunks_fuzzy"} userInput(@query))
+      ${lexicalFieldClauses}
       or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
       or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
     )`);
         } else {
           // Lexical only: short query, skip semantic
           whereConditions.push(`(
-      ({defaultIndex: "text_fuzzy"} userInput(@query))
-      or ({defaultIndex: "username"} userInput(@query))
-      or ({defaultIndex: "mentionChannelName"} userInput(@query))
-      or ({defaultIndex: "title"} userInput(@query))
-      or ({defaultIndex: "description"} userInput(@query))
-      or ({defaultIndex: "title_fuzzy"} userInput(@query))
-      or ({defaultIndex: "description_fuzzy"} userInput(@query))
-      or ({defaultIndex: "initialMessage_fuzzy"} userInput(@query))
-      or ({defaultIndex: "eta"} userInput(@query))
-      or ({defaultIndex: "channelName"} userInput(@query))
-      or ({defaultIndex: "boardName"} userInput(@query))
-      or ({defaultIndex: "xyneId"} userInput(@query))
-      or ({defaultIndex: "tags"} userInput(@query))
-      or ({defaultIndex: "createdByName"} userInput(@query))
-      or ({defaultIndex: "assignedToName"} userInput(@query))
-      or ({defaultIndex: "closedByName"} userInput(@query))
-      or ({defaultIndex: "projectName"} userInput(@query))
-      or ({defaultIndex: "ticketMentions"} userInput(@query))
-      or ({defaultIndex: "threadMentions"} userInput(@query))
-      or ({defaultIndex: "threadSenders"} userInput(@query))
-      or ({defaultIndex: "parentTicketXyneId"} userInput(@query))
-      or ({defaultIndex: "childTicketXyneIds"} userInput(@query))
-      or ({defaultIndex: "stage"} userInput(@query))
-      or ({defaultIndex: "status"} userInput(@query))
-      or ({defaultIndex: "subject_fuzzy"} userInput(@query))
-      or ({defaultIndex: "chunks_fuzzy"} userInput(@query))
+      ${lexicalFieldClauses}
     )`);
         }
       } else if (isTranscriptOnly) {
         // sam_transcript schema uses its own embedding fields; text_embeddings/chunk_embeddings don't exist on it
         whereConditions.push(`(
-        (userInput(@query))
+        ${userInputClause()}
       or ({targetHits:${safeLimit}} nearestNeighbor(meetingSummary_embeddings, e))
       or ({targetHits:${safeLimit}} nearestNeighbor(chapters_embeddings, e))
       or ({targetHits:${safeLimit}} nearestNeighbor(actionItems_embeddings, e))
@@ -260,12 +231,12 @@ export class YqlBuilder {
         // Lexical only: short query
         if (useSemantic) {
           whereConditions.push(`(
-          (userInput(@query))
+          ${userInputClause()}
         or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
         or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
         )`);
         } else {
-          whereConditions.push(`(userInput(@query))`);
+          whereConditions.push(userInputClause());
         }
       }
     }
@@ -1070,7 +1041,7 @@ export class YqlBuilder {
     params: Record<string, string>;
   } {
     const params = new VespaQueryParams();
-    const conditions: string[] = ['(userInput(@query))'];
+    const conditions: string[] = [userInputClause()];
 
     if (opts.view === 'org') {
       if (opts.orgId) {
