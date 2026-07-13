@@ -8,11 +8,14 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import {
   $getRoot,
   $getSelection,
+  $isRangeSelection,
   EditorState,
   $isElementNode,
   LexicalNode,
   $createTextNode,
   $createParagraphNode,
+  PASTE_COMMAND,
+  COMMAND_PRIORITY_LOW,
 } from 'lexical';
 import {
   FilterChipNode,
@@ -52,6 +55,8 @@ interface LexicalSearchInputProps {
   mentionSearchType?: MentionType | null;
   selectedMentionIndex?: number;
   setSelectedMentionIndex?: (index: number | ((prev: number) => number)) => void;
+  onNavigate?: () => void;
+  hasNavigated?: boolean;
   onInsertMentionReady?: (
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
@@ -276,7 +281,11 @@ function InsertTextPlugin({
   return null;
 }
 
-function CursorPositionPlugin({ onPositionChange }: { onPositionChange: (left: number) => void }) {
+function CursorPositionPlugin({
+  onPositionChange,
+}: {
+  onPositionChange: (pos: { left: number; top: number }) => void;
+}) {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
@@ -302,8 +311,16 @@ function CursorPositionPlugin({ onPositionChange }: { onPositionChange: (left: n
         if (lastTextNode && (lastTextNode.textContent ?? '').length > 0) {
           const range = document.createRange();
           range.selectNodeContents(lastTextNode);
-          const rect = range.getBoundingClientRect();
-          onPositionChange(rect.right - containerRect.left);
+          // getClientRects() yields one rect per visual line; the LAST is the end of the last
+          // wrapped line. The node's bounding box would span every line and drop the suffix in
+          // the middle of a multi-line (wrapped) query. Center on that line's own vertical mid.
+          const rects = range.getClientRects();
+          const lastRect = rects.length > 0 ? rects[rects.length - 1] : undefined;
+          const rect = lastRect ?? range.getBoundingClientRect();
+          onPositionChange({
+            left: rect.right - containerRect.left,
+            top: rect.top + rect.height / 2 - containerRect.top,
+          });
           return;
         }
 
@@ -313,7 +330,10 @@ function CursorPositionPlugin({ onPositionChange }: { onPositionChange: (left: n
         const caret = selection.getRangeAt(0).cloneRange();
         caret.collapse(false);
         const caretRect = caret.getBoundingClientRect();
-        onPositionChange(caretRect.left - containerRect.left);
+        onPositionChange({
+          left: caretRect.left - containerRect.left,
+          top: caretRect.top + caretRect.height / 2 - containerRect.top,
+        });
       });
     });
   }, [editor, onPositionChange]);
@@ -390,6 +410,33 @@ function OnChangePluginWrapper({
   return <OnChangePlugin onChange={handleChange} />;
 }
 
+// Search is single-line. Lexical's default paste keeps the copied HTML's block structure
+// (and any trailing newline in text/plain), so pasting a name copied from a rendered element
+// injects a line break. Force plain text with newlines collapsed to spaces instead.
+function SingleLinePastePlugin() {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    return editor.registerCommand(
+      PASTE_COMMAND,
+      (event: ClipboardEvent) => {
+        const text = event.clipboardData?.getData('text/plain');
+        if (!text) return false;
+        event.preventDefault();
+        const singleLine = text.replace(/[\r\n]+/g, ' ');
+        editor.update(() => {
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) {
+            selection.insertText(singleLine);
+          }
+        });
+        return true;
+      },
+      COMMAND_PRIORITY_LOW,
+    );
+  }, [editor]);
+  return null;
+}
+
 export function LexicalSearchInput({
   placeholder,
   value,
@@ -406,6 +453,8 @@ export function LexicalSearchInput({
   mentionSearchType,
   selectedMentionIndex,
   setSelectedMentionIndex,
+  onNavigate,
+  hasNavigated,
   onInsertMentionReady,
   onMentionInserted,
   onPasteDetected,
@@ -418,9 +467,9 @@ export function LexicalSearchInput({
   currentUserID,
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
-  const [suffixLeft, setSuffixLeft] = useState(0);
-  const handlePositionChange = useCallback((left: number) => {
-    setSuffixLeft(left);
+  const [suffixPos, setSuffixPos] = useState({ left: 0, top: 0 });
+  const handlePositionChange = useCallback((pos: { left: number; top: number }) => {
+    setSuffixPos(pos);
   }, []);
 
   const initialConfig = {
@@ -455,8 +504,8 @@ export function LexicalSearchInput({
                 />
                 {autocompleteSuffix && (
                   <span
-                    className='text-muted-foreground pointer-events-none text-sm absolute top-1/2 -translate-y-1/2 whitespace-nowrap'
-                    style={{ left: `${suffixLeft}px` }}
+                    className='text-muted-foreground pointer-events-none text-sm absolute -translate-y-1/2 whitespace-nowrap'
+                    style={{ left: `${suffixPos.left}px`, top: `${suffixPos.top}px` }}
                   >
                     {autocompleteSuffix}
                   </span>
@@ -494,6 +543,7 @@ export function LexicalSearchInput({
           )}
           {onInsertTextReady && <InsertTextPlugin onInsertTextReady={onInsertTextReady} />}
           <CursorPositionPlugin onPositionChange={handlePositionChange} />
+          <SingleLinePastePlugin />
           <FilterChipPlugin />
           <MentionPlugin
             {...(onUserSearch ? { onUserSearch } : {})}
@@ -505,6 +555,8 @@ export function LexicalSearchInput({
             {...(mentionSearchType !== undefined ? { mentionSearchType } : {})}
             {...(selectedMentionIndex !== undefined ? { selectedMentionIndex } : {})}
             {...(setSelectedMentionIndex ? { setSelectedMentionIndex } : {})}
+            {...(onNavigate ? { onNavigate } : {})}
+            {...(hasNavigated !== undefined ? { hasNavigated } : {})}
             {...(onInsertMentionReady ? { onInsertMentionReady } : {})}
             {...(onMentionInserted ? { onMentionInserted } : {})}
             enableToTrigger={enableToTrigger}

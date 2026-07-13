@@ -68,6 +68,12 @@ interface MentionPluginProps {
   mentionSearchType?: MentionType | null;
   selectedMentionIndex?: number;
   setSelectedMentionIndex?: (index: number | ((prev: number) => number)) => void;
+  // Called when the user moves the highlight via ArrowUp/Down in the typeahead, so the parent
+  // can switch the candidate into the active (blue) tier and show its Select/Open ghost.
+  onNavigate?: () => void;
+  // Whether the user has already engaged a candidate this session. When false, the first
+  // ArrowDown activates the resting candidate (index 0) IN PLACE instead of skipping to index 1.
+  hasNavigated?: boolean;
   onInsertMentionReady?: (
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
@@ -90,6 +96,8 @@ export function MentionPlugin({
   mentionSearchType,
   selectedMentionIndex = 0,
   setSelectedMentionIndex,
+  onNavigate,
+  hasNavigated = false,
   onInsertMentionReady,
   onMentionInserted,
   enableToTrigger = false,
@@ -326,7 +334,14 @@ export function MentionPlugin({
         if (currentItems.length === 0) {
           return true;
         }
+        // First ArrowDown activates the resting candidate (index 0) in place (gray -> blue +
+        // " - Select") instead of skipping to index 1.
+        if (!hasNavigated) {
+          onNavigate?.();
+          return true;
+        }
         setSelectedMentionIndex(prev => (prev + 1) % currentItems.length);
+        onNavigate?.();
         return true;
       },
       COMMAND_PRIORITY_HIGH,
@@ -339,7 +354,14 @@ export function MentionPlugin({
         if (currentItems.length === 0) {
           return true;
         }
+        // First ArrowUp activates the resting candidate (index 0) in place, same as ArrowDown,
+        // instead of wrapping to the last candidate.
+        if (!hasNavigated) {
+          onNavigate?.();
+          return true;
+        }
         setSelectedMentionIndex(prev => (prev - 1 + currentItems.length) % currentItems.length);
+        onNavigate?.();
         return true;
       },
       COMMAND_PRIORITY_HIGH,
@@ -438,6 +460,8 @@ export function MentionPlugin({
     selectedMentionIndex,
     setSelectedMentionIndex,
     insertMention,
+    onNavigate,
+    hasNavigated,
     onUserSearch,
     onChannelSearch,
     onPrioritySearch,
