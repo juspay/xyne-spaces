@@ -51,9 +51,7 @@ const ThreadRow = memo(
             <span className='opacity-70'>{getIcon()}</span>
             <button
               onClick={() =>
-                void navigate(
-                  `/chat/dir/threads/${channelId}/${conversationId}#origin=${conversationId}`,
-                )
+                void navigate(`/chat/dir/${channelId}/${conversationId}#origin=${conversationId}`)
               }
               className='text-base font-semibold text-foreground hover:underline'
               data-track-category='USER_THREADS'
