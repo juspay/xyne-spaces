@@ -42,13 +42,13 @@ const textSizeClasses: Record<AvatarSize, string> = {
 
 // Indicator config: radius of the colored circle, stroke width for white border
 const indicatorConfig: Record<AvatarSize, { radius: number; stroke: number }> = {
-  xs: { radius: 2, stroke: 1 },
-  sm: { radius: 3, stroke: 1.5 },
-  rg: { radius: 4, stroke: 2 },
-  md: { radius: 4, stroke: 2 },
-  lg: { radius: 5, stroke: 2 },
-  xl: { radius: 6, stroke: 3 },
-  big: { radius: 8, stroke: 4 },
+  xs: { radius: 3, stroke: 1 },
+  sm: { radius: 4, stroke: 1.5 },
+  rg: { radius: 5, stroke: 2 },
+  md: { radius: 5, stroke: 2 },
+  lg: { radius: 6, stroke: 2 },
+  xl: { radius: 7, stroke: 3 },
+  big: { radius: 9, stroke: 4 },
 };
 
 function AvatarRoot({
@@ -171,20 +171,34 @@ const Avatar = ({
     console.warn(`Failed to load avatar image for user ${targetUserId}: ${user?.picture}`);
   };
 
+  const isOnline = presenceStatus === 'ONLINE';
+  const isOfflineOrAway = presenceStatus === 'OFFLINE' || presenceStatus === 'AWAY';
+  const showIndicator = showActiveStatus && (isOnline || isOfflineOrAway);
+
+  const { radius, stroke } = indicatorConfig[size];
+
+  // Outer edge of the colored disc (online) / grey ring (offline).
+  const coreRadius = radius - stroke / 2;
+  const haloWidth = stroke * 1.5;
+  const offlineRing = stroke / 2;
+  const offlineRingRadius = coreRadius - offlineRing / 2;
+
+  // The halo is a hole punched through the avatar rather than a painted ring, so
+  // it reveals whatever sits behind — translucent sidebars, hovered rows, page.
+  const cutRadius = coreRadius + haloWidth;
+  const cutInset = 2;
+
+  // +1 keeps the outermost edge off the canvas edge, so it doesn't clip.
+  const svgSize = (cutRadius + 1) * 2;
+  const center = svgSize / 2;
+  // Position so the circle sits on the corner (slightly inward)
+  const offset = -(svgSize / 2) + cutInset;
+
+  const cutMask = `radial-gradient(circle at calc(100% - ${cutInset}px) calc(100% - ${cutInset}px), transparent ${cutRadius}px, #000 ${cutRadius + 0.5}px)`;
+
   // Render online indicator as SVG circle (guaranteed perfect circle)
   const renderOnlineIndicator = (): ReactElement | null => {
-    if (!showActiveStatus) return null;
-
-    const isOnline = presenceStatus === 'ONLINE';
-    const isOfflineOrAway = presenceStatus === 'OFFLINE' || presenceStatus === 'AWAY';
-
-    if (!isOnline && !isOfflineOrAway) return null;
-
-    const { radius, stroke } = indicatorConfig[size];
-    const svgSize = (radius + stroke) * 2;
-    const center = svgSize / 2;
-    // Position so the circle sits on the corner (slightly inward)
-    const offset = -(svgSize / 2) + 2;
+    if (!showIndicator) return null;
 
     return (
       <svg
@@ -193,14 +207,18 @@ const Avatar = ({
         className='absolute'
         style={{ bottom: offset, right: offset, pointerEvents: 'none' }}
       >
-        <circle
-          cx={center}
-          cy={center}
-          r={radius}
-          fill={isOnline ? 'var(--status-success)' : 'hsl(var(--muted-foreground))'}
-          stroke='hsl(var(--background))'
-          strokeWidth={stroke}
-        />
+        {isOnline ? (
+          <circle cx={center} cy={center} r={coreRadius} fill='var(--status-success)' />
+        ) : (
+          <circle
+            cx={center}
+            cy={center}
+            r={offlineRingRadius}
+            fill='none'
+            stroke='var(--avatar-ring, hsl(var(--muted-foreground)))'
+            strokeWidth={offlineRing}
+          />
+        )}
       </svg>
     );
   };
@@ -218,6 +236,7 @@ const Avatar = ({
     >
       <AvatarRoot
         className={cn(colorClass.bg, colorClass.text, 'size-full', textSizeClass, roundedClass)}
+        style={showIndicator ? { maskImage: cutMask, WebkitMaskImage: cutMask } : undefined}
       >
         {pictureUrl && !imageError && (
           <AvatarImage

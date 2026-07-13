@@ -65,6 +65,7 @@
     --action-accent: 90 98% 34%;
     --action-primary-foreground: #ffffff;
     --sidebar-divider: #e5ebf0;
+    --sidebar-avatar-ring: hsl(var(--muted-foreground));
     --metrics-bar-color: #485056;
     --metrics-bar-divider: rgba(0, 0, 0, 0.5);
     --update-btn-bg: #57ab02;
@@ -172,6 +173,7 @@
     --action-accent: 225 24% 54%;
     --action-primary-foreground: #ffffff;
     --sidebar-divider: #e5ebf0;
+    --sidebar-avatar-ring: rgba(255, 255, 255, 0.85);
     --metrics-bar-color: #ffffff;
     --metrics-bar-divider: rgba(255, 255, 255, 0.5);
     --update-btn-bg: #ffffff;
@@ -270,6 +272,7 @@
     --action-accent: 204 100% 37%;
     --action-primary-foreground: #ffffff;
     --sidebar-divider: #363a3f;
+    --sidebar-avatar-ring: hsl(var(--muted-foreground));
     --metrics-bar-color: #b0b4ba;
     --metrics-bar-divider: rgba(255, 255, 255, 0.2);
     --update-btn-bg: #ffffff;
