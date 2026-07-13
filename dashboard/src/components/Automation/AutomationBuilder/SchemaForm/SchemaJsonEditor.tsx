@@ -96,6 +96,7 @@ export function SchemaJsonEditor({
             autocompletion({ activateOnTyping: true, defaultKeymap: true }),
           ]}
           onChange={handleChange}
+          className='schema-json-editor'
           basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true }}
         />
       </div>

@@ -586,10 +586,12 @@ export function AutomationBuilder({
         });
         return;
       }
+      // A new "run agent" step starts with a { result: 'string' } output schema so
+      // downstream steps have a usable variable by default. Other actions start empty.
       const action: ActionStepConfig = {
         id: makeStepId(),
         type,
-        config: {},
+        config: type === 'RUN_AGENT' ? { outputSchema: { result: 'string' } } : {},
       };
       setConfig(prev => {
         const next = insertInto(prev.steps, action);
