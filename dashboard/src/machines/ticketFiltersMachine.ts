@@ -71,6 +71,7 @@ const getStorageKey = (
   projectId?: string,
   boardId?: string,
 ): string => {
+  if (viewMode === 'support' && channelId) return `${STORAGE_KEY_PREFIX}-support-${channelId}`;
   // Channel filters (for /chat/:channelId/tickets)
   if (channelId) return `${STORAGE_KEY_PREFIX}-channel-${channelId}`;
 
@@ -139,6 +140,12 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
   const sourceChannels = params.getAll('sourceChannels');
   if (sourceChannels.length) filters.sourceChannels = sourceChannels;
 
+  const aiCategory = params.getAll('aiCategory');
+  if (aiCategory.length) filters.aiCategory = aiCategory;
+
+  const hasAiDraft = params.get('hasAiDraft');
+  if (hasAiDraft === '1') filters.hasAiDraft = true;
+
   const dueDateStart = params.get('dueDateStart');
   if (dueDateStart) filters.dueDateStart = Number(dueDateStart);
 
@@ -192,27 +199,33 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
   return filters;
 };
 
-/**
- * Write filters to URL search parameters
- */
-const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): void => {
-  // Clear existing filter params
-  params.delete('board');
-  params.delete('priority');
-  params.delete('assignee');
-  params.delete('userGroups');
-  params.delete('createdBy');
-  params.delete('roleAssignments');
-  params.delete('tags');
-  params.delete('stages');
-  params.delete('ticketTypes');
-  params.delete('sourceChannels');
-  params.delete('dueDateStart');
-  params.delete('dueDateEnd');
-  params.delete('createdDateStart');
-  params.delete('createdDateEnd');
-  params.delete('assigned');
-  params.delete('created');
+// Every URL param owned by ticket filters — keep in sync with readFiltersFromUrl/writeFiltersToUrl.
+const FILTER_PARAM_KEYS = [
+  'board',
+  'priority',
+  'assignee',
+  'userGroups',
+  'createdBy',
+  'roleAssignments',
+  'tags',
+  'stages',
+  'ticketTypes',
+  'sourceChannels',
+  'aiCategory',
+  'hasAiDraft',
+  'dueDateStart',
+  'dueDateEnd',
+  'createdDateStart',
+  'createdDateEnd',
+  'assigned',
+  'created',
+] as const;
+
+// Strips all ticket filter params (incl. df_* fields) — used when switching filter scopes (e.g. desk channels).
+export const clearTicketFilterParams = (params: URLSearchParams): void => {
+  for (const key of FILTER_PARAM_KEYS) {
+    params.delete(key);
+  }
 
   // Clear existing dynamic field params
   for (const key of Array.from(params.keys())) {
@@ -220,6 +233,9 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
       params.delete(key);
     }
   }
+};
+const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): void => {
+  clearTicketFilterParams(params);
 
   // Add new filter params
   filters.boards?.forEach((b: string) => params.append('board', b));
@@ -235,6 +251,11 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   filters.stages?.forEach((s: string) => params.append('stages', s));
   filters.ticketTypes?.forEach((t: string) => params.append('ticketTypes', t));
   filters.sourceChannels?.forEach((c: string) => params.append('sourceChannels', c));
+  filters.aiCategory?.forEach((c: string) => params.append('aiCategory', c));
+
+  if (filters.hasAiDraft) {
+    params.set('hasAiDraft', '1');
+  }
 
   if (filters.dueDateStart !== undefined) {
     params.set('dueDateStart', filters.dueDateStart.toString());
@@ -612,7 +633,10 @@ export const ticketFiltersMachine = setup({
       // Write filters and viewType to params
       writeFiltersToUrl(params, context.filters);
 
-      params.set('viewType', context.viewType);
+      // The support desk has no status/stage/board view concept, so don't write viewType there.
+      if (context.viewMode !== 'support') {
+        params.set('viewType', context.viewType);
+      }
 
       if (context.groupBy && context.groupBy !== 'none') {
         params.set('groupBy', context.groupBy);
