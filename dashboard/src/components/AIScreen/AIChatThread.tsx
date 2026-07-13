@@ -911,15 +911,26 @@ function ChatMessageBubble({
                           validCitationKeys.has(`${citedId}#${chunkRaw}`) ||
                           validCitationKeys.has(`${normalizeCitedToolId(citedId)}#${chunkRaw}`);
                         if (toolNumber > 0 && Number.isFinite(chunkIndex) && hasBackingCitation) {
-                          // Resolve the model's synthetic `functions.<toolName>:<idx>`
-                          // form to the real toolCallId via toolName match — so
-                          // clicking the chip opens the right source.
+                          // Resolve the cited id to a real invocation. Prefer an
+                          // EXACT toolCallId match first: the model cites repeated
+                          // calls to the same tool as `functions.<name>:13` vs
+                          // `:14`, and that trailing index is the ONLY thing that
+                          // tells them apart. Normalizing to the bare toolName (and
+                          // taking the first match) collapses both onto the same
+                          // invocation → every same-tool citation resolves to one
+                          // file. So only fall back to toolName matching when no
+                          // invocation carries this exact id. (Mirrors the sidebar,
+                          // which matches on the raw cited id.)
+                          const stripClf = (id: string): string =>
+                            id.startsWith('clf-') ? id.slice(4) : id;
+                          const exactMatch = lookupTools.find(
+                            inv => inv.toolCallId && stripClf(inv.toolCallId) === citedId,
+                          );
                           const normalized = normalizeCitedToolId(citedId);
-                          const matchByName = lookupTools.find(inv => inv.toolName === normalized);
+                          const matchByName =
+                            exactMatch ?? lookupTools.find(inv => inv.toolName === normalized);
                           const resolvedToolCallId = matchByName?.toolCallId
-                            ? matchByName.toolCallId.startsWith('clf-')
-                              ? matchByName.toolCallId.slice(4)
-                              : matchByName.toolCallId
+                            ? stripClf(matchByName.toolCallId)
                             : citedId;
                           return (
                             <ClawCitationChip
