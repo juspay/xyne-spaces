@@ -45,6 +45,7 @@ interface TicketTableProps {
   ticketTags?: Map<string, TicketTag[]>;
   availableTags?: string[];
   onRowClick?: (ticket: Ticket) => void;
+  onTitleClick?: (ticket: Ticket) => void;
   visibleColumns?: Set<string>;
   isComfortView?: boolean;
 }
@@ -149,6 +150,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   ticketTags,
   availableTags = [],
   onRowClick,
+  onTitleClick,
   isComfortView = false,
   visibleColumns = new Set(['assignee', 'dueDate', 'status', 'priority', 'stage', 'tags']),
 }) => {
@@ -277,36 +279,41 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           };
 
           const handleTicketClick = () => {
-            if (params.data) {
-              const currentUrl = window.location.pathname + window.location.search;
+            if (!params.data) return;
 
-              // On mobile: navigate directly to ThreadMessages route with details tab
-              // On desktop: use tab-based route for expanded view in ConversationPannel
-              if (isMobile) {
-                void navigate(
-                  `${baseRoute}/${params.data.channelId}/${params.data.conversationId}/${params.data.id}?selectedTab=details`,
-                  {
-                    state: {
-                      fromMyTickets: false,
-                      returnToUrl: currentUrl,
-                    },
+            if (onTitleClick) {
+              onTitleClick(params.data);
+              return;
+            }
+
+            const currentUrl = window.location.pathname + window.location.search;
+
+            // On mobile: navigate directly to ThreadMessages route with details tab
+            // On desktop: use tab-based route for expanded view in ConversationPannel
+            if (isMobile) {
+              void navigate(
+                `${baseRoute}/${params.data.channelId}/${params.data.conversationId}/${params.data.id}?selectedTab=details`,
+                {
+                  state: {
+                    fromMyTickets: false,
+                    returnToUrl: currentUrl,
                   },
-                );
-              } else {
-                void navigate(
-                  buildChannelRoute(params.data.channelId, {
-                    tab: 'tickets',
-                    ticketId: params.data.id,
-                    conversationId: params.data.conversationId,
-                  }),
-                  {
-                    state: {
-                      fromMyTickets: false,
-                      returnToUrl: currentUrl,
-                    },
+                },
+              );
+            } else {
+              void navigate(
+                buildChannelRoute(params.data.channelId, {
+                  tab: 'tickets',
+                  ticketId: params.data.id,
+                  conversationId: params.data.conversationId,
+                }),
+                {
+                  state: {
+                    fromMyTickets: false,
+                    returnToUrl: currentUrl,
                   },
-                );
-              }
+                },
+              );
             }
           };
 
@@ -574,7 +581,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     return allColumns.filter(
       col => col.key === 'index' || col.key === 'title' || visibleColumns.has(col.key),
     );
-  }, [ticketTags, zero, visibleColumns, users, availableTags]);
+  }, [ticketTags, zero, visibleColumns, users, availableTags, onTitleClick]);
 
   const handleBulkUpdate = useCallback(
     (updates: Partial<Ticket> = {}) => {

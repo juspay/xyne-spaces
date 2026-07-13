@@ -15,6 +15,7 @@ import {
   ChevronsUpDown,
   LayoutGrid,
   List,
+  Table2,
   Split,
   Paperclip,
   Link as LinkIcon,
@@ -107,6 +108,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
+import { SupportTicketTable } from './SupportTicketTable';
 import { TicketPriority } from '@xyne/shared';
 import type { Ticket } from '@xyne/shared';
 import { getDraft } from '../../hooks/useDraft';
@@ -508,7 +510,7 @@ interface DemergeEmailResponse {
 }
 type TabType = 'messages' | 'details' | 'sources' | 'reasoning';
 
-type ViewMode = 'kanban' | 'list';
+type ViewMode = 'kanban' | 'list' | 'table';
 
 const SupportScreen = (): ReactElement => {
   const {
@@ -2157,6 +2159,20 @@ const SupportScreen = (): ReactElement => {
                         >
                           <List size={16} />
                         </button>
+                        <button
+                          onClick={() => setViewMode('table')}
+                          className={cn(
+                            'p-1.5 transition-colors',
+                            viewMode === 'table'
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                          )}
+                          title='Table View'
+                          data-track-category='Support'
+                          data-track-name='SetTableView'
+                        >
+                          <Table2 size={16} />
+                        </button>
                       </div>
                       {/* Compose new email — visible only on a joined email channel */}
                       {isSelectedChannelJoined && selectedChannelId && (
@@ -2357,6 +2373,21 @@ const SupportScreen = (): ReactElement => {
                         ticketFilter={ticketFilter}
                         onTicketClick={handleTicketClick}
                         onTicketsLoaded={setKanbanTickets}
+                      />
+                    ) : viewMode === 'table' ? (
+                      <SupportTicketTable
+                        channelId={selectedChannelId}
+                        ticketFilter={ticketFilter}
+                        onBoardIdResolved={setChannelBoardId}
+                        onTicketsLoaded={setKanbanTickets}
+                        onTicketClick={ticket => {
+                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                            state: {
+                              conversationId: ticket.conversationId,
+                              ticketId: ticket.id,
+                            },
+                          });
+                        }}
                       />
                     ) : (
                       <TicketListView
