@@ -2055,6 +2055,25 @@ img.inline-emoji,
   background: hsl(var(--border));
 }
 
+.call-detail-canvas-editor {
+  background: transparent !important;
+  min-height: 60vh;
+}
+
+.call-detail-canvas-editor > .flex-1 {
+  padding-top: 0 !important;
+}
+
+.call-detail-canvas-editor .bn-container,
+.call-detail-canvas-editor .bn-editor,
+.call-detail-canvas-editor .blocknote-editor-wrapper {
+  max-width: 100% !important;
+}
+
+.call-detail-canvas-editor .bn-editor {
+  padding-inline: 0 !important;
+}
+
 .bot-markdown-content .wmde-markdown,
 .bot-markdown-content-call-summary .wmde-markdown {
   background: transparent !important;

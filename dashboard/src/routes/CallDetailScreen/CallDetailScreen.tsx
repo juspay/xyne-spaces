@@ -16,6 +16,7 @@ import {
   MessageCircle,
   MessageSquare,
   FileText,
+  ScrollText,
 } from 'lucide-react';
 import { recordingService } from '../../services/Recording/recordingService';
 import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
@@ -32,6 +33,7 @@ import Tooltip from '../../components/ui/Tooltip/Tooltip';
 import { type Call } from '../CallHistoryScreen/callHistoryItem.utils';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { usePlatform } from '../../hooks/usePlatform';
+import { DetailedSummaryCanvasTab } from './DetailedSummaryCanvasTab';
 import { PrdCanvasTab } from './PrdCanvasTab';
 import { TranscriptTab } from './TranscriptTab';
 import { ParticipantsModal } from '../CallHistoryScreen/ParticipantsModal';
@@ -39,6 +41,11 @@ import { useAuth } from '../../hooks/useAuth';
 import { useAllVisibleChannels } from '../../hooks/useChannels';
 
 let _userClosedAIForCallId: string | null = null;
+
+const getCanvasIdFromUrl = (url: unknown): string | null => {
+  if (typeof url !== 'string') return null;
+  return url.split('/').filter(Boolean).pop() ?? null;
+};
 
 export default function CallDetailScreen(): ReactElement {
   const navigate = useNavigate();
@@ -87,14 +94,30 @@ export default function CallDetailScreen(): ReactElement {
     });
   }, [conversationMessages, call?.externalId]);
 
-  const callMessageId = useMemo<string | null>(() => {
+  const callMessage = useMemo(() => {
     if (!conversationMessages || !call?.externalId) return null;
-    const m = conversationMessages.find(msg => {
-      const meta = msg.metadata as Record<string, unknown> | null;
-      return meta?.['isCallMessage'] === true && meta?.['callId'] === call.externalId;
-    });
-    return m?.messageId ?? null;
+    return (
+      conversationMessages.find(msg => {
+        const meta = msg.metadata as Record<string, unknown> | null;
+        return meta?.['isCallMessage'] === true && meta?.['callId'] === call.externalId;
+      }) ?? null
+    );
   }, [conversationMessages, call?.externalId]);
+
+  const callMessageId = callMessage?.messageId ?? null;
+
+  const detailedSummaryCanvasId = useMemo<string | null>(() => {
+    const meta = callMessage?.metadata as Record<string, unknown> | null | undefined;
+    return getCanvasIdFromUrl(meta?.['detailedSummaryCanvasUrl']);
+  }, [callMessage]);
+
+  const hasDetailedSummaryTab = Boolean(detailedSummaryCanvasId);
+
+  useEffect(() => {
+    if (activeTab === 'detailed-summary' && !hasDetailedSummaryTab) {
+      setActiveTab('summary');
+    }
+  }, [activeTab, hasDetailedSummaryTab]);
 
   const hasRecording = useMemo<boolean>(() => {
     if (!conversationMessages || !call?.externalId) return false;
@@ -134,13 +157,16 @@ export default function CallDetailScreen(): ReactElement {
   const updateScrollButtons = (): void => {
     const el = tabScrollRef.current;
     if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 0);
-    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 1);
+    const maxScrollLeft = el.scrollWidth - el.clientWidth;
+    const hasOverflow = maxScrollLeft > 1;
+    setCanScrollLeft(hasOverflow && el.scrollLeft > 1);
+    setCanScrollRight(hasOverflow && el.scrollLeft < maxScrollLeft - 1);
   };
 
   useEffect(() => {
-    updateScrollButtons();
-  }, [prdEntries]);
+    const frame = window.requestAnimationFrame(updateScrollButtons);
+    return () => window.cancelAnimationFrame(frame);
+  }, [hasDetailedSummaryTab, prdEntries.length]);
 
   const aiOpenedRef = useRef(false);
 
@@ -282,7 +308,7 @@ export default function CallDetailScreen(): ReactElement {
 
         {/* Scrollable body */}
         <div className='flex-1 overflow-y-auto px-8 py-8'>
-          <div className='max-w-2xl mx-auto'>
+          <div className='mx-auto w-full max-w-5xl'>
             <h1 className='text-3xl font-bold text-foreground mb-8 leading-tight'>{title}</h1>
 
             {/* Metadata rows */}
@@ -384,6 +410,15 @@ export default function CallDetailScreen(): ReactElement {
                   [
                     { id: 'summary', label: 'Summary', icon: LayoutList },
                     { id: 'transcript', label: 'Transcript', icon: MessageCircle },
+                    ...(hasDetailedSummaryTab
+                      ? [
+                          {
+                            id: 'detailed-summary',
+                            label: 'Detailed Summary',
+                            icon: ScrollText,
+                          },
+                        ]
+                      : []),
                   ] as const
                 ).map(({ id, label, icon }) => {
                   const TabIcon = icon;
@@ -443,27 +478,31 @@ export default function CallDetailScreen(): ReactElement {
             </div>
 
             {/* Tab content */}
-            {activeTab === 'summary' ? (
-              renderSummaryTab()
-            ) : activeTab === 'transcript' ? (
-              <TranscriptTab attachmentId={transcriptAttachmentId} />
-            ) : (
-              (() => {
-                const prd = prdEntries.find(e => e.id === activeTab);
-                if (!prd) return null;
-                if (prd.canvasId === null) {
-                  return (
-                    <div className='flex flex-col gap-1.5'>
-                      <p className='text-sm font-medium text-foreground'>Generating PRD...</p>
-                      <p className='text-xs text-muted-foreground'>
-                        Analyzing meeting transcript and extracting requirements
-                      </p>
-                    </div>
-                  );
-                }
-                return <PrdCanvasTab canvasId={prd.canvasId} />;
-              })()
-            )}
+            <div className='w-full'>
+              {activeTab === 'summary' ? (
+                renderSummaryTab()
+              ) : activeTab === 'transcript' ? (
+                <TranscriptTab attachmentId={transcriptAttachmentId} />
+              ) : activeTab === 'detailed-summary' && detailedSummaryCanvasId ? (
+                <DetailedSummaryCanvasTab canvasId={detailedSummaryCanvasId} />
+              ) : (
+                (() => {
+                  const prd = prdEntries.find(e => e.id === activeTab);
+                  if (!prd) return null;
+                  if (prd.canvasId === null) {
+                    return (
+                      <div className='flex flex-col gap-1.5'>
+                        <p className='text-sm font-medium text-foreground'>Generating PRD...</p>
+                        <p className='text-xs text-muted-foreground'>
+                          Analyzing meeting transcript and extracting requirements
+                        </p>
+                      </div>
+                    );
+                  }
+                  return <PrdCanvasTab canvasId={prd.canvasId} />;
+                })()
+              )}
+            </div>
           </div>
         </div>
       </div>
