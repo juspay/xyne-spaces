@@ -494,7 +494,7 @@ const AppSidebar = (): ReactElement => {
           trigger={
             hasValidStatus ? (
               <div
-                className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer'
+                className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                 style={{ backgroundColor: 'var(--sidebar-divider)' }}
                 data-testid='profile-icon'
               >
@@ -522,7 +522,7 @@ const AppSidebar = (): ReactElement => {
               </div>
             ) : (
               <div
-                className='relative w-[32px] flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer'
+                className='relative w-[32px] flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                 data-testid='profile-icon'
               >
                 {/* Avatar at Bottom - overlaps container slightly to match with-status state */}
