@@ -29,6 +29,7 @@ import {
 interface CallWhiteboardProps {
   room: Room | null;
   className?: string | undefined;
+  displayOnly?: boolean | undefined;
 }
 
 interface CallWhiteboardRenderCache {
@@ -167,7 +168,11 @@ function renderStrokeDelta(
   renderCallWhiteboardStroke(ctx, { ...stroke, points }, canvasWidth, canvasHeight);
 }
 
-export function CallWhiteboard({ room, className }: CallWhiteboardProps): React.ReactElement {
+export function CallWhiteboard({
+  room,
+  className,
+  displayOnly = false,
+}: CallWhiteboardProps): React.ReactElement {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isSavingBeforeDelete, setIsSavingBeforeDelete] = useState(false);
   const [visibleDeleteNotice, setVisibleDeleteNotice] =
@@ -283,12 +288,22 @@ export function CallWhiteboard({ room, className }: CallWhiteboardProps): React.
     if (!surface || !canvas) return;
 
     const syncSize = (): void => {
-      canvas.width = surface.offsetWidth;
-      canvas.height = surface.offsetHeight;
+      const rect = surface.getBoundingClientRect();
+      const nextWidth = Math.round(rect.width || surface.offsetWidth);
+      const nextHeight = Math.round(rect.height || surface.offsetHeight);
+      if (nextWidth <= 0 || nextHeight <= 0) return;
+
+      const sizeChanged = canvas.width !== nextWidth || canvas.height !== nextHeight;
+      if (sizeChanged) {
+        renderCacheRef.current = null;
+        canvas.width = nextWidth;
+        canvas.height = nextHeight;
+      }
+
       sendCallWhiteboardEvent({
         type: 'setViewportSize',
-        width: canvas.width,
-        height: canvas.height,
+        width: nextWidth,
+        height: nextHeight,
       });
       scheduleRedraw();
     };
@@ -538,120 +553,124 @@ export function CallWhiteboard({ room, className }: CallWhiteboardProps): React.
     <div className={cn('h-full w-full p-2 sm:p-4', className)}>
       <div className='flex h-full min-h-0 w-full flex-col gap-2'>
         <div className='relative min-h-0 flex-1 w-full overflow-hidden rounded-xl border border-gray-700/60 bg-white shadow-2xl'>
-          <div className='absolute left-3 top-3 z-20 flex max-w-[calc(100%-4.75rem)] items-center gap-2 overflow-x-auto rounded-full border border-gray-200 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur'>
-            <button
-              type='button'
-              onClick={() => sendCallWhiteboardEvent({ type: 'setTool', tool: 'pen' })}
-              className={cn(
-                'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
-                tool === 'pen' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100',
-              )}
-              title='Pen'
-              aria-pressed={tool === 'pen'}
-              data-track-category='CALLS'
-              data-track-name='Whiteboard_Set_Tool_Pen'
-            >
-              <Brush className='h-4 w-4' aria-hidden />
-            </button>
+          {!displayOnly && (
+            <div className='absolute left-3 top-3 z-20 flex max-w-[calc(100%-4.75rem)] items-center gap-2 overflow-x-auto rounded-full border border-gray-200 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur'>
+              <button
+                type='button'
+                onClick={() => sendCallWhiteboardEvent({ type: 'setTool', tool: 'pen' })}
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
+                  tool === 'pen' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100',
+                )}
+                title='Pen'
+                aria-pressed={tool === 'pen'}
+                data-track-category='CALLS'
+                data-track-name='Whiteboard_Set_Tool_Pen'
+              >
+                <Brush className='h-4 w-4' aria-hidden />
+              </button>
 
-            <button
-              type='button'
-              onClick={() => sendCallWhiteboardEvent({ type: 'setTool', tool: 'eraser' })}
-              className={cn(
-                'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
-                tool === 'eraser' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100',
-              )}
-              title='Eraser'
-              aria-pressed={tool === 'eraser'}
-              data-track-category='CALLS'
-              data-track-name='Whiteboard_Set_Tool_Eraser'
-            >
-              <Eraser className='h-4 w-4' aria-hidden />
-            </button>
+              <button
+                type='button'
+                onClick={() => sendCallWhiteboardEvent({ type: 'setTool', tool: 'eraser' })}
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
+                  tool === 'eraser' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100',
+                )}
+                title='Eraser'
+                aria-pressed={tool === 'eraser'}
+                data-track-category='CALLS'
+                data-track-name='Whiteboard_Set_Tool_Eraser'
+              >
+                <Eraser className='h-4 w-4' aria-hidden />
+              </button>
 
+              <button
+                type='button'
+                onClick={() => sendCallWhiteboardEvent({ type: 'setTool', tool: 'delete' })}
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
+                  tool === 'delete' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100',
+                )}
+                title='Delete stroke'
+                aria-pressed={tool === 'delete'}
+                data-track-category='CALLS'
+                data-track-name='Whiteboard_Set_Tool_Delete'
+              >
+                <Trash2 className='h-4 w-4' aria-hidden />
+              </button>
+
+              <div className='h-6 w-px bg-gray-200' aria-hidden />
+
+              {CALL_WHITEBOARD_COLORS.map(item => (
+                <button
+                  key={item}
+                  type='button'
+                  onClick={() => sendCallWhiteboardEvent({ type: 'setColor', color: item })}
+                  className={cn(
+                    'h-6 w-6 rounded-full border transition-transform hover:scale-110',
+                    color === item && tool === 'pen'
+                      ? 'ring-2 ring-gray-900 ring-offset-2'
+                      : 'border-gray-200',
+                  )}
+                  style={{ backgroundColor: item }}
+                  title={item}
+                  aria-label={`Color ${item}`}
+                  aria-pressed={color === item && tool === 'pen'}
+                  data-track-category='CALLS'
+                  data-track-name='Whiteboard_Set_Color'
+                  data-track-metadata={JSON.stringify({ color: item })}
+                />
+              ))}
+
+              <div className='h-6 w-px bg-gray-200' aria-hidden />
+
+              <input
+                type='range'
+                min={1}
+                max={28}
+                step={1}
+                value={strokeWidth}
+                onChange={event =>
+                  sendCallWhiteboardEvent({
+                    type: 'setStrokeWidth',
+                    width: Number(event.target.value),
+                  })
+                }
+                className='w-24 accent-gray-900'
+                aria-label='Stroke width'
+                data-track-category='CALLS'
+                data-track-name='Whiteboard_Set_Stroke_Width'
+              />
+
+              <button
+                type='button'
+                onClick={handleClose}
+                className='flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900'
+                title='Close whiteboard'
+                data-track-category='CALLS'
+                data-track-name='Whiteboard_Close'
+              >
+                <X className='h-4 w-4' aria-hidden />
+              </button>
+            </div>
+          )}
+
+          {!displayOnly && (
             <button
               type='button'
-              onClick={() => sendCallWhiteboardEvent({ type: 'setTool', tool: 'delete' })}
-              className={cn(
-                'flex h-8 w-8 items-center justify-center rounded-full transition-colors',
-                tool === 'delete' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100',
-              )}
-              title='Delete stroke'
-              aria-pressed={tool === 'delete'}
+              onClick={() => setIsDeleteConfirmOpen(true)}
+              className='absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white/95 text-red-600 shadow-lg backdrop-blur transition-colors hover:bg-red-50 hover:text-red-700'
+              title='Delete whiteboard page'
               data-track-category='CALLS'
-              data-track-name='Whiteboard_Set_Tool_Delete'
+              data-track-name='Whiteboard_Delete_Page_Open'
+              data-track-metadata={JSON.stringify({ pageId: activePageId })}
             >
               <Trash2 className='h-4 w-4' aria-hidden />
             </button>
+          )}
 
-            <div className='h-6 w-px bg-gray-200' aria-hidden />
-
-            {CALL_WHITEBOARD_COLORS.map(item => (
-              <button
-                key={item}
-                type='button'
-                onClick={() => sendCallWhiteboardEvent({ type: 'setColor', color: item })}
-                className={cn(
-                  'h-6 w-6 rounded-full border transition-transform hover:scale-110',
-                  color === item && tool === 'pen'
-                    ? 'ring-2 ring-gray-900 ring-offset-2'
-                    : 'border-gray-200',
-                )}
-                style={{ backgroundColor: item }}
-                title={item}
-                aria-label={`Color ${item}`}
-                aria-pressed={color === item && tool === 'pen'}
-                data-track-category='CALLS'
-                data-track-name='Whiteboard_Set_Color'
-                data-track-metadata={JSON.stringify({ color: item })}
-              />
-            ))}
-
-            <div className='h-6 w-px bg-gray-200' aria-hidden />
-
-            <input
-              type='range'
-              min={1}
-              max={28}
-              step={1}
-              value={strokeWidth}
-              onChange={event =>
-                sendCallWhiteboardEvent({
-                  type: 'setStrokeWidth',
-                  width: Number(event.target.value),
-                })
-              }
-              className='w-24 accent-gray-900'
-              aria-label='Stroke width'
-              data-track-category='CALLS'
-              data-track-name='Whiteboard_Set_Stroke_Width'
-            />
-
-            <button
-              type='button'
-              onClick={handleClose}
-              className='flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900'
-              title='Close whiteboard'
-              data-track-category='CALLS'
-              data-track-name='Whiteboard_Close'
-            >
-              <X className='h-4 w-4' aria-hidden />
-            </button>
-          </div>
-
-          <button
-            type='button'
-            onClick={() => setIsDeleteConfirmOpen(true)}
-            className='absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white/95 text-red-600 shadow-lg backdrop-blur transition-colors hover:bg-red-50 hover:text-red-700'
-            title='Delete whiteboard page'
-            data-track-category='CALLS'
-            data-track-name='Whiteboard_Delete_Page_Open'
-            data-track-metadata={JSON.stringify({ pageId: activePageId })}
-          >
-            <Trash2 className='h-4 w-4' aria-hidden />
-          </button>
-
-          {visibleDeleteNotice && (
+          {!displayOnly && visibleDeleteNotice && (
             <div
               className={cn(
                 'absolute left-1/2 top-16 z-20 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-lg backdrop-blur',
@@ -682,7 +701,7 @@ export function CallWhiteboard({ room, className }: CallWhiteboardProps): React.
             </div>
           )}
 
-          {isDeleteConfirmOpen && (
+          {!displayOnly && isDeleteConfirmOpen && (
             <div className='absolute inset-0 z-30 flex items-center justify-center bg-gray-950/45 px-4 backdrop-blur-sm'>
               <div
                 className='w-full max-w-sm rounded-xl border border-gray-200 bg-white p-4 text-gray-950 shadow-2xl'
@@ -739,59 +758,65 @@ export function CallWhiteboard({ room, className }: CallWhiteboardProps): React.
             ref={surfaceRef}
             className={cn(
               'absolute inset-0 touch-none',
-              tool === 'delete' ? 'cursor-pointer' : 'cursor-crosshair',
+              displayOnly
+                ? 'cursor-default'
+                : tool === 'delete'
+                  ? 'cursor-pointer'
+                  : 'cursor-crosshair',
             )}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
+            onPointerDown={displayOnly ? undefined : handlePointerDown}
+            onPointerMove={displayOnly ? undefined : handlePointerMove}
+            onPointerUp={displayOnly ? undefined : handlePointerUp}
+            onPointerCancel={displayOnly ? undefined : handlePointerUp}
           >
             <canvas ref={canvasRef} className='absolute inset-0 h-full w-full' />
           </div>
         </div>
 
-        <div className='flex shrink-0 justify-center'>
-          <div
-            className='flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-gray-700/70 bg-gray-900/95 p-1 shadow-xl'
-            aria-label='Whiteboard pages'
-          >
-            {pages.map((page, index) => {
-              const isActive = page.id === activePageId;
-              return (
-                <button
-                  key={page.id}
-                  type='button'
-                  onClick={() => handleSelectPage(page.id)}
-                  className={cn(
-                    'flex h-8 min-w-8 items-center justify-center rounded-full px-3 text-xs font-semibold transition-colors',
-                    isActive
-                      ? 'bg-white text-gray-950'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white',
-                  )}
-                  title={`Whiteboard ${index + 1}`}
-                  aria-pressed={isActive}
-                  data-track-category='CALLS'
-                  data-track-name='Whiteboard_Select_Page'
-                  data-track-metadata={JSON.stringify({ pageId: page.id, index })}
-                >
-                  {index + 1}
-                </button>
-              );
-            })}
-
-            <button
-              type='button'
-              onClick={handleAddPage}
-              disabled={!canAddPage}
-              className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-300 transition-colors hover:bg-gray-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-300'
-              title={canAddPage ? 'Add whiteboard' : 'Maximum 5 whiteboards'}
-              data-track-category='CALLS'
-              data-track-name='Whiteboard_Add_Page'
+        {!displayOnly && (
+          <div className='flex shrink-0 justify-center'>
+            <div
+              className='flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-gray-700/70 bg-gray-900/95 p-1 shadow-xl'
+              aria-label='Whiteboard pages'
             >
-              <Plus className='h-4 w-4' aria-hidden />
-            </button>
+              {pages.map((page, index) => {
+                const isActive = page.id === activePageId;
+                return (
+                  <button
+                    key={page.id}
+                    type='button'
+                    onClick={() => handleSelectPage(page.id)}
+                    className={cn(
+                      'flex h-8 min-w-8 items-center justify-center rounded-full px-3 text-xs font-semibold transition-colors',
+                      isActive
+                        ? 'bg-white text-gray-950'
+                        : 'text-gray-300 hover:bg-gray-700 hover:text-white',
+                    )}
+                    title={`Whiteboard ${index + 1}`}
+                    aria-pressed={isActive}
+                    data-track-category='CALLS'
+                    data-track-name='Whiteboard_Select_Page'
+                    data-track-metadata={JSON.stringify({ pageId: page.id, index })}
+                  >
+                    {index + 1}
+                  </button>
+                );
+              })}
+
+              <button
+                type='button'
+                onClick={handleAddPage}
+                disabled={!canAddPage}
+                className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-300 transition-colors hover:bg-gray-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-300'
+                title={canAddPage ? 'Add whiteboard' : 'Maximum 5 whiteboards'}
+                data-track-category='CALLS'
+                data-track-name='Whiteboard_Add_Page'
+              >
+                <Plus className='h-4 w-4' aria-hidden />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

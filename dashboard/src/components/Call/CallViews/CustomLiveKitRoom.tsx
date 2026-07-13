@@ -38,7 +38,6 @@ import {
   isCallWhiteboardSaved,
   markCallWhiteboardSaved,
   sendCallWhiteboardEvent,
-  useCallWhiteboardStore,
 } from '../../../stores/callWhiteboardStore';
 
 export interface CustomLiveKitRoomProps {
@@ -61,7 +60,6 @@ export function CustomLiveKitRoom({
   // Sync custom screen picker on/off from CAC — only active while in a call
   useScreenPickerFlag();
   const isSavingWhiteboardRef = useRef(false);
-  const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
 
   // Subscribe to room state from global XState machine using a single snapshot
   const snapshot = useSelector(roomActor, state => state);
@@ -170,12 +168,6 @@ export function CustomLiveKitRoom({
       sendCallWhiteboardEvent({ type: 'setCallId', callId: null });
     };
   }, [callId]);
-
-  useEffect(() => {
-    if (!isNativeMode && !isMobile && machineViewMode === 'mini' && isWhiteboardOpen) {
-      roomActor.send({ type: 'TOGGLE_VIEW' });
-    }
-  }, [isMobile, isNativeMode, isWhiteboardOpen, machineViewMode]);
 
   // const isAiControlRequested = useMemo(() => {
   //   return pendingControlRequest !== null;

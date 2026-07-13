@@ -13,6 +13,7 @@ interface CallWhiteboardViewProps {
   className?: string | undefined;
   compact?: boolean | undefined;
   showSidebar?: boolean | undefined;
+  displayOnly?: boolean | undefined;
   aiController?: { id: string; name: string } | null;
   requestedAiController?: boolean;
 }
@@ -23,6 +24,7 @@ export function CallWhiteboardView({
   className = '',
   compact = false,
   showSidebar = true,
+  displayOnly = false,
   aiController,
   requestedAiController,
 }: CallWhiteboardViewProps): React.ReactElement {
@@ -35,7 +37,7 @@ export function CallWhiteboardView({
   return (
     <div className={cn('h-full w-full flex overflow-hidden', className)}>
       <div className='flex-1 min-w-0 overflow-hidden'>
-        <CallWhiteboard room={room} className='h-full' />
+        <CallWhiteboard room={room} className='h-full' displayOnly={displayOnly} />
       </div>
 
       {showSidebar && (
