@@ -3580,3 +3580,36 @@ img.inline-emoji,
   height: var(--rec-wave-height, 6%);
   opacity: var(--rec-wave-opacity, 0.4);
 }
+
+/* Automation schema JSON editor: CodeMirror ships stable structural classes.
+   Keep the React component theme-agnostic and scope dark overrides to the
+   app's midnight theme, matching the repo's data-theme CSS convention. */
+[data-theme="midnight"] .schema-json-editor .cm-editor {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+[data-theme="midnight"] .schema-json-editor .cm-scroller,
+[data-theme="midnight"] .schema-json-editor .cm-content {
+  background: hsl(var(--muted));
+}
+
+[data-theme="midnight"] .schema-json-editor .cm-gutters {
+  background: hsl(var(--secondary));
+  color: hsl(var(--muted-foreground));
+  border-right-color: hsl(var(--border));
+}
+
+[data-theme="midnight"] .schema-json-editor .cm-activeLine,
+[data-theme="midnight"] .schema-json-editor .cm-activeLineGutter {
+  background: hsl(var(--accent));
+}
+
+[data-theme="midnight"] .schema-json-editor .cm-cursor {
+  border-left-color: hsl(var(--foreground));
+}
+
+[data-theme="midnight"] .schema-json-editor .cm-selectionBackground,
+[data-theme="midnight"] .schema-json-editor .cm-editor.cm-focused .cm-selectionBackground {
+  background: hsl(var(--accent)) !important;
+}
