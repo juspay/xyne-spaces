@@ -12,6 +12,7 @@ import {
   validateFormFieldInputs,
 } from '@/utils/formFieldResolution';
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
+import { parseGlobalFieldEnum, serializeGlobalFieldEnum } from '@/utils/globalFieldEnum';
 
 export interface UpsertTicketFormFieldsResult {
   updatedFields: string[];
@@ -197,7 +198,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     projectId: string;
     workspaceId: string;
   }): Promise<GlobalFieldListResult[]> {
-    return await this.db.globalField.findMany({
+    const rows = await this.db.globalField.findMany({
       where: {
         projectId: input.projectId,
         project: {
@@ -213,6 +214,11 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         fieldEnum: true,
       },
     });
+
+    return rows.map(row => ({
+      ...row,
+      fieldEnum: parseGlobalFieldEnum(row.fieldEnum),
+    }));
   }
 
   /**
@@ -459,7 +465,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       if (def.fieldEnum !== undefined) {
         await tx.globalField.update({
           where: { id: existing.id },
-          data: { fieldEnum: def.fieldEnum },
+          data: { fieldEnum: serializeGlobalFieldEnum(def.fieldEnum) },
         });
       }
       return existing.id;
@@ -472,7 +478,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         projectId,
         fieldName,
         fieldType: def.fieldType,
-        ...(def.fieldEnum !== undefined ? { fieldEnum: def.fieldEnum } : {}),
+        ...(def.fieldEnum !== undefined ? { fieldEnum: serializeGlobalFieldEnum(def.fieldEnum) } : {}),
         createdAt: now,
         updatedAt: now,
       },
@@ -549,7 +555,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         data: {
           fieldName: def.fieldName.trim(),
           fieldType: def.fieldType,
-          fieldEnum: def.fieldEnum ?? Prisma.DbNull,
+          fieldEnum: serializeGlobalFieldEnum(def.fieldEnum),
         },
       });
     } catch (error: unknown) {
@@ -669,7 +675,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         projectId,
         fieldName: row.fieldName,
         fieldType: row.fieldType,
-        ...(row.fieldEnum !== null ? { fieldEnum: row.fieldEnum } : {}),
+        ...(row.fieldEnum !== null ? { fieldEnum: serializeGlobalFieldEnum(row.fieldEnum) } : {}),
         createdAt: now,
         updatedAt: now,
       },

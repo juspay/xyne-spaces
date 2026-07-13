@@ -100,6 +100,7 @@ import { searchService } from '../../../services/searchService';
 import { AIClassificationPanel } from './AIClassificationPanel';
 import type { TicketClassificationData } from '../../../types/classification';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { parseFieldEnumOptions } from '../../../utils/formFieldEnum';
 
 const formatTimestamp = (timestamp: number): string => {
   const date = new Date(timestamp);
@@ -261,8 +262,7 @@ const getFormEntityFieldEnum = (fieldValue: FormEntityValueWithField): string[] 
     fieldValue.globalField?.fieldEnum ??
     fieldValue.formField?.globalField?.fieldEnum ??
     fieldValue.formField?.fieldEnum;
-  if (!Array.isArray(fieldEnum)) return undefined;
-  return fieldEnum.filter((option): option is string => typeof option === 'string');
+  return parseFieldEnumOptions(fieldEnum);
 };
 
 // ── Stage Form Submissions Component ──────────────────────────────────────────

@@ -10,7 +10,7 @@ CREATE TABLE "public"."global_fields" (
     "projectId" TEXT NOT NULL,
     "fieldName" TEXT NOT NULL,
     "fieldType" "public"."FormFieldType" NOT NULL,
-    "fieldEnum" JSONB,
+    "fieldEnum" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

@@ -28,6 +28,7 @@ import { toast } from 'sonner';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
+import { parseFieldEnumOptions } from '../../../utils/formFieldEnum';
 
 interface FormField {
   id?: string; // Existing field ID for updates
@@ -152,9 +153,10 @@ export const CreateFormModal = ({
               isOptional: field.isOptional,
               membershipId: field.id,
             };
+            const parsedFieldEnum = parseFieldEnumOptions(fieldEnum);
             // Only add fieldEnum if it exists and is a non-empty array
-            if (fieldEnum && Array.isArray(fieldEnum) && fieldEnum.length > 0) {
-              return [{ ...baseField, fieldEnum: fieldEnum as string[] }];
+            if (parsedFieldEnum) {
+              return [{ ...baseField, fieldEnum: parsedFieldEnum }];
             }
             return [baseField];
           }),

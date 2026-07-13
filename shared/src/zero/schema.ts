@@ -2206,7 +2206,7 @@ export const globalFieldsTable = table('global_fields') // Prisma model: GlobalF
     projectId: string(),
     fieldName: string(),
     fieldType: enumeration<FormFieldType>(),
-    fieldEnum: json().optional(),
+    fieldEnum: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

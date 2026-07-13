@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { FormFieldType } from '@xyne/shared';
+import { parseGlobalFieldEnum } from './globalFieldEnum';
 
 /**
  * A resolved field definition, regardless of whether it lives in the new
@@ -39,7 +40,7 @@ export const resolveFieldDefinitionsByIds = async (
       id: g.id,
       fieldName: g.fieldName,
       fieldType: g.fieldType as FormFieldType,
-      fieldEnum: g.fieldEnum,
+      fieldEnum: parseGlobalFieldEnum(g.fieldEnum),
       source: 'global',
     });
   }
@@ -102,7 +103,7 @@ export const resolveFormFieldDefinitionsForForm = async (
       const id = row.globalFieldId ?? row.id;
       const fieldName = row.globalField?.fieldName ?? row.fieldName;
       const fieldType = (row.globalField?.fieldType ?? row.fieldType) as FormFieldType | null;
-      const fieldEnum = row.globalField?.fieldEnum ?? row.fieldEnum;
+      const fieldEnum = row.globalField ? parseGlobalFieldEnum(row.globalField.fieldEnum) : row.fieldEnum;
       if (!fieldName || !fieldType) {
         return null;
       }
