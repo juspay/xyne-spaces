@@ -7,6 +7,27 @@ exec < /dev/tty
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
+# --- Secret scanning (fail fast, before expensive build checks) ---------------
+# Scans ONLY staged changes so no secret can be committed by accident.
+# Config: .gitleaks.toml  | Accepted findings: .gitleaksignore
+echo "🔐 Scanning staged changes for secrets (gitleaks)..."
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks git --staged --redact --no-banner \
+        --config "$REPO_ROOT/.gitleaks.toml" \
+        --gitleaks-ignore-path "$REPO_ROOT/.gitleaksignore"; then
+    echo ""
+    echo "❌ gitleaks found a potential secret in your staged changes. Commit blocked."
+    echo "   • If it's a real secret: remove it, use an env var / secret manager."
+    echo "   • If it's a verified false positive: add its fingerprint to .gitleaksignore"
+    echo "     (get it reviewed — see comments in that file)."
+    exit 1
+  fi
+  echo "✅ No secrets detected in staged changes."
+else
+  echo "⚠️  gitleaks not installed — SKIPPING secret scan."
+  echo "   Install it: brew install gitleaks   (https://github.com/gitleaks/gitleaks)"
+fi
+
 # Get list of changed files
 CHANGED_FILES=$(git diff --cached --name-only)
 

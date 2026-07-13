@@ -1,0 +1,44 @@
+# Gitleaks configuration for xyne-spaces
+# Used by:
+#   - .husky/pre-commit  -> `gitleaks git --staged`  (blocks secrets before commit)
+#   - release audit       -> `gitleaks dir .`         (whole-tree scan before open-source)
+#
+# NOTE on suppression:
+#   - Whole PATH classes that never need scanning go in [allowlist].paths below.
+#   - Individual REVIEWED/ACCEPTED findings (incl. real-but-accepted values) go in
+#     the .gitleaksignore file as fingerprints, NOT here. Keep that list reviewed.
+
+# Inherit gitleaks' built-in default rules.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global path allowlist (build output, vendored, and test fixtures)"
+paths = [
+  # Dependencies / vendored
+  '''(^|/)node_modules/''',
+  '''(^|/)vendor/''',
+  '''(^|/)Pods/''',
+
+  # Build / release artifacts (already gitignored, never shipped)
+  '''(^|/)dist/''',
+  '''(^|/)build/''',
+  '''\.gradle/''',
+  '''(^|/)electron/release/''',
+  '''(^|/)\.vite/''',
+
+  # Signing material — must never be committed; flag via separate policy, not scan noise
+  '''\.keystore$''',
+  '''\.jks$''',
+
+  # Test fixtures / mocks that intentionally contain fake secrets
+  '''(^|/)__tests__/''',
+  '''(^|/)__mocks__/''',
+  '''\.test\.(ts|tsx|js|jsx)$''',
+  '''\.spec\.(ts|tsx|js|jsx)$''',
+
+  # Lockfiles (dependency checksums, not secrets)
+  '''(^|/)Podfile\.lock$''',
+  '''(^|/)package-lock\.json$''',
+  '''(^|/)yarn\.lock$''',
+]
