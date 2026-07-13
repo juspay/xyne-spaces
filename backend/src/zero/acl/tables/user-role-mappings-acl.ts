@@ -4,6 +4,7 @@ import { BaseACL } from '../core/base-acl';
 import { TableSchema, MutationACLError } from '../core/types';
 import { assertCanManageRoles } from '../core/admin-access';
 import { zql } from '../../queries';
+import { getRoleInWorkspaceOrThrow } from './roles-acl';
 
 export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
   private async verifyWorkspace(
@@ -14,27 +15,14 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
     if (!mapping) {
       throw new MutationACLError('User role mapping not found', 'user_role_mappings');
     }
-    const role = await tx.run(zql.roles.where('id', mapping.roleId).one());
-    if (!role || role.workspaceId !== this.ctx.workspaceId) {
-      throw new MutationACLError('Role not found in this workspace', 'user_role_mappings');
-    }
-  }
-
-  private async verifyRoleInWorkspace(
-    roleId: string,
-    tx: Transaction<Schema>,
-  ): Promise<void> {
-    const role = await tx.run(zql.roles.where('id', roleId).one());
-    if (!role || role.workspaceId !== this.ctx.workspaceId) {
-      throw new MutationACLError('Role not found in this workspace', 'user_role_mappings');
-    }
+    await getRoleInWorkspaceOrThrow(mapping.roleId, this.ctx.workspaceId, tx);
   }
 
   async canInsert(
     args: InsertValue<TableSchema<'user_role_mappings'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
-    await this.verifyRoleInWorkspace(args.roleId, tx);
+    await getRoleInWorkspaceOrThrow(args.roleId, this.ctx.workspaceId, tx);
     await assertCanManageRoles(this.ctx, tx);
   }
 

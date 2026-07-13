@@ -7,6 +7,9 @@ export const useUserGroups = (): UserGroup[] => {
   return useMemo(() => userGroups, [userGroups]);
 };
 
+export const useUserGroupsHydrated = (): boolean =>
+  useSelector(stateMachineActor, state => state.context.allUserGroupsHydrated);
+
 export const useUserGroupById = (userGroupId: string): UserGroup | undefined => {
   const userGroups = useUserGroups();
   return useMemo(() => userGroups.find(g => g.id === userGroupId), [userGroups, userGroupId]);

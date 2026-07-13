@@ -1131,7 +1131,11 @@ export const router = createBrowserRouter([
               {
                 path: 'user-groups',
                 element: (
-                  <ResourceProtectedRoute resourceName='USER-GROUPS'>
+                  <ResourceProtectedRoute
+                    resourceName='USER-GROUPS'
+                    minAccess='WRITE'
+                    allowUserGroupCreator
+                  >
                     <UserGroupsScreen />
                   </ResourceProtectedRoute>
                 ),
@@ -1181,7 +1185,11 @@ export const router = createBrowserRouter([
               {
                 path: 'user-groups/:userGroupId/assignment-config',
                 element: (
-                  <ResourceProtectedRoute resourceName='USER-GROUPS'>
+                  <ResourceProtectedRoute
+                    resourceName='USER-GROUPS'
+                    minAccess='WRITE'
+                    allowUserGroupCreator
+                  >
                     <AssignmentConfigWrapper />
                   </ResourceProtectedRoute>
                 ),

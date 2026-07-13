@@ -1,8 +1,20 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { Schema, WorkspaceRole } from '@xyne/shared';
+import { Schema, WorkspaceRole, type User } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+
+export async function getUserInWorkspaceOrThrow(
+  userId: string,
+  workspaceId: string,
+  tx: Transaction<Schema>
+): Promise<User> {
+  const user = await tx.run(zql.users.where('id', userId).one());
+  if (!user || user.workspaceId !== workspaceId) {
+    throw new MutationACLError('User not found in this workspace', 'users');
+  }
+  return user;
+}
 
 export class UsersACL extends BaseACL<'users'> {
 
@@ -46,11 +58,7 @@ export class UsersACL extends BaseACL<'users'> {
         throw new MutationACLError('User update failed: only workspace admins can change user roles', 'users');
       }
 
-      const targetUser = await tx.run(zql.users.where('id', args.id).one());
-
-      if (!targetUser || targetUser.workspaceId !== currentUser.workspaceId) {
-        throw new MutationACLError('User update failed: cannot modify users in different workspaces', 'users');
-      }
+      const targetUser = await getUserInWorkspaceOrThrow(args.id, currentUser.workspaceId, tx);
 
       if (!targetUser.workspaceId) {
         throw new MutationACLError('User update failed: target user has no workspace', 'users');

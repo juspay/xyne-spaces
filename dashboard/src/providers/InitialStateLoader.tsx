@@ -398,10 +398,11 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     enabled: !!context.userID,
   });
 
-  // Reset permission hydration when auth identity changes.
+  // Reset workspace-scoped state when the auth identity or workspace changes.
   useEffect(() => {
     setPermissionsHydrated(false);
-  }, [context.userID]);
+    stateMachineActor.send({ type: 'RESET_ALL_USER_GROUPS' });
+  }, [context.userID, context.workspaceId]);
 
   useEffect(() => {
     if (usersDetails.type === 'complete' && users) {

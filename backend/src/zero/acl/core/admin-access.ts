@@ -1,5 +1,5 @@
 import { Transaction } from '@rocicorp/zero';
-import { Schema, AccessType, WorkspaceRole } from '@xyne/shared';
+import { Schema, AccessType, WorkspaceRole, type UserGroup } from '@xyne/shared';
 import { zql } from '../../queries';
 import { MutationACLError, QueryContext } from './types';
 
@@ -75,6 +75,40 @@ export async function hasUserGroupsAdminAccess(ctx: { userID: string }, tx: Tran
     if (groupAccess) return true;
   }
   return false;
+}
+
+type UserGroupManagementContext = {
+  userID: string;
+  workspaceId: string;
+};
+
+type ManageableUserGroup = Pick<UserGroup, 'id' | 'workspaceId' | 'createdBy'>;
+type UserGroupManagementOperation = 'details' | 'members';
+
+/**
+ * Returns whether the current user may manage a specific user group.
+ *
+ * USER-GROUPS admins may perform either operation. Non-admin creators may edit
+ * group details, but may manage members only while the group has no resource
+ * grants.
+ */
+export async function canManageUserGroup(
+  ctx: UserGroupManagementContext,
+  tx: Transaction<Schema>,
+  userGroup: ManageableUserGroup,
+  operation: UserGroupManagementOperation
+): Promise<boolean> {
+  const isCreator =
+    userGroup.workspaceId === ctx.workspaceId &&
+    userGroup.createdBy !== null &&
+    userGroup.createdBy === ctx.userID;
+
+  if (isCreator && operation === 'details') return true;
+  if (await hasUserGroupsAdminAccess(ctx, tx)) return true;
+  if (!isCreator) return false;
+
+  const resourceGrant = await tx.run(zql.resource_access.where('groupId', userGroup.id).one());
+  return !resourceGrant;
 }
 
 /**

@@ -193,6 +193,7 @@ interface StateMachineContext {
   delayedMessages: DelayedMessageDB[];
   userPreference: UserPreference;
   allUserGroups: UserGroup[];
+  allUserGroupsHydrated: boolean;
   userGroupMappings: UserGroupMapping[];
   currentUserRoleIds: string[];
   metrics: MetricsState;
@@ -223,6 +224,7 @@ type StateMachineEvent =
   | { type: 'SAVE_DRAFT'; lookupId: string; html: string; text: string }
   | { type: 'REMOVE_DRAFT'; lookupId: string }
   | { type: 'ADD_ALL_USER_GROUPS'; userGroups: UserGroup[] }
+  | { type: 'RESET_ALL_USER_GROUPS' }
   | { type: 'ADD_USER_GROUP_MAPPINGS'; userGroupMappings: UserGroupMapping[] }
   | { type: 'SET_CURRENT_USER_ROLE_IDS'; roleIds: string[] }
   | { type: 'ADD_USER_DRAFTS'; draftMessages: DraftMessageDB[] }
@@ -453,6 +455,11 @@ export const stateMachine = setup({
         }
         return context.allUserGroups;
       },
+      allUserGroupsHydrated: ({ event }) => event.type === 'ADD_ALL_USER_GROUPS',
+    }),
+    resetAllUserGroups: assign({
+      allUserGroups: [],
+      allUserGroupsHydrated: false,
     }),
     addUserGroupMappings: assign({
       userGroupMappings: ({ context, event }) => {
@@ -713,6 +720,7 @@ export const stateMachine = setup({
     delayedMessages: [],
     userPreference: undefined,
     allUserGroups: [],
+    allUserGroupsHydrated: false,
     userGroupMappings: [],
     currentUserRoleIds: [],
     metrics: initialMetricsState,
@@ -767,6 +775,9 @@ export const stateMachine = setup({
         },
         ADD_ALL_USER_GROUPS: {
           actions: 'addAllUserGroups',
+        },
+        RESET_ALL_USER_GROUPS: {
+          actions: 'resetAllUserGroups',
         },
         ADD_USER_GROUP_MAPPINGS: {
           actions: 'addUserGroupMappings',
