@@ -178,6 +178,23 @@ const DEFAULT_ENABLED_TABS: TabType[] = [
   TabType.DESK,
 ];
 
+// Faint format hints for filters that open NO typeahead popup, so the caret would
+// otherwise sit after a bare colon with no cue. Shown only while the value is empty
+// (regex ends at `:` ) and cleared as soon as the user types a value.
+const TEXT_FILTER_HINTS: Record<string, string> = {
+  before: 'YYYY-MM-DD',
+  after: 'YYYY-MM-DD',
+  on: 'YYYY-MM-DD',
+  range: 'last 7 days',
+  board: 'board name',
+  tags: 'tag1, tag2',
+  stage: 'stage name',
+  status: 'open',
+  // `type:` with no value - hint the value set; `typeAutocomplete` completes it once you type.
+  type: 'messages, files, tickets…',
+};
+const TEXT_FILTER_HINT_REGEX = /\b(before|after|on|range|board|tags|stage|status|type):\s*$/i;
+
 const ChannelCommandMenu = ({
   channels,
   starred,
@@ -425,6 +442,21 @@ const ChannelCommandMenu = ({
     '@' | 'from:' | 'to:' | 'with:' | 'assignee:' | 'in:@' | null
   >(null);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
+  // Render-driving mirror of hasNavigatedRef: true once the user engages a specific row this
+  // session (ArrowUp/Down or hover). Drives the two-tier highlight (gray resting -> blue active)
+  // and whether the action-word ghost (Select/Open/Search) shows. Reset on query/chip change.
+  const [hasNavigated, setHasNavigated] = useState(false);
+  const markNavigated = useCallback(() => setHasNavigated(true), []);
+  // Hovering a mention candidate is engagement too — highlight it (index) and mark navigated so
+  // it renders in the active (blue) tier with its Select/Open ghost. (Programmatic resets to 0
+  // stay on the raw setter so they don't count as navigation.)
+  const selectMention = useCallback(
+    (index: number) => {
+      setSelectedMentionIndex(index);
+      markNavigated();
+    },
+    [markNavigated],
+  );
 
   const insertMentionRef = useRef<
     ((item: { id: string; name: string; email?: string; type?: MentionType }) => void) | null
@@ -466,27 +498,47 @@ const ChannelCommandMenu = ({
     setActiveItemLabel(willOpen ? (active?.getAttribute('data-item-label') ?? null) : null);
   }, []);
 
-  // Ghost suffix telling the user what Enter does: completes the highlighted row's
-  // name + " - Open" when it prefix-matches, else bare " - Open"; " - Search" otherwise.
+  // Ghost suffix telling the user what Enter does - shown when there's typed text or a filter
+  // chip and no mention typeahead is open. getScreenSearchSuffix() picks the text.
   const screenSearchActive =
-    hideTabs && searchMode === 'screen' && !mentionSearchType && Boolean(searchText.trim());
+    !mentionSearchType && (Boolean(searchText.trim()) || selectedMentions.length > 0);
   const getScreenSearchSuffix = (): string => {
+    // At rest (before arrowing/hovering onto a row): "- Search" - Enter searches everything,
+    // not the arbitrary first row previewed as if chosen.
+    if (!hasNavigated) return '\u00a0\u2013 Search';
+    // Navigated: preview the highlighted row - " - Search" for the search row, else the row
+    // name's completion + " - Open".
     if (!enterWillOpen) return '\u00a0\u2013 Search';
     // Match the RAW typed text so the completion lines up after it (the ghost sits
-    // right after the input); bare " - Open" when it can't (e.g. a filter prefix).
-    if (activeItemLabel && activeItemLabel.toLowerCase().startsWith(searchText.toLowerCase())) {
+    // right after the input); bare " - Open" when it can't (empty text left of a chip, or a
+    // filter prefix, where startsWith("") would otherwise splice the whole row name).
+    if (
+      searchText.trim() &&
+      activeItemLabel &&
+      activeItemLabel.toLowerCase().startsWith(searchText.toLowerCase())
+    ) {
       // nbsp: a leading space in the remainder would collapse in the ghost span.
       const completion = activeItemLabel.slice(searchText.length).replace(/^ /, '\u00a0');
       return `${completion}\u00a0\u2013 Open`;
     }
     return '\u00a0\u2013 Open';
   };
-  const autocompleteSuffix =
-    typeAutocomplete.suffix || (screenSearchActive ? getScreenSearchSuffix() : undefined);
+  // Format hint for a no-popup text filter whose value is still empty (e.g. "before:"
+  // -> "YYYY-MM-DD"). No leading space (matches the mention preview / raw filter text).
+  const textFilterHint = useMemo(() => {
+    const match = searchText.match(TEXT_FILTER_HINT_REGEX);
+    const keyword = match?.[1]?.toLowerCase();
+    const hint = keyword ? TEXT_FILTER_HINTS[keyword] : undefined;
+    return hint ?? '';
+  }, [searchText]);
 
-  // Empty-query browse: replace the placeholder with "<name> - Open" for the hovered row.
-  const openTargetLabel =
-    hideTabs && searchMode === 'screen' && !searchText.trim() ? activeItemLabel : null;
+  // `popupFilterHint` and the final `autocompleteSuffix` are assembled lower down, after the
+  // mention-candidate arrays (availableUsers / availableChannels / availablePriorities) they
+  // read to inline-complete the highlighted row's name.
+
+  // Empty-query browse: replace the placeholder with "<name> - Open" for the hovered/arrowed
+  // row. Active in every cmd+K mode now (activeItemLabel is only set for a real openable row).
+  const openTargetLabel = !searchText.trim() ? activeItemLabel : null;
 
   // Build URLSearchParams for navigating to the search results screen,
   // including human-readable display text resolved from mention IDs.
@@ -1131,6 +1183,72 @@ const ChannelCommandMenu = ({
       .filter(({ id }) => (query ? id.toLowerCase().startsWith(query) : true));
   }, [mentionSearchType, mentionSearchQuery]);
 
+  // The highlighted candidate in the open mention popup — the exact row Enter/click selects.
+  // Reads the same arrays the Enter handler indexes, so the ghost never disagrees with Enter.
+  const mentionActiveLabel = useMemo<string | null>(() => {
+    if (mentionSearchType === MentionType.USER) {
+      const user = availableUsers[selectedMentionIndex];
+      return user ? getUserDisplayName(user) : null;
+    }
+    if (mentionSearchType === MentionType.CHANNEL) {
+      return availableChannels[selectedMentionIndex]?.displayName ?? null;
+    }
+    if (mentionSearchType === MentionType.PRIORITY) {
+      return availablePriorities[selectedMentionIndex]?.name ?? null;
+    }
+    return null;
+  }, [
+    mentionSearchType,
+    availableUsers,
+    availableChannels,
+    availablePriorities,
+    selectedMentionIndex,
+  ]);
+
+  // Ghost suffix for an OPEN filter typeahead: previews the highlighted candidate + the action
+  // Enter triggers - " - Select" for the filter prefixes (from/to/with/assignee/in/priority),
+  // " - Open" for the @/# nav. Shown as soon as the typeahead is open (a selector is inherently a
+  // "pick a value" context, so the first candidate previews at rest); the row's gray→blue tier
+  // still signals navigation. Empty when there's no matching candidate.
+  const popupFilterHint = useMemo(() => {
+    if (!mentionSearchType || !mentionActiveLabel) return '';
+    const query = mentionSearchQuery.trim();
+    // @/# navigate on select; every other prefix builds a filter chip (a "select").
+    const action = userTrigger === '@' || channelTrigger === '#' ? 'Open' : 'Select';
+    // No value typed yet: at rest show only the action word ("from: - Select"), not the first
+    // candidate's name - the resting highlight is arbitrary, so previewing it reads as if it were
+    // already chosen. Once the user navigates, preview the actually-highlighted name.
+    if (!query) {
+      return hasNavigated
+        ? `${mentionActiveLabel}\u00a0\u2013 ${action}`
+        : `\u00a0\u2013 ${action}`;
+    }
+    // Typed value: inline-complete the remainder; nbsp keeps a leading space from collapsing.
+    if (mentionActiveLabel.toLowerCase().startsWith(query.toLowerCase())) {
+      const completion = mentionActiveLabel.slice(query.length).replace(/^ /, '\u00a0');
+      return `${completion}\u00a0\u2013 ${action}`;
+    }
+    return '';
+  }, [
+    hasNavigated,
+    mentionSearchType,
+    mentionSearchQuery,
+    userTrigger,
+    channelTrigger,
+    mentionActiveLabel,
+  ]);
+
+  // Never surface a ghost when the input is truly empty (no free text AND no chip). A stale
+  // mention popup or a mid-delete transition can otherwise leave the suffix floating at the
+  // caret with nothing to anchor to ("ghost text floating when deleted").
+  const inputIsEmpty = !searchText.trim() && selectedMentions.length === 0;
+  const autocompleteSuffix = inputIsEmpty
+    ? undefined
+    : typeAutocomplete.suffix ||
+      textFilterHint ||
+      popupFilterHint ||
+      (screenSearchActive ? getScreenSearchSuffix() : undefined);
+
   // Track search performed in command menu (debounced)
   useEffect(() => {
     if (!searchText.trim() && activeTab !== TabType.CHANNELS) return;
@@ -1198,6 +1316,14 @@ const ChannelCommandMenu = ({
       setMentionSearchType(null);
       setChannelTrigger(null);
       setUserTrigger(null);
+      // Ghost/selection state must reset too, or a reopen shows the last session's
+      // preview: openTargetLabel falls back to activeItemLabel when the query is empty,
+      // so a stale label renders as a "‹prev item› – Open" placeholder.
+      setSelectedMentionIndex(0);
+      setHasNavigated(false);
+      hasNavigatedRef.current = false;
+      setEnterWillOpen(false);
+      setActiveItemLabel(null);
       setActiveTab(TabType.ALL);
       onTabChange?.(TabType.ALL);
       resetSearchState();
@@ -1341,8 +1467,9 @@ const ChannelCommandMenu = ({
         item.setAttribute('aria-selected', item === hovered ? 'true' : 'false');
       });
       syncEnterIntent();
+      markNavigated();
     });
-  }, [syncEnterIntent]);
+  }, [syncEnterIntent, markNavigated]);
 
   const handleFilePreview = useCallback((result: DisplaySearchResult): void => {
     // Handle attachment preview - show file preview modal
@@ -1553,6 +1680,13 @@ const ChannelCommandMenu = ({
   // chips change — both are inputs to the backend search.
   useEffect(() => {
     hasNavigatedRef.current = false;
+    setHasNavigated(false);
+    // Emptying the input (e.g. Cmd+A + backspace over a chip) must also drop the stale row
+    // preview, or openTargetLabel keeps rendering "<prev item> - Open" over the placeholder.
+    if (!searchText.trim() && selectedMentions.length === 0) {
+      setActiveItemLabel(null);
+      setEnterWillOpen(false);
+    }
   }, [searchText, selectedMentions]);
 
   // The user-facing banner shows a generic "Search is unavailable" message;
@@ -1562,13 +1696,20 @@ const ChannelCommandMenu = ({
     if (error) console.warn('[Cmd+K search]', error);
   }, [error]);
 
+  // Signature of the backend result ORDER, not just count: a re-rank that keeps the same row
+  // count (e.g. adding free-text to a `from:` filter) wouldn't change `backendResults.length`,
+  // so the auto-select effect below wouldn't re-run and the highlight would stay stranded.
+  const backendResultOrder = backendResults.map(r => r.id).join(',');
+
   useEffect(() => {
     // Auto-select fires when there's a query OR an active filter chip — the
     // latter catches the case where the user typed `from:<name>` / `in:<ch>`,
     // inserted a chip, and the backend returned results for that filter with
     // no free-text query.
     const hasActiveSearch = searchText.trim().length > 0 || selectedMentions.length > 0;
-    if (!hasActiveSearch || !hasResults || hasNavigatedRef.current) return;
+    // While a mention typeahead is open, selection is owned by selectedMentionIndex - don't
+    // also auto-select a cmdk row, or two rows light up.
+    if (!hasActiveSearch || !hasResults || hasNavigatedRef.current || mentionSearchType) return;
     // Small delay to let DOM render the items
     const timer = setTimeout(() => {
       if (hasNavigatedRef.current) return;
@@ -1587,7 +1728,8 @@ const ChannelCommandMenu = ({
     activeTab,
     filteredLocalChannels.length,
     filteredLocalUsers.length,
-    backendResults.length,
+    backendResultOrder,
+    mentionSearchType,
     syncEnterIntent,
   ]);
 
@@ -1913,67 +2055,76 @@ const ChannelCommandMenu = ({
       </div>
     ) : null;
 
+  // Render the plain-search STARRED section. Extracted (like
+  // renderSearchUsersSection / renderSearchChannelsSection) so it can be pinned
+  // to the top of the list (both popup and screen).
+  const renderSearchStarredSection = () =>
+    (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+    showGroupedLocalResults &&
+    groupedChannels['starred'] &&
+    groupedChannels['starred'].length > 0 ? (
+      <div className='mb-4'>
+        {(() => {
+          const items = groupedChannels['starred'];
+          const category = ChannelCategory.STARRED;
+          const isExpanded = expandedCategories.has(category);
+          const hasMore = items.length > DISPLAY_LIMIT;
+          const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
+          const hiddenCount = items.length - DISPLAY_LIMIT;
+
+          return (
+            <Command.Group
+              heading={getCategoryLabel(category)}
+              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+            >
+              {displayItems.map(({ channel }, index) => {
+                const unreadCount = unreadCounts[channel.id] ?? 0;
+                return (
+                  <ChannelCommandItem
+                    key={channel.id}
+                    channel={channel}
+                    currentUserID={currentUserID}
+                    unreadCount={unreadCount}
+                    onSelect={displayName => {
+                      void handleChannelSelect(channel, displayName, index + 1);
+                    }}
+                    onItemMouseDown={handleItemMouseDown}
+                    getChannelIcon={getChannelIcon}
+                    isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+                  />
+                );
+              })}
+              {hasMore && (
+                <button
+                  onClick={() => toggleCategoryExpansion(category)}
+                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                  data-track-category='CHANNEL_SEARCH'
+                  data-track-name='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
+                  data-track-metadata={JSON.stringify({
+                    category: category as string,
+                    isExpanded,
+                  })}
+                >
+                  {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                </button>
+              )}
+            </Command.Group>
+          );
+        })()}
+      </div>
+    ) : null;
+
   // Render the local sections (Starred, Users, Group DMs, Channels) for the search branch.
-  // `includeUsers` is false when the USERS section is hoisted above the "Show
-  // results for" row (strong user match); `includeChannels` is false when the
-  // CHANNELS section is hoisted (strong channel match) — both avoid a double-render.
-  const renderSearchLocalSections = (includeUsers = true, includeChannels = true) => (
+  // Each `include*` flag is false when that section is pinned to the top of the
+  // list (hoistStarred / hoistUser / hoistChannel) — avoids a double-render.
+  const renderSearchLocalSections = (
+    includeStarred = true,
+    includeUsers = true,
+    includeChannels = true,
+  ) => (
     <>
       {/* 0. Starred (from local channels) */}
-      {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
-        showGroupedLocalResults &&
-        groupedChannels['starred'] &&
-        groupedChannels['starred'].length > 0 && (
-          <div className='mb-4'>
-            {(() => {
-              const items = groupedChannels['starred'];
-              const category = ChannelCategory.STARRED;
-              const isExpanded = expandedCategories.has(category);
-              const hasMore = items.length > DISPLAY_LIMIT;
-              const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-              const hiddenCount = items.length - DISPLAY_LIMIT;
-
-              return (
-                <Command.Group
-                  heading={getCategoryLabel(category)}
-                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                >
-                  {displayItems.map(({ channel }, index) => {
-                    const unreadCount = unreadCounts[channel.id] ?? 0;
-                    return (
-                      <ChannelCommandItem
-                        key={channel.id}
-                        channel={channel}
-                        currentUserID={currentUserID}
-                        unreadCount={unreadCount}
-                        onSelect={displayName => {
-                          void handleChannelSelect(channel, displayName, index + 1);
-                        }}
-                        onItemMouseDown={handleItemMouseDown}
-                        getChannelIcon={getChannelIcon}
-                        isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
-                      />
-                    );
-                  })}
-                  {hasMore && (
-                    <button
-                      onClick={() => toggleCategoryExpansion(category)}
-                      className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                      data-track-category='CHANNEL_SEARCH'
-                      data-track-name='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
-                      data-track-metadata={JSON.stringify({
-                        category: category as string,
-                        isExpanded,
-                      })}
-                    >
-                      {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                    </button>
-                  )}
-                </Command.Group>
-              );
-            })()}
-          </div>
-        )}
+      {includeStarred && renderSearchStarredSection()}
 
       {/* 1. Users (from local) */}
       {includeUsers && renderSearchUsersSection()}
@@ -2086,6 +2237,18 @@ const ChannelCommandMenu = ({
     </>
   );
 
+  // Hoist the best local matches to the top of the list — applies in BOTH the
+  // popup and the screen search bar. Only in the combined ALL view (a single-type
+  // tab has nothing to reorder) and not while a mention typeahead is open.
+  // Starred always leads; a strong user/channel match then becomes the default
+  // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
+  // from:/in:/with: chips, where backend results lead instead.
+  const canHoist = activeTab === TabType.ALL && !mentionSearchType;
+  const hoistStarred =
+    canHoist && !hasFromOrInFilter && !hasWithFilter && searchText.trim().length > 0;
+  const hoistUser = canHoist && hasStrongUserMatch;
+  const hoistChannel = canHoist && hasStrongChannelMatch;
+
   if (inline && !open) return null;
 
   const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
@@ -2129,7 +2292,13 @@ const ChannelCommandMenu = ({
     // Since we use LexicalSearchInput (ContentEditable), cmdk's native arrow key
     // navigation doesn't work. We manually manage aria-selected for navigation.
     // See: https://github.com/pacocoursey/cmdk/issues/322
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    // When a mention typeahead is open, its own ArrowUp/Down handler (MentionPlugin) owns
+    // navigation via selectedMentionIndex — don't also move aria-selected here.
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !mentionSearchType) {
+      // We drive arrow nav imperatively; cmdk's own bubble-phase ArrowDown/Up handler would move
+      // its selection and light up a SECOND row. cmdk skips it when the event is defaultPrevented,
+      // so prevent it here (our onKeyDownCapture runs first).
+      e.preventDefault();
       const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
       if (!items || items.length === 0) return;
 
@@ -2137,6 +2306,16 @@ const ChannelCommandMenu = ({
       const currentIndex = Array.from(items).findIndex(
         item => item.getAttribute('aria-selected') === 'true',
       );
+
+      // First arrow (Up OR Down) from the resting row activates it IN PLACE (gray -> blue)
+      // instead of moving to an adjacent row; keeps ArrowUp from rest off the last row.
+      if (!hasNavigated && currentIndex >= 0) {
+        hasNavigatedRef.current = true;
+        markNavigated();
+        setSuppressHover(true);
+        syncEnterIntent();
+        return;
+      }
 
       // Calculate next index
       let nextIndex: number;
@@ -2158,6 +2337,7 @@ const ChannelCommandMenu = ({
       // Suppress mouse hover highlights while navigating with keyboard.
       setSuppressHover(true);
       hasNavigatedRef.current = true;
+      markNavigated();
 
       // Track which result is currently selected via keyboard
       const newlySelectedItem = items[nextIndex];
@@ -2405,18 +2585,24 @@ const ChannelCommandMenu = ({
     e.preventDefault();
     e.stopPropagation();
 
-    // Tell cmdk to select the active item
+    // The explicitly-selected item; when nothing is highlighted (e.g. the empty resting state,
+    // which shows no highlight) fall back to the first row so Enter still opens the first result.
     const activeItem = commandRef.current?.querySelector(
       '[cmdk-item][aria-selected="true"]',
     ) as HTMLElement | null;
+    const enterTarget =
+      activeItem ??
+      (commandRef.current?.querySelector(
+        '[cmdk-item]:not([aria-disabled="true"])',
+      ) as HTMLElement | null);
 
     // Screen-mode popup: Enter navigates to search screen only when no result item is selected
     // (or when the "show results for" item is selected). If a regular result is selected, click it.
     if (hideTabs && searchMode === 'screen') {
-      const isShowResultsItem = activeItem?.getAttribute('data-show-results-item') === 'true';
-      if (activeItem && !isShowResultsItem) {
+      const isShowResultsItem = enterTarget?.getAttribute('data-show-results-item') === 'true';
+      if (enterTarget && !isShowResultsItem) {
         lastModifierRef.current = e.metaKey || e.ctrlKey;
-        activeItem.click();
+        enterTarget.click();
         return;
       }
       onOpenChange(false);
@@ -2430,7 +2616,7 @@ const ChannelCommandMenu = ({
     // loses modifier state, so downstream selection handlers read this ref
     // instead of checking event.metaKey.
     lastModifierRef.current = e.metaKey || e.ctrlKey;
-    activeItem?.click();
+    enterTarget?.click();
   };
 
   const commandBody = (
@@ -2473,6 +2659,8 @@ const ChannelCommandMenu = ({
             mentionSearchType={mentionSearchType}
             selectedMentionIndex={selectedMentionIndex}
             setSelectedMentionIndex={setSelectedMentionIndex}
+            onNavigate={markNavigated}
+            hasNavigated={hasNavigated}
             onInsertMentionReady={handleInsertMentionReady}
             onPasteDetected={onPasteDetected}
             onManualKeystroke={onManualKeystroke}
@@ -2777,24 +2965,13 @@ const ChannelCommandMenu = ({
               }
             }}
           >
-            {/* Strong user match — render the USERS section ABOVE the
-                "Show results for" row so the top user becomes the default
-                Enter target (Slack-style). Screen mode only. */}
-            {hideTabs &&
-              searchMode === 'screen' &&
-              hasStrongUserMatch &&
-              !mentionSearchType &&
-              renderSearchUsersSection()}
-
-            {/* Strong channel match — render the CHANNELS section ABOVE the
-                "Show results for" row so the top channel becomes the default
-                Enter target (Slack-style). Screen mode only. Only fires when a
-                strong USER match does not already win (user precedence). */}
-            {hideTabs &&
-              searchMode === 'screen' &&
-              hasStrongChannelMatch &&
-              !mentionSearchType &&
-              renderSearchChannelsSection()}
+            {/* Best local matches pinned to the top of the list — both popup and
+                screen. Starred leads; the strong-matched user/channel then becomes
+                the default Enter target (Slack-style). In screen mode these sit
+                above the "Show results for" row below. */}
+            {hoistStarred && renderSearchStarredSection()}
+            {hoistUser && renderSearchUsersSection()}
+            {hoistChannel && renderSearchChannelsSection()}
 
             {/* Show results for: [query] — screen mode only */}
             {hideTabs &&
@@ -2894,12 +3071,14 @@ const ChannelCommandMenu = ({
                                 });
                               }}
                               onMouseEnter={() => {
-                                if (setSelectedMentionIndex) {
-                                  setSelectedMentionIndex(index);
-                                }
+                                selectMention(index);
                               }}
                               className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                                index === selectedMentionIndex ? 'bg-muted' : ''
+                                index === selectedMentionIndex
+                                  ? hasNavigated
+                                    ? 'cmdk-active-row'
+                                    : 'bg-muted'
+                                  : ''
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
@@ -2938,12 +3117,14 @@ const ChannelCommandMenu = ({
                                 });
                               }}
                               onMouseEnter={() => {
-                                if (setSelectedMentionIndex) {
-                                  setSelectedMentionIndex(adjustedIndex);
-                                }
+                                selectMention(adjustedIndex);
                               }}
                               className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                                adjustedIndex === selectedMentionIndex ? 'bg-muted' : ''
+                                adjustedIndex === selectedMentionIndex
+                                  ? hasNavigated
+                                    ? 'cmdk-active-row'
+                                    : 'bg-muted'
+                                  : ''
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
@@ -2995,12 +3176,14 @@ const ChannelCommandMenu = ({
                                   });
                                 }}
                                 onMouseEnter={() => {
-                                  if (setSelectedMentionIndex) {
-                                    setSelectedMentionIndex(index);
-                                  }
+                                  selectMention(index);
                                 }}
                                 className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                                  index === selectedMentionIndex ? 'bg-muted' : ''
+                                  index === selectedMentionIndex
+                                    ? hasNavigated
+                                      ? 'cmdk-active-row'
+                                      : 'bg-muted'
+                                    : ''
                                 } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                               >
@@ -3065,12 +3248,14 @@ const ChannelCommandMenu = ({
                                 });
                               }}
                               onMouseEnter={() => {
-                                if (setSelectedMentionIndex) {
-                                  setSelectedMentionIndex(index);
-                                }
+                                selectMention(index);
                               }}
                               className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                                index === selectedMentionIndex ? 'bg-muted' : ''
+                                index === selectedMentionIndex
+                                  ? hasNavigated
+                                    ? 'cmdk-active-row'
+                                    : 'bg-muted'
+                                  : ''
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
@@ -3114,12 +3299,14 @@ const ChannelCommandMenu = ({
                           });
                         }}
                         onMouseEnter={() => {
-                          if (setSelectedMentionIndex) {
-                            setSelectedMentionIndex(index);
-                          }
+                          selectMention(index);
                         }}
                         className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                          index === selectedMentionIndex ? 'bg-muted' : ''
+                          index === selectedMentionIndex
+                            ? hasNavigated
+                              ? 'cmdk-active-row'
+                              : 'bg-muted'
+                            : ''
                         } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                         style={{ WebkitTapHighlightColor: 'transparent' }}
                       >
@@ -3160,12 +3347,14 @@ const ChannelCommandMenu = ({
                             });
                           }}
                           onMouseEnter={() => {
-                            if (setSelectedMentionIndex) {
-                              setSelectedMentionIndex(index);
-                            }
+                            selectMention(index);
                           }}
                           className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                            index === selectedMentionIndex ? 'bg-muted' : ''
+                            index === selectedMentionIndex
+                              ? hasNavigated
+                                ? 'cmdk-active-row'
+                                : 'bg-muted'
+                              : ''
                           } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                           style={{ WebkitTapHighlightColor: 'transparent' }}
                         >
@@ -3213,12 +3402,14 @@ const ChannelCommandMenu = ({
                             });
                           }}
                           onMouseEnter={() => {
-                            if (setSelectedMentionIndex) {
-                              setSelectedMentionIndex(index);
-                            }
+                            selectMention(index);
                           }}
                           className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                            index === selectedMentionIndex ? 'bg-muted' : ''
+                            index === selectedMentionIndex
+                              ? hasNavigated
+                                ? 'cmdk-active-row'
+                                : 'bg-muted'
+                              : ''
                           } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                           style={{ WebkitTapHighlightColor: 'transparent' }}
                         >
@@ -3268,12 +3459,14 @@ const ChannelCommandMenu = ({
                           });
                         }}
                         onMouseEnter={() => {
-                          if (setSelectedMentionIndex) {
-                            setSelectedMentionIndex(index);
-                          }
+                          selectMention(index);
                         }}
                         className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                          index === selectedMentionIndex ? 'bg-muted' : ''
+                          index === selectedMentionIndex
+                            ? hasNavigated
+                              ? 'cmdk-active-row'
+                              : 'bg-muted'
+                            : ''
                         } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                         style={{ WebkitTapHighlightColor: 'transparent' }}
                       >
@@ -3398,14 +3591,10 @@ const ChannelCommandMenu = ({
                       </>
                     ) : (
                       <>
+                        {/* A section pinned to the top (above) is skipped here to
+                            avoid a double-render. */}
                         {!hasWithFilter &&
-                          renderSearchLocalSections(
-                            // USERS already rendered above the "Show results for"
-                            // row on a strong match — don't render it twice.
-                            !(hideTabs && searchMode === 'screen' && hasStrongUserMatch),
-                            // CHANNELS likewise hoisted on a strong channel match.
-                            !(hideTabs && searchMode === 'screen' && hasStrongChannelMatch),
-                          )}
+                          renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)}
                         {backendResults.length > 0 && renderSearchBackendResults()}
                       </>
                     )}
@@ -3632,6 +3821,14 @@ const ChannelCommandMenu = ({
     return (
       <Command
         ref={commandRef}
+        // Selection is managed imperatively (aria-selected via setAttribute) because cmdk's
+        // arrow-nav needs a Command.Input we don't use. Pin cmdk's value to a sentinel that
+        // matches no item so it never marks one selected too — otherwise it latches a result row
+        // and a SECOND highlight appears alongside the manually-selected one.
+        value='__none__'
+        onValueChange={() => {}}
+        data-nav-active={hasNavigated ? 'true' : undefined}
+        data-mention-active={mentionSearchType ? 'true' : undefined}
         shouldFilter={false}
         className='w-full h-full flex flex-col bg-background'
         onMouseMove={() => {
@@ -3656,6 +3853,12 @@ const ChannelCommandMenu = ({
     <Command.Dialog
       open={open}
       ref={commandRef}
+      // See inline <Command> above: pin cmdk's value to a sentinel ('__none__') that matches no
+      // item so it never adds a second highlighted row next to the imperatively-managed one.
+      value='__none__'
+      onValueChange={() => {}}
+      data-nav-active={hasNavigated ? 'true' : undefined}
+      data-mention-active={mentionSearchType ? 'true' : undefined}
       onOpenChange={onOpenChange}
       shouldFilter={false}
       onMouseMove={() => {
