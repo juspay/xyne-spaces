@@ -92,6 +92,8 @@ import {
   DropdownMenuItem,
 } from '../../components/ui/dropdown-menu';
 import { StageFilterPopup } from '../../components/Tickets/TicketFilters/Submenus/StagesSubmenu/StageFilterPopup';
+import { useMachine } from '@xstate/react';
+import { ticketFiltersMachine, clearTicketFilterParams } from '../../machines/ticketFiltersMachine';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
 import { DragAndDropOverlay } from '../../components/Chat/DragAndDropOverlay';
@@ -540,8 +542,12 @@ const SupportScreen = (): ReactElement => {
 
   const setSelectedChannelId = useCallback(
     (next: string | null): void => {
-      // Preserve non-routing query params (settings, openSettings, etc.).
-      const qs = searchParams.toString();
+      // Preserve non-routing query params (settings, openSettings, etc.) but drop filter
+      // params — filters are persisted per channel, so the target channel restores its own
+      // from sessionStorage instead of inheriting the previous channel's URL filters.
+      const params = new URLSearchParams(searchParams);
+      clearTicketFilterParams(params);
+      const qs = params.toString();
       const path = next ? `${supportBase}/${next}` : supportBase;
       void navigate(qs ? `${path}?${qs}` : path, { replace: true });
     },
@@ -551,7 +557,35 @@ const SupportScreen = (): ReactElement => {
     const saved = localStorage.getItem('support-sidebar-open');
     return saved ? saved === 'true' : true;
   });
-  const [filters, setFilters] = useState<TicketFilters>({});
+  const [filtersState, sendFilters] = useMachine(ticketFiltersMachine);
+  const filters = filtersState.context.filters;
+
+  const setFilters = useCallback(
+    (nextFilters: TicketFilters): void => {
+      sendFilters({ type: 'SET_FILTERS', filters: nextFilters });
+    },
+    [sendFilters],
+  );
+
+  useEffect(() => {
+    sendFilters({
+      type: 'INIT',
+      channelId: selectedChannelId ?? undefined,
+      viewMode: 'support',
+      enabled: !!selectedChannelId,
+      searchParams,
+      setSearchParams,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sendFilters, selectedChannelId]);
+
+  // Sync URL changes to the machine (browser back/forward)
+  useEffect(() => {
+    if (filtersState.value === 'initialized') {
+      sendFilters({ type: 'URL_CHANGED', searchParams });
+    }
+  }, [searchParams, sendFilters, filtersState.value]);
+
   const [expandedDeskIds, setExpandedDeskIds] = useState<Set<string>>(new Set());
   const [deskView, setDeskView] = useState<'tickets' | 'userDrafts' | 'userSent' | 'labelThreads'>(
     'tickets',
@@ -611,24 +645,22 @@ const SupportScreen = (): ReactElement => {
 
   const handleFilterChange = useCallback(
     (key: keyof TicketFilters, value: unknown): void => {
-      setFilters(prev => {
-        const newFilters = { ...prev, [key]: value };
-        // Remove undefined/empty values
-        Object.keys(newFilters).forEach((filterKey: string) => {
-          const k = filterKey as keyof TicketFilters;
-          const filterValue = newFilters[k];
-          if (
-            filterValue === undefined ||
-            filterValue === null ||
-            (Array.isArray(filterValue) && filterValue.length === 0)
-          ) {
-            delete newFilters[k];
-          }
-        });
-        return newFilters;
+      const newFilters = { ...filters, [key]: value };
+      // Remove undefined/empty values
+      Object.keys(newFilters).forEach((filterKey: string) => {
+        const k = filterKey as keyof TicketFilters;
+        const filterValue = newFilters[k];
+        if (
+          filterValue === undefined ||
+          filterValue === null ||
+          (Array.isArray(filterValue) && filterValue.length === 0)
+        ) {
+          delete newFilters[k];
+        }
       });
+      setFilters(newFilters);
     },
-    [setFilters],
+    [filters, setFilters],
   );
 
   const handleMenuItemClick = useCallback((category: string): void => {
@@ -811,14 +843,6 @@ const SupportScreen = (): ReactElement => {
   }, [userID, zero]);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
-
-  // Reset stage filter when channel changes (different channels may have different stages)
-  useEffect(() => {
-    setFilters(prev => {
-      const { stages: _, ...rest } = prev;
-      return rest;
-    });
-  }, [selectedChannelId]);
 
   const deeplinkConversationId = searchParams.get('conversationId');
   const deeplinkMessageId = searchParams.get('messageId');

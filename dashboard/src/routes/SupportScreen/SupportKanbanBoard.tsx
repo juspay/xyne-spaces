@@ -51,6 +51,8 @@ export interface SupportKanbanBoardProps {
     assignedTo: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
+    aiCategory: string[] | undefined;
+    hasAiDraft: boolean | undefined;
     userGroups: string[] | undefined;
   };
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
@@ -101,6 +103,8 @@ export const SupportKanbanBoard = ({
         a: ticketFilter.assignedTo ?? null,
         p: ticketFilter.priority ?? null,
         s: ticketFilter.stageName ?? null,
+        ac: ticketFilter.aiCategory ?? null,
+        ad: ticketFilter.hasAiDraft ?? null,
         g: ticketFilter.userGroups ?? null,
       }),
     [
@@ -108,6 +112,8 @@ export const SupportKanbanBoard = ({
       ticketFilter.assignedTo,
       ticketFilter.priority,
       ticketFilter.stageName,
+      ticketFilter.aiCategory,
+      ticketFilter.hasAiDraft,
       ticketFilter.userGroups,
     ],
   );

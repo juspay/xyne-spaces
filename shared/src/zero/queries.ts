@@ -978,9 +978,11 @@ export const queries = defineQueries({
       assignedTo: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
+      aiCategory: z.array(z.string()).optional(),
+      hasAiDraft: z.boolean().optional(),
       userGroups: z.array(z.string()).optional(),
     }),
-    ({ args: { channelId, merchantMid, assignedTo, priority, stageName, userGroups } }) => {
+    ({ args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -998,6 +1000,16 @@ export const queries = defineQueries({
 
       if (stageName && stageName.length > 0) {
         query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
+      }
+
+      if (aiCategory && aiCategory.length > 0) {
+        query = query.where(({ or, cmp }) => or(...aiCategory.map((c) => cmp('aiCategory', c))));
+      }
+
+      if (hasAiDraft) {
+        query = query.where(({ exists }) =>
+          exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
+        );
       }
 
       if (userGroups && userGroups.length > 0) {
