@@ -10,11 +10,11 @@ yarn-error.log*
 Backend/target/
 
 .direnv/
-# Environment variables
+# Environment variables — track shared env files (.env.dev/.sandbox/.prod/.example),
+# but never per-developer local overrides.
 .env
-.env.development.local
-.env.test.local
-.env.production.local
+.env.local
+.env.*.local
 .gradle/
 # IDE files
 .vscode/
