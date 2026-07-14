@@ -10,13 +10,14 @@ import {
   LucideIcon,
   CheckCircle,
   Info,
-  MessageCircleMore,
+  Reply,
   FoldVertical,
   Fullscreen,
   Users,
   Ticket,
   MoreVertical,
-  Layout,
+  FileText,
+  Phone,
 } from 'lucide-react';
 import { ActivityItem } from '../ActivityItem';
 import { NofocusRefProvider } from '../ActivityItemCard';
@@ -60,6 +61,7 @@ type ActivityTab =
   | 'reactions'
   | 'tickets'
   | 'canvas'
+  | 'calls'
   | 'actionable'
   | 'fyi'
   | 'group_mentions';
@@ -89,6 +91,17 @@ const isAllVisibleActivity = (activity: ActivityWithRelated): boolean => {
   return true;
 };
 
+const CALL_ACTIVITY_TYPES = [
+  'scheduled_call',
+  'call_reminder',
+  'call_updated',
+  'meeting_accepted',
+  'meeting_declined',
+] as const;
+
+const isCallActivity = (activity: ActivityWithRelated): boolean =>
+  CALL_ACTIVITY_TYPES.some(type => type === activity.actorAction);
+
 export const isDirectUserMention = (messageContent: string, userId: string): boolean => {
   const userMentions = extractUserMentions(messageContent);
   return userMentions.includes(userId);
@@ -105,7 +118,7 @@ const TABS: TabConfig[] = [
   {
     value: 'replies',
     label: 'Replies',
-    Icon: MessageCircleMore,
+    Icon: Reply,
     // added to maintain backward compat for now, to be deprecated
     filter: activity => activity.actorAction === 'replied' || activity.actorAction === 'replied_v2',
   },
@@ -132,12 +145,18 @@ const TABS: TabConfig[] = [
   {
     value: 'canvas',
     label: 'Canvas',
-    Icon: Layout,
+    Icon: FileText,
     filter: activity =>
       activity.actorAction === 'canvas_shared' ||
       activity.actorAction === 'canvas_role_changed' ||
       activity.actorAction === 'canvas_access_revoked' ||
       (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
+  },
+  {
+    value: 'calls',
+    label: 'Calls',
+    Icon: Phone,
+    filter: isCallActivity,
   },
   {
     value: 'group_mentions',
@@ -315,6 +334,8 @@ const ActivityListView = (): ReactElement => {
         ];
       case 'canvas':
         return ['canvas_shared', 'canvas_role_changed', 'canvas_access_revoked', 'mentioned_user'];
+      case 'calls':
+        return [...CALL_ACTIVITY_TYPES];
       default:
         return []; // Empty array for 'all' - query will not filter by type
     }
@@ -655,6 +676,12 @@ const ActivityListView = (): ReactElement => {
         mutators.activities.markAsReadByFilter({ actorAction: 'canvas_access_revoked', timestamp }),
       );
       return;
+    } else if (activeTab === 'calls') {
+      const timestamp = Date.now();
+      CALL_ACTIVITY_TYPES.forEach(actorAction => {
+        void zero.mutate(mutators.activities.markAsReadByFilter({ actorAction, timestamp }));
+      });
+      return;
     }
 
     void zero.mutate(mutators.activities.markAsReadByFilter({ ...filters, timestamp: Date.now() }));
@@ -670,6 +697,7 @@ const ActivityListView = (): ReactElement => {
       reactions: 0,
       tickets: 0,
       canvas: 0,
+      calls: 0,
       actionable: 0,
       fyi: 0,
       group_mentions: 0,
@@ -714,6 +742,10 @@ const ActivityListView = (): ReactElement => {
         (activity.actorAction === 'mentioned_user' && activity.canvasId)
       ) {
         counts.canvas++;
+      }
+
+      if (CALL_ACTIVITY_TYPES.some(type => type === activity.actorAction)) {
+        counts.calls++;
       }
 
       const classification = activity.classification ?? ActivityClassification.PENDING;
@@ -828,42 +860,26 @@ const ActivityListView = (): ReactElement => {
           </h2>
         </div>
         <div className='flex items-center gap-4'>
-          {/* Unread Toggle */}
-          <div className='flex items-center gap-3 flex-shrink-0'>
-            <label
-              htmlFor='activity-unread-filter'
-              className='text-xs font-medium text-muted-foreground cursor-pointer select-none whitespace-nowrap'
-            >
-              Unread
-            </label>
-
-            <Switch.Root
-              id='activity-unread-filter'
-              checked={showUnreadOnly}
-              onCheckedChange={handleUnreadToggle}
-              data-track-category='ACTIVITY'
-              data-track-name='UNREAD_FILTER_TOGGLE'
-              data-track-metadata={JSON.stringify({
-                filter_type: 'unread_only',
-                filter_value: !showUnreadOnly,
-              })}
-              data-testid='activity-unread-toggle'
-              className={cn(
-                'relative inline-flex h-5 w-9 items-center rounded-full',
-                'bg-muted transition-colors duration-200',
-                'data-[state=checked]:bg-sidebar-badge-accent',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-              )}
-            >
-              <Switch.Thumb
-                className={cn(
-                  'block h-4 w-4 rounded-full bg-background shadow-sm',
-                  'transition-transform duration-200',
-                  'translate-x-0.5 data-[state=checked]:translate-x-4',
-                )}
-              />
-            </Switch.Root>
-          </div>
+          {/* Unread Filter */}
+          <Button
+            type='button'
+            variant='outline'
+            aria-pressed={showUnreadOnly}
+            onClick={() => handleUnreadToggle(!showUnreadOnly)}
+            className={cn(
+              'flex-shrink-0 flex items-center justify-center gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary',
+              showUnreadOnly && 'bg-accent',
+            )}
+            data-track-category='ACTIVITY'
+            data-track-name='UNREAD_FILTER_TOGGLE'
+            data-track-metadata={JSON.stringify({
+              filter_type: 'unread_only',
+              filter_value: !showUnreadOnly,
+            })}
+            data-testid='activity-unread-toggle'
+          >
+            <span className='text-xs font-medium text-muted-foreground'>Unread</span>
+          </Button>
 
           {/* Mark as Read Button */}
           <Button
@@ -991,17 +1007,20 @@ const ActivityListView = (): ReactElement => {
               {visibleTabs.map(tab => {
                 const count = activityCounts[tab.value];
                 const IconComponent = tab.Icon;
+                const showLabelByDefault =
+                  tab.value === 'all' || isMobile || showActionableTabs || activeTab === tab.value;
 
                 return (
                   <Tabs.Trigger key={tab.value} value={tab.value} asChild>
                     <button
+                      aria-label={tab.label}
                       data-track-category='ACTIVITY'
                       data-track-name={`TAB_CHANGE`}
                       data-track-metadata={JSON.stringify({ tab: tab.value })}
                       className={cn(
-                        'px-1 py-2 flex items-center transition-all duration-100 cursor-pointer sm:px-4 justify-start gap-2',
+                        'group mx-0.5 px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer sm:px-3 justify-start rounded-t-md hover:bg-accent focus-visible:bg-accent focus-visible:outline-none',
                         activeTab === tab.value
-                          ? 'border-b-2 border-primary'
+                          ? 'border-b-2 border-primary bg-accent/50'
                           : 'border-b-2 border-transparent',
                       )}
                     >
@@ -1017,21 +1036,36 @@ const ActivityListView = (): ReactElement => {
                       )}
                       <span
                         className={cn(
-                          'text-xs sm:text-sm font-medium text-foreground truncate',
+                          'grid overflow-hidden text-xs sm:text-sm font-medium transition-[grid-template-columns,opacity,margin] duration-500 ease-in-out',
                           activeTab === tab.value ? 'text-primary' : 'text-muted-foreground',
+                          showLabelByDefault
+                            ? 'grid-cols-[1fr] opacity-100 ml-2'
+                            : 'grid-cols-[0fr] opacity-0 ml-0 group-hover:grid-cols-[1fr] group-hover:opacity-100 group-hover:ml-2 group-focus-visible:grid-cols-[1fr] group-focus-visible:opacity-100 group-focus-visible:ml-2',
                         )}
                       >
-                        {tab.label}
+                        <span className='min-w-0 overflow-hidden whitespace-nowrap'>
+                          {tab.label}
+                        </span>
                       </span>
-                      {count > 0 && (
+                      {count > 0 && tab.value === 'all' && (
                         <Badge
                           className={cn(
-                            'h-3.5 text-[9px] px-1 leading-none shrink-0 sm:h-5 sm:text-xs sm:px-1.5 bg-sidebar-badge-accent',
+                            'ml-2 h-3.5 text-[9px] px-1 leading-none shrink-0 sm:h-5 sm:text-xs sm:px-1.5 bg-sidebar-badge-accent',
                             count > 99 && 'sm:text-[10px]',
                           )}
                         >
                           {count > 99 ? '99+' : count}
                         </Badge>
+                      )}
+                      {count > 0 && tab.value !== 'all' && (
+                        <span
+                          className={cn(
+                            'ml-1.5 shrink-0 text-xs font-medium tabular-nums',
+                            activeTab === tab.value ? 'text-primary' : 'text-muted-foreground',
+                          )}
+                        >
+                          {count > 99 ? '99+' : count}
+                        </span>
                       )}
                     </button>
                   </Tabs.Trigger>

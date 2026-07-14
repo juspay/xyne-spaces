@@ -135,6 +135,7 @@ export const ThreadMessages = ({
   const { isMobile } = usePlatform();
   const isInPanelWebview = useIsInPanelWebview();
   const { baseRoute, buildChannelRoute } = useRouteContext();
+  const isActivityRightPanel = baseRoute === '/chat/activity' && !isMobile;
 
   const currentUser = useSelf();
   const shareableOrigin = useShareableOrigin();
@@ -1512,7 +1513,8 @@ export const ThreadMessages = ({
             {!hideHeader && (
               <div
                 className={cn(
-                  'h-[88px] flex items-start self-stretch bg-background border-b border-border',
+                  'flex items-start self-stretch bg-background border-b border-border',
+                  isActivityRightPanel ? 'h-[107px]' : 'h-[88px]',
                 )}
               >
                 <div ref={headerRowRef} className='h-14 p-4 flex items-center gap-2 w-full'>
