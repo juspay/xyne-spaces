@@ -251,8 +251,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isFocused, setIsFocused] = useState(false);
     const [isInCodeBlock, setIsInCodeBlock] = useState(false);
     const [content, setContent] = useState('');
-    const contentRef = useRef('');
     const debouncedUpdateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastAppliedValueRef = useRef(value ?? '');
     const [isSending, setIsSending] = useState(false);
     // Voice recording state — driven by VoiceInput component via onStateChange
     const [isVoiceRecording, setIsVoiceRecording] = useState(false);
@@ -588,7 +588,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       editable: !isSending,
       onCreate: ({ editor }) => {
         const initialText = editor.getText().trim();
-        contentRef.current = initialText;
         setContent(initialText.length > 0 ? 'has-content' : '');
         updateEmojiSizeClass(editor);
       },
@@ -604,7 +603,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       },
       onUpdate: ({ editor }) => {
         const textContent = editor.getText().trim();
-        contentRef.current = textContent;
         setContent(prev => {
           const next = textContent.length > 0 ? 'has-content' : '';
           return prev === next ? prev : next;
@@ -625,6 +623,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         if (debouncedUpdateTimer.current) clearTimeout(debouncedUpdateTimer.current);
         debouncedUpdateTimer.current = setTimeout(() => {
           const htmlContent = sanitizeHtmlContent(editor.getHTML());
+          lastAppliedValueRef.current = htmlContent;
           onContentChange?.(htmlContent, editor.getText());
           updateEmojiSizeClass(editor);
         }, 300);
@@ -964,6 +963,28 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       editor?.setEditable(!disabled && !isSending);
     }, [editor, disabled, isSending]);
 
+    // Keep mounted, non-focused editors in sync when another InputBox updates
+    // the shared draft value for this lookup id. Skip focused editors where change is happening.
+    useEffect(() => {
+      if (!editor || editor.isFocused || value === undefined) return;
+
+      const nextValue = value;
+      if (lastAppliedValueRef.current === nextValue) return;
+
+      const currentHtml = sanitizeHtmlContent(editor.getHTML());
+      if (currentHtml === nextValue) {
+        lastAppliedValueRef.current = nextValue;
+        return;
+      }
+
+      editor.commands.setContent(nextValue, { emitUpdate: false });
+      lastAppliedValueRef.current = nextValue;
+
+      const nextText = editor.getText().trim();
+      setContent(nextText.length > 0 ? 'has-content' : '');
+      updateEmojiSizeClass(editor);
+    }, [editor, value, updateEmojiSizeClass]);
+
     // Expose imperative API for drag and drop and clearing content
     useImperativeHandle(
       ref,
@@ -1047,6 +1068,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         clearTimeout(debouncedUpdateTimer.current);
         debouncedUpdateTimer.current = null;
         const htmlContent = sanitizeHtmlContent(editor.getHTML());
+        lastAppliedValueRef.current = htmlContent;
         onContentChange?.(htmlContent, editor.getText());
       }
 
