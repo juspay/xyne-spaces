@@ -5,16 +5,28 @@ import { config } from '@/config/env';
 
 class GitHubWebhookMiddleware {
   private readonly webhookSecret: string;
+  private readonly webhookSecretConfigured: boolean;
 
   constructor() {
-    if (!config.github?.webhookSecret) {
+    this.webhookSecret = config.github?.webhookSecret || '';
+    this.webhookSecretConfigured = this.webhookSecret.trim().length > 0;
+
+    if (!this.webhookSecretConfigured) {
       logger.warn('SCM_WEBHOOK_SECRET is not configured, GitHub webhook updates will be rejected');
     }
-    this.webhookSecret = config.github?.webhookSecret || '';
   }
 
   verify = (req: Request, res: Response, next: NextFunction): void => {
     try {
+      if (!this.webhookSecretConfigured) {
+        logger.error('[GitHub-Webhook-Validator] Rejecting webhook because SCM_WEBHOOK_SECRET is empty');
+        res.status(503).json({
+          error: 'Service Unavailable',
+          message: 'Webhook secret is not configured',
+        });
+        return;
+      }
+
       const signature = req.headers['x-hub-signature-256'];
       logger.debug('[GitHub-Webhook-Validator] GitHub webhook received');
 

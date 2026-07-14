@@ -9,12 +9,88 @@ import {
 import {logger} from '@/utils/logger';
 
 export class ModelController {
+  private getWorkspaceId(req: Request, res: Response): string | null {
+    const workspaceId = req.user?.workspaceId;
+
+    if (!workspaceId) {
+      res.status(400).json({ error: 'Missing workspaceId' });
+      return null;
+    }
+
+    return workspaceId;
+  }
+
+  private normalizeCredentials(credentials: unknown): string | null {
+    if (typeof credentials === 'string') {
+      return credentials;
+    }
+
+    if (credentials && typeof credentials === 'object') {
+      return JSON.stringify(credentials);
+    }
+
+    return null;
+  }
+
+  private buildCreateModelData(req: Request, workspaceId: string): CreateModelInput | null {
+    const body = req.body as Record<string, unknown>;
+    const userDefinedId = typeof body.userDefinedId === 'string' ? body.userDefinedId.trim() : '';
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const provider = typeof body.provider === 'string' ? body.provider.trim() : '';
+    const credentials = this.normalizeCredentials(body.credentials);
+
+    if (!userDefinedId || !name || !provider || !credentials) {
+      return null;
+    }
+
+    return {
+      userDefinedId,
+      name,
+      provider,
+      credentials,
+      workspace: {
+        connect: { id: workspaceId },
+      },
+    };
+  }
+
+  private buildUpdateModelData(req: Request): UpdateModelInput | null {
+    const body = req.body as Record<string, unknown>;
+    const updateData: UpdateModelInput = {};
+
+    if (typeof body.userDefinedId === 'string') {
+      const userDefinedId = body.userDefinedId.trim();
+      if (userDefinedId) updateData.userDefinedId = userDefinedId;
+    }
+
+    if (typeof body.name === 'string') {
+      const name = body.name.trim();
+      if (name) updateData.name = name;
+    }
+
+    if (typeof body.provider === 'string') {
+      const provider = body.provider.trim();
+      if (provider) updateData.provider = provider;
+    }
+
+    const credentials = this.normalizeCredentials(body.credentials);
+    if (credentials) {
+      updateData.credentials = credentials;
+    }
+
+    return updateData;
+  }
 
   createModel = async (req: Request, res: Response): Promise<void> => {
     try {
-      const modelData: CreateModelInput = req.body;
+      const workspaceId = this.getWorkspaceId(req, res);
+      if (!workspaceId) {
+        return;
+      }
 
-      if (!modelData.userDefinedId || !modelData.name || !modelData.provider || !modelData.credentials) {
+      const modelData = this.buildCreateModelData(req, workspaceId);
+
+      if (!modelData) {
         res.status(400).json({ 
           error: 'Missing required fields: userDefinedId, name, provider, and credentials are required' 
         });
@@ -46,14 +122,21 @@ export class ModelController {
   getModelById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
+      const workspaceId = this.getWorkspaceId(req, res);
+      if (!workspaceId) {
+        return;
+      }
       const includeAgents = req.query.includeAgents === 'true';
 
       let model;
       
       if (includeAgents) {
-        model = await repositories.models.findWithAgents(id);
+        model = await repositories.models.findByIdAndWorkspaceId(id, workspaceId);
+        if (model) {
+          model = await repositories.models.findWithAgents(model.id);
+        }
       } else {
-        model = await repositories.models.findById(id);
+        model = await repositories.models.findByIdAndWorkspaceId(id, workspaceId);
       }
 
       if (!model) {
@@ -71,8 +154,12 @@ export class ModelController {
   getModelByUserDefinedId = async (req: Request, res: Response): Promise<void> => {
     try {
       const { userDefinedId } = req.params;
+      const workspaceId = this.getWorkspaceId(req, res);
+      if (!workspaceId) {
+        return;
+      }
 
-      const model = await repositories.models.findByUserDefinedId(userDefinedId);
+      const model = await repositories.models.findByUserDefinedIdAndWorkspaceId(userDefinedId, workspaceId);
 
       if (!model) {
         res.status(404).json({ error: 'Model not found' });
@@ -88,6 +175,10 @@ export class ModelController {
 
   getAllModels = async (req: Request, res: Response): Promise<void> => {
     try {
+      const workspaceId = this.getWorkspaceId(req, res);
+      if (!workspaceId) {
+        return;
+      }
       const page = req.query.page ? parseInt(req.query.page as string) : 1;
       const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string) : 10;
       const search = req.query.search as string;
@@ -107,7 +198,7 @@ export class ModelController {
       let models;
 
       if (search) {
-        models = await repositories.models.findBySearch(search);
+        models = await repositories.models.findBySearch(search, workspaceId);
         res.status(200).json({
           data: models,
           pagination: {
@@ -118,7 +209,7 @@ export class ModelController {
           }
         });
       } else {
-        const where: any = {};
+        const where: any = { workspaceId };
         if (provider) where.provider = provider;
         if (name) where.name = { contains: name, mode: 'insensitive' };
 
@@ -129,10 +220,10 @@ export class ModelController {
           repositories.models.findMany({
             skip,
             take,
-            where: Object.keys(where).length > 0 ? where : undefined,
+            where,
             orderBy: { createdAt: 'desc' }
           }),
-          repositories.models.findMany({ where: Object.keys(where).length > 0 ? where : undefined }).then(results => results.length)
+          repositories.models.findMany({ where }).then(results => results.length)
         ]);
 
         const totalPages = Math.ceil(total / pageSize);
@@ -156,11 +247,21 @@ export class ModelController {
   updateModel = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const updateData: UpdateModelInput = req.body;
+      const workspaceId = this.getWorkspaceId(req, res);
+      if (!workspaceId) {
+        return;
+      }
 
-      const existingModel = await repositories.models.findById(id);
+      const updateData = this.buildUpdateModelData(req);
+
+      const existingModel = await repositories.models.findByIdAndWorkspaceId(id, workspaceId);
       if (!existingModel) {
         res.status(404).json({ error: 'Model not found' });
+        return;
+      }
+
+      if (!updateData || Object.keys(updateData).length === 0) {
+        res.status(400).json({ error: 'No valid fields provided for update' });
         return;
       }
 
@@ -189,8 +290,12 @@ export class ModelController {
   getModelsByProvider = async (req: Request, res: Response): Promise<void> => {
     try {
       const { provider } = req.params;
+      const workspaceId = this.getWorkspaceId(req, res);
+      if (!workspaceId) {
+        return;
+      }
 
-      const models = await repositories.models.findByProvider(provider);
+      const models = await repositories.models.findByProvider(provider, workspaceId);
       res.status(200).json(models);
     } catch (error) {
       logger.error('Error getting models by provider:', error);

@@ -3,6 +3,7 @@
  * OAuth connect/callback for Microsoft email channels
  */
 
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { authV2Middleware } from '../../middleware/authV2Middleware';
 import {
@@ -13,7 +14,7 @@ import {
   isChannelEmailWorkspaceData,
   MICROSOFT_OAUTH_SCOPES,
 } from '../../services/microsoftDeskService';
-import { encrypt } from '../../services/encryptionService';
+import { decrypt, encrypt } from '../../services/encryptionService';
 import { db } from '../../database/client';
 import { emailFetchQueue } from '../../queues/emailFetchQueue';
 import { logger } from '../../utils/logger';
@@ -510,7 +511,7 @@ router.get('/callback', async (req: Request, res: Response) => {
 
       const source = await db.externalSource.findFirst({
         where: { channelId: channelData.channelId },
-        select: { id: true, name: true },
+        select: { id: true, name: true, credentials: true, isActive: true },
         orderBy: { createdAt: 'desc' },
       });
       if (!source) {
@@ -529,11 +530,20 @@ router.get('/callback', async (req: Request, res: Response) => {
       const expiresAt = token.expires_at
         ? new Date(token.expires_at as string).toISOString()
         : undefined;
+      const existingCredentials = (() => {
+        try {
+          return source.credentials ? JSON.parse(decrypt(source.credentials)) as { clientState?: string } : {};
+        } catch {
+          return {};
+        }
+      })();
+      const clientState = existingCredentials.clientState || crypto.randomBytes(16).toString('hex');
       const reconnectCreds = {
         accessToken,
         refreshToken: (token.refresh_token as string) ?? undefined,
         email,
         expiresAt,
+        clientState,
       };
       await db.externalSource.update({
         where: { id: source.id },
@@ -545,9 +555,25 @@ router.get('/callback', async (req: Request, res: Response) => {
 
       try {
         const webhookUrl = `${getBackendUrl(req)}/api/external-source-sync/${source.name}/ingest`;
-        await microsoftDeskService.registerGraphWebhook(accessToken, webhookUrl);
+        await microsoftDeskService.registerGraphWebhook(
+          accessToken,
+          webhookUrl,
+          clientState,
+        );
       } catch (err) {
         logger.warn(`[${requestId}] Failed to re-register webhook on reconnect`, err);
+        try {
+          await db.externalSource.update({
+            where: { id: source.id },
+            data: {
+              credentials: source.credentials,
+              isActive: source.isActive,
+            },
+          });
+        } catch (rollbackErr) {
+          logger.error(`[${requestId}] Failed to roll back reconnect after webhook error`, rollbackErr);
+        }
+        throw new MicrosoftDeskRouteError('Reconnect failed, try again once', 502);
       }
 
       logger.info(`[${requestId}] Microsoft integration reconnected: ${channelData.channelId}`);

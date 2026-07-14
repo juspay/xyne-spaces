@@ -293,6 +293,7 @@ const envSchema = Joi.object({
   VESPA_CONFIG_SERVER_URL: Joi.string().uri().default(''),
   // Microsoft Graph API
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default(''),
+  MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(true),
   // XYNE Claw Integration (Ask AI v2)
   XYNE_CLAW_URL: Joi.string().uri().default(''),
   XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
@@ -743,6 +744,7 @@ export const config = {
   },
   microsoftGraph: {
     baseUrl: envVars.MICROSOFT_GRAPH_BASE_URL as string,
+    clientStateBackfillEnabled: envVars.MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED as boolean,
   },
   xyneClaw: {
     url: envVars.XYNE_CLAW_URL as string,
@@ -752,6 +754,7 @@ export const config = {
     clawAuthCallbackUrlAutomation: envVars.XYNE_CLAW_AUTH_CALLBACK_URL_AUTOMATION as string,
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
   },
+  internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
   },

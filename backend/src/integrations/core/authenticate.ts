@@ -7,7 +7,8 @@ import { Request, Response, NextFunction } from 'express';
 import { ExternalSource } from '@prisma/client';
 import { logger } from '../../utils/logger';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
-import { decrypt } from '../../services/encryptionService';
+import { decrypt, encrypt } from '../../services/encryptionService';
+import { config } from '@/config/env';
 import { RawBodyRequest } from '../../types/express';
 
 const externalSourceRepository = new ExternalSourceRepository();
@@ -133,6 +134,26 @@ export async function authenticate(
         hint: 'Invalid signature or JWT',
       });
       return;
+    }
+
+    const observedClientState = authResult.metadata?.clientState;
+    if (observedClientState && config.microsoftGraph.clientStateBackfillEnabled) {
+      try {
+        const credentials = JSON.parse(decryptedCredentials) as { clientState?: string; [key: string]: unknown };
+        if (!credentials.clientState) {
+          credentials.clientState = observedClientState;
+          const encryptedCredentials = encrypt(JSON.stringify(credentials));
+          await externalSourceRepository.update(source.id, {
+            credentials: encryptedCredentials,
+          });
+          source.credentials = encryptedCredentials;
+          logger.info(`Backfilled Microsoft clientState for source: ${resolvedSourceName}`);
+        }
+      } catch (error) {
+        logger.warn(`Failed to backfill Microsoft clientState for source: ${resolvedSourceName}`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     // Check if processing should be skipped (e.g., test webhooks)

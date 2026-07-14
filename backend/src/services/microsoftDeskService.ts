@@ -101,6 +101,7 @@ interface MicrosoftCredentials {
   refreshToken?: string;
   email: string;
   expiresAt?: string;
+  clientState?: string;
 }
 
 interface GraphSubscriptionResponse {
@@ -210,15 +211,25 @@ export class MicrosoftDeskService {
 
   // ─── Webhook ───
 
+  private prepareCredentials(
+    credentials: { accessToken: string; refreshToken?: string; email: string; expiresAt?: string; clientState?: string },
+  ): { encryptedCredentials: string; clientState: string } {
+    const clientState = credentials.clientState || crypto.randomBytes(16).toString('hex');
+    const signedCredentials = { ...credentials, clientState };
+    return {
+      encryptedCredentials: encrypt(JSON.stringify(signedCredentials)),
+      clientState,
+    };
+  }
+
   private async createMailSubscription(
     accessToken: string,
     webhookUrl: string,
     resource: string,
+    clientState: string,
   ): Promise<GraphSubscriptionResponse> {
     const expirationDateTime = new Date();
     expirationDateTime.setMinutes(expirationDateTime.getMinutes() + GRAPH_SUBSCRIPTION_MAX_MINUTES);
-
-    const clientState = crypto.randomBytes(16).toString('hex');
 
     const response = await fetch(`${config.microsoftGraph.baseUrl}/subscriptions`, {
       method: 'POST',
@@ -246,9 +257,9 @@ export class MicrosoftDeskService {
     return result;
   }
 
-  async registerGraphWebhook(accessToken: string, webhookUrl: string): Promise<void> {
-    await this.createMailSubscription(accessToken, webhookUrl, 'me/mailFolders/inbox/messages');
-    await this.createMailSubscription(accessToken, webhookUrl, 'me/mailFolders/sentitems/messages');
+  async registerGraphWebhook(accessToken: string, webhookUrl: string, clientState: string): Promise<void> {
+    await this.createMailSubscription(accessToken, webhookUrl, 'me/mailFolders/inbox/messages', clientState);
+    await this.createMailSubscription(accessToken, webhookUrl, 'me/mailFolders/sentitems/messages', clientState);
   }
 
   // ─── Channel Setup ───
@@ -260,7 +271,7 @@ export class MicrosoftDeskService {
   ): Promise<{ channelId: string }> {
     const safeEmail = credentials.email.replace('@', '--');
     const sourceName = `microsoft-${safeEmail}`;
-    const encryptedCredentials = encrypt(JSON.stringify(credentials));
+    const { encryptedCredentials, clientState } = this.prepareCredentials(credentials);
     const webhookUrl = `${publicUrl}/api/external-source-sync/${sourceName}/ingest`;
 
     // If this Microsoft account is already connected, update credentials and reuse the channel
@@ -369,7 +380,7 @@ export class MicrosoftDeskService {
         },
       });
 
-      await this.registerGraphWebhook(credentials.accessToken, webhookUrl);
+      await this.registerGraphWebhook(credentials.accessToken, webhookUrl, clientState);
 
       return channel.id;
     }, {
@@ -392,7 +403,7 @@ export class MicrosoftDeskService {
   ): Promise<{ sourceName: string }> {
     const safeEmail = credentials.email.replace('@', '--');
     const sourceName = `microsoft-${safeEmail}`;
-    const encryptedCredentials = encrypt(JSON.stringify(credentials));
+    const { encryptedCredentials, clientState } = this.prepareCredentials(credentials);
     const webhookUrl = `${publicUrl}/api/external-source-sync/${sourceName}/ingest`;
 
     const existingByName = await db.externalSource.findUnique({ where: { name: sourceName } });
@@ -443,7 +454,7 @@ export class MicrosoftDeskService {
       });
     }
 
-    await this.registerGraphWebhook(credentials.accessToken, webhookUrl);
+    await this.registerGraphWebhook(credentials.accessToken, webhookUrl, clientState);
 
     return { sourceName };
   }
@@ -455,7 +466,7 @@ export class MicrosoftDeskService {
   ): Promise<{ sourceName: string }> {
     const safeEmail = credentials.email.replace('@', '--');
     const sourceName = `microsoft-channel-email-${safeEmail}`;
-    const encryptedCredentials = encrypt(JSON.stringify(credentials));
+    const { encryptedCredentials, clientState } = this.prepareCredentials(credentials);
     const webhookUrl = `${publicUrl}/api/external-source-sync/${sourceName}/ingest`;
     const existingByName = await db.externalSource.findUnique({ where: { name: sourceName } });
 
@@ -508,7 +519,7 @@ export class MicrosoftDeskService {
       });
     }
 
-    await this.registerGraphWebhook(credentials.accessToken, webhookUrl);
+    await this.registerGraphWebhook(credentials.accessToken, webhookUrl, clientState);
 
     return { sourceName };
   }

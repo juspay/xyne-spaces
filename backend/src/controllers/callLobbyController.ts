@@ -78,7 +78,7 @@ export const callLobbyController = {
       const { call, callSession } = req as CallLobbyRequest;
       const { displayName } = req.body as { displayName?: string };
 
-      // Session exists — skip approval
+      // Session exists — only restore an already-approved participant.
       if (callSession) {
         const trimmedName = displayName?.trim();
         const existing = await repositories.calls.findExternalParticipantById({
@@ -100,6 +100,11 @@ export const callLobbyController = {
           logger.info(
             `[call-lobby] requestToJoin: removed participant re-requested approval | participantId=${callSession.participantId}`,
           );
+          res.status(200).json({ skipApproval: false, participantId: callSession.participantId });
+          return;
+        }
+
+        if (existing.response !== InvitationResponse.ACCEPTED) {
           res.status(200).json({ skipApproval: false, participantId: callSession.participantId });
           return;
         }
@@ -276,6 +281,11 @@ export const callLobbyController = {
           `[call-lobby] rejoinLobby: removed participant re-requested approval | participantId=${callSession.participantId}`,
         );
         res.json({ skipApproval: false, participantId: callSession.participantId });
+        return;
+      }
+
+      if (existing.response !== InvitationResponse.ACCEPTED) {
+        res.status(200).json({ skipApproval: false, participantId: callSession.participantId });
         return;
       }
 

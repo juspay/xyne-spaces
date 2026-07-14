@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { validateS2SKey } from '@/middleware/validateS2SKey';
 
 const router = Router();
 
@@ -20,6 +21,7 @@ interface PRCheckRequestedPayload {
     senderName?: string;
     channelName?: string;
     createdAt: number;
+    callerUserId?: string;
 
     // PR-specific context
     projectKey: string;
@@ -99,16 +101,22 @@ async function sendVarysWebhook(
  *
  * Route: POST /api/apps/pr-check/callback
  */
-router.post('/callback', async (req: Request, res: Response) => {
+router.post('/callback', validateS2SKey, async (req: Request, res: Response) => {
   try {
-    const { context } = req.body;
+    const { context, callerUserId } = req.body as {
+      context?: Record<string, unknown>;
+      callerUserId?: string;
+    };
 
     if (!context) {
       res.status(400).json({ error: 'Missing context in request body' });
       return;
     }
 
-    const { ticketId, prId, projectKey, repositorySlug } = context;
+    const ticketId = typeof context.ticketId === 'string' ? context.ticketId : '';
+    const prId = typeof context.prId === 'string' ? context.prId : '';
+    const projectKey = typeof context.projectKey === 'string' ? context.projectKey : '';
+    const repositorySlug = typeof context.repositorySlug === 'string' ? context.repositorySlug : '';
 
     if (!ticketId || !prId || !projectKey || !repositorySlug) {
       res.status(400).json({
@@ -138,19 +146,16 @@ router.post('/callback', async (req: Request, res: Response) => {
       select: { name: true },
     });
 
-    // Get current user from auth middleware (supports both callerUserId from dispatchAction and userId)
-    const userId = req.body.callerUserId || req.body.userId || req.user?.id;
-    if (!userId) {
-      res.status(401).json({ error: 'User not authenticated' });
-      return;
-    }
-
     // Find Varys installed app
     const varysApp = await findVarysInstalledApp();
     if (!varysApp) {
       res.status(500).json({ error: 'Varys app not configured' });
       return;
     }
+
+    // The dispatcher authenticates the caller and forwards the caller user id.
+    // If that field is absent, fall back to the Varys bot identity.
+    const userId = typeof callerUserId === 'string' && callerUserId.trim() ? callerUserId : varysApp.userId;
 
     logger.info(
       `[PR-Check-Callback] Button clicked — sending webhook to Varys for PR #${prId} in ${repositorySlug} ` +
@@ -163,12 +168,12 @@ router.post('/callback', async (req: Request, res: Response) => {
       payload: {
         conversationId: ticket.conversationId,
         channelId: ticket.channelId,
-        userId: userId,
+        userId,
         channelName: channel?.name,
         createdAt: Date.now(),
         projectKey,
         repositorySlug,
-        prId: String(prId),
+        prId,
         ticketId,
         art: true,  // Enable ART trigger
         metadata: {

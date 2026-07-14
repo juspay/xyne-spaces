@@ -5,16 +5,28 @@ import { config } from '@/config/env';
 
 class BitbucketWebhookMiddleware {
   private readonly webhookSecret: string;
+  private readonly webhookSecretConfigured: boolean;
 
   constructor() {
-    if (!config.bitbucket.webhookSecret) {
+    this.webhookSecret = config.bitbucket.webhookSecret || '';
+    this.webhookSecretConfigured = this.webhookSecret.trim().length > 0;
+
+    if (!this.webhookSecretConfigured) {
       logger.warn('SCM_WEBHOOK_SECRET is not configured, webhook updates will be rejected');
     }
-    this.webhookSecret = config.bitbucket.webhookSecret;
   }
   
   verify = (req: Request, res: Response, next: NextFunction): void => {
     try {
+      if (!this.webhookSecretConfigured) {
+        logger.error('[Bitbucket-Webhook-Validator] Rejecting webhook because SCM_WEBHOOK_SECRET is empty');
+        res.status(503).json({
+          error: 'Service Unavailable',
+          message: 'Webhook secret is not configured'
+        });
+        return;
+      }
+
       const signature = req.headers['x-hub-signature'];
       logger.debug('[Webhook-Validator] Bitbucket webhook received');
       if (!signature || typeof signature !== 'string') {
