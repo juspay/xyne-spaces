@@ -112,7 +112,6 @@ export const TicketFiltersDropdown = ({
   availablePriorities,
   availableUsers,
   availableBoardDetails,
-  availableUserGroups,
   availableBoards,
   sourceChannelProjectIds,
   showBoardsFilter = false,
@@ -594,7 +593,6 @@ export const TicketFiltersDropdown = ({
             selectedGroups={filters.userGroups || []}
             onChange={(groups: string[]) => handleFilterChange('userGroups', groups)}
             onClose={() => setActiveSubmenu(null)}
-            availableUserGroups={availableUserGroups || []}
           />
         );
       case 'roleAssignments':
