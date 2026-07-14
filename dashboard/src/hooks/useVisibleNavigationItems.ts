@@ -18,8 +18,7 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
   );
 
   return useMemo(
-    () =>
-      filterNavItemsByPermission(NAVIGATION_ITEMS, permissions, canManageOwnUserGroups),
+    () => filterNavItemsByPermission(NAVIGATION_ITEMS, permissions, canManageOwnUserGroups),
     [permissions, canManageOwnUserGroups],
   );
 };
