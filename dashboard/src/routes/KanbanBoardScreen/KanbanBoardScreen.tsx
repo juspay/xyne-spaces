@@ -1339,14 +1339,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return { availableUsers: Array.from(userIds), hasPrReviewers, hasQaAssigned };
   }, [kanbanSourceTickets]);
 
-  const availableUserGroups = useMemo(() => {
-    const groups = new Set<string>();
-    (kanbanSourceTickets as KanbanLocalTicket[] | undefined)?.forEach(ticket => {
-      if (ticket.userGroupId) groups.add(ticket.userGroupId);
-    });
-    return Array.from(groups);
-  }, [kanbanSourceTickets]);
-
   // Get available board IDs based on view mode (only needed for my-tickets views)
   // Hydrate from the dedicated API call and merge in any boards from loaded tickets
   // so the dropdown can fill in progressively.
@@ -2132,7 +2124,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               }
               availablePriorities={availablePriorities}
               availableUsers={availableUsers}
-              availableUserGroups={availableUserGroups}
               availableBoards={availableBoards}
               availableBoardDetails={availableBoardDetails}
               sourceChannelProjectIds={sourceChannelProjectIds}

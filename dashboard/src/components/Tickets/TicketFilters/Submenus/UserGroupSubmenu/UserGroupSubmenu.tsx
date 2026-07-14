@@ -9,13 +9,11 @@ interface UserGroupSubmenuProps {
   selectedGroups: string[];
   onChange: (groupIds: string[]) => void;
   onClose: () => void;
-  availableUserGroups?: string[] | undefined;
 }
 
 export const UserGroupSubmenu = ({
   selectedGroups,
   onChange,
-  availableUserGroups: availableGroupIds,
 }: UserGroupSubmenuProps): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,26 +34,11 @@ export const UserGroupSubmenu = ({
     return (): void => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Filter groups based on availableGroupIds and search term
+  // Filter groups based on search term
   const allGroups = useMemo(() => {
     if (!allUserGroups || allUserGroups.length === 0) return [];
 
-    // Filter by availableGroupIds if provided
     let filtered = allUserGroups;
-    if (availableGroupIds && availableGroupIds.length > 0) {
-      const groupById = new Map(allUserGroups.map(group => [group.id, group] as const));
-      const orderedGroups: UserGroup[] = [];
-      const seen = new Set<string>();
-
-      for (const groupId of availableGroupIds) {
-        if (seen.has(groupId)) continue;
-        seen.add(groupId);
-        const group = groupById.get(groupId);
-        if (group) orderedGroups.push(group);
-      }
-
-      filtered = orderedGroups;
-    }
 
     // Filter by search term
     if (searchTerm.trim()) {
@@ -68,8 +51,10 @@ export const UserGroupSubmenu = ({
     }
 
     // Limit to first 20 results
-    return filtered.slice(0, 20);
-  }, [allUserGroups, availableGroupIds, searchTerm]);
+    return [...filtered]
+      .sort((a: UserGroup, b: UserGroup) => a.name.localeCompare(b.name))
+      .slice(0, 20);
+  }, [allUserGroups, searchTerm]);
 
   const searchResults = allGroups;
 
