@@ -60,9 +60,11 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     const isImmersiveMode = width === undefined && height === undefined;
 
     // Determine compact mode based on container size
-    const isCompactControls = width !== undefined && width <= 220;
-    const showVolumeSlider = !isCompactControls && !isMobile;
-    const showTimeDisplay = !isCompactControls;
+    const isCompactControls = width !== undefined && width <= 260;
+    const showVolumeSlider =
+      !isCompactControls && !isMobile && (width === undefined || width > 340);
+    const showVerticalVolumeSlider = !isImmersiveMode && !isMobile && !showVolumeSlider;
+    const showTimeDisplay = width === undefined || width > 220;
 
     // Memoize the streaming URL to prevent recreation on every render
     const streamUrl = React.useMemo((): string => {
@@ -587,7 +589,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                 </button>
 
                 {/* Volume */}
-                <div className={cn('flex items-center gap-2')}>
+                <div className={cn('relative group/volume flex items-center gap-2')}>
                   <button
                     onClick={toggleMute}
                     className={
@@ -611,36 +613,60 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                     )}
                   </button>
 
-                  {/* Volume slider - show in immersive or when not compact */}
-                  {(isImmersiveMode || showVolumeSlider) && (
-                    <div className={cn('relative w-20 h-1 bg-gray-600 rounded-lg')}>
+                  {/* Volume slider - inline next to the mute button when it fits,
+                      otherwise the same slider rotated vertical in a hover popover */}
+                  {(isImmersiveMode || showVolumeSlider || showVerticalVolumeSlider) && (
+                    <div
+                      className={cn(
+                        showVerticalVolumeSlider &&
+                          'absolute bottom-full left-1/2 -translate-x-1/2 z-30 pb-1 opacity-0 pointer-events-none group-hover/volume:opacity-100 group-hover/volume:pointer-events-auto transition-opacity duration-150',
+                      )}
+                    >
                       <div
                         className={cn(
-                          `absolute left-0 top-0 h-full rounded-lg transition-all duration-100 ${
-                            isImmersiveMode ? 'bg-white' : 'bg-blue-500'
-                          }`,
+                          showVerticalVolumeSlider &&
+                            'flex h-24 w-6 items-center justify-center rounded-lg bg-black/90 backdrop-blur-sm border border-gray-700 shadow-lg',
                         )}
-                        style={{ width: `${volume * 100}%` }}
-                      />
-                      <input
-                        type='range'
-                        min='0'
-                        max='1'
-                        step='0.1'
-                        value={volume}
-                        onChange={handleVolumeChange}
-                        className='absolute top-0 left-0 w-full h-1 appearance-none cursor-pointer bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:relative [&::-webkit-slider-thumb]:z-10 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer'
-                        data-track-category='VIDEO_PLAYER'
-                        data-track-name='AdjustVolume'
-                        data-track-metadata={JSON.stringify({ volume, attachmentId })}
-                      />
+                      >
+                        <div
+                          className={cn(
+                            'relative w-20 h-1 bg-gray-600 rounded-lg',
+                            showVerticalVolumeSlider && 'shrink-0 -rotate-90',
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              `absolute left-0 top-0 h-full rounded-lg transition-all duration-100 ${
+                                isImmersiveMode ? 'bg-white' : 'bg-blue-500'
+                              }`,
+                            )}
+                            style={{ width: `${volume * 100}%` }}
+                          />
+                          <input
+                            type='range'
+                            min='0'
+                            max='1'
+                            step='0.1'
+                            value={volume}
+                            onChange={handleVolumeChange}
+                            className='absolute top-0 left-0 w-full h-1 appearance-none cursor-pointer bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:relative [&::-webkit-slider-thumb]:z-10 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer'
+                            data-track-category='VIDEO_PLAYER'
+                            data-track-name='AdjustVolume'
+                            data-track-metadata={JSON.stringify({ volume, attachmentId })}
+                          />
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
 
                 {/* Time - show in immersive or when not compact */}
                 {(isImmersiveMode || showTimeDisplay) && (
-                  <div className={cn('text-white text-sm drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]')}>
+                  <div
+                    className={cn(
+                      'text-white text-sm whitespace-nowrap drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]',
+                    )}
+                  >
                     {formatTime(currentTime)} / {formatTime(duration)}
                   </div>
                 )}
