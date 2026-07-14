@@ -9,9 +9,9 @@ export const useUnreadThreadsCount = (): number => {
   return useMemo(() => {
     return (unreadActivities ?? []).filter(activity => {
       if (activity.isThreadActivity !== true) return false;
+      if (activity.actorAction !== 'mentioned_user') return false;
       const classification = activity.classification ?? ActivityClassification.PENDING;
       if (classification === ActivityClassification.SKIP) return false;
-      if (activity.actorAction === 'group_mention') return false;
       return true;
     }).length;
   }, [unreadActivities]);

@@ -42,6 +42,7 @@ import { activityService } from '@/services/activity/activityService';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
+import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
 
 export class ChannelController {
   private channelRepository: ChannelRepository;
@@ -229,6 +230,15 @@ export class ChannelController {
       await this.conversationRepository.update(conversation.conversationId, {
         initialMessageId: createdMessage.messageId,
       });
+      const targetChannel = await this.channelRepository.findById(channelId);
+      if (targetChannel) {
+        await ensureDmConversationAuthorParticipant({
+          channelId,
+          conversationId: conversation.conversationId,
+          senderId,
+          scopeType: targetChannel.scopeType,
+        });
+      }
       await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
       // Update channel last activity
@@ -484,6 +494,7 @@ export class ChannelController {
 
       // Use transaction for all write operations to maintain atomicity
       const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
+      const targetChannel = await this.channelRepository.findById(channelId);
       const result = await db.$transaction(async (tx) => {
         // Create conversation
       const conversation = await tx.conversation.create({
@@ -518,6 +529,15 @@ export class ChannelController {
             metadata: forwardedMessageMetadata as Prisma.InputJsonValue,
           },
         });
+        if (targetChannel) {
+          await ensureDmConversationAuthorParticipant({
+            channelId,
+            conversationId: conversation.conversationId,
+            senderId,
+            scopeType: targetChannel.scopeType,
+            tx,
+          });
+        }
 
          // Copy attachments to the new message
          const copiedAttachments: any[] = [];

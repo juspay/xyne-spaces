@@ -98,6 +98,7 @@ async function sendErrorNotice(opts: {
           participationType: 'AUTHOR',
           isSubscribed: true,
           joinedAt: new Date(now),
+          channelId,
         },
       });
     }

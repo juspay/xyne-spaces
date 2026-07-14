@@ -3690,7 +3690,21 @@ export const mutators = defineMutators({
 
         const newLastReadAt = message.createdAt - 1;
 
-        // Upsert conversation_participants.lastReadAt
+        let trueLastReplyAt: number | undefined = undefined;
+        if (conversation.replyCount > 0) {
+          const latestReply = await tx.run(
+            zql.messages
+              .where('conversationId', conversationId)
+              .where('messageId', '!=', conversation.initialMessageId)
+              .orderBy('createdAt', 'desc')
+              .limit(1),
+          );
+          if (latestReply[0]) {
+            trueLastReplyAt = latestReply[0].createdAt;
+          }
+        }
+
+        // Upsert conversation_participants state so marking unread also subscribes the user.
         const existingParticipant = await tx.run(
           zql.conversation_participants
             .where('conversationId', conversationId)
@@ -3699,20 +3713,6 @@ export const mutators = defineMutators({
         );
 
         if (!existingParticipant) {
-          let trueLastReplyAt: number | undefined = undefined;
-          if (conversation.replyCount > 0) {
-            const latestReply = await tx.run(
-              zql.messages
-                .where('conversationId', conversationId)
-                .where('messageId', '!=', conversation.initialMessageId)
-                .orderBy('createdAt', 'desc')
-                .limit(1),
-            );
-            if (latestReply[0]) {
-              trueLastReplyAt = latestReply[0].createdAt;
-            }
-          }
-
           await tx.mutate.conversation_participants.insert({
             id: participantId,
             conversationId,
@@ -3728,6 +3728,10 @@ export const mutators = defineMutators({
           await tx.mutate.conversation_participants.update({
             id: existingParticipant.id,
             lastReadAt: newLastReadAt,
+            isSubscribed: true,
+            ...(existingParticipant.channelId !== conversation.channelId
+              ? { channelId: conversation.channelId }
+              : {}),
           });
         }
 

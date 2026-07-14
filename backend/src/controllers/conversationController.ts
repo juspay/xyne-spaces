@@ -46,6 +46,7 @@ import {
 import { getCallTicketsCreatedFromSuggestionsTotal } from '@/services/otel/suggestionMetrics';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
+import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
 
 // Local type definitions
 interface UserInfo {
@@ -390,6 +391,12 @@ export class ConversationController {
         };
 
         const conversation = await this.conversationRepository.create(conversationData);
+        await ensureDmConversationAuthorParticipant({
+          channelId,
+          conversationId: conversation.conversationId,
+          senderId: userId,
+          scopeType: channel.scopeType,
+        });
 
         // Handle bot command with the new conversation ID
         await this.handleBotCommand(content.trim(), conversation.conversationId, userId, res, {
@@ -422,6 +429,12 @@ export class ConversationController {
       // Update message with real conversation ID
       messageData.conversationId = conversation.conversationId;
       const message = await this.messageRepository.create(messageData);
+      await ensureDmConversationAuthorParticipant({
+        channelId,
+        conversationId: conversation.conversationId,
+        senderId: userId,
+        scopeType: channel.scopeType,
+      });
 
       // Create attachment records if files were uploaded
       if (uploadedFiles.length > 0) {
