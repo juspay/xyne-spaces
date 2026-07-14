@@ -135,12 +135,15 @@ router.get("/internal/sessions/:convId/debug", validateS2SKey, async (req: Reque
     if (sessionDirPaths.length === 0) {
       // Not on the PVC — try restoring from the GCS archive under every
       // storeKey form claw uses on disk: `<convId>`, `<convId>_<agentSlug>`,
-      // and the agent-chat form `<userId>_<convId>_<agentSlug>`.
+      // the agent-chat form `<userId>_<convId>_<agentSlug>`, and the per-user
+      // Digital Twin form `<convId>-<userId>_<agentSlug>` (buildSandboxStoreKey
+      // folds userId into the conv segment for agentSlug==="digital-twin").
       const keys = [
         convId,
         ...(agentSlug ? [`${convId}_${agentSlug}`] : []),
         ...(userId ? [`${userId}_${convId}`] : []),
         ...(userId && agentSlug ? [`${userId}_${convId}_${agentSlug}`] : []),
+        ...(userId && agentSlug ? [`${convId}-${userId}_${agentSlug}`] : []),
       ];
       for (const k of keys) {
         if (await restoreSessionFromArchive(k).catch(() => false)) break;

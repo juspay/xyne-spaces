@@ -14,6 +14,9 @@ import https from "node:https";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { PPTX_DESIGNER_SYSTEM_PROMPT } from "./prompt.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("tools");
+
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
 
 /** POST JSON using native https — bypasses undici/fetch HTTP/2 GOAWAY issues. */
@@ -194,24 +197,11 @@ const JSON_START = "SLIDE_JSON_START";
 const JSON_END = "SLIDE_JSON_END";
 
 export const CREATE_PPT_CONFIG_SCHEMA = {
-  PPT_PROVIDER: {
-    label: "PPT Provider",
-    default: "",
-    required: false as const,
-    placeholder: "codex | copilot | claude | spaces",
-  },
-  PPT_BASE_URL: {
-    label: "PPT Provider Base URL",
-    default: "",
-    required: false as const,
-    placeholder: "https://api.openai.com/v1 or https://api.anthropic.com",
-  },
-  PPT_API_KEY: {
-    label: "PPT Provider API Key",
-    default: "",
-    required: false as const,
-    placeholder: "sk-...",
-  },
+  // Provider/key/base-url for slide-JSON generation are no longer configured
+  // here — the tool inherits the agent's resolved provider via
+  // ToolExecutionContext.providerConfig (set by xyne-claw's run dispatcher).
+  // Only the LiteLLM fallback (used when the run has no BYO provider) and an
+  // optional model override for that fallback remain.
   LITELLM_URL: {
     label: "LiteLLM Proxy URL",
     default: "",
@@ -234,12 +224,6 @@ export const CREATE_PPT_CONFIG_SCHEMA = {
     required: false as const,
     placeholder: DEFAULT_PPT_MODEL,
   },
-  PPT_AUTH_TYPE: {
-    label: "PPT Auth Type",
-    default: "api_key",
-    required: false as const,
-    placeholder: "api_key | oauth_token",
-  },
 };
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
@@ -254,43 +238,30 @@ interface LlmConfig {
 
 function resolveLlmConfig(context: ToolExecutionContext | undefined): LlmConfig | string {
   const config = context?.config ?? {};
-  const provider = String(config["PPT_PROVIDER"] ?? "").trim().toLowerCase();
-  const explicitBase = String(config["PPT_BASE_URL"] ?? "").trim();
-  const explicitApiKey = String(config["PPT_API_KEY"] ?? "").trim();
-  const explicitModel = String(config["PPT_MODEL"] ?? "").trim();
-  const explicitAuthType = String(config["PPT_AUTH_TYPE"] ?? "api_key").trim().toLowerCase() === "oauth_token"
-    ? "oauth_token"
-    : "api_key";
 
-  // New path: provider-aware runtime config injected by xyne-claw/run.ts.
-  if (provider && explicitApiKey && explicitModel) {
+  // Primary path: inherit the agent's resolved provider from the run context.
+  // This is how slide generation uses "whatever model is configured" for the
+  // agent (copilot proxy + base-URL defaulting already applied upstream).
+  const pc = context?.providerConfig;
+  if (pc?.apiKey && pc.model) {
+    const provider = pc.provider.trim().toLowerCase();
+    const authType = (pc.authType ?? "api_key").trim().toLowerCase() === "oauth_token"
+      ? "oauth_token"
+      : "api_key";
     if (provider === "claude") {
-      let base = (explicitBase || "https://api.anthropic.com").replace(/\/+$/, "");
+      let base = (pc.baseUrl || "https://api.anthropic.com").replace(/\/+$/, "");
       if (!/\/v1\/messages$/.test(base)) {
         if (/\/v1$/.test(base)) base = `${base}/messages`;
         else base = `${base}/v1/messages`;
       }
-      return {
-        endpoint: base,
-        apiKey: explicitApiKey,
-        model: explicitModel,
-        api: "anthropic-messages",
-        authType: explicitAuthType,
-      };
+      return { endpoint: base, apiKey: pc.apiKey, model: pc.model, api: "anthropic-messages", authType };
     }
-
-    let base = (explicitBase || "https://api.openai.com/v1").replace(/\/+$/, "");
+    let base = (pc.baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
     if (!/\/v\d+$/.test(base)) base = `${base}/v1`;
-    return {
-      endpoint: `${base}/chat/completions`,
-      apiKey: explicitApiKey,
-      model: explicitModel,
-      api: "openai-completions",
-      authType: explicitAuthType,
-    };
+    return { endpoint: `${base}/chat/completions`, apiKey: pc.apiKey, model: pc.model, api: "openai-completions", authType };
   }
 
-  // Legacy path: shared LiteLLM env/config.
+  // Fallback path: shared LiteLLM env/config (runs with no BYO provider).
   const baseUrlRaw =
     config["LITELLM_URL"] ||
     config["LITELLM_BASE_URL"] ||
@@ -358,7 +329,7 @@ async function callLlmForSlides(
     try {
       parsed = JSON.parse(extractJson(rawContent));
     } catch (err) {
-      console.error(`[ppt] JSON parse failed. Raw (first 600): ${rawContent.slice(0, 600)}`);
+      log.error(`[ppt] JSON parse failed. Raw (first 600): ${rawContent.slice(0, 600)}`);
       throw new Error(
         `LLM returned invalid JSON: ${err instanceof Error ? err.message : err}`,
       );
@@ -399,7 +370,7 @@ async function callLlmForSlides(
   try {
     parsed = JSON.parse(extractJson(rawContent));
   } catch (err) {
-    console.error(`[ppt] JSON parse failed. Raw (first 600): ${rawContent.slice(0, 600)}`);
+    log.error(`[ppt] JSON parse failed. Raw (first 600): ${rawContent.slice(0, 600)}`);
     throw new Error(
       `LLM returned invalid JSON: ${err instanceof Error ? err.message : err}`,
     );
@@ -453,7 +424,7 @@ async function renderPptBuffer(pptConfig: {
         );
       }
     } catch (slideErr) {
-      console.warn(`[ppt] slide ${si + 1} init failed, skipping: ${slideErr}`);
+      log.warn(`[ppt] slide ${si + 1} init failed, skipping: ${slideErr}`);
       skipped++;
       continue;
     }
@@ -558,7 +529,7 @@ async function renderPptBuffer(pptConfig: {
         }
       } catch (objErr) {
         skipped++;
-        console.warn(
+        log.warn(
           `[ppt] slide ${si + 1} obj ${oi + 1} (type="${String(obj["type"])}") failed — skipping: ${
             objErr instanceof Error ? objErr.message : objErr
           }`,
@@ -567,7 +538,7 @@ async function renderPptBuffer(pptConfig: {
     }
   }
 
-  if (skipped > 0) console.warn(`[ppt] ${skipped} objects skipped due to errors`);
+  if (skipped > 0) log.warn(`[ppt] ${skipped} objects skipped due to errors`);
 
   const buffer = Buffer.from((await pptx.write({ outputType: "nodebuffer" })) as ArrayBuffer);
   return { buffer, title, slideCount: slides.length, skipped };
@@ -637,7 +608,7 @@ export const createPptTool: ToolDefinition = {
     if (typeof llm === "string") return llm;
 
     const preview = query.length > 80 ? `${query.slice(0, 80)}...` : query;
-    console.log(`[create-ppt] ${numSlides} slides, model=${llm.model}, query="${preview}"`);
+    log.info(`[create-ppt] ${numSlides} slides, model=${llm.model}, query="${preview}"`);
 
     try {
       const userPrompt =
@@ -649,13 +620,13 @@ export const createPptTool: ToolDefinition = {
       if (!pptConfig.layout) pptConfig.layout = "LAYOUT_16x9";
 
       const { buffer, title } = await renderPptBuffer(pptConfig);
-      console.log(
+      log.info(
         `[create-ppt] rendered (${(buffer.length / 1024).toFixed(0)}KB), slides=${pptConfig.slides.length}`,
       );
       return formatAttachmentResponse(buffer, title, pptConfig);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[create-ppt] error: ${msg}`);
+      log.error(`[create-ppt] error: ${msg}`);
       return `Error creating presentation: ${msg}`;
     }
   },
@@ -721,7 +692,7 @@ export const editPptTool: ToolDefinition = {
     if (typeof llm === "string") return llm;
 
     const preview = changeRequest.length > 80 ? `${changeRequest.slice(0, 80)}...` : changeRequest;
-    console.log(
+    log.info(
       `[edit-ppt] prev=${prevObj.slides.length} slides, target=${numSlides ?? "same"}, model=${llm.model}, change="${preview}"`,
     );
 
@@ -746,13 +717,13 @@ export const editPptTool: ToolDefinition = {
       if (!pptConfig.layout) pptConfig.layout = prevObj.layout ?? "LAYOUT_16x9";
 
       const { buffer, title } = await renderPptBuffer(pptConfig);
-      console.log(
+      log.info(
         `[edit-ppt] rendered (${(buffer.length / 1024).toFixed(0)}KB), slides=${pptConfig.slides.length}`,
       );
       return formatAttachmentResponse(buffer, title, pptConfig);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[edit-ppt] error: ${msg}`);
+      log.error(`[edit-ppt] error: ${msg}`);
       return `Error editing presentation: ${msg}`;
     }
   },

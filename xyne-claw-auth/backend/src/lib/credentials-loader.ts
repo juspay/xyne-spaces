@@ -11,12 +11,15 @@
  *               the oldest instance — matches single-instance behaviour.
  *   2. user   — UserMcpConnection. Per-user creds, classic fallback.
  *   3. global — GlobalMcpCredentials when McpServer.allowGlobalFallback.
+ *               Org-scoped: an orgId row (agent's org, else the user's org)
+ *               beats the deployment-wide default row (orgId NULL).
  *
  * Most callers should use
  *   `loadEffectiveCredentials(userId, serverType, agentSlug?, instanceSlug?)`
  * instead of querying connection tables directly. The returned `connectionId`
  * is a stable string usable for cache keys / logging — `agent:<connId>`,
- * `<userConn cuid>`, or `global:<mcpServerId>` depending on the hit.
+ * `<userConn cuid>`, or `global:<mcpServerId>:<orgId|default>` depending on
+ * the hit.
  *
  * Token refresh (OAuth) only runs for the user-level path: we don't try to
  * refresh agent or global creds because there's no per-row writer to persist
@@ -27,7 +30,7 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getFreshCredentials } from "./credentials-refresh.js";
-import { getSpacesAuthForUser } from "./spaces-db.js";
+import { getSpacesAuthForUser, getWorkspaceIdForUser } from "./spaces-db.js";
 import { resolveFreshOAuthCreds, TokenRefreshError } from "./oauth-token-endpoint.js";
 import { getOAuthProvider } from "../routes/oauth-token.js";
 
@@ -57,7 +60,7 @@ export interface EffectiveCredentials {
  * hide a run merely for using these — virtually every spaces-agent run reads
  * Spaces, so counting it would hide almost everything and defeat the feature.
  */
-const AMBIENT_USER_CREDENTIAL_SERVER_TYPES = new Set(["xyne-spaces"]);
+const AMBIENT_USER_CREDENTIAL_SERVER_TYPES = new Set(["xyne-spaces", "xyne-dashboard"]);
 
 /**
  * True when an effective credential is a PRIVATE per-user credential whose use
@@ -70,11 +73,74 @@ export function isPrivateUserCredential(serverType: string, source: EffectiveCre
   return source === "user" && !AMBIENT_USER_CREDENTIAL_SERVER_TYPES.has(serverType);
 }
 
+async function ensureSpacesWorkspaceCredential(
+  userId: string,
+  credentials: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const existing = credentials["workspaceId"];
+  if (typeof existing === "string" && existing.trim()) return credentials;
+
+  const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner");
+  if (!workspaceId) return credentials;
+
+  log.info(`[creds-loader] xyne-spaces userId=${userId} → resolved workspaceId=${workspaceId} for cached credentials`);
+  return { ...credentials, workspaceId };
+}
+
+async function resolveSpacesAppToolsWorkspaceId(
+  userId: string,
+  orgId: string,
+  agentSlug: string,
+): Promise<string | null> {
+  const userWorkspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
+  if (userWorkspaceId) return userWorkspaceId;
+
+  const links = await prisma.surfaceTenantLink.findMany({
+    where: { surfaceType: "spaces", orgId },
+    select: { surfaceTenantId: true },
+    take: 2,
+  });
+  if (links.length === 1) {
+    const workspaceId = links[0]!.surfaceTenantId;
+    log.info(
+      `[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → resolved workspaceId=${workspaceId} from agent org surface_tenant_links`,
+    );
+    return workspaceId;
+  }
+  if (links.length > 1) {
+    log.warn(
+      `[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → ambiguous spaces surface_tenant_links orgId=${orgId}`,
+    );
+  }
+  return null;
+}
+
+/** Synthesize EffectiveCredentials from the user's live Spaces session —
+ *  the ambient operating credential for the Spaces-session-backed server
+ *  types (xyne-spaces, xyne-dashboard). Returns null when no session. */
+async function liveSpacesCredentials(userId: string): Promise<EffectiveCredentials | null> {
+  const live = await getSpacesAuthForUser(userId, "mcp-runner");
+  if (!live) return null;
+  return {
+    source: "user",
+    connectionId: `spaces-live:${userId}`,
+    credentials: {
+      url: CONFIG.spacesInternalUrl,
+      token: live.token,
+      sessionId: live.sessionId,
+      workspaceId: live.workspaceId,
+      userId,
+    },
+    isUserOwned: true,
+  };
+}
+
 export async function loadEffectiveCredentials(
   userId: string,
   serverType: string,
   agentSlug?: string,
   instanceSlug?: string,
+  agentOrgId?: string,
 ): Promise<EffectiveCredentials | null> {
   // google / microsoft: per-user OAuth connectors (never agent-pinned or
   // global), executed as claw-auth-hosted stdio MCP servers. Resolve a fresh
@@ -103,10 +169,28 @@ export async function loadEffectiveCredentials(
     }
   }
 
+  // xyne-dashboard: the dashboard-ai agent's dedicated server. Same
+  // live-session synthesis as xyne-spaces, but it must short-circuit BEFORE
+  // the agent-pin cascade: the seeded AgentMcpConnection row (needed so
+  // /mcp/tools lists the server for the agent) carries EMPTY creds by design,
+  // and returning those would spawn the child with no url/token.
+  if (serverType === "xyne-dashboard") {
+    const live = await liveSpacesCredentials(userId);
+    if (live) return live;
+    log.info(`[creds-loader] xyne-dashboard userId=${userId} → no live Spaces session`);
+    return null;
+  }
+
   // 1. Agent-pinned creds win when present. Only checked if the caller
   //    provided an agentSlug (i.e. the call is happening inside an agent's
   //    session — direct admin/health calls pass undefined and skip this).
   if (agentSlug) {
+    const resolvedAgentOrgId = agentOrgId
+      ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
+      ?? undefined;
+    const agentWhere = resolvedAgentOrgId
+      ? { slug: agentSlug, orgId: resolvedAgentOrgId }
+      : { id: "__missing_agent_org__" };
     // Multi-instance lookup. When `instanceSlug` is set, we narrow to that
     // specific row (the runner uses this when spawning per-instance MCP
     // processes — see mcp/runner.ts). Without it we fall back to the
@@ -117,7 +201,7 @@ export async function loadEffectiveCredentials(
     if (instanceSlug) {
       agentConn = await prisma.agentMcpConnection.findFirst({
         where: {
-          agent: { slug: agentSlug },
+          agent: agentWhere,
           mcpServer: { type: serverType },
           slug: instanceSlug,
         },
@@ -125,14 +209,14 @@ export async function loadEffectiveCredentials(
     } else {
       agentConn = await prisma.agentMcpConnection.findFirst({
         where: {
-          agent: { slug: agentSlug },
+          agent: agentWhere,
           mcpServer: { type: serverType },
           slug: "default",
         },
       });
       if (!agentConn) {
         agentConn = await prisma.agentMcpConnection.findFirst({
-          where: { agent: { slug: agentSlug }, mcpServer: { type: serverType } },
+          where: { agent: agentWhere, mcpServer: { type: serverType } },
           orderBy: { createdAt: "asc" },
         });
       }
@@ -166,20 +250,8 @@ export async function loadEffectiveCredentials(
   // no active session, or the refresh hop itself failed — at which point
   // the cached creds are no worse than nothing.
   if (serverType === "xyne-spaces") {
-    const live = await getSpacesAuthForUser(userId, "mcp-runner");
-    if (live) {
-      return {
-        source: "user",
-        connectionId: `spaces-live:${userId}`,
-        credentials: {
-          url: CONFIG.spacesInternalUrl,
-          token: live.token,
-          sessionId: live.sessionId,
-          workspaceId: live.workspaceId,
-        },
-        isUserOwned: true,
-      };
-    }
+    const live = await liveSpacesCredentials(userId);
+    if (live) return live;
   }
 
   // xyne-spaces-app-tools: empty credentialFields by design — there is no
@@ -214,17 +286,31 @@ export async function loadEffectiveCredentials(
       log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} → no agentSlug in context; cannot resolve app_token`);
       return null;
     }
-    const agent = await prisma.agent.findUnique({ where: { slug: agentSlug } });
+    const credOrgId = agentOrgId
+      ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
+      ?? undefined;
+    if (!credOrgId) {
+      log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → no org context; cannot resolve app_token`);
+      return null;
+    }
+    const agent = await prisma.agent.findUnique({
+      where: { orgId_slug: { orgId: credOrgId, slug: agentSlug } },
+    });
     if (agent?.spacesAppToken) {
       const parts = agent.spacesAppToken.split(":");
       if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
         try {
           const appToken = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
-          log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → resolved app_token from agent row`);
+          const workspaceId = await resolveSpacesAppToolsWorkspaceId(userId, credOrgId, agentSlug);
+          log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → resolved app_token from agent row workspaceId=${workspaceId ?? "(none)"}`);
           return {
             source: "agent",
             connectionId: `app-tools:${agent.id}`,
-            credentials: { url: CONFIG.spacesInternalUrl, app_token: appToken },
+            credentials: {
+              url: CONFIG.spacesInternalUrl,
+              app_token: appToken,
+              ...(workspaceId ? { workspaceId } : {}),
+            },
             isUserOwned: false,
           };
         } catch {
@@ -244,7 +330,7 @@ export async function loadEffectiveCredentials(
   log.info(`[creds-loader] enter ${serverType} userId=${userId} userConnFound=${!!userConn}`);
 
   if (userConn) {
-    const credentials = await getFreshCredentials(
+    let credentials = await getFreshCredentials(
       userConn.id,
       userId,
       serverType,
@@ -252,31 +338,55 @@ export async function loadEffectiveCredentials(
       userConn.iv,
       userConn.authTag,
     );
+    if (serverType === "xyne-spaces") {
+      credentials = await ensureSpacesWorkspaceCredential(userId, credentials);
+    }
     log.info(`[creds-loader] ${serverType} userId=${userId} → user-row hit (connId=${userConn.id})`);
     return { source: "user", connectionId: userConn.id, credentials, isUserOwned: true };
   }
 
   const server = await prisma.mcpServer.findUnique({
     where: { type: serverType },
-    include: { globalCredentials: true },
   });
 
-  if (!server || !server.allowGlobalFallback || !server.globalCredentials) {
+  if (!server || !server.allowGlobalFallback) {
     // xyne-spaces already had its live-first chance above, so reaching here
     // means both the live read and the cached userMcpConnection failed.
     // Other server types just fall through.
     return null;
   }
 
+  // Global creds are org-scoped: an org-specific row (keyed by the agent's
+  // org, falling back to the calling user's org) beats the deployment-wide
+  // default row (orgId NULL). Lets two orgs run the same server type with
+  // different shared credentials (e.g. per-org GitHub bot PATs).
+  const credOrgId = agentOrgId
+    ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
+    ?? null;
+  const globalCreds =
+    (credOrgId
+      ? await prisma.globalMcpCredentials.findFirst({
+          where: { mcpServerId: server.id, orgId: credOrgId },
+        })
+      : null)
+    ?? (await prisma.globalMcpCredentials.findFirst({
+      where: { mcpServerId: server.id, orgId: null },
+    }));
+
+  if (!globalCreds) return null;
+
   const decrypted = decrypt(
-    server.globalCredentials.encryptedCreds,
-    server.globalCredentials.iv,
-    server.globalCredentials.authTag,
+    globalCreds.encryptedCreds,
+    globalCreds.iv,
+    globalCreds.authTag,
     CONFIG.encryptionKey,
+  );
+  log.info(
+    `[creds-loader] ${serverType} userId=${userId} → global hit (${globalCreds.orgId ? `org=${globalCreds.orgId}` : "default"})`,
   );
   return {
     source: "global",
-    connectionId: `global:${server.id}`,
+    connectionId: `global:${server.id}:${globalCreds.orgId ?? "default"}`,
     credentials: JSON.parse(decrypted) as Record<string, unknown>,
     isUserOwned: false,
   };

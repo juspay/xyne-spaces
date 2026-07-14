@@ -8,7 +8,7 @@ import {
   ClockIcon,
   CaretRightIcon,
 } from "@phosphor-icons/react";
-import { listRuns, checkIsAdmin } from "../../../../lib/api";
+import { listRuns } from "../../../../lib/api";
 import type { AgentRun } from "../../../../lib/api";
 import { Skeleton } from "../../ui/Skeleton";
 import { formatTimeAgo, formatDuration, truncate } from "../../home/homeUtils";
@@ -16,6 +16,7 @@ import { formatTimeAgo, formatDuration, truncate } from "../../home/homeUtils";
 interface Props {
   agentSlug: string;
   userId: string;
+  canViewAllRuns: boolean;
 }
 
 // Status icon size bumped from 16 → 22 and switched to filled weight so it
@@ -47,7 +48,9 @@ function triggerLabel(source: AgentRun["triggerSource"]): string {
       ? "Scheduled"
       : source === "chat"
         ? "Chat"
-        : "API";
+        : source === "automation"
+          ? "Automation"
+          : "API";
 }
 
 function RunRow({ run, showOwner, onOpen }: { run: AgentRun; showOwner?: boolean; onOpen?: () => void }) {
@@ -120,26 +123,24 @@ function RunRow({ run, showOwner, onOpen }: { run: AgentRun; showOwner?: boolean
   );
 }
 
-export function RunHistoryTab({ agentSlug, userId }: Props) {
+export function RunHistoryTab({ agentSlug, userId, canViewAllRuns }: Props) {
   const navigate = useNavigate();
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
-  // Admin-only: show every user's runs of this agent. Off by default — you see
-  // only your own. The server ACL-filters by usedUserToken, so other users'
+  // Elevated view: admins, owners, and contributors can show every user's runs
+  // of this agent. The server ACL-filters by usedUserToken, so other users'
   // runs that touched their private token are never returned.
   const [allUsers, setAllUsers] = useState(false);
-  // Admin "All Runs" filters (client-side over the loaded set).
+  // "All Runs" filters (client-side over the loaded set).
   const [userFilter, setUserFilter] = useState<string>(""); // "" = every user
   const [query, setQuery] = useState("");
 
   useEffect(() => {
-    let cancelled = false;
-    checkIsAdmin(userId)
-      .then((a) => { if (!cancelled) setIsAdmin(a); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [userId]);
+    if (canViewAllRuns) return;
+    setAllUsers(false);
+    setUserFilter("");
+    setQuery("");
+  }, [canViewAllRuns]);
 
   useEffect(() => {
     setLoading(true);
@@ -172,9 +173,9 @@ export function RunHistoryTab({ agentSlug, userId }: Props) {
     });
   }, [runs, userFilter, query]);
 
-  // Admin toggle — rendered above the body so it's reachable even when YOUR
+  // Elevated toggle — rendered above the body so it's reachable even when YOUR
   // own runs are empty (the common "No runs yet" case).
-  const adminToggle = isAdmin ? (
+  const allRunsToggle = canViewAllRuns ? (
     <div className="flex flex-col gap-2.5 border-b border-xyne-border-subtle px-6 py-2.5">
       <div className="flex items-center justify-end gap-2">
         <span className="text-[12px] text-xyne-fg-tertiary">All Runs</span>
@@ -303,7 +304,7 @@ export function RunHistoryTab({ agentSlug, userId }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      {adminToggle}
+      {allRunsToggle}
       {body}
     </div>
   );

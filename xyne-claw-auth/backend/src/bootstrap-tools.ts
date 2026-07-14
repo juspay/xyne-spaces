@@ -46,6 +46,7 @@ export async function bootstrapCustomTools(): Promise<void> {
       });
       upserted++;
     }
+
     log.info(`[bootstrap-tools] upserted ${upserted} custom tools from shared registry`);
   } catch (err) {
     log.error("[bootstrap-tools] failed:", err);

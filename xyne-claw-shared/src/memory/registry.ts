@@ -52,11 +52,6 @@ export function getMemoryProvider(name?: string): MemoryProvider {
   return instance;
 }
 
-/** Test helper: clear instance cache so factories run again. */
-export function resetMemoryProviderCache(): void {
-  instances.clear();
-}
-
 // ── Built-in registrations ─────────────────────────────────────────────────
 
 registerMemoryProvider("hindsight", () =>

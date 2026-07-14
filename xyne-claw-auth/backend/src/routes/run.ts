@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
+import { decrypt } from "../crypto.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
 import { gcsService } from "../services/gcsService.js";
@@ -11,24 +12,100 @@ import {
   type AttachedContextRef,
 } from "../services/agentChatContextService.js";
 import { storeForSession as storeAttachedContextForSession } from "../mcp/attached-context-injector.js";
+import { storeRunScalars } from "../mcp/run-scalars.js";
 import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { resolveCustomSubagentsForRun } from "../lib/subagent-resolver.js";
-import { parseToolsConfig, stripPlatformConfigKeys } from "xyne-claw-shared";
+import {
+  resolveCallableAgentsForRun,
+  resolveCallableAgentSpecForOrchestratorCall,
+  resolveOrchestratorCallableAgentsForRun,
+} from "../lib/callable-agent-resolver.js";
+import { ClawSseParser, parseToolsConfig, stripPlatformConfigKeys } from "xyne-claw-shared";
 import { mintSessionToken } from "../lib/session-tokens.js";
 import { consumeAlreadyOpenStream } from "../lib/consume-claw-stream.js";
+import { resolveAgentProviderConfigs, type ProviderConfig } from "../lib/agent-provider-config.js";
 import { redisService } from "../redis.js";
 import { requireAuth, requireStrictS2S, requireUserAuth, requireResultToken } from "../middleware/require-auth.js";
+import { handleRunCompletion } from "../queue/run-recovery-worker.js";
+import { getDmChannelForUserAndApp, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 
 import { createLogger } from "../logger.js";
+import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
+import type { SessionContext } from "./webhook.js";
 const log = createLogger("run");
 
 const router = Router();
+
+const RUN_RETRY_DELAY_MS = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function collectErrorCodes(err: unknown): string[] {
+  const codes: string[] = [];
+  const seen = new Set<unknown>();
+  const visit = (value: unknown): void => {
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    if (typeof value === "object") {
+      const maybe = value as { code?: unknown; cause?: unknown; errors?: unknown };
+      if (typeof maybe.code === "string") codes.push(maybe.code);
+      visit(maybe.cause);
+      if (Array.isArray(maybe.errors)) {
+        for (const child of maybe.errors) visit(child);
+      }
+    }
+  };
+  visit(err);
+  return codes;
+}
+
+function isConnectionRefusedClassError(err: unknown): boolean {
+  const codes = collectErrorCodes(err);
+  return codes.includes("ECONNREFUSED") || codes.includes("EAI_AGAIN");
+}
+
+async function fetchClawRunWithRetry(init: RequestInit, label: string): Promise<globalThis.Response> {
+  let retried = false;
+  for (;;) {
+    try {
+      const response = await fetch(`${CONFIG.xyneClawUrl}/run`, init);
+      if (response.status === 503 && !retried) {
+        retried = true;
+        log.warn(`[run] proxy: retrying claw /run once after 503 (${label})`);
+        await sleep(RUN_RETRY_DELAY_MS);
+        continue;
+      }
+      return response;
+    } catch (err) {
+      if (!retried && isConnectionRefusedClassError(err)) {
+        retried = true;
+        log.warn(`[run] proxy: retrying claw /run once after ${collectErrorCodes(err).join(",") || "connection refusal"} (${label})`);
+        await sleep(RUN_RETRY_DELAY_MS);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
 
 function requireRunCaller(req: Request, res: Response, next: NextFunction): void | Promise<void> {
   if (req.originalUrl.includes("/internal/run")) {
     return requireAuth(req, res, next);
   }
+  if ((req.body as { triggerSource?: unknown } | undefined)?.triggerSource === "api") {
+    return requireAuth(req, res, next);
+  }
   return requireUserAuth(req, res, next);
+}
+
+type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation";
+
+function triggerSourceForEventType(eventType: unknown): AgentRunTriggerSource {
+  if (eventType === "automation") return "automation";
+  if (eventType === "scheduled_job") return "scheduled";
+  return "spaces";
 }
 
 const ASSISTANT_PROMPT = `You are a helpful AI assistant powered by Xyne Spaces. You help the user by searching their workspace data — messages, tickets, activity, and knowledge base — to give accurate, grounded answers.
@@ -135,7 +212,7 @@ Some tools (like creating tickets or scheduling calls) require user approval bef
 
 // ── Resolve identity: gateway call → Xyne Spaces userId ──
 
-async function resolveUserId(body: Record<string, unknown>): Promise<{ userId: string; userName: string; userEmail: string } | { error: string }> {
+async function resolveUserId(body: Record<string, unknown>): Promise<{ userId: string; userName: string; userEmail: string; orgId?: string } | { error: string }> {
   const { userId, userName, gatewayType, externalUserId } = body as {
     userId?: string;
     userName?: string;
@@ -145,11 +222,12 @@ async function resolveUserId(body: Record<string, unknown>): Promise<{ userId: s
 
   // Direct call with userId (e.g., from Xyne Spaces)
   if (userId && typeof userId === "string" && userId.trim().length > 0) {
-    const user = await prisma.user.findUnique({ where: { id: userId.trim() } });
+    const user = await prisma.user.findUnique({ where: { id: userId.trim() }, select: { name: true, email: true, orgId: true } });
     return {
       userId: userId.trim(),
       userName: userName?.trim() ?? user?.name ?? "",
       userEmail: user?.email ?? "",
+      ...(user?.orgId ? { orgId: user.orgId } : {}),
     };
   }
 
@@ -172,7 +250,12 @@ async function resolveUserId(body: Record<string, unknown>): Promise<{ userId: s
       return { error: `No linked Xyne Spaces account for ${gatewayType} user '${externalUserId}'` };
     }
 
-    return { userId: identity.userId, userName: identity.user.name, userEmail: identity.user.email };
+    return {
+      userId: identity.userId,
+      userName: identity.user.name,
+      userEmail: identity.user.email,
+      ...(identity.user.orgId ? { orgId: identity.user.orgId } : {}),
+    };
   }
 
   return { error: "Either userId or (gatewayType + externalUserId) is required" };
@@ -180,7 +263,7 @@ async function resolveUserId(body: Record<string, unknown>): Promise<{ userId: s
 
 // ── Resolve Spaces auth from request (for service-to-service calls) ──
 
-async function resolveSpacesAuthFromRequest(req: Request): Promise<SpacesAuthContext | undefined> {
+async function resolveSpacesAuthFromRequest(req: Request, userId?: string): Promise<SpacesAuthContext | undefined> {
   try {
     // Parse cookies — may be absent, header/Authorization fallbacks still apply.
     const cookieMap = new Map<string, string>();
@@ -231,10 +314,17 @@ async function resolveSpacesAuthFromRequest(req: Request): Promise<SpacesAuthCon
 
     if (!token && !sessionId) return undefined;
 
+    const effectiveWorkspaceId = workspaceId
+      ?? (userId ? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null) : null)
+      ?? undefined;
+    if (!workspaceId && effectiveWorkspaceId) {
+      log.info(`[run] resolved Spaces workspaceId=${effectiveWorkspaceId} from user row for userId=${userId ?? "unknown"}`);
+    }
+
     return {
       ...(token ? { token } : {}),
       ...(sessionId ? { sessionId } : {}),
-      ...(workspaceId ? { workspaceId } : {}),
+      ...(effectiveWorkspaceId ? { workspaceId: effectiveWorkspaceId } : {}),
     };
   } catch (err) {
     log.warn("[run] Failed to resolve Spaces auth from request:", err);
@@ -244,10 +334,17 @@ async function resolveSpacesAuthFromRequest(req: Request): Promise<SpacesAuthCon
 
 // ── Resolve agent config ──
 
-async function resolveAgent(agentSlug: string | undefined): Promise<{
+async function resolveAgent(agentSlug: string | undefined, orgId: string | undefined): Promise<{
+  id: string;
   systemPrompt: string;
   modelId?: string | undefined;
   agentConfig: Record<string, unknown>;
+  config?: unknown;
+  orgId: string;
+  delegationTier: "standard" | "orchestrator";
+  spacesAppId?: string | null;
+  spacesAppToken?: string | null;
+  spacesAppUserId?: string | null;
   skills?: {
     slug: string;
     name: string;
@@ -260,9 +357,20 @@ async function resolveAgent(agentSlug: string | undefined): Promise<{
   // sibling files (SkillFile rows) so directory-style skills get
   // materialized in the child workspace alongside SKILL.md.
   const includeSkills = { skills: { include: { skill: { include: { files: true } } } } };
+  if (agentSlug && !orgId) {
+    log.error(`[run] orgId is required for agentSlug lookup agentSlug=${agentSlug}`);
+    return { error: `Agent '${agentSlug}' not found` };
+  }
+  if (!agentSlug && !orgId) {
+    log.error("[run] orgId is required; refusing global default-agent lookup agentSlug=default orgId=none");
+    return { error: "orgId is required" };
+  }
   const agent = agentSlug
-    ? await prisma.agent.findUnique({ where: { slug: agentSlug }, include: includeSkills })
-    : await prisma.agent.findFirst({ where: { isDefault: true }, include: includeSkills });
+    ? await prisma.agent.findUnique({
+      where: { orgId_slug: { orgId: orgId!, slug: agentSlug } },
+      include: includeSkills,
+    })
+    : await prisma.agent.findFirst({ where: { orgId: orgId!, isDefault: true }, include: includeSkills });
 
   if (!agent) {
     return { error: agentSlug ? `Agent '${agentSlug}' not found` : "No default agent configured" };
@@ -293,9 +401,16 @@ async function resolveAgent(agentSlug: string | undefined): Promise<{
   }));
 
   return {
+    id: agent.id,
     systemPrompt: agent.systemPrompt,
     modelId: agent.modelId || undefined,
+    orgId: agent.orgId,
+    delegationTier: agent.delegationTier === "orchestrator" ? "orchestrator" : "standard",
+    spacesAppId: agent.spacesAppId ?? null,
+    spacesAppToken: agent.spacesAppToken ?? null,
+    spacesAppUserId: agent.spacesAppUserId ?? null,
     agentConfig: stripPlatformConfigKeys(agent.config as Record<string, unknown>),
+    config: agent.config,
     ...(skills.length > 0 ? { skills } : {}),
   };
 }
@@ -344,11 +459,51 @@ router.post("/clone-session", requireStrictS2S, async (req: Request, res: Respon
   }
 });
 
+router.get("/callable-agent-spec", requireStrictS2S, async (req: Request, res: Response) => {
+  try {
+    const caller = (req.query["caller"] as string | undefined)?.trim();
+    const callee = (req.query["callee"] as string | undefined)?.trim();
+    const userId = (req.query["userId"] as string | undefined)?.trim();
+    const sessionId = (req.query["sessionId"] as string | undefined)?.trim();
+    if (!caller || !callee || !userId || !sessionId) {
+      res.status(400).json({ success: false, error: "caller, callee, userId, and sessionId are required" });
+      return;
+    }
+
+    const resolvedSpec = await resolveCallableAgentSpecForOrchestratorCall(prisma, {
+      callerSlug: caller,
+      calleeSlug: callee,
+      userId,
+    });
+    if ("error" in resolvedSpec) {
+      res.status(resolvedSpec.status).json({ success: false, error: resolvedSpec.error });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...resolvedSpec.spec,
+        sessionToken: mintSessionToken({
+          sessionId,
+          userId,
+          agentSlug: resolvedSpec.spec.slug,
+          ...(resolvedSpec.spec.spacesAppId ? { spacesAppId: resolvedSpec.spec.spacesAppId } : {}),
+          ttlSeconds: 6 * 60 * 60,
+        }),
+      },
+    });
+  } catch (err) {
+    log.error("[run] callable-agent-spec error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
 // ── POST /run — accept task, resolve identity + agent, forward to xyne-claw ──
 
 router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
   try {
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, channelId, projectId, projectName, cwd, eventType, traceId, provider, providerOrder, subagentProviders, providerConfigs, progressUrl, attachments, contextFiles, attachedContext, ticketIds, canvasIds, callIds, isRegenerate } = req.body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, channelId, deliverTo, projectId, projectName, cwd, eventType, traceId, provider, providerOrder, subagentProviders, providerConfigs, progressUrl, attachments, contextFiles, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached } = req.body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -360,6 +515,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       agentSlug?: string;
       callbackUrl?: string;
       channelId?: string;
+      deliverTo?: "dm";
       projectId?: string;
       projectName?: string;
       cwd?: string;
@@ -368,7 +524,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       provider?: string;
       providerOrder?: string[];
       subagentProviders?: Record<string, string>;
-      providerConfigs?: Record<string, { apiKey: string; model: string; baseUrl?: string }>;
+      providerConfigs?: Record<string, ProviderConfig>;
       progressUrl?: string;
       attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
       contextFiles?: Array<{ path: string; content: string }>;
@@ -376,10 +532,14 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       ticketIds?: string[];
       canvasIds?: string[];
       callIds?: string[];
+      idempotencyKey?: string;
+      detached?: boolean;
       /** Branching: when true, claw branches the PI session at the last user
        *  entry so the new assistant turn is a sibling of the previous one. */
       isRegenerate?: boolean;
     };
+
+    const defaultTriggerSource = triggerSourceForEventType(eventType);
 
     log.info(`[run] Received: ticketIds=${JSON.stringify(ticketIds)}, canvasIds=${JSON.stringify(canvasIds)}, callIds=${JSON.stringify(callIds)}`);
     // [AUTODBG] confirm automation forwards reach this handler (past requireStrictS2S)
@@ -396,25 +556,53 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       return;
     }
 
-    // Resolve identity
-    const resolved = await resolveUserId(req.body as Record<string, unknown>);
+    // Resolve identity. Browser and CLI/Bearer auth pin x-user-id server-side;
+    // body userId is accepted only when it agrees with that authenticated id.
+    const authenticatedUserId = getRequesterId(req);
+    const bodyUserIdRaw = (req.body as { userId?: unknown }).userId;
+    const bodyUserId = typeof bodyUserIdRaw === "string" && bodyUserIdRaw.trim()
+      ? bodyUserIdRaw.trim()
+      : undefined;
+    if (bodyUserId && authenticatedUserId && bodyUserId !== authenticatedUserId) {
+      log.warn(`[run] userId pin mismatch: session=${authenticatedUserId} body=${bodyUserId}`);
+      res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
+      return;
+    }
+
+    const identityBody = {
+      ...(req.body as Record<string, unknown>),
+      ...(!bodyUserId && authenticatedUserId ? { userId: authenticatedUserId } : {}),
+    };
+    const resolved = await resolveUserId(identityBody);
     if ("error" in resolved) {
       res.status(400).json({ success: false, error: resolved.error });
       return;
     }
 
-    const sessionUserId = req.headers["x-user-id"];
-    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== resolved.userId) {
-      log.warn(`[run] userId pin mismatch: session=${sessionUserId} body=${resolved.userId}`);
-      res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
+    const headerOrgId = getOrgId(req);
+    const runtimeOrgId = headerOrgId ?? resolved.orgId;
+    if (agentSlug && !runtimeOrgId) {
+      log.error(`[run] orgId is required for agentSlug lookup agentSlug=${agentSlug} userId=${resolved.userId}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
       return;
     }
 
-    // Resolve agent (only if explicitly requested) - pass userId to get user-specific skills
-    const agent = await resolveAgent(agentSlug);
+    // Resolve agent (only if explicitly requested). Org comes from auth/user DB,
+    // never from request body.
+    const agent = await resolveAgent(agentSlug, runtimeOrgId);
     if ("error" in agent) {
       res.status(400).json({ success: false, error: agent.error });
       return;
+    }
+
+    let effectiveChannelId = channelId;
+    if (!effectiveChannelId && deliverTo === "dm" && authenticatedUserId) {
+      if (agent.spacesAppId) {
+        effectiveChannelId = await getDmChannelForUserAndApp(authenticatedUserId, agent.spacesAppId) ?? undefined;
+      }
+      if (!effectiveChannelId) {
+        log.warn(`[run] dm-delivery unresolved user=${authenticatedUserId} agent=${agentSlug || "assistant"}`);
+      }
     }
 
     // For the default assistant agent: select prompt based on event type
@@ -446,7 +634,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     }
     if (normalizedAttached.length > 0 || attachedThreadConversationId || attachedCanvasViewAccessId) {
       // Try to get Spaces auth from request cookies
-      const spacesAuth = await resolveSpacesAuthFromRequest(req);
+      const spacesAuth = await resolveSpacesAuthFromRequest(req, resolved.userId);
       if (spacesAuth) {
         try {
           resolvedAttachedContext = await buildAttachedContextPayload(normalizedAttached, spacesAuth, {
@@ -490,7 +678,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     // always sees the current agents without any hardcoded list in the prompt.
     if (agentSlug === "claw") {
       try {
-        const catalog = await buildAgentCatalog(resolved.userId);
+        const catalog = await buildAgentCatalog(resolved.userId, agent.orgId);
         additionalInstructions = additionalInstructions
           ? `${catalog}\n\n${additionalInstructions}`
           : catalog;
@@ -509,16 +697,115 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     const mergedAgentConfig = stripPlatformConfigKeys({ ...agent.agentConfig, ...((req.body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {}) });
     const requestedSubagentNames = parseToolsConfig(mergedAgentConfig)?.subagents ?? [];
     const customSubagents = requestedSubagentNames.length > 0
-      ? await resolveCustomSubagentsForRun(prisma, requestedSubagentNames)
+      ? await resolveCustomSubagentsForRun(prisma, requestedSubagentNames, agent.orgId)
       : [];
 
+    // A2A delegation. Standard-tier callers list requested callee slugs under
+    // tools.callableAgents and the resolver intersects them with approved
+    // grants. Orchestrator-tier callers receive a lightweight list of enabled
+    // global org agents + approved non-global grant targets; full specs are
+    // hydrated by claw-auth at tool-call time.
+    const toolsCfg = (mergedAgentConfig as { tools?: { callableAgents?: unknown } } | null | undefined)?.tools;
+    const requestedCalleeSlugs = Array.isArray(toolsCfg?.callableAgents)
+      ? (toolsCfg!.callableAgents as unknown[]).filter((x): x is string => typeof x === "string")
+      : [];
+    const runningUserIsAdmin = await isClawAdmin(resolved.userId);
+    const callableAgents = agent.delegationTier === "orchestrator"
+      ? await resolveOrchestratorCallableAgentsForRun(prisma, agent.id, agent.orgId, {
+          runningUserId: resolved.userId,
+          isAdmin: runningUserIsAdmin,
+        })
+      : requestedCalleeSlugs.length > 0
+        ? await resolveCallableAgentsForRun(prisma, agent.id, requestedCalleeSlugs, agent.orgId, {
+            runningUserId: resolved.userId,
+            isAdmin: runningUserIsAdmin,
+          })
+        : [];
+
     const sessionId = randomUUID();
+    const isInternalRun = req.baseUrl.includes("/internal");
+    const bodyIdempotencyKey = typeof requestedIdempotencyKey === "string" && requestedIdempotencyKey.trim().length > 0
+      ? requestedIdempotencyKey.trim()
+      : undefined;
+    const idempotencyKey = isInternalRun ? (bodyIdempotencyKey ?? sessionId) : randomUUID();
     const sessionToken = mintSessionToken({
       sessionId,
       userId: resolved.userId,
       ...(agentSlug ? { agentSlug } : {}),
+      ...(agent.spacesAppId ? { spacesAppId: agent.spacesAppId } : {}),
       ttlSeconds: 6 * 60 * 60,
     });
+    const standardCallableAgents = callableAgents as Array<{ slug: string; spacesAppId?: string | null }>;
+    const callableAgentsWithSession = agent.delegationTier === "orchestrator"
+      ? callableAgents
+      : standardCallableAgents.map((spec) => ({
+          ...spec,
+          sessionToken: mintSessionToken({
+            sessionId,
+            userId: resolved.userId,
+            agentSlug: spec.slug,
+            ...(spec.spacesAppId ? { spacesAppId: spec.spacesAppId } : {}),
+            ttlSeconds: 6 * 60 * 60,
+          }),
+        }));
+
+    let effectiveProviderConfigs = providerConfigs;
+    let effectiveProviderOrder = providerOrder;
+    let effectiveProvider = provider;
+    if (!providerConfigs) {
+      try {
+        const resolvedProviders = await resolveAgentProviderConfigs({ id: agent.id, config: agent.config });
+        effectiveProviderConfigs = resolvedProviders.providerConfigs;
+        if (!providerOrder?.length) effectiveProviderOrder = resolvedProviders.providerOrder;
+        // Primary provider — the pod keys its model off `provider` (defaults
+        // to "spaces"/private-large when unset), NOT providerOrder[0]. Same
+        // wiring as the scheduled-jobs worker and the automation webhook;
+        // without it, dispatches relying on server-side resolution run on the
+        // platform default regardless of the agent's configured provider.
+        if (!provider && resolvedProviders.parent) effectiveProvider = resolvedProviders.parent;
+      } catch (provErr) {
+        log.error(`[run] resolveAgentProviderConfigs failed for agent=${agentSlug || "assistant"}: ${provErr instanceof Error ? provErr.stack || provErr.message : String(provErr)}`);
+        res.status(502).json({ success: false, error: "provider config resolution failed" });
+        return;
+      }
+    }
+
+    const acceptHeader = (req.headers["accept"] as string | undefined) ?? "";
+    const injectedCallbackUrl = !callbackUrl && !acceptHeader.includes("text/event-stream")
+      ? `${CONFIG.internalUrl}/claw/api/v1/webhook/result`
+      : undefined;
+    const effectiveCallbackUrl = callbackUrl ?? injectedCallbackUrl;
+
+    if (injectedCallbackUrl) {
+      try {
+        const [ciphertext, iv, authTag] = (agent.spacesAppToken ?? "").split(":");
+        const appToken = ciphertext && iv && authTag
+          ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey)
+          : "";
+        const sessionContext: SessionContext = {
+          mentionedUserId: agent.spacesAppUserId ?? "",
+          senderId: resolved.userId,
+          senderName: resolved.userName || resolved.userId,
+          channelId: effectiveChannelId ?? "",
+          channelName: effectiveChannelId ?? "",
+          conversationId: conversationId ?? "",
+          task: task.trim(),
+          agentId: agent.id,
+          agentOrgId: agent.orgId,
+          agentSlug: agentSlug || "assistant",
+          responseMode: "conversation",
+          appToken,
+          spacesAppId: agent.spacesAppId ?? "",
+          spacesAppUserId: agent.spacesAppUserId ?? "",
+          rootAgentSlug: agentSlug || "assistant",
+          ...(traceId ? { traceId } : {}),
+        };
+        const { setSession } = await import("./webhook.js");
+        await setSession(sessionId, sessionContext);
+      } catch (sessionErr) {
+        log.warn(`[run] failed to store injected callback session context sessionId=${sessionId}:`, sessionErr instanceof Error ? sessionErr.message : sessionErr);
+      }
+    }
 
     // Persist attached items for the lifetime of this session so the MCP /call
     // boundary can default-fill missing channelId/conversationId on spaces-*
@@ -528,11 +815,31 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       storeAttachedContextForSession(sessionId, normalizedAttached).catch(() => {});
     }
 
+    // Dashboard-ai run scalars: the Spaces proxy passes the dashboard being
+    // edited via agentConfig. Stored per-session so the MCP /call boundary can
+    // force-inject them into xyne-dashboard tool calls. Fire-and-forget.
+    {
+      const ac = mergedAgentConfig as Record<string, unknown>;
+      const scalar = (k: string): string | undefined =>
+        typeof ac[k] === "string" && ac[k] ? (ac[k] as string) : undefined;
+      const dashboardDataSourceId = scalar("SPACES_DATA_SOURCE_ID");
+      const dashboardDraftId = scalar("SPACES_DASHBOARD_DRAFT_ID");
+      const dashboardFocusedComponentId = scalar("SPACES_FOCUSED_COMPONENT_ID");
+      if (dashboardDataSourceId || dashboardDraftId || dashboardFocusedComponentId) {
+        storeRunScalars(sessionId, {
+          ...(dashboardDataSourceId ? { dataSourceId: dashboardDataSourceId } : {}),
+          ...(dashboardDraftId ? { draftId: dashboardDraftId } : {}),
+          ...(dashboardFocusedComponentId ? { focusedComponentId: dashboardFocusedComponentId } : {}),
+        }).catch(() => {});
+      }
+    }
+
     // Shared request body for both transports. SSE consumers (run-stream.ts)
     // pass progressUrl/callbackUrl too — claw ignores them in SSE mode since
     // the response stream IS the channel.
     const forwardBody = {
       sessionId,
+      idempotencyKey,
       sessionToken,
       userId: resolved.userId,
       userName: resolved.userName,
@@ -541,20 +848,20 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       context: mergedContext,
       conversationId,
       ...(piSessionConversationId ? { piSessionConversationId } : {}),
-      ...(callbackUrl ? { callbackUrl } : {}),
+      ...(effectiveCallbackUrl ? { callbackUrl: effectiveCallbackUrl } : {}),
       ...(effectivePrompt ? { systemPrompt: effectivePrompt } : {}),
       ...(agent.modelId ? { modelId: agent.modelId } : {}),
       agentConfig: mergedAgentConfig,
       agentSlug,
-      channelId,
+      channelId: effectiveChannelId,
       ...(projectId ? { projectId } : {}),
       ...(projectName ? { projectName } : {}),
       ...(eventType ? { eventType } : {}),
       ...(traceId ? { traceId } : {}),
-      ...(provider ? { provider } : {}),
-      ...(providerOrder?.length ? { providerOrder } : {}),
+      ...(effectiveProvider ? { provider: effectiveProvider } : {}),
+      ...(effectiveProviderOrder?.length ? { providerOrder: effectiveProviderOrder } : {}),
       ...(subagentProviders ? { subagentProviders } : {}),
-      ...(providerConfigs ? { providerConfigs } : {}),
+      ...(effectiveProviderConfigs && Object.keys(effectiveProviderConfigs).length > 0 ? { providerConfigs: effectiveProviderConfigs } : {}),
       ...(cwd ? { cwd } : {}),
       ...(agent.skills ? { skills: agent.skills } : {}),
       ...(progressUrl ? { progressUrl } : {}),
@@ -567,18 +874,43 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       ...((req.body as { researchContext?: unknown }).researchContext ? { researchContext: (req.body as { researchContext?: unknown }).researchContext } : {}),
       ...(additionalInstructions ? { additionalInstructions } : {}),
       ...(customSubagents.length > 0 ? { customSubagents } : {}),
+      ...(callableAgentsWithSession.length > 0 ? { callableAgents: callableAgentsWithSession } : {}),
+      ...(agent.delegationTier === "orchestrator" ? { delegationMode: "orchestrator" } : {}),
       ...(isRegenerate ? { isRegenerate: true } : {}),
+      ...(detached === true ? { detached: true } : {}),
     };
+
+    if (detached === true) {
+      log.info(`[run] proxy: detached mode (sessionId=${sessionId})`);
+      const clawRes = await fetchClawRunWithRetry({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        },
+        body: JSON.stringify(forwardBody),
+      }, "detached-json");
+
+      const body = (await clawRes.json().catch(() => null)) as { success?: boolean; sessionId?: string; error?: string } | null;
+      if (clawRes.status !== 202 || !body?.success || !body.sessionId) {
+        const error = body?.error ?? `Detached /run failed: HTTP ${clawRes.status}`;
+        log.error(`[run] proxy: detached claw /run rejected (sessionId=${sessionId}): ${error}`);
+        res.status(clawRes.status || 502).json(body ?? { success: false, error });
+        return;
+      }
+
+      res.status(202).json({ success: true, sessionId: body.sessionId });
+      return;
+    }
 
     // SSE pass-through: the caller (run-stream.ts) opted into the streaming
     // transport via Accept: text/event-stream. Forward the same header to
     // claw and pipe the response body straight back. All pre-flight work
     // (identity, agent resolution, message persistence, AgentRun tracking)
     // ran above — same as legacy mode — so downstream behavior is unchanged.
-    const acceptHeader = (req.headers["accept"] as string | undefined) ?? "";
     if (acceptHeader.includes("text/event-stream")) {
       log.info(`[run] proxy: forwarding SSE upstream to claw (sessionId=${sessionId})`);
-      const clawRes = await fetch(`${CONFIG.xyneClawUrl}/run`, {
+      const clawRes = await fetchClawRunWithRetry({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -586,7 +918,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
         },
         body: JSON.stringify(forwardBody),
-      });
+      }, "sse-pass-through");
 
       if (!clawRes.ok || !clawRes.body) {
         const errText = await clawRes.text().catch(() => "");
@@ -607,18 +939,27 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             userId: resolved.userId,
             role: 'user',
             content: task.trim(),
+            orgId: agent.orgId,
           });
         } catch (msgErr) {
           log.warn("[run] Failed to persist user message:", msgErr instanceof Error ? msgErr.message : msgErr);
         }
+      }
+      // AgentRun tracking must NOT require a conversationId: automation/
+      // scheduled dispatches can be conversation-less (external-event
+      // automations), and since the webhook pre-insert was removed this is
+      // the ONLY row writer for them — gating on conversationId would make
+      // such runs invisible to Control Center and unreconcilable.
+      if ((conversationId || isScheduledOrAutomationEvent(eventType)) && !persistedByCaller) {
         agentRunRepository.start({
           sessionId,
           userId: resolved.userId,
           agentSlug: agentSlug || 'assistant',
-          triggerSource: "spaces",
+          orgId: agent.orgId,
+          triggerSource: defaultTriggerSource,
           task: task.trim(),
-          conversationId,
-          ...(channelId ? { channelId } : {}),
+          ...(conversationId ? { conversationId } : {}),
+          ...(effectiveChannelId ? { channelId: effectiveChannelId } : {}),
           ...(projectId ? { projectId } : {}),
           ...(projectName ? { projectName } : {}),
         }).catch((e) => log.warn("[run] AgentRun.start failed:", e instanceof Error ? e.message : e));
@@ -650,11 +991,18 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         }
       });
 
+      const parser = new ClawSseParser();
+      const decoder = new TextDecoder("utf-8");
+      let sawDone = false;
+      let streamBroken = false;
       try {
         for (;;) {
           const { value, done } = await upstreamReader.read();
           if (done) break;
           if (value) {
+            for (const event of parser.feed(decoder.decode(value, { stream: true }))) {
+              if (event.event === "done") sawDone = true;
+            }
             if (!res.write(Buffer.from(value))) {
               // backpressure: wait for drain before reading the next chunk so
               // we don't accumulate the agent's text deltas in the Node heap
@@ -663,6 +1011,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           }
         }
       } catch (pipeErr) {
+        streamBroken = true;
         log.error(`[run] proxy: SSE pipe error (sessionId=${sessionId}):`, pipeErr instanceof Error ? pipeErr.message : String(pipeErr));
         if (!res.writableEnded) {
           try {
@@ -671,6 +1020,26 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         }
       } finally {
         try { upstreamReader.releaseLock(); } catch { /* ignore */ }
+        if (!sawDone) {
+          if (callbackUrl && !isScheduledOrAutomationEvent(eventType)) {
+            // Same headless tolerance as the legacy-bridge paths: the runtime
+            // keeps running after a consumer disconnect and finalizes via its
+            // callback — synthesizing failure here raced that and mislabeled
+            // ~47 live runs/day as "sse stream broken" (prod 2026-07-09).
+            log.warn(`[run] proxy: pass-through stream lost; run continues headless (session=${sessionId})`);
+            armHeadlessFinalizeCheck({ sessionId, sessionToken, callbackUrl, conversationId: typeof conversationId === "string" ? conversationId : undefined, agentSlug: typeof agentSlug === "string" ? agentSlug : undefined, eventType });
+          } else {
+            await postBrokenSseTerminalCallback({
+              callbackUrl,
+              sessionId,
+              sessionToken,
+              conversationId: typeof conversationId === "string" ? conversationId : undefined,
+              agentSlug: typeof agentSlug === "string" ? agentSlug : undefined,
+              eventType,
+              logPrefix: streamBroken ? "pass-through pipe error" : "pass-through ended before done",
+            });
+          }
+        }
         if (!res.writableEnded) {
           try { res.end(); } catch { /* ignore */ }
         }
@@ -695,7 +1064,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       // consume in the foreground (the legacy contract is fire-and-forget),
       // so we just buy a quick "did /run accept" signal by waiting for the
       // first response chunk.
-      const probeRes = await fetch(`${CONFIG.xyneClawUrl}/run`, {
+      const probeRes = await fetchClawRunWithRetry({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -703,7 +1072,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
         },
         body: JSON.stringify(forwardBody),
-      });
+      }, "sse-bridge");
 
       if (!probeRes.ok || !probeRes.body) {
         const errText = await probeRes.text().catch(() => "");
@@ -725,18 +1094,27 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             userId: resolved.userId,
             role: 'user',
             content: task.trim(),
+            orgId: agent.orgId,
           });
         } catch (msgErr) {
           log.warn("[run] Failed to persist user message:", msgErr instanceof Error ? msgErr.message : msgErr);
         }
+      }
+      // AgentRun tracking must NOT require a conversationId: automation/
+      // scheduled dispatches can be conversation-less (external-event
+      // automations), and since the webhook pre-insert was removed this is
+      // the ONLY row writer for them — gating on conversationId would make
+      // such runs invisible to Control Center and unreconcilable.
+      if ((conversationId || isScheduledOrAutomationEvent(eventType)) && !persistedByCaller) {
         agentRunRepository.start({
           sessionId,
           userId: resolved.userId,
           agentSlug: agentSlug || 'assistant',
-          triggerSource: "spaces",
+          orgId: agent.orgId,
+          triggerSource: defaultTriggerSource,
           task: task.trim(),
-          conversationId,
-          ...(channelId ? { channelId } : {}),
+          ...(conversationId ? { conversationId } : {}),
+          ...(effectiveChannelId ? { channelId: effectiveChannelId } : {}),
           ...(projectId ? { projectId } : {}),
           ...(projectName ? { projectName } : {}),
         }).catch((e) => log.warn("[run] AgentRun.start failed:", e instanceof Error ? e.message : e));
@@ -756,25 +1134,27 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       void runBridgeForProbeResponse({
         probeRes,
         progressUrl,
-        callbackUrl,
+        callbackUrl: effectiveCallbackUrl,
         sessionId,
         sessionToken,
         conversationId: typeof conversationId === "string" ? conversationId : undefined,
         agentSlug: typeof agentSlug === "string" ? agentSlug : undefined,
+        eventType,
+        forwardBody,
       });
       return;
     }
 
     // Legacy JSON path — unchanged. Used when CLAW_SSE_TRANSPORT=off so a flag
     // flip is the only thing required to roll back to per-chunk POSTs.
-    const clawRes = await fetch(`${CONFIG.xyneClawUrl}/run`, {
+    const clawRes = await fetchClawRunWithRetry({
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
       body: JSON.stringify(forwardBody),
-    });
+    }, "legacy-json");
 
     const body = (await clawRes.json()) as { success: boolean; sessionId?: string; error?: string };
 
@@ -795,6 +1175,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           userId: resolved.userId,
           role: 'user',
           content: task.trim(),
+          orgId: agent.orgId,
         });
       } catch (msgErr) {
         log.warn("[run] Failed to persist user message:", msgErr instanceof Error ? msgErr.message : msgErr);
@@ -811,15 +1192,18 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     // one here too caused a P2002 on the unique sessionId and tagged
     // chat runs as "spaces". Webhook/direct-API paths leave the flag unset
     // and still get tracked here.
-    if (conversationId && !persistedByCaller) {
+    if ((conversationId || isScheduledOrAutomationEvent(eventType)) && !persistedByCaller) {
+      // conversationId intentionally optional here — see the SSE-path comment:
+      // conversation-less automations must still get an AgentRun row.
       agentRunRepository.start({
         sessionId: body.sessionId,
         userId: resolved.userId,
         agentSlug: agentSlug || 'assistant',
-        triggerSource: "spaces",
+        orgId: agent.orgId,
+        triggerSource: defaultTriggerSource,
         task: task.trim(),
-        conversationId,
-        ...(channelId ? { channelId } : {}),
+        ...(conversationId ? { conversationId } : {}),
+        ...(effectiveChannelId ? { channelId: effectiveChannelId } : {}),
         ...(projectId ? { projectId } : {}),
         ...(projectName ? { projectName } : {}),
       }).catch((e) => log.warn("[run] AgentRun.start failed:", e instanceof Error ? e.message : e));
@@ -967,6 +1351,11 @@ router.post("/sessions/:id/result", requireStrictS2S, requireResultToken((req) =
         }
       }
 
+      const run = await agentRunRepository.findBySessionId(id).catch(() => null);
+      if (!run) {
+        log.warn(`[run/callback] no AgentRun found for session ${id}; skipping ChatMessage persistence`);
+        return;
+      }
       const assistantMsg = await chatMessageRepository.create({
         conversationId,
         agentSlug: agentSlug || 'assistant',
@@ -974,6 +1363,7 @@ router.post("/sessions/:id/result", requireStrictS2S, requireResultToken((req) =
         role: 'assistant',
         content,
         status: status === 'completed' ? 'completed' : 'failed',
+        orgId: run.orgId,
         ...(reasoning ? { reasoning } : {}),
       });
 
@@ -1054,6 +1444,8 @@ interface BridgeForProbeOpts {
    *  and missing summarize replies). */
   conversationId?: string | undefined;
   agentSlug?: string | undefined;
+  eventType?: string | undefined;
+  forwardBody: Record<string, unknown>;
 }
 
 // Spaces' /webhook/progress only consumes toolInvocation / toolLabel /
@@ -1066,8 +1458,256 @@ function isSpacesWebhookProgressUrl(url: string | undefined): boolean {
   return !!url && /\/webhook\/progress(?:\?|$)/.test(url);
 }
 
+function isScheduledOrAutomationEvent(eventType: unknown): boolean {
+  return eventType === "scheduled_job" || eventType === "automation";
+}
+
+function scheduledJobIdFromCallback(callbackUrl: string | undefined): string | undefined {
+  if (!callbackUrl) return undefined;
+  const match = callbackUrl.match(/\/scheduled-jobs\/([^/]+)\/result(?:\?|$)/);
+  return match?.[1];
+}
+
+function safeIdPart(value: unknown): string {
+  const raw = typeof value === "string" && value.trim() ? value.trim() : randomUUID();
+  const safe = raw.replace(/[^A-Za-z0-9_-]/g, "_");
+  return safe.length > 0 ? safe.slice(0, 110) : randomUUID();
+}
+
+function retryIdempotencyKey(forwardBody: Record<string, unknown>): string {
+  // REUSE the original key, do not derive a new one: claw's completion marker
+  // (claw-results/<key>.json) is written only on success, so with the same key
+  // a bridge that died AFTER the run finished replays the completed result
+  // instead of re-executing the task (duplicate side effects), and an
+  // unfinished run executes normally. A `_retry1`-style suffix would bypass
+  // that idempotency backstop entirely.
+  return safeIdPart(forwardBody["idempotencyKey"]);
+}
+
+async function retryBrokenBridgeOnce(opts: {
+  forwardBody: Record<string, unknown>;
+  oldSessionId: string;
+  callbackUrl: string | undefined;
+  reason: string;
+}): Promise<boolean> {
+  const eventType = opts.forwardBody["eventType"];
+  if (!isScheduledOrAutomationEvent(eventType)) return false;
+  if (typeof opts.forwardBody["retryOf"] === "string") return false;
+
+  const userId = opts.forwardBody["userId"];
+  if (typeof userId !== "string" || !userId) {
+    log.warn(`[run] proxy: cannot retry broken bridge; missing userId (session=${opts.oldSessionId})`);
+    return false;
+  }
+
+  const agentSlug = typeof opts.forwardBody["agentSlug"] === "string"
+    ? opts.forwardBody["agentSlug"]
+    : undefined;
+  const newSessionId = randomUUID();
+  const sessionToken = mintSessionToken({
+    sessionId: newSessionId,
+    userId,
+    ...(agentSlug ? { agentSlug } : {}),
+    ttlSeconds: 6 * 60 * 60,
+  });
+  const newBody = {
+    ...opts.forwardBody,
+    sessionId: newSessionId,
+    sessionToken,
+    idempotencyKey: retryIdempotencyKey(opts.forwardBody),
+    retryOf: opts.oldSessionId,
+    detached: true,
+  };
+
+  const oldRun = await prisma.agentRun.findUnique({
+    where: { sessionId: opts.oldSessionId },
+    select: {
+      userId: true,
+      agentSlug: true,
+      orgId: true,
+      triggerSource: true,
+      task: true,
+      conversationId: true,
+      scheduledJobId: true,
+      channelId: true,
+      projectId: true,
+      projectName: true,
+    },
+  }).catch(() => null);
+
+  try {
+    const retryRes = await fetchClawRunWithRetry({
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
+      body: JSON.stringify(newBody),
+    }, "bridge-retry-detached");
+    const retryBody = (await retryRes.json().catch(() => null)) as { success?: boolean; sessionId?: string; error?: string } | null;
+    if (retryRes.status !== 202 || !retryBody?.success || retryBody.sessionId !== newSessionId) {
+      log.warn(`[run] proxy: bridge retry dispatch rejected old=${opts.oldSessionId} new=${newSessionId} status=${retryRes.status} error=${retryBody?.error ?? "unknown"}`);
+      return false;
+    }
+  } catch (err) {
+    log.warn(`[run] proxy: bridge retry dispatch failed old=${opts.oldSessionId} new=${newSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+
+  const retryError = `bridge lost — retried as ${newSessionId}`;
+  // Hand the old session's run-recovery state over: mark it completed so the
+  // watchdog can't fire a SECOND retry for the same work (automations register
+  // recovery at dispatch; without this, bridge-retry + recovery-retry would
+  // double-execute the task). The retry session owns delivery from here;
+  // retry-once semantics — if IT dies too, the failure surfaces via callback.
+  await handleRunCompletion(opts.oldSessionId, "completed").catch((err) =>
+    log.warn(`[run] proxy: failed to hand off recovery state for bridge-lost run (session=${opts.oldSessionId}): ${err instanceof Error ? err.message : String(err)}`),
+  );
+  await agentRunRepository.finalize(opts.oldSessionId, {
+    status: "failed",
+    error: retryError,
+    result: null,
+  }).catch((err) =>
+    log.warn(`[run] proxy: failed to mark bridge-lost run failed (session=${opts.oldSessionId}): ${err instanceof Error ? err.message : String(err)}`),
+  );
+
+  const scheduledJobId = oldRun?.scheduledJobId ?? scheduledJobIdFromCallback(opts.callbackUrl);
+  if (scheduledJobId) {
+    await prisma.scheduledJobRun.updateMany({
+      where: { scheduledJobId, sessionId: opts.oldSessionId },
+      data: { status: "failed", error: retryError, completedAt: new Date() },
+    }).catch(() => {});
+    await prisma.scheduledJobRun.create({
+      data: { scheduledJobId, sessionId: newSessionId, status: "started" },
+    }).catch((err) =>
+      log.warn(`[run] proxy: failed to create scheduled retry run row job=${scheduledJobId} session=${newSessionId}: ${err instanceof Error ? err.message : String(err)}`),
+    );
+  }
+
+  if (oldRun) {
+    await agentRunRepository.start({
+      sessionId: newSessionId,
+      userId: oldRun.userId,
+      agentSlug: oldRun.agentSlug,
+      orgId: oldRun.orgId,
+      triggerSource: oldRun.triggerSource as AgentRunTriggerSource,
+      task: oldRun.task,
+      ...(oldRun.conversationId ? { conversationId: oldRun.conversationId } : {}),
+      ...(scheduledJobId ? { scheduledJobId } : {}),
+      ...(oldRun.channelId ? { channelId: oldRun.channelId } : {}),
+      ...(oldRun.projectId ? { projectId: oldRun.projectId } : {}),
+      ...(oldRun.projectName ? { projectName: oldRun.projectName } : {}),
+    }).catch((err) =>
+      log.warn(`[run] proxy: failed to start retry AgentRun old=${opts.oldSessionId} new=${newSessionId}: ${err instanceof Error ? err.message : String(err)}`),
+    );
+  }
+
+  log.warn(`[run] proxy: ${opts.reason}; retried ${String(eventType)} run old=${opts.oldSessionId} new=${newSessionId}`);
+  return true;
+}
+
+/** How long a headless run (bridge lost, runtime presumed alive) gets to
+ *  finalize via its own callback before we declare it dead. Generous — long
+ *  interactive runs are the norm; the orphan-finalizer remains the deep
+ *  backstop if claw-auth restarts and loses this in-process timer. */
+const HEADLESS_FINALIZE_CHECK_MS = Number(process.env["HEADLESS_FINALIZE_CHECK_MS"] ?? 30 * 60 * 1000);
+
+/** The headless early-return trusts the runtime to finalize via callback —
+ *  correct when only the PIPE died. When the RUNTIME died (OOM/crash), no
+ *  callback ever comes and interactive runs register no run-recovery, so the
+ *  row would sit "running" until the slow orphan sweep. This bounded check
+ *  posts the synthetic failed callback only if the row is still running
+ *  after the window. Best-effort in-process timer. */
+function armHeadlessFinalizeCheck(opts: {
+  sessionId: string;
+  sessionToken: string;
+  callbackUrl: string | undefined;
+  conversationId?: string | undefined;
+  agentSlug?: string | undefined;
+  eventType?: string | undefined;
+}): void {
+  const timer = setTimeout(async () => {
+    try {
+      const run = await agentRunRepository.findBySessionId(opts.sessionId);
+      if (!run || run.status !== "running") return;
+      log.warn(`[run] proxy: headless run never finalized after ${HEADLESS_FINALIZE_CHECK_MS}ms — posting synthetic failure (session=${opts.sessionId})`);
+      log.warn(`[metric] name=inflight_killed kind=count value=1 cause=headless_never_finalized agent=${opts.agentSlug ?? "unknown"} session=${opts.sessionId}`);
+      await postBrokenSseTerminalCallback({
+        callbackUrl: opts.callbackUrl,
+        sessionId: opts.sessionId,
+        sessionToken: opts.sessionToken,
+        conversationId: opts.conversationId,
+        agentSlug: opts.agentSlug,
+        eventType: opts.eventType,
+        logPrefix: "headless run never finalized",
+      });
+    } catch (err) {
+      log.warn(`[run] proxy: headless finalize check failed (session=${opts.sessionId}): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, HEADLESS_FINALIZE_CHECK_MS);
+  timer.unref?.();
+}
+
+async function postBrokenSseTerminalCallback(opts: {
+  callbackUrl: string | undefined;
+  sessionId: string;
+  sessionToken: string;
+  conversationId?: string | undefined;
+  agentSlug?: string | undefined;
+  eventType?: string | undefined;
+  logPrefix: string;
+}): Promise<void> {
+  if (opts.eventType === "scheduled_job") {
+    log.warn(`[metric] name=post_broken_sse_terminal_callback eventType=scheduled_job agent=${opts.agentSlug ?? "unknown"} job=${scheduledJobIdFromCallback(opts.callbackUrl) ?? "unknown"}`);
+  }
+  const body = {
+    ...(opts.conversationId !== undefined ? { conversationId: opts.conversationId } : {}),
+    ...(opts.agentSlug !== undefined ? { agentSlug: opts.agentSlug } : {}),
+    sessionId: opts.sessionId,
+    status: "failed",
+    error: "sse stream broken",
+  };
+  if (!opts.callbackUrl) {
+    await agentRunRepository.finalize(opts.sessionId, {
+      status: "failed",
+      error: "sse stream broken",
+      result: null,
+    }).catch((err) =>
+      log.warn(`[run] proxy: failed to finalize broken SSE without callback (session=${opts.sessionId}): ${err instanceof Error ? err.message : String(err)}`),
+    );
+    return;
+  }
+
+  try {
+    const cbRes = await fetch(opts.callbackUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...(opts.sessionToken ? { "x-session-token": opts.sessionToken } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!cbRes.ok) {
+      const text = await cbRes.text().catch(() => "");
+      throw new Error(`HTTP ${cbRes.status}: ${text.slice(0, 300)}`);
+    }
+    log.warn(`[run] proxy: ${opts.logPrefix}; posted failed callback (session=${opts.sessionId})`);
+  } catch (err) {
+    log.warn(`[run] proxy: ${opts.logPrefix}; failed callback POST failed (session=${opts.sessionId}): ${err instanceof Error ? err.message : String(err)}`);
+    await agentRunRepository.finalize(opts.sessionId, {
+      status: "failed",
+      error: "sse stream broken",
+      result: null,
+    }).catch((finalizeErr) =>
+      log.warn(`[run] proxy: failed direct finalize after broken SSE callback miss (session=${opts.sessionId}): ${finalizeErr instanceof Error ? finalizeErr.message : String(finalizeErr)}`),
+    );
+  }
+}
+
 async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void> {
-  const { probeRes, progressUrl, callbackUrl, sessionId, sessionToken, conversationId, agentSlug } = opts;
+  const { probeRes, progressUrl, callbackUrl, sessionId, sessionToken, conversationId, agentSlug, eventType, forwardBody } = opts;
   if (!probeRes.body) {
     log.warn(`[run] proxy: bridge has no upstream body to consume (sessionId=${sessionId})`);
     return;
@@ -1139,6 +1779,9 @@ async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void
       onSandboxPreview: async (sid, payload) => {
         await postProgress({ sessionId: sid, ...payload });
       },
+      onPlan: async (sid, todos) => {
+        await postProgress({ sessionId: sid, kind: "plan", todos });
+      },
       onProgressLabel: async (sid, payload) => {
         await postProgress({ sessionId: sid, ...payload });
       },
@@ -1171,39 +1814,55 @@ async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promise<void
       } catch (err) {
         log.warn(`[run] proxy: callback POST failed (session=${sessionId}): ${err instanceof Error ? err.message : String(err)}`);
       }
-    } else if (callbackUrl && !result.result) {
+    } else if (!result.result) {
       // No done frame arrived — claw's stream ended cleanly without one. Surface
       // a synthetic failed callback so the caller's run tracker doesn't sit in
       // "running" forever.
-      try {
-        await fetch(callbackUrl, {
-          method: "POST",
-          headers: callbackHeaders,
-          body: JSON.stringify({
-            ...convFallback,
-            sessionId,
-            status: "failed",
-            error: "Claw SSE stream ended without a done frame",
-          }),
-        });
-      } catch { /* exhausted */ }
+      if (callbackUrl && !isScheduledOrAutomationEvent(eventType)) {
+        log.warn(`[run] proxy: bridge lost; run continues headless (session=${sessionId})`);
+        armHeadlessFinalizeCheck({ sessionId, sessionToken, callbackUrl, conversationId, agentSlug, eventType });
+        return;
+      }
+      const retried = await retryBrokenBridgeOnce({
+        forwardBody,
+        oldSessionId: sessionId,
+        callbackUrl,
+        reason: "bridge ended before done",
+      });
+      if (retried) return;
+      await postBrokenSseTerminalCallback({
+        callbackUrl,
+        sessionId,
+        sessionToken,
+        conversationId,
+        agentSlug,
+        eventType,
+        logPrefix: "bridge ended before done",
+      });
     }
   } catch (err) {
-    log.error(`[run] proxy: bridge failed (session=${sessionId}): ${err instanceof Error ? err.message : String(err)}`);
-    if (callbackUrl) {
-      try {
-        await fetch(callbackUrl, {
-          method: "POST",
-          headers: callbackHeaders,
-          body: JSON.stringify({
-            ...convFallback,
-            sessionId,
-            status: "failed",
-            error: err instanceof Error ? err.message : "SSE bridge failed",
-          }),
-        });
-      } catch { /* exhausted */ }
+    if (callbackUrl && !isScheduledOrAutomationEvent(eventType)) {
+      log.warn(`[run] proxy: bridge lost; run continues headless (session=${sessionId})`);
+      armHeadlessFinalizeCheck({ sessionId, sessionToken, callbackUrl, conversationId, agentSlug, eventType });
+      return;
     }
+    log.error(`[run] proxy: bridge failed (session=${sessionId}): ${err instanceof Error ? err.message : String(err)}`);
+    const retried = await retryBrokenBridgeOnce({
+      forwardBody,
+      oldSessionId: sessionId,
+      callbackUrl,
+      reason: "bridge failed before done",
+    });
+    if (retried) return;
+    await postBrokenSseTerminalCallback({
+      callbackUrl,
+      sessionId,
+      sessionToken,
+      conversationId,
+      agentSlug,
+      eventType,
+      logPrefix: "bridge failed before done",
+    });
   }
 }
 

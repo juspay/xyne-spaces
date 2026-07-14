@@ -224,17 +224,82 @@ export const evalRepository = {
     createdBy?: string | null;
     genProvider?: string | null;
     genModel?: string | null;
+    orgId: string;
+    /** Set when this run is one agent of a multi-agent comparison (see model). */
+    comparisonId?: string | null;
+    /** 0-based agent order within the comparison (stable primary baseline). */
+    comparisonSeq?: number | null;
   }) =>
     prisma.evalGeneration.create({
       data: {
         agentSlug: input.agentSlug,
         conversationIds: input.conversationIds,
         status: "running",
+        orgId: input.orgId,
         ...(input.folderId ? { folderId: input.folderId } : {}),
         ...(input.createdBy ? { createdBy: input.createdBy } : {}),
         ...(input.genProvider ? { genProvider: input.genProvider } : {}),
         ...(input.genModel ? { genModel: input.genModel } : {}),
+        ...(input.comparisonId ? { comparisonId: input.comparisonId } : {}),
+        ...(input.comparisonSeq != null ? { comparisonSeq: input.comparisonSeq } : {}),
       },
+    }),
+
+  /** Create every sibling run of a comparison atomically (all rows or none) so a
+   *  mid-loop failure can't orphan half a comparison. Rows come back in the input
+   *  order; each is stamped with its comparisonSeq. */
+  createComparisonRuns: (
+    inputs: Array<{
+      agentSlug: string;
+      conversationIds: string[];
+      folderId?: string | null;
+      createdBy?: string | null;
+      genProvider?: string | null;
+      genModel?: string | null;
+      orgId: string;
+      comparisonId: string;
+      comparisonSeq: number;
+    }>,
+  ) =>
+    prisma.$transaction(
+      inputs.map((input) =>
+        prisma.evalGeneration.create({
+          data: {
+            agentSlug: input.agentSlug,
+            conversationIds: input.conversationIds,
+            status: "running",
+            orgId: input.orgId,
+            comparisonId: input.comparisonId,
+            comparisonSeq: input.comparisonSeq,
+            ...(input.folderId ? { folderId: input.folderId } : {}),
+            ...(input.createdBy ? { createdBy: input.createdBy } : {}),
+            ...(input.genProvider ? { genProvider: input.genProvider } : {}),
+            ...(input.genModel ? { genModel: input.genModel } : {}),
+          },
+        }),
+      ),
+    ),
+
+  /** All sibling runs of a multi-agent comparison (one per agent), each with its
+   *  turn results + judge scores. Ordered by comparisonSeq so the first-selected
+   *  agent (seq 0) is a stable baseline across reloads — startedAt alone can tie
+   *  for back-to-back inserts. */
+  getComparison: (comparisonId: string) =>
+    prisma.evalGeneration.findMany({
+      where: { comparisonId },
+      orderBy: [{ comparisonSeq: "asc" }, { startedAt: "asc" }, { id: "asc" }],
+      include: {
+        turnResults: { orderBy: [{ conversationId: "asc" }, { turnIndex: "asc" }], include: { judgeScores: true } },
+      },
+    }),
+
+  /** Lightweight sibling-run list for a comparison (no turns) — used to fan a
+   *  judge pass across every agent's run in one call. */
+  listRunsByComparisonId: (comparisonId: string) =>
+    prisma.evalGeneration.findMany({
+      where: { comparisonId },
+      orderBy: [{ comparisonSeq: "asc" }, { startedAt: "asc" }, { id: "asc" }],
+      select: { id: true, agentSlug: true, status: true, genProvider: true, genModel: true, orgId: true },
     }),
 
   getRun: (id: string) =>
@@ -250,7 +315,7 @@ export const evalRepository = {
     prisma.evalGeneration.findMany({
       where: { folderId },
       orderBy: { startedAt: "desc" },
-      select: { id: true, agentSlug: true, status: true, startedAt: true, completedAt: true, genProvider: true, genModel: true },
+      select: { id: true, agentSlug: true, status: true, startedAt: true, completedAt: true, genProvider: true, genModel: true, comparisonId: true },
       take: 50,
     }),
 

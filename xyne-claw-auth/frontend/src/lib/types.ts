@@ -101,33 +101,31 @@ export interface AgentShare {
   readonly user: { readonly id: string; readonly name: string; readonly email: string };
 }
 
-export interface Agent {
+export interface AgentLight {
   readonly id: string;
   readonly slug: string;
   readonly name: string;
   readonly description: string;
-  readonly systemPrompt?: string;
-  /** Active prompt version number (denormalized). See prompt versioning. */
+  readonly color: string;
+  readonly scope: string;
+  readonly delegationTier?: "standard" | "orchestrator";
+  readonly ownerUserId: string | null;
+  readonly createdBy?: string | null;
+  readonly orgId?: string;
+  readonly orgName?: string | null;
+  readonly enabled: boolean;
+  readonly isDefault?: boolean;
   readonly activePromptVersion?: number | null;
   readonly activePromptVersionId?: string | null;
-  readonly scope: string;
-  readonly ownerUserId: string | null;
-  readonly enabled: boolean;
-  readonly color: string;
   readonly modelId?: string;
-  readonly config: Record<string, unknown>;
-  readonly spacesAppId: string | null;
-  readonly spacesAppUserId: string | null;
-  readonly spacesAppToken: string | null;
-  readonly tools: AgentTool[];
-  readonly skills?: AgentSkill[];
-  readonly collections?: AgentCollection[];
+  readonly spacesAppId?: string | null;
+  readonly spacesAppUserId?: string | null;
+  readonly spacesAppTokenConfigured?: boolean;
+  readonly signingSecretConfigured?: boolean;
   /** Knowledge Base scoping mode. "COLLECTIONS" (default) = per-agent
    *  allowlist via `collections`. "USER" = inherits whatever the calling
-   *  user can access in spaces; `collections` is empty by construction
-   *  and the picker is locked in the UI. */
+   *  user can access in spaces. */
   readonly kbScope?: "COLLECTIONS" | "USER";
-  readonly shares?: AgentShare[];
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly owner?: {
@@ -136,6 +134,20 @@ export interface Agent {
     readonly email: string;
     readonly googleId?: string | null;
   } | null;
+  /** Absent from the default GET /agents light list. Present on full reads. */
+  readonly tools?: AgentTool[];
+  readonly skills?: AgentSkill[];
+  readonly shares?: AgentShare[];
+}
+
+export interface Agent extends AgentLight {
+  readonly systemPrompt?: string;
+  readonly config: Record<string, unknown>;
+  readonly spacesAppToken: string | null;
+  readonly tools: AgentTool[];
+  readonly skills?: AgentSkill[];
+  readonly collections?: AgentCollection[];
+  readonly shares?: AgentShare[];
 }
 
 export interface ScheduledJob {

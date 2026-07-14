@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import { cancelChatRun, sendChatMessage } from "../../lib/api";
 import { resolveEffectiveParents } from "../../lib/branching";
-import type { AttachedContextRef, ChatMsg, DebugEventRecord, PendingAction, StreamCallbacks, ToolInvocation } from "../../lib/api";
+import type { AttachedContextRef, ChatMsg, DebugEventRecord, PendingAction, PlanTodo, StreamCallbacks, ToolInvocation } from "../../lib/api";
 
 /** Optional extras a single send() call can ride with. */
 export interface SendOptions {
@@ -11,14 +11,22 @@ export interface SendOptions {
   disableTools?: boolean;
   /** Backend-only guidance that is not shown as user-facing chat text. */
   additionalInstructions?: string;
+  /** Per-chat LiteLLM model override — pins this model (off the agent's shared
+   *  admin key) for this turn via the backend providerOverride. */
+  modelOverride?: string;
 }
 
 /** A live event delivered by the /live SSE for a conversation being viewed. */
 export interface LiveEventInput {
-  type: "snapshot" | "label" | "invocation" | "done";
+  type: "snapshot" | "label" | "invocation" | "delta" | "done";
   toolLabel?: string | null;
   toolInvocation?: ToolInvocation;
   inProgress?: ToolInvocation[];
+  /** Coalesced assistant answer/reasoning fragments for a viewed run. */
+  textDelta?: string;
+  reasoningDelta?: string;
+  /** Answer-so-far from the /live snapshot (set, not appended — idempotent). */
+  partial?: { msgId: string; content: string; reasoning: string };
 }
 
 /** Synthetic streaming-assistant placeholder id for a VIEWED (not driven) run.
@@ -46,6 +54,7 @@ interface ChatSession {
   sending: boolean;
   toolLabel: string | null;
   liveInvocations: ToolInvocation[];
+  livePlanTodos: PlanTodo[];
   liveReasoning: string;
   streamingMsgId: string | null;
   debugEvents: DebugEventRecord[];
@@ -94,6 +103,7 @@ const EMPTY_SESSION: ChatSession = {
   sending: false,
   toolLabel: null,
   liveInvocations: [],
+  livePlanTodos: [],
   liveReasoning: "",
   streamingMsgId: null,
   debugEvents: [],
@@ -212,6 +222,13 @@ function replaceMessageId(session: ChatSession, localId: string, persistedId: st
     reasoningByMsgId.set(persistedId, reasoning);
   }
 
+  const pendingActionsByMsgId = new Map(session.pendingActionsByMsgId);
+  const pendingActions = pendingActionsByMsgId.get(localId);
+  if (pendingActions) {
+    pendingActionsByMsgId.delete(localId);
+    pendingActionsByMsgId.set(persistedId, pendingActions);
+  }
+
   const branchSelection = Object.fromEntries(
     Object.entries(session.branchSelection).map(([parentId, selectedId]) => [
       parentId === localId ? persistedId : parentId,
@@ -223,6 +240,7 @@ function replaceMessageId(session: ChatSession, localId: string, persistedId: st
     ...session,
     invocationsByMsgId,
     reasoningByMsgId,
+    pendingActionsByMsgId,
     branchSelection,
     streamingMsgId: session.streamingMsgId === localId ? persistedId : session.streamingMsgId,
     messages: session.messages.map((msg) => ({
@@ -241,6 +259,7 @@ interface ChatContextValue {
   sending: boolean;
   toolLabel: string | null;
   invocations: ToolInvocation[];
+  planTodos: PlanTodo[];
   reasoning: string;
   reasoningByMsgId: Map<string, string>;
   invocationsByMsgId: Map<string, ToolInvocation[]>;
@@ -256,11 +275,11 @@ interface ChatContextValue {
   /** Branching: produce a sibling assistant under the same user parent.
    *  When assistantMessageId is provided, regenerates THAT assistant's reply;
    *  otherwise regenerates the latest visible assistant. */
-  regenerate: (agentSlug: string, userId: string, assistantMessageId?: string) => Promise<void>;
+  regenerate: (agentSlug: string, userId: string, assistantMessageId?: string, modelOverride?: string) => Promise<void>;
   /** Branching: replace the latest visible user message with edited text and
    *  run a new turn as a sibling. Older messages cannot be edited (would
    *  require re-rooting the tree). */
-  editLatestUserMessage: (agentSlug: string, userId: string, userMessageId: string, text: string) => Promise<void>;
+  editLatestUserMessage: (agentSlug: string, userId: string, userMessageId: string, text: string, modelOverride?: string) => Promise<void>;
   /** Branching: select which child of `parentId` should be visible. */
   selectBranch: (parentId: string, messageId: string) => void;
   /** Cancel the in-flight stream for the active session. No-op if nothing
@@ -396,6 +415,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         sending: true,
         streamingMsgId: assistantId,
         liveInvocations: [],
+        livePlanTodos: [],
         liveReasoning: "",
         toolLabel: null,
         debugEvents: [],
@@ -451,6 +471,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         onRunMeta: ({ sessionId }) =>
           updateSession(liveKey, (s) => ({ ...s, runSessionId: sessionId })),
         onProgress: (label) => updateSession(liveKey, (s) => ({ ...s, toolLabel: label })),
+        onPlan: (todos) => updateSession(liveKey, (s) => ({ ...s, livePlanTodos: todos })),
         onInvocation: (inv) =>
           updateSession(liveKey, (s) => {
             let nextLive: ToolInvocation[];
@@ -525,6 +546,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           {
             ...(opts?.disableTools ? { disableTools: true } : {}),
             ...(opts?.additionalInstructions ? { additionalInstructions: opts.additionalInstructions } : {}),
+            ...(opts?.modelOverride ? { providerOverride: { provider: "litellm", model: opts.modelOverride } } : {}),
           },
         );
 
@@ -547,6 +569,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             sending: false,
             streamingMsgId: null,
             liveInvocations: [],
+            livePlanTodos: [],
             liveReasoning: "",
             toolLabel: null,
             debugEvents: [],
@@ -561,11 +584,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 : m,
             ),
             pendingActionsByMsgId: (() => {
-              const next = new Map(s.pendingActionsByMsgId);
+              const next = new Map(withAssistantId.pendingActionsByMsgId);
+              next.delete(assistantId);
               if (result.reply.pendingActions && result.reply.pendingActions.length > 0) {
-                next.set(assistantId, dedupePendingActions(result.reply.pendingActions));
+                next.set(finalAssistantId, dedupePendingActions(result.reply.pendingActions));
               } else {
-                next.delete(assistantId);
+                next.delete(finalAssistantId);
               }
               return next;
             })(),
@@ -584,6 +608,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               sending: false,
               streamingMsgId: null,
               liveInvocations: [],
+              livePlanTodos: [],
               liveReasoning: "",
               toolLabel: null,
               debugEvents: [],
@@ -607,6 +632,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           sending: false,
           streamingMsgId: null,
           liveInvocations: [],
+          livePlanTodos: [],
           liveReasoning: "",
           toolLabel: null,
           debugEvents: [],
@@ -626,7 +652,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   const regenerate = useCallback(
-    async (agentSlug: string, userId: string, assistantMessageId?: string) => {
+    async (agentSlug: string, userId: string, assistantMessageId?: string, modelOverride?: string) => {
       const key = activeKey;
       if (!key) return;
       const current = sessions.get(key);
@@ -664,6 +690,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         sending: true,
         streamingMsgId: assistantId,
         liveInvocations: [],
+        livePlanTodos: [],
         liveReasoning: "",
         toolLabel: null,
         debugEvents: [],
@@ -678,6 +705,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         onRunMeta: ({ sessionId }) =>
           updateSession(key, (s) => ({ ...s, runSessionId: sessionId })),
         onProgress: (label) => updateSession(key, (s) => ({ ...s, toolLabel: label })),
+        onPlan: (todos) => updateSession(key, (s) => ({ ...s, livePlanTodos: todos })),
         onInvocation: (inv) =>
           updateSession(key, (s) => {
             const nextLive = inv.toolCallId
@@ -736,7 +764,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                                          // leaf for branch-session resolution, so a
                                          // regenerate after edit-user clones from
                                          // the edit branch (not the original).
+          undefined,                     // signalOrIsEditUserMessage
+          undefined,                     // editedUserMessageId
           controller.signal,             // explicit terminal signal
+          // Carry the per-chat model pick so regenerate reruns on the same model.
+          modelOverride ? { providerOverride: { provider: "litellm", model: modelOverride } } : undefined,
         );
         updateSession(key, (s) => {
           const withAssistantId = replaceMessageId(s, assistantId, result.reply.id ?? assistantId);
@@ -747,6 +779,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             sending: false,
             streamingMsgId: null,
             liveInvocations: [],
+            livePlanTodos: [],
             liveReasoning: "",
             toolLabel: null,
             debugEvents: [],
@@ -760,6 +793,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                   }
                 : m,
             ),
+            pendingActionsByMsgId: (() => {
+              const next = new Map(withAssistantId.pendingActionsByMsgId);
+              next.delete(assistantId);
+              if (result.reply.pendingActions && result.reply.pendingActions.length > 0) {
+                next.set(finalAssistantId, dedupePendingActions(result.reply.pendingActions));
+              } else {
+                next.delete(finalAssistantId);
+              }
+              return next;
+            })(),
           };
         });
         abortRefs.current.delete(key);
@@ -769,6 +812,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           sending: false,
           streamingMsgId: null,
           liveInvocations: [],
+          livePlanTodos: [],
           liveReasoning: "",
           toolLabel: null,
           debugEvents: [],
@@ -785,7 +829,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   const editLatestUserMessage = useCallback(
-    async (agentSlug: string, userId: string, userMessageId: string, text: string) => {
+    async (agentSlug: string, userId: string, userMessageId: string, text: string, modelOverride?: string) => {
       const key = activeKey;
       if (!key || !text.trim()) return;
       const current = sessions.get(key);
@@ -830,6 +874,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         sending: true,
         streamingMsgId: assistantId,
         liveInvocations: [],
+        livePlanTodos: [],
         liveReasoning: "",
         toolLabel: null,
         debugEvents: [],
@@ -844,6 +889,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         onRunMeta: ({ sessionId }) =>
           updateSession(key, (s) => ({ ...s, runSessionId: sessionId })),
         onProgress: (label) => updateSession(key, (s) => ({ ...s, toolLabel: label })),
+        onPlan: (todos) => updateSession(key, (s) => ({ ...s, livePlanTodos: todos })),
         onInvocation: (inv) =>
           updateSession(key, (s) => {
             const nextLive = inv.toolCallId
@@ -900,6 +946,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           true,                          // isEditUserMessage flag
           originalUser.id,               // editedUserMessageId
           controller.signal,             // explicit terminal signal
+          // Carry the per-chat model pick so the edited turn reruns on it.
+          modelOverride ? { providerOverride: { provider: "litellm", model: modelOverride } } : undefined,
         );
         updateSession(key, (s) => {
           const withUserId = result.reply.userMessageId
@@ -913,6 +961,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             sending: false,
             streamingMsgId: null,
             liveInvocations: [],
+            livePlanTodos: [],
             liveReasoning: "",
             toolLabel: null,
             debugEvents: [],
@@ -926,6 +975,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                   }
                 : m,
             ),
+            pendingActionsByMsgId: (() => {
+              const next = new Map(withAssistantId.pendingActionsByMsgId);
+              next.delete(assistantId);
+              if (result.reply.pendingActions && result.reply.pendingActions.length > 0) {
+                next.set(finalAssistantId, dedupePendingActions(result.reply.pendingActions));
+              } else {
+                next.delete(finalAssistantId);
+              }
+              return next;
+            })(),
           };
         });
         abortRefs.current.delete(key);
@@ -935,6 +994,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           sending: false,
           streamingMsgId: null,
           liveInvocations: [],
+          livePlanTodos: [],
           liveReasoning: "",
           toolLabel: null,
           debugEvents: [],
@@ -982,6 +1042,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         sending: false,
         streamingMsgId: null,
         liveInvocations: [],
+        livePlanTodos: [],
         liveReasoning: "",
         toolLabel: null,
         debugEvents: [],
@@ -1008,6 +1069,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         sending: false,
         toolLabel: null,
         liveInvocations: [],
+        livePlanTodos: [],
         liveReasoning: "",
         streamingMsgId: null,
         debugEvents: [],
@@ -1087,8 +1149,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       switch (event.type) {
         case "snapshot": {
           const inProg = event.inProgress ?? [];
-          if (inProg.length === 0) return s; // no live run; transcript already loaded
-          return { ...ensurePlaceholder(s), liveInvocations: inProg };
+          const partial = event.partial;
+          // A live run exists if there are in-progress tools OR persisted partial
+          // answer text. Seed the placeholder with both so a reloaded viewer sees
+          // the answer-so-far + tools before the first live delta.
+          if (inProg.length === 0 && !partial) return s; // no live run; transcript already loaded
+          const hadPlaceholder = s.messages.some((m) => m.id === placeholderId);
+          let seeded = ensurePlaceholder(s);
+          // Seed the persisted partial ONLY when the bubble was just created. On a
+          // reconnect re-snapshot the placeholder already holds live deltas that
+          // are AHEAD of the (debounced ~1s) persisted partial, so overwriting
+          // with the stale partial would truncate the visible answer.
+          if (partial && !hadPlaceholder) {
+            seeded = {
+              ...seeded,
+              messages: seeded.messages.map((m) => (m.id === placeholderId ? { ...m, content: partial.content } : m)),
+              liveReasoning: partial.reasoning,
+            };
+          }
+          return { ...seeded, liveInvocations: inProg.length ? inProg : seeded.liveInvocations };
         }
         case "label": {
           return { ...ensurePlaceholder(s), toolLabel: event.toolLabel ?? null };
@@ -1097,6 +1176,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           if (!event.toolInvocation) return s;
           const seeded = ensurePlaceholder(s);
           return { ...seeded, liveInvocations: upsertInvocation(seeded.liveInvocations, event.toolInvocation) };
+        }
+        case "delta": {
+          // Append coalesced text/reasoning to the viewer's streaming bubble —
+          // mirrors the driving tab's onTextDelta/onReasoningDelta reducers.
+          const seeded = ensurePlaceholder(s);
+          const next = { ...seeded };
+          if (event.textDelta) {
+            next.messages = seeded.messages.map((m) =>
+              m.id === placeholderId ? { ...m, content: m.content + event.textDelta } : m,
+            );
+            next.toolLabel = null; // text is flowing → drop the "running tool" label
+          }
+          if (event.reasoningDelta) next.liveReasoning = seeded.liveReasoning + event.reasoningDelta;
+          return next;
         }
         case "done": {
           // Tear down the placeholder + live state; ChatPageV3 refetches the
@@ -1107,6 +1200,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             streamingMsgId: null,
             toolLabel: null,
             liveInvocations: [],
+            livePlanTodos: [],
             messages: s.messages.filter((m) => m.id !== placeholderId),
           };
         }
@@ -1144,6 +1238,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sending: active.sending,
       toolLabel: active.toolLabel,
       invocations: active.liveInvocations,
+      planTodos: active.livePlanTodos,
       reasoning: active.liveReasoning,
       reasoningByMsgId: active.reasoningByMsgId,
       invocationsByMsgId: active.invocationsByMsgId,

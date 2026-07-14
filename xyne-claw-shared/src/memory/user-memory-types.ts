@@ -18,10 +18,14 @@
  * same envelope for messages, calls, and canvases.
  */
 export interface UserMemoryRecord {
-  /** Stable ID from Spaces (message ID, call ID, canvas ID). */
+  /** Stable ID from Spaces. For message/call/canvas: that record's ID. For
+   *  mention_reply: the ID of the user's OWN reply message (so the candidate
+   *  grounds on a real message the user authored). */
   id: string;
-  /** Source kind for the curator's grounding + the candidate's sourceRefs. */
-  type: "message" | "call" | "canvas";
+  /** Source kind for the curator's grounding + the candidate's sourceRefs.
+   *  mention_reply = an incoming message directed at the user paired with the
+   *  user's actual reply (forward pipeline, sourced from twin AgentRuns). */
+  type: "message" | "call" | "canvas" | "mention_reply";
   /** ISO timestamp the record was authored. */
   ts: string;
   /** Channel ID if the record is bound to a channel (message, canvas). */
@@ -32,7 +36,8 @@ export interface UserMemoryRecord {
   title?: string;
   /** The text the curator reads. For messages: the message body. For calls:
    *  the AI summary + transcript excerpt. For canvases: the markdown content
-   *  (truncated). */
+   *  (truncated). For mention_reply: the incoming message and the user's reply,
+   *  clearly delimited so the curator can read the trigger → response pair. */
   text: string;
 }
 
@@ -41,13 +46,13 @@ export interface UserMemoryRecord {
  * Fixed taxonomy — curator MUST pick one of these eight, never invent.
  */
 export type UserMemorySubsystem =
-  | "style"          // communication style, formatting, tone
-  | "expertise"      // domain knowledge, deep areas
-  | "projects"       // ongoing work, current focus
-  | "relationships"  // collaborators, manager, reports, key stakeholders
-  | "preferences"    // tools, workflow, formatting conventions
-  | "decisions"      // captured judgment calls
-  | "context"        // identity, role, tenure, team
+  | "style"          // voice + response mechanics: length, structure, openers, sign-offs, emoji, punctuation, register, how they ack/ask/disagree
+  | "expertise"      // domain knowledge, systems/files/tools they demonstrably know
+  | "projects"       // ongoing work, codenames, what they drive/own now
+  | "relationships"  // collaborators, manager, reports — AND how the tone shifts per person
+  | "preferences"    // tools, workflow, formatting conventions they prefer or reject
+  | "decisions"      // captured judgment calls + reasoning + date
+  | "context"        // identity, role, tenure, team, working hours
   | "docs";          // references to authored canvases / uploaded .md files
 
 export const USER_MEMORY_SUBSYSTEMS: readonly UserMemorySubsystem[] = [
@@ -79,6 +84,21 @@ export interface UserMemoryCandidatePayload {
 }
 
 /**
+ * An already-retained memory for this user, passed into a distill call so the
+ * curator can SEE what's already known and avoid re-emitting a near-duplicate
+ * (emit-time dedup). Non-destructive: storage-side consolidation of overlapping
+ * facts is left to the provider (Hindsight); we never delete from here.
+ */
+export interface ExistingUserMemory {
+  /** Hindsight memory id (from listMemories). */
+  id: string;
+  /** One of the eight fixed labels. */
+  subsystem: string;
+  /** The current memory text. */
+  text: string;
+}
+
+/**
  * Request body for claw's POST /internal/user-memory/distill.
  * Sent by claw-auth's BullMQ workers (backfill + daily) and route handlers.
  */
@@ -89,6 +109,11 @@ export interface UserMemoryDistillRequest {
   window: { from: string; to: string };
   /** Caps prompt size. Hard limit 200; caller should batch above that. */
   records: UserMemoryRecord[];
+  /** This user's already-retained memories (from listMemories). Lets the
+   *  curator SEE what's already known so it doesn't re-emit a near-duplicate
+   *  (emit-time dedup). Non-destructive — provider owns storage consolidation.
+   *  Optional — when absent the curator has no dedup context. */
+  existingMemories?: ExistingUserMemory[];
 }
 
 export interface UserMemoryDistillResponse {

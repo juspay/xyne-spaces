@@ -16,12 +16,15 @@ import {
 } from "@phosphor-icons/react";
 import type { Agent } from "../../../lib/types";
 import type { ScheduledJob } from "../../../lib/types";
-import type { ChainWorkflow, DashboardAgentRow, CloneRequestItem } from "../../../lib/api";
+import type { ChainWorkflow, DashboardAgentRow, CloneRequestItem, AgentDelegationRequest } from "../../../lib/api";
 import {
   requestWorkflowGlobal,
   listIncomingCloneRequests,
   approveCloneRequest,
   rejectCloneRequest,
+  listDelegationRequests,
+  decideDelegationRequest,
+  revokeDelegationRequest,
 } from "../../../lib/api";
 import { withAdminRequestAlert } from "../../../lib/admin-request-notice";
 import type { AgentPermissions } from "../../lib/agentPermissions";
@@ -111,18 +114,22 @@ export function AgentDetailRightColumn({
   const failed = agentStats?.failedRuns ?? 0;
 
   // ── Pending clone requests (owner inbox) ──────────────────────────
-  // Only the real owner reviews clone requests for this agent. We fetch here so
+  // Owners/admins review clone and delegation requests for this agent. We fetch here so
   // the dashboard card badge and the Requests panel stay in sync (single source
   // of truth), mirroring the Spaces Approve/Decline DM — resolving in either
   // place resolves everywhere.
-  const isActualOwner = !!userId && agent.ownerUserId === userId;
+  const canManageRequests = permissions.role === "owner";
   const { show: showSnackbar } = useSnackbar();
   const [cloneRequests, setCloneRequests] = useState<CloneRequestItem[]>([]);
   const [cloneBusyId, setCloneBusyId] = useState<string | null>(null);
   const [cloneLoading, setCloneLoading] = useState(false);
+  const [delegationRequests, setDelegationRequests] = useState<AgentDelegationRequest[]>([]);
+  const [activeDelegations, setActiveDelegations] = useState<AgentDelegationRequest[]>([]);
+  const [delegationBusyId, setDelegationBusyId] = useState<string | null>(null);
+  const [delegationLoading, setDelegationLoading] = useState(false);
 
   const loadCloneRequests = useCallback(async () => {
-    if (!isActualOwner) {
+    if (!canManageRequests) {
       setCloneRequests([]);
       return;
     }
@@ -135,11 +142,33 @@ export function AgentDetailRightColumn({
     } finally {
       setCloneLoading(false);
     }
-  }, [isActualOwner, userId, agent.id]);
+  }, [canManageRequests, userId, agent.id]);
 
   useEffect(() => {
     void loadCloneRequests();
   }, [loadCloneRequests]);
+
+  const loadDelegationRequests = useCallback(async () => {
+    if (!canManageRequests) {
+      setDelegationRequests([]);
+      setActiveDelegations([]);
+      return;
+    }
+    setDelegationLoading(true);
+    try {
+      const requests = await listDelegationRequests(agent.slug);
+      setDelegationRequests(requests.filter((r) => r.status === "pending"));
+      setActiveDelegations(requests.filter((r) => r.status === "approved"));
+    } catch {
+      // Non-fatal — leave the list as-is.
+    } finally {
+      setDelegationLoading(false);
+    }
+  }, [canManageRequests, agent.slug]);
+
+  useEffect(() => {
+    void loadDelegationRequests();
+  }, [loadDelegationRequests]);
 
   const resolveCloneRequest = useCallback(
     async (req: CloneRequestItem, decision: "approve" | "reject") => {
@@ -168,6 +197,54 @@ export function AgentDetailRightColumn({
     [cloneBusyId, userId, showSnackbar],
   );
 
+  const resolveDelegationRequest = useCallback(
+    async (req: AgentDelegationRequest, decision: "approve" | "reject") => {
+      if (delegationBusyId) return;
+      setDelegationBusyId(req.id);
+      const callerName = req.caller?.name ?? req.caller?.slug ?? "Caller agent";
+      const approve = decision === "approve";
+      try {
+        await decideDelegationRequest(agent.slug, req.id, approve);
+        setDelegationRequests((prev) => prev.filter((r) => r.id !== req.id));
+        showSnackbar({
+          variant: approve ? "success" : "info",
+          title: approve ? `Delegation approved for ${callerName}` : `Delegation rejected for ${callerName}`,
+        });
+      } catch (err) {
+        showSnackbar({
+          variant: "error",
+          title: approve ? "Approve failed" : "Reject failed",
+          description: err instanceof Error ? err.message : undefined,
+        });
+      } finally {
+        setDelegationBusyId(null);
+      }
+    },
+    [agent.slug, delegationBusyId, showSnackbar],
+  );
+
+  const revokeActiveDelegation = useCallback(
+    async (req: AgentDelegationRequest) => {
+      if (delegationBusyId) return;
+      setDelegationBusyId(req.id);
+      const callerName = req.caller?.name ?? req.caller?.slug ?? "Caller agent";
+      try {
+        await revokeDelegationRequest(agent.slug, req.id);
+        setActiveDelegations((prev) => prev.filter((r) => r.id !== req.id));
+        showSnackbar({ variant: "info", title: `Delegation revoked for ${callerName}` });
+      } catch (err) {
+        showSnackbar({
+          variant: "error",
+          title: "Revoke failed",
+          description: err instanceof Error ? err.message : undefined,
+        });
+      } finally {
+        setDelegationBusyId(null);
+      }
+    },
+    [agent.slug, delegationBusyId, showSnackbar],
+  );
+
   // Health verdict drives the dashboard headline + status glyph.
   const health: { label: string; tone: "ok" | "warn" | "idle" } =
     failed > 0
@@ -182,6 +259,11 @@ export function AgentDetailRightColumn({
       : "This agent hasn't been used yet — it'll show activity here once it runs.";
 
   const peopleStatus = shareCount > 0 ? `You + ${shareCount} ${shareCount === 1 ? "person" : "people"}` : "Just you";
+  const pendingRequestCount = cloneRequests.length + delegationRequests.length;
+  const requestStatus =
+    pendingRequestCount > 0
+      ? `${pendingRequestCount} pending ${pendingRequestCount === 1 ? "request" : "requests"}`
+      : "No pending requests";
 
   const cards: CardDef[] = [
     {
@@ -241,17 +323,14 @@ export function AgentDetailRightColumn({
     {
       id: "requests",
       label: "Requests",
-      status:
-        cloneRequests.length > 0
-          ? `${cloneRequests.length} pending clone ${cloneRequests.length === 1 ? "request" : "requests"}`
-          : "No pending requests",
+      status: requestStatus,
       icon: CopyIcon,
-      badge: cloneRequests.length || undefined,
+      badge: pendingRequestCount || undefined,
       // Owner-only inbox. Always visible to the owner so there's a persistent
       // place to check for clone requests — the badge appears only when some
       // are pending, and the panel shows an empty state otherwise. Kept last so
       // it sits at the end of the dashboard grid.
-      show: isActualOwner,
+      show: canManageRequests,
     },
   ];
 
@@ -284,9 +363,21 @@ export function AgentDetailRightColumn({
               busyId={cloneBusyId}
               loading={cloneLoading}
               onResolve={resolveCloneRequest}
+              delegationRequests={delegationRequests}
+              activeDelegations={activeDelegations}
+              delegationBusyId={delegationBusyId}
+              delegationLoading={delegationLoading}
+              onResolveDelegation={resolveDelegationRequest}
+              onRevokeDelegation={revokeActiveDelegation}
             />
           )}
-          {activeTab === "run-history" && <RunHistoryTab agentSlug={agent.slug} userId={userId} />}
+          {activeTab === "run-history" && (
+            <RunHistoryTab
+              agentSlug={agent.slug}
+              userId={userId}
+              canViewAllRuns={permissions.canEdit}
+            />
+          )}
           {activeTab === "contributors" && (
             <ContributorsTab agent={agent} userId={userId} permissions={permissions} />
           )}

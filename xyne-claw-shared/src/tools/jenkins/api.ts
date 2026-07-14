@@ -1,3 +1,6 @@
+import { createLogger } from "../../logger.js";
+const log = createLogger("api");
+
 /**
  * Jenkins API client for xyne-claw tools.
  * Uses Basic Auth with username:apiToken.
@@ -105,7 +108,7 @@ export async function triggerBuild(
     return { success: false, error: `Jenkins returned ${response.status}` };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[jenkins] triggerBuild failed:", msg);
+    log.error("[jenkins] triggerBuild failed:", msg);
     return { success: false, error: msg };
   }
 }
@@ -122,7 +125,7 @@ export async function getLatestBuild(
     if (!response.ok) return null;
     return (await response.json()) as JenkinsBuild;
   } catch (err) {
-    console.error("[jenkins] getLatestBuild failed:", err instanceof Error ? err.message : String(err));
+    log.error("[jenkins] getLatestBuild failed:", err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -140,7 +143,7 @@ export async function getBuildByNumber(
     if (!response.ok) return null;
     return (await response.json()) as JenkinsBuild;
   } catch (err) {
-    console.error("[jenkins] getBuildByNumber failed:", err instanceof Error ? err.message : String(err));
+    log.error("[jenkins] getBuildByNumber failed:", err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -159,7 +162,7 @@ export async function getBuildStages(
     const data = (await response.json()) as JenkinsWfApiResponse;
     return data.stages || [];
   } catch (err) {
-    console.error("[jenkins] getBuildStages failed:", err instanceof Error ? err.message : String(err));
+    log.error("[jenkins] getBuildStages failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }
@@ -183,7 +186,7 @@ export async function getBuildLogs(
     if (!response.ok) return "";
     return await response.text();
   } catch (err) {
-    console.error("[jenkins] getBuildLogs failed:", err instanceof Error ? err.message : String(err));
+    log.error("[jenkins] getBuildLogs failed:", err instanceof Error ? err.message : String(err));
     return "";
   }
 }
@@ -202,7 +205,7 @@ export async function listBuilds(
     const data = (await response.json()) as { builds?: JenkinsBuildInfo[] };
     return data.builds || [];
   } catch (err) {
-    console.error("[jenkins] listBuilds failed:", err instanceof Error ? err.message : String(err));
+    log.error("[jenkins] listBuilds failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }

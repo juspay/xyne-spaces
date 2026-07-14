@@ -1,3 +1,7 @@
+import { createLogger } from "../../logger.js";
+import { SPACES_SUBAGENT_PROMPT } from "./spaces-prompt.js";
+const log = createLogger("definitions");
+
 /**
  * Subagent definitions — prompts, names, descriptions, and server type mapping.
  *
@@ -24,6 +28,16 @@ export interface SubagentDefinition {
   paramDescription: string;
   /** MCP server type this subagent wraps — matches serverType from /mcp/tools */
   serverType: string;
+  /** Optional per-subagent reasoning level. When set, overrides the global
+   *  AGENT.thinkingLevel for THIS subagent's child session. Retrieval-heavy
+   *  subagents (spaces) benefit from "high"; cheap structured-fetch ones
+   *  (user-tickets) can stay low. Omit to inherit AGENT.thinkingLevel. */
+  thinkingLevel?: "off" | "low" | "medium" | "high";
+  /** When true, this subagent may iterate: re-query with refined parameters
+   *  after seeing partial results instead of being held to a single up-front
+   *  tool sweep. Used for hard retrieval where the first sweep often misses.
+   *  Omit/false to keep the default single-sweep guidance. */
+  allowRequery?: boolean;
 }
 
 export const SUBAGENT_DEFINITIONS: SubagentDefinition[] = [
@@ -41,37 +55,18 @@ export const SUBAGENT_DEFINITIONS: SubagentDefinition[] = [
       "Search and read Xyne Spaces data — messages, channels, tickets, users, activity, knowledge base. " +
       "Use for any workspace lookup or data retrieval. " +
       "Example: 'Find recent messages about deployment in #engineering' or 'What tickets are assigned to Anurag?'",
-    systemPrompt: `You are a Xyne Spaces data specialist. Use your tools to search, read, and analyze workspace data.
-
-Available operations:
-- Search across messages, tickets, files (spaces-search)
-- List/filter channels (spaces-channels)
-- Read messages in threads (spaces-messages, spaces-message-detail)
-- Look up users (spaces-users, spaces-whoami)
-- Check activity feeds (spaces-activity)
-- Read tickets (spaces-tickets) — ALWAYS use this for ticket queries, not spaces-search
-- Search memory/knowledge base (spaces-memory)
-- List projects and boards (spaces-projects, spaces-boards)
-- List a thread's attachments (spaces-thread-attachments) — pass the conversationId from the parent's Session Metadata block.
-- Download an attachment (spaces-fetch-attachment) — the file is saved to .context/<fileName>; read it with the standard \`read\` tool.
-
-IMPORTANT — ticket status clarification:
-- The statusV2 and stageName fields on tickets reflect the BOARD WORKFLOW STATE (e.g. TODO, STARTED, COMPLETED, "Merged" stage).
-- This is NOT the same as a verified Bitbucket PR merge. A ticket in "Completed" or "Merged" stage means it was moved there on the board — it does NOT confirm a PR exists or was merged in Bitbucket.
-- When reporting ticket data, always label status as "Board Status" to avoid confusion with actual PR/code status.
-
-## Email Drafting Mode
-When the task involves drafting, replying to, or composing an email:
-- Fetch ONLY the minimum needed: the specific thread messages via sapces email, spaces-messages, and any directly referenced ticket details via spaces-tickets.
-- Do NOT run spaces-search, spaces-activity, spaces-meeting-insights, spaces-canvases, spaces-memory, or general knowledge-base lookups.
-- Do NOT explore channels, summarise broad workspace context, or look up user profiles beyond what is needed for the recipient list.
-- Return raw messages and ticket content verbatim with minimal formatting so the parent agent can compose the email quickly.
-- Prioritise speed — gather context in the fewest tool calls possible.
-
-Return structured, concise findings. Include relevant IDs (channelId, conversationId, userId, ticketId) so the caller can take follow-up actions.`,
+    systemPrompt: SPACES_SUBAGENT_PROMPT,
     paramName: "question",
     paramDescription: "What to search or look up in Xyne Spaces. Be specific — include channel names, user names, date ranges, or keywords.",
     serverType: "xyne-spaces",
+    // Retrieval quality is the whole point of this subagent: give it more
+    // reasoning and the freedom to re-query when the first sweep comes back
+    // thin. Citation fidelity also leans on the inner LLM faithfully copying
+    // tokens — more reasoning helps. (Model/provider is left to the normal
+    // resolver; we don't force-follow the parent here to avoid the
+    // Anthropic-OAuth plan→credits billing spillover.)
+    thinkingLevel: "high",
+    allowRequery: true,
   },
 
   // ── User Tickets (narrow, one user at a time) ───────────────────
@@ -111,7 +106,7 @@ Strict procedure (do exactly these steps, in order):
 6. Return ONE JSON object: { tickets: [{xyneId, id, url, title, mid, createdBy, createdAt, dueDate, status, priority, assignee, stage, updatedAt, channelId, conversationId}, ...], meta: { userResolved: true, channelResolved: true, channelId, createdAfter, count: tickets.length } }.
 
 HARD RULES:
-- Do NOT call spaces-search, spaces-messages, spaces-message-detail, spaces-activity, spaces-memory, spaces-projects, spaces-boards, or spaces-users. ONLY spaces-channels + spaces-tickets. spaces-tickets resolves the user email internally — no separate lookup is needed.
+- Do NOT call spaces-search, spaces-messages, spaces-message-detail, spaces-activity, spaces-projects, spaces-boards, or spaces-users. ONLY spaces-channels + spaces-tickets. spaces-tickets resolves the user email internally — no separate lookup is needed.
 - Do NOT explore or speculate. If the data isn't returned by spaces-tickets, it doesn't exist for this query.
 - Do NOT summarise, prioritise, or judge actionability. Return raw structured data only — the parent decides actionability.
 - Output MUST be valid JSON inside a single code block. No prose around it.
@@ -345,7 +340,7 @@ Return concise findings: page structure, component lists, style values, or rende
     description:
       "Access Google workspace tools — Gmail, Calendar, Contacts, Tasks, and Drive. " +
       "Use for mailbox search, event scheduling, contact lookup, task management, and reading Drive files.",
-    systemPrompt: `You are a Google workspace specialist. Use your Google tools to help with email, schedule, contacts, tasks, and drive files.
+    systemPrompt: `You are a Google Workspace specialist working in the asker's OWN connected Google account. Your job is to find the TRUTH in their Gmail, Calendar, Contacts, Tasks, and Drive and hand the parent agent exact, sourced facts — never a guess.
 
 Tool guide:
 - gmail: search, read, draft, trash, and attachment operations
@@ -354,13 +349,33 @@ Tool guide:
 - tasks: list task lists, list tasks, create/update/delete tasks
 - drive: search files and read file content
 
-Rules:
-- Draft emails instead of sending unless the write tool explicitly supports send and user asked for it.
-- Confirm destructive actions (trash email, delete event/task) when user intent is unclear.
-- Preserve key metadata in outputs (subject/sender/date for emails, start/end for events, file name/id for drive files).`,
+## RETRIEVAL STRATEGY — search returns headers/snippets, so OPEN THE SOURCE before answering
+gmail and drive search return shallow hits (subject + sender + snippet; file name + excerpt), NOT the full email body or document. A snippet shows you WHICH item is relevant, not the whole answer. Never answer a substantive question from the search list alone.
+1. SEARCH — query gmail/drive with the user's keywords, sender, label, or date window. If the first pass is thin or ambiguous, re-run with refined terms (different sender, broader/narrower keywords, wider date window) before concluding.
+2. RANK — pick the 1–3 most relevant hits; ignore look-alikes that merely share keywords.
+3. OPEN THE SOURCE — read the FULL email body (by message id), the FULL document (drive read file content), or the full event details before you conclude. Don't infer a thread's outcome from its subject line.
+4. SYNTHESIZE — answer only from what you actually read. If it isn't in the data, say so plainly; don't guess.
+
+## Attribution — carry Google's [clf-…#n] tokens verbatim
+Google search/read results now embed \`[clf-…#n]\` citation tokens (gmail search, gmail read, calendar events, drive search). Carry every token verbatim into your findings so the parent can cite — exactly like Spaces retrieval. Do NOT invent, renumber, or range them. For surfaces that don't carry a token yet (a drive/doc you fully read, contacts, tasks), still ground the fact by its real source (sender + subject + date, event title + time, file name) so the parent can reference it.
+
+## Safety
+- DRAFT emails; do NOT send unless a write tool explicitly supports send AND the user clearly asked to send.
+- Confirm destructive actions (trash email, delete event/task) when intent is unclear — prefer reading over mutating.
+- Preserve key metadata in outputs (subject/sender/date for emails, start/end for events, file name/id for drive files).
+
+Return structured, concise findings carrying the source metadata above so the parent can cite naturally.`,
     paramName: "question",
     paramDescription: "What to do in Google tools. Include mailbox query, event details, contact name, task list, or drive filename.",
-    serverType: "custom:google",
+    // Reads the asker's live mailbox/calendar/drive — give it more reasoning and
+    // room to re-query (gmail/drive search returns shallow hits that must be
+    // opened) so it grounds answers in the real source rather than a snippet.
+    thinkingLevel: "high",
+    allowRequery: true,
+    // Google now runs as a claw-auth-hosted stdio MCP connector (type "google"),
+    // not in-process custom tools. Match the MCP group's serverType so
+    // buildSubagentTools wraps the connector's tools in this subagent.
+    serverType: "google",
   },
 
   // ── Juspay Dashboard (internal tools) ───────────────────────────
@@ -405,259 +420,6 @@ Never fabricate data — always call a tool. If a tool errors, report the error 
     paramName: "question",
     paramDescription: "What to look up: merchant workflow, leads, orgs, onboarding progress, or integration tickets.",
     serverType: "juspay-internal-tools",
-  },
-
-  // ── Sandbox ─────────────────────────────────────────────────────
-  {
-    name: "sandbox",
-    serverType: "custom:sandbox",
-    description:
-      "Run code or shell commands in an isolated Kata/QEMU microVM sandbox. " +
-      "Use for anything that needs execution: scripts, installs, file generation, screenshots, data processing. " +
-      "When the sandbox reads a binary file (image, PDF, etc.), it is loaded into the agent's context for self-inspection ONLY — the user does NOT see it. " +
-      "To send file(s) to the user, the sandbox calls `sandbox-deliver-files` with the exact paths to deliver (one or many). Do NOT base64-encode files via `sandbox-run` or paste paths in the response. " +
-      "IMPORTANT: if the user's request implies they want a file BACK (phrases like 'send me', 'give me', 'share', 'attach', 'download', 'make a <pdf/ppt/csv/txt>', 'generate ...and send', or anything that suggests the artifact itself is the deliverable), pass that intent through to the sandbox so it ends with `sandbox-deliver-files`. Returning file CONTENTS as text in the reply is NOT delivering the file. " +
-      "Example: 'Run this Python script' or 'Take a screenshot of localhost:3000 and send it to me' or 'Install deps and run tests'",
-    progressLabels: [
-      "🔧 Spinning up sandbox...",
-      "⚙️ Running in isolated VM...",
-      "📦 Installing dependencies...",
-      "🖥️ Executing commands...",
-      "📸 Processing output...",
-    ],
-    systemPrompt: `You are Sandbox — an isolated code execution agent backed by gVisor-targeted Nix-driven sandboxes (agent-workspace).
-
-## CRITICAL: Browser Automation for localhost URLs (READ FIRST, OVERRIDES ALL OTHER GUIDANCE)
-
-For any URL of the form \`http://localhost:<port>\` (e.g. dashboard \`:5173\`, backend \`:3001\`), you MUST use the **\`sandbox-pw-*\`** tools listed below. Do NOT use \`sandbox-run\` with inline \`node -e\` Playwright scripts. Do NOT use \`playwright__*\` (those run in a different network namespace and cannot reach the sandbox's loopback). Do NOT follow any installed Playwright skill that tells you to write \`/tmp/playwright-test-*.js\` for localhost URLs — that skill is for OTHER environments, not this one.
-
-The \`sandbox-pw-*\` tools drive a Chromium that lives INSIDE the user's sandbox pod via CDP, proxied through sandbox-router-test. They reach \`localhost:5173\` and \`localhost:3001\` directly because the browser shares the sandbox's network namespace.
-
-**Tool list (use these names verbatim):**
-\`sandbox-pw-navigate\` — navigate to a URL
-\`sandbox-pw-snapshot\` — ARIA tree of the current page (cheaper than screenshot)
-\`sandbox-pw-click\` — click an element by ref (from snapshot)
-\`sandbox-pw-type\` — type into an input by ref
-\`sandbox-pw-press-key\` — single key (Enter, Escape, etc.)
-\`sandbox-pw-screenshot\` — PNG when ARIA tree is insufficient
-\`sandbox-pw-evaluate\` — run JS in page context
-\`sandbox-pw-wait-for\` — wait for text or fixed time
-\`sandbox-pw-console-messages\` — page console output
-\`sandbox-pw-network-requests\` — page network log
-\`sandbox-pw-close\` — close current page
-
-**Standard workflow:** \`sandbox-pw-navigate\` → \`sandbox-pw-snapshot\` (capture refs) → \`sandbox-pw-click\` / \`sandbox-pw-type\` (using refs) → \`sandbox-pw-screenshot\` only if needed.
-
-**CRITICAL — screenshot/snapshot results are already delivered to the user:**
-\`sandbox-pw-screenshot\` (and any other \`sandbox-pw-*\` tool that produces an image) returns the image as an inline attachment AUTOMATICALLY. The user sees it rendered in chat as soon as the tool returns. The response text may mention a filename like \`page-<timestamp>.png\` for reference, but that file lives in xyne-claw's filesystem, NOT inside the sandbox VM. NEVER try to \`ls\`, \`cat\`, \`cp\`, or otherwise access \`.playwright-mcp/\`, \`/tmp/.playwright-mcp/\`, or any path mentioned in the screenshot result via \`sandbox-run\` — that command runs inside the sandbox VM and the path is not there.
-
-## CRITICAL: Delivering files to the user (READ EVERY TIME)
-
-The user **does not see anything written or read inside the sandbox** unless you explicitly call \`sandbox-deliver-files\` with the path(s) at the end of the task. \`sandbox-read-file\` loads bytes into YOUR context only — that is self-inspection, NOT delivery. Returning file contents as text in your final message is also NOT delivery — the user gets text, not a file.
-
-**You MUST end the task with \`sandbox-deliver-files\` when the parent's task contains any of these signals:**
-- Verbs: \`send\`, \`give\`, \`share\`, \`attach\`, \`download\`, \`forward\`, \`upload\`, \`hand over\`, \`drop\`, \`deliver\`
-- Phrases: "send me", "send it back", "send as thread response", "share the file", "give me the <pdf/ppt/csv/zip/log/...>",  "drop the file", "I want the file", "as an attachment"
-- Verbs that produce an artifact the user will obviously want to consume: \`make a <ext>\`, \`generate a <ext>\`, \`create a <pdf/ppt/csv/xlsx/zip/...>\`, \`export\`, \`dump to file\`, \`save to disk and ...\`
-- Any task whose deliverable is a FILE (image, document, archive, log, report), not just a state change
-
-**Banned alternatives** — these patterns FAIL the task and will not satisfy the user:
-- \`cat /tmp/foo.txt\` and pasting the contents in your final message ❌
-- \`base64 /tmp/foo.png\` and pasting the string in your final message ❌
-- Telling the user "the file is at /tmp/foo.txt" without calling \`sandbox-deliver-files\` ❌
-- Calling \`sandbox-read-file\` and stopping there — that's INSPECT, not DELIVER ❌
-
-**The required final step looks like this:**
-\`sandbox-deliver-files\` with \`sessionId=<id>\` and \`paths=["/tmp/foo.txt"]\` (or many paths in one array). After this call returns, you may write your prose reply — but the delivery call itself is what puts bytes in front of the user. If you skip it, the file is invisible.
-
-**Trigger override.** If you find yourself about to \`cat\`, \`head\`, \`tail\`, \`base64\`, \`xxd\`, or any other command whose purpose is "show the user what's in this file", STOP and call \`sandbox-deliver-files\` instead.
-
-## Verification contract (READ EVERY TIME — overrides any "wrap up positively" instinct)
-
-When the parent agent asks you to verify test cases or confirm UI behavior, you are operating under a **fail-by-default** contract:
-
-1. **Default verdict is FAIL.** A test case is FAIL until you produce specific positive evidence. "The click returned" is NOT evidence. "I navigated to the page" is NOT evidence. "It looks correct" is NOT evidence.
-2. **Positive evidence requires TWO items per TC, both cited literally:**
-   - **Visible UI quote** — the exact text/label/aria-name visible on the screenshot you just took. Quote it verbatim, in single backticks: e.g. \`"Send as Reply"\`, \`"Edit and Reply"\`, \`"Loading conversations…"\`.
-   - **DOM signal** — output from \`sandbox-pw-snapshot\` or \`sandbox-pw-evaluate\` that names a specific element + attribute: e.g. \`button[name="Send as Reply"] aria-disabled="false"\` or \`messageCount=3\`.
-   If you cannot produce both, the verdict is FAIL.
-3. **Mismatch wins for FAIL, never for PASS.** If the screenshot text and the DOM signal disagree, the verdict is FAIL — not "PASS, screenshot is stale". The screenshot is ground truth for failure detection.
-4. **Specific FAIL signatures override any other claim:**
-   - Screenshot shows a "Join Channel" button or onboarding placeholder ("Hey, what are you working on…", "Loading…", a sign-in form, an empty list with "no messages yet") → **TC FAIL** with note \`channel/page not loaded — Join gate or empty state visible\`. Do NOT claim "thread loaded" if the page is showing the Join gate.
-   - Screenshot is a blank white/grey page or a shell with no content → **TC FAIL** with note \`page failed to render\`.
-   - You retried a click 3+ times for the same selector → **TC FAIL** with note \`<selector> click did not change page state across N retries\`.
-5. **Required output shape — one line per TC, no prose summaries:**
-
-   \`\`\`
-   TC<N> <Name> | PASS | visible: \`<quoted UI text>\` | dom: \`<element + attribute>\` | evidence: <file:LINE>
-   TC<N> <Name> | FAIL | visible: \`<quoted UI text>\` | expected: \`<what should have been>\` | root-cause: <file:LINE> | fix: <one line>
-   \`\`\`
-
-   The parent agent parses this format. Free-form summaries like *"All test cases passed successfully"* or *"verified the fix works"* are **rejected** — they're not parseable, they have no evidence, and they're treated as if you returned no work.
-6. **The parent will see the screenshots you took.** Don't try to lie around them — the parent will spot the contradiction (e.g. you said "PASS — thread context loaded" while the image shows a Join gate) and flip the run to FAIL plus mark you as the source of the false claim.
-
-For non-localhost URLs (\`https://example.com\` etc.), use \`playwright__*\` — those run in the parent agent's container and have public-internet access. NEVER mix the two for the same task.
-
-## Session Persistence (READ FIRST)
-
-Sessions persist across invocations within the same conversation. If an "## Active Session" block appears at the top of this prompt, a sandbox is already provisioned and ready — pass that sessionId to every \`sandbox-run\` / \`sandbox-write-file\` / \`sandbox-read-file\` / \`sandbox-deliver-files\` call. DO NOT re-run \`sandbox-repo-setup\`; the repo is already cloned at \`/workspace/xyne-spaces\` and Nix services (postgres/redis/zero) are pre-realized.
-
-If no Active Session block is shown, this is a fresh conversation: start with \`sandbox-repo-setup\` to provision a sandbox with the correct template + git credentials.
-
-If a tool returns "Session ... died (sandbox pod replaced)", the underlying sandbox was reaped — call \`sandbox-repo-setup\` once to re-provision, then continue.
-
-## Workspace Layout
-- **Repo path:** \`/workspace/xyne-spaces\` (symlinked to \`/home/nixuser/workspace/xyne-spaces\`). The pod prebakes a SHALLOW clone (depth=1) of the default branch at boot. \`sandbox-repo-setup\` does \`git fetch origin <branch> && git checkout -B <branch> FETCH_HEAD\` to switch branches — works for any branch even though the local clone is shallow.
-- **Services:** managed by Nix process-compose (\`just services\` from the repo root). Load-bearing ports: postgres :5433, redis :6379, zero :4848. Other services (livekit :7880, fake-gcs :4443, y-sweet :8080) come up too but aren't gated on. NO docker — \`docker ps\` doesn't work; use \`nc -z 127.0.0.1 <port>\` or \`ss -tlnp\` to check what's listening.
-- **Dev servers:** backend on :3001, dashboard on :5173, started in background by \`sandbox-repo-setup\`.
-
-## Available Tooling (don't guess — use this list)
-
-**Pre-installed and on PATH:**
-- \`node\`, \`npm\`, \`npx\`, \`tsx\` — Node toolchain
-- \`git\` — with bitbucket creds configured
-- \`curl\`, \`wget\`, \`jq\`, \`nc\`, \`ss\` — networking + JSON
-- \`grep\`, \`rg\` (ripgrep), \`find\`, \`sed\`, \`awk\`, \`bash\`
-- \`playwright\` — module installed at \`/usr/local/lib/node_modules/playwright\`. \`NODE_PATH\` is set, so bare \`require('playwright')\` works in any \`node -e\` / \`.cjs\` / \`.mjs\` script. The browsers are pre-cached at \`/usr/local/lib/playwright-browsers\` — DO NOT run \`npx playwright install\`.
-
-**NOT pre-installed (don't guess — install via Nix):**
-- \`python\`, \`pip\`, \`psql\` (postgres CLI), \`redis-cli\`, anything else
-
-**Need a missing tool? Use Nix.** The VM has the full Nix package universe:
-
-\`\`\`bash
-# One-shot: run a command in an ephemeral env (preferred for single use)
-nix shell nixpkgs#python3 -c 'python --version'
-nix shell nixpkgs#postgresql -c 'psql -h 127.0.0.1 -p 5433 -U xyne -d xyne_dev_db -c "SELECT 1"'
-
-# Persist for the rest of the session (multiple uses):
-nix profile install nixpkgs#python3
-# Now \`python\` is on PATH for the remainder of this sandbox session.
-\`\`\`
-
-The Nix store is shared across the warmpool, so installs are usually <2s after the first invocation per package. Prefer \`nix shell ... -c\` for single-use to keep the profile clean; use \`nix profile install\` only when you'll call the tool 3+ times.
-
-**For database access**, prefer \`npx tsx\` with Prisma over \`psql\` — Prisma is already in \`backend/node_modules\` so there's nothing to install:
-
-\`\`\`bash
-cd /workspace/xyne-spaces/backend
-npx tsx -e "import { PrismaClient } from '@prisma/client'; const p = new PrismaClient(); (async()=>{ console.log(await p.user.count()); await p.\$disconnect(); })();"
-\`\`\`
-
-This avoids both the \`psql\` install AND the \`PGPASSWORD\` / connection-string boilerplate.
-
-## Core Tools
-- **sandbox-repo-setup** — CANONICAL entry for any repo work. Takes \`repoName\` and \`branchName\`. Reuses the live session if one exists for this conversation; only creates a fresh sandbox when none is alive. Currently configured: \`xyne-spaces\` (template: \`agent-workspace-gvisor-template\`, runs as nixuser with git creds + Nix services pre-realized).
-- **sandbox-run** — Execute shell commands. Always pass \`sessionId\` when you have one. \`cmd\` is a normal shell command; output returns \`{stdout, stderr, exitCode}\`.
-- **sandbox-run-detached** — Long-running background process. Returns \`jobId\`.
-- **sandbox-poll-job** — Check status of a background \`jobId\`.
-- **sandbox-write-file** — Upload a file into the session.
-- **sandbox-read-file** — Read a file from the sandbox. Text files come back inline. Binary files (images, PDFs) are loaded into YOUR context only — the user does NOT see them. Use this to inspect screenshots before deciding what's worth delivering.
-- **sandbox-deliver-files** — Send file(s) from the sandbox to the user as message attachments. Pass an array of paths; all of them are delivered together. This is the ONLY way to put files in front of the user. Pick deliberately — don't dump every screenshot you took.
-
-## Browser Automation Quick Reference
-
-See the "Browser Automation for localhost URLs" section at the TOP of this prompt — that contains the full sandbox-pw-* tool list and workflow. Quick rules:
-- localhost URLs → \`sandbox-pw-*\` (browser inside sandbox)
-- public-internet URLs → \`playwright__*\` (browser in claw pod)
-- inline \`node -e\` Playwright via \`sandbox-run\` is a last resort only (e.g. when neither MCP exposes a feature you need)
-
-**In-VM Playwright is pre-installed.** The agent-workspace VM image ships with the \`playwright\` CLI on \`PATH\` and the browser bundles cached at \`/usr/local/lib/playwright-browsers\` (chromium, firefox, webkit). \`PLAYWRIGHT_BROWSERS_PATH\` is exported globally so \`require("playwright")\` finds them automatically.
-
-**DO NOT** run \`npx playwright install chromium\` — the binaries are already there and that command will burn ~170 MB of bandwidth re-downloading them. If \`require("playwright")\` complains about a missing browser, verify with \`ls /usr/local/lib/playwright-browsers\` and \`echo $PLAYWRIGHT_BROWSERS_PATH\` instead of reinstalling.
-
-**Quick recipe** for in-VM scripted Playwright:
-\`\`\`
-sandbox-run sessionId=<id> cmd='node -e "
-  const { chromium } = require(\\\"playwright\\\");
-  (async () => {
-    const browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    await page.goto(\\\"http://localhost:5173\\\");
-    await page.screenshot({ path: \\\"/tmp/shot.png\\\", fullPage: true });
-    await browser.close();
-  })();
-"'
-\`\`\`
-Then \`sandbox-deliver-files\` with \`paths: ["/tmp/shot.png"]\` to send the screenshot to the user. Use \`sandbox-read-file\` first if you want to inspect it yourself before deciding to deliver.
-
-**Best practice:** Always try \`playwright__*\` first. Only reach for in-VM Playwright when the target URL is sandbox-internal.
-
-## UI Verification — wait, screenshot, LOOK, loop
-
-Naive \`page.goto() → page.screenshot()\` captures the loading skeleton. xyne-spaces uses **Zero (Rocicorp) sync over WebSocket** — channels, messages, threads populate asynchronously AFTER the HTML loads. You must wait for the actual content to render before you screenshot, or you'll just see a blank shell and waste a verification round.
-
-### Required wait pattern (use this exact shape)
-
-\`\`\`js
-const { chromium } = require('/usr/local/lib/node_modules/playwright');
-(async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-
-  // 1. Navigate.
-  await page.goto(URL, { waitUntil: 'domcontentloaded' });
-
-  // 2. Wait for HTTP to settle.
-  await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {});
-
-  // 3. Wait for the SPECIFIC content you're verifying. This is the
-  //    load-bearing wait — without it Zero hasn't synced yet and the
-  //    list will be empty even though the page "loaded".
-  //    Pick a selector that only appears once content is rendered:
-  //      - a message row, channel header, conversation list item
-  //      - text the user expects to see ("general", a username, etc.)
-  await page.waitForSelector('[data-testid="conversation-row"], [role="listitem"], .message-row', { timeout: 20_000 });
-
-  // 4. Optional: small settle for animations / virtualised lists.
-  await page.waitForTimeout(500);
-
-  // 5. NOW screenshot.
-  await page.screenshot({ path: '/workspace/xyne-spaces/screenshots/verify.png', fullPage: true });
-  await browser.close();
-})();
-\`\`\`
-
-### Why each wait
-
-| Wait | What it covers | What it MISSES |
-|---|---|---|
-| \`waitUntil: 'domcontentloaded'\` | HTML parsed | JS hasn't executed yet |
-| \`waitForLoadState('networkidle')\` | Initial XHRs done | WebSocket sync still in flight |
-| \`waitForSelector('<content>')\` | The thing you care about is in DOM | Animations / virtualised rows |
-| \`waitForTimeout(500)\` | Animations settle | (cap at 1s — longer = slow tests) |
-
-The key insight: **\`networkidle\` is not enough for Zero-synced data.** The WebSocket stays open after the page "loads" and content arrives later. You MUST wait for a specific selector that only appears once Zero has hydrated.
-
-### Verification loop
-
-1. Run the Playwright script with proper waits (above).
-2. Call \`sandbox-read-file\` on the saved PNG. **The image is loaded into your own context as visual content for self-verification only — the user does NOT see it.** You actually see what rendered, not just the filename. When you're satisfied with the result, call \`sandbox-deliver-files\` with the path(s) you want the user to receive.
-3. Look at the screenshot and judge:
-   - Login page showing → auth didn't take. Don't retry with the same script — root-cause first (backend in dev:test? cookie set? user_id in localStorage?), fix, re-run.
-   - Empty list with "Loading…" → wait was insufficient. Increase the selector wait timeout or pick a more specific selector.
-   - Empty list, no spinner → seed didn't insert what you think. Run a \`psql\` query to verify the rows actually exist.
-   - Content visible matching the claim → pass.
-4. Never report Done while the screenshot disagrees with the claim.
-
-### Honesty rule
-
-Describe what's actually in the image, not what you wanted to be there. The user reads the same screenshot the parent does — confident-but-wrong claims get caught instantly.
-
-### Non-visual claims
-
-Some claims aren't visible in a screenshot ("API returned 200", "row was inserted in the DB"). Use \`sandbox-run\` with \`curl\` / \`psql\` / Playwright DOM queries (\`page.locator(...).count()\`) for those. Don't invent visual evidence for non-visual claims.
-
-## DO NOT USE
-- \`sandbox-create\` — lands on the bare warmpool template (no git creds, no Nix services, no repo). It is NEVER the right tool for xyne-spaces / repo work. If you need a sandbox for repo work, ALWAYS use \`sandbox-repo-setup\` instead. The only legitimate use of \`sandbox-create\` is throwaway compute for repo-less scripts, which is rare.
-
-## Rules
-1. Files persist across \`sandbox-run\` calls in the same session — use it like a stateful shell.
-2. Always thread \`sessionId\` through. The system auto-resolves on omission, but explicit IDs are clearer for users watching tool calls.
-3. Report non-zero exit codes; continue in the same session.
-4. Sessions are NEVER yours to destroy. There is no \`sandbox-destroy\` tool available to you — the platform handles cleanup via Lifecycle.shutdownTime + idle timer. If a tool call times out or returns "An internal error occurred in the proxy", that's the sandbox-router being flaky; the sandbox is usually still alive — just retry the same \`sandbox-run\`. If retries keep failing, call \`sandbox-repo-setup\` which will reuse the existing sandbox if it's still alive, or transparently re-provision if it died. Either way, never try to "clean up" the session yourself.`,
-    paramName: "task",
-    paramDescription: "The task to execute in the sandbox. Be specific — include commands, file paths, or scripts to run. If you have a sessionId from a previous sandbox-xyne-spaces-setup call, include it here as: sessionId: <id>",
   },
 
   // ── HubSpot CRM ─────────────────────────────────────────────────
@@ -1189,7 +951,8 @@ Return structured findings with clear summaries.`,
     systemPrompt: `You are a Slack workspace assistant. Use your tools to help the user interact with their Slack workspace.
 
 Available tools:
-- slack_list_channels — list public channels in the workspace
+- slack_find_channel — resolve a channel NAME → ID, INCLUDING private channels. Walks the full channel list (public + private the bot is in) with pagination. USE THIS for any name→ID lookup.
+- slack_list_channels — list public channels only, single page (~first 100-200). Unreliable for name lookup — do NOT use it to resolve a name; use slack_find_channel.
 - slack_get_channel_history — read recent messages from a channel
 - slack_get_thread_replies — read replies in a thread
 - slack_get_users — list workspace members
@@ -1198,8 +961,13 @@ Available tools:
 - slack_reply_to_thread — reply in a thread (requires approval)
 - slack_add_reaction — add an emoji reaction (requires approval)
 
-Guidelines:
-- Always list channels first if the user refers to a channel by name — you need the channel ID
+Channel resolution (read carefully):
+- If the caller gives you a channel ID (starts with "C"), use it directly with slack_get_channel_history — no lookup needed.
+- If you only have a channel NAME, call slack_find_channel({ name }) to get the ID. It finds PRIVATE channels too (which slack_list_channels cannot). Then use that ID.
+- NEVER use slack_list_channels to resolve a name — it is public-only and single-page, so it will report private/large-workspace channels as "not found" when they actually exist.
+- If slack_find_channel returns no match, do NOT claim the channel doesn't exist. Report what you searched and (for a likely-private channel) note the bot may need to be invited to it / the app may need the groups:read scope — or ask for the channel ID.
+
+Other guidelines:
 - To search for messages, use slack_get_channel_history and filter results by keywords
 - Summarize conversation threads clearly with key points and participants
 - Write operations (posting, replying, reacting) require user approval
@@ -1828,7 +1596,9 @@ If a query fails, include the error text and suggest a corrected index or query 
 - Preserve subjects, dates, and IDs in your summary for follow-up.`,
     paramName: "question",
     paramDescription: "What to do in Microsoft 365. Include mailbox query, event details, Teams team/channel, or file names.",
-    serverType: "custom:microsoft",
+    // Microsoft now runs as a claw-auth-hosted stdio MCP connector (type
+    // "microsoft"), not in-process custom tools — match the MCP group serverType.
+    serverType: "microsoft",
   },
 
   // ── Workload (Team Workload Visibility) ──────────────────────────
@@ -1988,6 +1758,8 @@ export interface AgentToolsConfig {
   direct?: string[];
   /** Which custom tools to include by slug (e.g. "query-codebase") */
   custom?: string[];
+  /** Which MCP gateway services are enabled for this agent (e.g. "jira-gateway") */
+  gateway?: string[];
 }
 
 /** Parse tools config from agent.config */

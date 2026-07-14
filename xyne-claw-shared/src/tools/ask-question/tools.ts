@@ -49,7 +49,7 @@ export const askUserQuestion: ToolDefinition = {
 
     // Store question in xyne-claw-auth Redis
     try {
-      const res = await fetch(`${authUrl}/api/v1/pending-questions`, {
+      const res = await fetch(`${authUrl}/claw/api/v1/pending-questions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -67,6 +67,12 @@ export const askUserQuestion: ToolDefinition = {
         signal: AbortSignal.timeout(10_000),
       });
 
+      // Guard before res.json(): a wrong path / proxy error returns an HTML
+      // page, and res.json() would throw a cryptic "Unexpected token '<'".
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        return `Error storing question: HTTP ${res.status} ${body.slice(0, 120)}`;
+      }
       const data = (await res.json()) as { success: boolean; error?: string };
       if (!data.success) return `Error storing question: ${data.error ?? "unknown"}`;
     } catch (err) {

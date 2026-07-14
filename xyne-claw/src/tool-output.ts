@@ -18,7 +18,7 @@
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { join as joinPath } from "node:path";
+import { join as joinPath, resolve as resolvePath } from "node:path";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
@@ -137,7 +137,15 @@ export async function promoteIfOversized(
   const safeCategory = category.replace(/[^a-zA-Z0-9_-]/g, "_");
   const safeTool = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const dir = joinPath(outputBaseDir, ".context", "tool-results");
+  // resolvePath (not joinPath) so the path is genuinely ABSOLUTE even when
+  // PATHS.dataDir is relative ("./data" default) — outputBaseDir is then
+  // sessions/<key> (relative), and a relative path handed to the model gets
+  // re-resolved by the scoped read tool against the SANDBOX workingDir, not the
+  // claw process CWD → the file is written under /app/xyne-claw/data/... but
+  // read-resolved under /app/xyne-claw/data/workspaces/<id>/data/... → ENOENT.
+  // An absolute path is checked as-is by the read gate and matches the (already
+  // absolute-resolved) .context read roots.
+  const dir = resolvePath(outputBaseDir, ".context", "tool-results");
   const absPath = joinPath(dir, `${safeCategory}-${safeTool}-${stamp}.json`);
   try {
     await mkdir(dir, { recursive: true });

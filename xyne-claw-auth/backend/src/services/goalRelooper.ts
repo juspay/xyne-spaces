@@ -213,6 +213,7 @@ export async function persistGoalStart(args: {
   workspaceId?: string | null;
   userId: string;
   agentSlug: string;
+  orgId: string;
   condition: string;
   runPayload: Prisma.InputJsonValue;
   maxTurns?: number;

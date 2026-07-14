@@ -1,18 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
-import type { Agent } from "../../lib/types";
-import { listAgents, getUserAgentConfig } from "../../lib/api";
+import type { AgentLight } from "../../lib/types";
+import { listAgents, listUserAgentConfigs } from "../../lib/api";
 
 export type AgentProvider = "spaces" | "copilot" | "claude" | "codex" | string;
 
 export interface UseAgentsReturn {
-  agents: Agent[];
+  agents: AgentLight[];
   providerMap: Record<string, AgentProvider>;
   loading: boolean;
   reload: () => void;
 }
 
 export function useAgents(userId: string): UseAgentsReturn {
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<AgentLight[]>([]);
   const [providerMap, setProviderMap] = useState<Record<string, AgentProvider>>({});
   const [loading, setLoading] = useState(true);
 
@@ -22,20 +22,13 @@ export function useAgents(userId: string): UseAgentsReturn {
       const fetched = await listAgents(userId);
       setAgents(fetched);
 
-      const configs = await Promise.all(
-        fetched.map(async (agent) => {
-          try {
-            const config = await getUserAgentConfig(agent.slug, userId);
-            return { slug: agent.slug, provider: config.provider as AgentProvider };
-          } catch {
-            return { slug: agent.slug, provider: "spaces" as AgentProvider };
-          }
-        }),
-      );
-
       const map: Record<string, AgentProvider> = {};
-      for (const { slug, provider } of configs) {
-        map[slug] = provider;
+      for (const agent of fetched) {
+        map[agent.slug] = "spaces";
+      }
+      const configs = await listUserAgentConfigs(userId).catch(() => []);
+      for (const config of configs) {
+        map[config.agentSlug] = config.provider as AgentProvider;
       }
       setProviderMap(map);
     } catch (err) {

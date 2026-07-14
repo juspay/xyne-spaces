@@ -20,7 +20,7 @@ import type { SessionTranscriptForCurator, SubsystemUpdate } from "xyne-claw-sha
 
 const logger = createLogger("session-curator-client", createTraceId());
 
-const CURATE_TIMEOUT_MS = Number(process.env["MEMORY_CURATOR_TIMEOUT_MS"] ?? 120_000);
+const CURATE_TIMEOUT_MS = Number(process.env["MEMORY_CURATOR_TIMEOUT_MS"] ?? 600_000);
 
 export type { SessionTranscriptForCurator, SubsystemUpdate } from "xyne-claw-shared";
 

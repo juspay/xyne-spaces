@@ -87,7 +87,8 @@ export interface StartRunInput {
   sessionId: string;
   userId: string;
   agentSlug: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api";
+  orgId: string;
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation";
   task: string;
   conversationId?: string | null;
   scheduledJobId?: string | null;
@@ -132,7 +133,7 @@ export const agentRunRepository = {
     // lookup by slug) so none of the 5 call sites need to thread it through.
     // Best-effort: a missing agent / unversioned prompt just leaves it null.
     const agent = await prisma.agent.findUnique({
-      where: { slug: input.agentSlug },
+      where: { orgId_slug: { orgId: input.orgId, slug: input.agentSlug } },
       select: { activePromptVersion: true },
     });
     try {
@@ -144,6 +145,7 @@ export const agentRunRepository = {
           triggerSource: input.triggerSource,
           task: input.task,
           status: "running",
+          orgId: input.orgId,
           ...(agent?.activePromptVersion != null ? { promptVersion: agent.activePromptVersion } : {}),
           ...(input.conversationId ? { conversationId: input.conversationId } : {}),
           ...(input.scheduledJobId ? { scheduledJobId: input.scheduledJobId } : {}),
@@ -400,20 +402,22 @@ export const agentRunRepository = {
     }),
 
   /**
-   * Admin "All Runs" for a single agent: every user's runs of `agentSlug`, but
+   * "All Runs" for a single agent: every user's runs of `agentSlug`, but
    * ACL-filtered — the requester's OWN runs are always shown, while OTHER
    * users' runs appear only when `usedUserToken=false` (a run that touched the
-   * user's private OAuth/session data is never surfaced to an admin). Caller
-   * MUST gate this on isClawAdmin.
+   * user's private OAuth/session data is never surfaced to elevated viewers).
+   * Caller MUST gate this on admin or agent contributor access.
    */
   listAllForAgent: async (
     agentSlug: string,
+    orgId: string,
     requesterId: string,
     opts?: { status?: string; limit?: number; conversationId?: string },
   ) => {
     const rows = await prisma.agentRun.findMany({
       where: {
         agentSlug,
+        orgId,
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
         OR: [
@@ -582,6 +586,30 @@ export const agentRunRepository = {
     prisma.agentRun.findUnique({ where: { sessionId } }),
 
   /**
+   * The most-recent RUNNING run for a conversation. Used by the Spaces `/stop`
+   * command to find the in-flight run's sessionId (so it can be cancelled) when
+   * the caller only knows the conversationId. Returns null when nothing is
+   * running. Newest-first so a stale row can't shadow the live run.
+   */
+  findRunningByConversation: (conversationId: string) =>
+    prisma.agentRun.findFirst({
+      where: { conversationId, status: "running" },
+      orderBy: { startedAt: "desc" },
+      select: { sessionId: true, userId: true, agentSlug: true, conversationId: true, status: true },
+    }),
+
+  /**
+   * Every RUNNING run for a conversation. `/stop` uses this to reconcile all
+   * stale DB rows, not just the newest one.
+   */
+  listRunningByConversation: (conversationId: string) =>
+    prisma.agentRun.findMany({
+      where: { conversationId, status: "running" },
+      orderBy: { startedAt: "desc" },
+      select: { sessionId: true, userId: true, agentSlug: true, conversationId: true, status: true },
+    }),
+
+  /**
    * Minimal sessionId → (owner, usedUserToken) projection for a conversation.
    * Powers the debug-artifacts ACL: an admin viewing a SHARED conversation must
    * not see other users' user-token runs (their debug snapshots, tool I/O,
@@ -607,10 +635,12 @@ export const agentRunRepository = {
    */
   listByAgentSlug: async (
     slug: string,
+    orgId: string,
     opts?: { since?: Date; limit?: number; status?: string },
   ) => {
     const rows = await prisma.agentRun.findMany({
       where: {
+        orgId,
         agentSlug: slug,
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.since ? { startedAt: { gte: opts.since } } : {}),
@@ -709,8 +739,11 @@ export const agentRunRepository = {
    * Aggregate rating stats per agent within a window. Null cutoff = all time.
    * Returns totalRuns, ratedCount, upCount, downCount per agentSlug, sorted by downCount DESC.
    */
-  ratingStatsByAgent: async (cutoff: Date | null) => {
-    const where = cutoff ? { startedAt: { gte: cutoff } } : {};
+  ratingStatsByAgent: async (cutoff: Date | null, orgId?: string) => {
+    const where = {
+      ...(cutoff ? { startedAt: { gte: cutoff } } : {}),
+      ...(orgId ? { orgId } : {}),
+    };
     const rows = await prisma.agentRun.groupBy({
       by: ["agentSlug", "rating"],
       where,
@@ -730,10 +763,11 @@ export const agentRunRepository = {
   },
 
   /** Most recent thumbs-down runs with user email joined. */
-  recentDownRuns: async (cutoff: Date | null, limit: number) => {
+  recentDownRuns: async (cutoff: Date | null, limit: number, orgId?: string) => {
     const rows = await prisma.agentRun.findMany({
       where: {
         rating: "down",
+        ...(orgId ? { orgId } : {}),
         ...(cutoff ? { ratedAt: { gte: cutoff } } : {}),
       },
       orderBy: { ratedAt: "desc" },
@@ -741,6 +775,7 @@ export const agentRunRepository = {
       select: {
         sessionId: true,
         agentSlug: true,
+        orgId: true,
         userId: true,
         task: true,
         ratingComment: true,
@@ -756,6 +791,7 @@ export const agentRunRepository = {
     return rows.map((r) => ({
       sessionId: r.sessionId,
       agentSlug: r.agentSlug,
+      orgId: r.orgId,
       userId: r.userId,
       userEmail: emailById.get(r.userId) ?? null,
       task: r.task.length > 200 ? r.task.slice(0, 200) + "…" : r.task,

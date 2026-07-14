@@ -10,7 +10,7 @@
  * sendChatMessage() once per turn with a shared `eval-<runId>-<convId>` claw
  * conversationId, streams reasoning/text/tool events in, and persists each turn.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -38,6 +38,7 @@ import {
   InfoIcon,
   ArrowUpRightIcon,
   CloudArrowDownIcon,
+  BugIcon,
 } from "@phosphor-icons/react";
 import { Button } from "./ui/Button";
 import { Badge } from "./ui/Badge";
@@ -55,8 +56,10 @@ import {
   getLatestGenerationForFolder,
   parseEvalConversations,
   judgeEvalRun,
+  judgeComparison,
   listEvalModels,
   getGeneration,
+  getComparison,
   importEvalFromSpaces,
   importEvalFromSpacesChannel,
   listEvalSpacesChannels,
@@ -64,6 +67,7 @@ import {
   cancelEvalImportJob,
   startBackgroundGeneration,
   listEvalGenModels,
+  listChatLitellmModels,
   type EvalGenModels,
   getGenerationJob,
   cancelGenerationJob,
@@ -88,8 +92,20 @@ import {
   type EvalGeneration,
   type ToolInvocation,
 } from "../../lib/api";
-import type { Agent } from "../../lib/types";
+import type { AgentLight } from "../../lib/types";
 import { useBackgroundJob } from "../hooks/useBackgroundJob";
+import { DebugDrawer } from "../../components/DebugDrawer";
+import {
+  CitationMarkdown,
+  CitationPanel,
+  parseInvocationCitationChunks,
+  buildCitationKeyAliases,
+  citedChunksFor,
+  type CitationRef,
+  type CitationSelection,
+  type CitationLookup,
+} from "./ChatPageV3";
+import { EVAL_CSV_HEADERS, buildCsv, downloadCsv, mapPool, safeFilename, type CsvValue } from "../utils/csvExport";
 
 type TurnStatus = "idle" | "running" | "completed" | "failed";
 
@@ -107,6 +123,82 @@ interface LiveTurn {
   judgeFailed?: boolean;
   /** All judges' scores for this turn — used to remap the view per selected judge. */
   judgeScores: EvalTurnJudgeScore[];
+  /** Claw run/conversation ids for the "Debug this response" drawer, plus the
+   *  RUN's agent (the live picker's agentSlug can change after a run). Populated
+   *  from persisted turn results; absent until the turn finalizes. */
+  sessionId?: string | null;
+  clawConversationId?: string | null;
+  agentSlug?: string | null;
+}
+
+/** Max agents that can be compared in one run. */
+const MAX_COMPARE_AGENTS = 3;
+
+/** One agent participating in a folder's latest run/comparison (a single-agent
+ *  run is just a comparison of one). */
+interface AgentRun {
+  slug: string;
+  name: string;
+  runId: string;
+  /** Human label for the pinned generation model (e.g. "copilot · gpt-4o"), "" if default. */
+  genLabel: string;
+}
+
+/** The latest run for a folder: 1-3 sibling agent runs sharing a comparisonId. */
+interface FolderComparison {
+  comparisonId: string | null;
+  agents: AgentRun[];
+}
+
+/** A row in the Run dialog's agent picker: which agent + its own generation-model
+ *  choice (same encoding as the legacy single genChoice). */
+interface RunAgentSpec {
+  slug: string;
+  genChoice: string;
+}
+
+/** One agent's answer for a single turn, ready to render as a panel. */
+interface TurnAgentPane {
+  slug: string;
+  name: string;
+  live: LiveTurn | undefined;
+}
+
+/** Merge a run's persisted turn results into a per-(conv,turn) map without
+ *  clobbering newer in-flight state. Pure — shared by the flat (primary-agent)
+ *  and per-agent result maps. */
+function mergeTurnsInto(prev: Record<string, LiveTurn>, run: EvalGeneration): Record<string, LiveTurn> {
+  const next = { ...prev };
+  for (const tr of run.turnResults ?? []) {
+    const key = rKey(tr.conversationId, tr.turnIndex);
+    const cur = next[key];
+    next[key] = {
+      answer: tr.clawAnswer ?? cur?.answer ?? "",
+      reasoning: tr.reasoning ?? cur?.reasoning ?? "",
+      tools: tr.toolInvocations ?? cur?.tools ?? [],
+      status: tr.status === "completed" ? "completed" : tr.status === "failed" ? "failed" : "running",
+      matchScore: tr.matchScore ?? null,
+      judgeReasoning: tr.judgeReasoning ?? "",
+      judgeScores: tr.judgeScores ?? cur?.judgeScores ?? [],
+      sessionId: tr.sessionId ?? cur?.sessionId ?? null,
+      clawConversationId: tr.clawConversationId ?? cur?.clawConversationId ?? null,
+      agentSlug: run.agentSlug ?? cur?.agentSlug ?? null,
+    };
+  }
+  return next;
+}
+
+/** One CSV row for an eval turn: conversation label, 1-based turn number,
+ *  question, expected, claw response, and the cited chunks (numbered). */
+function evalCsvRow(
+  convLabel: string,
+  turnIdx: number,
+  question: string,
+  expected: string | null | undefined,
+  answer: string,
+  tools: ToolInvocation[],
+): CsvValue[] {
+  return [convLabel, turnIdx + 1, question, expected ?? "", answer, citedChunksFor(answer, tools)];
 }
 
 /** The score/reasoning to show for a turn given the selected judge view key —
@@ -179,7 +271,7 @@ function turnTitle(message: string): string {
 /** Render eval answer text as markdown — headings, bold, tables, lists, code —
  *  instead of raw `##` / `**` / `| … |`. Compact prose tuned for the side-by-side
  *  columns. `tone` picks the body text color (expected = muted, generated = full). */
-function EvalMarkdown({ children, tone = "primary" }: { children: string; tone?: "primary" | "secondary" }) {
+function EvalMarkdown({ children, tone = "primary", invocations, onOpenCitation, selectedCitationKey = null }: { children: string; tone?: "primary" | "secondary"; invocations?: ToolInvocation[]; onOpenCitation?: (citation: CitationRef, citationNumber: number, numbers: Map<string, number>) => void; selectedCitationKey?: string | null }) {
   return (
     <div
       className={
@@ -194,7 +286,21 @@ function EvalMarkdown({ children, tone = "primary" }: { children: string; tone?:
           : "prose-p:text-xyne-fg-primary prose-li:text-xyne-fg-primary")
       }
     >
-      <Markdown remarkPlugins={[remarkGfm]}>{children}</Markdown>
+      {invocations
+        ? (
+          // Generated answers carry inline [clf-…] citation tokens; render them
+          // as numbered chips (same renderer as chat). filterUnknownCitations
+          // is off so a token is never silently dropped when the eval turn's
+          // captured tool invocations don't line up. No side panel (Phase A).
+          <CitationMarkdown
+            content={children}
+            invocations={invocations}
+            selectedCitationKey={selectedCitationKey}
+            onOpenCitation={onOpenCitation ?? (() => {})}
+            filterUnknownCitations={false}
+          />
+        )
+        : <Markdown remarkPlugins={[remarkGfm]}>{children}</Markdown>}
     </div>
   );
 }
@@ -269,18 +375,87 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   // When set, the detail pane shows the run-comparison view for a folder.
   const [compareFolderId, setCompareFolderId] = useState<string | null>(null);
 
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<AgentLight[]>([]);
   const [agentSlug, setAgentSlug] = useState("");
-  // Generation model for the run: "" = default, "prov:<provider>" = a provider
-  // the user configured in claw, "spaces:<model>" = platform LiteLLM model.
-  const [genChoice, setGenChoice] = useState("");
+  // Run dialog: up to MAX_COMPARE_AGENTS agents to compare, each with its own
+  // generation-model choice. genChoice encodings: "" = default, "prov:<provider>"
+  // = a provider the user configured in claw, "spaces:<model>" = platform LiteLLM,
+  // "litellm:<model>" = a model off THAT agent's shared LiteLLM key.
+  const [runAgents, setRunAgents] = useState<RunAgentSpec[]>([{ slug: "", genChoice: "" }]);
   const [genModels, setGenModels] = useState<EvalGenModels | null>(null);
+  // Per-agent shared LiteLLM models (each agent's own key), fetched reactively
+  // while the Run dialog is open. Keyed by agent slug. Distinct from
+  // genModels.litellm, which is the platform catalog run on the platform key.
+  const [litellmByAgent, setLitellmByAgent] = useState<Record<string, { id: string; name: string }[]>>({});
+  // Right-docked, resizable side panels for an eval turn: the "Debug this
+  // response" drawer and the citation source panel. Mutually exclusive (one dock
+  // slot) — opening one closes the other, mirroring chat. Widths persist under
+  // evals-scoped localStorage keys so they don't collide with chat's.
+  const [evalDebug, setEvalDebug] = useState<{ agentSlug: string; conversationId: string; sessionId: string } | null>(null);
+  const [selectedCitation, setSelectedCitation] = useState<CitationSelection | null>(null);
+  const [citationPanelWidth, setCitationPanelWidth] = useState<number>(() => {
+    try { const s = localStorage.getItem("evals-citation-panel-width"); return s ? parseInt(s, 10) : 480; } catch { return 480; }
+  });
+  const [evalDebuggerWidth, setEvalDebuggerWidth] = useState<number>(() => {
+    try { const s = localStorage.getItem("evals-debugger-width"); return s ? parseInt(s, 10) : 460; } catch { return 460; }
+  });
+  const openTurnDebugger = useCallback((t: LiveTurn) => {
+    if (!t.sessionId || !t.clawConversationId) return;
+    setSelectedCitation(null); // one dock slot — close the citation panel
+    setEvalDebug({ agentSlug: t.agentSlug ?? agentSlug, conversationId: t.clawConversationId, sessionId: t.sessionId });
+  }, [agentSlug]);
+  const handleOpenCitation = useCallback((ref: CitationRef, citationNumber: number, numbers: Map<string, number>) => {
+    setEvalDebug(null); // one dock slot — close the debug drawer
+    setSelectedCitation({ key: ref.key, ref, citationNumber, numbers });
+  }, []);
+  // Per-agent variant used by each comparison panel — remembers which agent's
+  // citation index a clicked chip resolves against.
+  const makeOpenCitation = useCallback(
+    (slug: string) => (ref: CitationRef, citationNumber: number, numbers: Map<string, number>) => {
+      setEvalDebug(null);
+      setCitationAgent(slug);
+      setSelectedCitation({ key: ref.key, ref, citationNumber, numbers });
+    },
+    [],
+  );
+  const handleCloseCitation = useCallback(() => setSelectedCitation(null), []);
+  const handleCitationResizeStart = useCallback((e: ReactMouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX; const startWidth = citationPanelWidth; let cur = startWidth;
+    const onMove = (ev: MouseEvent) => { cur = Math.max(320, Math.min(760, startWidth + (startX - ev.clientX))); setCitationPanelWidth(cur); };
+    const onUp = () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); try { localStorage.setItem("evals-citation-panel-width", String(cur)); } catch { /* ignore */ } };
+    document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp);
+  }, [citationPanelWidth]);
+  const handleEvalDebuggerResizeStart = useCallback((e: ReactMouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX; const startWidth = evalDebuggerWidth; let cur = startWidth;
+    const onMove = (ev: MouseEvent) => { cur = Math.max(320, Math.min(760, startWidth + (startX - ev.clientX))); setEvalDebuggerWidth(cur); };
+    const onUp = () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); try { localStorage.setItem("evals-debugger-width", String(cur)); } catch { /* ignore */ } };
+    document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp);
+  }, [evalDebuggerWidth]);
 
+  // Flat, cross-folder map of the PRIMARY (first) agent's turns — powers the
+  // sidebar ticks, the judge view dropdown, and CSV export (all single-agent).
   const [results, setResults] = useState<Record<string, LiveTurn>>({});
+  // Every agent's turns, keyed by agent slug then rKey — powers the side-by-side
+  // comparison detail + report. The primary agent lives in both maps.
+  const [resultsByAgent, setResultsByAgent] = useState<Record<string, Record<string, LiveTurn>>>({});
+  // The latest run/comparison per folder (1-3 sibling agent runs). Drives the
+  // comparison detail/report views and the judging fan-out.
+  const [compareByFolder, setCompareByFolder] = useState<Record<string, FolderComparison>>({});
+  // Which agent's citation index a clicked chip resolves against (one dock slot).
+  const [citationAgent, setCitationAgent] = useState<string | null>(null);
 
-  // Latest run id per folder — lets us trigger on-demand judging for a folder
-  // (whole run) or one of its conversations.
-  const [runIdByFolder, setRunIdByFolder] = useState<Record<string, string>>({});
+  // Primary agent's runId per folder (derived) — the existing judge/gate reads
+  // key by a single runId; comparison judging fans out via compareByFolder.
+  const runIdByFolder = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const fid in compareByFolder) {
+      const rid = compareByFolder[fid]?.agents[0]?.runId;
+      if (rid) m[fid] = rid;
+    }
+    return m;
+  }, [compareByFolder]);
 
   // Judge: model list + global config (loaded lazily on first judge), and the
   // trigger dialog state.
@@ -298,7 +473,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   const copilotProv = genModels?.providers.find((pr) => pr.provider === "copilot") ?? null;
   const copilotOptionLabel = copilotProv ? `${copilotProv.model ?? "gpt-4o"} (copilot)` : null;
   const [judgeDialog, setJudgeDialog] = useState<
-    { runId: string; folderId: string; conversationIds?: string[]; label: string } | null
+    { comparisonId: string | null; agents: AgentRun[]; folderId: string; conversationIds?: string[]; label: string } | null
   >(null);
   const [judging, setJudging] = useState(false);
   const [judgeOnlyUnscored, setJudgeOnlyUnscored] = useState(false);
@@ -335,36 +510,64 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   // Background jobs (import / run / scoring) are driven by useBackgroundJob —
   // the hooks are created further down (their callbacks need later-declared
   // helpers); earlier callbacks reach `start` through these trampoline refs.
-  const startRunRef = useRef<(m: { jobId: string; runId: string; folderId?: string }) => void>(() => {});
+  // Live mirror of "is any generation run in flight" — read synchronously by the
+  // one-run-at-a-time guard so conversation-scoped runs (no folderId) are gated
+  // too, and without a stale-closure gap.
+  const runActiveRef = useRef(false);
+  const startRunRef = useRef<(m: { jobId: string; runId: string; folderId?: string; agentSlug?: string; isPrimary?: boolean }) => void>(() => {});
   const startJudgeRef = useRef<
-    (m: { jobId: string; runId: string; folderId: string; convScope?: string[]; primaryJudgeId: string }) => void
+    (m: { jobId: string; runId: string; folderId: string; convScope?: string[]; primaryJudgeId: string; agentSlug?: string; isPrimary?: boolean }) => void
   >(() => {});
   // The judge×model key of an in-flight scoring pass (keeps it selectable in
   // the view dropdown before its first scores land).
   const [inflightJudgeKey, setInflightJudgeKey] = useState<string | null>(null);
 
-  /** Merge a run's persisted turn results (answer/reasoning/tools + judge
-   *  verdict) into the live results map without clobbering newer in-flight
-   *  state. */
+  /** Merge a run's persisted turn results into the flat (primary-agent) map —
+   *  used only for the folder's first agent, which backs the single-agent
+   *  sidebar / judge-dropdown / CSV surfaces. */
   const mergeRunResults = useCallback((run: EvalGeneration) => {
-    setResults((prev) => {
-      const next = { ...prev };
-      for (const tr of run.turnResults ?? []) {
-        const key = rKey(tr.conversationId, tr.turnIndex);
-        const cur = next[key];
-        next[key] = {
-          answer: tr.clawAnswer ?? cur?.answer ?? "",
-          reasoning: tr.reasoning ?? cur?.reasoning ?? "",
-          tools: tr.toolInvocations ?? cur?.tools ?? [],
-          status: tr.status === "completed" ? "completed" : tr.status === "failed" ? "failed" : "running",
-          matchScore: tr.matchScore ?? null,
-          judgeReasoning: tr.judgeReasoning ?? "",
-          judgeScores: tr.judgeScores ?? cur?.judgeScores ?? [],
-        };
-      }
-      return next;
-    });
+    setResults((prev) => mergeTurnsInto(prev, run));
   }, []);
+
+  /** Merge a run into its own agent slot in the per-agent map (comparison views).
+   *  Every agent (including the primary) is merged here. */
+  const mergeAgentResults = useCallback((run: EvalGeneration) => {
+    setResultsByAgent((prev) => ({ ...prev, [run.agentSlug]: mergeTurnsInto(prev[run.agentSlug] ?? {}, run) }));
+  }, []);
+
+  /** Merge every sibling run of a comparison: agent[0] → flat map (primary) too. */
+  const mergeComparisonRuns = useCallback(
+    (runs: EvalGeneration[]) => {
+      runs.forEach((run, i) => {
+        mergeAgentResults(run);
+        if (i === 0) mergeRunResults(run);
+      });
+    },
+    [mergeAgentResults, mergeRunResults],
+  );
+
+  const agentNameBySlug = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of agents) m.set(a.slug, a.name);
+    return m;
+  }, [agents]);
+
+  /** Human label for a run's pinned generation model ("copilot · gpt-4o"), "" if default. */
+  const genLabelFor = useCallback((run: { genProvider?: string | null; genModel?: string | null }) => {
+    const p = run.genProvider ?? "";
+    const m = run.genModel ?? "";
+    return p && m ? `${p} · ${m}` : m || p || "";
+  }, []);
+
+  const toAgentRun = useCallback(
+    (run: EvalGeneration): AgentRun => ({
+      slug: run.agentSlug,
+      name: agentNameBySlug.get(run.agentSlug) ?? run.agentSlug,
+      runId: run.id,
+      genLabel: genLabelFor(run),
+    }),
+    [agentNameBySlug, genLabelFor],
+  );
 
   // True only while a run-start request is in flight (double-submit guard).
   const [submittingRun, setSubmittingRun] = useState(false);
@@ -457,6 +660,128 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     return out;
   }, [results, activeJudgeId, defaultModelName]);
 
+  // Same judge remap, per agent — feeds the side-by-side comparison detail/report.
+  const displayByAgent = useMemo(() => {
+    const out: Record<string, Record<string, LiveTurn>> = {};
+    for (const slug in resultsByAgent) {
+      const m = resultsByAgent[slug]!;
+      if (!activeJudgeId) {
+        out[slug] = m;
+        continue;
+      }
+      const remapped: Record<string, LiveTurn> = {};
+      for (const k in m) {
+        const t = m[k]!;
+        const { score, reasoning, failed } = scoreForJudge(t, activeJudgeId, defaultModelName);
+        remapped[k] = { ...t, matchScore: score, judgeReasoning: reasoning, judgeFailed: failed };
+      }
+      out[slug] = remapped;
+    }
+    return out;
+  }, [resultsByAgent, activeJudgeId, defaultModelName]);
+
+  // The agents to show for the currently open conversation (its folder's latest
+  // run) or the open report — 1-3, in comparison order.
+  const openAgents = useMemo(
+    () => (openConv ? compareByFolder[openConv.folderId]?.agents ?? [] : []),
+    [openConv, compareByFolder],
+  );
+
+  // Citation index for the open conversation's turns — maps each [clf-id#n] key
+  // (all alias forms) to the tool invocation + chunk backing it, so a chip click
+  // resolves its source. Mirrors chat's index but iterates eval turn results.
+  const citationIndexByAgent = useMemo(() => {
+    const out: Record<string, Map<string, CitationLookup>> = {};
+    if (!openConv) return out;
+    const turnCount = (openConv.turns as EvalTurn[]).length;
+    for (const a of openAgents) {
+      const dm = displayByAgent[a.slug] ?? {};
+      const index = new Map<string, CitationLookup>();
+      for (let ti = 0; ti < turnCount; ti++) {
+        const invocations = dm[rKey(openConv.id, ti)]?.tools ?? [];
+        for (const invocation of invocations) {
+          if (!invocation.toolCallId || !invocation.result) continue;
+          const chunks = parseInvocationCitationChunks(invocation);
+          if (chunks.length === 0) continue;
+          for (const chunk of chunks) {
+            const lookup: CitationLookup = { invocation, messageId: String(ti), chunk, chunks };
+            for (const key of buildCitationKeyAliases(chunk.toolCallId, chunk.chunkIndex)) index.set(key, lookup);
+            for (const key of buildCitationKeyAliases(invocation.toolCallId, chunk.chunkIndex)) index.set(key, lookup);
+          }
+        }
+      }
+      out[a.slug] = index;
+    }
+    return out;
+  }, [openConv, openAgents, displayByAgent]);
+
+  const resolvedCitation = selectedCitation
+    ? citationIndexByAgent[citationAgent ?? openAgents[0]?.slug ?? ""]?.get(selectedCitation.key) ?? null
+    : null;
+
+  // Drop a stale citation selection when switching conversations — its key would
+  // otherwise resolve against a different conversation's index.
+  useEffect(() => {
+    setSelectedCitation(null);
+    setCitationAgent(null);
+  }, [openConv?.id]);
+
+  // ── CSV export (question · expected · claw response · cited chunks) ──
+  // Folder ids with an in-flight export (folder export fetches every
+  // conversation's turns, so the button shows a spinner meanwhile).
+  const [downloadingFolders, setDownloadingFolders] = useState<Set<string>>(new Set());
+
+  // One turn's row — used by the per-message download button.
+  const downloadTurnCsv = useCallback((convLabel: string, turnIdx: number, turn: EvalTurn, live: LiveTurn | undefined) => {
+    const rows = [evalCsvRow(convLabel, turnIdx, turn.message, turn.expectedResponse, live?.answer ?? "", live?.tools ?? [])];
+    downloadCsv(`${safeFilename(convLabel, "turn")}_M${turnIdx + 1}.csv`, buildCsv(EVAL_CSV_HEADERS, rows));
+  }, []);
+
+  // The open conversation's turns — everything's already in state, no fetch.
+  const downloadConversationCsv = useCallback(() => {
+    if (!openConv) return;
+    const turns = (openConv.turns as EvalTurn[]) ?? [];
+    const rows = turns.map((t, ti) => {
+      const live = displayResults[rKey(openConv.id, ti)];
+      return evalCsvRow(openConv.title, ti, t.message, t.expectedResponse, live?.answer ?? "", live?.tools ?? []);
+    });
+    downloadCsv(`${safeFilename(openConv.title, "conversation")}.csv`, buildCsv(EVAL_CSV_HEADERS, rows));
+  }, [openConv, displayResults]);
+
+  // Whole folder — spans every conversation, so it fetches: list conversations
+  // → latest run's per-turn results → each conversation's turns, then joins them
+  // by (conversationId, turnIndex). Never throws; missing results export blank.
+  const downloadFolderCsv = useCallback(async (folderId: string) => {
+    if (downloadingFolders.has(folderId)) return;
+    setDownloadingFolders((s) => new Set(s).add(folderId));
+    try {
+      const items: EvalConversationListItem[] = [];
+      for (;;) {
+        const page = await listEvalConversations(folderId, { skip: items.length, take: FOLDER_PAGE });
+        items.push(...page.items);
+        if (page.items.length === 0 || items.length >= page.total) break;
+      }
+      const run = await getLatestGenerationForFolder(folderId).catch(() => null);
+      const resById = new Map((run?.turnResults ?? []).map((tr) => [`${tr.conversationId}::${tr.turnIndex}`, tr] as const));
+      const convs = await mapPool(items, 5, (item) => getEvalConversation(item.id).catch(() => null));
+      const rows: CsvValue[][] = [];
+      items.forEach((item, i) => {
+        const label = item.title || item.source || item.id;
+        const turns = (convs[i]?.turns as EvalTurn[] | undefined) ?? [];
+        turns.forEach((turn, ti) => {
+          const tr = resById.get(`${item.id}::${ti}`);
+          rows.push(evalCsvRow(label, ti, turn.message, turn.expectedResponse, tr?.clawAnswer ?? "", tr?.toolInvocations ?? []));
+        });
+      });
+      const folderName = foldersById.get(folderId)?.name ?? "folder";
+      downloadCsv(`${safeFilename(folderName, "folder")}.csv`, buildCsv(EVAL_CSV_HEADERS, rows));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "CSV export failed");
+    } finally {
+      setDownloadingFolders((s) => { const n = new Set(s); n.delete(folderId); return n; });
+    }
+  }, [downloadingFolders, foldersById]);
+
   // Does the open conversation have any judge scores at all? Gates the judge
   // dropdown in its header — a never-scored conversation shouldn't surface
   // graders that belong to other folders' runs.
@@ -469,14 +794,20 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     return false;
   }, [openConv, results]);
 
-  // Per-conversation overview for the detail header.
-  const openConvSummary = useMemo(() => {
-    if (!openConv) return null;
-    const turns = ((openConv.turns as EvalTurn[]) ?? [])
-      .map((_t, ti) => displayResults[rKey(openConv.id, ti)])
-      .filter((t): t is LiveTurn => !!t);
-    return summarizeTurns(turns);
-  }, [openConv, displayResults]);
+  // Per-agent overview for the detail header (one avg chip per compared agent).
+  const openAgentSummaries = useMemo(() => {
+    if (!openConv) return [] as Array<{ agent: AgentRun; summary: ReturnType<typeof summarizeTurns> }>;
+    const turnCount = ((openConv.turns as EvalTurn[]) ?? []).length;
+    return openAgents.map((a) => {
+      const dm = displayByAgent[a.slug] ?? {};
+      const turns: LiveTurn[] = [];
+      for (let ti = 0; ti < turnCount; ti++) {
+        const t = dm[rKey(openConv.id, ti)];
+        if (t) turns.push(t);
+      }
+      return { agent: a, summary: summarizeTurns(turns) };
+    });
+  }, [openConv, openAgents, displayByAgent]);
 
   // ── Loaders ──
   const loadFolders = useCallback(async () => {
@@ -491,16 +822,26 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     try {
       const { total, items } = await listEvalConversations(folderId, { take: FOLDER_PAGE });
       setFolderConvs((prev) => ({ ...prev, [folderId]: { items, total } }));
-      // Overlay the latest run's results for this folder (merge — don't clobber).
-      const run = await getLatestGenerationForFolder(folderId).catch(() => null);
-      if (run) {
-        setRunIdByFolder((prev) => ({ ...prev, [folderId]: run.id }));
-        if (run.turnResults?.length) mergeRunResults(run);
+      // Overlay the latest run for this folder. If it belongs to a comparison,
+      // pull every sibling agent's run so the side-by-side view has them all.
+      const latest = await getLatestGenerationForFolder(folderId).catch(() => null);
+      if (!latest) return;
+      if (latest.comparisonId) {
+        const comp = await getComparison(latest.comparisonId).catch(() => ({ agents: [] as { run: EvalGeneration }[] }));
+        const runs = comp.agents.map((c) => c.run);
+        if (runs.length) {
+          setCompareByFolder((prev) => ({ ...prev, [folderId]: { comparisonId: latest.comparisonId ?? null, agents: runs.map(toAgentRun) } }));
+          mergeComparisonRuns(runs);
+          return;
+        }
       }
+      // Single-agent run (no comparison) = a comparison of one.
+      setCompareByFolder((prev) => ({ ...prev, [folderId]: { comparisonId: null, agents: [toAgentRun(latest)] } }));
+      mergeComparisonRuns([latest]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load conversations");
     }
-  }, []);
+  }, [mergeComparisonRuns, toAgentRun]);
 
   const loadMoreConvs = useCallback(async (folderId: string) => {
     const cur = folderConvs[folderId];
@@ -655,69 +996,112 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     });
   }, []);
 
-  // Enqueue a resilient background run (replays server-side) and start polling.
+  // Decode a per-agent genChoice into the { genProvider, genModel } run pin.
+  const decodeGenChoice = useCallback(
+    (genChoice: string): { genProvider?: string; genModel?: string } => {
+      if (genChoice.startsWith("prov:")) {
+        const p = genChoice.slice(5);
+        const m = genModels?.providers.find((x) => x.provider === p)?.model;
+        return { genProvider: p, ...(m ? { genModel: m } : {}) };
+      }
+      if (genChoice.startsWith("spaces:")) return { genProvider: "spaces", genModel: genChoice.slice(7) };
+      if (genChoice.startsWith("litellm:")) return { genProvider: "litellm", genModel: genChoice.slice(8) };
+      return {};
+    },
+    [genModels],
+  );
+
+  // Enqueue a resilient background comparison (1-3 agents replay server-side) and
+  // start one poller per agent run.
   const runOver = useCallback(
     async (scope: { conversationIds?: string[]; folderId?: string }) => {
-      if (submittingRun || !agentSlug) return;
-      // One run at a time, full stop — a second folder's run would either fight
-      // the first for the same provider account (stream terminations) or sit in
-      // a queue that surprises the user. Block instead.
-      if (runningFolders.size > 0) {
+      if (submittingRun) return;
+      const specs = runAgents.filter((a) => a.slug);
+      if (specs.length === 0) return;
+      // One comparison at a time, full stop — a second run (any scope, incl. a
+      // checked-selection run with no folderId) would fight the first for the same
+      // provider account (stream terminations). Block on any in-flight run.
+      if (runActiveRef.current) {
         setInfo("A run is already in progress — wait for it to finish (or cancel it) before starting another.");
         return;
       }
       setError(null);
       setSubmittingRun(true);
-      // Clear the previous run's results for these conversations immediately —
-      // stale ticks/scores shouldn't linger while the new run streams in.
+      // Clear the previous run's results (flat + per-agent) for these conversations
+      // immediately — stale ticks/scores shouldn't linger while the new run streams in.
       const targetIds =
         scope.conversationIds ?? (scope.folderId ? (folderConvs[scope.folderId]?.items ?? []).map((c) => c.id) : []);
       if (targetIds.length > 0) {
-        setResults((prev) => {
-          const next = { ...prev };
-          for (const k of Object.keys(next)) {
-            if (targetIds.some((id) => k.startsWith(`${id}::`))) delete next[k];
-          }
+        const clear = (m: Record<string, LiveTurn>) => {
+          const next = { ...m };
+          for (const k of Object.keys(next)) if (targetIds.some((id) => k.startsWith(`${id}::`))) delete next[k];
           return next;
+        };
+        setResults(clear);
+        setResultsByAgent((prev) => {
+          const out: Record<string, Record<string, LiveTurn>> = {};
+          for (const s in prev) out[s] = clear(prev[s]!);
+          return out;
         });
       }
       try {
-        // genChoice encodings: "" = default resolution; "prov:<provider>" = a
-        // provider the user configured in claw (its model from gen-models);
-        // "spaces:<model>" = platform LiteLLM pinned to that model.
-        let gen: { genProvider?: string; genModel?: string } = {};
-        if (genChoice.startsWith("prov:")) {
-          const p = genChoice.slice(5);
-          const m = genModels?.providers.find((x) => x.provider === p)?.model;
-          gen = { genProvider: p, ...(m ? { genModel: m } : {}) };
-        } else if (genChoice.startsWith("spaces:")) {
-          gen = { genProvider: "spaces", genModel: genChoice.slice(7) };
-        }
-        const { runId, jobId } = await startBackgroundGeneration({ agentSlug, ...scope, ...gen }, userId);
+        const agentsPayload = specs.map((s) => ({ agentSlug: s.slug, ...decodeGenChoice(s.genChoice) }));
+        const { comparisonId, runs } = await startBackgroundGeneration({ agents: agentsPayload, ...scope }, userId);
+        if (runs.length === 0) throw new Error("No runs started");
         const fid = scope.folderId ?? openConv?.folderId;
         if (fid) {
-          setRunIdByFolder((prev) => ({ ...prev, [fid]: runId }));
+          const agentRuns: AgentRun[] = runs.map((r) => {
+            const spec = specs.find((s) => s.slug === r.agentSlug);
+            const g = spec ? decodeGenChoice(spec.genChoice) : {};
+            return {
+              slug: r.agentSlug,
+              name: agentNameBySlug.get(r.agentSlug) ?? r.agentSlug,
+              runId: r.runId,
+              genLabel: g.genProvider && g.genModel ? `${g.genProvider} · ${g.genModel}` : g.genModel ?? g.genProvider ?? "",
+            };
+          });
+          setCompareByFolder((prev) => ({ ...prev, [fid]: { comparisonId, agents: agentRuns } }));
         }
-        if (fid) setRunningFolders((cur) => new Set(cur).add(fid));
-        startRunRef.current({ jobId, runId, ...(fid ? { folderId: fid } : {}) });
+        runs.forEach((r, i) =>
+          startRunRef.current({ jobId: r.jobId, runId: r.runId, ...(fid ? { folderId: fid } : {}), agentSlug: r.agentSlug, isPrimary: i === 0 }),
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : "Run failed");
       } finally {
         setSubmittingRun(false);
       }
     },
-    [submittingRun, runningFolders, agentSlug, userId, openConv, genChoice, genModels, folderConvs],
+    [submittingRun, runAgents, userId, openConv, folderConvs, decodeGenChoice, agentNameBySlug],
   );
 
   const openRun = useCallback(
     (scope: { conversationIds?: string[]; folderId?: string }, label: string) => {
       if (submittingRun) return;
+      // Start with one agent row prefilled to the default agent; the user can add
+      // up to MAX_COMPARE_AGENTS to compare.
+      setRunAgents([{ slug: agentSlug || agents[0]?.slug || "", genChoice: "" }]);
       setPendingRun({ scope, label });
       // Lazily load the user's configured providers + platform models for the picker.
       if (!genModels) void listEvalGenModels(userId).then(setGenModels).catch(() => setGenModels({ providers: [], litellm: [] }));
     },
-    [submittingRun, genModels, userId],
+    [submittingRun, genModels, userId, agentSlug, agents],
   );
+
+  // Load each picked agent's shared LiteLLM models while the Run dialog is open
+  // (empty ⇒ that agent has no litellm credential; the group just hides). Cached
+  // per agent slug so switching rows doesn't refetch.
+  useEffect(() => {
+    if (!pendingRun || !userId) return;
+    let cancelled = false;
+    const slugs = [...new Set(runAgents.map((a) => a.slug).filter(Boolean))];
+    for (const slug of slugs) {
+      if (litellmByAgent[slug]) continue;
+      listChatLitellmModels(slug, userId)
+        .then((r) => { if (!cancelled) setLitellmByAgent((prev) => ({ ...prev, [slug]: r.models })); })
+        .catch(() => { if (!cancelled) setLitellmByAgent((prev) => ({ ...prev, [slug]: [] })); });
+    }
+    return () => { cancelled = true; };
+  }, [pendingRun, runAgents, userId, litellmByAgent]);
 
   // ── Semantic judge ──
   /** Open the judge dialog for a folder (whole run) or one conversation. Lazily
@@ -725,8 +1109,8 @@ export function EvalsPageV3({ userId }: { userId: string }) {
    *  per-folder override if one is set, else the global default. */
   const openJudge = useCallback(
     async (opts: { folderId: string; conversationId?: string; label: string }) => {
-      const runId = runIdByFolder[opts.folderId];
-      if (!runId) {
+      const comp = compareByFolder[opts.folderId];
+      if (!comp || comp.agents.length === 0) {
         setInfo("Run this eval first — there are no generated answers to score yet.");
         return;
       }
@@ -749,13 +1133,14 @@ export function EvalsPageV3({ userId }: { userId: string }) {
       if (models.length === 0) void loadModels().catch(() => {});
       if (!genModels) void listEvalGenModels(userId).then(setGenModels).catch(() => setGenModels({ providers: [], litellm: [] }));
       setJudgeDialog({
-        runId,
+        comparisonId: comp.comparisonId,
+        agents: comp.agents,
         folderId: opts.folderId,
         ...(opts.conversationId ? { conversationIds: [opts.conversationId] } : {}),
         label: opts.label,
       });
     },
-    [runIdByFolder, judges, activeJudgeId, models.length],
+    [compareByFolder, judges, activeJudgeId, models.length],
   );
 
   const runJudge = useCallback(async () => {
@@ -763,19 +1148,9 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     setJudging(true);
     setError(null);
     const entries = judgeEntries;
-    const runId = judgeDialog.runId;
-    const folderId = judgeDialog.folderId;
-    const convScope = judgeDialog.conversationIds;
+    const { comparisonId, agents, folderId, conversationIds: convScope } = judgeDialog;
     try {
-      const { jobId } = await judgeEvalRun(
-        runId,
-        {
-          judges: entries.map((e) => ({ judgeId: e.judgeId, ...(e.model ? { model: e.model } : {}) })),
-          ...(convScope ? { conversationIds: convScope } : {}),
-          ...(judgeOnlyUnscored ? { onlyUnscored: true } : {}),
-        },
-        userId,
-      );
+      const judgesPayload = entries.map((e) => ({ judgeId: e.judgeId, ...(e.model ? { model: e.model } : {}) }));
       // Point the view dropdown at the first entry we're scoring. The key always
       // carries the model ("default" when none picked — matching what the worker
       // stores), so the view never falls back to a previous pass's scores.
@@ -787,7 +1162,40 @@ export function EvalsPageV3({ userId }: { userId: string }) {
       const firstKey = `${first.judgeId}::${storedModel}`;
       setActiveJudgeId(firstKey);
       setInflightJudgeKey(firstKey);
-      startJudgeRef.current({ jobId, runId, folderId, ...(convScope ? { convScope } : {}), primaryJudgeId: firstKey });
+      const payload = {
+        judges: judgesPayload,
+        ...(convScope ? { conversationIds: convScope } : {}),
+        ...(judgeOnlyUnscored ? { onlyUnscored: true } : {}),
+      };
+      if (comparisonId) {
+        // Fan one judge pass across every agent's run (apples-to-apples).
+        const { jobs } = await judgeComparison(comparisonId, payload, userId);
+        jobs.forEach((j, i) =>
+          startJudgeRef.current({
+            jobId: j.jobId,
+            runId: j.runId,
+            folderId,
+            ...(convScope ? { convScope } : {}),
+            primaryJudgeId: firstKey,
+            agentSlug: j.agentSlug,
+            isPrimary: i === 0,
+          }),
+        );
+      } else {
+        // Legacy single-agent run (no comparison group).
+        const runId = agents[0]?.runId;
+        if (!runId) throw new Error("No run to score");
+        const { jobId } = await judgeEvalRun(runId, payload, userId);
+        startJudgeRef.current({
+          jobId,
+          runId,
+          folderId,
+          ...(convScope ? { convScope } : {}),
+          primaryJudgeId: firstKey,
+          ...(agents[0]?.slug ? { agentSlug: agents[0].slug } : {}),
+          isPrimary: true,
+        });
+      }
       setJudgeDialog(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scoring failed");
@@ -798,7 +1206,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
 
   // ── Background scoring job (generic poller — see useBackgroundJob) ──
   const judgeJob = useBackgroundJob<
-    { jobId: string; runId: string; folderId: string; convScope?: string[]; primaryJudgeId: string },
+    { jobId: string; runId: string; folderId: string; convScope?: string[]; primaryJudgeId: string; agentSlug?: string; isPrimary?: boolean },
     EvalJudgeProgress
   >({
     storageKey: "xyne-eval-judge",
@@ -808,12 +1216,17 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     onRestore: (meta) => setInflightJudgeKey(meta.primaryJudgeId ?? null),
     onFinish: () => setInflightJudgeKey(null),
     // Live: pull the scores written so far so the report/turns fill in as it runs.
+    // Route into the agent's slot; the primary also feeds the flat (sidebar) map.
     onTick: async (meta) => {
       const run = await getGeneration(meta.runId).catch(() => null);
-      if (run) mergeRunResults(run);
+      if (!run) return;
+      mergeAgentResults(run);
+      if (meta.isPrimary !== false) mergeRunResults(run);
     },
     onDone: (meta, st) => {
       if (meta.primaryJudgeId) setActiveJudgeId((cur) => cur || meta.primaryJudgeId);
+      // One toast per comparison, not per agent — announce on the primary run.
+      if (meta.isPrimary === false) return;
       const p = st.progress;
       setInfo(
         st.state === "failed"
@@ -1111,21 +1524,23 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     },
   });
 
-  const runJob = useBackgroundJob<{ jobId: string; runId: string; folderId?: string }, GenerationProgress>({
+  const runJob = useBackgroundJob<{ jobId: string; runId: string; folderId?: string; agentSlug?: string; isPrimary?: boolean }, GenerationProgress>({
     storageKey: "xyne-eval-generation",
     fetchStatus: (id) => getGenerationJob(id, userId),
     cancelJob: (id) => cancelGenerationJob(id, userId),
     isDone: (st) => st.progress?.phase === "done" || st.progress?.phase === "cancelled" || st.progress?.phase === "failed",
-    onRestore: (meta) => {
-      if (meta.folderId) setRunningFolders((cur) => new Set(cur).add(meta.folderId!));
-    },
-    // Live: each generated answer appears in the open conversation as soon as
-    // the worker persists it, instead of all-at-once when the run ends.
+    // Live: each generated answer appears as soon as the worker persists it.
+    // Route into the agent's slot; the primary also feeds the flat (sidebar) map.
     onTick: async (meta) => {
       const run = await getGeneration(meta.runId).catch(() => null);
-      if (run) mergeRunResults(run);
+      if (!run) return;
+      mergeAgentResults(run);
+      if (meta.isPrimary !== false) mergeRunResults(run);
     },
-    onDone: async (_meta, st) => {
+    onDone: async (meta, st) => {
+      // One toast + one folder refresh per comparison — do it on the primary run
+      // (non-primary agents keep streaming their scores in via onTick).
+      if (meta.isPrimary === false) return;
       const p = st.progress;
       setInfo(
         st.state === "failed" || p?.phase === "failed"
@@ -1135,16 +1550,18 @@ export function EvalsPageV3({ userId }: { userId: string }) {
       );
       // Refresh every loaded folder so results + run-ids overlay.
       await Promise.all(Object.keys(folderConvs).map((fid) => loadFolderConvs(fid).catch(() => {})));
-      if (_meta.folderId) {
-        setRunningFolders((cur) => {
-          const n = new Set(cur);
-          n.delete(_meta.folderId!);
-          return n;
-        });
-      }
     },
   });
   startRunRef.current = runJob.start;
+
+  // runningFolders (per-folder Run-button gating) is exactly the set of folders
+  // with an in-flight generation job — derive it from the poller's active jobs so
+  // the guard survives refresh and clears only when a folder's LAST agent finishes.
+  // runActiveRef additionally tracks folderId-less (conversation-scoped) runs.
+  useEffect(() => {
+    runActiveRef.current = runJob.actives.length > 0;
+    setRunningFolders(new Set(runJob.actives.map((a) => a.folderId).filter((x): x is string => !!x)));
+  }, [runJob.actives]);
 
   const ctx: TreeCtx = {
     foldersById,
@@ -1159,6 +1576,8 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     onSelectConv: selectConversation,
     onToggleCheck: toggleCheck,
     onRunFolder: (id) => openRun({ folderId: id }, `folder “${foldersById.get(id)?.name ?? ""}”`),
+    onDownloadCsv: (id) => void downloadFolderCsv(id),
+    downloadingFolders,
     onRunOne: (id) => openRun({ conversationIds: [id] }, "this conversation"),
     onAddConversations: openImport,
     onDeleteFolder: handleDeleteFolder,
@@ -1243,7 +1662,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
       </section>
 
       {/* ── Detail ── */}
-      <section className="relative flex flex-1 flex-col overflow-hidden">
+      <section className="relative flex flex-1 flex-col overflow-hidden min-w-0">
         {/* Bottom-right job banners — every background job (run / import /
             scoring) reports here consistently; they stack when several run. */}
         {(runJob.actives.length > 0 || importJob.active || judgeJob.active) && (
@@ -1255,6 +1674,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                     <SpinnerGapIcon size={13} className={`shrink-0 text-xyne-brand ${job.state === "waiting" || job.state === "delayed" ? "opacity-50" : "animate-spin"}`} />
                     <span className="truncate">
                       {job.state === "waiting" || job.state === "delayed" ? "Queued" : "Generating"}
+                      {job.agentSlug ? ` · ${agentNameBySlug.get(job.agentSlug) ?? job.agentSlug}` : ""}
                       {job.folderId ? ` · ${foldersById.get(job.folderId)?.name ?? ""}` : ""}…
                     </span>
                   </span>
@@ -1489,7 +1909,12 @@ export function EvalsPageV3({ userId }: { userId: string }) {
           <ProjectReport
             folderName={foldersById.get(reportFolderId)?.name ?? "Project"}
             convItems={folderConvs[reportFolderId]?.items ?? []}
-            results={displayResults}
+            agents={(compareByFolder[reportFolderId]?.agents ?? []).map((a) => ({
+              slug: a.slug,
+              name: a.name,
+              genLabel: a.genLabel,
+              results: displayByAgent[a.slug] ?? {},
+            }))}
             judgeOptions={judgeOptions}
             activeJudgeId={activeJudgeId}
             onSelectJudge={setActiveJudgeId}
@@ -1531,12 +1956,34 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                     ))}
                   </select>
                 )}
-                {openConvSummary && openConvSummary.avg != null && (
-                  <span className={`rounded px-1.5 py-0.5 text-[12px] font-semibold ${scoreChipClass(openConvSummary.avg)}`}>
-                    {openConvSummary.avg}
-                    <span className="font-normal opacity-70">/100</span>
-                  </span>
-                )}
+                {/* Once ANY agent is scored, show a chip for EVERY agent (a failed /
+                    unscored agent shows "—") so the header can't silently look like
+                    a smaller comparison than it is. */}
+                {openAgentSummaries.some((s) => s.summary.avg != null) &&
+                  openAgentSummaries.map((s) => {
+                    const avg = s.summary.avg;
+                    return (
+                      <span
+                        key={s.agent.slug}
+                        title={`${s.agent.name} — average semantic match`}
+                        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] font-semibold ${
+                          avg != null ? scoreChipClass(avg) : "bg-xyne-surface-sunken text-xyne-fg-tertiary"
+                        }`}
+                      >
+                        {openAgents.length > 1 && (
+                          <span className="max-w-[90px] truncate font-normal opacity-80">{s.agent.name}</span>
+                        )}
+                        {avg != null ? (
+                          <>
+                            {avg}
+                            <span className="font-normal opacity-70">/100</span>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </span>
+                    );
+                  })}
                 <Button
                   size="sm"
                   variant="secondary"
@@ -1549,75 +1996,178 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                 >
                   Score
                 </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  leadingIcon={<DownloadSimpleIcon size={13} />}
+                  title="Download this conversation as CSV"
+                  onClick={downloadConversationCsv}
+                >
+                  Export CSV
+                </Button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-2">
               <div className="flex flex-col">
-                {(openConv.turns as EvalTurn[]).map((t, ti) => (
-                  <TurnCard
-                    key={ti}
-                    index={ti}
-                    message={t.message}
-                    expected={t.expectedResponse ?? null}
-                    live={displayResults[rKey(openConv.id, ti)]}
-                  />
-                ))}
+                {(openConv.turns as EvalTurn[]).map((t, ti) => {
+                  const panes: TurnAgentPane[] = openAgents.map((a) => ({
+                    slug: a.slug,
+                    name: a.name,
+                    live: (displayByAgent[a.slug] ?? {})[rKey(openConv.id, ti)],
+                  }));
+                  return (
+                    <TurnCard
+                      key={ti}
+                      index={ti}
+                      message={t.message}
+                      expected={t.expectedResponse ?? null}
+                      panes={panes}
+                      selectedCitationKey={selectedCitation?.key ?? null}
+                      citationAgent={citationAgent}
+                      onOpenDebug={openTurnDebugger}
+                      makeOpenCitation={makeOpenCitation}
+                      onDownloadCsv={() => downloadTurnCsv(openConv.title, ti, t, displayResults[rKey(openConv.id, ti)])}
+                    />
+                  );
+                })}
               </div>
             </div>
           </>
         )}
       </section>
 
-      {/* ── Run dialog: pick the agent at run time ── */}
-      <Dialog open={!!pendingRun} onOpenChange={(o) => !o && setPendingRun(null)} title="Run eval">
-        <div className="flex flex-col gap-3">
-          <div className="text-[12px] text-xyne-fg-tertiary">
-            Running <span className="font-medium text-xyne-fg-secondary">{pendingRun?.label}</span>
+      {/* ── Citation source panel — right-docked, resizable. One dock slot:
+              rendered only when no debug drawer is open. ── */}
+      {selectedCitation && !evalDebug && (
+        <>
+          <div
+            data-id="evals-citation-resizer"
+            className="group relative flex w-1 shrink-0 cursor-col-resize items-center justify-center"
+            onMouseDown={handleCitationResizeStart}
+          >
+            <div className="h-full w-px bg-xyne-border-subtle group-hover:w-0.5 group-hover:bg-xyne-border-strong transition-all" />
           </div>
-          <SelectField
-            label="Agent"
-            placeholder={agents.length === 0 ? "Loading agents…" : "Search agents…"}
-            value={agentSlug}
-            onValueChange={(v) => setAgentSlug(v ?? "")}
-            options={agents.map((a) => ({ value: a.slug, label: a.name }))}
+          <CitationPanel
+            selection={selectedCitation}
+            citation={resolvedCitation}
+            width={citationPanelWidth}
+            onClose={handleCloseCitation}
+            onOpenCitation={handleOpenCitation}
           />
-          <div className="flex flex-col gap-1">
-            <SelectField
-              label="Generation model"
-              placeholder="Search models…"
-              value={toSel(genChoice)}
-              onValueChange={(v) => setGenChoice(fromSel(v))}
-              options={[
-                { value: DEFAULT_OPT, label: "Default — your agent settings" },
-                ...(genModels?.providers ?? []).map((p) => ({
-                  value: `prov:${p.provider}`,
-                  label: `${p.provider}${p.model ? ` · ${p.model}` : ""} (your provider)`,
-                })),
-                ...(genModels?.litellm ?? []).map((m) => ({ value: `spaces:${m}`, label: `${m} (platform)` })),
-              ]}
-            />
-            <span className="text-[11px] text-xyne-fg-tertiary">
-              Pinned for this run and recorded on the report. Default uses whatever your settings resolve to.
-            </span>
+        </>
+      )}
+
+      {/* ── Debug drawer for an eval turn's claw run — right-docked, resizable. ── */}
+      {evalDebug && (
+        <>
+          <div
+            data-id="evals-debugger-resizer"
+            className="group relative flex w-1 shrink-0 cursor-col-resize items-center justify-center bg-transparent"
+            onMouseDown={handleEvalDebuggerResizeStart}
+          >
+            <div className="h-full w-px bg-xyne-border-subtle group-hover:w-0.5 group-hover:bg-xyne-border-strong transition-all" />
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setPendingRun(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!agentSlug}
-              leadingIcon={<PlayIcon size={13} />}
-              onClick={() => {
-                const scope = pendingRun?.scope;
-                setPendingRun(null);
-                if (scope) void runOver(scope);
-              }}
-            >
-              Run
-            </Button>
-          </div>
-        </div>
+          <DebugDrawer
+            open
+            inline
+            width={evalDebuggerWidth}
+            agentSlug={evalDebug.agentSlug}
+            conversationId={evalDebug.conversationId}
+            selectedSessionId={evalDebug.sessionId}
+            onClose={() => setEvalDebug(null)}
+          />
+        </>
+      )}
+
+      {/* ── Run dialog: pick 1-3 agents to compare, each with its own model ── */}
+      <Dialog open={!!pendingRun} onOpenChange={(o) => !o && setPendingRun(null)} title="Run eval">
+        {(() => {
+          const chosen = runAgents.filter((a) => a.slug).length;
+          const setRow = (idx: number, patch: Partial<RunAgentSpec>) =>
+            setRunAgents((l) => l.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+          return (
+            <div className="flex flex-col gap-3">
+              <div className="text-[12px] text-xyne-fg-tertiary">
+                Running <span className="font-medium text-xyne-fg-secondary">{pendingRun?.label}</span>
+                {chosen > 1 ? <span className="text-xyne-fg-secondary"> — comparing {chosen} agents</span> : null}
+              </div>
+              <div className="flex flex-col gap-2.5">
+                {runAgents.map((row, idx) => {
+                  const taken = new Set(runAgents.filter((_, i) => i !== idx).map((r) => r.slug).filter(Boolean));
+                  return (
+                    <div key={idx} className="rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle p-2.5">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">
+                          {runAgents.length > 1 ? `Agent ${idx + 1}` : "Agent"}
+                        </span>
+                        {runAgents.length > 1 && (
+                          <button
+                            onClick={() => setRunAgents((l) => l.filter((_, i) => i !== idx))}
+                            title="Remove agent"
+                            className="text-[11px] text-xyne-fg-tertiary hover:text-xyne-error"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <SelectField
+                          placeholder={agents.length === 0 ? "Loading agents…" : "Search agents…"}
+                          value={row.slug}
+                          onValueChange={(v) => setRow(idx, { slug: v ?? "", genChoice: "" })}
+                          options={agents.filter((a) => !taken.has(a.slug)).map((a) => ({ value: a.slug, label: a.name }))}
+                        />
+                        <SelectField
+                          placeholder="Generation model…"
+                          value={toSel(row.genChoice)}
+                          onValueChange={(v) => setRow(idx, { genChoice: fromSel(v) })}
+                          options={[
+                            { value: DEFAULT_OPT, label: "Default — agent settings" },
+                            ...(genModels?.providers ?? []).map((p) => ({
+                              value: `prov:${p.provider}`,
+                              label: `${p.provider}${p.model ? ` · ${p.model}` : ""} (your provider)`,
+                            })),
+                            ...(genModels?.litellm ?? []).map((m) => ({ value: `spaces:${m}`, label: `${m} (platform)` })),
+                            ...(litellmByAgent[row.slug] ?? []).map((m) => ({ value: `litellm:${m.id}`, label: `${m.name} (agent LiteLLM)` })),
+                          ]}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {runAgents.length < MAX_COMPARE_AGENTS && agents.length > chosen && !runAgents.some((a) => !a.slug) && (
+                <button
+                  onClick={() => setRunAgents((l) => (l.length < MAX_COMPARE_AGENTS ? [...l, { slug: "", genChoice: "" }] : l))}
+                  className="flex items-center gap-1.5 self-start text-[12px] text-xyne-brand hover:underline"
+                >
+                  <PlusIcon size={13} /> Add agent to compare
+                </button>
+              )}
+              <span className="text-[11px] text-xyne-fg-tertiary">
+                Compare up to {MAX_COMPARE_AGENTS} agents over the same conversations — each replays on its own model and is
+                judged against the same gold answers. Each model pin is recorded on the report.
+              </span>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setPendingRun(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={chosen === 0}
+                  leadingIcon={<PlayIcon size={13} />}
+                  onClick={() => {
+                    const scope = pendingRun?.scope;
+                    setPendingRun(null);
+                    if (scope) void runOver(scope);
+                  }}
+                >
+                  {chosen > 1 ? `Compare ${chosen} agents` : "Run"}
+                </Button>
+              </div>
+            </div>
+          );
+        })()}
       </Dialog>
 
       {/* ── Score dialog: pick one or more judges ── */}
@@ -1934,10 +2484,30 @@ function ScoreBar({ score }: { score: number | null }) {
   );
 }
 
+/** One agent's column in the report (judge-remapped results for that agent). */
+interface ReportAgent {
+  slug: string;
+  name: string;
+  genLabel: string;
+  results: Record<string, LiveTurn>;
+}
+
+/** Per-agent rollup: avg (failed-to-score turns count as 0) + good/weak/fail. */
+function rollupAgent(turns: Array<{ score: number | null; failed: boolean }>) {
+  const scores = turns.map((t) => t.score).filter((s): s is number => typeof s === "number");
+  const errored = turns.filter((t) => typeof t.score !== "number" && t.failed).length;
+  const good = scores.filter((s) => s >= 80).length;
+  const weak = scores.filter((s) => s >= 50 && s < 80).length;
+  const fail = scores.filter((s) => s < 50).length + errored;
+  const total = scores.length + errored;
+  const avg = total ? Math.round(scores.reduce((s, n) => s + n, 0) / total) : null;
+  return { avg, good, weak, fail, total };
+}
+
 function ProjectReport({
   folderName,
   convItems,
-  results,
+  agents,
   judgeOptions,
   activeJudgeId,
   onSelectJudge,
@@ -1950,7 +2520,8 @@ function ProjectReport({
 }: {
   folderName: string;
   convItems: EvalConversationListItem[];
-  results: Record<string, LiveTurn>;
+  /** One column per compared agent (1-3); results already judge-remapped. */
+  agents: ReportAgent[];
   /** Judge×model view options (value = scoreForJudge key, label = "name · model"). */
   judgeOptions: Array<{ value: string; label: string }>;
   activeJudgeId: string;
@@ -1963,39 +2534,29 @@ function ProjectReport({
   onClose: () => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const multi = agents.length > 1;
 
+  // Per conversation: for each agent, its turn scores + a per-conversation avg.
   const rows = useMemo(() => {
     return convItems.map((conv) => {
-      const turns = Object.entries(results)
-        .filter(([k]) => k.startsWith(`${conv.id}::`))
-        .map(([k, v]) => ({ idx: Number(k.split("::")[1]), score: v.matchScore, failed: !!v.judgeFailed }))
-        .sort((a, b) => a.idx - b.idx);
-      const judged = turns.filter((t) => typeof t.score === "number") as Array<{ idx: number; score: number; failed: boolean }>;
-      const failedCount = turns.filter((t) => typeof t.score !== "number" && t.failed).length;
-      // Failed-to-score turns drag the average as 0s — same rule as the headline.
-      const denom = judged.length + failedCount;
-      const avg = denom ? Math.round(judged.reduce((s, t) => s + t.score, 0) / denom) : null;
-      return { conv, turns, avg, failedCount };
+      const perAgent = agents.map((a) => {
+        const turns = Object.entries(a.results)
+          .filter(([k]) => k.startsWith(`${conv.id}::`))
+          .map(([k, v]) => ({ idx: Number(k.split("::")[1]), score: v.matchScore, failed: !!v.judgeFailed }))
+          .sort((x, y) => x.idx - y.idx);
+        return { ...rollupAgent(turns), turns };
+      });
+      const turnIdxs = [...new Set(perAgent.flatMap((pa) => pa.turns.map((t) => t.idx)))].sort((x, y) => x - y);
+      return { conv, perAgent, turnIdxs };
     });
-  }, [convItems, results]);
+  }, [convItems, agents]);
 
-  const { overall, dist } = useMemo(() => {
-    const allTurns = rows.flatMap((r) => r.turns);
-    const scores = allTurns.map((t) => t.score).filter((s): s is number => typeof s === "number");
-    const errored = allTurns.filter((t) => typeof t.score !== "number" && t.failed).length;
-    const good = scores.filter((s) => s >= 80).length;
-    const weak = scores.filter((s) => s >= 50 && s < 80).length;
-    // A turn that scored < 50 OR that the judge couldn't score → both count as fail,
-    // and errored turns count as 0 in the average (no lucky-one-turn 95 headlines).
-    const fail = scores.filter((s) => s < 50).length + errored;
-    const total = scores.length + errored;
-    return {
-      overall: total ? Math.round(scores.reduce((s, n) => s + n, 0) / total) : null,
-      dist: { good, weak, fail, total },
-    };
-  }, [rows]);
-
-  const overallTxt = overall == null ? "text-xyne-fg-tertiary" : overall >= 80 ? "text-xyne-success" : overall >= 50 ? "text-amber-600 dark:text-amber-400" : "text-xyne-error";
+  // Overall per agent (across every conversation).
+  const overall = useMemo(
+    () => agents.map((_, ai) => rollupAgent(rows.flatMap((r) => r.perAgent[ai]?.turns ?? []))),
+    [rows, agents],
+  );
+  const bestAvg = Math.max(-1, ...overall.map((o) => (typeof o.avg === "number" ? o.avg : -1)));
 
   return (
     <>
@@ -2003,7 +2564,7 @@ function ProjectReport({
         <div className="flex min-w-0 items-center gap-2">
           <ChartBarIcon size={15} weight="fill" className="shrink-0 text-xyne-brand" />
           <h2 className="truncate text-[14px] font-semibold text-xyne-fg-primary">{folderName}</h2>
-          <span className="text-[11px] text-xyne-fg-tertiary">· Report</span>
+          <span className="text-[11px] text-xyne-fg-tertiary">· {multi ? `Comparison · ${agents.length} agents` : "Report"}</span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {judgeOptions.length > 0 && (
@@ -2031,101 +2592,141 @@ function ProjectReport({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-5 py-5">
-        <div className="mx-auto max-w-2xl">
-          {/* Summary card */}
-          <div className="mb-5 flex items-center justify-between rounded-xl border border-xyne-border-subtle bg-xyne-surface-subtle px-5 py-4">
-            <div>
-              <div className="flex items-baseline gap-1">
-                <span className={`text-[30px] font-bold leading-none ${overallTxt}`}>{overall ?? "—"}</span>
-                <span className="text-[13px] text-xyne-fg-tertiary">/100</span>
-              </div>
-              <div className="mt-1.5 text-[10px] font-medium uppercase tracking-wide text-xyne-fg-tertiary">average match</div>
-            </div>
-            <div className="text-right">
-              <div className="text-[12px] text-xyne-fg-secondary">
-                {rows.length} conversation{rows.length === 1 ? "" : "s"}
-              </div>
-              {dist.total > 0 && (
-                <div className="mt-2 flex h-1.5 w-44 overflow-hidden rounded-full bg-xyne-surface-sunken">
-                  <span className="bg-xyne-success" style={{ width: `${(dist.good / dist.total) * 100}%` }} />
-                  <span className="bg-amber-500" style={{ width: `${(dist.weak / dist.total) * 100}%` }} />
-                  <span className="bg-xyne-error" style={{ width: `${(dist.fail / dist.total) * 100}%` }} />
-                </div>
-              )}
-              {dist.total > 0 && (
-                <div className="mt-2 flex justify-end gap-3 text-[10px] text-xyne-fg-tertiary">
-                  <span className="text-xyne-success">{dist.good} good</span>
-                  <span className="text-amber-600 dark:text-amber-400">{dist.weak} weak</span>
-                  <span className="text-xyne-error">{dist.fail} fail</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Conversation list */}
-          {rows.length === 0 ? (
-            <div className="py-10 text-center text-[12px] text-xyne-fg-tertiary">No conversations in this project.</div>
+        <div className={`mx-auto ${multi ? "max-w-3xl" : "max-w-2xl"}`}>
+          {agents.length === 0 ? (
+            <div className="py-10 text-center text-[12px] text-xyne-fg-tertiary">Run this project to generate scores.</div>
           ) : (
-            <div className="flex flex-col gap-0.5">
-              {rows.map(({ conv, turns, avg, failedCount }) => {
-                const isOpen = expanded.has(conv.id);
-                return (
-                  <div key={conv.id}>
-                    <div className="group flex items-center gap-2 rounded-lg px-3 py-2 transition hover:bg-xyne-surface-subtle">
-                      <button
-                        onClick={() =>
-                          setExpanded((s) => {
-                            const n = new Set(s);
-                            n.has(conv.id) ? n.delete(conv.id) : n.add(conv.id);
-                            return n;
-                          })
-                        }
-                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                      >
-                        <span className="shrink-0 text-xyne-fg-tertiary">
-                          {isOpen ? <CaretDownIcon size={12} /> : <CaretRightIcon size={12} />}
-                        </span>
-                        <span className="truncate text-[13px] text-xyne-fg-primary">{conv.title}</span>
-                      </button>
-                      {scoringActive && (!scoringConvIds || scoringConvIds.has(conv.id)) ? (
-                        <SpinnerGapIcon size={13} className="shrink-0 animate-spin text-blue-500" />
-                      ) : avg == null && failedCount > 0 ? (
-                        <span className="shrink-0 text-[11px] font-medium text-xyne-error" title="Judge couldn't score (e.g. rate-limited)">
-                          fail
-                        </span>
-                      ) : (
-                        <ScoreBar score={avg} />
+            <>
+              {/* Per-agent headline scores (reuses ScoreBar + Delta) */}
+              <div className="mb-5 flex flex-col gap-2.5 rounded-xl border border-xyne-border-subtle bg-xyne-surface-subtle px-5 py-4">
+                {agents.map((a, ai) => {
+                  const o = overall[ai]!;
+                  const isBest = multi && typeof o.avg === "number" && o.avg === bestAvg;
+                  return (
+                    <div key={a.slug} className="flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-[13px] font-semibold text-xyne-fg-primary">{a.name}</span>
+                          {isBest && (
+                            <span className="shrink-0 rounded bg-xyne-success/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-xyne-success">
+                              Best
+                            </span>
+                          )}
+                        </div>
+                        {a.genLabel && <div className="truncate text-[10.5px] text-xyne-fg-tertiary">{a.genLabel}</div>}
+                      </div>
+                      {o.total > 0 && (
+                        <div className="hidden h-1.5 w-24 overflow-hidden rounded-full bg-xyne-surface-sunken sm:flex">
+                          <span className="bg-xyne-success" style={{ width: `${(o.good / o.total) * 100}%` }} />
+                          <span className="bg-amber-500" style={{ width: `${(o.weak / o.total) * 100}%` }} />
+                          <span className="bg-xyne-error" style={{ width: `${(o.fail / o.total) * 100}%` }} />
+                        </div>
                       )}
-                      <button
-                        onClick={() => onOpenConv(conv.id)}
-                        title="Open conversation detail"
-                        className="shrink-0 text-xyne-fg-tertiary opacity-0 transition hover:text-xyne-fg-primary group-hover:opacity-100"
-                      >
-                        <ArrowUpRightIcon size={14} />
-                      </button>
+                      <ScoreBar score={o.avg} />
+                      {multi && <Delta a={overall[0]?.avg ?? null} b={o.avg} />}
                     </div>
-                    {isOpen && (
-                      <div className="flex flex-col gap-1.5 py-1.5 pl-9 pr-3">
-                        {turns.length === 0 ? (
-                          <span className="text-[11px] text-xyne-fg-tertiary">No results yet.</span>
-                        ) : (
-                          turns.map((t) => (
-                            <div key={t.idx} className="flex items-center justify-between">
-                              <span className="text-[11px] text-xyne-fg-tertiary">Message {t.idx + 1}</span>
-                              {typeof t.score !== "number" && t.failed ? (
-                                <span className="text-[11px] font-medium text-xyne-error">fail</span>
-                              ) : (
-                                <ScoreBar score={typeof t.score === "number" ? t.score : null} />
-                              )}
-                            </div>
-                          ))
+                  );
+                })}
+                <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-xyne-fg-tertiary">
+                  average match · {rows.length} conversation{rows.length === 1 ? "" : "s"}
+                  {multi ? ` · Δ vs ${agents[0]!.name}` : ""}
+                </div>
+              </div>
+
+              {/* Agent column header (multi only) */}
+              {multi && (
+                <div className="mb-1 flex items-center gap-2 px-3 text-[10px] font-medium uppercase tracking-wide text-xyne-fg-tertiary">
+                  <span className="min-w-0 flex-1">Conversation</span>
+                  {agents.map((a) => (
+                    <span key={a.slug} className="w-[88px] shrink-0 truncate text-right" title={a.name}>
+                      {a.name}
+                    </span>
+                  ))}
+                  <span className="w-4 shrink-0" />
+                </div>
+              )}
+
+              {/* Conversation list */}
+              {rows.length === 0 ? (
+                <div className="py-10 text-center text-[12px] text-xyne-fg-tertiary">No conversations in this project.</div>
+              ) : (
+                <div className="flex flex-col gap-0.5">
+                  {rows.map(({ conv, perAgent, turnIdxs }) => {
+                    const isOpen = expanded.has(conv.id);
+                    const scoring = scoringActive && (!scoringConvIds || scoringConvIds.has(conv.id));
+                    return (
+                      <div key={conv.id}>
+                        <div className="group flex items-center gap-2 rounded-lg px-3 py-2 transition hover:bg-xyne-surface-subtle">
+                          <button
+                            onClick={() =>
+                              setExpanded((s) => {
+                                const n = new Set(s);
+                                n.has(conv.id) ? n.delete(conv.id) : n.add(conv.id);
+                                return n;
+                              })
+                            }
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          >
+                            <span className="shrink-0 text-xyne-fg-tertiary">
+                              {isOpen ? <CaretDownIcon size={12} /> : <CaretRightIcon size={12} />}
+                            </span>
+                            <span className="truncate text-[13px] text-xyne-fg-primary">{conv.title}</span>
+                          </button>
+                          {perAgent.map((pa, ai) =>
+                            scoring ? (
+                              <span key={ai} className="flex w-[88px] shrink-0 items-center justify-end">
+                                <SpinnerGapIcon size={13} className="animate-spin text-blue-500" />
+                              </span>
+                            ) : pa.avg == null && pa.fail > 0 ? (
+                              <span
+                                key={ai}
+                                className="w-[88px] shrink-0 text-right text-[11px] font-medium text-xyne-error"
+                                title="Judge couldn't score (e.g. rate-limited)"
+                              >
+                                fail
+                              </span>
+                            ) : (
+                              <ScoreBar key={ai} score={pa.avg} />
+                            ),
+                          )}
+                          <button
+                            onClick={() => onOpenConv(conv.id)}
+                            title="Open conversation detail"
+                            className="w-4 shrink-0 text-xyne-fg-tertiary opacity-0 transition hover:text-xyne-fg-primary group-hover:opacity-100"
+                          >
+                            <ArrowUpRightIcon size={14} />
+                          </button>
+                        </div>
+                        {isOpen && (
+                          <div className="flex flex-col gap-1.5 py-1.5 pl-9 pr-3">
+                            {turnIdxs.length === 0 ? (
+                              <span className="text-[11px] text-xyne-fg-tertiary">No results yet.</span>
+                            ) : (
+                              turnIdxs.map((idx) => (
+                                <div key={idx} className="flex items-center gap-2">
+                                  <span className="min-w-0 flex-1 text-[11px] text-xyne-fg-tertiary">Message {idx + 1}</span>
+                                  {perAgent.map((pa, ai) => {
+                                    const t = pa.turns.find((x) => x.idx === idx);
+                                    return typeof t?.score !== "number" && t?.failed ? (
+                                      <span key={ai} className="w-[88px] shrink-0 text-right text-[11px] font-medium text-xyne-error">
+                                        fail
+                                      </span>
+                                    ) : (
+                                      <ScoreBar key={ai} score={typeof t?.score === "number" ? t.score : null} />
+                                    );
+                                  })}
+                                  <span className="w-4 shrink-0" />
+                                </div>
+                              ))
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -2335,6 +2936,8 @@ interface TreeCtx {
   onSelectConv: (id: string) => void;
   onToggleCheck: (id: string, on: boolean) => void;
   onRunFolder: (id: string) => void;
+  onDownloadCsv: (id: string) => void;
+  downloadingFolders: Set<string>;
   onRunOne: (id: string) => void;
   onAddConversations: (id: string) => void;
   onDeleteFolder: (id: string) => void;
@@ -2474,6 +3077,16 @@ function FolderNode({ folderId, ctx }: { folderId: string; ctx: TreeCtx }) {
             >
               <CloudArrowDownIcon size={13} className="text-xyne-fg-tertiary hover:text-xyne-fg-primary" />
             </button>
+            {count > 0 && (
+              <button
+                onClick={() => ctx.onDownloadCsv(folderId)}
+                disabled={ctx.downloadingFolders.has(folderId)}
+                title="Download CSV (all conversations)"
+                className="opacity-70 transition group-hover:opacity-100 disabled:opacity-40"
+              >
+                <DownloadSimpleIcon size={13} className={`text-xyne-fg-tertiary hover:text-xyne-fg-primary ${ctx.downloadingFolders.has(folderId) ? "animate-pulse" : ""}`} />
+              </button>
+            )}
             <KebabMenu
               items={[
                 ...(canJudge ? [{ label: "Compare runs", onClick: () => ctx.onCompareRuns(folderId) }] : []),
@@ -2626,31 +3239,42 @@ function MiniStatus({ status }: { status: TurnStatus }) {
   return <span className="h-[5px] w-[5px] shrink-0 rounded-full bg-xyne-border-strong" />;
 }
 
-/* ── Turn: clean two-column comparison (no boxes) ── */
+/* ── Turn: expected (gold) reference + up to 3 collapsible per-agent answers ── */
 function TurnCard({
   index,
   message,
   expected,
-  live,
+  panes,
+  onOpenDebug,
+  makeOpenCitation,
+  selectedCitationKey,
+  citationAgent,
+  onDownloadCsv,
 }: {
   index: number;
   message: string;
   expected: string | null;
-  live?: LiveTurn;
+  /** One panel per compared agent (0-3). Empty until the eval has been run. */
+  panes: TurnAgentPane[];
+  onOpenDebug?: (t: LiveTurn) => void;
+  makeOpenCitation?: (slug: string) => (citation: CitationRef, citationNumber: number, numbers: Map<string, number>) => void;
+  selectedCitationKey?: string | null;
+  /** Which agent's panel currently owns the open citation (for highlighting). */
+  citationAgent?: string | null;
+  onDownloadCsv?: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [showWhy, setShowWhy] = useState(false);
-  const status = live?.status ?? "idle";
-  const answer = live?.answer ?? "";
-  const reasoning = live?.reasoning ?? "";
-  const tools = live?.tools ?? [];
-  const matchScore = live?.matchScore ?? null;
-  const judgeReasoning = live?.judgeReasoning ?? "";
+  // Per-agent panel collapse — lets you fold agents you're not focusing on so the
+  // remaining answers get the full width.
+  const [collapsedPanes, setCollapsedPanes] = useState<Set<string>>(new Set());
+  const multi = panes.length > 1;
+  const anyRunning = panes.some((p) => (p.live?.status ?? "idle") === "running");
+  const anyFailed = panes.some((p) => (p.live?.status ?? "idle") === "failed");
+  const status: TurnStatus = anyRunning ? "running" : anyFailed ? "failed" : panes.some((p) => p.live) ? "completed" : "idle";
 
   return (
     <div className="border-b border-xyne-border-subtle py-4 first:pt-1 last:border-b-0">
-      {/* Header row: caret + M{n} + one-line title are the toggle; score + status
-          sit outside it (so the score's info button isn't nested in a button). */}
+      {/* Header: caret + M{n} + title (toggle); per-agent score chips + status. */}
       <div className="flex w-full items-center gap-2">
         <button onClick={() => setCollapsed((c) => !c)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
           <span className="shrink-0 text-xyne-fg-tertiary">
@@ -2663,65 +3287,171 @@ function TurnCard({
             {collapsed ? turnTitle(message) : null}
           </div>
         </button>
-        {matchScore != null && (
-          <span className="flex shrink-0 items-center gap-1.5">
-            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${scoreChipClass(matchScore)}`}>
-              {matchScore}
-            </span>
-            {judgeReasoning && (
-              <button
-                onClick={() => setShowWhy(true)}
-                title="Why this score?"
-                className="text-xyne-fg-tertiary hover:text-xyne-fg-primary"
+        <span className="flex shrink-0 items-center gap-1">
+          {panes.map((p) =>
+            p.live?.matchScore != null ? (
+              <span
+                key={p.slug}
+                title={multi ? `${p.name}: ${p.live.matchScore}/100` : `${p.live.matchScore}/100`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${scoreChipClass(p.live.matchScore)}`}
               >
-                <InfoIcon size={14} />
-              </button>
-            )}
-          </span>
-        )}
+                {p.live.matchScore}
+              </span>
+            ) : null,
+          )}
+        </span>
         <StatusDot status={status} />
+        {onDownloadCsv && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onDownloadCsv(); }}
+            title="Download this turn as CSV"
+            aria-label="Download this turn as CSV"
+            className="shrink-0 text-xyne-fg-muted opacity-60 transition hover:text-xyne-fg-primary hover:opacity-100"
+          >
+            <DownloadSimpleIcon size={13} />
+          </button>
+        )}
       </div>
 
-      {/* Expanded: full query, then Expected vs Generated side by side. */}
+      {/* Expanded: query → expected (gold) reference → per-agent answer panels. */}
       {!collapsed && (
         <div className="mt-3 space-y-4 pl-[26px]">
           <div>
             <div className="mb-1.5 text-[13px] font-bold tracking-tight text-xyne-fg-primary">Query</div>
             <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[12.5px] leading-relaxed text-xyne-fg-secondary">{message}</div>
           </div>
-          <div className="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
-            <div className="min-w-0 md:border-r md:border-xyne-border-subtle md:pr-6">
-              <div className="mb-1.5 text-[13px] font-bold tracking-tight text-xyne-fg-primary">Expected</div>
-              {expected ? (
-                <EvalMarkdown tone="secondary">{expected}</EvalMarkdown>
-              ) : (
-                <span className="text-[12.5px] text-xyne-fg-tertiary">—</span>
-              )}
-            </div>
-            <div className="min-w-0">
-              <div className="mb-1.5 text-[13px] font-bold tracking-tight text-xyne-fg-primary">Generated · Claw</div>
-              {answer ? (
-                <EvalMarkdown tone="primary">{answer}</EvalMarkdown>
-              ) : (
-                <span className="text-[12.5px] text-xyne-fg-tertiary">{status === "running" ? "…" : "—"}</span>
-              )}
-              {(reasoning || tools.length > 0) && <GeneratedMeta reasoning={reasoning} tools={tools} />}
-            </div>
+          <div className="rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle px-3 py-2.5">
+            <div className="mb-1.5 text-[13px] font-bold tracking-tight text-xyne-fg-primary">Expected · gold</div>
+            {expected ? (
+              <EvalMarkdown tone="secondary">{expected}</EvalMarkdown>
+            ) : (
+              <span className="text-[12.5px] text-xyne-fg-tertiary">—</span>
+            )}
           </div>
+          {panes.length === 0 ? (
+            <div className="text-[12.5px] text-xyne-fg-tertiary">Run the eval to generate answers to compare.</div>
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              {panes.map((p) => {
+                const isCollapsed = collapsedPanes.has(p.slug);
+                const live = p.live;
+                return (
+                  <div
+                    key={p.slug}
+                    className={`min-w-0 rounded-lg border border-xyne-border-subtle ${isCollapsed ? "flex-none" : "flex-1 basis-[300px]"}`}
+                  >
+                    <div className="flex items-center gap-2 border-b border-xyne-border-subtle px-3 py-2">
+                      <button
+                        onClick={() =>
+                          setCollapsedPanes((s) => {
+                            const n = new Set(s);
+                            n.has(p.slug) ? n.delete(p.slug) : n.add(p.slug);
+                            return n;
+                          })
+                        }
+                        title={isCollapsed ? "Expand" : "Collapse"}
+                        className="flex min-w-0 items-center gap-1.5 text-left"
+                      >
+                        <span className="shrink-0 text-xyne-fg-tertiary">
+                          {isCollapsed ? <CaretRightIcon size={11} /> : <CaretDownIcon size={11} />}
+                        </span>
+                        <span className="min-w-0 truncate text-[12px] font-semibold text-xyne-fg-primary">
+                          {multi ? p.name : `Generated · ${p.name}`}
+                        </span>
+                      </button>
+                      {live?.matchScore != null && (
+                        <span className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${scoreChipClass(live.matchScore)}`}>
+                          {live.matchScore}
+                        </span>
+                      )}
+                      <StatusDot status={live?.status ?? "idle"} />
+                    </div>
+                    {!isCollapsed && (
+                      <div className="px-3 py-2.5">
+                        <PaneBody
+                          live={live}
+                          slug={p.slug}
+                          makeOpenCitation={makeOpenCitation}
+                          selectedCitationKey={citationAgent === p.slug ? selectedCitationKey ?? null : null}
+                          onOpenDebug={onOpenDebug}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
+    </div>
+  );
+}
 
+/** One agent's answer body inside a comparison panel: markdown (with citations),
+ *  reasoning/tools, the judge rationale, and the debug link. */
+function PaneBody({
+  live,
+  slug,
+  makeOpenCitation,
+  selectedCitationKey,
+  onOpenDebug,
+}: {
+  live: LiveTurn | undefined;
+  slug: string;
+  makeOpenCitation?: (slug: string) => (citation: CitationRef, citationNumber: number, numbers: Map<string, number>) => void;
+  selectedCitationKey?: string | null;
+  onOpenDebug?: (t: LiveTurn) => void;
+}) {
+  const [showWhy, setShowWhy] = useState(false);
+  const answer = live?.answer ?? "";
+  const reasoning = live?.reasoning ?? "";
+  const tools = live?.tools ?? [];
+  const status = live?.status ?? "idle";
+  const onOpenCitation = makeOpenCitation ? makeOpenCitation(slug) : undefined;
+  return (
+    <>
+      {answer ? (
+        <EvalMarkdown tone="primary" invocations={tools} onOpenCitation={onOpenCitation} selectedCitationKey={selectedCitationKey}>
+          {answer}
+        </EvalMarkdown>
+      ) : (
+        <span className="text-[12.5px] text-xyne-fg-tertiary">{status === "running" ? "…" : "—"}</span>
+      )}
+      {(reasoning || tools.length > 0) && <GeneratedMeta reasoning={reasoning} tools={tools} />}
+      {(live?.judgeReasoning || live?.sessionId) && (
+        <div className="mt-2 flex items-center gap-3">
+          {live?.judgeReasoning && (
+            <button
+              onClick={() => setShowWhy(true)}
+              className="inline-flex items-center gap-1 text-[10px] text-xyne-fg-muted transition hover:text-xyne-fg-secondary"
+            >
+              <InfoIcon size={11} /> Why this score?
+            </button>
+          )}
+          {live?.sessionId && (
+            <button
+              type="button"
+              onClick={() => live && onOpenDebug?.(live)}
+              className="inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-xyne-fg-muted transition hover:bg-xyne-surface hover:text-xyne-fg-secondary"
+            >
+              <BugIcon size={11} /> Debug
+            </button>
+          )}
+        </div>
+      )}
       <Dialog open={showWhy} onOpenChange={setShowWhy} title="Why this score?">
         <div className="flex flex-col gap-3">
-          {matchScore != null && (
-            <span className={`self-start rounded px-2 py-0.5 text-[13px] font-semibold ${scoreChipClass(matchScore)}`}>
-              {matchScore}/100
+          {live?.matchScore != null && (
+            <span className={`self-start rounded px-2 py-0.5 text-[13px] font-semibold ${scoreChipClass(live.matchScore)}`}>
+              {live.matchScore}/100
             </span>
           )}
-          <p className="text-[13px] leading-relaxed text-xyne-fg-secondary">{judgeReasoning}</p>
+          <p className="text-[13px] leading-relaxed text-xyne-fg-secondary">{live?.judgeReasoning}</p>
         </div>
       </Dialog>
-    </div>
+    </>
   );
 }
 

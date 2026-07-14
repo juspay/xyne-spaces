@@ -23,6 +23,7 @@ import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
 import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
+import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("control-center");
@@ -120,6 +121,8 @@ interface ControlCenterApproval {
   id: string;
   agentSlug: string;
   agentName: string;
+  orgId?: string;
+  orgName?: string | null;
   sessionId: string;
   action: string;
   targetSystem: string;
@@ -176,15 +179,16 @@ async function resolveApproval(
    GET /metrics
    ───────────────────────────────────────────────────────────────────── */
 
-router.get("/metrics", requireClawAdmin, async (_req: Request, res: Response) => {
+router.get("/metrics", requireClawAdmin, async (req: Request, res: Response) => {
   try {
+    const scope = getAdminOrgScope(req, "/control-center/metrics");
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
     const [activeSessions, todayRuns, approvals] = await Promise.all([
-      prisma.agentRun.count({ where: { status: "running" } }),
+      prisma.agentRun.count({ where: { status: "running", ...(scope.orgId ? { orgId: scope.orgId } : {}) } }),
       prisma.agentRun.findMany({
-        where: { startedAt: { gte: todayStart } },
+        where: { startedAt: { gte: todayStart }, ...(scope.orgId ? { orgId: scope.orgId } : {}) },
         select: { toolInvocations: true, agentSlug: true, status: true },
       }),
       getAllApprovals(),
@@ -201,7 +205,9 @@ router.get("/metrics", requireClawAdmin, async (_req: Request, res: Response) =>
       }
     }
 
-    const pendingApprovals = approvals.filter((a) => a.status === "pending").length;
+    const pendingApprovals = approvals.filter((a) =>
+      a.status === "pending" && (scope.allOrgs || !scope.orgId || a.orgId === scope.orgId),
+    ).length;
 
     res.json({
       success: true,
@@ -224,12 +230,16 @@ router.get("/metrics", requireClawAdmin, async (_req: Request, res: Response) =>
 
 router.get("/agents", requireClawAdmin, async (req: Request, res: Response) => {
   try {
+    const scope = getAdminOrgScope(req, "/control-center/agents");
     const limit = Math.min(parseInt((req.query["limit"] as string) || "50", 10), 200);
     const statusFilter =
       typeof req.query["status"] === "string" ? req.query["status"] : undefined;
 
     const runs = await prisma.agentRun.findMany({
-      where: statusFilter ? { status: statusFilter } : {},
+      where: {
+        ...(statusFilter ? { status: statusFilter } : {}),
+        ...(scope.orgId ? { orgId: scope.orgId } : {}),
+      },
       orderBy: { startedAt: "desc" },
       take: limit,
     });
@@ -245,6 +255,7 @@ router.get("/agents", requireClawAdmin, async (req: Request, res: Response) => {
       select: { slug: true, name: true, color: true },
     });
     const metaBySlug = new Map(agentMeta.map((a) => [a.slug, a]));
+    const orgNames = scope.allOrgs ? await getOrgNameMap(runs.map((r) => r.orgId)) : new Map();
 
     const feed = runs.map((run) => {
       const meta = metaBySlug.get(run.agentSlug);
@@ -273,6 +284,7 @@ router.get("/agents", requireClawAdmin, async (req: Request, res: Response) => {
         startedAt: run.startedAt,
         minutesAgo: minutesAgo(run.startedAt),
         error: run.error ?? undefined,
+        ...(scope.allOrgs ? withOrgLabel({ orgId: run.orgId }, orgNames) : {}),
         toolsUsed: run.toolsUsed,
         progress:
           run.status === "completed" ? 100 : run.status === "running" ? undefined : undefined,
@@ -293,10 +305,11 @@ router.get("/agents", requireClawAdmin, async (req: Request, res: Response) => {
 
 router.get("/failures", requireClawAdmin, async (req: Request, res: Response) => {
   try {
+    const scope = getAdminOrgScope(req, "/control-center/failures");
     const limit = Math.min(parseInt((req.query["limit"] as string) || "20", 10), 100);
 
     const runs = await prisma.agentRun.findMany({
-      where: { status: "failed" },
+      where: { status: "failed", ...(scope.orgId ? { orgId: scope.orgId } : {}) },
       orderBy: { startedAt: "desc" },
       take: limit,
     });
@@ -312,10 +325,12 @@ router.get("/failures", requireClawAdmin, async (req: Request, res: Response) =>
       select: { slug: true, name: true },
     });
     const metaBySlug = new Map(agentMeta.map((a) => [a.slug, a]));
+    const orgNames = scope.allOrgs ? await getOrgNameMap(runs.map((r) => r.orgId)) : new Map();
 
     const failures = runs.map((run) => ({
       sessionId: run.sessionId,
       agentSlug: run.agentSlug,
+      ...(scope.allOrgs ? withOrgLabel({ orgId: run.orgId }, orgNames) : {}),
       agentName: metaBySlug.get(run.agentSlug)?.name ?? run.agentSlug,
       task: run.task.length > 140 ? run.task.slice(0, 140) + "…" : run.task,
       error: {
@@ -337,10 +352,16 @@ router.get("/failures", requireClawAdmin, async (req: Request, res: Response) =>
    GET /approvals
    ───────────────────────────────────────────────────────────────────── */
 
-router.get("/approvals", requireClawAdmin, async (_req: Request, res: Response) => {
+router.get("/approvals", requireClawAdmin, async (req: Request, res: Response) => {
   try {
+    const scope = getAdminOrgScope(req, "/control-center/approvals");
     const all = await getAllApprovals();
-    res.json({ success: true, data: all });
+    const filtered = scope.allOrgs || !scope.orgId ? all : all.filter((a) => a.orgId === scope.orgId);
+    const orgNames = scope.allOrgs ? await getOrgNameMap(filtered.map((a) => a.orgId)) : new Map();
+    res.json({
+      success: true,
+      data: filtered.map((a) => (scope.allOrgs ? withOrgLabel(a, orgNames) : a)),
+    });
   } catch (err) {
     log.error("[control-center] approvals list error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
@@ -356,6 +377,7 @@ router.post("/approvals", requireS2S, async (req: Request, res: Response) => {
     const { agentSlug, agentName, sessionId, action, targetSystem } = req.body as {
       agentSlug?: string;
       agentName?: string;
+      orgId?: string;
       sessionId?: string;
       action?: string;
       targetSystem?: string;
@@ -374,6 +396,7 @@ router.post("/approvals", requireS2S, async (req: Request, res: Response) => {
       id,
       agentSlug,
       agentName: agentName ?? agentSlug,
+      ...(typeof req.body?.orgId === "string" && req.body.orgId.trim() ? { orgId: req.body.orgId.trim() } : {}),
       sessionId,
       action,
       targetSystem: targetSystem ?? "",
@@ -460,9 +483,11 @@ router.post(
   requireClawAdmin,
   async (req: Request<{ sessionId: string }>, res: Response) => {
     try {
+      const scope = getAdminOrgScope(req, "/control-center/runs/:sessionId/retry");
       const run = await prisma.agentRun.findUnique({
         where: { sessionId: req.params.sessionId },
         select: {
+          orgId: true,
           agentSlug: true,
           task: true,
           conversationId: true,
@@ -473,6 +498,10 @@ router.post(
       });
 
       if (!run) {
+        res.status(404).json({ success: false, error: "Run not found" });
+        return;
+      }
+      if (!scope.allOrgs && scope.orgId && run.orgId !== scope.orgId) {
         res.status(404).json({ success: false, error: "Run not found" });
         return;
       }
@@ -511,12 +540,17 @@ router.post(
   requireClawAdmin,
   async (req: Request<{ sessionId: string }>, res: Response) => {
     try {
+      const scope = getAdminOrgScope(req, "/control-center/runs/:sessionId/resolve");
       const run = await prisma.agentRun.findUnique({
         where: { sessionId: req.params.sessionId },
-        select: { status: true },
+        select: { status: true, orgId: true },
       });
 
       if (!run) {
+        res.status(404).json({ success: false, error: "Run not found" });
+        return;
+      }
+      if (!scope.allOrgs && scope.orgId && run.orgId !== scope.orgId) {
         res.status(404).json({ success: false, error: "Run not found" });
         return;
       }
@@ -549,12 +583,17 @@ router.get(
   requireClawAdmin,
   async (req: Request<{ sessionId: string }>, res: Response) => {
     try {
+      const scope = getAdminOrgScope(req, "/control-center/tasks/:sessionId/deep-link");
       const run = await prisma.agentRun.findUnique({
         where: { sessionId: req.params.sessionId },
-        select: { conversationId: true, channelId: true, triggerSource: true },
+        select: { conversationId: true, channelId: true, triggerSource: true, orgId: true },
       });
 
       if (!run) {
+        res.status(404).json({ success: false, error: "Run not found" });
+        return;
+      }
+      if (!scope.allOrgs && scope.orgId && run.orgId !== scope.orgId) {
         res.status(404).json({ success: false, error: "Run not found" });
         return;
       }

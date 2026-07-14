@@ -6,6 +6,9 @@
 
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("tools");
+
 const GENIUS_TIMEOUT_MS = 5 * 60 * 1000;
 const GENIUS_QUERY_ROUTING_PATH = "/api/v3/query_routing/";
 
@@ -48,13 +51,12 @@ async function executeGeniusQuery(
   const userId = context?.meta?.["userId"] || "unknown";
   const userEmail = context?.meta?.["userEmail"] || "";
 
-  console.log(`[genius-${agent}] query="${query.substring(0, 80)}...", user=${userId}, ${userEmail}`);
+  log.info(`[genius-${agent}] query="${query.substring(0, 80)}...", user=${userId}, ${userEmail}`);
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: apiKey,
     Accept: "text/event-stream",
-    "x-source": "XyneSpaces",
     "X-Xyne-User-Id": userId,
   };
 
@@ -139,7 +141,7 @@ async function executeGeniusQuery(
       return `Genius API Error: ${apiError}`;
     }
 
-    console.log(`[genius-${agent}] completed, result length=${finalResult.length}`);
+    log.info(`[genius-${agent}] completed, result length=${finalResult.length}`);
     return finalResult || "Genius query completed but no result was returned.";
 
   } catch (error) {
@@ -150,7 +152,7 @@ async function executeGeniusQuery(
     }
 
     const msg = error instanceof Error ? error.message : "Unknown error";
-    console.error(`[genius-${agent}] error: ${msg}`);
+    log.error(`[genius-${agent}] error: ${msg}`);
     return `Error calling Genius API: ${msg}`;
   }
 }

@@ -73,6 +73,7 @@ import {
   rejectWorkflowGlobalRequest,
   type WorkflowGlobalRequest,
   type AdminRole,
+  type AdminOrgScope,
   type AuditLogEntry,
   type AgentRequestItem,
   type AgentUsageStat,
@@ -80,7 +81,7 @@ import {
   type AdminMcpServerSummary,
   type AdminMcpGlobalCredsDetail,
 } from "../../lib/api";
-import type { Agent, McpServer, CredentialField } from "../../lib/types";
+import type { Agent, AgentLight, McpServer, CredentialField } from "../../lib/types";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -123,9 +124,11 @@ export function AdminPageV3({ userId }: Props) {
   const { show: showSnackbar } = useSnackbar();
 
   const [tab, setTab] = useState<TabKey>("requests");
+  const [allOrgs, setAllOrgs] = useState(false);
+  const adminOrgScope: AdminOrgScope = allOrgs ? "all" : "org";
 
   /* Common datasets */
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<AgentLight[]>([]);
   const [admins, setAdmins] = useState<AdminRole[]>([]);
   const [requests, setRequests] = useState<AgentRequestItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,6 +150,9 @@ export function AdminPageV3({ userId }: Props) {
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditOffset, setAuditOffset] = useState(0);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [auditEventFilter, setAuditEventFilter] = useState<string>("");   // "" = all events
+  const [auditAgentFilter, setAuditAgentFilter] = useState<string>("");   // agent id → targetId
+  const [auditRange, setAuditRange] = useState<"7" | "30" | "all">("all");
 
   /* Usage stats */
   const [usageStats, setUsageStats] = useState<AgentUsageStat[]>([]);
@@ -161,6 +167,13 @@ export function AdminPageV3({ userId }: Props) {
   const [scheduledStatusFilter, setScheduledStatusFilter] = useState<
     "" | "active" | "completed" | "cancelled"
   >("");
+  const [scheduledAgentFilter, setScheduledAgentFilter] = useState<string>("");
+  const [scheduledUserFilter, setScheduledUserFilter] = useState<string>("");
+  // Accumulated (union) user options so the User dropdown doesn't collapse to a
+  // single entry once a user filter is applied. Grows as pages/filters load.
+  const [scheduledUserOptions, setScheduledUserOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
   const [scheduledLoading, setScheduledLoading] = useState(false);
   const [cancelJobTarget, setCancelJobTarget] = useState<AdminScheduledJob | null>(null);
 
@@ -171,9 +184,9 @@ export function AdminPageV3({ userId }: Props) {
 
   /* Confirm dialogs */
   const [revokeTarget, setRevokeTarget] = useState<AdminRole | null>(null);
-  const [promoteTarget, setPromoteTarget] = useState<Agent | null>(null);
-  const [demoteTarget, setDemoteTarget] = useState<Agent | null>(null);
-  const [deleteAgentTarget, setDeleteAgentTarget] = useState<Agent | null>(null);
+  const [promoteTarget, setPromoteTarget] = useState<AgentLight | null>(null);
+  const [demoteTarget, setDemoteTarget] = useState<AgentLight | null>(null);
+  const [deleteAgentTarget, setDeleteAgentTarget] = useState<AgentLight | null>(null);
   const [deleteCredsTarget, setDeleteCredsTarget] = useState<AdminMcpServerSummary | null>(null);
 
   /* Reject request inline state */
@@ -208,9 +221,9 @@ export function AdminPageV3({ userId }: Props) {
     try {
       const [a, r, reqs] = await Promise.all([
         // Admin panel: the full roster across all users (server enforces admin).
-        listAgents(userId, true),
-        listAdminRoles(userId).catch(() => []),
-        listPendingRequests(userId).catch(() => []),
+        listAgents(userId, true, adminOrgScope),
+        listAdminRoles(userId, adminOrgScope).catch(() => []),
+        listPendingRequests(userId, adminOrgScope).catch(() => []),
       ]);
       setAgents(a);
       setAdmins(r);
@@ -221,16 +234,24 @@ export function AdminPageV3({ userId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [userId, showSnackbar]);
+  }, [userId, adminOrgScope, showSnackbar]);
 
   useEffect(() => { load(); }, [load]);
 
   const loadAuditLogs = useCallback(async () => {
     setAuditLoading(true);
     try {
+      const startDate =
+        auditRange === "all"
+          ? undefined
+          : new Date(Date.now() - Number(auditRange) * 24 * 60 * 60 * 1000).toISOString();
       const { rows, total } = await listAuditLogsPaged(userId, {
         limit: AUDIT_PAGE_SIZE,
         offset: auditOffset,
+        orgScope: adminOrgScope,
+        eventType: auditEventFilter || undefined,
+        targetId: auditAgentFilter || undefined,
+        startDate,
       });
       setLogs(rows);
       setAuditTotal(total);
@@ -240,19 +261,19 @@ export function AdminPageV3({ userId }: Props) {
     } finally {
       setAuditLoading(false);
     }
-  }, [userId, auditOffset, showSnackbar]);
+  }, [userId, auditOffset, adminOrgScope, auditEventFilter, auditAgentFilter, auditRange, showSnackbar]);
 
   useEffect(() => { if (tab === "audit") loadAuditLogs(); }, [tab, loadAuditLogs]);
 
   const loadUsage = useCallback(async () => {
     setUsageLoading(true);
     try {
-      const stats = await listAgentUsageStats(userId, usageRange).catch(() => []);
+      const stats = await listAgentUsageStats(userId, usageRange, adminOrgScope).catch(() => []);
       setUsageStats(stats);
     } finally {
       setUsageLoading(false);
     }
-  }, [userId, usageRange]);
+  }, [userId, usageRange, adminOrgScope]);
 
   useEffect(() => { if (tab === "usage") loadUsage(); }, [tab, loadUsage]);
 
@@ -274,13 +295,13 @@ export function AdminPageV3({ userId }: Props) {
   const loadWorkflowRequests = useCallback(async () => {
     setWorkflowRequestsLoading(true);
     try {
-      setWorkflowRequests(await listWorkflowGlobalRequests(userId));
+      setWorkflowRequests(await listWorkflowGlobalRequests(userId, adminOrgScope));
     } catch (err) {
       console.error("[admin] workflow global-requests load error:", err);
     } finally {
       setWorkflowRequestsLoading(false);
     }
-  }, [userId]);
+  }, [userId, adminOrgScope]);
   useEffect(() => { if (tab === "workflowreqs") loadWorkflowRequests(); }, [tab, loadWorkflowRequests]);
 
   const handleApproveWorkflow = async (id: string) => {
@@ -309,18 +330,38 @@ export function AdminPageV3({ userId }: Props) {
     try {
       const result = await listAdminScheduledJobs(userId, {
         status: scheduledStatusFilter || undefined,
+        agentSlug: scheduledAgentFilter || undefined,
+        userId: scheduledUserFilter || undefined,
         limit: SCHEDULED_PAGE_SIZE,
         offset: scheduledOffset,
+        orgScope: adminOrgScope,
       });
       setScheduledJobs(result.rows);
       setScheduledTotal(result.total);
+      // Merge any newly-seen users into the (union) option list.
+      setScheduledUserOptions((prev) => {
+        const seen = new Set(prev.map((o) => o.value));
+        const next = [...prev];
+        for (const j of result.rows) {
+          if (j.userId && !seen.has(j.userId)) {
+            seen.add(j.userId);
+            next.push({ value: j.userId, label: j.user?.email ?? j.userId });
+          }
+        }
+        return next;
+      });
     } catch (err) {
       console.error("[admin] scheduled-jobs load error:", err);
       showSnackbar({ variant: "error", title: "Failed to load scheduled jobs" });
     } finally {
       setScheduledLoading(false);
     }
-  }, [userId, scheduledStatusFilter, scheduledOffset, showSnackbar]);
+  }, [userId, scheduledStatusFilter, scheduledAgentFilter, scheduledUserFilter, scheduledOffset, adminOrgScope, showSnackbar]);
+
+  useEffect(() => {
+    setAuditOffset(0);
+    setScheduledOffset(0);
+  }, [adminOrgScope]);
 
   useEffect(() => { if (tab === "scheduled") loadScheduledJobs(); }, [tab, loadScheduledJobs]);
 
@@ -632,7 +673,7 @@ export function AdminPageV3({ userId }: Props) {
       }
       try {
         const agent = await getAgentDetail(agentSlug);
-        if (agent.spacesAppId && agent.spacesAppToken) {
+        if (agent.spacesAppId && agent.spacesAppTokenConfigured) {
           setSpacesFlow({ requestId, agentSlug, step: "done" });
         } else if (agent.spacesAppId) {
           setSpacesFlow({ requestId, agentSlug, step: "install" });
@@ -807,29 +848,35 @@ export function AdminPageV3({ userId }: Props) {
       <PageLayout
         header={
           <div className="shrink-0 border-b border-xyne-border-subtle">
-            <div className="mx-auto w-full max-w-[880px] px-[20px] py-xyne-header">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 inline-flex shrink-0 items-center justify-center">
-                  <ShieldIcon
-                    size={22}
-                    weight="regular"
-                    className="text-xyne-error-fg"
-                  />
-                </span>
-                <div>
-                  <h1 className="text-xl font-semibold text-xyne-fg-primary">
-                    Admin Panel
-                  </h1>
-                  <p className="mt-1 text-[14px] text-xyne-fg-muted">
-                    Manage requests, agents, admins, and platform settings
-                  </p>
+            <div className="mx-auto w-full px-[24px] py-xyne-header">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 inline-flex shrink-0 items-center justify-center">
+                    <ShieldIcon
+                      size={22}
+                      weight="regular"
+                      className="text-xyne-error-fg"
+                    />
+                  </span>
+                  <div>
+                    <h1 className="text-xl font-semibold text-xyne-fg-primary">
+                      Admin Panel
+                    </h1>
+                    <p className="mt-1 text-[14px] text-xyne-fg-muted">
+                      Manage requests, agents, admins, and platform settings
+                    </p>
+                  </div>
                 </div>
+                <label className="mt-1 flex shrink-0 items-center gap-2 text-[12px] text-xyne-fg-muted">
+                  <Switch checked={allOrgs} onChange={setAllOrgs} />
+                  All orgs
+                </label>
               </div>
             </div>
           </div>
         }
         filterTab={
-          <div className="mx-auto w-full max-w-[880px] px-[20px]">
+          <div className="mx-auto w-full px-[24px]">
             <Tabs
               items={tabItems}
               selected={tab}
@@ -839,10 +886,10 @@ export function AdminPageV3({ userId }: Props) {
           </div>
         }
         body={
-          // Body column is intentionally narrower than the header/tab strip
-          // (880px) so tab content reads as a focused "panel" inside the
-          // wider chrome rather than flush against it.
-          <div className="mx-auto w-full max-w-[720px] px-[20px] pb-[24px]">
+          // Full-width body so admin tables (Audit, Scheduled, Usage) use the
+          // whole panel; the left/right edges stay aligned with the header/tabs
+          // above, which are also full width.
+          <div className="mx-auto w-full px-[24px] pb-[24px]">
             {loading && agents.length === 0 ? (
               <div className="flex items-center gap-2 py-12 text-[13px] text-xyne-fg-muted">
                 <SpinnerGapIcon size={16} className="animate-spin" />
@@ -879,6 +926,7 @@ export function AdminPageV3({ userId }: Props) {
                     onDismissSpaces={() => setSpacesFlow(null)}
                     pictureInputRef={pictureInputRef}
                     onPictureChange={handlePictureFileChange}
+                    showOrgLabels={allOrgs}
                   />
                 )}
 
@@ -913,6 +961,7 @@ export function AdminPageV3({ userId }: Props) {
                     onCancelReject={() => { setWorkflowRejectingId(null); setWorkflowRejectNote(""); }}
                     onApprove={handleApproveWorkflow}
                     onConfirmReject={handleRejectWorkflow}
+                    showOrgLabels={allOrgs}
                   />
                 )}
 
@@ -934,6 +983,7 @@ export function AdminPageV3({ userId }: Props) {
                     onDelete={setDeleteAgentTarget}
                     onSpacesStep={handleSpacesStep}
                     onDismissSpaces={() => setSpacesFlow(null)}
+                    showOrgLabels={allOrgs}
                   />
                 )}
 
@@ -945,6 +995,7 @@ export function AdminPageV3({ userId }: Props) {
                     onNewAdminIdChange={setNewAdminId}
                     onGrant={handleGrant}
                     onRevoke={setRevokeTarget}
+                    showOrgLabels={allOrgs}
                   />
                 )}
 
@@ -955,6 +1006,23 @@ export function AdminPageV3({ userId }: Props) {
                     total={auditTotal}
                     offset={auditOffset}
                     pageSize={AUDIT_PAGE_SIZE}
+                    showOrgLabels={allOrgs}
+                    agentOptions={agents.map((a) => ({ value: a.id, label: a.name }))}
+                    eventFilter={auditEventFilter}
+                    onEventFilterChange={(v) => {
+                      setAuditOffset(0);
+                      setAuditEventFilter(v);
+                    }}
+                    agentFilter={auditAgentFilter}
+                    onAgentFilterChange={(v) => {
+                      setAuditOffset(0);
+                      setAuditAgentFilter(v);
+                    }}
+                    rangeFilter={auditRange}
+                    onRangeFilterChange={(v) => {
+                      setAuditOffset(0);
+                      setAuditRange(v);
+                    }}
                     onPrev={() => setAuditOffset((o) => Math.max(0, o - AUDIT_PAGE_SIZE))}
                     onNext={() => setAuditOffset((o) => o + AUDIT_PAGE_SIZE)}
                   />
@@ -966,6 +1034,7 @@ export function AdminPageV3({ userId }: Props) {
                     stats={usageStats}
                     range={usageRange}
                     onRangeChange={setUsageRange}
+                    showOrgLabels={allOrgs}
                   />
                 )}
 
@@ -981,11 +1050,24 @@ export function AdminPageV3({ userId }: Props) {
                       setScheduledOffset(0);
                       setScheduledStatusFilter(s);
                     }}
+                    agentOptions={agents.map((a) => ({ value: a.slug, label: a.name }))}
+                    agentFilter={scheduledAgentFilter}
+                    onAgentFilterChange={(v) => {
+                      setScheduledOffset(0);
+                      setScheduledAgentFilter(v);
+                    }}
+                    userOptions={scheduledUserOptions}
+                    userFilter={scheduledUserFilter}
+                    onUserFilterChange={(v) => {
+                      setScheduledOffset(0);
+                      setScheduledUserFilter(v);
+                    }}
                     onPrev={() =>
                       setScheduledOffset(Math.max(0, scheduledOffset - SCHEDULED_PAGE_SIZE))
                     }
                     onNext={() => setScheduledOffset(scheduledOffset + SCHEDULED_PAGE_SIZE)}
                     onCancel={setCancelJobTarget}
+                    showOrgLabels={allOrgs}
                   />
                 )}
 
@@ -1167,6 +1249,7 @@ function RequestsTab({
   onDismissSpaces,
   pictureInputRef,
   onPictureChange,
+  showOrgLabels,
 }: {
   requests: AgentRequestItem[];
   spacesFlow: SpacesFlow | null;
@@ -1181,6 +1264,7 @@ function RequestsTab({
   onDismissSpaces: () => void;
   pictureInputRef: React.RefObject<HTMLInputElement | null>;
   onPictureChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  showOrgLabels: boolean;
 }) {
   return (
     <div className="space-y-3 pt-4">
@@ -1212,6 +1296,7 @@ function RequestsTab({
                       ? (r.skillName ?? r.skillSlug)
                       : (r.agentName ?? r.agentSlug)}
                   </span>
+                  {showOrgLabels && <OrgBadge orgName={r.orgName} orgId={r.orgId} />}
                 </div>
                 <p className="mt-1 text-[11px] text-xyne-fg-tertiary">
                   by {r.requesterName ?? r.requesterId}
@@ -1496,6 +1581,7 @@ function WorkflowRequestsTab({
   onCancelReject,
   onApprove,
   onConfirmReject,
+  showOrgLabels,
 }: {
   loading: boolean;
   requests: WorkflowGlobalRequest[];
@@ -1506,6 +1592,7 @@ function WorkflowRequestsTab({
   onCancelReject: () => void;
   onApprove: (id: string) => void | Promise<void>;
   onConfirmReject: (id: string) => void | Promise<void>;
+  showOrgLabels: boolean;
 }) {
   if (loading) return <Loading text="Loading…" />;
   if (requests.length === 0)
@@ -1523,6 +1610,7 @@ function WorkflowRequestsTab({
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[13px] font-medium text-xyne-fg-primary">{req.workflow.name}</span>
                   <Badge as="span" size="sm" variant="success" label="push to global" />
+                  {showOrgLabels && <OrgBadge orgName={req.orgName} orgId={req.orgId} />}
                 </div>
                 <p className="mt-1 text-[11px] text-xyne-fg-tertiary">
                   Requested by <span className="text-xyne-fg-secondary">{who}</span>
@@ -1706,17 +1794,19 @@ function AgentsTab({
   onDelete,
   onSpacesStep,
   onDismissSpaces,
+  showOrgLabels,
 }: {
-  globalAgents: Agent[];
-  personalAgents: Agent[];
+  globalAgents: AgentLight[];
+  personalAgents: AgentLight[];
   spacesFlow: SpacesFlow | null;
-  onResumeSetup: (a: Agent, hasApp: boolean) => void;
+  onResumeSetup: (a: AgentLight, hasApp: boolean) => void;
   onUploadPicture: (slug: string) => void;
-  onPromote: (a: Agent) => void;
-  onDemote: (a: Agent) => void;
-  onDelete: (a: Agent) => void;
+  onPromote: (a: AgentLight) => void;
+  onDemote: (a: AgentLight) => void;
+  onDelete: (a: AgentLight) => void;
   onSpacesStep: (step: "create" | "install" | "configure" | "grant") => void | Promise<void>;
   onDismissSpaces: () => void;
+  showOrgLabels: boolean;
 }) {
   return (
     <div className="space-y-6 pt-4">
@@ -1734,7 +1824,7 @@ function AgentsTab({
         </h3>
         <div className="space-y-2">
           {globalAgents.map((a) => {
-            const registered = Boolean(a.spacesAppId && a.spacesAppToken);
+            const registered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
             const hasApp = Boolean(a.spacesAppId);
             return (
               <div
@@ -1749,6 +1839,7 @@ function AgentsTab({
                   <div className="min-w-0">
                     <span className="text-[13px] font-medium text-xyne-fg-primary">{a.name}</span>
                     <span className="ml-2 text-[11px] text-xyne-fg-tertiary">{a.slug}</span>
+                    {showOrgLabels && <span className="ml-2"><OrgBadge orgName={a.orgName} orgId={a.orgId} /></span>}
                     <span className="ml-2 inline-block align-middle">
                       <Badge
                         as="span"
@@ -1812,7 +1903,7 @@ function AgentsTab({
         ) : (
           <div className="space-y-2">
             {personalAgents.map((a) => {
-              const registered = Boolean(a.spacesAppId && a.spacesAppToken);
+              const registered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
               return (
                 <div
                   key={a.id}
@@ -1826,6 +1917,7 @@ function AgentsTab({
                     <div className="min-w-0">
                       <span className="text-[13px] font-medium text-xyne-fg-primary">{a.name}</span>
                       <span className="ml-2 text-[11px] text-xyne-fg-tertiary">{a.slug}</span>
+                      {showOrgLabels && <span className="ml-2"><OrgBadge orgName={a.orgName} orgId={a.orgId} /></span>}
                       {a.ownerUserId && (
                         <span className="ml-2 text-[11px] text-xyne-fg-muted">
                           owner: {a.ownerUserId.slice(0, 8)}…
@@ -1880,6 +1972,7 @@ function AdminsTab({
   onNewAdminIdChange,
   onGrant,
   onRevoke,
+  showOrgLabels,
 }: {
   admins: AdminRole[];
   currentUserId: string;
@@ -1887,6 +1980,7 @@ function AdminsTab({
   onNewAdminIdChange: (v: string) => void;
   onGrant: () => void | Promise<void>;
   onRevoke: (a: AdminRole) => void;
+  showOrgLabels: boolean;
 }) {
   return (
     <div className="space-y-4 pt-4">
@@ -1925,6 +2019,7 @@ function AdminsTab({
               <span className="ml-2 text-[12px] text-xyne-fg-tertiary">
                 {r.user.email}
               </span>
+              {showOrgLabels && <span className="ml-2"><OrgBadge orgName={r.user.orgName} orgId={r.user.orgId} /></span>}
               <span className="ml-2 text-[11px] text-xyne-fg-muted">
                 granted {new Date(r.createdAt).toLocaleDateString()}
               </span>
@@ -1949,6 +2044,27 @@ function AdminsTab({
 
 /* ── Audit log tab ─────────────────────────────────────────────── */
 
+const AUDIT_EVENT_TYPES = [
+  "AGENT_CREATED", "AGENT_UPDATED", "AGENT_DELETED", "AGENT_CONFIG_UPDATED",
+  "AGENT_PROMOTED", "AGENT_DEMOTED", "AGENT_SHARED", "AGENT_UNSHARED",
+  "ROLE_GRANTED", "ROLE_REVOKED",
+  "REQUEST_CREATED", "REQUEST_APPROVED", "REQUEST_REJECTED",
+  "MCP_GLOBAL_FALLBACK_ENABLED", "MCP_GLOBAL_FALLBACK_DISABLED",
+  "MCP_GLOBAL_CREDENTIALS_SET", "MCP_GLOBAL_CREDENTIALS_REMOVED",
+  "MCP_CONNECTOR_CREATED", "MCP_CONNECTOR_UPDATED", "MCP_CONNECTOR_DELETED",
+  "MCP_CONNECTOR_EDIT_REQUESTED", "MCP_CONNECTOR_EDIT_APPROVED",
+  "MCP_CONNECTOR_EDIT_REJECTED", "MCP_CONNECTOR_EDIT_SUPERSEDED",
+  "MCP_CONNECTOR_EDIT_CANCELLED",
+] as const;
+
+function auditEventLabel(v: string): string {
+  return v
+    .toLowerCase()
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 function AuditTab({
   loading,
   logs,
@@ -1957,6 +2073,14 @@ function AuditTab({
   pageSize,
   onPrev,
   onNext,
+  showOrgLabels,
+  agentOptions,
+  eventFilter,
+  onEventFilterChange,
+  agentFilter,
+  onAgentFilterChange,
+  rangeFilter,
+  onRangeFilterChange,
 }: {
   loading: boolean;
   logs: AuditLogEntry[];
@@ -1965,18 +2089,72 @@ function AuditTab({
   pageSize: number;
   onPrev: () => void;
   onNext: () => void;
+  showOrgLabels: boolean;
+  agentOptions: { value: string; label: string }[];
+  eventFilter: string;
+  onEventFilterChange: (v: string) => void;
+  agentFilter: string;
+  onAgentFilterChange: (v: string) => void;
+  rangeFilter: "7" | "30" | "all";
+  onRangeFilterChange: (v: "7" | "30" | "all") => void;
 }) {
-  if (loading) return <Loading text="Loading audit logs…" />;
-  if (logs.length === 0) return <EmptyHint>No audit logs yet.</EmptyHint>;
+  const filterBar = (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <FilterDropdown<string>
+        ariaLabel="Event filter"
+        value={eventFilter}
+        options={[
+          { value: "", label: "All events" },
+          ...AUDIT_EVENT_TYPES.map((e) => ({ value: e, label: auditEventLabel(e) })),
+        ]}
+        onChange={onEventFilterChange}
+      />
+      <FilterDropdown<string>
+        ariaLabel="Agent filter"
+        value={agentFilter}
+        options={[{ value: "", label: "All agents" }, ...agentOptions]}
+        onChange={onAgentFilterChange}
+      />
+      <FilterDropdown<"7" | "30" | "all">
+        ariaLabel="Time range filter"
+        value={rangeFilter}
+        options={[
+          { value: "all", label: "All time" },
+          { value: "7", label: "Last 7 days" },
+          { value: "30", label: "Last 30 days" },
+        ]}
+        onChange={onRangeFilterChange}
+      />
+    </div>
+  );
+
+  if (loading) {
+    return (
+      <div className="space-y-3 pt-4">
+        {filterBar}
+        <Loading text="Loading audit logs…" />
+      </div>
+    );
+  }
+  if (logs.length === 0) {
+    return (
+      <div className="space-y-3 pt-4">
+        {filterBar}
+        <EmptyHint>No audit logs match these filters.</EmptyHint>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3 pt-4">
+      {filterBar}
       <div className="overflow-hidden rounded-xl border border-xyne-border">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-xyne-border bg-xyne-surface-subtle text-left text-[11px] uppercase tracking-wide text-xyne-fg-tertiary">
               <th className="px-3 py-2 font-medium">Time</th>
               <th className="px-3 py-2 font-medium">Event</th>
+              {showOrgLabels && <th className="px-3 py-2 font-medium">Org</th>}
               <th className="px-3 py-2 font-medium">Description</th>
             </tr>
           </thead>
@@ -2006,6 +2184,11 @@ function AuditTab({
                       label={l.eventType}
                     />
                   </td>
+                  {showOrgLabels && (
+                    <td className="px-3 py-2">
+                      <OrgBadge orgName={l.orgName} orgId={l.orgId ?? undefined} />
+                    </td>
+                  )}
                   <td className="px-3 py-2 text-xyne-fg-secondary">{l.description}</td>
                 </tr>
               );
@@ -2043,11 +2226,13 @@ function UsageTab({
   stats,
   range,
   onRangeChange,
+  showOrgLabels,
 }: {
   loading: boolean;
   stats: AgentUsageStat[];
   range: 7 | 30 | "all";
   onRangeChange: (v: 7 | 30 | "all") => void;
+  showOrgLabels: boolean;
 }) {
   const totals = stats.reduce(
     (acc, s) => ({
@@ -2101,6 +2286,7 @@ function UsageTab({
               <thead>
                 <tr className="border-b border-xyne-border bg-xyne-surface-subtle text-left text-[11px] uppercase tracking-wide text-xyne-fg-tertiary">
                   <th className="px-3 py-2 font-medium">Agent</th>
+                  {showOrgLabels && <th className="px-3 py-2 font-medium">Org</th>}
                   <th className="px-3 py-2 text-right font-medium">Runs</th>
                   <th className="px-3 py-2 text-right font-medium">Tokens In</th>
                   <th className="px-3 py-2 text-right font-medium">Tokens Out</th>
@@ -2111,12 +2297,17 @@ function UsageTab({
               <tbody>
                 {stats.map((s) => (
                   <tr
-                    key={s.agentSlug}
+                    key={`${s.orgId ?? "org"}:${s.agentSlug}`}
                     className="border-b border-xyne-border-subtle hover:bg-xyne-surface-subtle/40"
                   >
                     <td className="px-3 py-2 font-medium text-xyne-fg-primary">
                       {s.agentSlug}
                     </td>
+                    {showOrgLabels && (
+                      <td className="px-3 py-2">
+                        <OrgBadge orgName={s.orgName} orgId={s.orgId} />
+                      </td>
+                    )}
                     <td className="px-3 py-2 text-right font-mono text-xyne-fg-secondary">
                       {s.runs.toLocaleString()}
                     </td>
@@ -2152,6 +2343,17 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function OrgBadge({ orgName, orgId }: { orgName?: string | null; orgId?: string | null }) {
+  return (
+    <Badge
+      as="span"
+      size="sm"
+      variant="neutral"
+      label={orgName ?? orgId ?? "unknown org"}
+    />
+  );
+}
+
 /* ── Scheduled jobs tab ────────────────────────────────────────── */
 
 function ScheduledTab({
@@ -2162,9 +2364,16 @@ function ScheduledTab({
   pageSize,
   statusFilter,
   onStatusFilterChange,
+  agentOptions,
+  agentFilter,
+  onAgentFilterChange,
+  userOptions,
+  userFilter,
+  onUserFilterChange,
   onPrev,
   onNext,
   onCancel,
+  showOrgLabels,
 }: {
   loading: boolean;
   jobs: AdminScheduledJob[];
@@ -2173,27 +2382,48 @@ function ScheduledTab({
   pageSize: number;
   statusFilter: "" | "active" | "completed" | "cancelled";
   onStatusFilterChange: (v: "" | "active" | "completed" | "cancelled") => void;
+  agentOptions: { value: string; label: string }[];
+  agentFilter: string;
+  onAgentFilterChange: (v: string) => void;
+  userOptions: { value: string; label: string }[];
+  userFilter: string;
+  onUserFilterChange: (v: string) => void;
   onPrev: () => void;
   onNext: () => void;
   onCancel: (j: AdminScheduledJob) => void;
+  showOrgLabels: boolean;
 }) {
   return (
     <div className="space-y-3 pt-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-[11px] text-xyne-fg-muted">
           All scheduled jobs across users. Cancel stops cron execution and removes the BullMQ scheduler.
         </p>
-        <FilterDropdown<"" | "active" | "completed" | "cancelled">
-          ariaLabel="Status filter"
-          value={statusFilter}
-          options={[
-            { value: "", label: "All statuses" },
-            { value: "active", label: "Active" },
-            { value: "completed", label: "Completed" },
-            { value: "cancelled", label: "Cancelled" },
-          ]}
-          onChange={onStatusFilterChange}
-        />
+        <div className="flex items-center gap-2">
+          <FilterDropdown<string>
+            ariaLabel="Agent filter"
+            value={agentFilter}
+            options={[{ value: "", label: "All agents" }, ...agentOptions]}
+            onChange={onAgentFilterChange}
+          />
+          <FilterDropdown<string>
+            ariaLabel="User filter"
+            value={userFilter}
+            options={[{ value: "", label: "All users" }, ...userOptions]}
+            onChange={onUserFilterChange}
+          />
+          <FilterDropdown<"" | "active" | "completed" | "cancelled">
+            ariaLabel="Status filter"
+            value={statusFilter}
+            options={[
+              { value: "", label: "All statuses" },
+              { value: "active", label: "Active" },
+              { value: "completed", label: "Completed" },
+              { value: "cancelled", label: "Cancelled" },
+            ]}
+            onChange={onStatusFilterChange}
+          />
+        </div>
       </div>
 
       {loading ? (
@@ -2209,6 +2439,7 @@ function ScheduledTab({
               <thead>
                 <tr className="border-b border-xyne-border bg-xyne-surface-subtle text-left text-[11px] uppercase tracking-wide text-xyne-fg-tertiary">
                   <th className="px-3 py-2 font-medium">User</th>
+                  {showOrgLabels && <th className="px-3 py-2 font-medium">Org</th>}
                   <th className="px-3 py-2 font-medium">Agent</th>
                   <th className="px-3 py-2 font-medium">Type</th>
                   <th className="px-3 py-2 font-medium">Schedule</th>
@@ -2237,6 +2468,11 @@ function ScheduledTab({
                         </div>
                       )}
                     </td>
+                    {showOrgLabels && (
+                      <td className="px-3 py-2">
+                        <OrgBadge orgName={j.orgName} orgId={j.orgId} />
+                      </td>
+                    )}
                     <td className="px-3 py-2 font-medium text-xyne-fg-primary">
                       {j.agentSlug}
                     </td>
@@ -2527,10 +2763,11 @@ function GlobalMcpTab({
 function ViewAgentBody({ agent }: { agent: Agent }) {
   const cfgTools = (
     agent.config as
-      | { tools?: { subagents?: string[]; direct?: string[]; custom?: string[]; gateway?: string[] } }
+      | { tools?: { subagents?: string[]; direct?: string[]; custom?: string[]; gateway?: string[]; callableAgents?: string[] } }
       | undefined
   )?.tools;
   const subagents = cfgTools?.subagents ?? [];
+  const callableAgents = cfgTools?.callableAgents ?? [];
 
   return (
     <div className="space-y-4 text-[13px]">
@@ -2576,6 +2813,24 @@ function ViewAgentBody({ agent }: { agent: Agent }) {
           <div className="mt-1 flex flex-wrap gap-1">
             {subagents.map((s) => (
               <Badge key={s} as="span" size="sm" variant="info" label={s} />
+            ))}
+          </div>
+        </div>
+      )}
+      {callableAgents.length > 0 && (
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-xyne-fg-tertiary">
+            Agents ({callableAgents.length})
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {callableAgents.map((s) => (
+              <Badge
+                key={s}
+                as="span"
+                size="sm"
+                variant="warning"
+                label={`${s} · Agent · heavyweight`}
+              />
             ))}
           </div>
         </div>
@@ -2695,4 +2950,3 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
     <p className="py-12 text-center text-[13px] text-xyne-fg-muted">{children}</p>
   );
 }
-

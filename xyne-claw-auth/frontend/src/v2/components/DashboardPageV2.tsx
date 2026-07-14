@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { listAgents } from "../../lib/api";
-import type { Agent } from "../../lib/types";
+import type { AgentLight } from "../../lib/types";
 import { AgentCard } from "./common/AgentCard";
 import { CreateAgentModal } from "../../components/CreateAgentModal";
 
@@ -10,7 +10,7 @@ interface Props {
 }
 
 export function DashboardPageV2({ userId, isAdmin }: Props) {
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<AgentLight[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
 
@@ -100,4 +100,3 @@ export function DashboardPageV2({ userId, isAdmin }: Props) {
     </div>
   );
 }
-

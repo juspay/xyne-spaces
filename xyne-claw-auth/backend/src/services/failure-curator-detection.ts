@@ -78,6 +78,7 @@ export interface NegativeSession {
  * it tripped more than one detector (the curator decides the primary).
  */
 export async function selectNegativeSessions(opts: {
+  orgId: string;
   agentSlug: string;
   since: Date;
   now: Date;
@@ -112,6 +113,7 @@ export async function selectNegativeSessions(opts: {
            r."lastRetryReason", r."toolInvocations"
       FROM "agent_runs" r
      WHERE r."agentSlug" = ${opts.agentSlug}
+       AND r."orgId" = ${opts.orgId}
        AND r."completedAt" >= ${opts.since}
        AND r."completedAt" <  ${opts.now}
        AND r.status = 'completed'
@@ -155,6 +157,7 @@ export async function selectNegativeSessions(opts: {
            r."lastRetryReason", r."toolInvocations"
       FROM "agent_runs" r
      WHERE r."agentSlug" = ${opts.agentSlug}
+       AND r."orgId" = ${opts.orgId}
        AND r."completedAt" >= ${opts.since}
        AND r."completedAt" <  ${opts.now}
        AND (
@@ -207,6 +210,7 @@ export async function selectNegativeSessions(opts: {
          AND cm."createdAt" >  r."completedAt"
          AND cm."createdAt" <= r."completedAt" + INTERVAL '10 minutes'
        WHERE r."agentSlug" = ${opts.agentSlug}
+         AND r."orgId" = ${opts.orgId}
          AND r."completedAt" >= ${opts.since}
          AND r."completedAt" <  ${opts.now}
          AND cm.content ~* ${FRUSTRATION_REGEX}
@@ -229,6 +233,7 @@ export async function selectNegativeSessions(opts: {
          AND r2."startedAt" >  r."completedAt"
          AND r2."startedAt" <= r."completedAt" + INTERVAL '10 minutes'
        WHERE r."agentSlug" = ${opts.agentSlug}
+         AND r."orgId" = ${opts.orgId}
          AND r."completedAt" >= ${opts.since}
          AND r."completedAt" <  ${opts.now}
          AND r2.task ~* ${FRUSTRATION_REGEX}

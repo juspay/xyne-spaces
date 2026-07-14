@@ -8,6 +8,7 @@ import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { evictSession } from "../mcp/runner.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("connections");
@@ -319,7 +320,8 @@ router.post("/:userId/connections/auto-connect-spaces", async (req: Request<{ us
     // looks at `req.cookies.xyne_session` *after* confirming `workspaceId` is
     // present (header or `xyne_last_workspace` cookie). Without it the
     // session-refresh path is skipped entirely → 401 once the JWT expires.
-    if (lastWorkspace) credentials["workspaceId"] = lastWorkspace;
+    const resolvedWorkspaceId = lastWorkspace ?? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null);
+    if (resolvedWorkspaceId) credentials["workspaceId"] = resolvedWorkspaceId;
     // TEMP [sid-debug] — remove after verifying
     log.info(`[sid-debug] auto-connect-spaces storing credentials keys=[${Object.keys(credentials).join(",")}] (no values)`);
     const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);

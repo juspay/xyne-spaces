@@ -207,6 +207,14 @@ export function AgentDetailHeader({
               variant={agent.enabled ? "success" : "warning"}
               size="sm"
             />
+            {agent.delegationTier === "orchestrator" && (
+              <Badge
+                as="span"
+                label="Orchestrator tier"
+                variant="neutral"
+                size="sm"
+              />
+            )}
           </div>
         </div>
       </div>

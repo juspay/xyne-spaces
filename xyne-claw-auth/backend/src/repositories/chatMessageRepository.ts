@@ -10,6 +10,7 @@ export const chatMessageRepository = {
     status?: string;
     reasoning?: string | null;
     parentId?: string | null;
+    orgId: string;
   }) =>
     prisma.chatMessage.create({ data }),
 
@@ -20,6 +21,13 @@ export const chatMessageRepository = {
     id: string,
     data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null },
   ) => prisma.chatMessage.update({ where: { id }, data }),
+
+  /** Persist mid-run PARTIAL content, but ONLY while the row is still "running".
+   *  Conditional (updateMany + status guard) so a late/cross-pod debounced write
+   *  can never clobber the final content the completion callback wrote (which
+   *  flips status off "running"). Returns count of rows updated (0 = ignored). */
+  updatePartialContent: (id: string, data: { content?: string; reasoning?: string | null }) =>
+    prisma.chatMessage.updateMany({ where: { id, status: "running" }, data }),
 
   /** Hard-delete a single message by id. Used to drop a duplicate run's
    *  pre-created assistant placeholder when that run is skipped because another

@@ -160,6 +160,22 @@ async function grafanaFetch(baseUrl: string, token: string, path: string, option
   });
 }
 
+async function resolveDatasourceByProxyId(
+  baseUrl: string,
+  token: string,
+  numericId: number,
+): Promise<{ uid: string; type: string } | null> {
+  try {
+    const res = await grafanaFetch(baseUrl, token, `/api/datasources/${numericId}`);
+    if (!res.ok) return null;
+    const ds = (await res.json()) as { uid?: string; type?: string };
+    if (!ds.uid || !ds.type) return null;
+    return { uid: ds.uid, type: ds.type };
+  } catch {
+    return null;
+  }
+}
+
 /** Build a Grafana Explore deep link. The query is carried as a URL-encoded
  *  JSON `panes` data parameter — it can never alter the host/path. Base URL
  *  is the connection's credential `url` (normalized in mcp.ts as
@@ -291,7 +307,7 @@ function inlineCitationToken(chunkIndex: number): string {
 
 /** Prepend the chunk's inline citation token to the result's first line.
  *  Mirrors spaces-tools' prefixChunk so the agent copies a clickable token. */
-function prefixChunk(chunkIndex: number, text: string): string {
+export function prefixChunk(chunkIndex: number, text: string): string {
   const lines = text.split("\n");
   return [`${inlineCitationToken(chunkIndex)} ${lines[0]}`, ...lines.slice(1)].join("\n");
 }
@@ -381,8 +397,11 @@ export async function handleGrafanaQueryLogs(
   }
   result += "**Logs:**\n```\n" + entries.join("\n") + "\n```";
 
-  const datasourceUid = (params["datasourceUid"] as string | undefined) ?? "victoria-logs";
-  const datasourceType = (params["datasourceType"] as string | undefined) ?? "victoriametrics-logs-datasource";
+  const resolvedLogsDs = await resolveDatasourceByProxyId(baseUrl, token, 8);
+  const datasourceUid =
+    (params["datasourceUid"] as string | undefined) ?? resolvedLogsDs?.uid ?? "victoria-logs";
+  const datasourceType =
+    (params["datasourceType"] as string | undefined) ?? resolvedLogsDs?.type ?? "victoriametrics-logs-datasource";
   const url = buildGrafanaExploreUrl(baseUrl, {
     datasourceUid,
     datasourceType,
@@ -477,10 +496,11 @@ export async function handleGrafanaQueryMetrics(
     }
   }
 
-  // Read datasource uid/type from params (defaults match the xyne Grafana's
-  // VictoriaMetrics datasource) so callers can override per-instance.
-  const datasourceUid = (params["datasourceUid"] as string | undefined) ?? "victoria-metrics";
-  const datasourceType = (params["datasourceType"] as string | undefined) ?? "victoriametrics-datasource";
+  const resolvedMetricsDs = await resolveDatasourceByProxyId(baseUrl, token, 7);
+  const datasourceUid =
+    (params["datasourceUid"] as string | undefined) ?? resolvedMetricsDs?.uid ?? "victoria-metrics";
+  const datasourceType =
+    (params["datasourceType"] as string | undefined) ?? resolvedMetricsDs?.type ?? "victoriametrics-datasource";
   const url = buildGrafanaExploreUrl(baseUrl, {
     datasourceUid,
     datasourceType,

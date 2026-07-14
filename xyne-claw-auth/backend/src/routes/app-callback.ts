@@ -73,10 +73,28 @@ async function spacesAppFetch(path: string, body: Record<string, unknown>, appTo
   return res.json();
 }
 
-async function getAgentToken(agentSlug: string | undefined): Promise<string | null> {
-  const agent = agentSlug
-    ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
-    : await prisma.agent.findFirst({ where: { isDefault: true } });
+async function findAgent(agentSlug: string | undefined, spacesAppId?: string) {
+  if (spacesAppId) return prisma.agent.findFirst({ where: { spacesAppId } });
+  if (!agentSlug) {
+    log.error(`[app-callback] org/app context is required; refusing global default-agent lookup spacesAppId=${spacesAppId ?? "none"} agentSlug=default`);
+    return null;
+  }
+  const matches = await prisma.agent.findMany({
+    where: { slug: agentSlug },
+    take: 2,
+  });
+  if (matches.length > 1) {
+    log.error(`[app-callback] ambiguous legacy agent slug=${agentSlug}; refusing global lookup`);
+    return null;
+  }
+  if (matches[0]) {
+    log.warn(`[app-callback] deprecated legacy slug-only agent lookup slug=${agentSlug}; pass spacesAppId`);
+  }
+  return matches[0] ?? null;
+}
+
+async function getAgentToken(agentSlug: string | undefined, spacesAppId?: string): Promise<string | null> {
+  const agent = await findAgent(agentSlug, spacesAppId);
 
   if (!agent?.spacesAppToken) return null;
 
@@ -92,6 +110,7 @@ async function escalateWriteActionFailure(opts: {
   writeUserId: string;
   signature: string;
   agentSlug: string | undefined;
+  spacesAppId?: string | undefined;
   channelId: string | undefined;
   conversationId: string | undefined;
   originalTask: string | undefined;
@@ -104,6 +123,7 @@ async function escalateWriteActionFailure(opts: {
     writeUserId,
     signature,
     agentSlug,
+    spacesAppId,
     channelId,
     conversationId,
     originalTask,
@@ -115,15 +135,13 @@ async function escalateWriteActionFailure(opts: {
     return;
   }
 
-  const appToken = await getAgentToken(agentSlug);
+  const appToken = await getAgentToken(agentSlug, spacesAppId);
   if (!appToken) {
     log.error(`[app-callback] Cannot post failure message — no agent token for ${agentSlug ?? "(default)"}`);
     return;
   }
 
-  const agent = agentSlug
-    ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
-    : await prisma.agent.findFirst({ where: { isDefault: true } });
+  const agent = await findAgent(agentSlug, spacesAppId);
 
   const retryId = crypto.randomUUID();
   const dismissId = crypto.randomUUID();
@@ -145,6 +163,7 @@ async function escalateWriteActionFailure(opts: {
     `      userId: "${writeUserId}"`,
     `      signature: "${signature}"`,
     `      agentSlug: "${agentSlug ?? ""}"`,
+    ...(agent?.spacesAppId ? [`      spacesAppId: "${agent.spacesAppId}"`] : []),
     ...(channelId ? [`      channelId: "${channelId}"`] : []),
     ...(conversationId ? [`      conversationId: "${conversationId}"`] : []),
     ...(originalTask ? [`      originalTask: ${JSON.stringify(originalTask)}`] : []),
@@ -188,6 +207,7 @@ async function startWriteRetryRun(opts: {
   errorReason: string;
   writeUserId: string;
   agentSlug: string | undefined;
+  spacesAppId?: string | undefined;
   channelId: string | undefined;
   conversationId: string | undefined;
   originalTask: string | undefined;
@@ -199,18 +219,23 @@ async function startWriteRetryRun(opts: {
     errorReason,
     writeUserId,
     agentSlug,
+    spacesAppId,
     channelId,
     conversationId,
     originalTask,
     paramsStr,
   } = opts;
 
-  const agent = agentSlug
-    ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
-    : await prisma.agent.findFirst({ where: { isDefault: true } });
+  const agent = await findAgent(agentSlug, spacesAppId);
 
   if (!agent?.spacesAppToken || !agent.spacesAppId) {
     log.error(`[app-callback] write-retry: no agent found for ${agentSlug ?? "(default)"}`);
+    return;
+  }
+  const retryOrgId = agent.orgId
+    ?? (await prisma.user.findUnique({ where: { id: writeUserId }, select: { orgId: true } }))?.orgId;
+  if (!retryOrgId) {
+    log.error(`[app-callback] write-retry: no orgId for user=${writeUserId} agent=${agentSlug ?? "(default)"}`);
     return;
   }
 
@@ -236,6 +261,7 @@ async function startWriteRetryRun(opts: {
         task: retryTask,
         context: retryContext,
         agentSlug: agentSlug ?? undefined,
+        orgId: retryOrgId,
         conversationId: conversationId ?? undefined,
         channelId: channelId ?? undefined,
         callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
@@ -259,6 +285,8 @@ async function startWriteRetryRun(opts: {
         channelName: channelId ?? "",
         conversationId: conversationId ?? "",
         task: `Retry after failure: ${originalTask ?? tool}`,
+        agentId: agent.id,
+        agentOrgId: agent.orgId ?? null,
         agentSlug: agentSlug ?? "",
         responseMode: "conversation" as const,
         appToken,
@@ -277,6 +305,7 @@ async function startWriteRetryRun(opts: {
           userId: writeUserId,
           task: retryTask,
           agentSlug: agentSlug ?? "",
+          orgId: retryOrgId,
           conversationId: conversationId ?? "",
           channelId: channelId ?? "",
           eventType: "APP_MENTIONED",
@@ -325,6 +354,7 @@ router.post("/callback", async (req: Request, res: Response) => {
     const questionId = context["questionId"] as string;
     const answer = context["answer"] as string;
     const answerAgentSlug = context["agentSlug"] as string;
+    const answerSpacesAppId = context["spacesAppId"] as string | undefined;
     const answerChannelId = context["channelId"] as string;
     const answerConversationId = context["conversationId"] as string;
     const answerUserId = context["userId"] as string;
@@ -347,10 +377,16 @@ router.post("/callback", async (req: Request, res: Response) => {
     const optionsList = question?.options?.join(", ") ?? "";
 
     try {
-      const agent = await prisma.agent.findFirst({ where: { slug: answerAgentSlug } });
+      const agent = await findAgent(answerAgentSlug, answerSpacesAppId);
       const appToken = agent?.spacesAppToken
         ? decrypt(...agent.spacesAppToken.split(":") as [string, string, string], CONFIG.encryptionKey)
         : "";
+      const answerOrgId = agent?.orgId
+        ?? (await prisma.user.findUnique({ where: { id: answerUserId }, select: { orgId: true } }))?.orgId;
+      if (!answerOrgId) {
+        log.error(`[app-callback] answer: no orgId for user=${answerUserId} agent=${answerAgentSlug ?? "(default)"}`);
+        return;
+      }
 
       const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
       const runRes = await fetch(runUrl, {
@@ -366,6 +402,7 @@ router.post("/callback", async (req: Request, res: Response) => {
           conversationId: answerConversationId,
           channelId: answerChannelId,
           agentSlug: answerAgentSlug,
+          orgId: answerOrgId,
           callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
         }),
       });
@@ -380,6 +417,8 @@ router.post("/callback", async (req: Request, res: Response) => {
           channelName: answerChannelId,
           conversationId: answerConversationId,
           task: `User answered: ${answer}`,
+          agentId: agent.id,
+          agentOrgId: agent.orgId ?? null,
           agentSlug: answerAgentSlug,
           responseMode: "conversation",
           appToken,
@@ -407,6 +446,7 @@ router.post("/callback", async (req: Request, res: Response) => {
     const writeUserId = context["userId"] as string;
     const signature = context["signature"] as string;
     const agentSlug = context["agentSlug"] as string | undefined;
+    const spacesAppId = context["spacesAppId"] as string | undefined;
     const channelId = context["channelId"] as string | undefined;
     const conversationId = context["conversationId"] as string | undefined;
     const originalTask = context["originalTask"] as string | undefined;
@@ -422,14 +462,12 @@ router.post("/callback", async (req: Request, res: Response) => {
       return;
     }
 
-    const appToken = await getAgentToken(agentSlug);
+    const appToken = await getAgentToken(agentSlug, spacesAppId);
     if (appToken && (conversationId || channelId)) {
       try {
         const body: Record<string, unknown> = {
           markdownText: `🔄 Retrying **${humanizeToolName(tool ?? "unknown")}** — the agent is diagnosing the failure and will attempt again.`,
-          userId: (agentSlug
-            ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
-            : await prisma.agent.findFirst({ where: { isDefault: true } }))?.spacesAppUserId ?? "",
+          userId: (await findAgent(agentSlug, spacesAppId))?.spacesAppUserId ?? "",
           metadata: { contentFormat: "markdown" },
         };
         if (conversationId) body.conversationId = conversationId;
@@ -444,6 +482,7 @@ router.post("/callback", async (req: Request, res: Response) => {
       errorReason: errorReason ?? "Unknown error",
       writeUserId,
       agentSlug,
+      spacesAppId,
       channelId,
       conversationId,
       originalTask,
@@ -460,6 +499,7 @@ router.post("/callback", async (req: Request, res: Response) => {
     const writeUserId = context["userId"] as string;
     const signature = context["signature"] as string;
     const agentSlug = context["agentSlug"] as string | undefined;
+    const spacesAppId = context["spacesAppId"] as string | undefined;
     const actionChannelId = context["channelId"] as string | undefined;
     const actionConversationId = context["conversationId"] as string | undefined;
     const actionOriginalTask = context["originalTask"] as string | undefined;
@@ -489,9 +529,7 @@ router.post("/callback", async (req: Request, res: Response) => {
       // xyne-spaces write tools — execute using the bot's app token, not the user's JWT
       if (serverType === "xyne-spaces" && tool === "spaces-send-message") {
         // Look up the agent that triggered this action by slug, falling back to default
-        const agent = agentSlug
-          ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
-          : await prisma.agent.findFirst({ where: { isDefault: true } });
+        const agent = await findAgent(agentSlug, spacesAppId);
         if (!agent?.spacesAppToken) {
           log.error(`[app-callback] spaces-send-message: no spacesAppToken for agent ${agentSlug ?? "(default)"}`);
           return;
@@ -711,6 +749,7 @@ router.post("/callback", async (req: Request, res: Response) => {
         writeUserId,
         signature,
         agentSlug,
+        spacesAppId,
         channelId: actionChannelId,
         conversationId: actionConversationId,
         originalTask: actionOriginalTask,

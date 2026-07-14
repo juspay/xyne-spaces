@@ -55,7 +55,7 @@ import {
   type SpacesTriggerSchema,
   type SpacesTriggerPropertySchema,
 } from "../../lib/api";
-import type { Agent } from "../../lib/types";
+import type { AgentLight } from "../../lib/types";
 import { Button } from "./ui/Button";
 import { Dialog } from "./ui/Dialog";
 import { useSnackbar } from "./ui/Snackbar";
@@ -187,7 +187,7 @@ function triggerOutputRefs(schema: SpacesTriggerSchema | undefined): string[] {
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  agents: Agent[];
+  agents: AgentLight[];
   onSaved: () => void;
   editingWorkflow?: ChainWorkflow | null;
 }

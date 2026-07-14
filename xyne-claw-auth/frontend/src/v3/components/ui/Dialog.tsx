@@ -133,5 +133,3 @@ export function Dialog({
     </BaseDialog.Root>
   );
 }
-
-export const DialogClose = BaseDialog.Close;

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Save, X } from "lucide-react";
-import type { Agent } from "../../../lib/types";
+import type { Agent, AgentLight } from "../../../lib/types";
 
 export const WELL_KNOWN_TOOLS = [
   { value: "Bitbucket__create_pull_request", label: "PR Created (Bitbucket)" },
@@ -18,7 +18,7 @@ export const WELL_KNOWN_TOOLS = [
 interface ChainEditorProps {
   agent: Agent;
   userId: string;
-  allAgents: Agent[];
+  allAgents: AgentLight[];
   onSave: (cfg: Record<string, unknown> | null) => Promise<void>;
   loadConfig: () => Promise<Record<string, unknown> | null>;
 }

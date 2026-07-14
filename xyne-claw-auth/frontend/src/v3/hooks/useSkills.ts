@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { listSkills, listAgents } from "../../lib/api";
+import { listSkills, listAgentsFull } from "../../lib/api";
 import type { Skill } from "../../lib/api";
 import type { Agent } from "../../lib/types";
 
@@ -28,7 +28,7 @@ export function useSkills(userId: string): UseSkillsReturn {
     try {
       const [skillList, agentList] = await Promise.all([
         listSkills(userId),
-        listAgents(userId),
+        listAgentsFull(userId),
       ]);
       setSkills(skillList);
       setAgents(agentList);

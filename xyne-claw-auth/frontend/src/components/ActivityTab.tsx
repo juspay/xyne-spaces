@@ -16,6 +16,7 @@ const SOURCE_BADGE: Record<string, string> = {
   spaces: "bg-blue-950 text-blue-400",
   scheduled: "bg-amber-950 text-amber-400",
   chat: "bg-purple-950 text-purple-400",
+  automation: "bg-fuchsia-950 text-fuchsia-300",
   api: "bg-zinc-800 text-zinc-300",
 };
 

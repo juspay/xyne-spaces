@@ -2,9 +2,11 @@ import { Worker, type Job } from "bullmq";
 import { redisService } from "../redis.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
+import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { ensureUserExists } from "../lib/users-jit.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { registerRunRecovery, type RecoverySessionContext } from "./run-recovery-worker.js";
 import type { ScheduledJobData } from "./scheduled-jobs-queue.js";
 
 import { createLogger } from "../logger.js";
@@ -13,7 +15,7 @@ const log = createLogger("scheduled-jobs-worker");
 let worker: Worker<ScheduledJobData> | undefined;
 
 async function processJob(job: Job<ScheduledJobData>): Promise<void> {
-  const { scheduledJobId, userId, agentSlug, task, context, channelId, conversationId } = job.data;
+  const { scheduledJobId, userId, agentSlug, channelId, conversationId } = job.data;
 
   log.info(`[scheduler] Firing job ${scheduledJobId} (agent: ${agentSlug})`);
 
@@ -23,6 +25,16 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
     log.info(`[scheduler] Job ${scheduledJobId} is ${row?.status ?? "missing"}, skipping`);
     return;
   }
+
+  // Read the prompt/context LIVE from the DB row rather than the BullMQ job
+  // payload. For cron jobs the payload's task/context is baked into the
+  // repeatable-job template at enqueue time, so an in-place edit via
+  // PATCH /scheduled-jobs/:id (or the scheduled-job-control "update" action)
+  // would otherwise never take effect. Sourcing them from the freshly-loaded
+  // row makes prompt edits a pure DB write with no Redis re-bind and keeps the
+  // runtime in sync with what the dashboard shows.
+  const task = row.task;
+  const context = row.context ?? undefined;
 
   // JIT-mirror the owning user from Spaces if needed. Without this, a job
   // that was scheduled by a user who later lost their claw_auth row (or
@@ -37,7 +49,9 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
 
   // Use a unique conversationId per run so the agent gets a fresh session
   // instead of resuming the thread's ongoing conversation.
-  const runConversationId = `scheduled_${scheduledJobId}_${Date.now()}`;
+  const scheduledFireTs = Date.now();
+  const runConversationId = `scheduled_${scheduledJobId}_${scheduledFireTs}`;
+  const idempotencyKey = `scheduled_${scheduledJobId}_${scheduledFireTs}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 128);
   const scheduledContext = [
     "## Scheduled Job",
     "This is an automated scheduled task — NOT a reply to a user message.",
@@ -55,8 +69,8 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
   // rather than failing the job (matches the loose-coupling style of the
   // rest of this worker).
   const agentRow = await prisma.agent.findUnique({
-    where: { slug: agentSlug },
-    select: { id: true, config: true },
+    where: { orgId_slug: { orgId: row.orgId, slug: agentSlug } },
+    select: { id: true, config: true, orgId: true, spacesAppId: true, spacesAppToken: true, spacesAppUserId: true },
   }).catch((err) => {
     log.warn(`[scheduler] agent lookup failed for ${agentSlug}:`, err instanceof Error ? err.message : err);
     return null;
@@ -66,9 +80,47 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
   // (premium) model a human chat would — not the platform default. Headless:
   // agent-level creds only, honoring the agent's providerAlwaysOn policy.
   // Best-effort — if the row is gone we fire without it (platform default).
-  const { providerConfigs, providerOrder } = agentRow
+  const { providerConfigs, providerOrder, parent: providerParent } = agentRow
     ? await resolveAgentProviderConfigs(agentRow)
-    : { providerConfigs: {}, providerOrder: [] as string[] };
+    : { providerConfigs: {}, providerOrder: [] as string[], parent: undefined as string | undefined };
+
+  const progressUrl = `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`;
+  const dispatchPayload = {
+    userId,
+    task,
+    context: scheduledContext,
+    agentSlug,
+    orgId: row.orgId,
+    channelId: channelId ?? "",
+    conversationId: runConversationId,
+    traceId: runConversationId,
+    callbackUrl,
+    progressUrl,
+    idempotencyKey,
+    detached: true,
+    // Marks the run as scheduler-triggered: xyne-claw strips the
+    // schedule-task tool for these runs (self-scheduling ban — see
+    // run.ts). The conversationId "scheduled_" prefix is the fallback
+    // signal for the same check.
+    eventType: "scheduled_job",
+    // Thread the row id into the run so the scheduledJobControl tool can
+    // resolve jobId:"current" (xyne-claw run.ts puts it on tool meta).
+    scheduledJobId,
+    // We persist the user ChatMessage and AgentRun ourselves below (with the
+    // correct triggerSource: "scheduled"). Without this flag, /internal/run
+    // also inserts an AgentRun for the same sessionId — tagged "spaces" — and
+    // our insert then loses the race with a P2002 unique-constraint error
+    // (~19/hour in prod), mislabeling every scheduled run as "spaces" in the
+    // Control Center. Mirrors how /agent-chat opts out (see run.ts).
+    __persistedByCaller: true,
+    ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
+    // Primary provider — the pod keys its model off `provider` (defaults to
+    // "spaces"/kimi when unset). Without this, scheduled runs ran on private-large
+    // regardless of the agent's configured provider.
+    ...(providerParent ? { provider: providerParent } : {}),
+    ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
+    ...(providerOrder.length > 1 ? { providerOrder } : {}),
+  };
 
   const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
     method: "POST",
@@ -76,30 +128,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
       "Content-Type": "application/json",
       ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
     },
-    body: JSON.stringify({
-      userId,
-      task,
-      context: scheduledContext,
-      agentSlug,
-      channelId,
-      conversationId: runConversationId,
-      callbackUrl,
-      // Marks the run as scheduler-triggered: xyne-claw strips the
-      // schedule-task tool for these runs (self-scheduling ban — see
-      // run.ts). The conversationId "scheduled_" prefix is the fallback
-      // signal for the same check.
-      eventType: "scheduled_job",
-      // We persist the user ChatMessage and AgentRun ourselves below (with the
-      // correct triggerSource: "scheduled"). Without this flag, /internal/run
-      // also inserts an AgentRun for the same sessionId — tagged "spaces" — and
-      // our insert then loses the race with a P2002 unique-constraint error
-      // (~19/hour in prod), mislabeling every scheduled run as "spaces" in the
-      // Control Center. Mirrors how /agent-chat opts out (see run.ts).
-      __persistedByCaller: true,
-      ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
-      ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
-      ...(providerOrder.length > 1 ? { providerOrder } : {}),
-    }),
+    body: JSON.stringify(dispatchPayload),
   });
 
   const body = (await res.json()) as { success: boolean; sessionId?: string; error?: string };
@@ -132,6 +161,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
       sessionId: body.sessionId,
       userId,
       agentSlug,
+      orgId: agentRow?.orgId ?? row.orgId ?? null,
       triggerSource: "scheduled",
       task,
       conversationId: runConversationId,
@@ -145,7 +175,38 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
       role: "user",
       content: task,
       status: "completed",
+      orgId: agentRow?.orgId ?? row.orgId ?? null,
     }).catch((e) => log.warn(`[scheduler] ChatMessage.create failed:`, e instanceof Error ? e.message : e));
+
+    const appToken = agentRow?.spacesAppToken
+      ? (() => {
+          const [ciphertext, iv, authTag] = agentRow.spacesAppToken.split(":");
+          return ciphertext && iv && authTag ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
+        })()
+      : "";
+    const recoveryCtx: RecoverySessionContext = {
+      mentionedUserId: agentRow?.spacesAppUserId ?? "",
+      senderId: userId,
+      senderName: userId,
+      channelId: channelId ?? "",
+      channelName: channelId ?? "",
+      conversationId: conversationId ?? runConversationId,
+      task,
+      agentSlug,
+      responseMode: "conversation",
+      appToken,
+      spacesAppId: agentRow?.spacesAppId ?? "",
+      spacesAppUserId: agentRow?.spacesAppUserId ?? "",
+      ...(row.workspaceId ? { workspaceId: row.workspaceId } : {}),
+    };
+    await registerRunRecovery({
+      rootSessionId: body.sessionId,
+      maxRetries: CONFIG.runRecoveryMaxRetries,
+      timeoutMs: CONFIG.runRecoveryTimeoutMs,
+      retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+      dispatchPayload,
+      sessionContext: recoveryCtx,
+    }).catch((e) => log.warn(`[scheduler] registerRunRecovery failed for ${body.sessionId}:`, e instanceof Error ? e.message : e));
   }
 
   log.info(`[scheduler] Job ${scheduledJobId} → session ${body.sessionId}`);

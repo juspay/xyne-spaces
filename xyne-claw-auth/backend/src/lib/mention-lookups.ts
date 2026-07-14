@@ -31,6 +31,7 @@ const log = createLogger("mention-lookups");
  * SPACES_DB_URL is configured; the HTTP builder below is the fallback.
  */
 export function buildSpacesMentionLookupsDb(workspaceId?: string): MentionLookups {
+  log.info(`[mention-lookups] using db lookups workspaceId=${workspaceId ?? "(none)"}`);
   return {
     // Scope ALL people lookups to the agent's workspace when known. Names AND
     // emails/handles collide across workspaces (the same person is imported into
@@ -58,6 +59,10 @@ export function buildSpacesMentionLookups(auth: SpacesMentionAuth): MentionLooku
   // that breaks tagging for headless runs, and needs no workspace/token. The
   // HTTP path below stays as the fallback for deployments without SPACES_DB_URL.
   if (spacesDbAvailable()) return buildSpacesMentionLookupsDb(auth.workspaceId);
+
+  log.info(
+    `[mention-lookups] using http lookups workspaceId=${auth.workspaceId ?? "(none)"} hasSession=${!!auth.sessionId}`,
+  );
 
   const baseHeaders: Record<string, string> = {
     Authorization: `Bearer ${auth.token}`,

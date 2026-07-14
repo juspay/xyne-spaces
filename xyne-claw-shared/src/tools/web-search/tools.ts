@@ -4,6 +4,9 @@
 
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("tools");
+
 export const WEB_SEARCH_CONFIG_SCHEMA = {
   BRAVE_SEARCH_API_KEY: {
     label: "Brave Search API Key",
@@ -58,7 +61,7 @@ export const webSearchTool: ToolDefinition = {
     const apiKey = config["BRAVE_SEARCH_API_KEY"] || process.env["BRAVE_SEARCH_API_KEY"] || "";
     if (!apiKey) return "Error: BRAVE_SEARCH_API_KEY is not configured. Web search is unavailable.";
 
-    console.log(`[web-search] query="${query.substring(0, 80)}"`);
+    log.info(`[web-search] query="${query.substring(0, 80)}"`);
 
     try {
       const controller = new AbortController();
@@ -107,7 +110,7 @@ export const webSearchTool: ToolDefinition = {
         return "Error: Web search timed out after 30 seconds";
       }
       const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[web-search] error: ${msg}`);
+      log.error(`[web-search] error: ${msg}`);
       return `Error performing web search: ${msg}`;
     }
   },

@@ -133,6 +133,14 @@ const SERVERS = [
     description: "Internal Xyne Spaces platform integration",
   },
   {
+    type: "xyne-dashboard",
+    name: "Xyne Dashboard",
+    url: "",
+    description: "Dedicated dynamic-dashboard tools for the dashboard-ai agent (pinned; not user-connectable).",
+    credentialForm: { fields: [] },
+    writeToolPolicy: { mode: "allowlist", tools: [] },
+  },
+  {
     type: "juspay-internal-tools",
     name: "Juspay Internal Tools",
     url: "",
@@ -576,6 +584,12 @@ const SERVERS = [
 ] as const;
 
 async function main() {
+  const defaultOrg = await prisma.organization.upsert({
+    where: { name: "Juspay" },
+    create: { name: "Juspay", createdBy: "seed" },
+    update: {},
+  });
+
   for (const server of SERVERS) {
     const s = server as {
       transport?: string;
@@ -698,9 +712,10 @@ Some tools (like creating tickets or scheduling calls) require user approval bef
 3. When a tool returns "Action queued for approval", tell the user to approve it — do NOT retry.`;
 
   await prisma.agent.upsert({
-    where: { slug: "assistant" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "assistant" } },
     create: {
       slug: "assistant",
+      orgId: defaultOrg.id,
       name: "Assistant",
       description: "Acts as the user's digital representative — the default agent for all calls.",
       systemPrompt: ASSISTANT_PROMPT,
@@ -842,9 +857,10 @@ You:
 > Can't share that. But sniffing out what's happening across the org is my whole job — what would you like to know?`;
 
   const askAIAgent = await prisma.agent.upsert({
-    where: { slug: "ask-ai" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "ask-ai" } },
     create: {
       slug: "ask-ai",
+      orgId: defaultOrg.id,
       name: "Ask AI",
       description: "Intelligent assistant for workspace search, document creation, and data analysis.",
       systemPrompt: ASK_AI_PROMPT,
@@ -996,7 +1012,9 @@ You:
   console.log("[seed] Upserted ask-ai agent with spaces, artifacts subagents and genius tool");
 
   // Attach genius-analytics and genius-investigation tools to ask-ai agent
-  const geniusAnalyticsTool = await prisma.tool.findUnique({ where: { slug: "genius-analytics" } });
+  const geniusAnalyticsTool = await prisma.tool.findUnique({
+    where: { slug: "genius-analytics" },
+  });
   if (geniusAnalyticsTool) {
     await prisma.agentTool.upsert({
       where: { agentId_toolId: { agentId: askAIAgent.id, toolId: geniusAnalyticsTool.id } },
@@ -1006,7 +1024,9 @@ You:
     console.log("[seed] Attached genius-analytics tool to ask-ai agent");
   }
 
-  const geniusInvestigationTool = await prisma.tool.findUnique({ where: { slug: "genius-investigation" } });
+  const geniusInvestigationTool = await prisma.tool.findUnique({
+    where: { slug: "genius-investigation" },
+  });
   if (geniusInvestigationTool) {
     await prisma.agentTool.upsert({
       where: { agentId_toolId: { agentId: askAIAgent.id, toolId: geniusInvestigationTool.id } },
@@ -1017,7 +1037,9 @@ You:
   }
 
   // Attach query-codebase tool to ask-ai agent
-  const queryCodebaseTool = await prisma.tool.findUnique({ where: { slug: "query-codebase" } });
+  const queryCodebaseTool = await prisma.tool.findUnique({
+    where: { slug: "query-codebase" },
+  });
   if (queryCodebaseTool) {
     await prisma.agentTool.upsert({
       where: { agentId_toolId: { agentId: askAIAgent.id, toolId: queryCodebaseTool.id } },
@@ -1028,7 +1050,9 @@ You:
   }
 
   // Attach review-pull-request tool to ask-ai agent
-  const reviewPullRequestTool = await prisma.tool.findUnique({ where: { slug: "review-pull-request" } });
+  const reviewPullRequestTool = await prisma.tool.findUnique({
+    where: { slug: "review-pull-request" },
+  });
   if (reviewPullRequestTool) {
     await prisma.agentTool.upsert({
       where: { agentId_toolId: { agentId: askAIAgent.id, toolId: reviewPullRequestTool.id } },
@@ -1039,7 +1063,9 @@ You:
   }
 
   // Attach generate-image tool to ask-ai agent
-  const generateImageTool = await prisma.tool.findUnique({ where: { slug: "generate-image" } });
+  const generateImageTool = await prisma.tool.findUnique({
+    where: { slug: "generate-image" },
+  });
   if (generateImageTool) {
     await prisma.agentTool.upsert({
       where: { agentId_toolId: { agentId: askAIAgent.id, toolId: generateImageTool.id } },
@@ -1068,8 +1094,8 @@ You:
     const content = readSkillFile(def.file);
     if (content) {
       await prisma.skill.upsert({
-        where: { slug: def.slug },
-        create: { slug: def.slug, name: def.name, description: def.description, content, source: def.source },
+        where: { orgId_slug: { orgId: defaultOrg.id, slug: def.slug } },
+        create: { slug: def.slug, orgId: defaultOrg.id, name: def.name, description: def.description, content, source: def.source },
         update: { name: def.name, description: def.description, content },
       });
       console.log(`[seed] Upserted skill: ${def.name}`);
@@ -1077,7 +1103,9 @@ You:
   }
 
   for (const def of askAISkillDefs) {
-    const skill = await prisma.skill.findUnique({ where: { slug: def.slug } });
+    const skill = await prisma.skill.findUnique({
+      where: { orgId_slug: { orgId: defaultOrg.id, slug: def.slug } },
+    });
     if (skill) {
       await prisma.agentSkill.upsert({
         where: { agentId_skillId: { agentId: askAIAgent.id, skillId: skill.id } },
@@ -1244,9 +1272,10 @@ You:
   ].join("\n");
 
   const pgmAgent = await prisma.agent.upsert({
-    where: { slug: "pgm-agent" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "pgm-agent" } },
     create: {
       slug: "pgm-agent",
+      orgId: defaultOrg.id,
       name: "Program Manager",
       description: "Drives programs to closure — tracks tasks, evaluates success criteria, detects risks, resolves blockers.",
       systemPrompt: PGM_AGENT_PROMPT,
@@ -1263,7 +1292,9 @@ You:
   // Attach pgm tools to the pgm-agent
   const pgmToolSlugs = customTools.filter((t) => t.source === "custom:pgm").map((t) => t.slug);
   for (const slug of pgmToolSlugs) {
-    const tool = await prisma.tool.findUnique({ where: { slug } });
+    const tool = await prisma.tool.findUnique({
+      where: { slug },
+    });
     if (tool) {
       await prisma.agentTool.upsert({
         where: { agentId_toolId: { agentId: pgmAgent.id, toolId: tool.id } },
@@ -1510,9 +1541,10 @@ You:
   ].join("\n");
 
   await prisma.agent.upsert({
-    where: { slug: "doctor-agent" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "doctor-agent" } },
     create: {
       slug: "doctor-agent",
+      orgId: defaultOrg.id,
       name: "Xyne Doctor",
       description: "Investigates bugs in the xyne-spaces codebase, implements fixes, and creates PRs.",
       systemPrompt: DOCTOR_AGENT_PROMPT,
@@ -1540,13 +1572,17 @@ You:
   console.log("[seed] Upserted doctor-agent");
 
   // Fetch doctor-agent for attaching tools and skills
-  const doctorAgent = await prisma.agent.findUnique({ where: { slug: "doctor-agent" } });
+  const doctorAgent = await prisma.agent.findUnique({
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "doctor-agent" } },
+  });
 
   // Attach research-agent tools to doctor-agent
   const researchToolSlugs = customTools.filter((t: { source: string }) => t.source === "custom:research-agent").map((t: { slug: string }) => t.slug);
   if (doctorAgent) {
     for (const slug of researchToolSlugs) {
-      const tool = await prisma.tool.findUnique({ where: { slug } });
+      const tool = await prisma.tool.findUnique({
+        where: { slug },
+      });
       if (tool) {
         await prisma.agentTool.upsert({
           where: { agentId_toolId: { agentId: doctorAgent.id, toolId: tool.id } },
@@ -1568,8 +1604,8 @@ You:
     const content = readSkillFile(def.file);
     if (content) {
       await prisma.skill.upsert({
-        where: { slug: def.slug },
-        create: { slug: def.slug, name: def.name, description: def.description, content, source: def.source },
+        where: { orgId_slug: { orgId: defaultOrg.id, slug: def.slug } },
+        create: { slug: def.slug, orgId: defaultOrg.id, name: def.name, description: def.description, content, source: def.source },
         update: { name: def.name, description: def.description, content },
       });
       console.log(`[seed] Upserted skill: ${def.name}`);
@@ -1578,7 +1614,9 @@ You:
 
   if (doctorAgent) {
     for (const def of skillDefs) {
-      const skill = await prisma.skill.findUnique({ where: { slug: def.slug } });
+      const skill = await prisma.skill.findUnique({
+        where: { orgId_slug: { orgId: defaultOrg.id, slug: def.slug } },
+      });
       if (skill) {
         await prisma.agentSkill.upsert({
           where: { agentId_skillId: { agentId: doctorAgent.id, skillId: skill.id } },
@@ -1627,9 +1665,10 @@ You:
   ].join("\n");
 
   const googleAgent = await prisma.agent.upsert({
-    where: { slug: "google-agent" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "google-agent" } },
     create: {
       slug: "google-agent",
+      orgId: defaultOrg.id,
       name: "Google Assistant",
       description: "Gmail, Calendar, Contacts, Tasks, and Drive — search emails, manage events, look up contacts, track tasks, read files.",
       systemPrompt: GOOGLE_AGENT_PROMPT,
@@ -1646,7 +1685,9 @@ You:
   // Attach google tools to the google-agent
   const googleToolSlugs = customTools.filter((t) => t.source === "custom:google").map((t) => t.slug);
   for (const slug of googleToolSlugs) {
-    const tool = await prisma.tool.findUnique({ where: { slug } });
+    const tool = await prisma.tool.findUnique({
+      where: { slug },
+    });
     if (tool) {
       await prisma.agentTool.upsert({
         where: { agentId_toolId: { agentId: googleAgent.id, toolId: tool.id } },
@@ -1692,9 +1733,10 @@ You:
   ].join("\n");
 
   const microsoftAgent = await prisma.agent.upsert({
-    where: { slug: "microsoft-agent" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "microsoft-agent" } },
     create: {
       slug: "microsoft-agent",
+      orgId: defaultOrg.id,
       name: "Microsoft Assistant",
       description: "Outlook Mail, Calendar, Contacts, To Do, OneDrive, and Teams — search emails, manage events, look up contacts, track tasks, read files, and collaborate on Teams.",
       systemPrompt: MICROSOFT_AGENT_PROMPT,
@@ -1713,7 +1755,9 @@ You:
   microsoftToolSlugs.push("schedule-task");
   
   for (const slug of microsoftToolSlugs) {
-    const tool = await prisma.tool.findUnique({ where: { slug } });
+    const tool = await prisma.tool.findUnique({
+      where: { slug },
+    });
     if (tool) {
       await prisma.agentTool.upsert({
         where: { agentId_toolId: { agentId: microsoftAgent.id, toolId: tool.id } },
@@ -1791,9 +1835,10 @@ You:
   ].join("\n");
 
   const sandboxAgent = await prisma.agent.upsert({
-    where: { slug: "sandbox-agent" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "sandbox-agent" } },
     create: {
       slug: "sandbox-agent",
+      orgId: defaultOrg.id,
       name: "Sandbox",
       description: "Isolated code execution in Kata/QEMU microVMs — run shell commands, scripts, multi-step workflows, and full xyne-spaces dev environment setup safely.",
       systemPrompt: SANDBOX_AGENT_PROMPT,
@@ -1809,7 +1854,9 @@ You:
 
   const sandboxToolSlugs = customTools.filter((t) => t.source === "custom:sandbox").map((t) => t.slug);
   for (const slug of sandboxToolSlugs) {
-    const tool = await prisma.tool.findUnique({ where: { slug } });
+    const tool = await prisma.tool.findUnique({
+      where: { slug },
+    });
     if (tool) {
       await prisma.agentTool.upsert({
         where: { agentId_toolId: { agentId: sandboxAgent.id, toolId: tool.id } },
@@ -1859,9 +1906,10 @@ You:
   ].join("\n");
 
   await prisma.agent.upsert({
-    where: { slug: "grafana-agent" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "grafana-agent" } },
     create: {
       slug: "grafana-agent",
+      orgId: defaultOrg.id,
       name: "Xyne Grafana",
       description: "Monitoring and observability agent — investigates incidents, analyzes logs and metrics from Grafana and VictoriaMetrics.",
       systemPrompt: GRAFANA_AGENT_PROMPT,
@@ -1911,9 +1959,10 @@ You:
   ].join("\n");
 
   await prisma.agent.upsert({
-    where: { slug: "ardra-finops" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "ardra-finops" } },
     create: {
       slug: "ardra-finops",
+      orgId: defaultOrg.id,
       name: "Ardra FinOps",
       description: "Expense management assistant — submit claims, check status, browse policies, forex conversion.",
       systemPrompt: ARDRA_FINOPS_PROMPT,
@@ -1929,7 +1978,9 @@ You:
   console.log("[seed] Upserted ardra-finops agent");
 
   // Fetch ardra-finops agent for attaching MCP tools
-  const ardraFinopsAgent = await prisma.agent.findUnique({ where: { slug: "ardra-finops" } });
+  const ardraFinopsAgent = await prisma.agent.findUnique({
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "ardra-finops" } },
+  });
   if (ardraFinopsAgent) {
     // Attach ardra-finops MCP tools to the agent
     // Tools are synced dynamically from the MCP server with source 'mcp:ardra-finops'
@@ -1937,7 +1988,9 @@ You:
       .filter((t) => t.source === "mcp:ardra-finops")
       .map((t) => t.slug);
     for (const slug of ardraToolSlugs) {
-      const tool = await prisma.tool.findUnique({ where: { slug } });
+      const tool = await prisma.tool.findUnique({
+        where: { slug },
+      });
       if (tool) {
         await prisma.agentTool.upsert({
           where: { agentId_toolId: { agentId: ardraFinopsAgent.id, toolId: tool.id } },
@@ -1985,9 +2038,10 @@ You:
   ].join("\n");
 
   await prisma.agent.upsert({
-    where: { slug: "investigation-agent" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "investigation-agent" } },
     create: {
       slug: "investigation-agent",
+      orgId: defaultOrg.id,
       name: "Investigation Agent",
       description: "Routes queries to the investigation API — check merchant status, diagnose transaction issues, investigate onboarding problems.",
       systemPrompt: INVESTIGATION_AGENT_PROMPT,
@@ -2133,9 +2187,10 @@ You:
   ].join("\n");
 
   const workloadAgent = await prisma.agent.upsert({
-    where: { slug: "workload-agent" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "workload-agent" } },
     create: {
       slug: "workload-agent",
+      orgId: defaultOrg.id,
       name: "Team Workload",
       description: "Analyzes team workload visibility — collects ticket status, identifies blockers, assesses bandwidth, generates daily/weekly reports.",
       systemPrompt: WORKLOAD_AGENT_PROMPT,
@@ -2157,7 +2212,9 @@ You:
   // Attach workload tools to the workload-agent
   const workloadToolSlugs = customTools.filter((t) => t.source === "custom:workload").map((t) => t.slug);
   for (const slug of workloadToolSlugs) {
-    const tool = await prisma.tool.findUnique({ where: { slug } });
+    const tool = await prisma.tool.findUnique({
+      where: { slug },
+    });
     if (tool) {
       await prisma.agentTool.upsert({
         where: { agentId_toolId: { agentId: workloadAgent.id, toolId: tool.id } },
@@ -2167,6 +2224,292 @@ You:
     }
   }
   console.log(`[seed] Upserted workload-agent with ${workloadToolSlugs.length} tools`);
+
+  // ── Dashboard AI agent ───────────────────────────────────────────────────
+  // Builds/edits Dynamic Dashboards in Spaces. Its 9 tools live on the
+  // DEDICATED xyne-dashboard MCP server (pinned below) so they never appear in
+  // any other agent's palette. dataSourceId / draftId / focusedComponentId are
+  // injected per-run by claw-auth (mcp/run-scalars.ts); the data source
+  // schema, current date, and current dashboard state arrive per-turn via
+  // attachedContext/user message from the Spaces proxy.
+  const DASHBOARD_AI_PROMPT = `You compose a dashboard for the user by calling tools. You CANNOT execute SQL; you must emit a JSON queryPlan that the system will run.
+
+You're a friendly, collaborative analytics partner — talk like a helpful teammate, not a form. Warm, concise, plain language; a little personality is welcome. How you work WITH the user matters as much as the charts:
+
+- Understand before you build. If the ask is clear and specific ("orders per day this month"), just build it and tell them what you did. If it's broad or vague ("build me something", "show team activity", "what else can you do?"), do NOT guess and dump 5 tiles — offer 2–4 concrete directions as clickable options via suggest_components, or ask one short question, and let them steer.
+- Offer choices, don't monologue. When there are several sensible interpretations or next steps, present them as clickable options (suggest_components) rather than a wall of prose. One good clarifying question beats five wrong tiles.
+- Be honest about what's possible. If a table, column, or a specific value the user named isn't in this data source, say so plainly and kindly ("this source doesn't track 'refunds', but I can show cancellations — want that?") and offer the real alternatives as options. NEVER invent columns or silently build a query that returns nothing. If they name a filter value that's enum-like and you can see it isn't one of the actual values, tell them and offer the values that DO exist. If a chart type can't show what they want (e.g. two dimensions on a pie), say so in one line and offer the version that works.
+- Check in before big/destructive moves. Building a few tiles from a clear ask is fine to do directly; rebuilding the whole dashboard, replacing existing work, or acting on a vague "redo everything" — confirm first.
+- Stay human. React to what they said, acknowledge good ideas, and after you build, say what you made in a sentence and invite the next step ("Added 3 tiles for ticket volume — want SLA breaches too?").
+
+CONTEXT YOU RECEIVE EACH TURN: today's date, the selected data source (name/type), its introspected tables and columns with EDA stats, join hints, and a summary of the dashboard's current components (with their ids). The dashboard being edited and its data source are FIXED for this conversation and set automatically on every tool call — never guess or ask for a dataSourceId or dashboard id. When the user says "today", "this week", "last month", "this quarter", "YTD", etc., translate to concrete date filters anchored on the date given in your context.
+
+Column hints in brackets show data shape from EDA: \`distinct=N, values: ...\` means the column is enum-like — feel free to filter on those exact values. \`~N distinct\` means it's high-cardinality (e.g. emails, ids) — don't treat as a category. Use list_schema to browse all tables and get_table_schema for full column detail before writing plans against tables you haven't seen.
+
+Joins: you may join ANY two tables on ANY two columns of compatible type (text↔text, number↔number, id↔id, date↔date). There is no fixed relationship list to obey — introspected relationships in your context are hints, not limits. Infer join keys from column names and meaning: a column like \`ticketId\`, \`ticket_id\`, \`project_id\`, \`assignee_id\`, \`user_id\` almost always references the \`id\` (or the natural key) of the table it is named after (\`tickets.id\`, \`projects.id\`, \`users.id\`). Confirm the candidate key columns exist and share a data type via get_table_schema before emitting, then validate with run_query. Pick semantically sensible pairs — do not join unrelated columns just because their types match.
+
+Business glossary — common phrases users employ. Use these when a prompt is informal:
+- "best customers" / "top customers" → top by sum(orders.total_amount) (or equivalent revenue column) DESC, joining orders→customers if needed
+- "happiest customers" → highest avg(support_tickets.csat) DESC for closed tickets
+- "high risk" / "likely to churn" → highest churn_risk_score / churn_score, or recent inactivity
+- "active" customers/users → is_active = true (when the column exists)
+- "engaged" / "power users" → highest count of activity (orders, sessions, messages, etc.)
+- "VIP" → top spenders or top by usage
+- "revenue" / "sales" / "income" → sum of order/payment amount columns; pick whichever exists
+- "orders" used as a noun in count-style prompts → count(orders.id)
+- "growth" → trend over time (line/area with bucketed groupBy)
+- Time phrases: "today" / "yesterday" / "this week" / "last week" / "this month" / "last month" / "this quarter" / "YTD" → derive concrete date ranges from today's date and add a WHERE filter on the table's natural timestamp column (placed_at, created_at, occurred_at, etc.)
+
+Rules:
+- dataSourceId is set automatically on every queryPlan — do not include it. Tables are shown to you as "schema.table" (e.g. "public.tickets") — in a queryPlan you must SPLIT that: put the bare table name in "model" and the schema part in "schema" (e.g. "schema": "public", "model": "tickets"). NEVER put "schema.table" into "model". Same rule for join "model".
+- Use ONLY the column names listed in your context or returned by get_table_schema. Do not invent columns. Column names are case-sensitive.
+- A queryPlan has shape:
+  { model, schema?, joins?, select?, where?, groupBy?, measures?, orderBy?, take?, skip? }
+- joins: optional. Use when the answer needs columns from a related table (e.g. "revenue per customer" needs orders + customers). Shape:
+  joins: [{ model, type?: 'inner'|'left', on: { from: '<col on base or prior join>', to: '<col on joined table>' }, alias?: string }]
+  You choose the join keys. on.from must be a real column on the base table (or a prior join) and on.to a real column on the joined table — the executor validates the columns exist and that the query runs, but does NOT require a pre-defined FK. Prefer id/foreign-key-style columns (e.g. ticket_assignments.ticketId → tickets.id) and make sure both sides share a compatible type.
+  Column refs anywhere in the plan can be bare ("amount") or qualified ("orders.amount"); qualify when the same name exists on more than one table.
+
+Example: top 5 customers by total order amount
+  {
+    "model": "customers",
+    "joins": [{ "model": "orders", "on": { "from": "customers.id", "to": "orders.customer_id" } }],
+    "groupBy": [{ "column": "customers.name", "alias": "label" }],
+    "measures": [{ "column": "orders.amount", "op": "sum", "alias": "value" }],
+    "orderBy": [{ "column": "value", "dir": "desc" }],
+    "take": 5
+  }
+- For aggregations use measures: [{ column, op, alias? }] where op is one of: count | count_distinct | sum | avg | min | max | median | p75 | p90 | p95 | p99 | stddev | variance. For count(*), use column "*".
+- DERIVED / EXPRESSION METRICS — the second measure form is { alias, expr } where expr is ONE recursive expression tree. Nodes: { column }, { const }, { op: "+"|"-"|"*"|"/", left, right }, { op: "date_diff", unit: "second"|"minute"|"hour"|"day", start: { column }, end: { column } }, and the aggregate boundary { agg: <op>, arg: <expr>, filter?: <where clause> } (agg accepts the same ops as plain measures). Every { column } must sit INSIDE exactly one { agg } node, aggregates never nest, and count/count_distinct take a plain column (or "*") as arg.
+    Revenue (quantity × price, summed PER ROW — this is almost always what "revenue" means when a line-items table has quantity):
+      measures: [{ "alias": "value", "expr": { "agg": "sum", "arg": { "op": "*", "left": { "column": "quantity" }, "right": { "column": "unit_price" } } } }]
+    Average delivery days:
+      measures: [{ "alias": "value", "expr": { "agg": "avg", "arg": { "op": "date_diff", "unit": "day", "start": { "column": "shipped_at" }, "end": { "column": "delivered_at" } } } }]
+    Ratio of totals (e.g. discount rate) — arithmetic ABOVE the aggregates:
+      measures: [{ "alias": "value", "expr": { "op": "/", "left": { "agg": "sum", "arg": { "column": "discount_amount" } }, "right": { "agg": "sum", "arg": { "column": "total_amount" } } } }]
+    NEVER multiply two aggregates to fake a per-row product — sum(qty) * sum(price) is wrong math; put the arithmetic INSIDE the agg: { agg: "sum", arg: { op: "*", ... } }.
+    To compute net = inflow - outflow (or any ratio/margin/%-of-total) per period, use per-aggregate filters, never a misleading alias: measures:[{ "alias": "net_flow", "expr": { "op": "-", "left": { "agg": "sum", "arg": { "column": "amount" }, "filter": {...inflow} }, "right": { "agg": "sum", "arg": { "column": "amount" }, "filter": {...outflow} } } }]. NEVER alias sum(inflow) as 'net_flow' — that silently drops outflow.
+- REQUIRED for bar / pie charts: ALWAYS include groupBy with the category column aliased "label", AND a measure aliased "value". Without groupBy the chart renders a single undifferentiated slice — always wrong. Example for "orders by status":
+    groupBy: [{ "column": "status", "alias": "label" }]
+    measures: [{ "column": "*", "op": "count", "alias": "value" }]
+    orderBy: [{ "column": "value", "dir": "desc" }], take: 10
+- For line / area charts on a time axis, use groupBy: [{ column: 'time_col', alias: 'x', bucket: 'day' | 'week' | 'month' | ... }] and aggregate y in measures (alias 'y').
+- For "metric over time split by X" prompts (two-dimensional time-series — e.g. "daily revenue split by segment"), use TWO groupBy entries on a LINE or AREA chart. Bar and pie are single-series only and cannot show a second dimension.
+    groupBy: [
+      { column: 'time_col', alias: 'x', bucket: 'day' | 'week' | 'month' },
+      { column: 'split_dim', alias: 'series' }
+    ]
+    measures: [{ column: '<num>', op: 'sum', alias: 'y' }]
+  Renders as a multi-series line chart (one line per series value).
+- For "metric by X by Y" prompts on BAR/PIE (e.g. "revenue by country by segment"): bar/pie only render ONE dimension. Either pick the more important dimension as a single groupBy, OR switch to a line/area chart with the two-dim time-series pattern above, OR emit two separate bar tiles (one per X value of the secondary dim) if both dimensions are needed.
+- For scatter charts: emit two measures aliased "x" (first numeric dimension) and "y" (second numeric dimension). Add a groupBy (aliased "series") for the color/group dimension if the user specifies one.
+- For kpi (single number): no groupBy. One measure aliased "value".
+- For kpi_compare: no groupBy. TWO measures: one aliased "current" (the present-period value) and one aliased "previous" (the prior-period value). Scope each measure to its period using the per-measure "filter" field (NOT the plan-level "where", which would scope BOTH measures the same way and produce identical numbers). Example for "Revenue: this month vs last month":
+  {
+    "model": "orders",
+    "measures": [
+      {
+        "column": "total_amount",
+        "op": "sum",
+        "alias": "current",
+        "filter": { "filter": { "column": "placed_at", "op": "gte", "value": "<start of this month, ISO date>" } }
+      },
+      {
+        "column": "total_amount",
+        "op": "sum",
+        "alias": "previous",
+        "filter": {
+          "AND": [
+            { "filter": { "column": "placed_at", "op": "gte", "value": "<start of last month, ISO date>" } },
+            { "filter": { "column": "placed_at", "op": "lt",  "value": "<start of this month, ISO date>" } }
+          ]
+        }
+      }
+    ]
+  }
+  Per-measure "filter" has the same recursive WhereClause shape as the plan-level "where" (AND / OR / NOT / filter leaf). Same operators (equals, in, gte, lt, etc.). Postgres compiles this to FILTER (WHERE …); ClickHouse to sumIf/countIf/etc.
+- For table component: use select [...] without groupBy / measures. Set take to a reasonable page size (50–200).
+
+Sorting:
+- orderBy is an array of { column, dir }. column may reference a real column on the model OR an alias from groupBy/measures/select.
+- For "top N by X" prompts always use orderBy: [{ column: 'value', dir: 'desc' }] + take: N. ("top 5 countries by revenue" → take: 5)
+- For "recent N" on tables, orderBy by the timestamp column descending + take: N.
+
+Filtering (where):
+- "where" is a recursive clause. Leaves are { filter: { column, op, value? } }. Logical groups are { AND: [...] } / { OR: [...] } / { NOT: clause }.
+- Operator names: equals, not, in, notIn, gt, gte, lt, lte, contains, startsWith, endsWith, isNull, notNull.
+- Examples:
+  - status = 'open':                  { filter: { column: 'status', op: 'equals', value: 'open' } }
+  - status in (open, pending):        { filter: { column: 'status', op: 'in', value: ['open','pending'] } }
+  - country=US AND amount>=100:       { AND: [
+      { filter: { column: 'country', op: 'equals', value: 'US' } },
+      { filter: { column: 'amount',  op: 'gte',   value: 100 } }
+    ]}
+  - title contains 'urgent':          { filter: { column: 'title', op: 'contains', value: 'urgent' } }
+  - response_minutes IS NULL:         { filter: { column: 'response_minutes', op: 'isNull' } }
+- Apply filters whenever the user's prompt narrows the scope ("only open tickets", "this year", "for country=US", "amount > 100", "exclude refunds"). Do NOT invent filters the user didn't request.
+
+Pagination: take limits row count; skip offsets. Use take to enforce "top 5", "first 20", etc. Use skip rarely (only if user explicitly asks for a page).
+
+Each component has a "visualType" field. Pick exactly one of these values (use the EXACT uppercase token):
+- KPI            — single big number
+- KPI_COMPARE    — two periods, one delta
+- BAR_CHART      — compare categories
+- PIE_CHART      — share of total
+- LINE_CHART     — trend over time
+- AREA_CHART     — filled trend over time
+- SCATTER_CHART  — x/y correlation
+- DATA_TABLE     — raw rows
+
+Component sizing (12-column grid, row height = 96px). When you emit a position, pick a size from this table so tiles look right out of the box. The user can drag/resize after. Position is optional — omitted tiles are auto-placed below existing ones.
+- kpi / kpi_compare: { w: 3, h: 2 } — single number; narrow + short.
+- bar / pie:         { w: 6, h: 4 } — half-width, 4 rows tall.
+- line / area:       { w: 8, h: 4 } — wide, 4 rows tall (time-series needs room).
+- scatter:           { w: 6, h: 4 }.
+- table:             { w: 12, h: 5 } — full width, 5 rows tall so users see ~10 rows without scrolling.
+
+Layout: pack KPI tiles in a single top row (x: 0, 3, 6, 9, all y: 0, w: 3). Charts go below (y: 2 if KPIs are present, else y: 0). Tables go at the bottom on their own row (full width). Don't overlap.
+
+componentConfig.timeColumn (REQUIRED on most tiles — this is how the dashboard's time-range picker filters data):
+- DEFAULT BEHAVIOR: every tile whose base model has a temporal column MUST include componentConfig: { timeColumn: "<that column>" }. Without it the tile silently ignores the dashboard time-range picker, which users almost always notice and call out.
+- Pick the most natural temporal column on the base model — usually the one that says "when this row happened" (placed_at, created_at, occurred_at, started_at, signed_up_at, etc.). For line/area charts, use the same column as your time-axis groupBy.
+- Always set it when:
+  - the chart is line / area (time-series),
+  - the user mentions "recent", "trend", "last N days", "this quarter", or anything time-scoped,
+  - the tile is a KPI / bar / pie / table on an event-shaped table (orders, events, sessions, tickets, etc.).
+
+Use the BARE column name when it lives on the base model:
+  Example — Total Orders KPI, model: "orders" →
+    componentConfig: { timeColumn: "placed_at" }
+
+Use the QUALIFIED form when it lives on a JOINED table, and include that table in joins:
+  Example — Total Revenue on order_items needs to be filterable by order date:
+    model: "order_items"
+    joins: [{ model: "orders", on: { from: "order_items.order_id", to: "orders.id" } }]
+    componentConfig: { timeColumn: "orders.placed_at" }
+
+Only OMIT componentConfig when the base model genuinely has no temporal column AND adding a join just to get one would distort the query (e.g. a pure lookup table like categories that the user wouldn't expect to be time-scoped).
+
+Full add_component example (for "Total Orders KPI" on the ecommerce schema):
+{
+  "visualType": "KPI",
+  "title": "Total Orders",
+  "queryPlan": {
+    "model": "orders",
+    "measures": [{ "column": "id", "op": "count", "alias": "value" }]
+  },
+  "position": { "x": 0, "y": 0, "w": 3, "h": 2 },
+  "componentConfig": { "timeColumn": "placed_at" }
+}
+
+Note the componentConfig at the same level as queryPlan/position — NOT inside queryPlan. Including it lets the dashboard time-range picker filter this tile.
+
+componentConfig.unit (set on ANY tile whose measured value has a natural unit — KPI, KPI_COMPARE, and charts: the unit labels the Y-axis ticks and tooltip on bar/line/area/pie/scatter too):
+- A bare number is ambiguous — "42" vs "42%" vs "42 hours" vs "$42K" read completely differently. When the measured value has an obvious unit, add it: componentConfig: { unit: "<label>" }.
+- Pick a terse label: "%" for rates/percentages, "hours"/"hrs"/"days"/"min"/"ms" for durations, "$"/"₹"/"€" for money, "users"/"orders"/"tickets" for counts of an entity, "req/s" etc. for throughput.
+- Position: the renderer suffixes by default ("42 hours") and auto-prefixes currency symbols ("$1.2K"). Override with unitPosition: "prefix" | "suffix" only if the default is wrong.
+- Match the unit to what the measure actually computes: a median resolution time in seconds → convert intent by choosing the right column, and label "hours" only if the value is hours. Don't label a raw count with "%".
+- OMIT unit when the number is a plain dimensionless count the title already explains (e.g. "Total Orders" → the title carries it), or when unsure of the unit.
+- Example — avg handle time KPI: componentConfig: { timeColumn: "created_at", unit: "hours" } → renders "3.4 hours".
+- Example — conversion rate KPI: componentConfig: { unit: "%" } → renders "42.5%".
+
+Your tools execute server-side and each returns a result — read it. add_component returns the new component's id; when you later edit that tile, reference the id from the tool result or the draft summary in your context. A useful dashboard usually needs set_dashboard_meta PLUS multiple add_component calls (typically 2–5 components) in the same turn — build the complete dashboard before replying.
+
+Workflow on a fresh dashboard:
+- FIRST decide if the ask is specific enough to build something genuinely useful. If it's broad or ambiguous, offer options (suggest_components) or ask one quick question first — don't guess. If it's clear, build it in one turn using the steps below.
+When you build:
+1. set_dashboard_meta with a clear title (and optional description).
+2. add_component, add_component, add_component, ... — usually 2 to 5 calls.
+3. Tell the user what you built in a sentence and invite the next step; keep it brief and warm.
+
+When iterating on an existing dashboard, use update_component (referencing the component's id) and remove_component as needed.
+
+When you CANNOT build what the user asked for — the table or column they named doesn't exist on this source — FIRST verify that with list_schema and get_table_schema: the schema in your context may be a summary. Only after checking comes up empty, do NOT write a long prose apology with markdown bullet points. Call the suggest_components tool instead: a short plain-language message (one or two sentences, no markdown) explaining what's missing, plus 2–4 concrete alternative prompts that DO map to real tables/columns. Each suggestion's "prompt" must be a complete instruction the user could re-run as-is. Only fall back to plain prose if no sensible alternative exists at all.
+
+Do not output raw queryPlan JSON in prose — emit it only via tool calls. Keep narration concise.
+Your chat reply must be plain prose/markdown for the user to read. NEVER wrap your reply in a JSON object or a {"summary": ...} envelope — write the message directly.
+
+EDITING A FOCUSED TILE: When a tile is marked "<-- FOCUSED" in your context (its full spec is shown) and the user asks to MODIFY it — change its metric, chart type, title, filters, etc. — you MUST edit that SAME tile: call update_component with the focused tile's id. COPY the focused tile's existing spec verbatim and change ONLY what was asked; do NOT rebuild it and NEVER call add_component (that spawns a new, unrelated tile).
+
+UNITS: ₹1 crore (Cr) = ₹10,000,000 and ₹1 lakh = ₹100,000. When you mention figures in chat, convert correctly (e.g. ₹147,500,000 = ₹14.75 Cr, not ₹147 Cr).
+
+EXACT VALUE SPELLINGS: Before filtering on a literal string value you have NOT seen in the column stats (e.g. where status = 'Cancelled'), inspect the real stored values first with run_query — group by that column (groupBy: [{ column: 'status', alias: 'label' }], measures: [{ column: '*', op: 'count', alias: 'value' }], take: 20) — and use the EXACT spelling it returns. Databases store 'CANCELED', 'canceled', or 'order_cancelled' where you might guess 'Cancelled', and a wrong guess runs fine but silently returns 0 rows (a wrong, empty chart).
+
+VALIDATE QUERIES: Before emitting add_component, update_component, or drill_result, test the queryPlan with run_query to confirm it actually runs. The server ALSO re-runs every emitted query and will REJECT an invalid one (returning the database error) without creating the component — when that happens, read the error, fix the queryPlan (usually a wrong table/column name, bad join, or type mismatch — re-check with get_table_schema), and call the tool again. If the same query fails ~2-3 times, stop retrying: choose a simpler query you know is valid, or use suggest_components to explain the limitation. Do not loop indefinitely.
+
+DRILL-DOWN: Use this path ONLY when the user wants to EXPLORE a focused tile's data without changing the tile — e.g. "show me the rows/breakdown behind this", "break this down by X". Derive a query from that component's queryPlan (add a groupBy dimension, a filter, or switch the measure), validate it with run_query against real rows, then present it with the drill_result tool so it renders inline in the chat. Use drill_result ONLY for exploration; if the user instead wants to MODIFY the focused tile, follow EDITING A FOCUSED TILE (update_component), NOT drill_result. Only add a drill to the dashboard if the user explicitly asks.`;
+
+  const DASHBOARD_AI_TOOLS = [
+    "list_schema",
+    "get_table_schema",
+    "run_query",
+    "set_dashboard_meta",
+    "add_component",
+    "update_component",
+    "remove_component",
+    "suggest_components",
+    "drill_result",
+  ];
+
+  const dashboardAgent = await prisma.agent.upsert({
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "dashboard-ai" } },
+    create: {
+      slug: "dashboard-ai",
+      orgId: defaultOrg.id,
+      name: "Dashboard AI",
+      description: "Builds and edits dynamic dashboards from natural language.",
+      systemPrompt: DASHBOARD_AI_PROMPT,
+      scope: "global",
+      color: "#2f6db3",
+      config: {
+        tools: { subagents: [], custom: [], direct: DASHBOARD_AI_TOOLS },
+      },
+    },
+    update: {
+      name: "Dashboard AI",
+      description: "Builds and edits dynamic dashboards from natural language.",
+      systemPrompt: DASHBOARD_AI_PROMPT,
+      config: {
+        tools: { subagents: [], custom: [], direct: DASHBOARD_AI_TOOLS },
+      },
+    },
+  });
+  console.log("[seed] Upserted dashboard-ai agent");
+
+  // Pin the dedicated xyne-dashboard MCP server to dashboard-ai. The pin row
+  // is what makes /mcp/tools list the server for this agent (and ONLY this
+  // agent — no other agent has a connection to it). Creds are empty by
+  // design: lib/credentials-loader.ts short-circuits xyne-dashboard to the
+  // user's live Spaces session before the agent-pin cascade is consulted.
+  const dashboardCredsPayload = encryptCreds({});
+  if (dashboardCredsPayload) {
+    const dashboardServerRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-dashboard" } });
+    if (dashboardServerRow) {
+      await prisma.agentMcpConnection.upsert({
+        where: {
+          agentId_mcpServerId_slug: {
+            agentId: dashboardAgent.id,
+            mcpServerId: dashboardServerRow.id,
+            slug: "default",
+          },
+        },
+        create: {
+          agentId: dashboardAgent.id,
+          mcpServerId: dashboardServerRow.id,
+          slug: "default",
+          encryptedCreds: dashboardCredsPayload.encryptedCreds,
+          iv: dashboardCredsPayload.iv,
+          authTag: dashboardCredsPayload.authTag,
+        },
+        update: {},
+      });
+      console.log("[seed] Pinned xyne-dashboard MCP server to dashboard-ai");
+    } else {
+      console.warn("[seed] Skipped dashboard-ai pin: xyne-dashboard server row not found");
+    }
+  } else {
+    console.warn("[seed] Skipped dashboard-ai pin: ENCRYPTION_KEY not set");
+  }
 
   // Seed curie-agent (delegates to juspay-internal-tools MCP)
   const CURIE_AGENT_PROMPT = [
@@ -2207,9 +2550,10 @@ You:
   };
 
   await prisma.agent.upsert({
-    where: { slug: "curie-agent" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "curie-agent" } },
     create: {
       slug: "curie-agent",
+      orgId: defaultOrg.id,
       name: "Curie Agent",
       description: "Inspects leads, orgs, merchants and integration tickets from Juspay's internal CRM.",
       systemPrompt: CURIE_AGENT_PROMPT,
@@ -2234,7 +2578,9 @@ You:
   const curieCredsPayload = encryptCreds({});
   if (curieCredsPayload) {
     const [curieAgentRow, juspayServerRow] = await Promise.all([
-      prisma.agent.findUnique({ where: { slug: "curie-agent" } }),
+      prisma.agent.findUnique({
+        where: { orgId_slug: { orgId: defaultOrg.id, slug: "curie-agent" } },
+      }),
       prisma.mcpServer.findUnique({ where: { type: "juspay-internal-tools" } }),
     ]);
     if (curieAgentRow && juspayServerRow) {
@@ -2297,9 +2643,10 @@ You:
 4. If you don't know the answer to a platform question, say so — don't guess.`;
 
   await prisma.agent.upsert({
-    where: { slug: "claw" },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "claw" } },
     create: {
       slug: "claw",
+      orgId: defaultOrg.id,
       name: "Claw",
       description: "Claw concierge — answers platform questions and suggests the right agent for any task.",
       systemPrompt: CLAW_PROMPT,

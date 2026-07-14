@@ -8,6 +8,9 @@
 
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("tools");
+
 export const DEEP_RESEARCH_CONFIG_SCHEMA = {
   XYNE_AI_EXTENDED_URL: {
     label: "Xyne AI Extended URL",
@@ -39,7 +42,7 @@ const NODE_PROGRESS: Record<string, string> = {
   final_report_generation: "Writing final report…",
 };
 
-const DEEP_RESEARCH_TIMEOUT_MS = 10 * 60 * 1000;
+const DEEP_RESEARCH_TIMEOUT_MS = Number(process.env["DEEP_RESEARCH_TIMEOUT_MS"] ?? 10 * 60 * 1000);
 
 export const deepResearchTool: ToolDefinition = {
   slug: "deep-research",
@@ -72,7 +75,7 @@ export const deepResearchTool: ToolDefinition = {
     if (typeof configResult === "string") return configResult;
     const { url } = configResult;
 
-    console.log(`[deep-research] topic="${topic.substring(0, 80)}..."`);
+    log.info(`[deep-research] topic="${topic.substring(0, 80)}..."`);
 
     let threadId: string | null = null;
     let runId: string | null = null;
@@ -90,96 +93,104 @@ export const deepResearchTool: ToolDefinition = {
       threadId = createData.thread_id ?? null;
       if (!threadId) return "Error: No thread_id returned from deep research service.";
 
-      console.log(`[deep-research] Thread created ${threadId}`);
+      log.info(`[deep-research] Thread created ${threadId}`);
 
-      const streamRes = await fetch(
-        `${url}/deep_research/threads/${threadId}/runs/stream`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assistant_id: "Deep Researcher",
-            stream_mode: ["events"],
-            config: { configurable: RESEARCH_CONFIG },
-            input: { messages: [{ role: "human", content: topic }] },
-          }),
-        },
-      );
-      if (!streamRes.ok || !streamRes.body) {
-        return `Error: Failed to start research stream (HTTP ${streamRes.status}).`;
-      }
-
-      const reader = streamRes.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let currentSseEvent = "";
-
+      // Cap the entire research stream at DEEP_RESEARCH_TIMEOUT_MS. The signal is
+      // attached to the fetch below so the abort actually cancels the request AND
+      // its body reader — previously the controller was created after the fetch
+      // and its signal was never wired, so the abort fired into the void and the
+      // stream ran unbounded (the cap was inert). clearTimeout runs in the finally.
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), DEEP_RESEARCH_TIMEOUT_MS);
-
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        const streamRes = await fetch(
+          `${url}/deep_research/threads/${threadId}/runs/stream`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              assistant_id: "Deep Researcher",
+              stream_mode: ["events"],
+              config: { configurable: RESEARCH_CONFIG },
+              input: { messages: [{ role: "human", content: topic }] },
+            }),
+            signal: controller.signal,
+          },
+        );
+        if (!streamRes.ok || !streamRes.body) {
+          return `Error: Failed to start research stream (HTTP ${streamRes.status}).`;
+        }
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
+        const reader = streamRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let currentSseEvent = "";
 
-          for (const line of lines) {
-            if (line.startsWith("event: ")) {
-              currentSseEvent = line.slice(7).trim();
-              continue;
-            }
-            if (!line.startsWith("data: ")) continue;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-            const rawData = line.slice(6).trim();
-            if (!rawData || rawData === "[DONE]") continue;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
 
-            try {
-              const parsed = JSON.parse(rawData) as Record<string, unknown>;
-
-              if (currentSseEvent === "metadata" && typeof parsed.run_id === "string") {
-                runId = parsed.run_id;
+            for (const line of lines) {
+              if (line.startsWith("event: ")) {
+                currentSseEvent = line.slice(7).trim();
                 continue;
               }
-              if (currentSseEvent !== "events") continue;
+              if (!line.startsWith("data: ")) continue;
 
-              const lcName = parsed.name as string | undefined;
-              const lcEvent = parsed.event as string | undefined;
+              const rawData = line.slice(6).trim();
+              if (!rawData || rawData === "[DONE]") continue;
 
-              if (lcEvent === "on_chain_start" && lcName) {
-                const label = NODE_PROGRESS[lcName];
-                if (label) {
-                  console.log(`[deep-research] progress: ${label}`);
+              try {
+                const parsed = JSON.parse(rawData) as Record<string, unknown>;
+
+                if (currentSseEvent === "metadata" && typeof parsed.run_id === "string") {
+                  runId = parsed.run_id;
+                  continue;
                 }
-              }
-            } catch { /* non-JSON SSE line, skip */ }
+                if (currentSseEvent !== "events") continue;
+
+                const lcName = parsed.name as string | undefined;
+                const lcEvent = parsed.event as string | undefined;
+
+                if (lcEvent === "on_chain_start" && lcName) {
+                  const label = NODE_PROGRESS[lcName];
+                  if (label) {
+                    log.info(`[deep-research] progress: ${label}`);
+                  }
+                }
+              } catch { /* non-JSON SSE line, skip */ }
+            }
           }
+        } finally {
+          reader.releaseLock();
         }
+
+        const stateRes = await fetch(`${url}/deep_research/threads/${threadId}/state`);
+        const finalReport = stateRes.ok
+          ? ((await stateRes.json()) as { values?: { final_report?: string } }).values?.final_report ?? ""
+          : "";
+
+        log.info(`[deep-research] Done, has_report=${finalReport.length > 0}`);
+
+        if (!finalReport) {
+          return "DEEP_RESEARCH_DONE. No report was generated — do not retry this tool.";
+        }
+
+        return `DEEP_RESEARCH_DONE.\n\n${finalReport}`;
       } finally {
         clearTimeout(timeoutId);
-        reader.releaseLock();
       }
-
-      const stateRes = await fetch(`${url}/deep_research/threads/${threadId}/state`);
-      const finalReport = stateRes.ok
-        ? ((await stateRes.json()) as { values?: { final_report?: string } }).values?.final_report ?? ""
-        : "";
-
-      console.log(`[deep-research] Done, has_report=${finalReport.length > 0}`);
-
-      if (!finalReport) {
-        return "DEEP_RESEARCH_DONE. No report was generated — do not retry this tool.";
-      }
-
-      return `DEEP_RESEARCH_DONE.\n\n${finalReport}`;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         return "Error: Deep research timed out";
       }
       const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[deep-research] error: ${msg}`);
+      log.error(`[deep-research] error: ${msg}`);
 
       if (threadId && runId) {
         fetch(`${url}/deep_research/threads/${threadId}/runs/${runId}/cancel`, {

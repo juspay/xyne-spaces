@@ -2,6 +2,7 @@ import { Queue, Worker, type Job } from "bullmq";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
+import { enqueueMessage, type QueuedMessage } from "../lib/message-queue.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("run-recovery-worker");
@@ -20,17 +21,24 @@ interface RecoveryDispatchPayload {
   idempotencyKey?: string;
   conversationId: string;
   agentSlug: string;
+  orgId: string;
   eventType: string;
   traceId: string;
   callbackUrl: string;
   progressUrl: string;
   channelId: string;
   context?: string;
+  detached?: boolean;
+  agentConfig?: Record<string, unknown>;
+  __persistedByCaller?: boolean;
   skills?: Array<{ name: string; content: string }>;
   provider?: string;
   subagentProviders?: Record<string, string>;
   providerConfigs?: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string }>;
   attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
+  workspaceId?: string;
+  resultForwardUrl?: string;
+  resolveMentions?: boolean;
 }
 
 export interface RecoverySessionContext {
@@ -59,6 +67,7 @@ export interface RecoverySessionContext {
    *  never gets its result and the run is retried pointlessly. */
   resultForwardUrl?: string;
   resolveMentions?: boolean;
+  workspaceId?: string;
 }
 
 interface RunRecoveryState {
@@ -72,6 +81,8 @@ interface RunRecoveryState {
   lastHeartbeatAt: number;
   retryScheduled: boolean;
   lastError: string | null;
+  /** Count of session_locked deferrals (see deferLockContentionRetry). */
+  lockDeferrals?: number;
   dispatchPayload: RecoveryDispatchPayload;
   sessionContext: RecoverySessionContext;
   sessionHistory: string[];
@@ -120,6 +131,69 @@ function dispatchJobId(rootSessionId: string): string {
   return `recovery-dispatch-${rootSessionId}`;
 }
 
+function recoveryIdempotencyKey(state: RunRecoveryState): string {
+  return state.dispatchPayload.idempotencyKey ?? state.rootSessionId;
+}
+
+function isSessionLockedFailure(error?: string | null): boolean {
+  return error === "session_locked" || error?.includes("session_locked") === true;
+}
+
+/** Scheduled fires use a one-shot `scheduled_<jobId>_<ts>` conversationId. The
+ *  mid-run FIFO for such a key is NEVER drained (no inbound message targets it
+ *  and /scheduled-jobs/:id/result has no drain), so lock-contended scheduled
+ *  runs must be re-dispatched on a delay instead of queued. */
+function isOneShotScheduledConversation(conversationId: string | undefined): boolean {
+  return typeof conversationId === "string" && conversationId.startsWith("scheduled_");
+}
+
+const LOCK_CONTENTION_RETRY_DELAY_MS = 120_000;
+/** Hard cap on lock-contention deferrals. The runtime session lock TTL is 15
+ *  min, so the holder either finishes or its lock expires well within
+ *  10 × 2 min; the cap only guards against a pathological refresh loop. */
+const MAX_LOCK_DEFERRALS = 10;
+
+/** Re-schedule a lock-contended run's dispatch after a delay, WITHOUT
+ *  consuming a retry attempt. dispatchRetry's runAlreadyCompleted check exits
+ *  the loop as soon as the lock-holding original finishes and writes its
+ *  marker. Returns false when the deferral cap is hit (caller exhausts). */
+async function deferLockContentionRetry(state: RunRecoveryState): Promise<boolean> {
+  state.lockDeferrals = (state.lockDeferrals ?? 0) + 1;
+  if (state.lockDeferrals > MAX_LOCK_DEFERRALS) return false;
+  state.retryScheduled = true;
+  state.lastHeartbeatAt = Date.now();
+  await saveState(state);
+  await scheduleDispatch(state.rootSessionId, "session_locked — waiting for lock holder", LOCK_CONTENTION_RETRY_DELAY_MS);
+  log.info(`[run-recovery] lock contention deferred root=${state.rootSessionId} deferral=${state.lockDeferrals}/${MAX_LOCK_DEFERRALS} retryInMs=${LOCK_CONTENTION_RETRY_DELAY_MS}`);
+  return true;
+}
+
+async function enqueueLockContentionRun(state: RunRecoveryState): Promise<void> {
+  const { dispatchPayload, sessionContext } = state;
+  if (sessionContext.responseMode !== "conversation") return;
+  if (!dispatchPayload.conversationId || !dispatchPayload.agentSlug || !dispatchPayload.task) return;
+  const workspaceId = dispatchPayload.workspaceId ?? sessionContext.workspaceId;
+  const queuedMsg: QueuedMessage = {
+    eventId: `lock:${state.rootSessionId}`,
+    conversationId: dispatchPayload.conversationId,
+    channelId: dispatchPayload.channelId || sessionContext.channelId,
+    ...(sessionContext.channelName ? { channelName: sessionContext.channelName } : {}),
+    userId: dispatchPayload.userId,
+    ...(sessionContext.senderName ? { senderName: sessionContext.senderName } : {}),
+    agentSlug: dispatchPayload.agentSlug,
+    orgId: dispatchPayload.orgId,
+    ...(workspaceId ? { workspaceId } : {}),
+    task: dispatchPayload.task,
+    eventType: dispatchPayload.eventType,
+    ...(dispatchPayload.context ? { context: dispatchPayload.context } : {}),
+    ...(sessionContext.resultForwardUrl ? { resultForwardUrl: sessionContext.resultForwardUrl } : {}),
+    ...(sessionContext.resolveMentions ? { resolveMentions: sessionContext.resolveMentions } : {}),
+    ts: Date.now(),
+  };
+  const enq = await enqueueMessage(queuedMsg);
+  log.info(`[run-recovery] lock contention queued root=${state.rootSessionId} conv=${queuedMsg.conversationId} agent=${queuedMsg.agentSlug} enqueued=${enq.enqueued} deduped=${enq.deduped} full=${enq.full} pos=${enq.position}`);
+}
+
 function getQueue(): Queue<RunRecoveryJobData> {
   if (!queue) {
     queue = new Queue<RunRecoveryJobData>(QUEUE_NAME, {
@@ -161,6 +235,47 @@ export async function getRecoveryContextForSession(sessionId: string): Promise<R
   return state?.sessionContext ?? null;
 }
 
+/**
+ * Cancel recovery for a run the user explicitly stopped (`/stop`).
+ *
+ * Without this, `/stop` aborts the in-flight run but recovery keeps watching it:
+ * the aborted run stops heart-beating, the watchdog fires "no heartbeat before
+ * timeout", `runAlreadyCompleted` finds no "completed" marker (there is none —
+ * it was cancelled, not finished), so recovery RETRIES it. The retry re-dispatches
+ * minutes later as a fresh session and posts anyway — silently defeating `/stop`.
+ *
+ * We flip the state terminal FIRST (so any already-queued watchdog/dispatch that
+ * fires before we finish short-circuits on the `status !== "running"` guard), then
+ * drop the pending watchdog + dispatch jobs. Idempotent; safe to call on a run
+ * that has no recovery state (returns false).
+ */
+export async function cancelRunRecovery(sessionId: string): Promise<boolean> {
+  const rootSessionId = await getRecoveryRootSessionId(sessionId);
+  if (!rootSessionId) return false;
+  const state = await loadState(rootSessionId);
+  if (!state || state.status !== "running") return false;
+
+  state.status = "exhausted";
+  state.retryScheduled = false;
+  state.lastError = "cancelled by user (/stop)";
+  await saveState(state);
+
+  // Remove watchdogs for every session we've watched (active + historical
+  // retries) plus the pending dispatch job, so nothing re-fires.
+  const sessions = new Set<string>([state.activeSessionId, ...state.sessionHistory]);
+  await Promise.all<unknown>([
+    ...[...sessions].map((sid) => removeWatchdog(rootSessionId, sid)),
+    getQueue()
+      .getJob(dispatchJobId(rootSessionId))
+      .then((job) => (job ? job.remove() : undefined)),
+  ]).catch((err) =>
+    log.warn(`[run-recovery] cancel cleanup partial for root=${rootSessionId}: ${err instanceof Error ? err.message : String(err)}`),
+  );
+
+  log.info(`[run-recovery] cancelled recovery root=${rootSessionId} via /stop (dropped watchdog + dispatch)`);
+  return true;
+}
+
 async function scheduleWatchdog(rootSessionId: string, sessionId: string, delayMs: number): Promise<void> {
   if (delayMs <= 0) delayMs = 1_000;
   await getQueue().add(
@@ -185,6 +300,9 @@ async function scheduleDispatch(rootSessionId: string, reason: string, delayMs: 
 
 async function notifyExhausted(state: RunRecoveryState): Promise<void> {
   if (state.sessionContext.responseMode !== "conversation") return;
+  const tail = isSessionLockedFailure(state.lastError)
+    ? "Another task was already running in this thread, so this request could not start. Please re-send your message after the current task finishes."
+    : "Some application issue is happening while running this query. Admins will get back to you.";
   const message = [
     "⚠️ **Run recovery exhausted**",
     "",
@@ -192,7 +310,7 @@ async function notifyExhausted(state: RunRecoveryState): Promise<void> {
     `Session ID: \`${state.activeSessionId}\``,
     `Root Session ID: \`${state.rootSessionId}\``,
     "",
-    "Some application issue is happening while running this query. Admins will get back to you.",
+    tail,
   ].join("\n");
 
   await spacesAppFetch("/chat/postMessage", {
@@ -221,7 +339,7 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
 
   // Idempotency: the run may have actually FINISHED and just lost its
   // completion callback. Don't re-dispatch finished work — mark completed.
-  if (await runAlreadyCompleted(rootSessionId)) {
+  if (await runAlreadyCompleted(recoveryIdempotencyKey(state))) {
     state.status = "completed";
     state.retryScheduled = false;
     await saveState(state);
@@ -241,6 +359,10 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
   await saveState(state);
 
   try {
+    if (typeof state.dispatchPayload.orgId !== "string" || !state.dispatchPayload.orgId) {
+      await markExhausted(state, "retry dispatch missing orgId");
+      return;
+    }
     const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
       method: "POST",
       headers: {
@@ -254,6 +376,28 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
     const body = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
     if (!runRes.ok || !body.success || !body.sessionId) {
       const err = body.error ?? `HTTP ${runRes.status}`;
+      if (isSessionLockedFailure(err)) {
+        state.retriesUsed = Math.max(0, state.retriesUsed - 1);
+        state.lastError = err;
+        if (isOneShotScheduledConversation(state.dispatchPayload.conversationId)) {
+          // Scheduled run colliding with its own still-running original:
+          // defer a re-dispatch (the FIFO for this one-shot conversationId
+          // would never drain). runAlreadyCompleted exits the loop once the
+          // holder finishes.
+          if (await deferLockContentionRetry(state)) return;
+          await markExhausted(state, "session_locked (lock never released)");
+          return;
+        }
+        state.status = "completed";
+        state.retryScheduled = false;
+        state.lastHeartbeatAt = Date.now();
+        await enqueueLockContentionRun(state).catch((enqueueErr) => {
+          log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)}`);
+        });
+        await saveState(state);
+        await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
+        return;
+      }
       if (state.retriesUsed >= state.maxRetries) {
         await markExhausted(state, `retry dispatch failed: ${err}`);
         return;
@@ -389,7 +533,7 @@ async function rearmRunningRecoveries(): Promise<void> {
         // but its completion callback was lost, mark it completed — never
         // re-arm/re-dispatch finished work. This is the direct fix for the
         // boot re-arm resurrecting completed runs (2026-06-11).
-        if (await runAlreadyCompleted(rootSessionId)) {
+        if (await runAlreadyCompleted(recoveryIdempotencyKey(state))) {
           state.status = "completed";
           state.retryScheduled = false;
           await saveState(state);
@@ -488,9 +632,9 @@ export async function registerRunRecovery(params: {
     lastHeartbeatAt: Date.now(),
     retryScheduled: false,
     lastError: null,
-    // Stamp the idempotency key (= rootSessionId) so every retry dispatch
-    // carries it → xyne-claw skips re-execution if the run already completed.
-    dispatchPayload: { ...params.dispatchPayload, idempotencyKey: params.rootSessionId },
+    // Stamp one stable idempotency key onto every retry dispatch so xyne-claw
+    // skips re-execution if the original run already completed.
+    dispatchPayload: { ...params.dispatchPayload, idempotencyKey: params.dispatchPayload.idempotencyKey ?? params.rootSessionId },
     sessionContext: params.sessionContext,
     sessionHistory: [params.rootSessionId],
   };
@@ -529,6 +673,30 @@ export async function handleRunCompletion(sessionId: string, status: "completed"
 
   if (state.status !== "running") {
     return { retried: false, exhausted: state.status === "exhausted", rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+  }
+
+  if (status === "failed" && isSessionLockedFailure(error)) {
+    state.lastError = error ?? null;
+    if (isOneShotScheduledConversation(state.dispatchPayload.conversationId)) {
+      // Scheduled run: defer a re-dispatch instead of queueing into a FIFO
+      // nobody drains (one-shot conversationId). Report retried:true so the
+      // scheduled result handler treats this as handled, not a failure.
+      await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
+      if (await deferLockContentionRetry(state)) {
+        return { retried: true, exhausted: false, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+      }
+      await markExhausted(state, "session_locked (lock never released)");
+      return { retried: false, exhausted: true, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+    }
+    state.status = "completed";
+    state.retryScheduled = false;
+    state.lastHeartbeatAt = Date.now();
+    await enqueueLockContentionRun(state).catch((err) => {
+      log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    await saveState(state);
+    await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
+    return { retried: false, exhausted: false, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
   }
 
   state.lastError = error ?? null;

@@ -14,11 +14,12 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
-import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
+import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
-import { buildSpacesMentionLookups } from "../lib/mention-lookups.js";
+import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/mention-lookups.js";
 import {
   enqueueDelayedJob,
   enqueueCronJob,
@@ -26,6 +27,7 @@ import {
   cancelCronJob,
   type ScheduledJobData,
 } from "../queue/scheduled-jobs-queue.js";
+import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 // cron-parser v4 is CJS (`module.exports = CronParser`). Node's native ESM
 // loader can't statically detect named exports from that pattern, so a
 // `import { parseExpression } from "cron-parser"` throws at runtime even
@@ -131,6 +133,99 @@ function decryptStoredField(stored: string): string {
   return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
 }
 
+function isSessionLockedError(error?: string | null): boolean {
+  return error === "session_locked" || error?.includes("session_locked") === true;
+}
+
+function nextFireText(row: { type: string; nextRunAt: Date | null; cronExpression: string | null; status: string }): string | null {
+  if (row.status !== "active") return null;
+  if (row.nextRunAt) return row.nextRunAt.toISOString();
+  if (row.type === "cron" && row.cronExpression) {
+    try {
+      return parseExpression(row.cronExpression, { tz: "Asia/Kolkata" }).next().toDate().toISOString();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function postScheduledFailureNotice(row: {
+  id: string;
+  userId: string;
+  agentSlug: string;
+  orgId: string;
+  channelId: string | null;
+  conversationId: string | null;
+  workspaceId: string | null;
+  replyMode: string;
+  targetChannelId: string | null;
+  type: string;
+  nextRunAt: Date | null;
+  cronExpression: string | null;
+  status: string;
+}, error: string | null | undefined): Promise<void> {
+  const agent = await prisma.agent.findFirst({
+    where: { slug: row.agentSlug, orgId: row.orgId },
+  });
+  if (!agent?.spacesAppToken || !agent.spacesAppId) {
+    log.error(`[scheduled-jobs/result] Agent ${row.agentSlug} has no Spaces app credentials for failure notice`);
+    return;
+  }
+
+  let effectiveWorkspaceId = row.workspaceId;
+  if (!effectiveWorkspaceId) {
+    effectiveWorkspaceId = await getWorkspaceIdForUser(row.userId, "scheduled-job").catch(() => null);
+  }
+  if (!effectiveWorkspaceId) {
+    log.error(`[scheduled-jobs/result] Job ${row.id}: missing workspaceId for failure notice`);
+    return;
+  }
+
+  const next = nextFireText(row);
+  const message = [
+    `⚠️ Scheduled run failed: ${error?.trim() || "unknown error"}.`,
+    ...(next ? [`Next run: ${next}.`] : []),
+  ].join("\n");
+  const appToken = decryptStoredField(agent.spacesAppToken);
+  const spacesAppUserId = agent.spacesAppUserId ?? "";
+
+  if (row.replyMode === "channel" && (row.targetChannelId || row.channelId)) {
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: row.targetChannelId ?? row.channelId!,
+      markdownText: message,
+      userId: spacesAppUserId,
+      workspaceId: effectiveWorkspaceId,
+      metadata: { contentFormat: "markdown" },
+    }, appToken);
+    return;
+  }
+
+  if (row.channelId && row.conversationId) {
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: row.channelId,
+      conversationId: row.conversationId,
+      markdownText: message,
+      userId: spacesAppUserId,
+      workspaceId: effectiveWorkspaceId,
+      metadata: { contentFormat: "markdown" },
+    }, appToken);
+    return;
+  }
+
+  const dmResult = (await spacesAppFetch("/channel/openDm", {
+    targetUserId: row.userId,
+    workspaceId: effectiveWorkspaceId,
+  }, appToken)) as { channelId: string };
+  await spacesAppFetch("/chat/postMessage", {
+    channelId: dmResult.channelId,
+    markdownText: message,
+    userId: spacesAppUserId,
+    workspaceId: effectiveWorkspaceId,
+    metadata: { contentFormat: "markdown" },
+  }, appToken);
+}
+
 // ── POST / — create a scheduled job ─────────────────────────────────
 
 router.post("/", async (req: Request, res: Response) => {
@@ -177,6 +272,30 @@ router.post("/", async (req: Request, res: Response) => {
 
     if (!userId || !agentSlug || !task || !type) {
       res.status(400).json({ success: false, error: "userId, agentSlug, task, and type are required" });
+      return;
+    }
+
+    // S2S callers (the runtime's schedule-task tool) send only the S2S key +
+    // body userId — no x-user-id header, so requireAuth attaches no org
+    // context. Derive the org from the job owner instead (User.orgId is
+    // required and 1:1), same pattern as the other S2S entry points.
+    let requestOrgId = getOrgId(req);
+    if (!requestOrgId) {
+      const owner = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }).catch(() => null);
+      requestOrgId = owner?.orgId ?? undefined;
+    }
+    if (!requestOrgId) {
+      log.error(`[scheduled-jobs/create] orgId is required userId=${userId} requesterId=${requesterId ?? "none"} bodyUserId=${bodyUserId ?? "none"} agentSlug=${agentSlug} channelId=${channelId ?? "none"} conversationId=${conversationId ?? "none"} workspaceId=${workspaceId ?? "none"} type=${type}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
+    const agent = await prisma.agent.findFirst({
+      where: { slug: agentSlug, orgId: requestOrgId },
+      select: { orgId: true },
+    });
+    if (!agent) {
+      log.warn(`[scheduled-jobs/create] agent org-scoped miss slug=${agentSlug} orgId=${requestOrgId ?? "none"} userId=${userId}`);
+      res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
 
@@ -254,6 +373,7 @@ router.post("/", async (req: Request, res: Response) => {
         label: label ?? null,
         workspaceId: workspaceId ?? null,
         replyMode: replyMode ?? "thread",
+        orgId: agent.orgId,
       },
     });
 
@@ -378,8 +498,18 @@ router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
+    // Require a resolved requester identity. On the browser path requireAuth
+    // overwrites x-user-id with the verified Spaces session id, so this is the
+    // authenticated caller. A bare `if (requesterId && ...)` guard SKIPPED the
+    // ownership check whenever x-user-id was absent, letting an identity-less
+    // caller read/reschedule ANY job. Match DELETE: no requester => 401;
+    // non-owner (and non-admin) => 404.
     const requesterId = getRequesterId(req);
-    if (requesterId && row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
@@ -408,18 +538,30 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
+    // Require a resolved requester identity. On the browser path requireAuth
+    // overwrites x-user-id with the verified Spaces session id, so this is the
+    // authenticated caller. A bare `if (requesterId && ...)` guard SKIPPED the
+    // ownership check whenever x-user-id was absent, letting an identity-less
+    // caller read/reschedule ANY job. Match DELETE: no requester => 401;
+    // non-owner (and non-admin) => 404.
     const requesterId = getRequesterId(req);
-    if (requesterId && row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
 
-    const { replyMode, label, targetChannelId, cronExpression, nextRunAt } = req.body as {
+    const { replyMode, label, targetChannelId, cronExpression, nextRunAt, task, context } = req.body as {
       replyMode?: string;
       label?: string | null;
       targetChannelId?: string | null;
       cronExpression?: string;
       nextRunAt?: string;
+      task?: string;
+      context?: string | null;
     };
 
     const data: {
@@ -429,6 +571,8 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
       cronExpression?: string;
       delayMs?: bigint;
       nextRunAt?: Date;
+      task?: string;
+      context?: string | null;
     } = {};
     if (replyMode !== undefined) {
       if (replyMode !== "thread" && replyMode !== "channel") {
@@ -444,6 +588,24 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
       // Empty string / null clears the override (revert to originating channel).
       const trimmed = targetChannelId == null ? null : String(targetChannelId).trim();
       data.targetChannelId = trimmed && trimmed.length > 0 ? trimmed : null;
+    }
+
+    if (task !== undefined) {
+      // task is the agent instruction executed on every fire (NOT NULL column).
+      // The worker reads it live from the row, so an edit takes effect on the
+      // next run with no Redis re-bind. Reject empty/whitespace so a job can't
+      // be silently turned into a no-op.
+      const trimmed = String(task).trim();
+      if (trimmed.length === 0) {
+        res.status(400).json({ success: false, error: "task cannot be empty" });
+        return;
+      }
+      data.task = trimmed;
+    }
+    if (context !== undefined) {
+      // Empty string / null clears the additional context.
+      const trimmed = context == null ? null : String(context).trim();
+      data.context = trimmed && trimmed.length > 0 ? trimmed : null;
     }
 
     let cronChanged = false;
@@ -589,6 +751,317 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
 
 // ── DELETE /:id — cancel a job ──────────────────────────────────────
 
+// ── POST /:id/pause — pause an active job (unbind from BullMQ, keep row) ──
+
+router.post(
+  "/:id/pause",
+  async (req: Request<{ id: string }>, res: Response) => {
+    try {
+      const row = await prisma.scheduledJob.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!row) {
+        res.status(404).json({ success: false, error: "Not found" });
+        return;
+      }
+
+      const auth = await assertCanControlScheduledJob(req, row);
+      if (auth.ok === false) {
+        res.status(auth.status).json({ success: false, error: auth.error });
+        return;
+      }
+
+      if (row.status === "paused") {
+        res.json({ success: true, data: { id: row.id, status: row.status } });
+        return;
+      }
+      if (row.status !== "active") {
+        res.status(400).json({
+          success: false,
+          error: `Only active jobs can be paused (current status: ${row.status})`,
+        });
+        return;
+      }
+
+      if (row.type === "once" && row.bullJobId) {
+        await cancelJob(row.bullJobId).catch((err) => {
+          log.warn(
+            `[scheduled-jobs] Failed to remove delayed job ${row.bullJobId} while pausing ${row.id}:`,
+            err instanceof Error ? err.message : err,
+          );
+        });
+      }
+      if (row.type === "cron" && row.bullSchedulerId) {
+        await cancelCronJob(row.bullSchedulerId).catch((err) => {
+          log.warn(
+            `[scheduled-jobs] Failed to remove scheduler ${row.bullSchedulerId} while pausing ${row.id}:`,
+            err instanceof Error ? err.message : err,
+          );
+        });
+      }
+
+      const updated = await prisma.scheduledJob.update({
+        where: { id: row.id },
+        data: { status: "paused" },
+      });
+
+      log.info(`[scheduled-jobs] Paused job ${row.id} by ${auth.actorUserId}`);
+      res.json({
+        success: true,
+        data: { id: updated.id, status: updated.status },
+      });
+    } catch (err) {
+      log.error("[scheduled-jobs] Pause error:", err);
+      res
+        .status(500)
+        .json({ success: false, error: "Failed to pause scheduled job" });
+    }
+  },
+);
+
+// ── POST /:id/resume — resume a paused job (re-bind to BullMQ) ────────────
+
+router.post(
+  "/:id/resume",
+  async (req: Request<{ id: string }>, res: Response) => {
+    try {
+      const row = await prisma.scheduledJob.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!row) {
+        res.status(404).json({ success: false, error: "Not found" });
+        return;
+      }
+
+      const auth = await assertCanControlScheduledJob(req, row);
+      if (auth.ok === false) {
+        res.status(auth.status).json({ success: false, error: auth.error });
+        return;
+      }
+
+      if (row.status === "active") {
+        res.json({ success: true, data: { id: row.id, status: row.status } });
+        return;
+      }
+      if (row.status !== "paused") {
+        res.status(400).json({
+          success: false,
+          error: `Only paused jobs can be resumed (current status: ${row.status})`,
+        });
+        return;
+      }
+
+      const jobData: ScheduledJobData = {
+        scheduledJobId: row.id,
+        userId: row.userId,
+        agentSlug: row.agentSlug,
+        task: row.task,
+        ...(row.context ? { context: row.context } : {}),
+        ...(row.channelId ? { channelId: row.channelId } : {}),
+        ...(row.conversationId ? { conversationId: row.conversationId } : {}),
+      };
+      let updateData: {
+        status: string;
+        bullJobId?: string;
+        bullSchedulerId?: string;
+        nextRunAt?: Date;
+        delayMs?: bigint;
+      } = { status: "active" };
+
+      if (row.type === "cron") {
+        if (!row.cronExpression) {
+          res.status(400).json({
+            success: false,
+            error: "Cannot resume cron job without cronExpression",
+          });
+          return;
+        }
+        const schedulerId = row.bullSchedulerId ?? `cron-${row.id}`;
+        await enqueueCronJob(schedulerId, jobData, row.cronExpression);
+        updateData = { ...updateData, bullSchedulerId: schedulerId };
+      } else if (row.type === "once") {
+        const targetRunAt =
+          row.nextRunAt && row.nextRunAt.getTime() > Date.now() + 5_000
+            ? row.nextRunAt
+            : new Date(Date.now() + 5_000);
+        const delayMs = targetRunAt.getTime() - Date.now();
+        const bullJobId = await enqueueDelayedJob(jobData, delayMs);
+        updateData = {
+          ...updateData,
+          bullJobId,
+          nextRunAt: targetRunAt,
+          delayMs: BigInt(delayMs),
+        };
+      } else {
+        res.status(400).json({
+          success: false,
+          error: `Unknown scheduled job type: ${row.type}`,
+        });
+        return;
+      }
+
+      const updated = await prisma.scheduledJob.update({
+        where: { id: row.id },
+        data: updateData,
+      });
+
+      log.info(`[scheduled-jobs] Resumed job ${row.id} by ${auth.actorUserId}`);
+      res.json({
+        success: true,
+        data: {
+          id: updated.id,
+          status: updated.status,
+          nextRunAt: updated.nextRunAt?.toISOString(),
+        },
+      });
+    } catch (err) {
+      log.error("[scheduled-jobs] Resume error:", err);
+      res
+        .status(500)
+        .json({ success: false, error: "Failed to resume scheduled job" });
+    }
+  },
+);
+
+// ── POST /:id/cancel — tool-friendly cancel (mirrors DELETE, keeps row) ───
+
+router.post(
+  "/:id/cancel",
+  async (req: Request<{ id: string }>, res: Response) => {
+    try {
+      const row = await prisma.scheduledJob.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!row) {
+        res.status(404).json({ success: false, error: "Not found" });
+        return;
+      }
+
+      const auth = await assertCanControlScheduledJob(req, row);
+      if (auth.ok === false) {
+        res.status(auth.status).json({ success: false, error: auth.error });
+        return;
+      }
+
+      if (row.status === "cancelled") {
+        res.json({ success: true, data: { id: row.id, status: row.status } });
+        return;
+      }
+      if (row.status === "completed") {
+        res.status(400).json({
+          success: false,
+          error: "Completed jobs cannot be cancelled",
+        });
+        return;
+      }
+
+      if (row.type === "once" && row.bullJobId) {
+        await cancelJob(row.bullJobId).catch(() => {});
+      }
+      if (row.type === "cron" && row.bullSchedulerId) {
+        await cancelCronJob(row.bullSchedulerId).catch(() => {});
+      }
+
+      const updated = await prisma.scheduledJob.update({
+        where: { id: row.id },
+        data: { status: "cancelled" },
+      });
+
+      log.info(
+        `[scheduled-jobs] Cancelled job ${row.id} by ${auth.actorUserId}`,
+      );
+      res.json({
+        success: true,
+        data: { id: updated.id, status: updated.status },
+      });
+    } catch (err) {
+      log.error("[scheduled-jobs] Cancel error:", err);
+      res
+        .status(500)
+        .json({ success: false, error: "Failed to cancel scheduled job" });
+    }
+  },
+);
+
+// ── POST /:id/update — edit the prompt/task (and label) of a job ──────
+//
+// Companion to PATCH /:id for the S2S / agent path. PATCH authenticates via
+// getRequesterId (browser session) and 401s an identity-less caller; the
+// scheduled-job-control tool instead posts userId+agentSlug over S2S. Reuse
+// assertCanControlScheduledJob so an agent can only edit its OWN job (owner +
+// agent clamp, plus the currentScheduledJobId clamp when it runs inside one).
+// Because the worker reads task/context live from the row, no Redis re-bind is
+// needed — this is a pure DB write that the next fire picks up.
+router.post(
+  "/:id/update",
+  async (req: Request<{ id: string }>, res: Response) => {
+    try {
+      const row = await prisma.scheduledJob.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!row) {
+        res.status(404).json({ success: false, error: "Not found" });
+        return;
+      }
+
+      const auth = await assertCanControlScheduledJob(req, row);
+      if (auth.ok === false) {
+        res.status(auth.status).json({ success: false, error: auth.error });
+        return;
+      }
+
+      const { task, context, label } = req.body as {
+        task?: string;
+        context?: string | null;
+        label?: string | null;
+      };
+
+      const data: { task?: string; context?: string | null; label?: string | null } = {};
+      if (task !== undefined) {
+        const trimmed = String(task).trim();
+        if (trimmed.length === 0) {
+          res.status(400).json({ success: false, error: "task cannot be empty" });
+          return;
+        }
+        data.task = trimmed;
+      }
+      if (context !== undefined) {
+        const trimmed = context == null ? null : String(context).trim();
+        data.context = trimmed && trimmed.length > 0 ? trimmed : null;
+      }
+      if (label !== undefined) {
+        data.label = label === null ? null : String(label);
+      }
+
+      if (Object.keys(data).length === 0) {
+        res.status(400).json({
+          success: false,
+          error: "No editable fields supplied (task, context, label)",
+        });
+        return;
+      }
+
+      const updated = await prisma.scheduledJob.update({
+        where: { id: row.id },
+        data,
+      });
+
+      log.info(
+        `[scheduled-jobs] Updated task/context on job ${row.id} by ${auth.actorUserId}`,
+      );
+      res.json({
+        success: true,
+        data: { id: updated.id, status: updated.status },
+      });
+    } catch (err) {
+      log.error("[scheduled-jobs] Update error:", err);
+      res
+        .status(500)
+        .json({ success: false, error: "Failed to update scheduled job" });
+    }
+  },
+);
+
 router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
   try {
     const row = await prisma.scheduledJob.findUnique({ where: { id: req.params.id } });
@@ -678,6 +1151,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
           role: "assistant",
           content: payload.result,
           status: "completed",
+          orgId: run.orgId ?? null,
         }).catch(() => {});
       }
     }
@@ -722,16 +1196,57 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     log.error(`[scheduled-jobs/result] Failed to persist run for job ${id}:`, err);
   }
 
-  if (payload.status !== "completed" || !payload.result) return;
-
   const row = await prisma.scheduledJob.findUnique({ where: { id } });
   if (!row) {
     log.warn(`[scheduled-jobs/result] Job ${id} not found`);
     return;
   }
 
-  // Resolve agent's Spaces app token
-  const agent = await prisma.agent.findFirst({ where: { slug: row.agentSlug } });
+  if (payload.sessionId && payload.status === "completed") {
+    await handleRunCompletion(payload.sessionId, "completed").catch((err) => {
+      log.warn(`[scheduled-jobs/result] handleRunCompletion completed failed for ${payload.sessionId}:`, err instanceof Error ? err.message : err);
+    });
+  } else if (payload.sessionId) {
+    const recoveryFailure = await handleRunCompletion(payload.sessionId, "failed", payload.error ?? payload.status ?? "failed").catch((err) => {
+      log.warn(`[scheduled-jobs/result] handleRunCompletion failed for ${payload.sessionId}:`, err instanceof Error ? err.message : err);
+      return null;
+    });
+    if (recoveryFailure?.retried) {
+      log.info(`[scheduled-jobs/result] Job ${id}: failure queued recovery retry (${recoveryFailure.retriesUsed}/${recoveryFailure.maxRetries})`);
+      return;
+    }
+    // Lock contention is transient (the original run is still holding the
+    // conversation's session lock) — recovery defers/queues it; never alarm
+    // the thread with a failure notice. Only reachable without recovery
+    // state (recovery handles it above via retried:true) or after deferral
+    // exhaustion, which recovery reports separately.
+    if (isSessionLockedError(payload.error)) {
+      log.info(`[metric] name=scheduled_run_outcome status=deferred agent=${row.agentSlug} job=${id}`);
+      log.info(`[scheduled-jobs/result] Job ${id}: session_locked — deferred, no failure notice`);
+      return;
+    }
+  }
+
+  const finalizedStatus = payload.status === "completed" ? "completed" : "failed";
+  log.info(`[metric] name=scheduled_run_outcome status=${finalizedStatus} agent=${row.agentSlug} job=${id}`);
+
+  if (payload.status !== "completed") {
+    // Genuine failure (recovery exhausted or not retryable) — tell the thread.
+    await postScheduledFailureNotice(row, payload.error ?? payload.status).catch((err) => {
+      log.warn(`[scheduled-jobs/result] Job ${id}: failed to post failure notice:`, err instanceof Error ? err.message : err);
+    });
+    return;
+  }
+  if (!payload.result) {
+    // Completed with nothing to deliver — not a failure; do not alarm the thread.
+    log.info(`[scheduled-jobs/result] Job ${id}: completed with empty result — nothing to post`);
+    return;
+  }
+
+  // Resolve agent's Spaces app token scoped to the job's org.
+  const agent = await prisma.agent.findFirst({
+    where: { slug: row.agentSlug, orgId: row.orgId },
+  });
   if (!agent?.spacesAppToken || !agent.spacesAppId) {
     log.error(`[scheduled-jobs/result] Agent ${row.agentSlug} has no Spaces app credentials`);
     return;
@@ -739,6 +1254,19 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
 
   const appToken = decryptStoredField(agent.spacesAppToken);
   const spacesAppUserId = agent.spacesAppUserId ?? "";
+  let effectiveWorkspaceId = row.workspaceId;
+
+  if (!effectiveWorkspaceId) {
+    const resolvedWorkspaceId = await getWorkspaceIdForUser(row.userId, "scheduled-job");
+    if (resolvedWorkspaceId) {
+      await prisma.scheduledJob.update({
+        where: { id: row.id },
+        data: { workspaceId: resolvedWorkspaceId },
+      });
+      effectiveWorkspaceId = resolvedWorkspaceId;
+      log.info(`[scheduled-jobs/result] Job ${id}: backfilled workspaceId=${resolvedWorkspaceId} from Spaces user row`);
+    }
+  }
 
   // Deterministic tagging for scheduled results. This path used to post
   // payload.result raw, so agent-emitted mentions (`@bowmitha.c`,
@@ -764,7 +1292,11 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
         }),
       );
     } else {
-      log.warn(`[scheduled-jobs/result] Job ${id}: no active Spaces session for creator ${row.userId ?? "(none)"} — skipping @name resolution (bracketed mentions still expand)`);
+      resultText = await resolveUnboundMentions(
+        resultText,
+        buildSpacesMentionLookupsDb(effectiveWorkspaceId ?? undefined),
+      );
+      log.info(`[scheduled-jobs/result] Job ${id}: resolved mentions via Spaces DB fallback for creator ${row.userId ?? "(none)"}`);
     }
   } catch (err) {
     log.warn(`[scheduled-jobs/result] Job ${id}: mention resolution failed, posting unresolved text:`, err instanceof Error ? err.message : err);
@@ -776,7 +1308,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     // capture it at job-creation time (scheduled_jobs.workspaceId). Rows
     // created before that column existed have null workspaceId — surface a
     // clear error so the user knows to recreate the job.
-    if (!row.workspaceId) {
+    if (!effectiveWorkspaceId) {
       log.error(`[scheduled-jobs/result] Job ${id}: missing workspaceId on row — Spaces will reject delivery. Recreate the job.`);
       return;
     }
@@ -796,7 +1328,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
         }
         form.append("channelId", postChannelId);
         form.append("userId", spacesAppUserId);
-        form.append("workspaceId", row.workspaceId);
+        form.append("workspaceId", effectiveWorkspaceId);
         form.append("markdownText", resultText);
         form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
 
@@ -806,7 +1338,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
           channelId: postChannelId,
           markdownText: resultText,
           userId: spacesAppUserId,
-          workspaceId: row.workspaceId,
+          workspaceId: effectiveWorkspaceId,
           metadata: { contentFormat: "markdown" },
         }, appToken);
       }
@@ -824,7 +1356,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
         form.append("channelId", row.channelId);
         form.append("conversationId", row.conversationId);
         form.append("userId", spacesAppUserId);
-        form.append("workspaceId", row.workspaceId);
+        form.append("workspaceId", effectiveWorkspaceId);
         form.append("markdownText", resultText);
         form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
 
@@ -835,7 +1367,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
           conversationId: row.conversationId,
           markdownText: resultText,
           userId: spacesAppUserId,
-          workspaceId: row.workspaceId,
+          workspaceId: effectiveWorkspaceId,
           metadata: { contentFormat: "markdown" },
         }, appToken);
       }
@@ -845,14 +1377,14 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
       // DM the user
       const dmResult = (await spacesAppFetch("/channel/openDm", {
         targetUserId: row.userId,
-        workspaceId: row.workspaceId,
+        workspaceId: effectiveWorkspaceId,
       }, appToken)) as { channelId: string };
 
       await spacesAppFetch("/chat/postMessage", {
         channelId: dmResult.channelId,
         markdownText: resultText,
         userId: spacesAppUserId,
-        workspaceId: row.workspaceId,
+        workspaceId: effectiveWorkspaceId,
         metadata: { contentFormat: "markdown" },
       }, appToken);
 

@@ -29,7 +29,7 @@ import {
   type ContextItem,
   type ContextSearchType,
 } from "../lib/api";
-import type { Agent } from "../lib/types";
+import type { AgentLight } from "../lib/types";
 import { resolveEffectiveParents } from "../lib/branching";
 import { MessageBubble } from "./MessageBubble";
 import { ContextPicker } from "./ContextPicker";
@@ -94,7 +94,7 @@ export function AgentChat({ userId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
   const slug = searchParams.get("agent") ?? "";
 
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<AgentLight[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [providerConfig, setProviderConfig] = useState<UserAgentConfig | null>(null);
   const [providerCreds, setProviderCreds] = useState<ProviderCredential[]>([]);

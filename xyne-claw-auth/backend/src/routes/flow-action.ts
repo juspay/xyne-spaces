@@ -19,12 +19,73 @@ import { decrypt } from "../crypto.js";
 import { expandSpacesMentions } from "../lib/mention-transform.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { agentRunRepository } from "../repositories/index.js";
+import { learnFromTwinReply } from "../services/userMemoryCuratorClient.js";
 import type { FlowDefinition } from "xyne-claw-shared";
+import { mdToMrkdwn } from "xyne-claw-shared";
+import { executeTool as executeGatewayTool } from "../mcpgateway/services/execution.js";
+import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
+import { redisService } from "../redis.js";
+import {
+  QUEUE_CAP,
+  QUEUE_ENABLED,
+  enqueueMessage,
+  tryAcquireSlot,
+  type QueuedMessage,
+} from "../lib/message-queue.js";
+import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
+import { isClawAdmin } from "../middleware/agent-acl.js";
+import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
 
 const router = Router();
+const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
+  ?.split(",")
+  .map((tenant) => tenant.trim())
+  .find((tenant) => tenant.length > 0);
+
+function resolveGatewayTenantForApproval(): string | null {
+  return DEFAULT_GATEWAY_TENANT ?? null;
+}
+
+function parseGatewayServerTypeForApproval(serverType: string): { serviceName: string; backendId?: string } | null {
+  const parsed = parseGatewayCatalogSource(serverType);
+  if (parsed) return { serviceName: parsed.serviceName, backendId: parsed.backendId };
+
+  if (!serverType.startsWith(GATEWAY_KEY_PREFIX)) return null;
+  const raw = serverType.slice(GATEWAY_KEY_PREFIX.length).trim();
+  if (!raw) return null;
+  const parts = raw.split(":");
+  if (parts.length !== 1) return null;
+  const [serviceName] = parts;
+  if (!serviceName) return null;
+  return { serviceName };
+}
+
+function formatGatewayApprovalExecutionError(
+  execution: { error?: string; errorDetail?: unknown },
+  serviceName: string,
+  toolName: string,
+): string {
+  const detail = execution.errorDetail;
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const record = detail as Record<string, unknown>;
+    const responseMessage = typeof record.responseMessage === "string" ? record.responseMessage.trim() : "";
+    if (responseMessage.length > 0) return responseMessage;
+
+    const message = typeof record.message === "string" ? record.message.trim() : "";
+    if (message.length > 0) return message;
+
+    const error = typeof record.error === "string" ? record.error.trim() : "";
+    if (error.length > 0) return error;
+  }
+
+  const directError = typeof execution.error === "string" ? execution.error.trim() : "";
+  if (directError.length > 0) return directError;
+
+  return `Gateway execution failed for ${serviceName}/${toolName}`;
+}
 
 /**
  * Flag a conversation's most-recent run as having touched a user-scoped
@@ -44,6 +105,32 @@ function flagUserTokenRun(conversationId: string | undefined, agentSlug: string 
     );
 }
 
+function sanitizeApprovalToolError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return raw
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\{[^{}]{20,}\}/g, "{...}")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240) || "tool execution failed";
+}
+
+function approvalToolFailureMessage(errMsg: string): string {
+  if (/conversation not found/i.test(errMsg) || /Spaces API 404/i.test(errMsg)) {
+    return "target conversation not found — re-run the agent to regenerate this approval";
+  }
+  return errMsg;
+}
+
+const AGENT_CALL_CONSUMED_TTL_SEC = 24 * 60 * 60;
+
+async function consumeAgentCallAction(messageId: string): Promise<boolean> {
+  if (!messageId) return true;
+  const key = `flow-action:agent-call:${messageId}`;
+  const result = await redisService.getConnection().set(key, "1", "EX", AGENT_CALL_CONSUMED_TTL_SEC, "NX");
+  return result === "OK";
+}
+
 // ── Spaces signature re-verification ─────────────────────────────────────────
 // The handler below trusts body-supplied identity (context.userId = the user
 // who clicked the Flow button). requireStrictS2S at the mount only proves the
@@ -59,6 +146,10 @@ function pinAgentSlugFromHeader(req: Request, _res: Response, next: NextFunction
   if (typeof slug === "string" && slug.trim()) {
     (req.params as Record<string, string>)["agentSlug"] = slug.trim();
   }
+  const spacesAppId = req.headers["x-spaces-app-id"];
+  if (typeof spacesAppId === "string" && spacesAppId.trim()) {
+    (req.params as Record<string, string>)["spacesAppId"] = spacesAppId.trim();
+  }
   next();
 }
 
@@ -71,9 +162,10 @@ async function replaceFlowCardWithText(
   text: string,
   conversationId?: string,
   channelId?: string,
+  spacesAppId?: string,
 ): Promise<void> {
   if (!messageId) return;
-  const agent = await getAgentTokenAndUserId(agentSlug);
+  const agent = await getAgentTokenAndUserId(agentSlug, spacesAppId);
   if (!agent) {
     log.warn(`[flow-action] replaceFlowCardWithText: no agent token/userId for slug=${agentSlug ?? "(default)"}`);
     return;
@@ -85,7 +177,10 @@ async function replaceFlowCardWithText(
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${agent.token}` },
       body: JSON.stringify({
         messageId,
-        markdownText: text,
+        // Spaces renders this replacement text as mrkdwn (*bold*), NOT Markdown
+        // (**bold**). Convert so **bold** in the handler strings doesn't render
+        // as literal asterisks. Matches how the flow builder renders all text.
+        markdownText: mdToMrkdwn(text),
         userId: agent.userId,
         // validateChannelAccessForPost middleware requires one of channelId/conversationId.
         // Prefer channelId (direct) over conversationId (requires a DB lookup).
@@ -126,10 +221,35 @@ type AppActionResponse =
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function getAgentTokenAndUserId(agentSlug: string | undefined): Promise<{ token: string; userId: string } | null> {
-  const agent = agentSlug
-    ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
-    : await prisma.agent.findFirst({ where: { isDefault: true } });
+async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: string): Promise<{
+  id: string;
+  orgId: string;
+  slug: string;
+  spacesAppToken: string | null;
+  spacesAppUserId: string | null;
+  spacesAppId: string | null;
+} | null> {
+  if (spacesAppId) return prisma.agent.findFirst({ where: { spacesAppId } });
+  if (!agentSlug) {
+    log.error(`[flow-action] org/app context is required; refusing global default-agent lookup spacesAppId=${spacesAppId ?? "none"} agentSlug=default`);
+    return null;
+  }
+  const matches = await prisma.agent.findMany({
+    where: { slug: agentSlug },
+    take: 2,
+  });
+  if (matches.length > 1) {
+    log.error(`[flow-action] ambiguous legacy agent slug=${agentSlug}; refusing global lookup`);
+    return null;
+  }
+  if (matches[0]) {
+    log.warn(`[flow-action] deprecated legacy slug-only agent lookup slug=${agentSlug}; pass spacesAppId`);
+  }
+  return matches[0] ?? null;
+}
+
+async function getAgentTokenAndUserId(agentSlug: string | undefined, spacesAppId?: string): Promise<{ token: string; userId: string } | null> {
+  const agent = await findAgentForFlow(agentSlug, spacesAppId);
   if (!agent?.spacesAppToken || !agent.spacesAppUserId) return null;
   const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
   if (!ciphertext || !iv || !authTag) return null;
@@ -159,6 +279,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const writeUserId = data["userId"] as string;
       const signature = data["signature"] as string;
       const agentSlug = data["agentSlug"] as string | undefined;
+      const spacesAppId = data["spacesAppId"] as string | undefined;
 
       if (!serverType || !tool || !paramsStr || !writeUserId || !signature) {
         res.status(400).json({ type: "error", message: "Missing write action fields in flowJSON.data" } satisfies AppActionResponse);
@@ -176,7 +297,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       if (actionId === "decline-write") {
         resp = { type: "close_screen", finalMessage: "❌ Action declined." };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, agentSlug, "❌ **Action declined.**", conversationId);
+        void replaceFlowCardWithText(messageId, agentSlug, "❌ **Action declined.**", conversationId, undefined, spacesAppId);
         return;
       }
 
@@ -194,9 +315,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
       // Execute the tool
       if (serverType === "xyne-spaces" && tool === "spaces-send-message") {
-        const agent = agentSlug
-          ? await prisma.agent.findUnique({ where: { slug: agentSlug } })
-          : await prisma.agent.findFirst({ where: { isDefault: true } });
+        const agent = await findAgentForFlow(agentSlug, spacesAppId);
         if (!agent?.spacesAppToken) {
           res.json({ type: "error", message: `No spacesAppToken for agent ${agentSlug ?? "(default)"}` } satisfies AppActionResponse);
           return;
@@ -240,7 +359,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             if (errMsg.includes("private")) {
               resp = { type: "close_screen", finalMessage: `❌ Cannot post to #${targetChannelId} — private channel. Add me first.` };
               res.json(resp);
-              void replaceFlowCardWithText(messageId, agentSlug, `❌ Cannot post to #${targetChannelId} — private channel.`, conversationId);
+              void replaceFlowCardWithText(messageId, agentSlug, `❌ Cannot post to #${targetChannelId} — private channel.`, conversationId, undefined, spacesAppId);
               return;
             }
           }
@@ -251,7 +370,64 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           resp = { type: "close_screen", finalMessage: `✅ Posted in #${channelName}` };
         }
         res.json(resp);
-        void replaceFlowCardWithText(messageId, agentSlug, typeof resp === "object" && "finalMessage" in resp ? (resp.finalMessage ?? "✅ Done.") : "✅ Done.", conversationId);
+        void replaceFlowCardWithText(messageId, agentSlug, typeof resp === "object" && "finalMessage" in resp ? (resp.finalMessage ?? "✅ Done.") : "✅ Done.", conversationId, undefined, spacesAppId);
+        return;
+      }
+
+      const gatewayTarget = parseGatewayServerTypeForApproval(serverType);
+      if (gatewayTarget) {
+        const tenantUniqueId = resolveGatewayTenantForApproval();
+        if (!tenantUniqueId) {
+          res.json({ type: "error", message: "Gateway tenant is not configured" } satisfies AppActionResponse);
+          return;
+        }
+
+        const user = await prisma.user.findUnique({
+          where: { id: writeUserId },
+          select: { email: true },
+        });
+        if (!user?.email) {
+          res.json({ type: "error", message: `No user email found for ${writeUserId}` } satisfies AppActionResponse);
+          return;
+        }
+
+        const execution = await executeGatewayTool(tenantUniqueId, user.email, {
+          serviceName: gatewayTarget.serviceName,
+          toolName: tool,
+          arguments: params,
+          ...(gatewayTarget.backendId ? { backendId: gatewayTarget.backendId } : {}),
+        });
+
+        if (!execution.success) {
+          const errMsg = sanitizeApprovalToolError(
+            formatGatewayApprovalExecutionError(execution, gatewayTarget.serviceName, tool),
+          );
+          const userMessage = approvalToolFailureMessage(errMsg);
+          log.error(
+            `[flow-action] gateway approval tool failed server=${serverType} tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errMsg}`,
+          );
+          res.status(422).json({
+            type: "error",
+            code: "TOOL_EXECUTION_FAILED",
+            message: userMessage,
+          } satisfies AppActionResponse);
+          void replaceFlowCardWithText(
+            messageId,
+            agentSlug,
+            `❌ **${tool}** failed: ${userMessage}`,
+            conversationId,
+            undefined,
+            spacesAppId,
+          );
+          return;
+        }
+
+        log.info(
+          `[flow-action] Gateway write action approved: ${serverType}/${tool} backend=${execution.backendId} duration=${execution.duration}ms`,
+        );
+        resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, agentSlug, `✅ **${tool}** executed successfully.`, conversationId, undefined, spacesAppId);
         return;
       }
 
@@ -301,7 +477,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         log.info(`[flow-action] Google write action approved: ${tool} → ${result.slice(0, 100)}`);
         resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, agentSlug, `✅ **${tool}** executed successfully.`, conversationId);
+        void replaceFlowCardWithText(messageId, agentSlug, `✅ **${tool}** executed successfully.`, conversationId, undefined, spacesAppId);
         return;
       }
 
@@ -352,7 +528,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         log.info(`[flow-action] Microsoft write action approved: ${tool} → ${result.slice(0, 100)}`);
         resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, agentSlug, `✅ **${tool}** executed successfully.`, conversationId);
+        void replaceFlowCardWithText(messageId, agentSlug, `✅ **${tool}** executed successfully.`, conversationId, undefined, spacesAppId);
         return;
       }
 
@@ -373,11 +549,34 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // (excludes the ambient Spaces session — see isPrivateUserCredential).
       if (isPrivateUserCredential(serverType, effective.source)) flagUserTokenRun(conversationId, agentSlug);
 
-      const toolResult = await callTool(writeUserId, serverType, effective.credentials, tool, params);
+      let toolResult: Awaited<ReturnType<typeof callTool>>;
+      try {
+        toolResult = await callTool(writeUserId, serverType, effective.credentials, tool, params);
+      } catch (err) {
+        const errMsg = sanitizeApprovalToolError(err);
+        const userMessage = approvalToolFailureMessage(errMsg);
+        log.error(
+          `[flow-action] approval tool failed tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errMsg}`,
+        );
+        res.status(422).json({
+          type: "error",
+          code: "TOOL_EXECUTION_FAILED",
+          message: userMessage,
+        } satisfies AppActionResponse);
+        void replaceFlowCardWithText(
+          messageId,
+          agentSlug,
+          `❌ **${tool}** failed: ${userMessage}`,
+          conversationId,
+          undefined,
+          spacesAppId,
+        );
+        return;
+      }
       log.info(`[flow-action] Write action approved: ${tool} → ${toolResult.content.slice(0, 100)}`);
       resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
       res.json(resp);
-      void replaceFlowCardWithText(messageId, agentSlug, `✅ **${tool}** executed successfully.`, conversationId);
+      void replaceFlowCardWithText(messageId, agentSlug, `✅ **${tool}** executed successfully.`, conversationId, undefined, spacesAppId);
       return;
     }
 
@@ -440,6 +639,18 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         resp = { type: "close_screen", finalMessage: "✅ Response sent." };
         res.json(resp);
         void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, "✅ **Response sent.**", conversationId, data["dmChannelId"] as string | undefined);
+
+        // Forward self-learning: the (incoming mention → the user's final reply)
+        // pair is the highest-signal example of how this user actually responds.
+        // Fire-and-forget so it never delays the approve response.
+        void learnFromTwinReply({
+          userId: mentionedUserId,
+          incomingTask: (data["incomingTask"] as string | undefined) ?? "",
+          reply: finalContent,
+          conversationId: targetConversationId,
+          channelId: targetChannelId,
+          ...(typeof data["channelName"] === "string" ? { channelName: data["channelName"] as string } : {}),
+        });
       } catch (err) {
         log.error("[flow-action] Twin approval error:", err);
         resp = { type: "error", message: "Failed to post response" };
@@ -452,6 +663,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
     if (actionType === "user-answer") {
       const questionId = data["questionId"] as string;
       const answerAgentSlug = data["agentSlug"] as string;
+      const answerSpacesAppId = data["spacesAppId"] as string | undefined;
       const answerChannelId = data["channelId"] as string;
       const answerConversationId = data["conversationId"] as string;
       const answerUserId = data["userId"] as string;
@@ -483,10 +695,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         const questionText = question?.question ?? "a question";
         const optionsList = question?.options?.join(", ") ?? "";
 
-        const agent = await prisma.agent.findFirst({ where: { slug: answerAgentSlug } });
+        const agent = await findAgentForFlow(answerAgentSlug, answerSpacesAppId);
         const appToken = agent?.spacesAppToken
           ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
           : "";
+        const answerOrgId = agent?.orgId
+          ?? (await prisma.user.findUnique({ where: { id: answerUserId }, select: { orgId: true } }))?.orgId;
+        if (!answerOrgId) {
+          log.error(`[flow-action] answer: no orgId for user=${answerUserId} agent=${answerAgentSlug}`);
+          return;
+        }
 
         const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
           method: "POST",
@@ -501,6 +719,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             conversationId: answerConversationId,
             channelId: answerChannelId,
             agentSlug: answerAgentSlug,
+            orgId: answerOrgId,
             callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
           }),
         });
@@ -515,6 +734,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             channelName: answerChannelId,
             conversationId: answerConversationId,
             task: `User answered: ${answer}`,
+            agentId: agent.id,
+            agentOrgId: agent.orgId,
             agentSlug: answerAgentSlug,
             responseMode: "conversation",
             appToken,
@@ -528,6 +749,245 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       } catch (err) {
         log.error("[flow-action] Failed to start new run with answer:", err);
       }
+      return;
+    }
+
+    // ── 4. Agent call proposal ───────────────────────────────────────────────
+    // Posted by propose-agent-call. Run dispatches the target agent in this
+    // same thread under the CLICKING user's identity; Dismiss just consumes the
+    // card. The HMAC binds the target/task/proposer/conversation fields.
+    if (actionType === "agent-call") {
+      const targetAgentSlug = data["targetAgentSlug"] as string | undefined;
+      const targetAgentName = data["targetAgentName"] as string | undefined;
+      const proposerAgentSlug = data["proposerAgentSlug"] as string | undefined;
+      const proposalSpacesAppId = data["spacesAppId"] as string | undefined;
+      const proposalConversationId = data["conversationId"] as string | undefined;
+      const proposalChannelId = data["channelId"] as string | undefined;
+      const task = data["task"] as string | undefined;
+      const signature = data["signature"] as string | undefined;
+
+      if (!targetAgentSlug || !proposerAgentSlug || !proposalConversationId || !proposalChannelId || !task || !signature) {
+        res.status(400).json({ type: "error", message: "Missing agent-call fields in flowJSON.data" } satisfies AppActionResponse);
+        return;
+      }
+      if (!callerUserId) {
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+
+      const { verifyActionSignature } = await import("./mcp.js");
+      const actionPayload = {
+        actionType: "agent-call",
+        targetAgentSlug,
+        task,
+        proposerAgentSlug,
+        conversationId: proposalConversationId,
+      };
+      if (!verifyActionSignature(actionPayload, signature)) {
+        log.error("[flow-action] agent-call HMAC verification failed");
+        res.status(422).json({ type: "error", message: "Proposal card verification failed" } satisfies AppActionResponse);
+        return;
+      }
+
+      if (actionId !== "agent-call-run" && actionId !== "agent-call-dismiss") {
+        res.status(400).json({ type: "error", message: "Unknown agent-call action" } satisfies AppActionResponse);
+        return;
+      }
+      if (actionId === "agent-call-dismiss") {
+        const firstClick = await consumeAgentCallAction(messageId);
+        if (!firstClick) {
+          res.json({ type: "close_screen", finalMessage: "Already handled." } satisfies AppActionResponse);
+          return;
+        }
+        resp = { type: "close_screen", finalMessage: "Dismissed." };
+        res.json(resp);
+        void replaceFlowCardWithText(
+          messageId,
+          proposerAgentSlug,
+          `✋ **Dismissed.** Did not run ${targetAgentName ?? targetAgentSlug}.`,
+          proposalConversationId,
+          proposalChannelId,
+          proposalSpacesAppId,
+        );
+        return;
+      }
+
+      const proposer = await findAgentForFlow(proposerAgentSlug, proposalSpacesAppId);
+      if (!proposer) {
+        res.status(422).json({ type: "error", message: "Proposer agent is no longer available" } satisfies AppActionResponse);
+        return;
+      }
+      const targetAgent = await prisma.agent.findFirst({
+        where: {
+          orgId: proposer.orgId,
+          slug: targetAgentSlug,
+          enabled: true,
+          ...visibleAgentWhereForRunningUser(callerUserId, await isClawAdmin(callerUserId)),
+        },
+        select: {
+          id: true,
+          orgId: true,
+          slug: true,
+          name: true,
+          spacesAppId: true,
+          spacesAppToken: true,
+          spacesAppUserId: true,
+        },
+      });
+      if (!targetAgent) {
+        res.status(422).json({ type: "error", message: "Target agent is not visible or is no longer available" } satisfies AppActionResponse);
+        void replaceFlowCardWithText(
+          messageId,
+          proposerAgentSlug,
+          `❌ **Could not run ${targetAgentName ?? targetAgentSlug}.** Target agent is not visible or is no longer available.`,
+          proposalConversationId,
+          proposalChannelId,
+          proposalSpacesAppId,
+        );
+        return;
+      }
+
+      const firstClick = await consumeAgentCallAction(messageId);
+      if (!firstClick) {
+        res.json({ type: "close_screen", finalMessage: "Already handled." } satisfies AppActionResponse);
+        return;
+      }
+
+      // Charset matters: this doubles as the run idempotencyKey, and claw's
+      // isSafeId rejects anything outside [A-Za-z0-9_-] (it becomes a GCS
+      // object name). No colons. Clamped to claw's 128-char limit.
+      const eventId = `agent-call_${messageId}_${targetAgent.slug}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 128);
+      let slotToken: string | null = null;
+      if (QUEUE_ENABLED) {
+        slotToken = await tryAcquireSlot(proposalConversationId, targetAgent.slug);
+        if (!slotToken) {
+          const queuedMsg: QueuedMessage = {
+            eventId,
+            conversationId: proposalConversationId,
+            channelId: proposalChannelId,
+            userId: callerUserId,
+            agentSlug: targetAgent.slug,
+            orgId: targetAgent.orgId,
+            task,
+            eventType: "APP_MENTIONED",
+            ts: Date.now(),
+          };
+          const enq = await enqueueMessage(queuedMsg);
+          if (!enq.enqueued && !enq.deduped) {
+            const msg = enq.full
+              ? `Queue is full (${QUEUE_CAP}); please try again when the current run finishes.`
+              : "Could not queue the agent run.";
+            res.status(422).json({ type: "error", message: msg } satisfies AppActionResponse);
+            void replaceFlowCardWithText(
+              messageId,
+              proposerAgentSlug,
+              `❌ **Could not queue ${targetAgent.name}.** ${msg}`,
+              proposalConversationId,
+              proposalChannelId,
+              proposalSpacesAppId,
+            );
+            return;
+          }
+          resp = { type: "close_screen", finalMessage: `Queued ${targetAgent.name}.` };
+          res.json(resp);
+          void replaceFlowCardWithText(
+            messageId,
+            proposerAgentSlug,
+            `🕒 **Queued ${targetAgent.name}.** It will run in this thread after the current run finishes.`,
+            proposalConversationId,
+            proposalChannelId,
+            proposalSpacesAppId,
+          );
+          return;
+        }
+      }
+
+      const traceId = eventId;
+      const dispatchPayload = {
+        userId: callerUserId,
+        task,
+        conversationId: proposalConversationId,
+        agentSlug: targetAgent.slug,
+        orgId: targetAgent.orgId,
+        eventType: "APP_MENTIONED",
+        traceId,
+        callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+        progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+        channelId: proposalChannelId,
+        idempotencyKey: eventId,
+      };
+
+      const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        },
+        body: JSON.stringify(dispatchPayload),
+      });
+      const runBody = (await runRes.json().catch(() => null)) as { success?: boolean; sessionId?: string; error?: string } | null;
+      if (!runRes.ok || !runBody?.success || !runBody.sessionId) {
+        const { drainNextQueued } = await import("./webhook.js");
+        if (QUEUE_ENABLED) await drainNextQueued(proposalConversationId, targetAgent.slug, slotToken).catch(() => {});
+        const msg = runBody?.error ?? `dispatch failed with HTTP ${runRes.status}`;
+        res.status(422).json({ type: "error", message: msg } satisfies AppActionResponse);
+        void replaceFlowCardWithText(
+          messageId,
+          proposerAgentSlug,
+          `❌ **Could not run ${targetAgent.name}.** ${msg}`,
+          proposalConversationId,
+          proposalChannelId,
+          proposalSpacesAppId,
+        );
+        return;
+      }
+
+      if (targetAgent.spacesAppToken && targetAgent.spacesAppId) {
+        const { setSession } = await import("./webhook.js");
+        const appToken = decrypt(...(targetAgent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey);
+        const sessionContext = {
+          mentionedUserId: targetAgent.spacesAppUserId ?? "",
+          senderId: callerUserId,
+          senderName: "",
+          channelId: proposalChannelId,
+          channelName: proposalChannelId,
+          conversationId: proposalConversationId,
+          task,
+          agentId: targetAgent.id,
+          agentOrgId: targetAgent.orgId,
+          agentSlug: targetAgent.slug,
+          responseMode: "conversation" as const,
+          appToken,
+          spacesAppId: targetAgent.spacesAppId,
+          spacesAppUserId: targetAgent.spacesAppUserId ?? "",
+          traceId,
+          rootAgentSlug: targetAgent.slug,
+        };
+        await setSession(runBody.sessionId, sessionContext);
+        await registerRunRecovery({
+          rootSessionId: runBody.sessionId,
+          maxRetries: CONFIG.runRecoveryMaxRetries,
+          timeoutMs: CONFIG.runRecoveryTimeoutMs,
+          retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+          dispatchPayload,
+          sessionContext,
+        }).catch((err) => {
+          log.warn("[flow-action] agent-call: registerRunRecovery failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
+
+      resp = { type: "close_screen", finalMessage: `Running ${targetAgent.name}…` };
+      res.json(resp);
+      void replaceFlowCardWithText(
+        messageId,
+        proposerAgentSlug,
+        `▶ **Running ${targetAgent.name}…**`,
+        proposalConversationId,
+        proposalChannelId,
+        proposalSpacesAppId,
+      );
       return;
     }
 
@@ -546,6 +1006,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const requestId = data["requestId"] as string | undefined;
       const ownerUserId = data["ownerUserId"] as string | undefined;
       const cloneAgentSlug = data["agentSlug"] as string | undefined;
+      const cloneSpacesAppId = data["spacesAppId"] as string | undefined;
 
       if (!requestId || !ownerUserId) {
         res.status(400).json({ type: "error", message: "Missing clone-approval fields in flowJSON.data" } satisfies AppActionResponse);
@@ -565,7 +1026,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       if (!result.ok) {
         resp = { type: "close_screen", finalMessage: result.error };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, cloneAgentSlug, `⚠️ ${result.error}`, conversationId);
+        void replaceFlowCardWithText(messageId, cloneAgentSlug, `⚠️ ${result.error}`, conversationId, undefined, cloneSpacesAppId);
         return;
       }
 
@@ -574,13 +1035,14 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         : (result.status === "approved" ? "✅ **Clone approved.** The requester now has their own copy." : "❌ **Clone request declined.**");
       resp = { type: "close_screen", finalMessage: finalText };
       res.json(resp);
-      void replaceFlowCardWithText(messageId, cloneAgentSlug, finalText, conversationId);
+      void replaceFlowCardWithText(messageId, cloneAgentSlug, finalText, conversationId, undefined, cloneSpacesAppId);
       return;
     }
 
     if (actionType === "start-goal") {
       const condition = data["condition"] as string | undefined;
       const goalAgentSlug = data["agentSlug"] as string | undefined;
+      const goalSpacesAppId = data["spacesAppId"] as string | undefined;
       const goalChannelId = data["channelId"] as string | undefined;
       const goalConversationId = data["conversationId"] as string | undefined;
       const goalUserId = data["userId"] as string | undefined;
@@ -610,6 +1072,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         "▶ **/goal started — running autonomously.** I'll keep working until the exit condition is met (or the turn cap is reached). Use `/goal status` to check progress or `/stop` to cancel.",
         goalConversationId,
         goalChannelId,
+        goalSpacesAppId,
       );
 
       // Fire-and-forget: dispatch the actual /run + relooper persistence.
@@ -617,7 +1080,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // a stuck dispatch is recoverable; a broken UI promise is not.
       (async () => {
         try {
-          const agent = await prisma.agent.findFirst({ where: { slug: goalAgentSlug } });
+          const agent = await findAgentForFlow(goalAgentSlug, goalSpacesAppId);
           if (!agent) {
             log.error(`[flow-action] start-goal: agent ${goalAgentSlug} not found`);
             return;
@@ -647,6 +1110,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             conversationId: goalConversationId,
             channelId: goalChannelId,
             agentSlug: goalAgentSlug,
+            orgId: agent.orgId,
             callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
           };
 
@@ -671,6 +1135,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               channelName: goalChannelId,
               conversationId: goalConversationId,
               task: intercept.firstTurnTask,
+              agentId: agent.id,
+              agentOrgId: agent.orgId,
               agentSlug: goalAgentSlug,
               responseMode: "conversation",
               appToken,
@@ -685,6 +1151,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               channelId: goalChannelId,
               userId: goalUserId,
               agentSlug: goalAgentSlug,
+              orgId: agent.orgId,
               condition: intercept.condition,
               runPayload: dispatchPayload as Parameters<typeof persistGoalStart>[0]["runPayload"],
             }).catch((err) => {
@@ -713,6 +1180,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
     if (actionType === "promote-provider") {
       const provider = data["provider"] as string | undefined;
       const promoteAgentSlug = data["agentSlug"] as string | undefined;
+      const promoteSpacesAppId = data["spacesAppId"] as string | undefined;
       const promoteChannelId = data["channelId"] as string | undefined;
       const promoteConversationId = data["conversationId"] as string | undefined;
       const promoteUserId = data["userId"] as string | undefined;
@@ -758,11 +1226,11 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // Fire-and-forget: flip the escalation flag + dispatch the original task.
       (async () => {
         try {
-          const { extractCodexBearer } = await import("../lib/codex-creds.js");
+          const { buildProviderConfig } = await import("../lib/agent-provider-config.js");
           const { agentProviderCredentialsRepository } = await import("../repositories/index.js");
           const { setSession, getSessionByConv } = await import("./webhook.js");
 
-          const agent = await prisma.agent.findFirst({ where: { slug: promoteAgentSlug } });
+          const agent = await findAgentForFlow(promoteAgentSlug, promoteSpacesAppId);
           if (!agent) {
             log.error(`[flow-action] promote-provider: agent ${promoteAgentSlug} not found`);
             return;
@@ -771,34 +1239,17 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
             : "";
 
-          // Build the provider config for the promoted provider — same
-          // shape as webhook.ts buildProviderConfig (kept inline here to
-          // avoid a heavier refactor; if a third call site appears, extract).
+          // Build the promoted provider's config via the shared resolver builder
+          // (one source of truth for default models + codex/claude OAuth-bundle
+          // extraction — the inline copy here previously handled only codex).
           const credRow = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, provider);
-          if (!credRow?.encryptedKey || !credRow.iv || !credRow.authTag) {
-            log.error(`[flow-action] promote-provider: no creds for ${provider} on agent ${promoteAgentSlug}`);
+          const promotedConfig = credRow ? buildProviderConfig(provider, credRow) : null;
+          if (!promotedConfig) {
+            log.error(`[flow-action] promote-provider: no usable ${provider} creds on agent ${promoteAgentSlug}`);
             return;
           }
-          let apiKey: string;
-          try {
-            const decrypted = decrypt(credRow.encryptedKey, credRow.iv, credRow.authTag, CONFIG.encryptionKey);
-            apiKey = provider === "codex" ? extractCodexBearer(decrypted) : decrypted;
-          } catch (err) {
-            log.error(`[flow-action] promote-provider: failed to decrypt ${provider} key:`, err instanceof Error ? err.message : err);
-            return;
-          }
-          const defaultModel =
-            provider === "copilot" ? "gpt-4o" :
-            provider === "codex" ? "gpt-4.1" :
-            "claude-sonnet-4-5";
           const providerConfigs: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string; reasoningEffort?: string }> = {
-            [provider]: {
-              apiKey,
-              model: credRow.model ?? defaultModel,
-              ...(credRow.baseUrl ? { baseUrl: credRow.baseUrl } : {}),
-              ...(credRow.authType ? { authType: credRow.authType } : {}),
-              ...(credRow.reasoningEffort ? { reasoningEffort: credRow.reasoningEffort } : {}),
-            },
+            [provider]: promotedConfig,
           };
 
           // Update the conversation's SessionContext with the escalation
@@ -813,6 +1264,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             channelName: promoteChannelId,
             conversationId: promoteConversationId,
             task: originalTask ?? "",
+            agentId: agent.id,
+            agentOrgId: agent.orgId,
             agentSlug: promoteAgentSlug,
             responseMode: "conversation" as const,
             appToken,
@@ -827,6 +1280,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             conversationId: promoteConversationId,
             channelId: promoteChannelId,
             agentSlug: promoteAgentSlug,
+            orgId: agent.orgId,
             callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
             progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
             provider,

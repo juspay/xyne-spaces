@@ -19,6 +19,7 @@
 import { prisma } from "../db.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
+import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
 
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
   ?.split(",")
@@ -37,6 +38,20 @@ export interface WriteActionResult {
   ok: boolean;
   content: string;
   error?: string;
+}
+
+function parseGatewayActionTarget(serverType: string): { serviceName: string; backendId?: string } | null {
+  const parsed = parseGatewayCatalogSource(serverType);
+  if (parsed) return { serviceName: parsed.serviceName, backendId: parsed.backendId };
+
+  if (!serverType.startsWith(GATEWAY_KEY_PREFIX)) return null;
+  const raw = serverType.slice(GATEWAY_KEY_PREFIX.length).trim();
+  if (!raw) return null;
+  const parts = raw.split(":");
+  if (parts.length !== 1) return null;
+  const [serviceName] = parts;
+  if (!serviceName) return null;
+  return { serviceName };
 }
 
 /**
@@ -58,9 +73,8 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
   try {
     // 2a. MCP gateway tools: serverType is encoded as gateway:<service>[:<backendId>]
     if (serverType.startsWith("gateway:")) {
-      const [, rawTarget] = serverType.split("gateway:");
-      const [serviceName, backendId] = (rawTarget ?? "").split(":");
-      if (!serviceName) {
+      const gatewayTarget = parseGatewayActionTarget(serverType);
+      if (!gatewayTarget) {
         return { ok: false, content: "", error: "Invalid gateway action: missing service name." };
       }
 
@@ -77,10 +91,10 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
 
       const { executeTool: executeGatewayTool } = await import("../mcpgateway/services/execution.js");
       const result = await executeGatewayTool(DEFAULT_GATEWAY_TENANT, user.email, {
-        serviceName,
+        serviceName: gatewayTarget.serviceName,
         toolName: tool,
         arguments: params,
-        ...(backendId ? { backendId } : {}),
+        ...(gatewayTarget.backendId ? { backendId: gatewayTarget.backendId } : {}),
       });
 
       if (!result.success) {

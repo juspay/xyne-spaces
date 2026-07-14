@@ -6,7 +6,7 @@ import {
   TrashIcon,
   GlobeIcon,
 } from "@phosphor-icons/react";
-import type { Agent } from "../../lib/types";
+import type { AgentLight } from "../../lib/types";
 import {
   listChainWorkflows,
   deleteChainWorkflow,
@@ -258,7 +258,7 @@ function WorkflowCard({
 
 export function WorkflowsPageV3({ userId }: Props) {
   const [workflows, setWorkflows] = useState<ChainWorkflow[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<AgentLight[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingWorkflow, setEditingWorkflow] = useState<ChainWorkflow | null>(null);

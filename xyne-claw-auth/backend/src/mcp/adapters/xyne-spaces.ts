@@ -17,7 +17,7 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
   // message AS THE USER, so it must require explicit consent before sending.
   // apps-send-message (in the sibling xyne-spaces-app-tools MCP) is NOT
   // gated by design — that one acts as the bot identity, autonomously.
-  writeTools: ["spaces-create-ticket", "spaces-update-ticket", "spaces-schedule-call", "spaces-create-canvas", "spaces-edit-canvas", "user-send-message"],
+  writeTools: ["spaces-create-ticket", "spaces-update-ticket", "spaces-schedule-call", "spaces-create-canvas", "spaces-edit-canvas", "user-send-message", "spaces-upload-to-kb"],
   credentialFields: [
     { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: "https://app.spaces.xyne.juspay.net" },
     { name: "token", label: "Google Auth Token", type: "password", placeholder: "Paste your google_access_token" },

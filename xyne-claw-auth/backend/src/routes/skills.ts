@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { skillRepository, agentRequestRepository } from "../repositories/index.js";
-import { getRequesterId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
 
 import { createLogger } from "../logger.js";
@@ -14,9 +14,15 @@ router.get("/", async (req: Request, res: Response) => {
     const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
     const authedUserId = String(req.headers["x-user-id"] ?? "");
     const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+    // Gate the admin "see ALL (incl. others' private)" bypass behind ?scope=all,
+    // mirroring GET /agents. Without this an admin's normal skill list leaks
+    // every user's private skills (the same regression agents.ts already fixed).
+    const wantAllSkills = req.query["scope"] === "all";
+    const listOrgId = getOrgId(req);
     const skills = await skillRepository.listVisible({
       ...(scopeUserId ? { userId: scopeUserId } : {}),
-      isAdmin: admin,
+      ...(listOrgId ? { orgId: listOrgId } : {}),
+      isAdmin: admin && wantAllSkills,
     });
     res.json({ success: true, data: skills });
   } catch (err) {
@@ -28,8 +34,10 @@ router.get("/", async (req: Request, res: Response) => {
 // Get a single skill by slug
 router.get("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const skill = await skillRepository.findBySlug(req.params.slug);
+    // Phase-2: org-scope this read (global fallback while slug is globally unique).
+    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!skill) {
+      log.warn(`[skills/get] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
       res.status(404).json({ success: false, error: "Skill not found" });
       return;
     }
@@ -61,7 +69,14 @@ router.post("/", async (req: Request, res: Response) => {
       return;
     }
 
-    const existing = await skillRepository.findBySlug(cleanSlug);
+    const orgId = getOrgId(req);
+    if (!orgId) {
+      log.warn(`[skills/create] orgId is required requesterId=${getRequesterId(req) ?? "none"} slug=${cleanSlug} source=${source ?? "none"}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
+
+    const existing = await skillRepository.findBySlug(cleanSlug, orgId);
     if (existing) {
       res.status(409).json({ success: false, error: "A skill with this slug already exists" });
       return;
@@ -94,6 +109,8 @@ router.post("/", async (req: Request, res: Response) => {
       // explicit intent, and the UI now matches what non-admins see.
       scope: "personal",
       ...(requesterId ? { owner: { connect: { id: requesterId } } } : {}),
+      // Phase-2: stamp the creating org.
+      org: { connect: { id: orgId } },
     });
 
     res.status(201).json({ success: true, data: skill });
@@ -106,8 +123,9 @@ router.post("/", async (req: Request, res: Response) => {
 // Update a skill (owner or admin)
 router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const existing = await skillRepository.findBySlug(req.params.slug);
+    const existing = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!existing) {
+      log.warn(`[skills/update] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
       res.status(404).json({ success: false, error: "Skill not found" });
       return;
     }
@@ -135,7 +153,7 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     if (content !== undefined) data.content = content.trim();
     if (enabled !== undefined) data.enabled = enabled;
 
-    const skill = await skillRepository.update(req.params.slug, data);
+    const skill = await skillRepository.update(req.params.slug, existing.orgId, data);
     res.json({ success: true, data: skill });
   } catch (err) {
     log.error("[skills] update error:", err);
@@ -146,8 +164,9 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
 // Delete a skill (owner or admin)
 router.delete("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const existing = await skillRepository.findBySlug(req.params.slug);
+    const existing = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!existing) {
+      log.warn(`[skills/delete] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
       res.status(404).json({ success: false, error: "Skill not found" });
       return;
     }
@@ -162,7 +181,7 @@ router.delete("/:slug", async (req: Request<{ slug: string }>, res: Response) =>
       }
     }
 
-    await skillRepository.delete(req.params.slug);
+    await skillRepository.delete(req.params.slug, existing.orgId);
     res.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "P2025") {
@@ -178,11 +197,11 @@ router.delete("/:slug", async (req: Request<{ slug: string }>, res: Response) =>
 router.post("/:slug/promote", requireClawAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
-    const skill = await skillRepository.findBySlug(req.params.slug);
-    if (!skill) { res.status(404).json({ success: false, error: "Skill not found" }); return; }
+    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+    if (!skill) { log.warn(`[skills/promote] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`); res.status(404).json({ success: false, error: "Skill not found" }); return; }
     if (skill.scope === "global") { res.status(400).json({ success: false, error: "Skill is already global" }); return; }
 
-    const updated = await skillRepository.update(req.params.slug, { scope: "global", promotedBy: requesterId, promotedAt: new Date() });
+    const updated = await skillRepository.update(req.params.slug, skill.orgId, { scope: "global", promotedBy: requesterId, promotedAt: new Date() });
 
     await writeAuditLog({
       actorUserId: requesterId,
@@ -202,11 +221,11 @@ router.post("/:slug/promote", requireClawAdmin, async (req: Request<{ slug: stri
 router.post("/:slug/demote", requireClawAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
-    const skill = await skillRepository.findBySlug(req.params.slug);
-    if (!skill) { res.status(404).json({ success: false, error: "Skill not found" }); return; }
+    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+    if (!skill) { log.warn(`[skills/demote] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`); res.status(404).json({ success: false, error: "Skill not found" }); return; }
     if (skill.scope !== "global") { res.status(400).json({ success: false, error: "Skill is not global" }); return; }
 
-    const updated = await skillRepository.update(req.params.slug, { scope: "personal", promotedBy: null, promotedAt: null });
+    const updated = await skillRepository.update(req.params.slug, skill.orgId, { scope: "personal", promotedBy: null, promotedAt: null });
 
     await writeAuditLog({
       actorUserId: requesterId,
@@ -228,8 +247,8 @@ router.post("/:slug/request", async (req: Request<{ slug: string }>, res: Respon
     const requesterId = getRequesterId(req);
     if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
 
-    const skill = await skillRepository.findBySlug(req.params.slug);
-    if (!skill) { res.status(404).json({ success: false, error: "Skill not found" }); return; }
+    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+    if (!skill) { log.warn(`[skills/request] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`); res.status(404).json({ success: false, error: "Skill not found" }); return; }
     if (skill.ownerUserId !== requesterId) { res.status(403).json({ success: false, error: "Only the owner can request this" }); return; }
     if (skill.scope === "global") { res.status(400).json({ success: false, error: "Skill is already global" }); return; }
 
@@ -243,6 +262,7 @@ router.post("/:slug/request", async (req: Request<{ slug: string }>, res: Respon
       skillSlug: skill.slug,
       requestType: "push_to_global",
       requesterId,
+      orgId: skill.orgId,
     });
 
     await writeAuditLog({
@@ -280,8 +300,9 @@ const MAX_BUNDLE_BYTES = 5_000_000;     // 5 MB total per skill
 
 router.get("/:slug/files", async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const skill = await skillRepository.findBySlug(req.params.slug);
+    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!skill) {
+      log.warn(`[skills/files] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
       res.status(404).json({ success: false, error: "Skill not found" });
       return;
     }
@@ -304,8 +325,9 @@ router.get("/:slug/files", async (req: Request<{ slug: string }>, res: Response)
 
 router.get("/:slug/files/:fileId", async (req: Request<{ slug: string; fileId: string }>, res: Response) => {
   try {
-    const skill = await skillRepository.findBySlug(req.params.slug);
+    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!skill) {
+      log.warn(`[skills/file] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} fileId=${req.params.fileId} userId=${getRequesterId(req) ?? "none"}`);
       res.status(404).json({ success: false, error: "Skill not found" });
       return;
     }
@@ -338,8 +360,9 @@ router.put("/:slug/files", async (req: Request<{ slug: string }>, res: Response)
       res.status(401).json({ success: false, error: "x-user-id header is required" });
       return;
     }
-    const skill = await skillRepository.findBySlug(req.params.slug);
+    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!skill) {
+      log.warn(`[skills/upsert-files] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
       res.status(404).json({ success: false, error: "Skill not found" });
       return;
     }

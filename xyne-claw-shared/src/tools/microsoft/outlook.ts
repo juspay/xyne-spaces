@@ -5,7 +5,6 @@
 import { microsoftFetch } from "./oauth.js";
 
 const BASE = "https://graph.microsoft.com/v1.0/me";
-const MAX_BODY_LENGTH = 8000;
 
 /** Basic sanity check — Graph IDs are long alphanumeric+symbol strings, never empty. */
 function validateId(id: string, label: string): void {
@@ -147,9 +146,9 @@ export async function readMessage(token: string, messageId: string): Promise<str
   if (msg.body?.contentType === "html") {
     body = body.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
   }
-  if (body.length > MAX_BODY_LENGTH) {
-    body = body.slice(0, MAX_BODY_LENGTH) + "\n\n... (truncated)";
-  }
+  // Full body — claw's promoteIfOversized() spills oversized output to a file
+  // behind a preview (microsoft-outlook-read is on the retrieval allowlist),
+  // so we no longer hard-truncate and silently drop the tail here.
 
   // Fetch attachments list if present
   let attachmentInfo = "";

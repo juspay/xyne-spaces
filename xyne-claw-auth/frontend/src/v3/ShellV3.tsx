@@ -27,7 +27,9 @@ import {
   ChartBarIcon,
   BrainIcon,
   FlaskIcon,
+  PulseIcon,
   ShieldCheckIcon,
+  BuildingsIcon,
   SignOutIcon,
   SunIcon,
   MoonIcon,
@@ -116,11 +118,15 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
     items: [
       { label: "Metrics", path: "/v3/metrics", icon: ChartBarIcon },
       { label: "Evals", path: "/v3/evals", icon: FlaskIcon },
+      { label: "Error Pipeline", path: "/v3/error-pipeline", icon: PulseIcon },
     ],
   },
   {
     label: "Configure",
-    items: [{ label: "Settings", path: "/v3/settings", icon: GearSixIcon }],
+    items: [
+      { label: "Organization", path: "/v3/organizations", icon: BuildingsIcon },
+      { label: "Settings", path: "/v3/settings", icon: GearSixIcon },
+    ],
   },
 ];
 
@@ -288,7 +294,7 @@ export function ShellV3({ children, isAdmin = false }: ShellV3Props) {
   // Admin section appended only for users with CLAW_ADMIN
   const sidebarGroups: SidebarGroupConfig[] = (isAdmin
     ? [...SIDEBAR_GROUPS, ADMIN_GROUP]
-    : SIDEBAR_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => i.path !== "/v3/evals") }))
+    : SIDEBAR_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => i.path !== "/v3/evals" && i.path !== "/v3/error-pipeline") }))
   ).filter((g) => g.items.length > 0);
   const auth = useAuth();
   const location = useLocation();

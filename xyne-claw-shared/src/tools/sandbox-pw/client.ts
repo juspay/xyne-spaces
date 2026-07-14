@@ -22,7 +22,7 @@
  *     │
  *     └─ MCP RPC over the spawned child's stdio.
  *
- * Cache keyed by storeKey (`<conversationId>_<agentSlug>`). On stale-session
+ * Cache keyed by storeKey (`<userId>_<conversationId>_<agentSlug>`). On stale-session
  * detection (cached.sessionId !== current session.id), we evict + respawn.
  *
  * Process exit: SIGTERM/SIGINT cleanup kills every cached child. We
@@ -36,6 +36,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 import { getSandboxSession } from "../sandbox/tools.js";
+
+import { createLogger } from "../../logger.js";
+const log = createLogger("client");
 
 interface SandboxPwCacheEntry {
   client: Client;
@@ -141,7 +144,7 @@ export async function getOrSpawnSandboxPwClient(
   // Surface the child's stderr so MCP-side errors aren't silent.
   transport.stderr?.on("data", (chunk: Buffer) => {
     const line = chunk.toString("utf8").trimEnd();
-    if (line) console.warn(`[sandbox-pw:${session.id.slice(0, 8)}] ${line}`);
+    if (line) log.warn(`[sandbox-pw:${session.id.slice(0, 8)}] ${line}`);
   });
 
   const client = new Client(

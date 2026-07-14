@@ -1,4 +1,6 @@
 import type { StdioMcpAdapter, McpToolInfo } from "../types.js";
+import type { Citation } from "xyne-claw-shared";
+import { prefixChunk } from "./grafana.js";
 
 export const bitbucketAdapter: StdioMcpAdapter = {
   transport: "stdio",
@@ -73,7 +75,111 @@ export const BITBUCKET_CUSTOM_TOOLS: McpToolInfo[] = [
       required: ["projectKey", "repoSlug", "prId"],
     },
   },
+
+  {
+    name: "get-pr-template",
+    description:
+      "Fetch a repository's pull-request description template so a bot can pre-fill a PR body. " +
+      "Bitbucket Data Center has no native PR-template API, so this reads a template FILE from the repo. " +
+      "By default it probes common paths (PULL_REQUEST_TEMPLATE.md, .bitbucket/, docs/, .github/) and returns " +
+      "the first that exists. Pass `path` to fetch one explicit file (no probing); pass `at` to pin a " +
+      "branch/tag/commit (defaults to the repo default branch). Returns JSON: " +
+      "{ found, path, at, content, triedPaths }. found=false means no template exists \u2014 handle that case.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: { type: "string", description: "Bitbucket project key (e.g. XYNE)" },
+        repoSlug: { type: "string", description: "Repository slug (e.g. xyne-spaces)" },
+        at: { type: "string", description: "Optional branch/tag/commit to read from. Defaults to the repo default branch." },
+        path: { type: "string", description: "Optional explicit template file path. If set, only this path is fetched (no probing)." },
+      },
+      required: ["projectKey", "repoSlug"],
+    },
+  },
 ];
+
+// ── Citation URL builders ───────────────────────────────────────────────────
+
+function prUrl(baseUrl: string, projectKey: string, repoSlug: string, prId: string | number): string {
+  return `${baseUrl}/projects/${projectKey}/repos/${repoSlug}/pull-requests/${prId}/overview`;
+}
+
+function fileUrl(baseUrl: string, projectKey: string, repoSlug: string, path: string, at?: string): string {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const q = at ? `?at=${encodeURIComponent(at)}` : "";
+  return `${baseUrl}/projects/${projectKey}/repos/${repoSlug}/browse/${encodedPath}${q}`;
+}
+
+function branchUrl(baseUrl: string, projectKey: string, repoSlug: string, branch: string): string {
+  return `${baseUrl}/projects/${projectKey}/repos/${repoSlug}/browse?at=${encodeURIComponent(`refs/heads/${branch}`)}`;
+}
+
+function commitUrl(baseUrl: string, projectKey: string, repoSlug: string, commitId: string): string {
+  return `${baseUrl}/projects/${projectKey}/repos/${repoSlug}/commits/${commitId}`;
+}
+
+// ── Upstream bitbucket-mcp-server tools (get_pull_request, get_branch, …) ──
+// These run through the generic stdio `callTool`/throttle path (mcp.ts), NOT
+// the local switch above, so they carry no citation by default. Each entry
+// says which of the tool's params identify the PR/branch/file/commit to link.
+const UPSTREAM_BITBUCKET_TOOLS: Record<string, "pr" | "branch" | "file" | "commit"> = {
+  get_pull_request: "pr",
+  update_pull_request: "pr",
+  merge_pull_request: "pr",
+  decline_pull_request: "pr",
+  add_comment: "pr",
+  delete_comment: "pr",
+  get_pull_request_diff: "pr",
+  set_pr_approval: "pr",
+  set_review_status: "pr",
+  list_pr_tasks: "pr",
+  create_pr_task: "pr",
+  update_pr_task: "pr",
+  delete_pr_task: "pr",
+  set_pr_task_status: "pr",
+  convert_pr_item: "pr",
+  list_pr_commits: "pr",
+  get_branch: "branch",
+  delete_branch: "branch",
+  list_branch_commits: "branch",
+  get_file_content: "file",
+  get_file_blame: "file",
+  get_commit_detail: "commit",
+};
+
+export function buildUpstreamBitbucketCitation(
+  baseUrl: string,
+  tool: string,
+  params: Record<string, unknown>,
+): Citation | null {
+  const kind = UPSTREAM_BITBUCKET_TOOLS[tool];
+  if (!kind) return null;
+
+  const base = baseUrl.replace(/\/+$/, "");
+  const workspace = params["workspace"] as string | undefined;
+  const repository = params["repository"] as string | undefined;
+  if (!workspace || !repository) return null;
+
+  if (kind === "pr") {
+    const prId = params["pull_request_id"] as string | number | undefined;
+    if (prId === undefined || prId === null) return null;
+    return { kind: "external", url: prUrl(base, workspace, repository, prId), chunkIndex: 1, label: `Bitbucket PR #${prId}` };
+  }
+  if (kind === "branch") {
+    const branch = params["branch_name"] as string | undefined;
+    if (!branch) return null;
+    return { kind: "external", url: branchUrl(base, workspace, repository, branch), chunkIndex: 1, label: `Bitbucket branch ${branch}` };
+  }
+  if (kind === "file") {
+    const filePath = params["file_path"] as string | undefined;
+    if (!filePath) return null;
+    const branch = params["branch"] as string | undefined;
+    return { kind: "external", url: fileUrl(base, workspace, repository, filePath, branch), chunkIndex: 1, label: `Bitbucket file ${filePath}` };
+  }
+  const commitId = params["commit_id"] as string | undefined;
+  if (!commitId) return null;
+  return { kind: "external", url: commitUrl(base, workspace, repository, commitId), chunkIndex: 1, label: `Bitbucket commit ${commitId.slice(0, 8)}` };
+}
 
 /**
  * Handle the upload-pr-screenshot tool call.
@@ -82,7 +188,7 @@ export const BITBUCKET_CUSTOM_TOOLS: McpToolInfo[] = [
 export async function handleUploadPrScreenshot(
   credentials: Record<string, unknown>,
   params: Record<string, unknown>,
-): Promise<string> {
+): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
   const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.example.com").replace(/\/+$/, "");
@@ -165,12 +271,22 @@ export async function handleUploadPrScreenshot(
     body: JSON.stringify({ text: commentBody }),
   });
 
+  const citations: Citation[] = [
+    { kind: "external", url: prUrl(baseUrl, projectKey, repoSlug, prId), chunkIndex: 1, label: `Bitbucket PR #${prId}` },
+  ];
+
   if (!commentRes.ok) {
     // Attachment uploaded but comment failed — still return the URL
-    return `Screenshot uploaded: ${fullUrl}\n(Warning: Failed to add PR comment — add manually)`;
+    return {
+      content: prefixChunk(1, `Screenshot uploaded: ${fullUrl}\n(Warning: Failed to add PR comment — add manually)`),
+      citations,
+    };
   }
 
-  return `Screenshot uploaded and added to PR #${prId}:\n![${caption}](${fullUrl})`;
+  return {
+    content: prefixChunk(1, `Screenshot uploaded and added to PR #${prId}:\n![${caption}](${fullUrl})`),
+    citations,
+  };
 }
 
 // ── get-pr-comments ────────────────────────────────────────────────────────
@@ -291,7 +407,7 @@ function collectThread(
 export async function handleGetPrComments(
   credentials: Record<string, unknown>,
   params: Record<string, unknown>,
-): Promise<string> {
+): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
   const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.example.com").replace(/\/+$/, "");
@@ -348,7 +464,7 @@ export async function handleGetPrComments(
   }
 
   const truncated = out.length >= maxComments;
-  return JSON.stringify(
+  const content = JSON.stringify(
     {
       total: out.length,
       truncated,
@@ -359,4 +475,89 @@ export async function handleGetPrComments(
     null,
     2,
   );
+  const citations: Citation[] = [
+    { kind: "external", url: prUrl(baseUrl, projectKey, repoSlug, prId), chunkIndex: 1, label: `Bitbucket PR #${prId} comments` },
+  ];
+  return { content: prefixChunk(1, content), citations };
+}
+
+
+/**
+ * Handle the get-pr-template tool call.
+ * Bitbucket Data Center has no native PR-template API, so we read a template FILE from the
+ * repo via the raw content endpoint, probing a small ordered list of conventional paths.
+ * Read-only. Uses the same Basic-auth credentials as every other Bitbucket call — Bitbucket
+ * enforces repo read ACL on the token, so this grants no new privilege.
+ */
+const DEFAULT_PR_TEMPLATE_PATHS = [
+  "PULL_REQUEST_TEMPLATE.md",
+  ".bitbucket/pull_request_template.md",
+  ".bitbucket/PULL_REQUEST_TEMPLATE.md",
+  "docs/pull_request_template.md",
+  "docs/PULL_REQUEST_TEMPLATE.md",
+  ".github/pull_request_template.md",
+  ".github/PULL_REQUEST_TEMPLATE.md",
+  "pull_request_template.md",
+];
+
+export async function handleGetPrTemplate(
+  credentials: Record<string, unknown>,
+  params: Record<string, unknown>,
+): Promise<{ content: string; citations?: Citation[] }> {
+  const username = credentials["username"] as string;
+  const token = credentials["token"] as string;
+  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.example.com").replace(/\/+$/, "");
+
+  const projectKey = params["projectKey"] as string;
+  const repoSlug = params["repoSlug"] as string;
+  const at = (params["at"] as string | undefined)?.trim() || undefined;
+  const explicitPath = (params["path"] as string | undefined)?.trim() || undefined;
+
+  if (!projectKey || !repoSlug) {
+    throw new Error("get-pr-template: projectKey and repoSlug are required");
+  }
+  // Guard the caller-supplied path: encodeURIComponent does NOT encode ".", so a ".." segment
+  // would survive as real path traversal. Reject absolute paths and any ".." / empty segment.
+  if (
+    explicitPath &&
+    (/^[\\/]/.test(explicitPath) || explicitPath.split(/[\\/]/).some((seg) => seg === ".." || seg === ""))
+  ) {
+    throw new Error("get-pr-template: path must be a relative repo path with no '..' or empty segments");
+  }
+
+  const authHeader = "Basic " + Buffer.from(`${username}:${token}`).toString("base64");
+  const candidates = explicitPath ? [explicitPath] : DEFAULT_PR_TEMPLATE_PATHS;
+  const tried: string[] = [];
+
+  for (const path of candidates) {
+    // Encode each path segment to prevent traversal / stray query chars leaking into the URL.
+    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+    let url = `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}/raw/${encodedPath}`;
+    if (at) url += `?at=${encodeURIComponent(at)}`;
+
+    tried.push(path);
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: authHeader, Accept: "text/plain" },
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (res.status === 404) continue; // no such file -> try next candidate
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`get-pr-template: not authorized to read ${projectKey}/${repoSlug} (${res.status})`);
+    }
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(`Bitbucket raw file API failed (${res.status}): ${errText.slice(0, 300)}`);
+    }
+
+    const content = await res.text();
+    const body = JSON.stringify({ found: true, path, at: at ?? null, content, triedPaths: tried }, null, 2);
+    const citations: Citation[] = [
+      { kind: "external", url: fileUrl(baseUrl, projectKey, repoSlug, path, at), chunkIndex: 1, label: `Bitbucket file ${path}` },
+    ];
+    return { content: prefixChunk(1, body), citations };
+  }
+
+  return { content: JSON.stringify({ found: false, path: null, at: at ?? null, content: null, triedPaths: tried }, null, 2) };
 }

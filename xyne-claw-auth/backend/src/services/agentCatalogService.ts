@@ -1,7 +1,9 @@
 import { prisma } from "../db.js";
 import { parseToolsConfig } from "xyne-claw-shared";
+import { createLogger } from "../logger.js";
 
 const CLAW_SLUG = "claw";
+const log = createLogger("agent-catalog-service");
 
 /**
  * Build a live markdown catalog of all agents visible to the given user.
@@ -12,9 +14,14 @@ const CLAW_SLUG = "claw";
  * Claw agent so the LLM always sees the current agent list without any
  * hardcoded names.
  */
-export async function buildAgentCatalog(userId: string): Promise<string> {
+export async function buildAgentCatalog(userId: string, orgId: string | undefined): Promise<string> {
+  if (!orgId) {
+    log.error(`[agent-catalog-service] orgId is required; refusing global agent catalog userId=${userId}`);
+    return "## Live Agent Catalog\n\n_No agents are currently available._";
+  }
   const agents = await prisma.agent.findMany({
     where: {
+      orgId,
       enabled: true,
       slug: { not: CLAW_SLUG },
       OR: [

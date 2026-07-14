@@ -44,7 +44,7 @@ import {
   type SpacesTriggerSchema,
   type SpacesTriggerPropertySchema,
 } from "../lib/api";
-import type { Agent } from "../lib/types";
+import type { AgentLight } from "../lib/types";
 
 /** Claw-defined VCS trigger templates (compiled to a generic WEBHOOK automation
  *  + RUN_AGENT server-side). Surfaced alongside Spaces' native trigger catalog. */
@@ -134,7 +134,7 @@ function triggerSchemaFields(
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  agents: Agent[];
+  agents: AgentLight[];
   onCreated: () => void;
   editingWorkflow?: ChainWorkflow | null;
 }

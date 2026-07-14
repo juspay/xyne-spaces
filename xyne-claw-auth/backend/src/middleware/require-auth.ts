@@ -3,9 +3,45 @@ import { timingSafeEqual } from "node:crypto";
 import { CONFIG } from "../config.js";
 import { ensureUserExists } from "../lib/users-jit.js";
 import { checkResultCallbackToken } from "../lib/session-tokens.js";
+import { verify as verifyCliToken } from "../lib/cli-tokens.js";
+import { prisma } from "../db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("require-auth");
+
+/**
+ * Attach phase-1 org context to the request as headers, right after `x-user-id`
+ * is set. Read-only: looks up the user's `orgId` and their `OrgMember.role` and
+ * stamps `x-org-id` / `x-user-role` for downstream handlers (getTenantContext).
+ *
+ * Non-breaking and best-effort: if the user has no org yet (should not happen
+ * post-backfill — JIT attaches new users to the default org, see users-jit.ts)
+ * or the lookup fails, we simply leave the headers unset. Nothing downstream
+ * requires them this phase.
+ *
+ * Called only after the caller's identity is authenticated: browser-cookie auth
+ * derives `userId` from Spaces, and S2S callers may pin `x-user-id` after the
+ * shared key has been validated.
+ */
+async function attachOrgContext(req: Request, userId: string): Promise<void> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { orgId: true },
+    });
+    if (!user?.orgId) return;
+
+    req.headers["x-org-id"] = user.orgId;
+
+    const member = await prisma.orgMember.findUnique({
+      where: { userId_orgId: { userId, orgId: user.orgId } },
+      select: { role: true },
+    });
+    if (member?.role) req.headers["x-user-role"] = member.role;
+  } catch (err) {
+    log.warn(`[require-auth] attachOrgContext(${userId}) failed:`, err instanceof Error ? err.message : err);
+  }
+}
 
 interface SpacesMeResponse {
   success?: boolean;
@@ -18,6 +54,20 @@ interface SpacesMeResponse {
  * measure it. Compare lengths first (length isn't secret; timingSafeEqual throws
  * on mismatch) then do the constant-time check. Mirrors xyne-claw's auth.ts.
  */
+/**
+ * Strip inbound org-context headers so a client can NEVER inject them. `x-org-id`
+ * and `x-user-role` are derived SERVER-SIDE (by `attachOrgContext` on the verified
+ * cookie session); if a request arrives carrying them, they're spoof attempts.
+ * Removing them at entry makes the org context fail-CLOSED — a failed/absent
+ * attach yields an EMPTY org (→ getOrgId undefined → safe no-match) rather than
+ * an attacker-chosen org. (x-user-id is left intact: the S2S contract legitimately
+ * sets it, and the cookie path overwrites it from the verified session.)
+ */
+function stripClientOrgHeaders(req: Request): void {
+  delete req.headers["x-org-id"];
+  delete req.headers["x-user-role"];
+}
+
 export function s2sKeyMatches(provided: string | string[] | undefined): boolean {
   const expected = CONFIG.xyneClawS2sKey;
   if (!expected || typeof provided !== "string") return false; // fail closed when key unset
@@ -68,12 +118,20 @@ async function resolveUserIdFromSpacesUncached(req: Request): Promise<string | u
   return typeof userId === "string" && userId.trim() ? userId.trim() : undefined;
 }
 
+function bearerToken(req: Request): string | undefined {
+  const header = req.headers.authorization;
+  if (typeof header !== "string") return undefined;
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match?.[1]?.trim();
+}
+
 /**
  * Express middleware that verifies the caller's identity.
  *
  * Accepts auth via (in priority order):
  * 1. Spaces backend auth middleware via /api/auth/me (cookie-based)
- * 2. `x-s2s-key` header — service-to-service calls (must match CONFIG.xyneClawS2sKey)
+ * 2. CLI PAT via `Authorization: Bearer xyne_cli_...` when CLI_TOKENS_ENABLED is on
+ * 3. `x-s2s-key` header — service-to-service calls (must match CONFIG.xyneClawS2sKey)
  *
  * On success, ensures `req.headers["x-user-id"]` is set so downstream code works unchanged.
  */
@@ -82,6 +140,7 @@ export async function requireAuth(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
+  stripClientOrgHeaders(req);
   // 1. Verify browser cookies through Spaces backend auth middleware.
   const userId = await resolveUserIdFromSpaces(req).catch(() => undefined);
   if (userId) {
@@ -93,18 +152,39 @@ export async function requireAuth(
       log.warn(`[require-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
     });
     req.headers["x-user-id"] = userId;
+    // Phase-1 org context (additive; requireAuth only).
+    await attachOrgContext(req, userId);
     next();
     return;
   }
 
-  // 2. Service-to-service: x-s2s-key header
+  // 2. CLI bearer token. Identity is derived only from the hashed token row;
+  // any inbound x-user-id is overwritten here.
+  if (CONFIG.cliTokensEnabled) {
+    const token = await verifyCliToken(bearerToken(req)).catch((err) => {
+      log.warn("[require-auth] CLI token verification failed:", err instanceof Error ? err.message : err);
+      return null;
+    });
+    if (token) {
+      req.headers["x-user-id"] = token.userId;
+      req.headers["x-org-id"] = token.orgId;
+      next();
+      return;
+    }
+  }
+
+  // 3. Service-to-service: x-s2s-key header
   const s2sKey = req.headers["x-s2s-key"] as string | undefined;
   if (s2sKeyMatches(s2sKey)) {
+    const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
+    if (pinnedUserId) {
+      await attachOrgContext(req, pinnedUserId);
+    }
     next();
     return;
   }
 
-  // 3. No valid auth
+  // 4. No valid auth
   res.status(401).json({ success: false, error: "Authentication required" });
 }
 
@@ -117,8 +197,13 @@ export async function requireS2S(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
+  stripClientOrgHeaders(req);
   const s2sKey = req.headers["x-s2s-key"] as string | undefined;
   if (s2sKeyMatches(s2sKey)) {
+    const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
+    if (pinnedUserId) {
+      await attachOrgContext(req, pinnedUserId);
+    }
     next();
     return;
   }
@@ -129,6 +214,7 @@ export async function requireS2S(
       log.warn(`[require-auth/s2s] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
     });
     req.headers["x-user-id"] = userId;
+    await attachOrgContext(req, userId);
     next();
     return;
   }
@@ -202,6 +288,7 @@ export async function requireUserAuth(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
+  stripClientOrgHeaders(req);
   const userId = await resolveUserIdFromSpaces(req).catch(() => undefined);
   if (!userId) {
     res.status(401).json({ success: false, error: "User session required" });
@@ -213,5 +300,6 @@ export async function requireUserAuth(
     log.warn(`[require-user-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
   });
   req.headers["x-user-id"] = userId;
+  await attachOrgContext(req, userId);
   next();
 }

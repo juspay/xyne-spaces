@@ -1,4 +1,4 @@
-import type { User, McpServer, UserConnection, HealthResult, CredentialField, Gateway, GatewayIdentity, Agent, ScheduledJob, ScheduledJobRun } from "./types";
+import type { User, McpServer, UserConnection, HealthResult, CredentialField, Gateway, GatewayIdentity, Agent, AgentLight, ScheduledJob, ScheduledJobRun } from "./types";
 
 import { frontendConfig } from "./config";
 
@@ -28,6 +28,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   }
 
   return res.json() as Promise<T>;
+}
+
+export type AdminOrgScope = "org" | "all";
+
+function applyAdminOrgScope(params: URLSearchParams, orgScope?: AdminOrgScope): void {
+  if (orgScope === "all") params.set("orgScope", "all");
 }
 
 export async function getMe(): Promise<User> {
@@ -193,6 +199,13 @@ export async function deleteServer(id: string): Promise<void> {
   );
 }
 
+export async function approveCliLogin(userCode: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/cli/auth/approve`,
+    { method: "POST", body: JSON.stringify({ userCode }) },
+  );
+}
+
 export async function listConnections(userId: string): Promise<UserConnection[]> {
   const data = await request<{ success: boolean; data: UserConnection[] }>(
     `${AUTH_API_URL}/api/v1/users/${userId}/connections`,
@@ -310,7 +323,7 @@ export async function unlinkIdentity(gatewayId: string, identityId: string): Pro
 
 // ── Agents ────────────────────────────────────────────────────────────
 
-export async function listAgents(userId?: string, allAgents?: boolean): Promise<Agent[]> {
+function agentListQuery(userId?: string, allAgents?: boolean, orgScope?: AdminOrgScope, view?: "full"): string {
   // allAgents=true asks the backend for the FULL roster (admins only — server
   // enforces). Use it only where you genuinely need every user's agents (e.g.
   // the metrics agent filter); the default list stays filtered to
@@ -318,9 +331,21 @@ export async function listAgents(userId?: string, allAgents?: boolean): Promise<
   const params = new URLSearchParams();
   if (userId) params.set("userId", userId);
   if (allAgents) params.set("scope", "all");
-  const qs = params.toString() ? `?${params.toString()}` : "";
+  if (view) params.set("view", view);
+  applyAdminOrgScope(params, orgScope);
+  return params.toString() ? `?${params.toString()}` : "";
+}
+
+export async function listAgents(userId?: string, allAgents?: boolean, orgScope?: AdminOrgScope): Promise<AgentLight[]> {
+  const data = await request<{ success: boolean; data: AgentLight[] }>(
+    `${AUTH_API_URL}/api/v1/agents${agentListQuery(userId, allAgents, orgScope)}`,
+  );
+  return data.data;
+}
+
+export async function listAgentsFull(userId?: string, allAgents?: boolean, orgScope?: AdminOrgScope): Promise<Agent[]> {
   const data = await request<{ success: boolean; data: Agent[] }>(
-    `${AUTH_API_URL}/api/v1/agents${qs}`,
+    `${AUTH_API_URL}/api/v1/agents${agentListQuery(userId, allAgents, orgScope, "full")}`,
   );
   return data.data;
 }
@@ -486,6 +511,106 @@ export async function getAgentDetail(slug: string): Promise<Agent> {
   return data.data;
 }
 
+export type DelegationIdentityMode = "user" | "callee_app";
+
+export interface AgentDelegationGrant {
+  id: string;
+  callerAgentId: string;
+  calleeAgentId: string;
+  identityMode: DelegationIdentityMode;
+  enabled: boolean;
+  status: "pending" | "approved" | "rejected";
+  approvedByUserId: string | null;
+  approvedAt: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  callee: (Pick<AgentLight, "id" | "slug" | "name" | "description" | "enabled"> & {
+    ownerUserId?: string | null;
+    /** Display name of the callee agent's owner — who must approve a pending grant. */
+    ownerName?: string | null;
+  }) | null;
+}
+
+export interface AgentDelegationRequest {
+  id: string;
+  callerAgentId: string;
+  calleeAgentId: string;
+  identityMode: DelegationIdentityMode;
+  enabled: boolean;
+  status: "pending" | "approved" | "rejected";
+  approvedByUserId: string | null;
+  approvedAt: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  caller: (Pick<AgentLight, "id" | "slug" | "name" | "description" | "enabled" | "ownerUserId" | "owner">) | null;
+}
+
+export interface AgentDelegationPendingRequest extends AgentDelegationRequest {
+  callee: Pick<AgentLight, "id" | "slug" | "name" | "description" | "enabled" | "ownerUserId"> | null;
+}
+
+export async function listDelegationGrants(slug: string): Promise<AgentDelegationGrant[]> {
+  const data = await request<{ success: boolean; data: AgentDelegationGrant[] }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-grants`,
+  );
+  return data.data;
+}
+
+export async function createDelegationGrant(
+  slug: string,
+  payload: { calleeSlug: string; identityMode?: DelegationIdentityMode },
+): Promise<AgentDelegationGrant> {
+  const data = await request<{ success: boolean; data: AgentDelegationGrant }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-grants`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  return data.data;
+}
+
+export async function deleteDelegationGrant(slug: string, grantId: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-grants/${encodeURIComponent(grantId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function listDelegationRequests(slug: string): Promise<AgentDelegationRequest[]> {
+  const data = await request<{ success: boolean; data: AgentDelegationRequest[] }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-requests`,
+  );
+  return data.data;
+}
+
+export async function listPendingDelegationRequestsForMe(userId: string): Promise<AgentDelegationPendingRequest[]> {
+  const data = await request<{ success: boolean; data: AgentDelegationPendingRequest[] }>(
+    `${AUTH_API_URL}/api/v1/agents/delegation-requests/pending-for-me`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function decideDelegationRequest(
+  slug: string,
+  grantId: string,
+  approve: boolean,
+): Promise<AgentDelegationGrant> {
+  const data = await request<{ success: boolean; data: AgentDelegationGrant }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-requests/${encodeURIComponent(grantId)}/decision`,
+    { method: "POST", body: JSON.stringify({ approve }) },
+  );
+  return data.data;
+}
+
+export async function revokeDelegationRequest(slug: string, grantId: string): Promise<AgentDelegationGrant> {
+  const data = await request<{ success: boolean; data: AgentDelegationGrant }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-requests/${encodeURIComponent(grantId)}/revoke`,
+    { method: "POST" },
+  );
+  return data.data;
+}
+
 export async function updateAgent(
   slug: string,
   payload: { slug?: string; enabled?: boolean; name?: string; description?: string; systemPrompt?: string; promptNote?: string; color?: string; modelId?: string; config?: Record<string, unknown>; skills?: string[]; knowledgeBase?: Array<{ collectionId: string; fileId?: string | null }>; kbScope?: "COLLECTIONS" | "USER" },
@@ -543,8 +668,26 @@ export interface AgentProviderCredentialStatus {
   reasoningEffort: "low" | "medium" | "high" | null;
   configured: boolean;
   createdByUserId: string | null;
+  /** Set when this credential is a BINDING to an org-level shared credential
+   *  (one OAuth session shared by several agents) rather than a dedicated key. */
+  sharedCredentialId: string | null;
+  sharedCredentialName: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Promote this agent's credential to an org-level shared credential and bind
+ *  the given agents to it (re-call with more agentIds to extend). */
+export async function shareAgentProviderCredential(
+  slug: string,
+  provider: string,
+  payload: { name?: string; agentIds: string[] },
+): Promise<{ sharedCredentialId: string; results: Array<{ agentId: string; slug?: string; ok: boolean; error?: string }> }> {
+  const data = await request<{ success: boolean; data: { sharedCredentialId: string; results: Array<{ agentId: string; slug?: string; ok: boolean; error?: string }> } }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/provider-credentials/${encodeURIComponent(provider)}/share`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  return data.data;
 }
 
 export async function listAgentProviderCredentials(
@@ -640,6 +783,21 @@ export async function listAgentCodexModels(
   return data.data;
 }
 
+// Agent-scoped LiteLLM model list. POST (not GET like Codex) so the add-
+// credential form can list models for a JUST-TYPED key + base URL before the
+// credential is saved. With no apiKey, the backend lists against the saved
+// `litellm` cred. Returns the models the key can access on the proxy.
+export async function listAgentLitellmModels(
+  slug: string,
+  payload?: { apiKey?: string; baseUrl?: string },
+): Promise<Array<{ id: string; name: string }>> {
+  const data = await request<{ success: boolean; data: Array<{ id: string; name: string }> }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/provider-credentials/litellm/models`,
+    { method: "POST", body: JSON.stringify(payload ?? {}) },
+  );
+  return data.data;
+}
+
 // ── User Agent Config (provider override) ────────────────────────────
 
 export interface UserAgentConfig {
@@ -647,6 +805,12 @@ export interface UserAgentConfig {
   model?: string | null;
   baseUrl?: string | null;
   hasApiKey?: boolean;
+}
+
+export interface UserAgentConfigEntry extends UserAgentConfig {
+  agentSlug: string;
+  chainConfig?: Record<string, unknown> | null;
+  updatedAt?: string;
 }
 
 export interface ClaudeModelInfo {
@@ -659,6 +823,13 @@ export async function getUserAgentConfig(slug: string, userId: string): Promise<
     `${AUTH_API_URL}/api/v1/agents/${slug}/user-config/${userId}`,
   );
   return data.data;
+}
+
+export async function listUserAgentConfigs(userId: string): Promise<UserAgentConfigEntry[]> {
+  const data = await request<{ success: boolean; data: { configs: UserAgentConfigEntry[] } }>(
+    `${AUTH_API_URL}/api/v1/agents/user-config?userId=${encodeURIComponent(userId)}`,
+  );
+  return data.data.configs;
 }
 
 export async function setUserAgentConfig(
@@ -942,6 +1113,8 @@ export interface WorkflowGlobalRequest {
   workflow: ChainWorkflow;
   requestedByUserId: string;
   requestedByUser?: { id: string; name: string | null; email: string } | null;
+  orgId?: string;
+  orgName?: string | null;
   status: "pending" | "approved" | "rejected" | "cancelled";
   reviewedByUserId?: string | null;
   reviewNote?: string | null;
@@ -961,9 +1134,12 @@ export async function requestWorkflowGlobal(
 }
 
 /** Admin: list pending global-promotion requests. */
-export async function listWorkflowGlobalRequests(userId: string): Promise<WorkflowGlobalRequest[]> {
+export async function listWorkflowGlobalRequests(userId: string, orgScope?: AdminOrgScope): Promise<WorkflowGlobalRequest[]> {
+  const qs = new URLSearchParams();
+  applyAdminOrgScope(qs, orgScope);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
   const data = await request<{ success: boolean; data: WorkflowGlobalRequest[] }>(
-    `${AUTH_API_URL}/api/v1/chain-workflows/global-requests`,
+    `${AUTH_API_URL}/api/v1/chain-workflows/global-requests${suffix}`,
     { headers: { "x-user-id": userId } },
   );
   return data.data;
@@ -1371,6 +1547,8 @@ export async function updateScheduledJob(
     targetChannelId?: string | null;
     cronExpression?: string;
     nextRunAt?: string;
+    task?: string;
+    context?: string | null;
   },
 ): Promise<ScheduledJob> {
   const data = await request<{ success: boolean; data: ScheduledJob }>(
@@ -1380,6 +1558,35 @@ export async function updateScheduledJob(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     },
+  );
+  return data.data;
+}
+
+export interface ScheduledJobControlResult {
+  id: string;
+  status: string;
+  nextRunAt?: string;
+}
+
+// Pause an active job: unbinds it from the BullMQ scheduler but keeps the row
+// (status -> "paused"). Owner or CLAW_ADMIN only (enforced server-side).
+export async function pauseScheduledJob(
+  id: string,
+): Promise<ScheduledJobControlResult> {
+  const data = await request<{ success: boolean; data: ScheduledJobControlResult }>(
+    `${AUTH_API_URL}/api/v1/scheduled-jobs/${id}/pause`,
+    { method: "POST" },
+  );
+  return data.data;
+}
+
+// Resume a paused job: re-binds it to the BullMQ scheduler (status -> "active").
+export async function resumeScheduledJob(
+  id: string,
+): Promise<ScheduledJobControlResult> {
+  const data = await request<{ success: boolean; data: ScheduledJobControlResult }>(
+    `${AUTH_API_URL}/api/v1/scheduled-jobs/${id}/resume`,
+    { method: "POST" },
   );
   return data.data;
 }
@@ -1399,7 +1606,7 @@ export interface AdminRole {
   role: string;
   grantedBy: string | null;
   createdAt: string;
-  user: { id: string; name: string; email: string };
+  user: { id: string; name: string; email: string; orgId?: string; orgName?: string | null };
 }
 
 export interface AuditLogEntry {
@@ -1410,6 +1617,8 @@ export interface AuditLogEntry {
   description: string;
   metadata: Record<string, unknown> | null;
   createdAt: string;
+  orgId?: string | null;
+  orgName?: string | null;
 }
 
 export async function checkIsAdmin(userId: string): Promise<boolean> {
@@ -1420,9 +1629,96 @@ export async function checkIsAdmin(userId: string): Promise<boolean> {
   return data.data.isAdmin;
 }
 
-export async function listAdminRoles(userId: string): Promise<AdminRole[]> {
+// ── Organizations (phase 1, org-only) ──────────────────────────────────────
+export type OrgRole = "OWNER" | "ADMIN" | "MEMBER";
+
+export interface OrgSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  createdAt: string;
+  role: OrgRole;
+}
+
+export interface OrgMemberRow {
+  userId: string;
+  email: string;
+  name: string;
+  role: OrgRole;
+  joinedAt: string;
+}
+
+export interface OrgDetail {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  createdAt: string;
+  createdBy: string;
+  members: OrgMemberRow[];
+}
+
+/** Orgs the caller belongs to (with one-org-per-user, this is their org). */
+export async function listOrganizations(userId: string): Promise<OrgSummary[]> {
+  const data = await request<{ success: boolean; data: OrgSummary[] }>(
+    `${AUTH_API_URL}/api/v1/organizations`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function getOrganization(userId: string, orgId: string): Promise<OrgDetail> {
+  const data = await request<{ success: boolean; data: OrgDetail }>(
+    `${AUTH_API_URL}/api/v1/organizations/${orgId}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function addOrgMember(
+  userId: string,
+  orgId: string,
+  userIdOrEmail: string,
+  role: "ADMIN" | "MEMBER",
+): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/organizations/${orgId}/members`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify({ userIdOrEmail, role }),
+  });
+}
+
+export async function updateOrgMemberRole(
+  userId: string,
+  orgId: string,
+  targetUserId: string,
+  role: OrgRole,
+): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/organizations/${orgId}/members/${targetUserId}`, {
+    method: "PATCH",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function removeOrgMember(
+  userId: string,
+  orgId: string,
+  targetUserId: string,
+): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/organizations/${orgId}/members/${targetUserId}`, {
+    method: "DELETE",
+    headers: { "x-user-id": userId },
+  });
+}
+
+export async function listAdminRoles(userId: string, orgScope?: AdminOrgScope): Promise<AdminRole[]> {
+  const qs = new URLSearchParams();
+  applyAdminOrgScope(qs, orgScope);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
   const data = await request<{ success: boolean; data: AdminRole[] }>(
-    `${AUTH_API_URL}/api/v1/admin/roles`,
+    `${AUTH_API_URL}/api/v1/admin/roles${suffix}`,
     { headers: { "x-user-id": userId } },
   );
   return data.data;
@@ -1442,9 +1738,12 @@ export async function revokeAdmin(userId: string, targetUserId: string): Promise
   );
 }
 
-export async function listAuditLogs(userId: string, limit = 50): Promise<AuditLogEntry[]> {
+export async function listAuditLogs(userId: string, limit = 50, orgScope?: AdminOrgScope): Promise<AuditLogEntry[]> {
+  const qs = new URLSearchParams();
+  qs.set("limit", String(limit));
+  applyAdminOrgScope(qs, orgScope);
   const data = await request<{ success: boolean; data: AuditLogEntry[] }>(
-    `${AUTH_API_URL}/api/v1/admin/audit-logs?limit=${limit}`,
+    `${AUTH_API_URL}/api/v1/admin/audit-logs?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
   );
   return data.data;
@@ -1456,12 +1755,28 @@ export async function listAuditLogs(userId: string, limit = 50): Promise<AuditLo
  */
 export async function listAuditLogsPaged(
   userId: string,
-  opts: { limit?: number; offset?: number } = {},
+  opts: {
+    limit?: number;
+    offset?: number;
+    orgScope?: AdminOrgScope;
+    eventType?: string;
+    targetId?: string;
+    startDate?: string;
+    endDate?: string;
+  } = {},
 ): Promise<{ rows: AuditLogEntry[]; total: number }> {
   const limit = opts.limit ?? 50;
   const offset = opts.offset ?? 0;
+  const qs = new URLSearchParams();
+  qs.set("limit", String(limit));
+  qs.set("offset", String(offset));
+  if (opts.eventType) qs.set("eventType", opts.eventType);
+  if (opts.targetId) qs.set("targetId", opts.targetId);
+  if (opts.startDate) qs.set("startDate", opts.startDate);
+  if (opts.endDate) qs.set("endDate", opts.endDate);
+  applyAdminOrgScope(qs, opts.orgScope);
   const data = await request<{ success: boolean; data: AuditLogEntry[]; total: number }>(
-    `${AUTH_API_URL}/api/v1/admin/audit-logs?limit=${limit}&offset=${offset}`,
+    `${AUTH_API_URL}/api/v1/admin/audit-logs?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
   );
   return { rows: data.data, total: data.total };
@@ -1469,6 +1784,8 @@ export async function listAuditLogsPaged(
 
 export interface AgentUsageStat {
   agentSlug: string;
+  orgId?: string;
+  orgName?: string | null;
   runs: number;
   tokensIn: number;
   tokensOut: number;
@@ -1476,21 +1793,26 @@ export interface AgentUsageStat {
   tokensCacheWrite: number;
 }
 
-export async function listAgentUsageStats(userId: string, days: number | "all" = 30): Promise<AgentUsageStat[]> {
+export async function listAgentUsageStats(userId: string, days: number | "all" = 30, orgScope?: AdminOrgScope): Promise<AgentUsageStat[]> {
+  const qs = new URLSearchParams();
+  qs.set("days", String(days));
+  applyAdminOrgScope(qs, orgScope);
   const data = await request<{ success: boolean; data: AgentUsageStat[] }>(
-    `${AUTH_API_URL}/api/v1/admin/usage/stats?days=${days}`,
+    `${AUTH_API_URL}/api/v1/admin/usage/stats?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
   );
   return data.data;
 }
 
 export interface AdminScheduledJob extends ScheduledJob {
+  orgId?: string;
+  orgName?: string | null;
   user: { id: string; name: string; email: string } | null;
 }
 
 export async function listAdminScheduledJobs(
   userId: string,
-  params: { status?: string; agentSlug?: string; userId?: string; limit?: number; offset?: number } = {},
+  params: { status?: string; agentSlug?: string; userId?: string; limit?: number; offset?: number; orgScope?: AdminOrgScope } = {},
 ): Promise<{ rows: AdminScheduledJob[]; total: number }> {
   const qs = new URLSearchParams();
   if (params.status) qs.set("status", params.status);
@@ -1498,6 +1820,7 @@ export async function listAdminScheduledJobs(
   if (params.userId) qs.set("userId", params.userId);
   if (params.limit != null) qs.set("limit", String(params.limit));
   if (params.offset != null) qs.set("offset", String(params.offset));
+  applyAdminOrgScope(qs, params.orgScope);
   const data = await request<{ success: boolean; data: { rows: AdminScheduledJob[]; total: number } }>(
     `${AUTH_API_URL}/api/v1/admin/scheduled-jobs?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
@@ -1576,6 +1899,8 @@ export async function setAdminMcpFallbackFlag(
 
 export interface AgentRequestItem {
   id: string;
+  orgId?: string;
+  orgName?: string | null;
   targetType: string;
   agentId?: string;
   agentSlug?: string;
@@ -1668,9 +1993,12 @@ export async function rejectCloneRequest(requestId: string, userId: string, note
   );
 }
 
-export async function listPendingRequests(userId: string): Promise<AgentRequestItem[]> {
+export async function listPendingRequests(userId: string, orgScope?: AdminOrgScope): Promise<AgentRequestItem[]> {
+  const qs = new URLSearchParams();
+  applyAdminOrgScope(qs, orgScope);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
   const data = await request<{ success: boolean; data: AgentRequestItem[] }>(
-    `${AUTH_API_URL}/api/v1/agents/requests/pending`,
+    `${AUTH_API_URL}/api/v1/agents/requests/pending${suffix}`,
     { headers: { "x-user-id": userId } },
   );
   return data.data;
@@ -2102,6 +2430,14 @@ export interface StreamedAttachment {
   metadata?: Record<string, unknown>;
 }
 
+export type PlanTodoStatus = "pending" | "in_progress" | "completed" | "failed";
+
+export interface PlanTodo {
+  id: string;
+  title: string;
+  status: PlanTodoStatus;
+}
+
 export interface DebugEventRecord {
   seq: number;
   at: string;
@@ -2120,6 +2456,7 @@ export interface StreamCallbacks {
   onReasoningDelta?: (delta: string) => void;
   onTextDelta?: (delta: string) => void;
   onAttachment?: (att: StreamedAttachment) => void;
+  onPlan?: (todos: PlanTodo[]) => void;
   onDebugEvent?: (event: DebugEventRecord) => void;
   onDebugArtifactsReady?: (meta: { sessionId?: string; conversationId?: string }) => void;
   onRunMeta?: (meta: { sessionId: string }) => void;
@@ -2154,6 +2491,27 @@ export interface ChatReply {
   attachments?: ChatAttachmentMeta[];
 }
 
+// Models the agent's shared LiteLLM credential can access, for the in-chat model
+// switcher. Any chat participant may call this — the backend reads the agent's
+// admin-set key and never returns it. Empty models ⇒ hide the picker.
+// `defaultModel` is the agent's configured model, used to preselect the dropdown.
+export async function listChatLitellmModels(
+  slug: string,
+  userId: string,
+): Promise<{ models: Array<{ id: string; name: string }>; defaultModel: string | null }> {
+  const res = await fetch(
+    `${AUTH_API_URL}/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`,
+    { credentials: "include", headers: { "x-user-id": userId } },
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = (await res.json()) as {
+    success: boolean;
+    data?: Array<{ id: string; name: string }>;
+    defaultModel?: string | null;
+  };
+  return { models: data.data ?? [], defaultModel: data.defaultModel ?? null };
+}
+
 export async function sendChatMessage(
   slug: string,
   message: string,
@@ -2179,6 +2537,9 @@ export async function sendChatMessage(
   requestOptions?: {
     disableTools?: boolean;
     additionalInstructions?: string;
+    /** Per-request model/provider override. Used by the in-chat model switcher
+     *  to pin a LiteLLM model off the agent's shared key for this turn. */
+    providerOverride?: { provider: string; model?: string };
   },
 ): Promise<{ conversationId: string; reply: ChatReply }> {
   // Backward-compat: allow passing a single onProgress function (old signature).
@@ -2218,6 +2579,7 @@ export async function sendChatMessage(
       ...(requestOptions?.additionalInstructions?.trim()
         ? { additionalInstructions: requestOptions.additionalInstructions.trim() }
         : {}),
+      ...(requestOptions?.providerOverride ? { providerOverride: requestOptions.providerOverride } : {}),
     }),
     ...(requestSignal ? { signal: requestSignal } : {}),
   });
@@ -2255,6 +2617,8 @@ export async function sendChatMessage(
         cb.onTextDelta(data.delta);
       } else if (currentEvent === "attachment" && data.attachment && cb.onAttachment) {
         cb.onAttachment(data.attachment as StreamedAttachment);
+      } else if (currentEvent === "plan" && Array.isArray(data.todos) && cb.onPlan) {
+        cb.onPlan(data.todos as PlanTodo[]);
       } else if (currentEvent === "debug" && data.debugEvent && cb.onDebugEvent) {
         cb.onDebugEvent(data.debugEvent as DebugEventRecord);
       } else if (currentEvent === "debug_artifacts_ready" && cb.onDebugArtifactsReady) {
@@ -2436,9 +2800,19 @@ export async function pollChatMessages(slug: string, conversationId: string): Pr
 }
 
 export interface LiveStreamCallbacks {
-  onSnapshot?: (data: { invocationsByMsgId: Record<string, ToolInvocation[]>; inProgress: ToolInvocation[] }) => void;
+  onSnapshot?: (data: {
+    invocationsByMsgId: Record<string, ToolInvocation[]>;
+    inProgress: ToolInvocation[];
+    /** Answer-so-far persisted mid-run — lets a reloaded viewer show the partial
+     *  assistant text/reasoning before the first live `delta` arrives. */
+    partial?: { msgId: string; content: string; reasoning: string };
+  }) => void;
   onLabel?: (toolLabel: string) => void;
   onInvocation?: (inv: ToolInvocation) => void;
+  /** Coalesced assistant text/reasoning fragments for a VIEWED run (viewers +
+   *  reloaded tabs stream the answer live instead of seeing it appear on `done`). */
+  onTextDelta?: (delta: string) => void;
+  onReasoningDelta?: (delta: string) => void;
   onDone?: (status: string) => void;
 }
 
@@ -2496,6 +2870,7 @@ export function subscribeLiveConversation(
           callbacks.onSnapshot?.({
             invocationsByMsgId: (data["invocationsByMsgId"] as Record<string, ToolInvocation[]>) ?? {},
             inProgress: (data["inProgress"] as ToolInvocation[]) ?? [],
+            ...(data["partial"] ? { partial: data["partial"] as { msgId: string; content: string; reasoning: string } } : {}),
           });
           break;
         case "label":
@@ -2503,6 +2878,10 @@ export function subscribeLiveConversation(
           break;
         case "invocation":
           if (data["toolInvocation"]) callbacks.onInvocation?.(data["toolInvocation"] as ToolInvocation);
+          break;
+        case "delta":
+          if (typeof data["textDelta"] === "string" && data["textDelta"]) callbacks.onTextDelta?.(data["textDelta"] as string);
+          if (typeof data["reasoningDelta"] === "string" && data["reasoningDelta"]) callbacks.onReasoningDelta?.(data["reasoningDelta"] as string);
           break;
         case "done":
           callbacks.onDone?.(typeof data["status"] === "string" ? (data["status"] as string) : "completed");
@@ -2539,7 +2918,7 @@ export function subscribeLiveConversation(
 
 export interface DebugArtifactBundle {
   conversationId: string;
-  debugDir: string;
+  debugDir: string | null;
   debugSession: Record<string, unknown> | null;
   debugEvents: Record<string, unknown>[] | null;
   runs: Array<{ fileName: string; data: Record<string, unknown> }>;
@@ -2772,6 +3151,21 @@ export async function upsertProviderCredential(
   return data.data;
 }
 
+/** Promote the user's PERSONAL provider credential into an org-level shared
+ *  credential and bind the given agents to it. The personal row becomes a
+ *  binding too (one OAuth session — copies would invalidate each other). */
+export async function shareMyProviderCredential(
+  userId: string,
+  provider: string,
+  payload: { name?: string; agentIds: string[] },
+): Promise<{ sharedCredentialId: string; results: Array<{ agentId: string; ok: boolean; error?: string }> }> {
+  const data = await request<{ success: boolean; data: { sharedCredentialId: string; results: Array<{ agentId: string; ok: boolean; error?: string }> } }>(
+    `${AUTH_API_URL}/api/v1/settings/provider-credentials/${encodeURIComponent(provider)}/share`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+  return data.data;
+}
+
 export async function deleteProviderCredential(userId: string, provider: string): Promise<void> {
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/settings/provider-credentials/${encodeURIComponent(provider)}`,
@@ -2880,6 +3274,14 @@ export interface ToolInvocation {
   subagentName?: string;
   /** The subagent's own tool-call id — lets the frontend dedupe retries. */
   toolCallId?: string;
+  /** Background (run_in_background) subagent lifecycle. `background` marks a
+   *  wrapper invocation whose subagent runs DETACHED; the spawning tool call
+   *  returns immediately (so `status` becomes "completed" right away), and the
+   *  real progress is tracked by `backgroundState`. Rendered as a non-blocking
+   *  chip, distinct from a blocking tool. */
+  background?: boolean;
+  backgroundState?: "running" | "completed" | "error";
+  backgroundTaskId?: string;
 }
 
 export interface AgentRun {
@@ -2887,7 +3289,7 @@ export interface AgentRun {
   sessionId: string;
   userId: string;
   agentSlug: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api";
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation";
   status: "running" | "completed" | "failed" | "cancelled";
   currentToolLabel: string | null;
   task: string;
@@ -2922,7 +3324,7 @@ export interface AgentRun {
    *  branching: once a user message has multiple assistant siblings,
    *  chronology no longer pairs runs ↔ assistants — chatMessageId does. */
   chatMessageId?: string | null;
-  /** Populated only by the admin "All Runs" (scope=all) listing — null elsewhere. */
+  /** Populated only by the elevated "All Runs" (scope=all) listing — null elsewhere. */
   userName?: string | null;
   userEmail?: string | null;
 }
@@ -2987,8 +3389,8 @@ export async function listRuns(userId: string, opts?: { status?: string; limit?:
   if (opts?.limit) qs.set("limit", String(opts.limit));
   if (opts?.conversationId) qs.set("conversationId", opts.conversationId);
   if (opts?.agentSlug) qs.set("agentSlug", opts.agentSlug);
-  // Admin-only: every user's runs of this agent (server enforces isAdmin + the
-  // usedUserToken ACL). Requires agentSlug.
+  // Elevated view: every user's runs of this agent (server enforces admin or
+  // agent contributor access + the usedUserToken ACL). Requires agentSlug.
   if (opts?.allUsers && opts?.agentSlug) qs.set("scope", "all");
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   const data = await request<{ success: boolean; data: AgentRun[] }>(
@@ -3989,9 +4391,15 @@ export interface GlobalMetricsDayBucket {
   avgLlmMs: number | null;
   avgToolMs: number | null;
   errorRate: number;
+  user?: number;
+  automation?: number;
+  scheduled?: number;
+  api?: number;
 }
 export interface GlobalMetricsAgentRow {
   agentSlug: string;
+  orgId?: string | null;
+  orgName?: string | null;
   runs: number;
   p50TotalMs: number | null;
   p95TotalMs: number | null;
@@ -4009,6 +4417,17 @@ export interface GlobalMetricsProviderRow {
   p95TtftMs: number | null;
   avgTokensPerSec: number | null;
   errorRate: number;
+}
+export type GlobalMetricsTriggerGroup = "user" | "automation" | "scheduled" | "api";
+export interface GlobalMetricsTriggerRow {
+  trigger: GlobalMetricsTriggerGroup;
+  runs: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  errorRate: number;
+  p50TotalMs: number | null;
+  p95TotalMs: number | null;
 }
 export interface GlobalMetrics {
   days: number;
@@ -4032,14 +4451,18 @@ export interface GlobalMetrics {
     errorRate: number;
   };
   perDay: GlobalMetricsDayBucket[];
+  byTrigger: GlobalMetricsTriggerRow[];
   topAgents: GlobalMetricsAgentRow[];
   byProvider: GlobalMetricsProviderRow[];
   slowSessions: SlowSession[];
 }
 
-export async function fetchGlobalMetrics(userId: string, days: 1 | 7 | 30 = 7): Promise<GlobalMetrics> {
+export async function fetchGlobalMetrics(userId: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope): Promise<GlobalMetrics> {
+  const qs = new URLSearchParams();
+  qs.set("days", String(days));
+  applyAdminOrgScope(qs, orgScope);
   return request<GlobalMetrics>(
-    `${AUTH_API_URL}/api/v1/metrics/global?days=${days}`,
+    `${AUTH_API_URL}/api/v1/metrics/global?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
   );
 }
@@ -4139,9 +4562,12 @@ export async function dismissImprovement(userId: string, id: string, reason?: st
   );
 }
 
-export async function fetchAgentMetrics(userId: string, slug: string, days: 1 | 7 | 30 = 7): Promise<AgentMetrics> {
+export async function fetchAgentMetrics(userId: string, slug: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope): Promise<AgentMetrics> {
+  const qs = new URLSearchParams();
+  qs.set("days", String(days));
+  applyAdminOrgScope(qs, orgScope);
   return request<AgentMetrics>(
-    `${AUTH_API_URL}/api/v1/metrics/agent/${encodeURIComponent(slug)}?days=${days}`,
+    `${AUTH_API_URL}/api/v1/metrics/agent/${encodeURIComponent(slug)}?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
   );
 }
@@ -4226,6 +4652,9 @@ export interface EvalGeneration {
   conversationIds: string[];
   folderId: string | null;
   createdBy?: string | null;
+  /** Groups the sibling runs (one per agent, up to 3) of a multi-agent
+   *  comparison; null for a plain single-agent run. */
+  comparisonId?: string | null;
   startedAt: string;
   completedAt: string | null;
   turnResults?: EvalTurnResult[];
@@ -4332,15 +4761,36 @@ export async function listEvalGenModels(userId: string): Promise<EvalGenModels> 
   return { providers: data.providers ?? [], litellm: data.litellm ?? [] };
 }
 
+/** One agent to run, with its own optional generation-model pin. */
+export interface StartGenerationAgent {
+  agentSlug: string;
+  genProvider?: string;
+  genModel?: string;
+}
+
+/** Start a comparison of 1-3 agents over the same conversations. Each agent gets
+ *  its own runId (+ jobId to poll); they share a comparisonId so results align. */
 export async function startBackgroundGeneration(
-  payload: { agentSlug: string; conversationIds?: string[]; folderId?: string; genProvider?: string; genModel?: string },
+  payload: { agents: StartGenerationAgent[]; conversationIds?: string[]; folderId?: string },
   userId: string,
-): Promise<{ runId: string; jobId: string }> {
-  const d = await request<{ success: boolean; runId: string; jobId: string }>(
-    `${AUTH_API_URL}/api/v1/evals/generations/background`,
-    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
-  );
-  return { runId: d.runId, jobId: d.jobId };
+): Promise<{ comparisonId: string | null; runs: Array<{ agentSlug: string; runId: string; jobId: string }> }> {
+  const d = await request<{
+    success: boolean;
+    comparisonId?: string;
+    runs?: Array<{ agentSlug: string; runId: string; jobId: string }>;
+    runId?: string;
+    jobId?: string;
+  }>(`${AUTH_API_URL}/api/v1/evals/generations/background`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify(payload),
+  });
+  if (Array.isArray(d.runs)) return { comparisonId: d.comparisonId ?? null, runs: d.runs };
+  // Defensive: a legacy single-agent {runId,jobId} response.
+  return {
+    comparisonId: null,
+    runs: d.runId && d.jobId ? [{ agentSlug: payload.agents[0]?.agentSlug ?? "", runId: d.runId, jobId: d.jobId }] : [],
+  };
 }
 
 export async function getGenerationJob(jobId: string, userId: string): Promise<GenerationJobStatus> {
@@ -4371,6 +4821,46 @@ export interface GenerationMeta {
   completedAt: string | null;
   genProvider?: string | null;
   genModel?: string | null;
+  comparisonId?: string | null;
+}
+
+/** Per-run score rollup returned by the comparison endpoint (mirrors the
+ *  backend summarizeRun). */
+export interface GenerationSummary {
+  judgedCount: number;
+  totalTurns: number;
+  avgScore: number | null;
+  distribution: { good: number; weak: number; fail: number };
+  perConversation: Array<{ conversationId: string; avgScore: number; count: number }>;
+}
+
+export interface EvalComparisonAgent {
+  run: EvalGeneration;
+  summary: GenerationSummary;
+}
+
+/** All sibling agent runs of a comparison, each with turns + a score summary. */
+export async function getComparison(
+  comparisonId: string,
+): Promise<{ comparisonId: string; agents: EvalComparisonAgent[] }> {
+  const d = await request<{ success: boolean; comparisonId: string; agents: EvalComparisonAgent[] }>(
+    `${AUTH_API_URL}/api/v1/evals/comparisons/${comparisonId}`,
+  );
+  return { comparisonId: d.comparisonId, agents: d.agents ?? [] };
+}
+
+/** Score every agent's run in a comparison in one call (same judges across all
+ *  agents). Returns one background judge job per sibling run. */
+export async function judgeComparison(
+  comparisonId: string,
+  payload: { judges?: Array<{ judgeId: string; model?: string }>; conversationIds?: string[]; onlyUnscored?: boolean },
+  userId: string,
+): Promise<{ jobs: Array<{ runId: string; agentSlug: string; jobId: string }> }> {
+  const d = await request<{ success: boolean; jobs: Array<{ runId: string; agentSlug: string; jobId: string }> }>(
+    `${AUTH_API_URL}/api/v1/evals/comparisons/${comparisonId}/judge`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+  return { jobs: d.jobs ?? [] };
 }
 
 /** All runs for a folder (newest first) — for the regression-compare picker. */
@@ -4691,4 +5181,92 @@ export function parseEvalConversations(
   }
 
   return { error: "Unrecognized shape" };
+}
+
+// ── Error pipeline (Grafana → Claw auto-fix) admin inspection ──────────────
+
+export interface ErrorPipelineBucketStat {
+  queued: number;
+  pending: number;
+}
+
+export interface ErrorPipelineItem {
+  errorKey: string;
+  enqueuedAt: number;
+  attempts: number;
+  error: { source: string; message: string; normMessage?: string; sampleRequestId?: string };
+  classification: { bucket: string; reason: string; signal: string };
+}
+
+export async function getErrorPipelineBuckets(userId: string): Promise<Record<string, ErrorPipelineBucketStat>> {
+  const data = await request<{ success: boolean; data: { buckets: Record<string, ErrorPipelineBucketStat> } }>(
+    `${AUTH_API_URL}/api/v1/admin/error-pipeline/buckets`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data.buckets;
+}
+
+export async function listErrorPipelineItems(userId: string, bucket: string, limit = 100): Promise<ErrorPipelineItem[]> {
+  const data = await request<{ success: boolean; data: { items: ErrorPipelineItem[] } }>(
+    `${AUTH_API_URL}/api/v1/admin/error-pipeline/items/${encodeURIComponent(bucket)}?limit=${limit}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data.items;
+}
+
+export interface ErrorPipelineFix {
+  errorKey: string;
+  bucket: string;
+  status: "running" | "completed" | "failed";
+  message: string;
+  sessionId?: string;
+  conversationId?: string;
+  summary?: string;
+  attempts: number;
+  updatedAt: number;
+}
+
+export async function listErrorPipelineFixes(userId: string, limit = 200): Promise<ErrorPipelineFix[]> {
+  const data = await request<{ success: boolean; data: { fixes: ErrorPipelineFix[] } }>(
+    `${AUTH_API_URL}/api/v1/admin/error-pipeline/fixes?limit=${limit}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data.fixes;
+}
+
+// ── Editable bucket rules (the DB taxonomy) ──────────────────────────
+export interface ErrorPipelineRule {
+  name: string;
+  description: string;
+  keywords: string[];
+  markers: string;
+  matchOrder: number;
+  enabled: boolean;
+  updatedAt: string;
+}
+
+export async function listErrorPipelineRules(userId: string): Promise<ErrorPipelineRule[]> {
+  const data = await request<{ success: boolean; data: ErrorPipelineRule[] }>(
+    `${AUTH_API_URL}/api/v1/admin/error-pipeline/rules`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function saveErrorPipelineRule(
+  userId: string,
+  name: string,
+  body: { description: string; keywords: string[]; markers: string; matchOrder: number; enabled: boolean },
+): Promise<void> {
+  await request(
+    `${AUTH_API_URL}/api/v1/admin/error-pipeline/rules/${encodeURIComponent(name)}`,
+    { method: "PUT", headers: { "x-user-id": userId, "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+}
+
+export async function deleteErrorPipelineRule(userId: string, name: string): Promise<void> {
+  await request(
+    `${AUTH_API_URL}/api/v1/admin/error-pipeline/rules/${encodeURIComponent(name)}`,
+    { method: "DELETE", headers: { "x-user-id": userId } },
+  );
 }

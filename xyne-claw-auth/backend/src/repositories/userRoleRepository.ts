@@ -7,7 +7,7 @@ export const userRoleRepository = {
   listByRole: (role: string) =>
     prisma.userRole.findMany({
       where: { role },
-      include: { user: { select: { id: true, name: true, email: true } } },
+      include: { user: { select: { id: true, name: true, email: true, orgId: true } } },
       orderBy: { createdAt: "asc" },
     }),
 
@@ -16,7 +16,7 @@ export const userRoleRepository = {
       where: { userId_role: { userId, role } },
       create: { userId, role, grantedBy },
       update: { grantedBy },
-      include: { user: { select: { id: true, name: true, email: true } } },
+      include: { user: { select: { id: true, name: true, email: true, orgId: true } } },
     }),
 
   delete: (userId: string, role: string) =>

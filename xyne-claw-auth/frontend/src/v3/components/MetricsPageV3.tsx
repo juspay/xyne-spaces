@@ -9,7 +9,7 @@
  * 1180px max-width column matching the rest of v3.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ResponsiveContainer,
   BarChart, Bar,
@@ -21,9 +21,11 @@ import {
   fetchAgentImprovements, applyImprovement, dismissImprovement,
   type GlobalMetrics, type GlobalMetricsDayBucket, type AgentMetrics,
   type SlowSession, type ToolLatencyRow, type AgentSentiment, type GlobalMetricsProviderRow,
-  type ImprovementCandidate, type ImprovementBucket,
+  type ImprovementCandidate, type ImprovementBucket, type AdminOrgScope,
 } from "../../lib/api";
 import { Skeleton } from "./ui/Skeleton";
+import { Switch } from "./ui/Switch";
+import { useAdminStatus } from "../hooks/useAdminStatus";
 
 interface MetricsPageV3Props {
   userId: string;
@@ -137,9 +139,25 @@ export function MetricsPanel({
       ) : (
         <>
           <TotalsStrip data={data} />
-          <Card title="How many runs each day" subtitle="Bar height = total runs. Stacked by outcome.">
-            <SessionsBarChart perDay={data.perDay} />
-          </Card>
+          {showLeaderboard && "byTrigger" in data && (
+            <Card title="By trigger" subtitle="User combines Spaces mentions, DMs, and dashboard chat. CLI is API-triggered runs.">
+              <TriggerTiles rows={data.byTrigger} />
+            </Card>
+          )}
+          {showLeaderboard && "byTrigger" in data ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
+              <Card title="How many runs each day" subtitle="Bar height = total runs. Stacked by outcome.">
+                <SessionsBarChart perDay={data.perDay} />
+              </Card>
+              <Card title="Daily runs by trigger" subtitle="Same run volume, grouped by how the run started.">
+                <TriggerBarChart perDay={data.perDay} />
+              </Card>
+            </div>
+          ) : (
+            <Card title="How many runs each day" subtitle="Bar height = total runs. Stacked by outcome.">
+              <SessionsBarChart perDay={data.perDay} />
+            </Card>
+          )}
           {/* Two charts side-by-side so each line gets its own y-axis. When
               p50 and p95 share a scale (p95 is 10-20× larger), the p50 line
               flattens to the baseline and looks broken. */}
@@ -276,12 +294,19 @@ function SlowSessionsTable({ rows, showAgent }: { rows: SlowSession[]; showAgent
 }
 
 export function MetricsPageV3({ userId }: MetricsPageV3Props) {
+  const { isAdmin } = useAdminStatus();
   // null = workspace-wide view, otherwise a single agent's slug.
   // The selector below drives this; the leaderboard renders agent rows as
   // clickable links into the per-agent view so you can pivot without scrolling
   // back to the dropdown.
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [agentSlugs, setAgentSlugs] = useState<string[]>([]);
+  const [allOrgs, setAllOrgs] = useState(false);
+  const adminOrgScope: AdminOrgScope = allOrgs ? "all" : "org";
+
+  useEffect(() => {
+    if (!isAdmin && allOrgs) setAllOrgs(false);
+  }, [isAdmin, allOrgs]);
 
   // Populate the agent selector from the FULL agent roster (allAgents=true, so
   // admins get every user's agents) UNIONed with agents that have runs in the
@@ -292,21 +317,23 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      listAgents(userId, true).then((rows) => rows.map((a) => a.slug)).catch(() => [] as string[]),
-      fetchGlobalMetrics(userId, 30).then((g) => g.topAgents.map((a) => a.agentSlug)).catch(() => [] as string[]),
+      listAgents(userId, true, adminOrgScope).then((rows) => rows.map((a) => a.slug)).catch(() => [] as string[]),
+      fetchGlobalMetrics(userId, 30, adminOrgScope).then((g) => g.topAgents.map((a) => a.agentSlug)).catch(() => [] as string[]),
     ]).then(([all, withRuns]) => {
       if (cancelled) return;
       setAgentSlugs([...new Set([...all, ...withRuns])].sort());
     });
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [userId, adminOrgScope]);
 
   // The fetcher passed to MetricsPanel switches based on selection. Memoising
   // would be cleaner but a fresh function per render is fine here since the
   // panel re-runs its effect on every fetcher identity change anyway.
-  const fetcher = selectedAgent
-    ? (uid: string, days: 1 | 7 | 30) => fetchAgentMetrics(uid, selectedAgent, days)
-    : fetchGlobalMetrics;
+  const fetcher = useCallback((uid: string, days: 1 | 7 | 30) => (
+    selectedAgent
+      ? fetchAgentMetrics(uid, selectedAgent, days, adminOrgScope)
+      : fetchGlobalMetrics(uid, days, adminOrgScope)
+  ), [selectedAgent, adminOrgScope]);
 
   return (
     <div className="flex-1 overflow-auto">
@@ -322,7 +349,13 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
                 : "Latency, throughput, and error trends across all agents and users."}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {isAdmin && (
+              <label className="flex shrink-0 items-center gap-2 text-[12px] text-xyne-fg-muted">
+                <Switch checked={allOrgs} onChange={setAllOrgs} />
+                All orgs
+              </label>
+            )}
             <label className="text-[12px] text-xyne-fg-muted">View:</label>
             <select
               value={selectedAgent ?? ""}
@@ -476,6 +509,42 @@ function Tile({ label, value, sub, subTone = "flat" as "good" | "bad" | "flat" }
   );
 }
 
+const TRIGGER_LABELS = {
+  user: "User",
+  automation: "Automation",
+  scheduled: "Scheduled",
+  api: "CLI",
+} as const;
+
+function TriggerTiles({ rows }: { rows: GlobalMetrics["byTrigger"] }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {rows.map((r) => (
+        <div key={r.trigger} className="rounded-lg bg-xyne-bg-secondary/40 px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-xyne-fg-muted">{TRIGGER_LABELS[r.trigger]}</span>
+            <span className="text-[11px] text-xyne-fg-muted tabular-nums">{r.runs} runs</span>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <MetricChip label="Error" value={fmtPct(r.errorRate)} />
+            <MetricChip label="p50" value={fmtMs(r.p50TotalMs)} />
+            <MetricChip label="p95" value={fmtMs(r.p95TotalMs)} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MetricChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] text-xyne-fg-muted">{label}</div>
+      <div className="text-[13px] font-medium text-xyne-fg-primary tabular-nums truncate">{value}</div>
+    </div>
+  );
+}
+
 /* ── Charts (recharts) ────────────────────────────────────────────────── */
 
 const CHART_HEIGHT = 240;
@@ -532,6 +601,31 @@ function SessionsBarChart({ perDay }: { perDay: GlobalMetricsDayBucket[] }) {
         <Bar dataKey="Completed" stackId="s" fill="#22c55e" radius={[0, 0, 0, 0]} />
         <Bar dataKey="Failed"    stackId="s" fill="#ef4444" />
         <Bar dataKey="Cancelled" stackId="s" fill="#94a3b8" radius={[4, 4, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function TriggerBarChart({ perDay }: { perDay: GlobalMetricsDayBucket[] }) {
+  const data = perDay.map((d) => ({
+    day: d.day.slice(5),
+    User: d.user ?? 0,
+    Automation: d.automation ?? 0,
+    Scheduled: d.scheduled ?? 0,
+    CLI: d.api ?? 0,
+  }));
+  return (
+    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+      <BarChart data={data} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} opacity={GRID_OPACITY} vertical={false} />
+        <XAxis dataKey="day" tick={tickStyle} axisLine={axisStyle} tickLine={false} />
+        <RcYAxis tick={tickStyle} axisLine={axisStyle} tickLine={false} width={40} allowDecimals={false} />
+        <Tooltip content={<MetricsTooltip />} cursor={{ fill: "currentColor", opacity: 0.05 }} />
+        <RcLegend wrapperStyle={{ fontSize: 12, paddingBottom: 8 }} verticalAlign="top" align="left" />
+        <Bar dataKey="User" stackId="s" fill="#3b82f6" radius={[0, 0, 0, 0]} />
+        <Bar dataKey="Automation" stackId="s" fill="#a855f7" />
+        <Bar dataKey="Scheduled" stackId="s" fill="#f59e0b" />
+        <Bar dataKey="CLI" stackId="s" fill="#14b8a6" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -594,6 +688,7 @@ function AgentTable({ rows, onAgentClick }: {
   rows: GlobalMetrics["topAgents"];
   onAgentClick?: (slug: string) => void;
 }) {
+  const showOrgLabels = rows.some((r) => r.orgName || r.orgId);
   return (
     <div className="overflow-x-auto -mx-1 px-1">
       <table className="w-full min-w-[640px] text-[13px]">
@@ -619,7 +714,12 @@ function AgentTable({ rows, onAgentClick }: {
               onClick={onAgentClick ? () => onAgentClick(r.agentSlug) : undefined}
               title={onAgentClick ? `Drill into ${r.agentSlug}'s metrics` : undefined}
             >
-              <td className="py-2 pr-3 font-medium text-xyne-fg-primary">{r.agentSlug}</td>
+              <td className="py-2 pr-3">
+                <div className="font-medium text-xyne-fg-primary">{r.agentSlug}</div>
+                {showOrgLabels && (
+                  <div className="mt-0.5 text-[11px] text-xyne-fg-muted">{r.orgName ?? r.orgId ?? "unknown org"}</div>
+                )}
+              </td>
               <td className="py-2 pr-3 text-right tabular-nums">{r.runs}</td>
               <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.p50TotalMs)}</td>
               <td className="py-2 pr-3 text-right tabular-nums">{fmtMs(r.p95TotalMs)}</td>

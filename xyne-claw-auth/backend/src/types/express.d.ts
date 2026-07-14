@@ -20,6 +20,10 @@ declare global {
         name: string;
         /** Workspace the user is currently scoped to (from `xyne_last_workspace`). */
         workspaceId?: string;
+        /** Phase-1 org context (set alongside the `x-org-id` header by requireAuth). */
+        orgId?: string;
+        /** OrgMember role in `orgId`: OWNER | ADMIN | MEMBER. */
+        role?: string;
       };
     }
   }

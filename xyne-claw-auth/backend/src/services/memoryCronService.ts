@@ -60,6 +60,7 @@ export interface SessionTranscript {
   sessionId: string;
   userId: string;
   agentSlug: string;
+  orgId: string;
   conversationId: string | null;
   channelId: string | null;
   task: string;
@@ -106,6 +107,7 @@ async function createBatchReviews(
       sessionId: true,
       userId: true,
       agentSlug: true,
+      orgId: true,
       conversationId: true,
       channelId: true,
       task: true,
@@ -133,28 +135,33 @@ async function createBatchReviews(
     ...(opts.agentFilter ? { agentFilter: opts.agentFilter } : {}),
   });
 
-  // Group by agentSlug
+  // Group by (orgId, agentSlug) so same-slug agents in different orgs never
+  // share memory batches, cooldowns, or curation work.
   const byAgent = new Map<string, typeof runs>();
   for (const r of runs) {
-    if (!byAgent.has(r.agentSlug)) byAgent.set(r.agentSlug, []);
-    byAgent.get(r.agentSlug)!.push(r);
+    const key = `${r.orgId}\u0000${r.agentSlug}`;
+    if (!byAgent.has(key)) byAgent.set(key, []);
+    byAgent.get(key)!.push(r);
   }
 
   let batchesCreated = 0;
   let sessionsIncluded = 0;
   let sessionsSkipped = 0;
 
-  for (const [agentSlug, agentRuns] of byAgent) {
+  for (const [_key, agentRuns] of byAgent) {
+    const orgId = agentRuns[0]!.orgId;
+    const agentSlug = agentRuns[0]!.agentSlug;
     // Check the agent's memoryEnabled flag before doing anything. Even if old
     // agent_runs rows exist from before the toggle was disabled, skip them.
     const agent = await prisma.agent.findUnique({
-      where: { slug: agentSlug },
+      where: { orgId_slug: { orgId, slug: agentSlug } },
       select: { config: true },
     });
     const config = (agent?.config ?? null) as Record<string, unknown> | null;
     const memoryEnabled = config?.["memoryEnabled"] === true || config?.["memoryEnabled"] === "true";
     if (!memoryEnabled) {
       logger.info("[memory-cron] Skipping agent — memory not enabled", {
+        orgId,
         agentSlug,
         completedRuns: agentRuns.length,
       });
@@ -189,6 +196,7 @@ async function createBatchReviews(
 
     if (included.length === 0) {
       logger.info("[memory-cron] All sessions filtered for agent — no batch created", {
+        orgId,
         agentSlug,
         skipped: skipped.length,
       });
@@ -199,11 +207,12 @@ async function createBatchReviews(
     // Preserve admin decisions: don't overwrite an existing batch unless it's
     // still "pending". An approved or rejected batch is a deliberate human
     // call; a backfill re-run shouldn't reset it.
-    const existing = await prisma.pendingBatchReview.findUnique({
-      where: { agentSlug_reviewDate: { agentSlug, reviewDate: dateStr } },
+    const existing = await prisma.pendingBatchReview.findFirst({
+      where: { orgId, agentSlug, reviewDate: dateStr },
     });
     if (existing && existing.status !== "pending") {
       logger.info("[memory-cron] Existing non-pending batch — leaving untouched", {
+        orgId,
         agentSlug,
         reviewDate: dateStr,
         existingStatus: existing.status,
@@ -216,28 +225,33 @@ async function createBatchReviews(
     try {
       const heuristicSkippedJson: Prisma.InputJsonValue | undefined =
         skipped.length > 0 ? (skipped as unknown as Prisma.InputJsonValue) : undefined;
-      const batch = await prisma.pendingBatchReview.upsert({
-        where: { agentSlug_reviewDate: { agentSlug, reviewDate: dateStr } },
-        create: {
-          agentSlug,
-          reviewDate: dateStr,
-          status: "pending",
-          sessionIds: included,
-          ...(heuristicSkippedJson !== undefined ? { heuristicSkipped: heuristicSkippedJson } : {}),
-          approvalStrategy,
-        },
-        update: {
-          sessionIds: included,
-          ...(heuristicSkippedJson !== undefined ? { heuristicSkipped: heuristicSkippedJson } : {}),
-          status: "pending",
-          approvalStrategy,
-        },
-      });
+      const batch = existing
+        ? await prisma.pendingBatchReview.update({
+          where: { id: existing.id },
+          data: {
+            sessionIds: included,
+            ...(heuristicSkippedJson !== undefined ? { heuristicSkipped: heuristicSkippedJson } : {}),
+            status: "pending",
+            approvalStrategy,
+          },
+        })
+        : await prisma.pendingBatchReview.create({
+          data: {
+            agentSlug,
+            orgId,
+            reviewDate: dateStr,
+            status: "pending",
+            sessionIds: included,
+            ...(heuristicSkippedJson !== undefined ? { heuristicSkipped: heuristicSkippedJson } : {}),
+            approvalStrategy,
+          },
+        });
 
       batchesCreated++;
       sessionsIncluded += included.length;
       sessionsSkipped += skipped.length;
       logger.info("[memory-cron] Batch created", {
+        orgId,
         agentSlug,
         reviewDate: dateStr,
         batchId: batch.id,
@@ -267,6 +281,7 @@ async function createBatchReviews(
       }
     } catch (err) {
       logger.error("[memory-cron] Failed to create batch row", {
+        orgId,
         agentSlug,
         err: err instanceof Error ? err.message : String(err),
       });
@@ -508,6 +523,7 @@ async function ingestRecallHits(dateStr: string): Promise<void> {
     scope: string;
     rank: number | null;
     recalledAt: Date;
+    orgId: string | undefined;
   }> = [];
 
   let parseFailed = 0;
@@ -526,11 +542,20 @@ async function ingestRecallHits(dateStr: string): Promise<void> {
         scope: parsed.scope,
         rank: typeof parsed.rank === "number" ? parsed.rank : null,
         recalledAt: new Date(parsed.recalledAt),
+        orgId: undefined,
       });
     } catch {
       parseFailed++;
     }
   }
+
+  const sessionOrgRows = await prisma.agentRun.findMany({
+    where: { sessionId: { in: [...new Set(rows.map((r) => r.sessionId))] } },
+    select: { sessionId: true, orgId: true },
+  });
+  const orgBySession = new Map(sessionOrgRows.map((r) => [r.sessionId, r.orgId]));
+  for (const row of rows) row.orgId = orgBySession.get(row.sessionId);
+  const rowsWithOrg = rows.flatMap((r) => r.orgId ? [{ ...r, orgId: r.orgId }] : []);
 
   if (rows.length === 0) {
     logger.info("[memory-cron] Recall-hits file empty after parse", { dateStr, parseFailed });
@@ -539,11 +564,12 @@ async function ingestRecallHits(dateStr: string): Promise<void> {
   }
 
   try {
-    const result = await prisma.memoryRecallHit.createMany({ data: rows, skipDuplicates: true });
+    const result = await prisma.memoryRecallHit.createMany({ data: rowsWithOrg, skipDuplicates: true });
     logger.info("[memory-cron] Recall-hits ingested", {
       dateStr,
       inserted: result.count,
       parsed: rows.length,
+      skippedMissingOrg: rows.length - rowsWithOrg.length,
       parseFailed,
     });
     await unlink(file).catch(() => {});
@@ -647,6 +673,7 @@ export async function curateApprovedTranscript(
     const created = await prisma.pendingMemoryReview.create({
       data: {
         agentSlug: transcript.agentSlug,
+        orgId: transcript.orgId,
         userId: null,
         sessionId: transcript.sessionId,
         scope: "shared",
@@ -738,6 +765,7 @@ export async function readSessionTranscript(sessionId: string): Promise<SessionT
       sessionId: true,
       userId: true,
       agentSlug: true,
+      orgId: true,
       conversationId: true,
       channelId: true,
       task: true,
@@ -754,7 +782,7 @@ export async function readSessionTranscript(sessionId: string): Promise<SessionT
 
   // Resolve the agent's current approvalStrategy from its config blob.
   const agent = await prisma.agent.findUnique({
-    where: { slug: run.agentSlug },
+    where: { orgId_slug: { orgId: run.orgId, slug: run.agentSlug } },
     select: { config: true },
   });
   const config = (agent?.config ?? null) as Record<string, unknown> | null;
@@ -764,6 +792,7 @@ export async function readSessionTranscript(sessionId: string): Promise<SessionT
     sessionId: run.sessionId,
     userId: run.userId,
     agentSlug: run.agentSlug,
+    orgId: run.orgId,
     conversationId: run.conversationId,
     channelId: run.channelId,
     task: run.task,

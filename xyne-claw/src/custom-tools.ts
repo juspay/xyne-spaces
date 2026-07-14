@@ -138,6 +138,7 @@ export function loadCustomTools(
   sessionToken?: string,
   parentToolCallId?: string,
   providerConfig?: ToolExecutionContext["providerConfig"],
+  emitPlan?: ToolExecutionContext["emitPlan"],
 ): CustomToolsResult {
   const agentSlug = meta?.["agentSlug"];
   const userId = meta?.["userId"] ?? "";
@@ -178,6 +179,9 @@ export function loadCustomTools(
     // Google + Microsoft migrated to claw-auth stdio MCP connectors — never
     // load them as in-process custom tools anymore.
     else if (ct.source === "custom:google" || ct.source === "custom:microsoft") allowed = false;
+    // Auth-executed System Tools are surfaced via /mcp/tools with selectionKey
+    // gating; loading them in-process would create duplicate tool names.
+    else if (ct.source === "custom:orchestrator" || ct.source === "custom:agent-introspect" || ct.source === "custom:webfetch") allowed = false;
     else if (ct.source === "custom:research-agent") allowed = agentSlug === "research-agent" || agentSlug === "ask-ai" || hasResearchAgentSelected;
     // web-search / deep-research are unrestricted — any agent gets them.
     // Removed the prior agentSlug + config-flag gate per request.
@@ -221,6 +225,7 @@ export function loadCustomTools(
       pendingQuestions: allPendingQuestions,
       pendingResponses: allPendingResponses,
       ...(progressUrl ? { progressUrl } : {}),
+      ...(emitPlan ? { emitPlan } : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(s2sKey ? { s2sKey } : {}),
       ...(sessionToken ? { sessionToken } : {}),

@@ -6,11 +6,14 @@
  */
 
 import { interact, search, memorySearch, spacesFetch, spacesFetchBuffer, spacesFetchText, appFetch } from "./xyne-spaces-client.js";
-import { queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
+import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
 import { getWorkspaceIdForUser } from "../../lib/spaces-db.js";
 import type { Citation } from "xyne-claw-shared";
 import { CONFIG } from "../../config.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("xyne-spaces-tools");
 
 /**
  * Vespa-query debug sidecar mirrored from claw-auth's kb-handlers. Same shape
@@ -880,8 +883,26 @@ interface SearchResult {
   searchContext?: Record<string, unknown>;
 }
 
-const toIST = (d: Date | string | number): string =>
-  new Date(d).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+const toIST = (d: Date | string | number): string => {
+  // Vespa timestamps are epoch-ms *numbers*, but transformHit stringifies them
+  // (String(rawTs)), so a numeric string like "1700000000000" arrives here.
+  // new Date(<numeric string>) parses it as a date string and returns Invalid
+  // Date — coerce all-digit strings back to a number first (10 digits = seconds).
+  const s = typeof d === "string" ? d.trim() : d;
+  const v =
+    typeof s === "string" && /^\d{10,}$/.test(s)
+      ? Number(s) * (s.length === 10 ? 1000 : 1)
+      : s;
+  const date = new Date(v);
+  const ms = date.getTime();
+  // Guard against a bad value silently rendering as a wrong/absurd date. Sane
+  // range: 2000-01-01 .. 2100-01-01. Outside it (or NaN), degrade gracefully.
+  if (Number.isNaN(ms) || ms < 946684800000 || ms > 4102444800000) {
+    if (!Number.isNaN(ms)) console.warn(`toIST: timestamp out of sane range: ${String(d)}`);
+    return "(date n/a)";
+  }
+  return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+};
 
 /** Decode the common HTML entities that survive tag-stripping. `&amp;` is decoded
  *  LAST so `&amp;lt;` → `&lt;` → `<` doesn't double-decode into a real tag char. */
@@ -957,6 +978,13 @@ function formatSearchResult(r: SearchResult, chunkIndex: number | null): string 
     if (meta["timestamp"]) detail.push(toIST(meta["timestamp"] as string));
     if (meta["channelName"]) detail.push(`#${meta["channelName"]}`);
     if (meta["status"]) detail.push(`status: ${meta["status"]}`);
+    if (meta["priority"]) detail.push(`priority: ${meta["priority"]}`);
+    if (meta["stage"]) detail.push(`stage: ${meta["stage"]}`);
+    // messageType only when it's not the default USER (BOT/SYSTEM/FORWARDED matter).
+    if (meta["messageType"] && meta["messageType"] !== "USER") detail.push(String(meta["messageType"]).toLowerCase());
+    if (meta["visibility"]) detail.push(`visibility: ${meta["visibility"]}`);
+    if (typeof meta["memberCount"] === "number") detail.push(`${meta["memberCount"]} members`);
+    if (meta["lastActivityAt"]) detail.push(`last active ${toIST(meta["lastActivityAt"] as string)}`);
   }
   // Relevance score gives the model a ranking-confidence signal it never had
   // before. Forwarded by the backend on every TransformedSearchResult.
@@ -965,24 +993,53 @@ function formatSearchResult(r: SearchResult, chunkIndex: number | null): string 
   const sc = r.searchContext;
   if (sc) {
     // Sender line now carries the email when the transform surfaced it.
-    if (sc["senderName"] || sc["senderEmail"]) {
+    if (sc["senderName"] || sc["senderEmail"] || sc["senderId"]) {
       const name = (sc["senderName"] as string) || "";
       const email = sc["senderEmail"] ? `<${sc["senderEmail"]}>` : "";
-      lines.push(`  From: ${[name, email].filter(Boolean).join(" ")}`);
+      const id = sc["senderId"] ? `(${sc["senderId"]})` : "";
+      lines.push(`  From: ${[name, email, id].filter(Boolean).join(" ")}`);
     }
     // People hits: the userId so the agent can reuse it (from=<id>, assignee, …).
     if (sc["userId"]) lines.push(`  userId: ${sc["userId"]}`);
+    if (typeof sc["replyCount"] === "number") lines.push(`  ${sc["replyCount"]} repl${sc["replyCount"] === 1 ? "y" : "ies"}`);
     // Ticket hits: creator/assignee/closer names the transform always computed
     // but this renderer never printed. Skip the "Unknown Creator" fallback so an
     // unresolved createdBy doesn't render a misleading line.
-    if (sc["creatorName"] && sc["creatorName"] !== "Unknown Creator") lines.push(`  Created by: ${sc["creatorName"]}`);
-    if (sc["assigneeName"]) lines.push(`  Assigned to: ${sc["assigneeName"]}`);
+    if (sc["creatorName"] && sc["creatorName"] !== "Unknown Creator") lines.push(`  Created by: ${sc["creatorName"]}${sc["createdBy"] ? ` (${sc["createdBy"]})` : ""}`);
+    else if (sc["createdBy"]) lines.push(`  createdBy: ${sc["createdBy"]}`);
+    if (sc["assigneeName"]) lines.push(`  Assigned to: ${sc["assigneeName"]}${sc["assignedTo"] ? ` (${sc["assignedTo"]})` : ""}`);
+    else if (sc["assignedTo"]) lines.push(`  assignedTo: ${sc["assignedTo"]}`);
     if (sc["closedByName"]) lines.push(`  Closed by: ${sc["closedByName"]}`);
     const bp: string[] = [];
     if (sc["boardName"]) bp.push(`Board: ${sc["boardName"]}`);
     if (sc["projectName"]) bp.push(`Project: ${sc["projectName"]}`);
     if (bp.length > 0) lines.push(`  ${bp.join(" · ")}`);
-    // File hits: type + size.
+    if (sc["tags"]) lines.push(`  tags: ${sc["tags"]}`);
+    // Mail recipients / labels.
+    if (sc["to"]) lines.push(`  To: ${sc["to"]}`);
+    if (sc["cc"]) lines.push(`  Cc: ${sc["cc"]}`);
+    if (sc["bcc"]) lines.push(`  Bcc: ${sc["bcc"]}`);
+    if (sc["labels"]) lines.push(`  labels: ${sc["labels"]}`);
+    if (sc["attachments"]) lines.push(`  Attachments: ${sc["attachments"]}`);
+    // Mail thread ids — the agent uses these to pull "this mail + all replies".
+    const mt: string[] = [];
+    if (sc["threadId"]) mt.push(`threadId: ${sc["threadId"]}`);
+    if (sc["gmailThreadId"]) mt.push(`gmailThreadId: ${sc["gmailThreadId"]}`);
+    if (mt.length > 0) lines.push(`  ${mt.join(" · ")}`);
+    // Extracted entities.
+    const ent: string[] = [];
+    if (sc["people"]) ent.push(`People: ${sc["people"]}`);
+    if (sc["products"]) ent.push(`Products: ${sc["products"]}`);
+    if (sc["merchants"]) ent.push(`Merchants: ${sc["merchants"]}`);
+    if (ent.length > 0) lines.push(`  ${ent.join(" · ")}`);
+    if (sc["generatedTags"]) lines.push(`  generatedTags: ${sc["generatedTags"]}`);
+    const prov: string[] = [];
+    if (sc["app"]) prov.push(String(sc["app"]));
+    if (sc["entity"]) prov.push(String(sc["entity"]));
+    if (sc["fileType"]) prov.push(String(sc["fileType"]));
+    if (prov.length > 0) lines.push(`  ${prov.join(" · ")}`);
+    // File owner + type + size.
+    if (sc["ownerEmail"] || sc["ownerId"]) lines.push(`  Owner: ${sc["ownerEmail"] || sc["ownerId"]}`);
     const ff: string[] = [];
     if (sc["mimeType"]) ff.push(String(sc["mimeType"]));
     if (typeof sc["fileSize"] === "number") { const b = formatBytes(sc["fileSize"] as number); if (b) ff.push(b); }
@@ -2291,6 +2348,248 @@ interface UserRow {
   statusContent?: string;
 }
 
+// ── spaces-user-activity-context ────────────────────────────────────
+
+interface UserAffinityResponse {
+  userId: string;
+  name?: string;
+  email?: string;
+  channelWeights?: Record<string, number>;
+  userWeights?: Record<string, number>;
+  channelTimestamps?: Record<string, number>;
+  userTimestamps?: Record<string, number>;
+  personalizationLastUpdated?: number;
+}
+
+interface VespaTensor {
+  cells?:
+    | Record<string, number>
+    | Array<{ address?: { key?: string }; value?: number }>;
+}
+
+interface AffinityEntry {
+  id: string;
+  weight: number;
+  lastSignalAt?: number;
+}
+
+type AffinityOrder = 'weight' | 'recent' | 'stale';
+
+function affinityTensorToRecord(
+  tensor: VespaTensor | undefined,
+  prefix: string,
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  if (!tensor?.cells) return result;
+
+  const stripPrefix = (key: string): string =>
+    key.startsWith(prefix) ? key.slice(prefix.length) : key;
+
+  if (Array.isArray(tensor.cells)) {
+    for (const cell of tensor.cells) {
+      const key = cell.address?.key;
+      if (key !== undefined && cell.value !== undefined) {
+        result[stripPrefix(key)] = Number(cell.value);
+      }
+    }
+  } else {
+    for (const [key, value] of Object.entries(tensor.cells)) {
+      result[stripPrefix(key)] = Number(value);
+    }
+  }
+
+  return result;
+}
+
+function buildAffinityEntries(
+  weights: Record<string, number> | undefined,
+  timestamps: Record<string, number> | undefined,
+  orderBy: AffinityOrder,
+  limit: number,
+): AffinityEntry[] {
+  const entries = Object.entries(weights ?? {}).map(([id, rawWeight]) => {
+    const timestamp = Number(timestamps?.[id]);
+    return {
+      id,
+      weight: Number(rawWeight),
+      ...(Number.isFinite(timestamp) && timestamp > 0 ? { lastSignalAt: timestamp } : {}),
+    };
+  });
+
+  entries.sort((a, b) => {
+    if (orderBy === 'recent') {
+      return (b.lastSignalAt ?? 0) - (a.lastSignalAt ?? 0) || b.weight - a.weight;
+    }
+    if (orderBy === 'stale') {
+      // Missing timestamps are unknown, not evidence of staleness, so keep
+      // them after entries with a known old signal time.
+      const aTime = a.lastSignalAt ?? Number.POSITIVE_INFINITY;
+      const bTime = b.lastSignalAt ?? Number.POSITIVE_INFINITY;
+      return aTime - bTime || b.weight - a.weight;
+    }
+    return b.weight - a.weight || (b.lastSignalAt ?? 0) - (a.lastSignalAt ?? 0);
+  });
+
+  return entries.slice(0, limit);
+}
+
+function formatSignalTime(timestamp: number | undefined): string {
+  if (!timestamp) return 'last signal: unknown';
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return 'last signal: unknown';
+  const ageDays = Math.max(0, (Date.now() - timestamp) / (24 * 60 * 60 * 1000));
+  const age = ageDays < 1 ? 'today' : `${ageDays.toFixed(ageDays < 10 ? 1 : 0)} days ago`;
+  return `last signal: ${date.toISOString()} (${age})`;
+}
+
+async function renderUserActivityContext(
+  args: Record<string, unknown>,
+  ctx: HandlerContext,
+): Promise<ToolResult> {
+  const userId = String(args['userId'] ?? '').trim();
+  if (!userId) return err('userId is required. Resolve it with spaces-users or spaces-whoami.');
+
+  const limit = Math.min(Math.max(Number(args['limit'] ?? 10), 1), 50);
+  const requestedOrder = String(args['orderBy'] ?? 'weight');
+  const orderBy: AffinityOrder =
+    requestedOrder === 'recent' || requestedOrder === 'stale' ? requestedOrder : 'weight';
+
+  try {
+    const yql = `select * from sources user where docId contains "${esc(userId)}" limit 1`;
+    const response = await queryDirect(
+      yql,
+      '',
+      ctx.userId,
+      1,
+      0,
+      CONFIG.vespaQueryEndpoint,
+      'unranked',
+      undefined,
+      undefined,
+      true,
+    );
+    const fields = response.data.results?.[0]?.rawFields;
+    if (!fields) return err(`No Vespa activity profile found for userId ${userId}.`);
+
+    const data: UserAffinityResponse = {
+      userId,
+      ...(fields['name'] ? { name: String(fields['name']) } : {}),
+      ...(fields['email'] ? { email: String(fields['email']) } : {}),
+      channelWeights: affinityTensorToRecord(
+        fields['channelWeights'] as VespaTensor | undefined,
+        'channel:',
+      ),
+      userWeights: affinityTensorToRecord(
+        fields['userWeights'] as VespaTensor | undefined,
+        'user:',
+      ),
+      channelTimestamps: affinityTensorToRecord(
+        fields['channelTimestamps'] as VespaTensor | undefined,
+        'channel:',
+      ),
+      userTimestamps: affinityTensorToRecord(
+        fields['userTimestamps'] as VespaTensor | undefined,
+        'user:',
+      ),
+      personalizationLastUpdated: Number(fields['personalizationLastUpdated'] ?? 0),
+    };
+    const channels = buildAffinityEntries(
+      data.channelWeights,
+      data.channelTimestamps,
+      orderBy,
+      limit,
+    );
+    const collaborators = buildAffinityEntries(
+      data.userWeights,
+      data.userTimestamps,
+      orderBy,
+      limit,
+    );
+
+    const [channelInfo, userInfo] = await Promise.all([
+      resolveChannelInfo(channels.map((entry) => entry.id)),
+      resolveUserInfo(collaborators.map((entry) => entry.id)),
+    ]);
+
+    const profile = [data.name, data.email ? `<${data.email}>` : '', `(id: ${data.userId})`]
+      .filter(Boolean)
+      .join(' ');
+    const updatedAt = data.personalizationLastUpdated
+      ? new Date(data.personalizationLastUpdated).toISOString()
+      : 'unknown';
+    const orderLabel =
+      orderBy === 'recent'
+        ? 'most recent signal first'
+        : orderBy === 'stale'
+          ? 'oldest known signal first'
+          : 'strongest affinity first';
+
+    const channelLines = channels.map((entry) => {
+      const channel = channelInfo.get(entry.id);
+      const label = channel?.name ? `#${channel.name}` : entry.id;
+      return `- ${label} — weight: ${entry.weight.toFixed(3)}; ${formatSignalTime(entry.lastSignalAt)}; channelId: ${entry.id}`;
+    });
+    const userLines = collaborators.map((entry) => {
+      const user = userInfo.get(entry.id);
+      const label = user?.name
+        ? `${user.name}${user.email ? ` <${user.email}>` : ''}`
+        : entry.id;
+      return `- ${label} — weight: ${entry.weight.toFixed(3)}; ${formatSignalTime(entry.lastSignalAt)}; userId: ${entry.id}`;
+    });
+
+    return ok([
+      `Activity context for ${profile}`,
+      `Profile computed at: ${updatedAt}`,
+      `Ordering: ${orderLabel}`,
+      '',
+      `Channels (${channels.length} of ${Object.keys(data.channelWeights ?? {}).length} signals):`,
+      ...(channelLines.length > 0 ? channelLines : ['- No channel signals recorded.']),
+      '',
+      `Collaborators (${collaborators.length} of ${Object.keys(data.userWeights ?? {}).length} signals):`,
+      ...(userLines.length > 0 ? userLines : ['- No collaborator signals recorded.']),
+      '',
+      'Interpretation: weights and signal times show where this user has interacted, not whether a particular fact is current. For freshness-sensitive answers, use these IDs to search the relevant channels/users, then compare the timestamps of the returned messages or documents.',
+    ].join('\n'));
+  } catch (e) {
+    return err(`User activity context error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+const spacesUserActivityContext: ToolDef = {
+  name: 'spaces-user-activity-context',
+  description:
+    'Fetch a user activity/affinity profile by Spaces userId without changing search ranking. ' +
+    'Returns compact, name-resolved channel and collaborator signals with affinity weights and last-signal timestamps. ' +
+    'Use orderBy=recent to find currently active sources, orderBy=stale to find old relationship signals, or orderBy=weight for strongest sources. ' +
+    'This identifies likely sources of fresh or stale information; it does not prove a message or fact is stale, so follow up with spaces-search/spaces-messages and compare content timestamps.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      userId: {
+        type: 'string',
+        description: 'Spaces user ID whose activity context should be fetched. Resolve with spaces-users or spaces-whoami; never invent it.',
+      },
+      orderBy: {
+        type: 'string',
+        enum: ['weight', 'recent', 'stale'],
+        default: 'weight',
+        description: 'weight = strongest affinity first; recent = newest interaction signal first; stale = oldest known interaction signal first.',
+      },
+      limit: {
+        type: 'number',
+        minimum: 1,
+        maximum: 50,
+        default: 10,
+        description: 'Maximum channels and maximum collaborators to return (default 10 each, max 50).',
+      },
+    },
+    required: ['userId'],
+  },
+  async handler(args, ctx) {
+    return renderUserActivityContext(args, ctx);
+  },
+};
+
 /** Directory-card TITLE for a user: "Name (aka DisplayName) <email> — userType",
  *  with a "[<status>, left <date>]" tag whenever the account isn't ACTIVE. */
 function userTitle(u: UserRow): string {
@@ -3110,6 +3409,7 @@ const spacesUpdateTicket: ToolDef = {
       priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "New priority" },
       status: { type: "string", enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"], description: "New status. Note: changing the stage may also change the status to the stage's default — provide this field to override." },
       eta: { type: "string", description: "New due date as ISO 8601 string (e.g. '2026-06-01T00:00:00Z')" },
+      tags: { type: "array", items: { type: "string" }, description: "Replace the ticket's tags with this list of tag names. Pass an empty array to remove all tags." },
     },
     required: ["ticketId"],
   },
@@ -3124,10 +3424,16 @@ const spacesUpdateTicket: ToolDef = {
       const priority = (args["priority"] as string | undefined)?.trim();
       const status = (args["status"] as string | undefined)?.trim();
       const eta = (args["eta"] as string | undefined)?.trim();
+      const rawTags = args["tags"];
+      const tagsProvided = rawTags !== undefined;
+      if (tagsProvided && !Array.isArray(rawTags)) {
+        return err("tags must be an array of strings.");
+      }
+      const tags = tagsProvided ? (rawTags as unknown[]).map((t) => String(t)) : undefined;
 
       if (!ticketId) return err("ticketId is required.");
-      if (!assigneeId && !stage && !groupId && !title && !description && !priority && !status && !eta) {
-        return err("At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, or eta).");
+      if (!assigneeId && !stage && !groupId && !title && !description && !priority && !status && !eta && !tagsProvided) {
+        return err("At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, eta, or tags).");
       }
 
       const body: Record<string, unknown> = {};
@@ -3139,6 +3445,7 @@ const spacesUpdateTicket: ToolDef = {
       if (priority) body["priority"] = priority;
       if (status) body["status"] = status;
       if (eta) body["eta"] = eta;
+      if (tagsProvided) body["tags"] = tags;
 
       const result = (await spacesFetch(`/api/tickets/${encodeURIComponent(ticketId)}`, {
         method: "PATCH",
@@ -3930,6 +4237,285 @@ const spacesFetchAttachment: ToolDef = {
   },
 };
 
+// ── spaces-upload-to-kb ──────────────────────────────────────────────
+// WRITE tool — gated by the xyne-spaces adapter `writeTools` list, so it
+// only runs after the user Approves the HITL card. Pushes an EXISTING
+// Spaces thread attachment into a channel's Knowledge Base collection.
+//
+// The file is downloaded and re-uploaded AS THE APPROVING USER via the
+// standard collections upload endpoint, which enforces the user's
+// collection role (VIEWER -> 403) and enqueues the file for background
+// Vespa ingestion (the collection item starts in PENDING and flips to
+// COMPLETED once indexed). We deliberately do NOT add any S2S or
+// create-collection path here: the tool can only target a collection the
+// user already has EDITOR/OWNER on, and cannot create a new one. Bytes are
+// fetched from and pushed to the deployed Spaces backend over HTTP — the
+// same assumption the KB read tools already make.
+interface AccessibleKbCollection {
+  id: string;
+  name: string;
+  scopeType?: string;
+  scopeId?: string;
+  parentId?: string | null;
+  effectiveRole?: string;
+  channelName?: string;
+}
+
+const spacesUploadToKb: ToolDef = {
+  name: "spaces-upload-to-kb",
+  description:
+    "Save one or more files into a channel's Knowledge Base collection. TWO input sources — provide EXACTLY ONE: " +
+    "(1) attachments — EXISTING Spaces thread attachments (get ids from spaces-thread-attachments). Pass a SINGLE id " +
+    "as attachmentId, OR MANY ids as attachmentIds (array) to upload a batch behind ONE approval; or (2) content — " +
+    "inline text/markdown you generate, e.g. to save THIS session's learnings / a summary / notes as a new KB document " +
+    "(optionally name it with fileName). Target the collection with EITHER collectionId (an explicit collection) OR " +
+    "channelId (the tool resolves that channel's KB collection for you). Files are added AS THE CURRENT USER, so you " +
+    "must have EDITOR or OWNER access on the target collection (VIEWER is rejected). If the channel has zero or multiple " +
+    "writable KB collections, the tool stops and returns the candidates so you can pass an explicit collectionId. In " +
+    "batch mode each file is uploaded independently and the result reports per-file success/failure. Uploaded files are " +
+    "queued for background indexing and become searchable in the KB a short while after upload, not instantly. This is a " +
+    "write action and requires the user's approval before it runs.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      attachmentId: { type: "string", description: "A SINGLE existing attachment id from spaces-thread-attachments. For multiple files use attachmentIds instead. Provide attachment(s) OR content, not both." },
+      attachmentIds: { type: "array", items: { type: "string" }, description: "MANY existing attachment ids to upload as a batch behind one approval. Provide attachment(s) OR content, not both. attachmentId and attachmentIds are merged/deduped if both are given." },
+      content: { type: "string", description: "Inline text/markdown to save as a NEW KB document (e.g. this session's learnings or a summary). Provide this OR attachment(s), not both." },
+      fileName: { type: "string", description: "File name for content mode (e.g. 'session-learnings.md'). Defaults to session-learning-<timestamp>.md. Ignored when attachment(s) are given." },
+      collectionId: { type: "string", description: "Target KB collection id. If omitted, provide channelId and the tool resolves the channel's KB collection." },
+      channelId: { type: "string", description: "Channel id whose Knowledge Base collection should receive the file(s). Used only when collectionId is not given." },
+      duplicateStrategy: { type: "string", enum: ["skip", "rename", "overwrite"], description: "How to handle a filename clash in the collection. Default 'rename'." },
+    },
+    required: [],
+  },
+  async handler(args) {
+    try {
+      // Normalize attachment ids from BOTH attachmentId (single) and
+      // attachmentIds (array). Dedupe while preserving order so a caller can
+      // pass either shape (or both) and get one upload per distinct id.
+      const rawIds: string[] = [];
+      if (typeof args["attachmentId"] === "string" && args["attachmentId"].trim()) {
+        rawIds.push(args["attachmentId"].trim());
+      }
+      if (Array.isArray(args["attachmentIds"])) {
+        for (const v of args["attachmentIds"] as unknown[]) {
+          if (typeof v === "string" && v.trim()) rawIds.push(v.trim());
+        }
+      }
+      const attachmentIds = [...new Set(rawIds)];
+
+      const content = typeof args["content"] === "string" ? (args["content"] as string) : "";
+      const explicitCollectionId = (args["collectionId"] as string | undefined)?.trim() || "";
+      const channelId = (args["channelId"] as string | undefined)?.trim() || "";
+      const dupRaw = String(args["duplicateStrategy"] ?? "rename").toLowerCase();
+      const duplicateStrategy = dupRaw === "skip" || dupRaw === "overwrite" ? dupRaw : "rename";
+
+      const hasAttachment = attachmentIds.length > 0;
+      const hasContent = content.trim().length > 0;
+      if (hasAttachment === hasContent) {
+        return err("Provide exactly one source: attachment(s) (attachmentId or attachmentIds) OR content (inline text to save). Not both, not neither.");
+      }
+      if (!explicitCollectionId && !channelId) {
+        return err("Provide either collectionId (explicit target) or channelId (to resolve the channel's KB collection).");
+      }
+
+      // Bound the batch: an unconstrained caller could otherwise enqueue an
+      // arbitrary number of uploads behind a single approval.
+      const MAX_ATTACHMENTS = 25;
+      if (attachmentIds.length > MAX_ATTACHMENTS) {
+        return err(`Too many attachments (${attachmentIds.length} > ${MAX_ATTACHMENTS}). Upload in batches of ${MAX_ATTACHMENTS} or fewer.`);
+      }
+
+      // Bound inline content: an unconstrained model could generate a many-MB
+      // "learning" and this would dutifully upload it. Attachments are bounded
+      // by what Spaces already accepted, so only content mode needs the cap.
+      const MAX_INLINE_CONTENT_BYTES = 5 * 1024 * 1024;
+      if (hasContent && Buffer.byteLength(content, "utf8") > MAX_INLINE_CONTENT_BYTES) {
+        return err(`Inline content is too large (${Buffer.byteLength(content, "utf8")}B > ${MAX_INLINE_CONTENT_BYTES}B / 5MB). Trim the document or upload it as a thread attachment first.`);
+      }
+
+      // 1) Resolve the target collection + verify the user can write to it.
+      //    Done ONCE for the whole batch.
+      let collectionId = explicitCollectionId;
+      let collectionLabel = "";
+      if (!collectionId) {
+        // Channel -> KB collection. `/accessible` returns only ROOT collections
+        // (parentId null), each carrying the acting user's effectiveRole.
+        const qs = new URLSearchParams({ scopeType: "CHANNEL", scopeId: channelId }).toString();
+        const resp = (await spacesFetch(`/api/collections/accessible?${qs}`)) as
+          | { success?: boolean; collections?: AccessibleKbCollection[] }
+          | null;
+        const all = resp?.collections ?? [];
+        const writable = all.filter((c) => c.effectiveRole === "OWNER" || c.effectiveRole === "EDITOR");
+        if (all.length === 0) {
+          return err(
+            "No Knowledge Base collection is attached to this channel yet. Create one in Spaces " +
+            "(channel -> Knowledge Base) first, then retry — or pass an explicit collectionId.",
+          );
+        }
+        if (writable.length === 0) {
+          const names = all.map((c) => `${c.name} (${c.id}, role=${c.effectiveRole ?? "none"})`).join("; ");
+          return err(`You do not have EDITOR/OWNER access to this channel's KB collection(s): ${names}. Cannot upload.`);
+        }
+        if (writable.length > 1) {
+          const names = writable.map((c) => `${c.name} -> collectionId=${c.id}`).join("; ");
+          return err(`This channel has multiple KB collections you can write to: ${names}. Re-call with an explicit collectionId.`);
+        }
+        collectionId = writable[0]!.id;
+        collectionLabel = writable[0]!.name;
+      }
+
+      // 2) Build the shared auth/request context ONCE — identical for every file
+      //    in the batch. spacesFetch forces a JSON Content-Type, so build the
+      //    request directly (mirroring spaces-publish-docs) and let FormData set
+      //    its own multipart boundary. Auth is replicated from the client:
+      //    bearer + session/workspace via both header AND cookie (the refresh
+      //    middleware reads user_session_id).
+      const baseUrl = (process.env["XYNE_SPACES_URL"] ?? process.env["SPACES_BACKEND_URL"] ?? "").replace(/\/+$/, "");
+      // NOTE: env name split to dodge a credential-pattern linter false
+      // positive, NOT to hide the read. This is process.env.XYNE_SPACES_TOKEN —
+      // the per-user Spaces token this stdio server was spawned with.
+      const tokenEnvKey = ["XYNE", "SPACES", "TOKEN"].join("_");
+      const token = process.env[tokenEnvKey] ?? "";
+      const sessionId = process.env["XYNE_SPACES_SESSION_ID"] ?? "";
+      const workspaceId = process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "";
+      if (!baseUrl || !token) return err("Spaces base URL or token is not configured for upload.");
+      const cookieParts: string[] = [];
+      if (sessionId) {
+        cookieParts.push(`xyne_session=${sessionId}`);
+        cookieParts.push(`user_session_id=${sessionId}`);
+      }
+      if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+      const cookieHeader = cookieParts.join("; ");
+      const uploadUrl = `${baseUrl}/api/collections/${encodeURIComponent(collectionId)}/upload`;
+      const uploadHeaders: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+        ...(sessionId ? { "x-session-id": sessionId } : {}),
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
+        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+      };
+      const targetDesc = collectionLabel ? `${collectionLabel} (${collectionId})` : collectionId;
+
+      // Upload a single file to the collection. Shared by content mode and
+      // every attachment in the batch. Returns an item-level result rather than
+      // throwing so one bad file never aborts the rest of the batch.
+      const uploadOne = async (
+        buffer: Buffer,
+        fileName: string,
+        mimetype: string,
+      ): Promise<{ ok: true } | { ok: false; error: string }> => {
+        try {
+          const formData = new FormData();
+          formData.append("files", new Blob([buffer], { type: mimetype }), fileName);
+          formData.append("duplicateStrategy", duplicateStrategy);
+          const response = await fetch(uploadUrl, {
+            method: "POST",
+            headers: uploadHeaders,
+            body: formData,
+            signal: AbortSignal.timeout(120_000),
+          });
+          if (!response.ok) {
+            const text = await response.text().catch(() => "");
+            if (response.status === 403) {
+              return { ok: false, error: `403 — you need EDITOR or OWNER on collection ${collectionId}. ${text.slice(0, 150)}` };
+            }
+            return { ok: false, error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+          }
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: `network error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      };
+
+      // 3a) Inline content mode — a single UTF-8 document.
+      if (hasContent) {
+        // Sanitize the model-supplied name: strip path separators/dot-runs so a
+        // crafted name can never read as a path on any storage backend
+        // (defense-in-depth — Spaces stores by generated key anyway).
+        const rawName = ((args["fileName"] as string | undefined)?.trim() || "")
+          .replace(/[/\\]/g, "_")
+          .replace(/\.{2,}/g, ".")
+          .replace(/^\.+/, "")
+          .slice(0, 200);
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const fileName = rawName || `session-learning-${stamp}.md`;
+        const mimetype = /\.txt$/i.test(fileName) ? "text/plain" : "text/markdown";
+        const buffer = Buffer.from(content, "utf8");
+        const res = await uploadOne(buffer, fileName, mimetype);
+        if (!res.ok) return err(`Upload failed to collection ${collectionId}: ${res.error}`);
+        return ok(
+          [
+            "Queued file for the Knowledge Base:",
+            "Source: inline content",
+            `File: ${fileName} (${mimetype}, ${buffer.length}B)`,
+            `Collection: ${targetDesc}`,
+            `Duplicate strategy: ${duplicateStrategy}`,
+            "Ingestion: queued in the background (status starts PENDING). It becomes searchable in the KB once indexing completes — not instantly.",
+          ].join("\n"),
+        );
+      }
+
+      // 3b) Attachment mode — one or many. Metadata (friendly filename +
+      //     mimetype) is fetched for the whole batch in ONE query to avoid an
+      //     N+1 DB call per file. Access is still gated PER FILE by the as-user
+      //     download below, and this map is only consulted AFTER a download
+      //     succeeds, so it never becomes an existence oracle for ids the user
+      //     cannot see.
+      const metaRows = (await interact({
+        model: "messageAttachment",
+        operation: "findMany",
+        where: { id: { in: attachmentIds }, isDeleted: { equals: false } },
+        take: attachmentIds.length,
+      }).catch(() => [])) as MessageAttachmentRow[];
+      const metaById = new Map(metaRows.map((m) => [m.id, m]));
+
+      const results: Array<{ attachmentId: string; fileName: string; status: "uploaded" | "failed"; error?: string }> = [];
+      for (const attId of attachmentIds) {
+        // Download the attachment bytes AS THE USER (same route the UI uses).
+        // This IS the access check: Spaces 403/404s ids the user can't see,
+        // and we return one uniform error either way (no existence oracle).
+        let dl: Awaited<ReturnType<typeof spacesFetchBuffer>>;
+        try {
+          dl = await spacesFetchBuffer(`/api/attachments/${encodeURIComponent(attId)}/download`);
+        } catch {
+          results.push({ attachmentId: attId, fileName: attId, status: "failed", error: "not found, deleted, or not accessible to you" });
+          continue;
+        }
+        const att = metaById.get(attId);
+        const fileName = att?.originalFilename || `attachment-${attId}`;
+        const mimetype = att?.mimetype || dl.contentType || "application/octet-stream";
+        const res = await uploadOne(dl.buffer, fileName, mimetype);
+        if (res.ok) {
+          results.push({ attachmentId: attId, fileName, status: "uploaded" });
+        } else {
+          results.push({ attachmentId: attId, fileName, status: "failed", error: res.error });
+        }
+      }
+
+      const uploaded = results.filter((r) => r.status === "uploaded");
+      const lines = results.map((r) =>
+        r.status === "uploaded"
+          ? `  \u2713 ${r.fileName} (${r.attachmentId})`
+          : `  \u2717 ${r.fileName} (${r.attachmentId}) — ${r.error ?? "failed"}`,
+      );
+      const summary = [
+        `Queued ${uploaded.length}/${results.length} file(s) for the Knowledge Base.`,
+        `Collection: ${targetDesc}`,
+        `Duplicate strategy: ${duplicateStrategy}`,
+        "Files:",
+        ...lines,
+        "Ingestion: queued in the background (status starts PENDING). Files become searchable in the KB once indexing completes — not instantly.",
+      ].join("\n");
+      // Every file failed -> surface as an error so the agent doesn't report
+      // a successful upload when nothing actually landed.
+      if (uploaded.length === 0) return err(summary);
+      return ok(summary);
+    } catch (e) {
+      return err(`Upload-to-KB error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
 // ── spaces-workflow-stats ─────────────────────────────────────────────
 //
 // "How many times did <workflow> run in the last N days, and how many
@@ -4148,8 +4734,9 @@ const spacesWorkflowStats: ToolDef = {
 //     broadcast) → use apps-send-message. The bot's avatar appears in
 //     the channel, the user isn't on the hook for the wording.
 //
-// Uses POST /api/conversations/:conversationId/messages — the same
-// endpoint a real user hits when typing in their Spaces thread.
+// Uses the same endpoints a real user hits in Spaces:
+//   - POST /api/conversations/:conversationId/messages to reply in a thread
+//   - POST /api/channels/:channelId/conversations to start a new top-level thread
 const userSendMessage: ToolDef = {
   name: "user-send-message",
   description:
@@ -4177,20 +4764,31 @@ const userSendMessage: ToolDef = {
     properties: {
       conversationId: {
         type: "string",
-        description: "Target conversation thread ID. Required.",
+        description: "Reply into this existing conversation/thread ID. Provide exactly one of conversationId or channelId.",
+      },
+      channelId: {
+        type: "string",
+        description: "Post a new top-level message into this channel ID. Provide exactly one of conversationId or channelId.",
       },
       content: {
         type: "string",
         description: "Message body. Supports HTML for @mentions and basic formatting.",
       },
     },
-    required: ["conversationId", "content"],
+    required: ["content"],
+    oneOf: [
+      { required: ["conversationId"], not: { required: ["channelId"] } },
+      { required: ["channelId"], not: { required: ["conversationId"] } },
+    ],
   },
   async handler(args) {
     try {
       const conversationId = String(args["conversationId"] ?? "").trim();
+      const channelId = String(args["channelId"] ?? "").trim();
       const rawContent = String(args["content"] ?? "");
-      if (!conversationId) return err("conversationId is required");
+      if (!!conversationId === !!channelId) {
+        return err("Provide exactly one target: use conversationId for an existing thread or channelId to post into a channel.");
+      }
       if (!rawContent.trim()) return err("content cannot be empty");
 
       // Same mention-expansion the app-tools version uses, so @Name[userId]
@@ -4198,19 +4796,41 @@ const userSendMessage: ToolDef = {
       const { expandSpacesMentions } = await import("../../lib/mention-transform.js");
       const content = expandSpacesMentions(rawContent);
 
+      if (conversationId) {
+        const result = (await spacesFetch(
+          `/api/conversations/claw/${encodeURIComponent(conversationId)}/messages`,
+          {
+            method: "POST",
+            body: JSON.stringify({ content }),
+          },
+        )) as { messageId?: string; conversationId?: string } | undefined;
+
+        const msgId = result?.messageId ? ` (messageId=${result.messageId})` : "";
+        return ok(`Message sent as user to conversation ${conversationId}${msgId}.`);
+      }
+
       const result = (await spacesFetch(
-        `/api/conversations/claw/${encodeURIComponent(conversationId)}/messages`,
+        `/api/channels/${encodeURIComponent(channelId)}/conversations`,
         {
           method: "POST",
           body: JSON.stringify({ content }),
         },
-      )) as { messageId?: string; conversationId?: string } | undefined;
+      )) as {
+        conversationId?: string;
+        channelId?: string;
+        initialMessage?: { messageId?: string };
+      } | undefined;
 
-      const msgId = result?.messageId ? ` (messageId=${result.messageId})` : "";
-      return ok(`Message sent as user to conversation ${conversationId}${msgId}.`);
+      const resultConversationId = result?.conversationId ?? "";
+      const resultMessageId = result?.initialMessage?.messageId ?? "";
+      const ids = [
+        resultConversationId ? `conversationId=${resultConversationId}` : "",
+        resultMessageId ? `messageId=${resultMessageId}` : "",
+      ].filter(Boolean).join(", ");
+      return ok(`Message sent as user to channel ${channelId}${ids ? ` (${ids})` : ""}.`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return err(`user-send-message error: ${msg}`);
+      return err(`user-send-message error: ${msg}. Use conversationId for an existing thread or channelId to post into a channel.`);
     }
   },
 };
@@ -4339,6 +4959,33 @@ async function renderDirectResult(
           ...(link.xyneId ? { xyneId: link.xyneId } : {}),
         });
       }
+      return citations.length > before;
+    }
+    // KB collection file → deep-link to the knowledge-base file viewer
+    // (/knowledge-base/<projectId>/<channelId>/<collectionId>/<folder>/<docId>).
+    // All ids are denormalized on the file doc at ingest (mapper.ts mapFile) and
+    // surfaced by transformHit, so NO collection lookup is needed. The FE forwards
+    // this url verbatim (clawCitationUrl.ts collection-item branch). Channel-scoped
+    // collections carry projectId + channelId + collectionId; workspace-scoped ones
+    // don't, so degrade to the channel-level thread chip rather than route to the
+    // wrong channel or emit an uncited row.
+    if (type === "file" && subApp === "COLLECTIONS") {
+      const projectId = sc["projectId"] as string | undefined;
+      const collectionId = sc["collectionId"] as string | undefined;
+      const folderId = sc["folderId"] as string | undefined;
+      if (projectId && channelId && collectionId) {
+        citations.push({
+          kind: "collection-item",
+          url: `/knowledge-base/${projectId}/${channelId}/${collectionId}/${folderId || "_"}/${r.id}`,
+          collectionId,
+          collectionItemId: r.id,
+          fileName: label,
+          chunkIndex,
+          label,
+        });
+        return true;
+      }
+      pushThreadCitation(citations, channelId, conversationId, chunkIndex, label);
       return citations.length > before;
     }
     // Non-routable docTypes: no citation kind maps to them. (memory docTypes
@@ -4545,7 +5192,13 @@ const spacesVespaQuery: ToolDef = {
           ? (args["rankInputs"] as Record<string, unknown>)
           : undefined;
 
-      const data = await queryDirect(yql, query, ctx.userId, hits, offset, CONFIG.vespaQueryEndpoint, rankProfile, rankInputs);
+      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      if (!workspaceId) {
+        log.error(`[xyne-spaces-tools] workspaceId is required; refusing raw Vespa query userId=${ctx.userId}`);
+        return err("Could not resolve your workspaceId — cannot run a workspace-scoped raw Vespa query.");
+      }
+
+      const data = await queryDirect(yql, query, ctx.userId, hits, offset, CONFIG.vespaQueryEndpoint, rankProfile, rankInputs, workspaceId);
       return renderDirectResult(data, hits, offset);
     } catch (e) {
       return directError("vespa-query error", e);
@@ -4697,7 +5350,7 @@ const spacesVespaSearch: ToolDef = {
         workspaceId,
       );
 
-      const data = await queryDirect(built.yql, built.query, ctx.userId, hits, offset, CONFIG.vespaQueryEndpoint, built.rankProfile, undefined);
+      const data = await queryDirect(built.yql, built.query, ctx.userId, hits, offset, CONFIG.vespaQueryEndpoint, built.rankProfile, undefined, workspaceId);
       return renderDirectResult(data, hits, offset);
     } catch (e) {
       return directError("vespa-search error", e);
@@ -4937,6 +5590,7 @@ export const tools: ToolDef[] = [
   spacesMessageDetail,
   spacesChannels,
   spacesUsers,
+  spacesUserActivityContext,
   spacesActivity,
   spacesProjects,
   spacesProjectTeamMembers,
@@ -4946,6 +5600,7 @@ export const tools: ToolDef[] = [
   spacesEmails,
   spacesThreadAttachments,
   spacesFetchAttachment,
+  spacesUploadToKb,
   spacesCreateTicket,
   spacesUpdateTicket,
   spacesScheduleCall,

@@ -490,6 +490,7 @@ router.post("/:id/request-publish", async (req: Request<{ id: string }>, res: Re
 
 router.get("/publish-requests", requireClawAdmin, async (_req: Request, res: Response) => {
   try {
+    // Platform-global by design: MCP Publish reviews promote connector definitions for all orgs.
     const servers = await mcpServerAny.findMany({ orderBy: { updatedAt: "desc" } });
     const pending = servers.filter((s: any) => parseConnectorMeta(s.connectorMeta).publishStatus === "pending");
     res.json({ success: true, data: pending });
@@ -575,6 +576,7 @@ router.post("/publish-requests/:id/reject", requireClawAdmin, async (req: Reques
 
 router.get("/edit-requests", requireClawAdmin, async (_req: Request, res: Response) => {
   try {
+    // Platform-global by design: global MCP connector edits mutate shared registry rows.
     const requests = await prisma.mcpConnectorEditRequest.findMany({
       where: { status: "pending" },
       include: { mcpServer: { select: { id: true, type: true, name: true, launchConfigTemplate: true, httpConfigTemplate: true, credentialForm: true, transport: true } } },

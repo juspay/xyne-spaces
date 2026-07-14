@@ -8,7 +8,7 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { MemoryTab } from "../v2/components/MemoryTab";
 import { AgentMcpTab } from "./AgentMcpTab";
 import { KnowledgeBasePicker } from "../v3/components/KnowledgeBasePicker";
-import type { Agent, AgentSkill, ScheduledJob, ScheduledJobRun } from "../lib/types";
+import type { Agent, AgentLight, AgentSkill, ScheduledJob, ScheduledJobRun } from "../lib/types";
 
 interface Props {
   userId: string;
@@ -62,7 +62,7 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
   const [activeTab, setActiveTab] = useState<"configure" | "jobs" | "runs" | "chain" | "share" | "memory" | "mcp" | "provider">("configure");
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [allAgents, setAllAgents] = useState<Agent[]>([]);
+  const [allAgents, setAllAgents] = useState<AgentLight[]>([]);
   const [myShare, setMyShare] = useState<{ role: string } | null>(null);
 
   const loadData = useCallback(async () => {
@@ -1528,7 +1528,7 @@ const WELL_KNOWN_TOOLS = [
 interface ChainEditorProps {
   agent: Agent;
   userId: string;
-  allAgents: Agent[];
+  allAgents: AgentLight[];
   onSave: (chainConfig: Record<string, unknown> | null) => Promise<void>;
   loadConfig: () => Promise<Record<string, unknown> | null>;
 }

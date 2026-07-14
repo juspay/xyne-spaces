@@ -11,6 +11,7 @@ export interface SessionTokenPayload {
   sid: string;
   uid: string;
   aslug?: string;
+  appid?: string;
   iat: number;
   exp: number;
 }
@@ -31,7 +32,7 @@ function sign(payloadB64: string): string {
 }
 
 export function mintSessionToken(
-  args: { sessionId: string; userId: string; agentSlug?: string; ttlSeconds: number },
+  args: { sessionId: string; userId: string; agentSlug?: string; spacesAppId?: string; ttlSeconds: number },
 ): string {
   const now = Math.floor(Date.now() / 1000);
   const payload: SessionTokenPayload = {
@@ -39,6 +40,7 @@ export function mintSessionToken(
     sid: args.sessionId,
     uid: args.userId,
     ...(args.agentSlug ? { aslug: args.agentSlug } : {}),
+    ...(args.spacesAppId ? { appid: args.spacesAppId } : {}),
     iat: now,
     exp: now + Math.max(60, Math.floor(args.ttlSeconds)),
   };

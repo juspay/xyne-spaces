@@ -1,5 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("skill-repository");
 
 /**
  * Normalize and validate a path destined for `SkillFile.relativePath`.
@@ -42,16 +45,20 @@ export const skillRepository = {
    * skills, including private ones owned by other users — necessary for
    * operators auditing skill libraries workspace-wide.
    */
-  listVisible: (opts: { userId?: string; isAdmin?: boolean } = {}) =>
-    prisma.skill.findMany({
-      where: opts.isAdmin
-        ? {}
-        : opts.userId
-          ? { OR: [{ scope: "global" }, { ownerUserId: opts.userId }] }
-          : { scope: "global" },
+  listVisible: (opts: { userId?: string; isAdmin?: boolean; orgId?: string } = {}) => {
+    const base: Prisma.SkillWhereInput = opts.isAdmin
+      ? {}
+      : opts.userId
+        ? { OR: [{ scope: "global" }, { ownerUserId: opts.userId }] }
+        : { scope: "global" };
+    // Phase-2: AND the caller's org when provided (see agentRepository.listVisible).
+    const where: Prisma.SkillWhereInput = opts.orgId ? { AND: [{ orgId: opts.orgId }, base] } : base;
+    return prisma.skill.findMany({
+      where,
       orderBy: { name: "asc" },
       include: { owner: OWNER_SELECT },
-    }),
+    });
+  },
 
   findAll: (source?: string) =>
     prisma.skill.findMany({
@@ -59,8 +66,16 @@ export const skillRepository = {
       orderBy: { name: "asc" },
     }),
 
-  findBySlug: (slug: string) =>
-    prisma.skill.findUnique({ where: { slug }, include: { owner: OWNER_SELECT } }),
+  findBySlug: (slug: string, orgId?: string | null) => {
+    if (!orgId) {
+      log.error("[skillRepository.findBySlug] missing orgId; refusing global slug lookup", { slug });
+      return Promise.resolve(null);
+    }
+    return prisma.skill.findUnique({
+      where: { orgId_slug: { orgId, slug } },
+      include: { owner: OWNER_SELECT },
+    });
+  },
 
   findById: (id: string) =>
     prisma.skill.findUnique({ where: { id } }),
@@ -71,14 +86,14 @@ export const skillRepository = {
   create: (data: Prisma.SkillCreateInput) =>
     prisma.skill.create({ data }),
 
-  update: (slug: string, data: Prisma.SkillUpdateInput) =>
-    prisma.skill.update({ where: { slug }, data }),
+  update: (slug: string, orgId: string, data: Prisma.SkillUpdateInput) =>
+    prisma.skill.update({ where: { orgId_slug: { orgId, slug } }, data }),
 
-  delete: (slug: string) =>
-    prisma.skill.delete({ where: { slug } }),
+  delete: (slug: string, orgId: string) =>
+    prisma.skill.delete({ where: { orgId_slug: { orgId, slug } } }),
 
-  upsertBySlug: (slug: string, create: Prisma.SkillCreateInput, update: Prisma.SkillUpdateInput) =>
-    prisma.skill.upsert({ where: { slug }, create, update }),
+  upsertBySlug: (slug: string, orgId: string, create: Prisma.SkillCreateInput, update: Prisma.SkillUpdateInput) =>
+    prisma.skill.upsert({ where: { orgId_slug: { orgId, slug } }, create, update }),
 
   // ── File-bundle helpers (SkillFile rows) ────────────────────────────
 

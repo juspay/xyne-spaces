@@ -3,7 +3,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { evalRepository, userProviderCredentialsRepository } from "../../repositories/index.js";
-import { getRequesterId } from "../../middleware/agent-acl.js";
+import { getRequesterId, getOrgId } from "../../middleware/agent-acl.js";
 import { listEvalModels } from "../../services/evalJudgeClient.js";
 import { enqueueEvalJudge, getEvalJudgeStatus, cancelEvalJudge } from "../../queue/eval-judge-queue.js";
 
@@ -152,6 +152,55 @@ router.post("/generations/:id/judge", async (req: Request<{ id: string }>, res: 
     res.json({ success: true, jobId });
   } catch (err) {
     log.error("[evals] judge enqueue error:", err);
+    res.status(500).json({ success: false, error: "Failed to start scoring" });
+  }
+});
+
+// POST /evals/comparisons/:comparisonId/judge — score every agent's run in a
+// multi-agent comparison in one call (same judges/model across all agents, so
+// they are graded apples-to-apples). Returns one judge job per sibling run.
+router.post("/comparisons/:comparisonId/judge", async (req: Request<{ comparisonId: string }>, res: Response) => {
+  const { judges, conversationIds, onlyUnscored } = req.body as {
+    judges?: Array<{ judgeId?: string; model?: string }>;
+    conversationIds?: string[];
+    onlyUnscored?: boolean;
+  };
+  try {
+    const runs = await evalRepository.listRunsByComparisonId(req.params.comparisonId);
+    // Cross-org guard: only score a comparison that belongs to the caller's org.
+    const orgId = getOrgId(req);
+    if (runs.length === 0 || runs.some((r) => r.orgId !== orgId)) {
+      res.status(404).json({ success: false, error: "Comparison not found" });
+      return;
+    }
+    // Resolve judge specs: the explicit selection, else the built-in Default.
+    let specs: Array<{ judgeId: string; model?: string }> = Array.isArray(judges)
+      ? judges
+          .filter((j) => j && typeof j.judgeId === "string" && j.judgeId)
+          .map((j) => ({ judgeId: j.judgeId as string, ...(j.model && typeof j.model === "string" && j.model.trim() ? { model: j.model.trim() } : {}) }))
+      : [];
+    if (specs.length === 0) {
+      specs = (await evalRepository.listJudges()).filter((j) => j.isDefault).map((j) => ({ judgeId: j.id }));
+    }
+    if (specs.length === 0) {
+      res.status(400).json({ success: false, error: "No judges selected" });
+      return;
+    }
+    const userId = getRequesterId(req);
+    const jobs: Array<{ runId: string; agentSlug: string; jobId: string }> = [];
+    for (const run of runs) {
+      const jobId = await enqueueEvalJudge({
+        runId: run.id,
+        judges: specs,
+        ...(Array.isArray(conversationIds) ? { conversationIds } : {}),
+        ...(onlyUnscored ? { onlyUnscored: true } : {}),
+        ...(userId ? { userId } : {}),
+      });
+      jobs.push({ runId: run.id, agentSlug: run.agentSlug, jobId });
+    }
+    res.json({ success: true, jobs });
+  } catch (err) {
+    log.error("[evals] comparison judge enqueue error:", err);
     res.status(500).json({ success: false, error: "Failed to start scoring" });
   }
 });

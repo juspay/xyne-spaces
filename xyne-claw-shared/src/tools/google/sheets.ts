@@ -33,20 +33,6 @@ function validateSheetValues(values: string[][]): void {
   }
 }
 
-/** Create a new Google Spreadsheet. */
-export async function createSpreadsheet(token: string, title: string): Promise<string> {
-  if (!title.trim()) throw new Error("Spreadsheet title cannot be empty");
-  const created = (await googleFetch(BASE, token, {
-    method: "POST",
-    body: JSON.stringify({ properties: { title } }),
-  })) as SpreadsheetResponse;
-  return [
-    `Spreadsheet created: ${title}`,
-    `Spreadsheet ID: ${created.spreadsheetId}`,
-    `URL: ${created.spreadsheetUrl ?? `https://docs.google.com/spreadsheets/d/${created.spreadsheetId}/edit`}`,
-  ].join("\n");
-}
-
 /** Create a new Google Spreadsheet and optionally write initial rows. */
 export async function createSpreadsheetWithValues(
   token: string,

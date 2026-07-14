@@ -3,7 +3,8 @@
  * webhook call.
  *
  * Flow:
- *   1. Look up the agent by `req.params.agentSlug`.
+ *   1. Look up the agent by `req.params.spacesAppId` on /webhook/app/:spacesAppId,
+ *      otherwise by `req.params.agentSlug`.
  *   2. Decrypt `agents.signingSecret` (GCM 3-tuple).
  *   3. Compute HMAC-SHA256 over the RAW request body.
  *   4. Timing-safe compare against `X-Xyne-Signature` header (hex).
@@ -49,8 +50,8 @@ function parseGcmBundle(blob: string): [string, string, string] | null {
   return [ciphertext, iv, authTag];
 }
 
-function tag(slug: string, reason: string): string {
-  return `[verify-spaces-sig] slug=${slug} reason=${reason}`;
+function tag(key: string, reason: string): string {
+  return `[verify-spaces-sig] ${key} reason=${reason}`;
 }
 
 /**
@@ -85,16 +86,32 @@ export async function verifySpacesSignature(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  const slug = (req.params as { agentSlug?: string }).agentSlug ?? "(none)";
+  const params = req.params as { agentSlug?: string; spacesAppId?: string };
+  const spacesAppId = params.spacesAppId;
+  const slug = params.agentSlug;
+  const lookupTag = spacesAppId ? `spacesAppId=${spacesAppId}` : `slug=${slug ?? "(none)"}`;
 
   // 1. Resolve the agent + its stored secret.
-  const agent = slug !== "(none)"
-    ? await prisma.agent.findFirst({ where: { slug }, select: { id: true, signingSecret: true } })
-    : null;
+  let agent: { id: string; signingSecret: string | null } | null = null;
+  if (spacesAppId) {
+    agent = await prisma.agent.findFirst({ where: { spacesAppId }, select: { id: true, signingSecret: true } });
+  } else if (slug) {
+    const matches = await prisma.agent.findMany({
+      where: { slug },
+      select: { id: true, signingSecret: true, orgId: true },
+      take: 2,
+    });
+    if (matches.length > 1) {
+      log.error(tag(lookupTag, "ambiguous_legacy_slug") + ` — matched multiple orgs; rejecting legacy route`);
+      res.status(404).json({ success: false, error: "agent not found" });
+      return;
+    }
+    agent = matches[0] ?? null;
+  }
 
   if (!agent?.signingSecret) {
     if (!ENFORCE) {
-      log.warn(tag(slug, "no_stored_secret") + " — warn-only, passing through");
+      log.warn(tag(lookupTag, "no_stored_secret") + " — warn-only, passing through");
       return next();
     }
     res.status(401).json({ success: false, error: "missing signing secret" });
@@ -104,7 +121,7 @@ export async function verifySpacesSignature(
   // 2. Decrypt with claw-auth's GCM scheme.
   const parts = parseGcmBundle(agent.signingSecret);
   if (!parts) {
-    log.warn(tag(slug, "malformed_secret_blob") + " — treating as no secret");
+    log.warn(tag(lookupTag, "malformed_secret_blob") + " — treating as no secret");
     if (!ENFORCE) return next();
     res.status(401).json({ success: false, error: "malformed signing secret" });
     return;
@@ -113,7 +130,7 @@ export async function verifySpacesSignature(
   try {
     plaintextSecret = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
   } catch (err) {
-    log.warn(tag(slug, "decrypt_failed") + ` — ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(tag(lookupTag, "decrypt_failed") + ` — ${err instanceof Error ? err.message : String(err)}`);
     if (!ENFORCE) return next();
     res.status(401).json({ success: false, error: "secret decrypt failed" });
     return;
@@ -126,7 +143,7 @@ export async function verifySpacesSignature(
   // 4. Compare with the header.
   const received = req.headers["x-xyne-signature"];
   if (typeof received !== "string" || received.length === 0) {
-    log.warn(tag(slug, "no_signature_header") + " — caller did not sign request");
+    log.warn(tag(lookupTag, "no_signature_header") + " — caller did not sign request");
     if (!ENFORCE) return next();
     res.status(401).json({ success: false, error: "missing X-Xyne-Signature" });
     return;
@@ -137,7 +154,7 @@ export async function verifySpacesSignature(
   const matches = recBuf.length === expBuf.length && timingSafeEqual(recBuf, expBuf);
 
   if (!matches) {
-    log.warn(tag(slug, "mismatch") + ` — bodyBytes=${rawBody.length} headerLen=${received.length} ${diagnoseMismatch(rawBody, plaintextSecret, received)}`);
+    log.warn(tag(lookupTag, "mismatch") + ` — bodyBytes=${rawBody.length} headerLen=${received.length} ${diagnoseMismatch(rawBody, plaintextSecret, received)}`);
     if (!ENFORCE) return next();
     res.status(401).json({ success: false, error: "invalid signature" });
     return;

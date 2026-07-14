@@ -7,7 +7,7 @@ import {
   CaretRightIcon,
   CpuIcon,
 } from "@phosphor-icons/react";
-import type { Agent } from "../../lib/types";
+import type { AgentLight } from "../../lib/types";
 import { useSnackbar } from "./ui/Snackbar";
 import { PageListHeader } from "./ui/PageListHeader";
 import { PageLayout } from "./ui/PageLayout";
@@ -62,7 +62,7 @@ function scopeToLabel(scope: string): ScopeTabLabel {
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-function ownerLabel(agent: Agent): string {
+function ownerLabel(agent: AgentLight): string {
   // Prefer the real owner (matches the slide-over's Owner row). Only fall
   // back to "Spaces App" / "Xyne" when the agent genuinely has no owner.
   if (agent.owner?.name) return agent.owner.name;
@@ -108,7 +108,7 @@ type ScopeBadgeResult =
   | { type: "brand"; label: string }
   | { type: "badge"; label: string; variant: "info" | "neutral" };
 
-function getScopeBadgeProps(agent: Agent, userId: string): ScopeBadgeResult {
+function getScopeBadgeProps(agent: AgentLight, userId: string): ScopeBadgeResult {
   const userShare = agent.shares?.find((s) => s.userId === userId);
   if (userShare) {
     return { type: "brand", label: userShare.role };
@@ -236,7 +236,7 @@ function ProviderPopup({
 // ── AgentRow ───────────────────────────────────────────────────────────
 
 interface AgentRowProps {
-  agent: Agent;
+  agent: AgentLight;
   userId: string;
   category: AgentCategoryId;
   searchQuery: string;
@@ -687,8 +687,8 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
   );
 
   const { myAgents, otherAgents } = useMemo(() => {
-    const mine: Agent[] = [];
-    const other: Agent[] = [];
+    const mine: AgentLight[] = [];
+    const other: AgentLight[] = [];
     for (const a of displayedAgents) {
       if (a.ownerUserId === userId) mine.push(a);
       else other.push(a);
@@ -696,7 +696,7 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
     return { myAgents: mine, otherAgents: other };
   }, [displayedAgents, userId]);
 
-  const renderAgents = (items: Agent[]) => (
+  const renderAgents = (items: AgentLight[]) => (
     <div data-id="agents-row-list" className="flex flex-col gap-2">
       {items.map((agent) => (
         <AgentRow

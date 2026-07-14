@@ -702,12 +702,10 @@ function UploadMdModal({
 }
 
 interface BackfillResult {
-  daysProcessed: number;
-  daysWithTranscripts: number;
-  batchesCreated: number;
-  sessionsIncluded: number;
-  sessionsSkipped: number;
-  skippedDays: string[];
+  // Backfill now runs as a background job (202 queued); the walk+curate happens
+  // async in the worker, so the response is just the job handle + range.
+  jobId: string;
+  status: string;
   from: string;
   to: string;
 }
@@ -875,21 +873,13 @@ function BackfillModal({
         {result && (
           <div className="mt-3 space-y-3 text-[12px] text-xyne-fg-secondary">
             <div className="rounded-lg border border-xyne-success-fg/30 bg-xyne-success-bg p-3 text-xyne-success-fg font-medium">
-              ✅ Backfill complete · {result.from} → {result.to}
+              ✅ Backfill started in the background · {result.from} → {result.to}
             </div>
-            <ul className="space-y-1 leading-relaxed">
-              <li>Days processed: <strong className="font-semibold text-xyne-fg-primary">{result.daysProcessed}</strong></li>
-              <li>Days with transcripts: <strong className="font-semibold text-xyne-fg-primary">{result.daysWithTranscripts}</strong></li>
-              <li>Batches created: <strong className="font-semibold text-xyne-fg-primary">{result.batchesCreated}</strong></li>
-              <li>Sessions included for review: <strong className="font-semibold text-xyne-fg-primary">{result.sessionsIncluded}</strong></li>
-              <li>Sessions skipped by heuristic: <strong className="font-semibold text-xyne-fg-primary">{result.sessionsSkipped}</strong></li>
-              {result.skippedDays.length > 0 && (
-                <li className="text-xyne-fg-tertiary">
-                  No transcripts for: {result.skippedDays.slice(0, 5).join(", ")}
-                  {result.skippedDays.length > 5 ? ` (+${result.skippedDays.length - 5} more)` : ""}
-                </li>
-              )}
-            </ul>
+            <p className="leading-relaxed text-xyne-fg-tertiary">
+              This runs asynchronously — it walks the transcripts and curates each
+              session, which can take a while. Batches will show up in the Pending
+              Review tab as they’re created; refresh it to watch the counts.
+            </p>
             <div className="pt-1 flex justify-end">
               <button
                 onClick={onDone}

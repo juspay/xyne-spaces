@@ -76,6 +76,14 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
     res.status(404).json({ success: false, error: `no agent with slug=${slug}` });
     return;
   }
+  const duplicateAgent = await prisma.agent.findFirst({
+    where: { slug, id: { not: agent.id } },
+    select: { id: true },
+  });
+  if (duplicateAgent) {
+    res.status(409).json({ success: false, error: `ambiguous agent slug=${slug}` });
+    return;
+  }
 
   // Stored secret (claw-auth GCM, format `ct:iv:tag` base64).
   let stored: { ok: boolean; fp?: string; len?: number; error?: string };

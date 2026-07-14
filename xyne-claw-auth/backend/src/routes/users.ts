@@ -4,6 +4,9 @@ import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { syncToolsForServer } from "../tool-sync.js";
+import { getDefaultOrgId, ensureOrgMembership, ensureUserExists } from "../lib/users-jit.js";
+import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("users");
@@ -26,18 +29,29 @@ router.get("/", async (req: Request, res: Response) => {
   try {
     const qRaw = req.query["q"];
     const q = typeof qRaw === "string" ? qRaw.trim() : "";
+    const requesterId = getRequesterId(req);
+    const orgId = getOrgId(req)
+      ?? (requesterId
+        ? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId
+        : undefined);
+    if (!orgId) {
+      log.error(`[users] orgId is required; refusing global user typeahead requesterId=${requesterId ?? "none"} q=${q || "none"}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
 
     const users = await prisma.user.findMany({
-      ...(q
-        ? {
-            where: {
+      where: {
+        orgId,
+        ...(q
+          ? {
               OR: [
                 { email: { contains: q, mode: "insensitive" as const } },
                 { name: { contains: q, mode: "insensitive" as const } },
               ],
-            },
-          }
-        : {}),
+            }
+          : {}),
+      },
       select: { id: true, email: true, name: true },
       orderBy: { name: "asc" },
       take: 20,
@@ -80,11 +94,37 @@ router.post("/", async (req: Request, res: Response) => {
       return;
     }
 
-    const user = await prisma.user.upsert({
-      where: { id: id.trim() },
-      create: { id: id.trim(), email: email.trim(), name: name.trim() },
-      update: { email: email.trim(), name: name.trim() },
-    });
+    // Org placement (§13): prefer the mapping-aware JIT path so a second-tenant
+    // user lands in the RIGHT org (via SurfaceTenantLink), not the default. It
+    // creates the row (with the mapped org + membership) if new, then we sync the
+    // client-supplied email/name. If JIT can't resolve the Spaces profile
+    // (transient DB miss / user not in Spaces), fall back to creating from the
+    // request body in the default org — preserves this endpoint's resilience.
+    let user;
+    const jitOk = await ensureUserExists(id.trim(), "require-auth");
+    if (jitOk) {
+      user = await prisma.user.update({
+        where: { id: id.trim() },
+        data: { email: email.trim(), name: name.trim() },
+      });
+      // Gap 8: re-assert OrgMembership for a pre-existing user (ensureUserExists
+      // short-circuits without touching it when the row already exists). Idempotent.
+      await ensureOrgMembership(user.id, user.orgId);
+    } else {
+      // orgId is NOT NULL — a new user row must carry it at insert time.
+      const orgId = await getDefaultOrgId();
+      if (!orgId) {
+        log.error(`[users] default org not provisioned — cannot create user ${id.trim()}. Run backfill-default-org.ts.`);
+        res.status(503).json({ success: false, error: "Default organization not provisioned" });
+        return;
+      }
+      user = await prisma.user.upsert({
+        where: { id: id.trim() },
+        create: { id: id.trim(), email: email.trim(), name: name.trim(), orgId },
+        update: { email: email.trim(), name: name.trim() },
+      });
+      await ensureOrgMembership(user.id, orgId);
+    }
 
     // Auto-configure xyne-spaces MCP connection if token provided
     if (spacesToken && typeof spacesToken === "string") {
@@ -117,7 +157,15 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
   }
 
   const spacesUrl = CONFIG.spacesInternalUrl;
-  const credentials = { url: spacesUrl, token };
+  const workspaceId = await getWorkspaceIdForUser(userId, "require-auth").catch(() => null);
+  const credentials = {
+    url: spacesUrl,
+    token,
+    ...(workspaceId ? { workspaceId } : {}),
+  };
+  if (workspaceId) {
+    log.info(`[users] Auto-configured xyne-spaces workspaceId=${workspaceId} for user ${userId}`);
+  }
   const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
 
   await prisma.userMcpConnection.upsert({
@@ -161,8 +209,14 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
       });
     }
 
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+    if (!user?.orgId) {
+      log.error(`[users] orgId is required; refusing global default-agent lookup for xyne-spaces-app-tools userId=${userId}`);
+      return;
+    }
+
     // Resolve the default agent's app token — this is the bot identity the server will post as.
-    const defaultAgent = await prisma.agent.findFirst({ where: { isDefault: true } });
+    const defaultAgent = await prisma.agent.findFirst({ where: { orgId: user.orgId, isDefault: true } });
     let decryptedAppToken = "";
     if (defaultAgent?.spacesAppToken) {
       const { decrypt } = await import("../crypto.js");

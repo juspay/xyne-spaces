@@ -10,6 +10,7 @@ export { agentChainWorkflowRepository } from "./agentChainWorkflowRepository.js"
 export { userAgentConfigRepository } from "./userAgentConfigRepository.js";
 export { userProviderCredentialsRepository } from "./userProviderCredentialsRepository.js";
 export { agentProviderCredentialsRepository } from "./agentProviderCredentialsRepository.js";
+export { sharedProviderCredentialRepository } from "./sharedProviderCredentialRepository.js";
 export { userSubagentConfigRepository } from "./userSubagentConfigRepository.js";
 export { userRepository } from "./userRepository.js";
 export { skillRepository } from "./skillRepository.js";

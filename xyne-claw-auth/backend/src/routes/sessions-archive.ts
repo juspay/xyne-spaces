@@ -179,6 +179,26 @@ sessionsArchiveRouter.get("/restore/:conversationId", async (req: Request, res: 
 });
 
 /**
+ * GET /lock/:conversationId
+ * Non-mutating status check for migration/backfill tooling.
+ */
+sessionsArchiveRouter.get("/lock/:conversationId", async (req: Request<{ conversationId: string }>, res: Response) => {
+  const { conversationId } = req.params;
+  if (!isSafeConversationId(conversationId)) {
+    res.status(400).json({ success: false, error: "conversationId required" });
+    return;
+  }
+  try {
+    const redis = redisService.getConnection();
+    const holder = await redis.get(lockKey(conversationId));
+    res.json({ success: true, locked: !!holder });
+  } catch (err) {
+    log.warn(`[sessions-archive] lock status error for ${conversationId}:`, err instanceof Error ? err.message : err);
+    res.status(503).json({ success: false, error: "lock status unavailable" });
+  }
+});
+
+/**
  * POST /lock/:conversationId  body { holder, ttlMs }
  * Acquire the conversation lock. Returns { success, acquired }. `acquired` is
  * false when another holder already owns it. SET NX PX = atomic acquire+expire.

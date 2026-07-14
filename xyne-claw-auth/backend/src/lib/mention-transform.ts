@@ -112,10 +112,11 @@ const UNBOUND_EMAIL_MENTION_RE =
 // requires a full `@domain.tld`, so without this these mentions silently
 // stay plain text. Resolved via `byHandle` (email startsWith `${handle}@`).
 // `pre` additionally excludes `@` and `.` so the domain of a full email
-// (`@john.doe@gmail.com`) never matches; trailing lookahead excludes `[`
-// (already-bracketed) and `@` (it's really an email — handled above).
+// (`@john.doe@gmail.com`) never matches; trailing lookahead excludes bracketed
+// mentions, full emails, and partial backtracking inside longer handle/email
+// tokens.
 const UNBOUND_HANDLE_MENTION_RE =
-  /(^|[^A-Za-z0-9_>@.])@([A-Za-z][A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]+)+)(?!\[|@)/g;
+  /(^|[^A-Za-z0-9_>@.])@([A-Za-z][A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]+)+)(?!\[|[A-Za-z0-9_.@_\-])/g;
 
 // Group alias shorthand — e.g. `@data-intelligence`. User handles use
 // dots and display-name mentions are capitalised, so hyphenated lowercase
@@ -228,8 +229,10 @@ export async function resolveUnboundMentions(
     emailsToResolve.size === 0 &&
     handlesToResolve.size === 0 &&
     groupAliasesToResolve.size === 0
-  )
+  ) {
+    log.info("[mention] no unbound mention candidates matched");
     return input;
+  }
 
   // Resolve names + emails in parallel — one HTTP call per distinct input.
   // Map values are `{ id, displayName }` so the email path can substitute
@@ -251,13 +254,15 @@ export async function resolveUnboundMentions(
     ...[...namesToResolve].map(async (name) => {
       try {
         const matches = await lookups.byName(name);
+        log.info(`[mention] byName "${name}" -> ${matches.length} match(es)${matches.length === 1 ? ` id=${matches[0]?.id}` : ""}`);
         if (matches.length === 1 && matches[0]?.id) {
           resolvedByName.set(name, {
             id: matches[0].id,
             displayName: matches[0].name || name,
           });
         }
-      } catch {
+      } catch (err) {
+        log.warn(`[mention] byName "${name}" threw: ${err instanceof Error ? err.message : String(err)}`);
         // Swallow per-name failures so one bad lookup doesn't kill the post.
       }
     }),
@@ -281,19 +286,22 @@ export async function resolveUnboundMentions(
     ...[...handlesToResolve].map(async (handle) => {
       try {
         const matches = await lookups.byHandle!(handle);
+        log.info(`[mention] byHandle "${handle}" -> ${matches.length} match(es)${matches.length === 1 ? ` id=${matches[0]?.id}` : ""}`);
         if (matches.length === 1 && matches[0]?.id) {
           resolvedByHandle.set(handle, {
             id: matches[0].id,
             displayName: matches[0].name || handle,
           });
         }
-      } catch {
+      } catch (err) {
+        log.warn(`[mention] byHandle "${handle}" threw: ${err instanceof Error ? err.message : String(err)}`);
         // Same fallthrough as above.
       }
     }),
     ...[...groupAliasesToResolve].map(async (alias) => {
       try {
         const matches = await lookups.byGroupAlias!(alias);
+        log.info(`[mention] byGroupAlias "${alias}" -> ${matches.length} match(es)${matches.length === 1 ? ` id=${matches[0]?.id}` : ""}`);
         if (matches.length === 1 && matches[0]?.id) {
           resolvedByGroupAlias.set(alias, {
             id: matches[0].id,
@@ -301,11 +309,16 @@ export async function resolveUnboundMentions(
             alias: matches[0].alias || alias,
           });
         }
-      } catch {
+      } catch (err) {
+        log.warn(`[mention] byGroupAlias "${alias}" threw: ${err instanceof Error ? err.message : String(err)}`);
         // Same fallthrough as above.
       }
     }),
   ]);
+
+  log.info(
+    `[mention] resolved names=${resolvedByName.size}/${namesToResolve.size} emails=${resolvedByEmail.size}/${emailsToResolve.size} handles=${resolvedByHandle.size}/${handlesToResolve.size} groups=${resolvedByGroupAlias.size}/${groupAliasesToResolve.size}`,
+  );
 
   // Second pass: rewrite non-code segments. Apply email rewrites BEFORE
   // handle rewrites BEFORE name rewrites — most-specific-first, same

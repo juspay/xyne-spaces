@@ -14,6 +14,9 @@ import https from "node:https";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { PDF_DESIGNER_SYSTEM_PROMPT } from "./prompt.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("tools");
+
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
 
 /** POST JSON using native https — bypasses undici/fetch HTTP/2 GOAWAY issues. */
@@ -249,7 +252,7 @@ async function callLlmForDocument(
     try {
       parsed = JSON.parse(extractJson(rawContent));
     } catch (err) {
-      console.error(`[pdf] JSON parse failed. Raw (first 600): ${rawContent.slice(0, 600)}`);
+      log.error(`[pdf] JSON parse failed. Raw (first 600): ${rawContent.slice(0, 600)}`);
       throw new Error(
         `LLM returned invalid JSON: ${err instanceof Error ? err.message : err}`,
       );
@@ -290,7 +293,7 @@ async function callLlmForDocument(
   try {
     parsed = JSON.parse(extractJson(rawContent));
   } catch (err) {
-    console.error(`[pdf] JSON parse failed. Raw (first 600): ${rawContent.slice(0, 600)}`);
+    log.error(`[pdf] JSON parse failed. Raw (first 600): ${rawContent.slice(0, 600)}`);
     throw new Error(
       `LLM returned invalid JSON: ${err instanceof Error ? err.message : err}`,
     );
@@ -447,7 +450,7 @@ async function convertHtmlToPdf(html: string): Promise<Buffer> {
     
     return Buffer.from(pdfBuffer);
   } catch (err) {
-    console.error("[pdf] Playwright PDF conversion failed:", err instanceof Error ? err.message : err);
+    log.error("[pdf] Playwright PDF conversion failed:", err instanceof Error ? err.message : err);
     throw new Error(`PDF conversion failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
     if (browser) {
@@ -520,7 +523,7 @@ export const createPdfTool: ToolDefinition = {
     if (typeof llm === "string") return llm;
 
     const preview = query.length > 80 ? `${query.slice(0, 80)}...` : query;
-    console.log(`[create-pdf] ${numPages} pages, model=${llm.model}, query="${preview}"`);
+    log.info(`[create-pdf] ${numPages} pages, model=${llm.model}, query="${preview}"`);
 
     try {
       const userPrompt =
@@ -532,13 +535,13 @@ export const createPdfTool: ToolDefinition = {
       if (!docConfig.style) docConfig.style = "professional";
 
       const { buffer, title } = await renderPdfBuffer(docConfig);
-      console.log(
+      log.info(
         `[create-pdf] rendered (${(buffer.length / 1024).toFixed(0)}KB), pages=${docConfig.pages.length}`,
       );
       return formatAttachmentResponse(buffer, title, docConfig);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[create-pdf] error: ${msg}`);
+      log.error(`[create-pdf] error: ${msg}`);
       return `Error creating PDF: ${msg}`;
     }
   },
@@ -604,7 +607,7 @@ export const editPdfTool: ToolDefinition = {
     if (typeof llm === "string") return llm;
 
     const preview = changeRequest.length > 80 ? `${changeRequest.slice(0, 80)}...` : changeRequest;
-    console.log(
+    log.info(
       `[edit-pdf] prev=${prevObj.pages.length} pages, target=${numPages ?? "same"}, model=${llm.model}, change="${preview}"`,
     );
 
@@ -629,13 +632,13 @@ export const editPdfTool: ToolDefinition = {
       if (!docConfig.style) docConfig.style = prevObj.style ?? "professional";
 
       const { buffer, title } = await renderPdfBuffer(docConfig);
-      console.log(
+      log.info(
         `[edit-pdf] rendered (${(buffer.length / 1024).toFixed(0)}KB), pages=${docConfig.pages.length}`,
       );
       return formatAttachmentResponse(buffer, title, docConfig);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[edit-pdf] error: ${msg}`);
+      log.error(`[edit-pdf] error: ${msg}`);
       return `Error editing PDF: ${msg}`;
     }
   },

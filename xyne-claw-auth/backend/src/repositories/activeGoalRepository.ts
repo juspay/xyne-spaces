@@ -27,6 +27,7 @@ export const activeGoalRepository = {
     workspaceId?: string | null;
     userId: string;
     agentSlug: string;
+    orgId: string;
     condition: string;
     maxTurns?: number;
     runPayload: Prisma.InputJsonValue;
@@ -40,6 +41,7 @@ export const activeGoalRepository = {
         condition: args.condition,
         maxTurns: max,
         runPayload: args.runPayload,
+        orgId: args.orgId,
         status: "active",
         turnCount: 0,
         lastTurnResult: null,
@@ -54,6 +56,7 @@ export const activeGoalRepository = {
         workspaceId: args.workspaceId ?? null,
         userId: args.userId,
         agentSlug: args.agentSlug,
+        orgId: args.orgId,
         condition: args.condition,
         maxTurns: max,
         runPayload: args.runPayload,

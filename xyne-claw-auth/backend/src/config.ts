@@ -24,6 +24,13 @@ export const CONFIG = {
     : Buffer.alloc(0),
   xyneClawUrl: process.env["XYNE_CLAW_URL"] ?? "http://localhost:3002",
   xyneClawS2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+  // Platform LiteLLM proxy base URL. Default endpoint the agent-level "litellm"
+  // provider lists models from (and, at run time, the runtime falls back to
+  // when a credential omits its own baseUrl). Owners bringing their own LiteLLM
+  // key that lives on the platform proxy can leave the credential's baseUrl
+  // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
+  // cleanly.
+  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.example.com").replace(/\/+$/, ""),
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
@@ -37,6 +44,9 @@ export const CONFIG = {
    */
   clawSseTransport: ["1", "true", "on", "yes"].includes(
     (process.env["CLAW_SSE_TRANSPORT"] ?? "").trim().toLowerCase(),
+  ),
+  cliTokensEnabled: ["1", "true", "on", "yes"].includes(
+    (process.env["CLI_TOKENS_ENABLED"] ?? "").trim().toLowerCase(),
   ),
   xyneSpacesCallbackUrl: process.env["XYNE_SPACES_CALLBACK_URL"] ?? "",
   spacesBackendUrl: process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
@@ -156,4 +166,20 @@ export const CONFIG = {
   researchAgentMcpApiKey: process.env["RESEARCH_AGENT_MCP_API_KEY"]
     ?? process.env["research_agent_mcp_api_key"]
     ?? "",
+} as const;
+
+// Grafana → error auto-fix pipeline (lives here — claw stays stateless; the
+// queues + fix records ride this service's existing Redis).
+export const ERROR_PIPELINE = {
+  jwtSecret: process.env["ERROR_PIPELINE_JWT_SECRET"] ?? "",
+  isRunnerPod: (process.env["ERROR_PIPELINE_RUNNER_POD"] ?? "false") === "true",
+  itemTimeoutMs: 60 * 60 * 1000,
+  maxAttempts: 3,
+  dedupTtlSeconds: 2 * 24 * 60 * 60,
+  maxStreamLen: 1000,
+  runnerPollMs: 3000,
+  agentSlug: process.env["ERROR_PIPELINE_AGENT_SLUG"] ?? "doctor-agent",
+  // Identity the agent runs as; resolved from the agent row
+  agentUserId: process.env["ERROR_PIPELINE_AGENT_USER_ID"] ?? "",
+  agentTimeoutMs: 30 * 60 * 1000,
 } as const;

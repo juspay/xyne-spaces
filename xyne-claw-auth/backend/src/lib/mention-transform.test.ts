@@ -97,6 +97,21 @@ describe("resolveUnboundMentions — dotted handles", () => {
     expect(out).toBe(`ping @Bowmitha C[${USERS["bowmitha.c"]!.id}] please`);
   });
 
+  it("does not partial-match unresolved full emails as handles", async () => {
+    let handleLookups = 0;
+    const lk: MentionLookups = {
+      ...lookups(),
+      byEmail: async () => [],
+      byHandle: async () => {
+        handleLookups += 1;
+        return [{ id: "usr_wrong0000000000", name: "Wrong User" }];
+      },
+    };
+    const input = "ping @john.doe@gmail.com please";
+    expect(await resolveUnboundMentions(input, lk)).toBe(input);
+    expect(handleLookups).toBe(0);
+  });
+
   it("skips handles when byHandle lookup is not provided", async () => {
     const { byHandle: _omit, ...rest } = lookups();
     const out = await resolveUnboundMentions("Hey @bowmitha.c", rest);

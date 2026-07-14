@@ -1,11 +1,24 @@
 /**
  * Google tool definitions for the xyne-claw custom tool system.
- * All 18 tools use source "custom:google" and require a Google OAuth access token
+ * All tools use source "custom:google" and require a Google OAuth access token
  * resolved via ctx.config["GOOGLE_ACCESS_TOKEN"].
  */
 
 import type { ToolDefinition, ToolExecutionContext, ConfigField } from "../types.js";
-import { searchEmails, readEmail, createDraft, getAttachment, trashEmail } from "./gmail.js";
+import {
+  searchEmails,
+  readEmail,
+  createDraft,
+  getAttachment,
+  trashEmails,
+  batchMarkEmailsRead,
+  archiveEmails,
+  starEmails,
+  markEmailsSpam,
+  untrashEmails,
+  modifyEmailLabels,
+  listLabels,
+} from "./gmail.js";
 import { searchEvents, createEvent, deleteEvent, listCalendars } from "./calendar.js";
 import { searchContacts, listContacts } from "./contacts.js";
 import { listTaskLists, listTasks, createTask, updateTaskStatus, deleteTask } from "./tasks.js";
@@ -64,6 +77,9 @@ export const googleGmailSearch: ToolDefinition = {
     required: ["query"],
   },
   async execute(args, ctx) {
+    return (await this.executeCited!(args, ctx)).text;
+  },
+  async executeCited(args, ctx) {
     const token = getToken(ctx);
     return searchEmails(token, args["query"] as string, (args["maxResults"] as number) ?? 10);
   },
@@ -85,6 +101,9 @@ export const googleGmailRead: ToolDefinition = {
     required: ["messageId"],
   },
   async execute(args, ctx) {
+    return (await this.executeCited!(args, ctx)).text;
+  },
+  async executeCited(args, ctx) {
     const token = getToken(ctx);
     return readEmail(token, args["messageId"] as string);
   },
@@ -128,20 +147,213 @@ export const googleGmailTrash: ToolDefinition = {
   slug: "google-gmail-trash",
   name: "Gmail Trash",
   description:
-    "Move an email to trash. Only use this for emails the user explicitly asks to delete.",
+    "Move one or more emails to trash. Only use this for emails the user explicitly asks to delete.",
   source: "custom:google",
   isWriteTool: true,
   configSchema: GOOGLE_CONFIG_SCHEMA,
   inputSchema: {
     type: "object",
     properties: {
-      messageId: { type: "string", description: "Gmail message ID to move to trash" },
+      messageIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Gmail message IDs to move to trash (one or more)",
+      },
     },
-    required: ["messageId"],
+    required: ["messageIds"],
   },
   async execute(args, ctx) {
     const token = getToken(ctx);
-    return trashEmail(token, args["messageId"] as string);
+    return trashEmails(token, args["messageIds"] as string[]);
+  },
+};
+
+export const googleGmailMarkRead: ToolDefinition = {
+  slug: "google-gmail-mark-read",
+  name: "Gmail Mark Read",
+  description:
+    "Mark one or more Gmail messages as read or unread in a single call. " +
+    "Defaults to marking as read. Use google-gmail-search first to find message IDs.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      messageIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Gmail message IDs to update (one or more, max 1000)",
+      },
+      read: { type: "boolean", description: "true to mark as read (default), false to mark as unread" },
+    },
+    required: ["messageIds"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return batchMarkEmailsRead(
+      token,
+      args["messageIds"] as string[],
+      (args["read"] as boolean | undefined) ?? true,
+    );
+  },
+};
+
+export const googleGmailArchive: ToolDefinition = {
+  slug: "google-gmail-archive",
+  name: "Gmail Archive",
+  description:
+    "Archive one or more emails by removing them from the inbox (removes the INBOX label). Emails stay searchable.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      messageIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Gmail message IDs to archive (one or more)",
+      },
+    },
+    required: ["messageIds"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return archiveEmails(token, args["messageIds"] as string[]);
+  },
+};
+
+export const googleGmailStar: ToolDefinition = {
+  slug: "google-gmail-star",
+  name: "Gmail Star",
+  description: "Star or unstar one or more emails in a single call. Defaults to starring. Pass multiple IDs to bulk star/unstar.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      messageIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Gmail message IDs to star/unstar (one or more)",
+      },
+      starred: { type: "boolean", description: "true to star (default), false to unstar" },
+    },
+    required: ["messageIds"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return starEmails(token, args["messageIds"] as string[], (args["starred"] as boolean | undefined) ?? true);
+  },
+};
+
+export const googleGmailSpam: ToolDefinition = {
+  slug: "google-gmail-spam",
+  name: "Gmail Mark Spam",
+  description:
+    "Mark one or more emails as spam (moves to Spam) or not spam (moves back to inbox). Defaults to marking as spam.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      messageIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Gmail message IDs to update (one or more)",
+      },
+      spam: { type: "boolean", description: "true to mark as spam (default), false to mark as not spam" },
+    },
+    required: ["messageIds"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return markEmailsSpam(token, args["messageIds"] as string[], (args["spam"] as boolean | undefined) ?? true);
+  },
+};
+
+export const googleGmailUntrash: ToolDefinition = {
+  slug: "google-gmail-untrash",
+  name: "Gmail Untrash",
+  description: "Restore one or more emails from trash back to the inbox. Pairs with google-gmail-trash.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      messageIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Gmail message IDs to restore from trash (one or more)",
+      },
+    },
+    required: ["messageIds"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return untrashEmails(token, args["messageIds"] as string[]);
+  },
+};
+
+export const googleGmailLabelsList: ToolDefinition = {
+  slug: "google-gmail-labels-list",
+  name: "Gmail Labels List",
+  description:
+    "List all Gmail labels (system and user) with their IDs. Call this first to resolve label names to IDs before using google-gmail-modify-labels.",
+  source: "custom:google",
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
+  async execute(_args, ctx) {
+    const token = getToken(ctx);
+    return listLabels(token);
+  },
+};
+
+export const googleGmailModifyLabels: ToolDefinition = {
+  slug: "google-gmail-modify-labels",
+  name: "Gmail Modify Labels",
+  description:
+    "Add and/or remove labels on one or more emails in a single call. Labels are referenced by label ID — use google-gmail-labels-list first to resolve names to IDs.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      messageIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Gmail message IDs to update (one or more)",
+      },
+      addLabelIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Label IDs to add",
+      },
+      removeLabelIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Label IDs to remove",
+      },
+    },
+    required: ["messageIds"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return modifyEmailLabels(
+      token,
+      args["messageIds"] as string[],
+      (args["addLabelIds"] as string[] | undefined) ?? [],
+      (args["removeLabelIds"] as string[] | undefined) ?? [],
+    );
   },
 };
 
@@ -202,6 +414,9 @@ export const googleCalendarEvents: ToolDefinition = {
     },
   },
   async execute(args, ctx) {
+    return (await this.executeCited!(args, ctx)).text;
+  },
+  async executeCited(args, ctx) {
     const token = getToken(ctx);
     return searchEvents(
       token,
@@ -471,13 +686,22 @@ export const googleDriveRead: ToolDefinition = {
   inputSchema: {
     type: "object",
     properties: {
-      fileUrl: { type: "string", description: "Google Drive/Sheets/Docs URL or file ID" },
+      fileUrl: { type: "string", description: "Google Drive/Sheets/Docs URL or file ID. For Sheets, the #gid= in the URL selects the tab automatically." },
+      tab: { type: "string", description: "Optional. Target a specific spreadsheet tab by its title (case-insensitive). Overrides the URL gid if both are given." },
+      gid: { type: "string", description: "Optional. Target a specific spreadsheet tab by its gid (numeric). Usually inferred from the URL." },
+      range: { type: "string", description: "Optional A1 range within the targeted tab, e.g. \"A1:Z\" or \"A500:Z1000\" to read recent/bottom rows." },
+      maxRows: { type: "number", description: "Optional. Max rows to return per tab before windowing (default 5000)." },
     },
     required: ["fileUrl"],
   },
   async execute(args, ctx) {
     const token = getToken(ctx);
-    const result = await readDriveFile(token, args["fileUrl"] as string);
+    const result = await readDriveFile(token, args["fileUrl"] as string, {
+      tab: args["tab"] as string | undefined,
+      gid: args["gid"] as string | undefined,
+      range: args["range"] as string | undefined,
+      maxRows: args["maxRows"] as number | undefined,
+    });
     if (result.dataUrl) {
       const base64 = result.dataUrl.replace(/^data:[^;]+;base64,/, "");
       const fileName = (args["fileUrl"] as string).split("/").pop() ?? "file";
@@ -504,6 +728,9 @@ export const googleDriveSearch: ToolDefinition = {
     required: ["query"],
   },
   async execute(args, ctx) {
+    return (await this.executeCited!(args, ctx)).text;
+  },
+  async executeCited(args, ctx) {
     const token = getToken(ctx);
     return searchDriveFiles(token, args["query"] as string, (args["maxResults"] as number) ?? 10);
   },

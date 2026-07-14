@@ -29,7 +29,7 @@ import {
   XIcon,
   ArrowSquareOutIcon,
 } from "@phosphor-icons/react";
-import type { Agent } from "../../../lib/types";
+import type { AgentLight } from "../../../lib/types";
 import type { AgentRun } from "../../../lib/api";
 import { Skeleton } from "../ui/Skeleton";
 import { formatTimeAgo, getInitials } from "./homeUtils";
@@ -56,7 +56,7 @@ const COLLAPSED_COUNT = 4;
 
 interface RecentRunsCardProps {
   runs: AgentRun[];
-  agents: Agent[];
+  agents: AgentLight[];
   userId: string;
   isLoading: boolean;
   days?: 1 | 7 | 30;
@@ -69,6 +69,7 @@ const ORIGIN_META: Record<
   chat: { label: "Chat", icon: ChatCircleIcon },
   spaces: { label: "Spaces", icon: CubeIcon },
   scheduled: { label: "Scheduled", icon: ClockIcon },
+  automation: { label: "Automation", icon: LightningIcon },
   api: { label: "API", icon: LightningIcon },
 };
 
@@ -124,7 +125,7 @@ function sessionKeyFor(run: AgentRun): string {
     : run.sessionId;
 }
 
-function groupBySessions(runs: AgentRun[], agents: Agent[]): SessionGroup[] {
+function groupBySessions(runs: AgentRun[], agents: AgentLight[]): SessionGroup[] {
   const byKey = new Map<string, AgentRun[]>();
   for (const r of runs) {
     const k = sessionKeyFor(r);

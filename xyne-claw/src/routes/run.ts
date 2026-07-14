@@ -7,6 +7,7 @@ import {
   applyCopilotProxyIfNeeded,
   RunCancelledError,
   QuotaExhaustedError,
+  isProviderAuthError,
   isQuotaExhaustedError,
   isTransientProviderError,
   type ImageContent,
@@ -22,9 +23,11 @@ import {
   type ClawSandboxPreviewPayload,
   type ClawStreamMeta,
   type ClawDoneStatus,
+  type Todo,
 } from "xyne-claw-shared";
 import { SessionLockedError } from "../session-lock.js";
 import { isSafeId } from "../safe-id.js";
+import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { loadMcpToolsForUser } from "../mcp.js";
 import { loadCustomTools } from "../custom-tools.js";
@@ -51,12 +54,26 @@ import {
   type SkillTrigger,
 } from "../subagent-tools.js";
 import {
+  AgentDelegationGovernor,
+  buildCallableAgentTools,
+  buildOrchestratorCallableAgentTool,
+  type CallableAgentLightSpec,
+  type CallableAgentSpec,
+  type NestedAgentRunner,
+} from "../agent-delegation.js";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import {
   parseToolsConfig,
   COPILOT_SYSTEM_INSTRUCTION,
   REPO_CONFIGS,
   getSandboxSession,
   probeSession,
   buildSandboxStoreKey,
+  clearPlan,
+  isPlanToolSlug,
+  // Aliased: run.ts declares a local `isReadOnlyJob` const later in the same
+  // scope; this shared util is the single-source scheduled/automation check.
+  isReadOnlyJob as isScheduledOrAutomationRun,
   type SetupStep,
 } from "xyne-claw-shared";
 import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
@@ -80,6 +97,7 @@ import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
+import { isDraining } from "../drain.js";
 import { createLogger } from "../logger.js";
 
 const clog = createLogger("run");
@@ -90,14 +108,53 @@ interface ActiveRunControl {
   abortController: AbortController;
   /** Owner of the run. Used to reject cross-user cancellation. */
   userId: string;
+  /** For inflight-kill forensics: who/what this run is + when it began. */
+  agentSlug?: string;
+  startedAtMs?: number;
   /** True when the abort was triggered by an explicit user cancel (the
    *  /run/:sessionId/cancel endpoint), as opposed to the agent's own
    *  respond-to-user termination (which also aborts the controller). Lets the
    *  catch block honor a user stop instead of posting a just-generated answer. */
   userCancelled?: boolean;
+  hasCallbackUrl?: boolean;
+  sseClientAttached?: boolean;
+  sseReconnectGraceTimer?: ReturnType<typeof setTimeout>;
+  sseEmitter?: SseProgressEmitter;
 }
 
 const activeRuns = new Map<string, ActiveRunControl>();
+const configuredSseReconnectGraceMs = Number(process.env["SSE_RECONNECT_GRACE_MS"] ?? 180_000);
+const SSE_RECONNECT_GRACE_MS = Number.isFinite(configuredSseReconnectGraceMs) && configuredSseReconnectGraceMs >= 0
+  ? configuredSseReconnectGraceMs
+  : 180_000;
+
+/** Snapshot for shutdown/drain forensics — one line per still-active run. */
+export function describeActiveRuns(): Array<{ sessionId: string; agentSlug: string; userId: string; ageS: number }> {
+  const now = Date.now();
+  return [...activeRuns.entries()].map(([sessionId, a]) => ({
+    sessionId,
+    agentSlug: a.agentSlug ?? "unknown",
+    userId: a.userId,
+    ageS: a.startedAtMs ? Math.round((now - a.startedAtMs) / 1000) : -1,
+  }));
+}
+
+export function getActiveRunCount(): number {
+  return activeRuns.size;
+}
+
+export function cancelActiveRunsForDrain(reason = "server draining"): number {
+  let cancelled = 0;
+  for (const [sessionId, active] of activeRuns.entries()) {
+    if (active.abortController.signal.aborted) continue;
+    const ageS = active.startedAtMs ? Math.round((Date.now() - active.startedAtMs) / 1000) : -1;
+    clog.warn(`[run] drain deadline reached — cancelling active run sessionId=${sessionId} agent=${active.agentSlug ?? "unknown"} user=${active.userId} ageS=${ageS} reason=${reason}`);
+    clog.warn(`[metric] name=inflight_killed kind=count value=1 cause=drain_deadline agent=${active.agentSlug ?? "unknown"} session=${sessionId}`);
+    active.abortController.abort();
+    cancelled++;
+  }
+  return cancelled;
+}
 
 // Appended to the agent's systemPrompt at runTime when channelId is present
 // (i.e. the agent is replying in a Spaces chat thread). Lives in the system
@@ -190,6 +247,11 @@ function toWorkspaceContextPath(input: string): string {
 }
 
 router.post("/run", validateS2SKey, async (req, res: Response) => {
+  if (isDraining()) {
+    res.status(503).json({ success: false, error: "xyne-claw is draining" });
+    return;
+  }
+
   const {
     userId,
     userName,
@@ -206,6 +268,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     channelId,
     cwd: requestCwd,
     eventType,
+    scheduledJobId,
     traceId,
     skills,
     provider,
@@ -218,6 +281,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     additionalInstructions,
     researchContext,
     customSubagents,
+    callableAgents,
+    delegationMode,
     sessionId: providedSessionId,
     sessionToken,
     ticketIds,
@@ -226,6 +291,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     idempotencyKey,
     compactBeforeRun,
     isRegenerate,
+    detached,
   } = req.body as {
     userId?: string;
     userName?: string;
@@ -253,6 +319,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     channelId?: string;
     cwd?: string;
     eventType?: string;
+    scheduledJobId?: string;
     traceId?: string;
     skills?: {
       slug?: string;
@@ -288,6 +355,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       productId?: string;
     };
     customSubagents?: import("../subagent-tools.js").CustomSubagentSpec[];
+    callableAgents?: Array<CallableAgentSpec | CallableAgentLightSpec>;
+    delegationMode?: "orchestrator";
     // claw-auth-issued per-run identifiers. sessionId is the URL-bound run id;
     // sessionToken is an HMAC bearer used on every outbound /sessions/:sessionId/mcp/*
     // call back to claw-auth. Both REQUIRED in production — required check below.
@@ -308,6 +377,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     /** Branching: when true, runTask branches the PI session at the last user
      *  entry so the new assistant turn becomes a sibling of the previous one. */
     isRegenerate?: boolean;
+    detached?: boolean;
   };
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
@@ -435,8 +505,120 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   const sseRequested = accept.includes("text/event-stream");
   clog.info(`[run] transport: ${sseRequested ? "sse" : "legacy"} (accept=${JSON.stringify(accept)}, sessionId=${sessionId})`);
 
+  const existingActive = activeRuns.get(sessionId);
+  if (sseRequested && existingActive?.sseEmitter && !existingActive.abortController.signal.aborted) {
+    // Reject cross-user reattach outright — the sessionToken sid/uid binding
+    // upstream should already guarantee this; defense-in-depth.
+    if (existingActive.userId !== userId.trim()) {
+      res.status(403).json({ success: false, error: "session belongs to another user" });
+      return;
+    }
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    if (existingActive.sseReconnectGraceTimer) {
+      clearTimeout(existingActive.sseReconnectGraceTimer);
+      delete existingActive.sseReconnectGraceTimer;
+    }
+    existingActive.sseClientAttached = true;
+    existingActive.sseEmitter.attachResponse(res);
+    // Run finished during the disconnect gap (done written to the dead socket,
+    // activeRuns entry not yet cleaned): replay the terminal frame instead of
+    // streaming `started` and hanging forever — done() refuses to re-emit via
+    // its doneWritten guard, so without this replay the reattached client
+    // never receives a terminal event.
+    if (existingActive.sseEmitter.wroteDone()) {
+      const terminal = existingActive.sseEmitter.terminalPayload();
+      clog.info(`[run/sse] reattach after completion — replaying terminal frame (sessionId=${sessionId})`);
+      try {
+        // Same frame shape the live done uses: consumers read `event.result`.
+        res.write(frameSseEvent({
+          event: "done",
+          seq: Number.MAX_SAFE_INTEGER,
+          sessionId,
+          result: (terminal?.payload ?? { status: "completed" }),
+        } as unknown as ClawStreamEvent));
+      } catch { /* socket already gone */ }
+      res.end();
+      return;
+    }
+    existingActive.sseEmitter.writeStarted();
+    const keepaliveTimer = setInterval(() => {
+      try { res.write(KEEPALIVE_FRAME); } catch { /* response already closed */ }
+    }, 25_000);
+    attachSseCloseHandler({
+      res,
+      keepaliveTimer,
+      activeRun: existingActive,
+      sessionId,
+      emitter: existingActive.sseEmitter,
+    });
+    return;
+  }
+
   const abortController = new AbortController();
-  activeRuns.set(sessionId, { abortController, userId: userId.trim() });
+  const activeRun: ActiveRunControl = {
+    abortController,
+    userId: userId.trim(),
+    agentSlug: agentSlug ?? "unknown",
+    startedAtMs: Date.now(),
+    hasCallbackUrl: typeof callbackUrl === "string" && !!callbackUrl.trim(),
+  };
+  activeRuns.set(sessionId, activeRun);
+
+  if (detached === true) {
+    clog.info(`[run] detached dispatch accepted (sessionId=${sessionId}, eventType=${eventType ?? ""})`);
+    res.status(202).json({ success: true, sessionId });
+
+    processTask(
+      sessionId,
+      sessionToken.trim(),
+      userId.trim(),
+      task.trim(),
+      context,
+      userName,
+      userEmail,
+      conversationId,
+      piSessionConversationId,
+      spacesConversationId,
+      callbackUrl,
+      systemPrompt,
+      agentConfig,
+      agentSlug,
+      channelId,
+      requestCwd,
+      eventType,
+      scheduledJobId,
+      traceId,
+      skills,
+      provider,
+      providerOrder,
+      subagentProviders,
+      providerConfigs,
+      progressUrl,
+      attachments,
+      contextFiles,
+      additionalInstructions,
+      researchContext,
+      customSubagents,
+      callableAgents,
+      delegationMode,
+      ticketIds,
+      canvasIds,
+      callIds,
+      idempotencyKey,
+      isRegenerate,
+      abortController.signal,
+      () => abortController.abort(),
+      compactBeforeRun,
+    ).finally(() => {
+      activeRuns.delete(sessionId);
+    });
+    return;
+  }
 
   // SSE mode: caller (e.g. claw-auth's run-stream proxy) opted in by sending
   // Accept: text/event-stream. We hold the response open, write every progress
@@ -452,6 +634,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       "X-Accel-Buffering": "no",
     });
     const emitter = makeSseProgressEmitter(res, sessionId);
+    activeRun.sseEmitter = emitter;
+    activeRun.sseClientAttached = true;
     emitter.writeStarted();
 
     // Periodic keepalive comment so middleboxes/HTTP-keep-alives don't idle
@@ -461,8 +645,10 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       try { res.write(KEEPALIVE_FRAME); } catch { /* response already closed */ }
     }, 25_000);
 
-    // If the consumer disconnects mid-run, abort the agent loop. processTask's
-    // catch handler observes the abort and the finally below tears down.
+    // If the consumer disconnects mid-run, callback-backed runs keep going
+    // headless so the terminal callback can finalize the caller. Pure-SSE
+    // runs get a reconnect grace before we abort to avoid burning tokens
+    // forever.
     //
     // Use res.on("close"), NOT req.on("close"): IncomingMessage emits 'close'
     // as soon as the request body is fully consumed by Express's body parser,
@@ -472,17 +658,12 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     // closes — when the client (the proxy in our case) hangs up — so it
     // distinguishes "we finished and called res.end()" (writableEnded=true)
     // from "client went away" (writableEnded=false).
-    res.on("close", () => {
-      if (!res.writableEnded && !abortController.signal.aborted) {
-        clog.info(`[run/sse] client disconnected before done — aborting agent (sessionId=${sessionId})`);
-        // Distinct cancel frame BEFORE the abort takes hold. The consumer
-        // sees this as soon as the bytes flush — gives the frontend's typing
-        // indicator a way to stop immediately, without waiting for the
-        // cancelled `done` (which is delayed until partial state is gathered
-        // and the /callback replay completes).
-        emitter.writeCancelled(sessionId, "client disconnected");
-        abortController.abort();
-      }
+    attachSseCloseHandler({
+      res,
+      keepaliveTimer,
+      activeRun,
+      sessionId,
+      emitter,
     });
 
     // Also catch the explicit Stop-button path: claw-auth's /cancel hits
@@ -518,6 +699,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         channelId,
         requestCwd,
         eventType,
+        scheduledJobId,
         traceId,
         skills,
         provider,
@@ -530,6 +712,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         additionalInstructions,
         researchContext,
         customSubagents,
+        callableAgents,
+        delegationMode,
         ticketIds,
         canvasIds,
         callIds,
@@ -543,6 +727,9 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       processTaskError = err;
     } finally {
       clearInterval(keepaliveTimer);
+      if (activeRun.sseReconnectGraceTimer) {
+        clearTimeout(activeRun.sseReconnectGraceTimer);
+      }
       activeRuns.delete(sessionId);
       // Backstop: processTask has several silent-return paths (most notably
       // SessionLockedError — another pod owns this run and suppresses the
@@ -560,6 +747,13 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
             : "Run ended without emitting a result (likely session-locked or silent early-return — check claw logs for this sessionId)";
         const status: "completed" | "failed" | "cancelled" = processTaskError ? "failed" : "completed";
         emitter.forceDone(sessionId, status, reason);
+      }
+      const terminal = emitter.terminalPayload();
+      if (terminal && emitter.deliveryFailed() && typeof callbackUrl === "string" && callbackUrl.trim()) {
+        clog.warn(`[run/sse] terminal frame was not delivered over SSE; posting fallback callback (sessionId=${sessionId})`);
+        await sendCallback(callbackUrl, sessionToken.trim(), terminal.payload).catch((err) =>
+          clog.error(`[run/sse] fallback callback failed (session=${sessionId}): ${err instanceof Error ? err.message : String(err)}`),
+        );
       }
       if (!res.writableEnded) {
         try { res.end(); } catch { /* ignore */ }
@@ -593,6 +787,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     channelId,
     requestCwd,
     eventType,
+    scheduledJobId,
     traceId,
     skills,
     provider,
@@ -605,6 +800,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     additionalInstructions,
     researchContext,
     customSubagents,
+    callableAgents,
+    delegationMode,
     ticketIds,
     canvasIds,
     callIds,
@@ -623,6 +820,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
 // one TCP connection. seq is monotonic per session so the consumer can
 // detect drops (today we don't replay; that's the next hardening layer).
 interface SseProgressEmitter extends ProgressEmitter {
+  attachResponse: (res: Response) => void;
   writeStarted: () => void;
   /** Distinct cancel signal — emitted as soon as the route handler observes
    *  an aborted run, BEFORE forceDone / the cancelled done payload. Gives the
@@ -638,25 +836,84 @@ interface SseProgressEmitter extends ProgressEmitter {
    *  backstop in finally so an emitter that never got done() called still
    *  emits ONE final frame before res.end() — keeps the wire contract intact. */
   forceDone: (sessionId: string, status: "completed" | "failed" | "cancelled", reason: string) => void;
+  markDeliveryFailed: () => void;
+  deliveryFailed: () => boolean;
+  terminalPayload: () => { sessionId: string; payload: Record<string, unknown> } | null;
 }
 
-function makeSseProgressEmitter(res: Response, sessionId: string): SseProgressEmitter {
+function attachSseCloseHandler(opts: {
+  res: Response;
+  keepaliveTimer: ReturnType<typeof setInterval>;
+  activeRun: ActiveRunControl;
+  sessionId: string;
+  emitter: SseProgressEmitter;
+}): void {
+  const { res, keepaliveTimer, activeRun, sessionId, emitter } = opts;
+  res.on("close", () => {
+    clearInterval(keepaliveTimer);
+    if (res.writableEnded || activeRun.abortController.signal.aborted) return;
+    activeRun.sseClientAttached = false;
+    emitter.markDeliveryFailed();
+    if (activeRun.hasCallbackUrl) {
+      clog.info(`[run/sse] client disconnected before done — continuing headless (sessionId=${sessionId})`);
+      return;
+    }
+    if (activeRun.sseReconnectGraceTimer) {
+      clearTimeout(activeRun.sseReconnectGraceTimer);
+    }
+    clog.info(`[run/sse] client disconnected before done — waiting ${SSE_RECONNECT_GRACE_MS}ms before abort (sessionId=${sessionId})`);
+    activeRun.sseReconnectGraceTimer = setTimeout(() => {
+      if (activeRuns.get(sessionId) !== activeRun) return;
+      if (activeRun.sseClientAttached || activeRun.abortController.signal.aborted) return;
+      clog.info(`[run/sse] reconnect grace expired — aborting agent (sessionId=${sessionId})`);
+      emitter.writeCancelled(sessionId, "client disconnected");
+      activeRun.abortController.abort();
+    }, SSE_RECONNECT_GRACE_MS);
+  });
+}
+
+function makeSseProgressEmitter(initialRes: Response, sessionId: string): SseProgressEmitter {
+  let res = initialRes;
   let seq = 0;
   const next = () => seq++;
   let closed = false;
   let doneWritten = false;
   let cancelEmitted = false;
+  let deliveryFailed = false;
+  let terminalPayload: { sessionId: string; payload: Record<string, unknown> } | null = null;
   const write = (event: ClawStreamEvent): void => {
     if (closed) return;
+    if (res.destroyed || res.writableEnded) {
+      deliveryFailed = true;
+      closed = true;
+      return;
+    }
     try {
       res.write(frameSseEvent(event));
     } catch (err) {
       closed = true;
+      deliveryFailed = true;
       clog.warn(`[run/sse] write failed (session=${sessionId}): ${err instanceof Error ? err.message : String(err)}`);
     }
   };
+  const endResponse = (): void => {
+    if (!res.writableEnded) {
+      try { res.end(); } catch { /* ignore */ }
+    }
+  };
   return {
+    attachResponse: (nextRes) => {
+      res = nextRes;
+      closed = false;
+      deliveryFailed = false;
+    },
     writeStarted: () => write({ event: "started", seq: next(), sessionId }),
+    markDeliveryFailed: () => {
+      deliveryFailed = true;
+      closed = true;
+    },
+    deliveryFailed: () => deliveryFailed,
+    terminalPayload: () => terminalPayload,
     writeCancelled: (sid, reason) => {
       if (cancelEmitted) return;
       cancelEmitted = true;
@@ -665,13 +922,16 @@ function makeSseProgressEmitter(res: Response, sessionId: string): SseProgressEm
     wroteDone: () => doneWritten,
     forceDone: (sid, status, reason) => {
       if (doneWritten) return;
+      terminalPayload = { sessionId: sid, payload: { sessionId: sid, status, error: reason } };
       write({ event: "done", seq: next(), sessionId: sid, result: { status, error: reason } });
       doneWritten = true;
       closed = true;
+      endResponse();
     },
     invocation: (sid, invocation) => write({ event: "invocation", seq: next(), sessionId: sid, toolInvocation: invocation }),
     attachment: (sid, attachment: ClawAttachmentPayload) => write({ event: "attachment", seq: next(), sessionId: sid, attachment }),
     sandboxPreview: (sid, payload: ClawSandboxPreviewPayload) => write({ event: "sandbox-preview", seq: next(), sessionId: sid, payload }),
+    plan: (sid, todos: Todo[]) => write({ event: "plan", seq: next(), sessionId: sid, todos }),
     streamChunk: (sid, payload) => {
       if (payload.reasoningDelta !== undefined) {
         write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
@@ -699,9 +959,11 @@ function makeSseProgressEmitter(res: Response, sessionId: string): SseProgressEm
       // sessionId-based lookup races against setSession() or run-recovery.
       const status = (payload["status"] as "completed" | "failed" | "cancelled" | undefined) ?? "completed";
       const result: ClawDoneStatus = { ...payload, status };
+      terminalPayload = { sessionId: sid, payload: { ...payload, status, sessionId: sid } };
       write({ event: "done", seq: next(), sessionId: sid, result });
       doneWritten = true;
       closed = true;
+      endResponse();
     },
   };
 }
@@ -837,6 +1099,7 @@ async function processTask(
   channelId: string | undefined,
   requestCwd: string | undefined,
   eventType: string | undefined,
+  scheduledJobId: string | undefined,
   traceId: string | undefined,
   skills:
     | { slug?: string; name: string; description?: string; content: string }[]
@@ -874,6 +1137,8 @@ async function processTask(
   customSubagents:
     | import("../subagent-tools.js").CustomSubagentSpec[]
     | undefined,
+  callableAgents: Array<CallableAgentSpec | CallableAgentLightSpec> | undefined,
+  delegationMode: "orchestrator" | undefined,
   ticketIds: string[] | undefined,
   canvasIds: string[] | undefined,
   callIds: string[] | undefined,
@@ -1042,6 +1307,9 @@ async function processTask(
     // automation runs to the shared read-only sbx-git sandbox instead of cloning
     // a per-project golden snapshot (see sandboxRepoSetup → resolveSbxGit).
     if (eventType) meta["eventType"] = eventType;
+    // Surface the originating scheduled-job row id so the scheduledJobControl
+    // tool can resolve jobId:"current" (worker forwards it in the run body).
+    if (scheduledJobId) meta["scheduledJobId"] = scheduledJobId;
     // Sandbox repo pin (agent.config.sandboxRepo). Propagating it into meta is what
     // lets pinnedTemplateForContext (tools.ts) route bare `sandbox-create` and
     // one-shot `sandbox-run` onto the pinned repo's template — not just
@@ -1053,6 +1321,14 @@ async function processTask(
     // isReadOnlyJob (see sandboxRepoSetup → resolveSbxGit). Reviewers only
     // grep/read across all repos, so they never need a per-project clone.
     if (agentConfig?.["forceReadOnlySandbox"] === true) meta["forceReadOnlySandbox"] = "true";
+    // Per-agent opt-in (e.g. the error-pipeline doctor): allow this agent's
+    // automation/scheduled runs to escalate to a WRITABLE sandbox (via
+    // sandbox-repo-setup write:true) so it can implement a fix, push, and open a
+    // PR unattended. This is the SAME flag the tool-palette gate below reads
+    // (agentConfig.allowWriteInReadOnlyJob); propagate it into meta so the
+    // sandbox-routing gate in claw-shared honors it too — otherwise the tools
+    // stay but the sandbox is still routed read-only. Default-off.
+    if (agentConfig?.["allowWriteInReadOnlyJob"] === true) meta["allowWriteInReadOnlyJob"] = "true";
     // Operator-selected sbx-git repo context (agent.config.sbxGitRepos: string[]).
     // Surfaced to the read-only sandbox message so the agent focuses on these repos.
     const sbxGitRepos = agentConfig?.["sbxGitRepos"];
@@ -1069,7 +1345,7 @@ async function processTask(
     // We also reuse it to drive custom:create-ppt so PPT generation uses the
     // same user credential/model instead of shared env keys.
     const parentProviderConfig =
-      provider === "copilot" || provider === "claude" || provider === "codex"
+      provider === "copilot" || provider === "claude" || provider === "codex" || provider === "litellm"
         ? providerConfigs?.[provider]
         : undefined;
 
@@ -1110,7 +1386,12 @@ async function processTask(
     // we pass undefined so they no-op, and attachment events still surface via
     // the onAttachment callback above, which dispatches through pushAttachment
     // (URL or emitter, whichever is plumbed).
+    const progressEmitter = progressUrl && typeof progressUrl !== "string" ? progressUrl : undefined;
     const progressUrlForCustom = typeof progressUrl === "string" ? progressUrl : undefined;
+    const emitPlanForCustom =
+      progressEmitter
+        ? (todos: Todo[]) => progressEmitter.plan(sessionId, todos)
+        : undefined;
     customToolsResult = loadCustomTools(
       effectiveConfig,
       meta,
@@ -1122,6 +1403,7 @@ async function processTask(
       sessionToken,
       undefined,
       runtimeProviderConfig,
+      emitPlanForCustom,
     );
     const {
       tools: customToolDefs,
@@ -1334,6 +1616,12 @@ async function processTask(
     const toolsConfigEarly = parseToolsConfig(effectiveConfig);
     const directPickSuffixes = toolsConfigEarly?.direct ?? [];
 
+    // Per-run registry for background (run_in_background) subagents. Shared by
+    // reference with the subagent tools (via the progressCtx below) and with
+    // runTask (opts), so a detached spawn registered inside a tool's execute()
+    // is drained by runTask after the model loop settles. See agent.ts.
+    const backgroundSubagentRegistry: import("../subagent-tools.js").BackgroundSubagentRegistry = new Map();
+
     const { subagentTools, directTools, remainingCustomTools } =
       buildSubagentTools(
         allGroups,
@@ -1362,6 +1650,7 @@ async function processTask(
           // hits Stop, instead of running for its full duration and orphaning
           // the result back to a parent that's already thrown RunCancelledError.
           ...(abortSignal ? { abortSignal } : {}),
+          backgroundRegistry: backgroundSubagentRegistry,
         },
         undefined, // bonusToolsBySubagent — removed with the sandbox subagent
         customSubagents,
@@ -1389,8 +1678,289 @@ async function processTask(
     const playwrightHoistedTools =
       sandboxSelected && playwrightGroup ? playwrightGroup.tools : [];
 
+    const emitDelegationProgress = (label: string): void => {
+      if (!progressUrl) return;
+      if (typeof progressUrl !== "string") {
+        try {
+          progressUrl.progressLabel(sessionId, label, {
+            ...(conversationId ? { conversationId } : {}),
+            ...(agentSlug ? { agentSlug } : {}),
+          });
+        } catch (err) {
+          logErr(`Delegation progress emit failed:`, err);
+        }
+        return;
+      }
+      fetch(progressUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+        },
+        body: JSON.stringify({
+          sessionId,
+          toolLabel: label,
+          ...(conversationId ? { conversationId } : {}),
+          ...(agentSlug ? { agentSlug } : {}),
+        }),
+        signal: AbortSignal.timeout(5_000),
+      }).catch((err) => logErr(`Delegation progress POST failed:`, err));
+    };
+
+    const extractRuntimeToolName = (name: string): string => {
+      const idx = name.lastIndexOf("__");
+      return idx >= 0 ? name.slice(idx + 2) : name;
+    };
+    const isWriteTool = (tool: ToolDefinition, groups: typeof allGroups): boolean => {
+      if ((tool as { isWriteTool?: boolean }).isWriteTool === true) return true;
+      const rawName = extractRuntimeToolName(tool.name);
+      return groups.some((group) => group.writeTools.map(String).includes(rawName));
+    };
+    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => {
+      const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
+      const toolSelectionKey = (tool as { selectionKey?: string }).selectionKey;
+      return allowedDirect.some((d) =>
+        tool.name === d ||
+        tool.name.endsWith(d) ||
+        d.endsWith(`__${tool.name}`) ||
+        norm(tool.name) === norm(d) ||
+        (toolSelectionKey ? d === toolSelectionKey : false),
+      );
+    };
+    const applyAgentToolFilter = (
+      tools: ToolDefinition[],
+      cfg: ReturnType<typeof parseToolsConfig>,
+      sets: {
+        subagentTools: ToolDefinition[];
+        directTools: ToolDefinition[];
+        customTools: ToolDefinition[];
+      },
+    ): ToolDefinition[] => {
+      if (!cfg) return tools;
+      const allowedSubagents = new Set(cfg.subagents ?? []);
+      const allowedDirect = cfg.direct ?? [];
+      const allowedCustom = new Set(cfg.custom ?? []);
+      const allowedGatewayServices = new Set(cfg.gateway ?? []);
+      return tools.filter((t) => {
+        if (sets.subagentTools.some((s) => s.name === t.name)) {
+          return allowedSubagents.has(t.name);
+        }
+        if (sets.directTools.some((d) => d.name === t.name)) {
+          const serviceName = (t as { serviceName?: string }).serviceName;
+          const selectionKey = (t as { selectionKey?: string }).selectionKey;
+          return selectedAsDirect(t, allowedDirect) ||
+            (serviceName ? allowedGatewayServices.has(serviceName) : false) ||
+            (selectionKey ? allowedCustom.has(selectionKey) : false);
+        }
+        if (sets.customTools.some((c) => c.name === t.name)) {
+          return allowedCustom.has(t.name);
+        }
+        return true;
+      });
+    };
+
+    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, signal, onProgress }) => {
+      const calleeSessionToken = spec.sessionToken ?? sessionToken;
+      const label = spec.progressLabels?.[0] ?? `Delegating to ${spec.name}...`;
+      onProgress?.(label);
+      const calleeConfig = spec.agentConfig ?? {};
+      const calleeToolsConfig = parseToolsConfig(calleeConfig);
+      const calleeMeta: Record<string, string> = { userId };
+      if (userName) calleeMeta["userName"] = userName;
+      if (userEmail) calleeMeta["userEmail"] = userEmail;
+      calleeMeta["agentSlug"] = spec.slug;
+      if (channelId) calleeMeta["channelId"] = channelId;
+      if (conversationId) calleeMeta["conversationId"] = conversationId;
+      if (eventType) calleeMeta["eventType"] = eventType;
+      if (scheduledJobId) calleeMeta["scheduledJobId"] = scheduledJobId;
+      const calleeToolProvider = spec.provider;
+      const calleeToolProviderConfig = calleeToolProvider ? spec.providerConfigs?.[calleeToolProvider] : undefined;
+      const calleeProviderConfigForTools =
+        calleeToolProvider && calleeToolProviderConfig
+          ? {
+              provider: calleeToolProvider,
+              apiKey: calleeToolProviderConfig.apiKey,
+              model: calleeToolProviderConfig.model,
+              ...(calleeToolProviderConfig.baseUrl ? { baseUrl: calleeToolProviderConfig.baseUrl } : {}),
+              ...(calleeToolProviderConfig.authType ? { authType: calleeToolProviderConfig.authType } : {}),
+            }
+          : runtimeProviderConfig;
+
+      const calleeMcp = await loadMcpToolsForUser(
+        sessionId,
+        calleeSessionToken,
+        workspaceDir,
+        {},
+        spec.slug,
+        mcpOutputDir,
+        (att) => pushAttachment(progressUrl, sessionId, att),
+      );
+      try {
+        const calleeCustom = loadCustomTools(
+          calleeConfig,
+          calleeMeta,
+          (att) => pushAttachment(progressUrl, sessionId, att),
+          researchContext,
+          progressUrlForCustom,
+          sessionId,
+          SERVER.s2sKey,
+          calleeSessionToken,
+          undefined,
+          calleeProviderConfigForTools,
+          emitPlanForCustom,
+        );
+        const calleeGroupsWithoutKb = calleeMcp.groups.filter((g) => g.serverType !== "knowledge-base");
+        const calleeKbTools = calleeMcp.groups.find((g) => g.serverType === "knowledge-base")?.tools ?? [];
+        const calleeGroups = [
+          ...calleeGroupsWithoutKb,
+          ...(deepwikiGroup ? [deepwikiGroup] : []),
+          ...(context7Group ? [context7Group] : []),
+        ];
+        const calleeProvider =
+          spec.provider && (["copilot", "claude", "codex"] as readonly string[]).includes(spec.provider)
+            ? spec.provider
+            : "spaces";
+        const calleeDirectPickSuffixes = calleeToolsConfig?.direct ?? [];
+        const calleeInnerTools: string[] = [];
+        const calleeSubagents = buildSubagentTools(
+          calleeGroups,
+          calleeCustom.tools,
+          undefined,
+          undefined,
+          {
+            parentProvider: calleeProvider,
+            subagentProviders: spec.subagentProviders,
+            providerConfigs: spec.providerConfigs,
+          },
+          {
+            ...(progressUrl ? { progressUrl } : {}),
+            parentSessionId: sessionId,
+            ...(conversationId
+              ? {
+                  parentDebugSessionId:
+                    buildSandboxStoreKey(userId, conversationId, spec.slug) ??
+                    conversationId,
+                }
+              : {}),
+            parentToolsUsed: calleeInnerTools,
+            parentMeta: {
+              ...(conversationId ? { conversationId } : {}),
+              agentSlug: spec.slug,
+              userId,
+            },
+            ...(signal ? { abortSignal: signal } : {}),
+          },
+          undefined,
+          spec.customSubagents as import("../subagent-tools.js").CustomSubagentSpec[] | undefined,
+          calleeDirectPickSuffixes,
+        );
+        const calleeSandboxSelected = (calleeToolsConfig?.custom ?? []).some((s) => s.startsWith("sandbox-"));
+        const calleeParentHoistedTools = calleeCustom.tools.filter((t) => {
+          const src = (t as { source?: string }).source ?? "";
+          return src === "custom:sandbox" && t.name !== "sandbox-destroy";
+        });
+        const calleePlaywrightTools =
+          calleeSandboxSelected && playwrightGroup ? playwrightGroup.tools : [];
+        let calleePalette = [
+          ...calleeSubagents.subagentTools,
+          ...calleeSubagents.directTools,
+          ...calleeSubagents.remainingCustomTools,
+          ...calleeParentHoistedTools,
+          ...calleePlaywrightTools,
+          ...calleeKbTools,
+        ];
+        calleePalette = applyAgentToolFilter(calleePalette, calleeToolsConfig, {
+          subagentTools: calleeSubagents.subagentTools,
+          directTools: calleeSubagents.directTools,
+          customTools: calleeCustom.tools,
+        });
+        const beforeReadOnly = calleePalette.length;
+        calleePalette = calleePalette.filter((tool) => !isWriteTool(tool, calleeGroups));
+        if (beforeReadOnly !== calleePalette.length) {
+          log(`A2A callee ${spec.slug}: removed ${beforeReadOnly - calleePalette.length} write tool(s) from delegated palette`);
+        }
+
+        const providerConfig = spec.provider ? spec.providerConfigs?.[spec.provider] : undefined;
+        const result = await runTask({
+          userId,
+          task: question,
+          userName,
+          userEmail,
+          customTools: calleePalette,
+          systemPromptOverride: spec.systemPrompt,
+          cwd: workspaceDir,
+          provider: spec.provider,
+          providerConfig,
+          progressUrl: undefined,
+          sessionId: `${sessionId}-a2a-${spec.slug}`,
+          skills: spec.skills,
+          abortSignal: signal,
+          progressMeta: {
+            ...(conversationId ? { conversationId } : {}),
+            agentSlug: spec.slug,
+          },
+        });
+        if (calleeInnerTools.length > 0) {
+          subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
+        }
+        return { text: result.text, toolsUsed: result.toolsUsed };
+      } finally {
+        await calleeMcp.cleanup().catch(() => {});
+      }
+    };
+
+    const delegationGovernor = new AgentDelegationGovernor({
+      ownerSlug: agentSlug ?? "root",
+      onEvent: (ev) => {
+        log(`A2A ${ev.kind}: ${ev.caller} -> ${ev.callee}${ev.reason ? ` (${ev.reason})` : ""}`);
+        if (ev.kind === "requested" || ev.kind === "queued" || ev.kind === "started") {
+          const spec = callableAgents?.find((candidate) => candidate.slug === ev.callee);
+          emitDelegationProgress(spec?.progressLabels?.[0] ?? `Delegating to ${ev.callee}...`);
+        }
+      },
+    });
+    const hydrateOrchestratorCallee = async (calleeSlug: string): Promise<CallableAgentSpec> => {
+      const caller = agentSlug?.trim();
+      if (!caller) throw new Error("caller agent slug is required for orchestrator delegation");
+      const qs = new URLSearchParams({
+        caller,
+        callee: calleeSlug,
+        userId,
+        sessionId,
+      });
+      const res = await fetch(`${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/internal/callable-agent-spec?${qs.toString()}`, {
+        method: "GET",
+        headers: {
+          ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+        },
+        signal: AbortSignal.timeout(30_000),
+      });
+      const body = (await res.json().catch(() => ({}))) as { success?: boolean; data?: CallableAgentSpec; error?: string };
+      if (!res.ok || body.success !== true || !body.data) {
+        throw new Error(body.error ?? `callable-agent-spec failed with HTTP ${res.status}`);
+      }
+      return body.data;
+    };
+    const callableAgentTools = callableAgents && callableAgents.length > 0
+      ? delegationMode === "orchestrator"
+        ? buildOrchestratorCallableAgentTool(
+            callableAgents as CallableAgentLightSpec[],
+            delegationGovernor,
+            hydrateOrchestratorCallee,
+            buildNestedRunner(),
+            { ...(abortSignal ? { signal: abortSignal } : {}), onProgress: emitDelegationProgress },
+          ) as unknown as ToolDefinition[]
+        : buildCallableAgentTools(
+            callableAgents as CallableAgentSpec[],
+            delegationGovernor,
+            buildNestedRunner(),
+            { ...(abortSignal ? { signal: abortSignal } : {}), onProgress: emitDelegationProgress },
+          ) as unknown as ToolDefinition[]
+      : [];
+
     let allTools = [
       ...subagentTools, // spaces, bitbucket, grafana, deepwiki, context7, pgm
+      ...callableAgentTools, // A2A governed full-agent delegation tools
       ...directTools, // write tools (create-ticket, send-message)
       ...remainingCustomTools, // custom tools not wrapped in a subagent
       ...parentHoistedTools, // sandbox tools mounted directly on the parent
@@ -1459,6 +2029,24 @@ async function processTask(
         `Agent tools config applied: ${allTools.length} tools after filtering`,
       );
     }
+
+    // ── Plan tools: framework default, not per-agent config ──────────────────
+    // todo-write / todo-read give the user live visibility into what the agent
+    // is doing, so they are DEFAULT-ON for every DIRECT interactive run (a user
+    // is watching a channel/thread) and OFF for scheduled/automation runs (no
+    // interactive surface, and the plan card has nowhere to render). This
+    // overrides the per-agent `tools.custom` gate above: any agent gets them on
+    // a direct run without needing config, and no agent gets them on a
+    // scheduled/automation run. Uses the tool objects from remainingCustomTools
+    // (already ctx-threaded by loadCustomTools). Mirrors the isScheduledRun /
+    // isReadOnlyJob logic computed later — inlined here because tool assembly
+    // runs before it.
+    const planToolsDefaultOn =
+      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      !isScheduledOrAutomationRun(eventType, conversationId);
+    const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
+    allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
+    if (planToolsDefaultOn) allTools.push(...planTools);
 
     // Inject copilot respond-to-user tool if provider is copilot.
     // Defence-in-depth: also require an actual copilot config. Without this
@@ -1691,6 +2279,32 @@ async function processTask(
       fullContext = fullContext
         ? `${fullContext}\n\n${goalPrimer}`
         : goalPrimer;
+    }
+
+    // ── Plan tracking primer ───────────────────────────────────────────────
+    // Surfaces the todo-write/todo-read plan tools up front so the agent
+    // maintains a live, in-place-updating checklist card in the thread instead
+    // of narrating steps in prose. Gated on BOTH (a) a channel surface to
+    // render the card onto and (b) todo-write being in the agent's tool config,
+    // so we never instruct an agent to use a tool it doesn't have.
+    // Same gate as tool availability (planToolsDefaultOn): a direct interactive
+    // run with a channel surface. Keeps the primer and the tools in lockstep —
+    // the agent is told to plan exactly when it has the tools + a place to render.
+    if (planToolsDefaultOn) {
+      const planPrimer = [
+        "## Plan tracking — REQUIRED for any real work",
+        "The user cannot see your reasoning or tool calls — only a small activity spinner. So WHENEVER a request requires you to DO something (search, read, call ANY tool, or take more than one step), you MUST post a plan with the `todo-write` tool BEFORE you start. It renders as a live, in-place-updating checklist card in this thread, and it's the ONLY way the user knows what you're doing.",
+        "- Post the FULL todo list up front, before your first tool call. Each todo is `{ id, title, status }` with a stable `id`, a short user-facing `title`, and `status` in `pending | in_progress | completed | failed`.",
+        "- Even a single-tool task gets a short 1–2 item plan (e.g. `Search #general`, then `Summarize findings`).",
+        "- Keep EXACTLY ONE todo `in_progress` at a time. Call `todo-write` again with the FULL list the moment a status changes — mark a todo `completed` immediately when it's done (don't batch), or `failed` if it can't complete.",
+        "- Use `todo-read` to re-check your current plan instead of re-deriving it.",
+        "- Titles are shown to the user — keep them clear and concise.",
+        "- Your final user-facing answer MUST be the LAST thing you output. Send your final `todo-write` (marking the closing step `completed`) BEFORE you write that answer, then write the answer with NO tool call after it. NEVER call `todo-write` (or any other tool) once your final answer is written — a trailing tool call starts a new message and the user then sees only that fragment instead of your answer.",
+        "The ONLY time to skip a plan is a pure conversational reply you answer directly with NO tool calls (e.g. a greeting, or a question you can answer from what's already in context).",
+      ].join("\n");
+      fullContext = fullContext
+        ? `${fullContext}\n\n${planPrimer}`
+        : planPrimer;
     }
 
     // ── Sandbox primer ─────────────────────────────────────────────────────
@@ -1965,6 +2579,11 @@ async function processTask(
     if (runtimeProvider && runtimeProvider !== "spaces") {
       attempts.push({ provider: "spaces", config: undefined });
     }
+    const attemptByProvider = new Map(
+      attempts
+        .filter((a): a is Attempt & { provider: string } => typeof a.provider === "string")
+        .map((a) => [a.provider, a]),
+    );
 
     // Default the per-attempt compaction flag to the caller's `compactBeforeRun`
     // (set by `/compact`). The provider-fallback machine still passes `true`
@@ -2015,6 +2634,7 @@ async function processTask(
         citationReflection,
         autoToolCitations,
         ...(isRegenerate ? { isRegenerate: true } : {}),
+        backgroundRegistry: backgroundSubagentRegistry,
       });
 
     // Capture provider-fallback context so an empty FINAL result can tell the
@@ -2045,8 +2665,13 @@ async function processTask(
         getPendingResponses().length === 0 &&
         getPendingActions().length === 0 &&
         getCustomPendingActions().length === 0,
+      // Auth failures walk the fallback chain like quota: a PRESENT-but-bad
+      // premium credential (expired OAuth, revoked key → 401/403) must fall
+      // through to the next provider (→ spaces), not hard-fail the run. This
+      // matters now that dispatchers thread the agent's premium provider as
+      // the primary — before, bad creds simply never got selected as primary.
       isQuotaError: (err) =>
-        err instanceof QuotaExhaustedError || isQuotaExhaustedError(err),
+        err instanceof QuotaExhaustedError || isQuotaExhaustedError(err) || isProviderAuthError(err),
       // Transient provider/network failures + detected stalls fall back to the
       // next provider (→ spaces) instead of dropping the run. A genuine user
       // cancel is gated out by isCancelled below before this is consulted.
@@ -2059,6 +2684,16 @@ async function processTask(
           lastFallbackUnderlying =
             lastErr instanceof Error ? lastErr.message : String(lastErr);
           metric.count("agent_provider_fallback", { from, to, agentSlug });
+          if (to === "spaces" && from !== "spaces") {
+            const wantedAttempt = attemptByProvider.get(from);
+            if (wantedAttempt?.config) {
+              const usingModel = LITELLM.model;
+              clog.warn(
+                `[agent] provider-fallthrough session=${sessionId} wanted=${from}/${wantedAttempt.config.model} using=spaces/${usingModel} reason=${lastFallbackUnderlying}`,
+              );
+              metric.count("provider_fallthrough");
+            }
+          }
           log(
             `Quota fallback: ${from} → ${to}. Underlying: ${lastFallbackUnderlying}`,
           );
@@ -2220,7 +2855,17 @@ async function processTask(
     // field verbatim, so a stringified `{"result":"…\n…"}` showed up in threads
     // as raw escaped JSON instead of the rendered answer. The executor still
     // gets the structured form via `automationResult`.
-    const callbackResultText = finalResultText;
+    // Sanitize citation tokens against the run's REAL tool citations before this
+    // text is persisted / emitted (DB body, GCS marker, done frame all read this
+    // one variable): drop hallucinated [clf-…] tokens the model invented, and
+    // rewrite its malformed forms — legacy [n](cite:clf-…), ranges [clf-id#a-#b],
+    // and label/ordinal [Image #1] — to valid [clf-…] tokens when a matching
+    // citation actually exists. Skipped for structured JSON output (that text IS
+    // the machine payload, not chat markdown).
+    const callbackResultText =
+      structuredOutputPayload !== undefined
+        ? finalResultText
+        : sanitizeCitations(finalResultText, result.toolInvocations, result.sessionClfTokens);
 
     // Honor an explicit user stop even when generation FINISHED before the abort
     // could interrupt it. Non-copilot agents (codex/spaces) deliver their final
@@ -2334,14 +2979,23 @@ async function processTask(
       model: completedModel,
     });
   } catch (err) {
-    // HA: another pod already owns this conversation's lock. Skip silently —
-    // do NOT send a failure callback, so the owning pod's real result is the
-    // one that reaches claw-auth. (Happens when run-recovery refires a run that
-    // the original, still-alive pod is also processing.)
+    // HA: another pod already owns this conversation's lock. In callback mode
+    // /run has already replied success, so claw-auth must receive a terminal
+    // callback to release its busy slot and drain any queued messages.
     if (err instanceof SessionLockedError) {
       log(
         `Skipped: conversation locked by another worker (sessionId=${sessionId})`,
       );
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        status: "failed",
+        error: "session_locked",
+        provider: callbackProvider,
+        model: callbackModel,
+      });
       return;
     }
     // If respond-to-user fired before the abort propagated, this is a
@@ -2511,6 +3165,9 @@ async function processTask(
       // exist — repo work happens in the sandbox.)
       await deleteWorkspace(sessionId).catch(() => {});
     }
+    // Free the per-run plan/todo state (todo-write store) so it doesn't
+    // accumulate across runs. No-op when the run never used todo-write.
+    clearPlan(sessionId);
   }
 }
 

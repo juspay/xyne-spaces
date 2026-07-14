@@ -24,6 +24,7 @@
     "pdfkit": "^0.15.2",
     "playwright": "^1.59.1",
     "pptxgenjs": "^4.0.1",
+    "winston": "^3.19.0",
     "yaml": "^2.7.0"
   },
   "devDependencies": {

@@ -180,9 +180,12 @@ export const agentChainWorkflowRepository = {
     return prisma.workflowGlobalRequest.create({ data: { workflowId, requestedByUserId } });
   },
 
-  listPendingGlobalRequests: () =>
+  listPendingGlobalRequests: (requestedByUserIds?: string[]) =>
     prisma.workflowGlobalRequest.findMany({
-      where: { status: "pending" },
+      where: {
+        status: "pending",
+        ...(requestedByUserIds ? { requestedByUserId: { in: requestedByUserIds } } : {}),
+      },
       include: { workflow: true },
       orderBy: { createdAt: "asc" },
     }),

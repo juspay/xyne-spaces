@@ -12,6 +12,10 @@ export interface Tool {
   description: string;
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   path?: string;
+  /** Explicit approval policy for gateway execution. Prefer this over method-based inference. */
+  requiresApproval?: boolean;
+  /** Backward-compatible alias accepted during registration. */
+  isWriteTool?: boolean;
   inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
 }

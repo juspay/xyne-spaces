@@ -1,9 +1,29 @@
 import { KataClient } from "@xyne/kata-sdk";
 import type { Session } from "@xyne/kata-sdk";
-import type { ToolDefinition } from "../types.js";
+import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
 
+// Build a redacted `Error: ...` string from a caught error. Several tool
+// catch blocks interpolate err.message straight into tool output, which can
+// echo secrets surfaced by the failing command. Route them through this.
+function sandboxErr(err: unknown): string {
+  return `Error: ${redactSecrets(err instanceof Error ? err.message : String(err))}`;
+}
+
+// Reject paths that resolve to known credential locations so they can't be
+// exfiltrated as base64/binary (which bypasses pattern redaction on text reads).
+function isCredentialPath(p: string): boolean {
+  const s = p.toLowerCase();
+  return /(^|\/)\.ssh(\/|$)|id_rsa|id_ed25519|\.git-credentials|\/tmp\/ssh-keys|\/tmp\/github-ssh-keys|\/tmp\/attic|\.netrc|\.npmrc|\.docker\/config|known_hosts/.test(s);
+}
+
 const SESSION_STORE = new Map<string, Session>();
+interface SessionOwner {
+  userId: string;
+  conversationId: string;
+  agentSlug: string;
+}
+const SESSION_OWNER = new Map<string, SessionOwner>();
 
 // When was a session first stored? Used to give freshly-created sessions
 // a grace period during which we DON'T treat probe failures as "dead".
@@ -28,6 +48,57 @@ const SESSION_TEMPLATE = new Map<string, string>();
 // eviction. Matches the SandboxTemplate's prebake budget (~8 min).
 const SESSION_FRESH_WINDOW_MS = 8 * 60 * 1000;
 
+// Session ids that are intentionally SHARED across users/conversations and so
+// must bypass the per-conversation ownership check. Currently only the single
+// read-only sbx-git session (see resolveSbxGit). Safe because such sessions are
+// read-only: the write/exec tools are stripped from the palette for the runs
+// that use them, so cross-tenant sharing can't mutate anything.
+const SHARED_SESSIONS = new Set<string>();
+
+// Session ids that are READ-ONLY (sbx-git). Any exec/write against them is
+// enforced here at execution time — not only by removing the tool from the
+// palette — so an explicit sessionId, a bypassed tool-strip, or a dev agent
+// reusing the shared session still cannot mutate it. sandbox-run only permits
+// the read-only command allowlist below; write/destroy are rejected outright.
+const READONLY_SESSIONS = new Set<string>();
+
+// Binaries that are read-only REGARDLESS of their arguments (no write/exec
+// capability; redirection + command-chaining are blocked separately below).
+// Deliberately EXCLUDES find/sed/awk/git/xargs/interpreters — agents use the
+// dedicated read/grep/find tools, and `git-read` for any git (its own allowlist).
+const READONLY_CMD_ALLOW = new Set([
+  "cat", "ls", "head", "tail", "wc", "sort", "uniq", "cut", "tr", "nl", "tac",
+  "rev", "grep", "egrep", "fgrep", "rg", "diff", "comm", "column", "basename",
+  "dirname", "pwd", "echo", "printf", "file", "stat", "tree", "jq", "yq",
+  "readlink", "realpath",
+]);
+// Block redirection (`>`), pipes (`|`), chaining (`;`/`&&`), and subshells
+// (`$(`/backtick) so a single whitelisted binary can't be turned into a write.
+const READONLY_SHELL_META = /[;&|`$(){}<>\n\r]/;
+
+/** True only for a single whitelisted read-only command (no chaining/redirection). */
+function isReadOnlyCommand(cmd: string): boolean {
+  const t = (cmd ?? "").trim();
+  if (!t || READONLY_SHELL_META.test(t)) return false;
+  const bin = t.split(/\s+/)[0]?.replace(/^.*\//, ""); // basename of the binary
+  return !!bin && READONLY_CMD_ALLOW.has(bin);
+}
+
+const READONLY_REJECT_RUN =
+  "Error: This is the READ-ONLY git sandbox (sbx-git). `sandbox-run` only allows read-only commands here " +
+  `(${[...READONLY_CMD_ALLOW].slice(0, 12).join(", ")}, …) with no pipes/redirection/chaining. ` +
+  "Use the dedicated read/grep/find tools for inspection, and the `git-read` tool for any git " +
+  "(read a branch by ref — never checkout). To write or build, the run must use a per-project dev sandbox.";
+
+/** Reject any mutating op against a read-only (sbx-git) session. Returns an error string, or null if allowed. */
+function readOnlyGuard(session: Session, opts: { command?: string; write?: boolean; destroy?: boolean }): string | null {
+  if (!READONLY_SESSIONS.has(session.id)) return null;
+  if (opts.write) return "Error: cannot write files in the read-only sbx-git sandbox.";
+  if (opts.destroy) return "Error: refusing to destroy the shared read-only sbx-git sandbox.";
+  if (opts.command !== undefined && !isReadOnlyCommand(opts.command)) return READONLY_REJECT_RUN;
+  return null;
+}
+
 const STALE_PATTERNS = [
   /could not connect to the backend sandbox/i,
   /HTTP request failed/i,
@@ -37,21 +108,104 @@ const STALE_PATTERNS = [
   /sandbox(?:claim)?.*not found/i,
 ];
 
+// Agents whose per-thread session is ISOLATED PER USER rather than shared
+// across the thread. The Digital Twin runs AS a specific mentioned user, so two
+// users mentioned in ONE Spaces thread each need a private session/sandbox
+// (otherwise user B's mention resumes user A's twin conversation). Everything
+// else keeps the intentional shared-thread resume documented below.
+const PER_USER_SESSION_AGENTS: ReadonlySet<string> = new Set(["digital-twin"]);
+
+// Fold a userId into a key segment using the archive-safe charset only
+// (`[A-Za-z0-9-]`; `_` is reserved as the `<cid>_<slug>` separator and `:` is
+// banned by claw's isSafeId). Length-capped so the composite store key stays
+// within the GCS archive-key validator (/^[A-Za-z0-9_-]{8,100}$/). userIds here
+// are cuid-shaped, so this is a guard, not a hot path.
+function safeUserKeySegment(userId: string): string {
+  const cleaned = userId.replace(/[^A-Za-z0-9]/g, "");
+  return cleaned.length <= 40 ? cleaned : cleaned.slice(0, 40);
+}
+
+export function buildSandboxStoreKey(userId: string | undefined, conversationId: string | undefined, agentSlug?: string | undefined): string | undefined {
+  // Default: keyed by conversation + agent ONLY — userId is NOT part of the key.
+  // A thread's session/sandbox is SHARED across every user in that thread for
+  // the same agent, so a second user triggering the agent RESUMES the existing
+  // session (conversation context + tool calls preserved) instead of starting
+  // fresh ("claude --resume", not a new session). Per-user visibility is
+  // enforced at the UI layer (Agent Control Center ACL filters messages/runs by
+  // userId), not by key-level isolation.
+  //
+  // Exception: PER_USER_SESSION_AGENTS (the Digital Twin) fold the userId INTO
+  // the conversation segment so each mentioned user gets a private session in
+  // the same thread. `_<slug>` stays LAST so bareConversationIdForStoreKey
+  // (lastIndexOf "_") still parses. This is the single chokepoint: every caller
+  // that derives the session/sandbox store key inherits the per-user split.
+  const cid = conversationId?.trim();
+  if (!cid) return undefined;
+  const slug = agentSlug?.trim();
+  const uid = userId?.trim();
+  const cidSeg =
+    slug && uid && PER_USER_SESSION_AGENTS.has(slug)
+      ? `${cid}-${safeUserKeySegment(uid)}`
+      : cid;
+  return slug ? `${cidSeg}_${slug}` : cidSeg;
+}
+
 function isStaleSessionError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return STALE_PATTERNS.some((re) => re.test(msg));
 }
 
-function rememberSession(storeKey: string | undefined, session: Session, template?: string): void {
+function ownerFromContext(context: { meta?: Record<string, string> } | undefined): SessionOwner | undefined {
+  const userId = context?.meta?.["userId"]?.trim();
+  const conversationId = context?.meta?.["conversationId"]?.trim();
+  if (!userId || !conversationId) return undefined;
+  return {
+    userId,
+    conversationId,
+    agentSlug: context?.meta?.["agentSlug"]?.trim() ?? "",
+  };
+}
+
+function storeKeyFromContext(context: { meta?: Record<string, string> } | undefined): string | undefined {
+  return buildSandboxStoreKey(
+    context?.meta?.["userId"],
+    context?.meta?.["conversationId"],
+    context?.meta?.["agentSlug"],
+  );
+}
+
+function rememberSession(storeKey: string | undefined, session: Session, template?: string, owner?: SessionOwner): void {
   if (storeKey) SESSION_STORE.set(storeKey, session);
   SESSION_STORE.set(session.id, session);
   const now = Date.now();
   if (storeKey) SESSION_CREATED_AT.set(storeKey, now);
   SESSION_CREATED_AT.set(session.id, now);
+  if (owner) {
+    if (storeKey) SESSION_OWNER.set(storeKey, owner);
+    SESSION_OWNER.set(session.id, owner);
+  }
   if (template) {
     if (storeKey) SESSION_TEMPLATE.set(storeKey, template);
     SESSION_TEMPLATE.set(session.id, template);
   }
+}
+
+function isSessionOwnedByContext(session: Session, lookupKey: string | undefined, context: { meta?: Record<string, string> } | undefined): boolean {
+  // Shared read-only sessions (sbx-git) are accessible to any caller — they hold
+  // no per-tenant state and expose no mutating tools.
+  if (SHARED_SESSIONS.has(session.id)) return true;
+  const owner =
+    (lookupKey ? SESSION_OWNER.get(lookupKey) : undefined) ??
+    SESSION_OWNER.get(session.id);
+  const caller = ownerFromContext(context);
+  if (!owner || !caller) return false;
+  return owner.userId === caller.userId &&
+    owner.conversationId === caller.conversationId &&
+    owner.agentSlug === caller.agentSlug;
+}
+
+function unauthorizedSessionMessage(sessionId: string): string {
+  return `Error: Session ${sessionId} is not authorized for this user/conversation.`;
 }
 
 function isFreshSession(session: Session, storeKey?: string): boolean {
@@ -65,15 +219,18 @@ function evictSession(session: Session, storeKey?: string): void {
   if (storeKey) {
     SESSION_STORE.delete(storeKey);
     SESSION_CREATED_AT.delete(storeKey);
+    SESSION_OWNER.delete(storeKey);
     SESSION_TEMPLATE.delete(storeKey);
   }
   SESSION_STORE.delete(session.id);
   SESSION_CREATED_AT.delete(session.id);
+  SESSION_OWNER.delete(session.id);
   SESSION_TEMPLATE.delete(session.id);
   for (const [k, v] of SESSION_STORE.entries()) {
     if (v === session) {
       SESSION_STORE.delete(k);
       SESSION_CREATED_AT.delete(k);
+      SESSION_OWNER.delete(k);
       SESSION_TEMPLATE.delete(k);
     }
   }
@@ -145,7 +302,9 @@ export interface RepoSetupConfig {
   slug: string;
   name: string;
   description: string;
-  repoUrl: string;
+  /** Omit for a no-repo profile (e.g. "Browser (no repo)"): no clone happens,
+   *  the sandbox is just provisioned on `template`. */
+  repoUrl?: string;
   defaultBranch: string;
   cloneDepth?: number;
   workDir: string;
@@ -153,6 +312,24 @@ export interface RepoSetupConfig {
   sessionTimeoutMs?: number;
   idleTimeoutMs?: number;
   readyTimeoutMs?: number;
+  /** Session lifetime for an ON-DEMAND write sandbox (sandbox-repo-setup
+   *  write:true). Keep this short for hot repos (e.g. xyne-spaces = 20 min) so
+   *  few golden-snapshot clones are alive at once and the per-snapshot GCP
+   *  op-rate limit isn't tripped. Falls back to sessionTimeoutMs when unset, so
+   *  other repos' behavior is unchanged. */
+  writeSessionTimeoutMs?: number;
+  /** Idle timeout for an ON-DEMAND write sandbox — it's destroyed after this
+   *  much inactivity (e.g. xyne-spaces = 10 min), independent of the hard
+   *  writeSessionTimeoutMs cap. Falls back to idleTimeoutMs when unset, so other
+   *  repos are unchanged. */
+  writeIdleTimeoutMs?: number;
+  /** READ-FIRST: when true, sandbox-repo-setup DEFAULTS every interactive run
+   *  to the read-only sbx-git sandbox (no snapshot clone), and only claims a
+   *  writable golden dev sandbox on explicit write:true. Opt-in per repo — set
+   *  it on hot repos (e.g. xyne-spaces) to eliminate default snapshot clones.
+   *  Repos WITHOUT this keep legacy behavior (setup provisions a writable clone
+   *  directly). Requires the repo to exist in SBX_GIT.repoPaths for reads. */
+  readFirst?: boolean;
   steps: SetupStep[];
   ports?: Record<string, number>;
   // When the template bakes multiple repos, list the auxiliary ones here.
@@ -176,20 +353,41 @@ export const SANDBOX_CONFIG_SCHEMA = {
   },
   KATA_TEMPLATE: {
     label: "Kata Sandbox Template",
+    // Unchanged default. Browser work routes to `agent-workspace-browser-template`
+    // (via the "Browser (no repo)" pin); repo work routes to a repo template (via
+    // the pin). See pinnedTemplateForContext + repo-configs.ts.
     default: "kata-workspace-template",
     required: false as const,
     placeholder: "kata-workspace-template",
   },
 };
 
-function makeClient(config: Record<string, string>): KataClient {
+function makeClient(config: Record<string, string>, templateOverride?: string): KataClient {
   const routerUrl = config["KATA_ROUTER_URL"];
   if (!routerUrl) throw new Error("KATA_ROUTER_URL is required");
   return new KataClient({
     routerUrl,
     namespace: config["KATA_NAMESPACE"] || "xyne-apps",
-    template: config["KATA_TEMPLATE"] || "kata-workspace-template",
+    // Precedence: explicit override (e.g. a UI-pinned repo's template) >
+    // agent-config KATA_TEMPLATE > the previous default. Browser/repo sandboxes
+    // come through the pin (templateOverride).
+    template: templateOverride || config["KATA_TEMPLATE"] || "kata-workspace-template",
   });
+}
+
+/**
+ * When an agent has a sandbox pinned in the UI (agent.config.sandboxRepo →
+ * context.meta.sandboxRepo), EVERY auto-provisioned sandbox must use that repo's
+ * template — never the legacy kata image and never an LLM-chosen override. This
+ * makes `sandbox-create` / `sandbox-run` one-shot behave like `sandbox-repo-setup`
+ * w.r.t. template selection. Returns the pinned repo's template, or undefined
+ * when no pin is set (callers then fall back to an explicit param / the default).
+ */
+async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<string | undefined> {
+  const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
+  if (!pinnedRepo) return undefined;
+  const { REPO_CONFIGS } = await import("./repo-configs.js");
+  return REPO_CONFIGS[pinnedRepo]?.template;
 }
 
 /**
@@ -218,7 +416,7 @@ export const sandboxCreate: ToolDefinition = {
       },
       template: {
         type: "string",
-        description: "Sandbox template name to use (default: kata-workspace-template from agent config).",
+        description: "Sandbox template name to use (default: kata-workspace-template). For browser automation pin the agent to 'Browser (no repo)'; for repo work pin to a repo. Only override here for special cases.",
       },
     },
     required: [],
@@ -226,16 +424,20 @@ export const sandboxCreate: ToolDefinition = {
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
-    const conversationId = context.meta?.["conversationId"];
-    if (!conversationId) return "Error: No conversationId in context.";
-    const agentSlug = context.meta?.["agentSlug"] ?? "";
-    const storeKey = agentSlug ? `${conversationId}_${agentSlug}` : conversationId;
+    const storeKey = storeKeyFromContext(context);
+    if (!storeKey) return "Error: No userId/conversationId in context.";
     const timeoutMs = (params["timeoutMs"] as number | undefined) ?? 60 * 60 * 1000;
     const idleTimeoutMs = (params["idleTimeoutMs"] as number | undefined) ?? 10 * 60 * 1000;
-    const template = params["template"] as string | undefined;
+    // A UI-pinned sandbox repo wins over whatever template the LLM passed —
+    // a pinned agent must always get its own sandbox, never the legacy kata one.
+    const pinnedTemplate = await pinnedTemplateForContext(context);
+    const template = pinnedTemplate ?? (params["template"] as string | undefined);
 
     const existing = SESSION_STORE.get(storeKey);
     if (existing) {
+      if (!isSessionOwnedByContext(existing, storeKey, context)) {
+        return "Error: Existing sandbox session is not authorized for this user/conversation.";
+      }
       const alive = await probeSession(existing, storeKey);
       if (alive) {
         return JSON.stringify({ sessionId: existing.id, status: "ready", reused: true });
@@ -244,12 +446,12 @@ export const sandboxCreate: ToolDefinition = {
     }
 
     try {
-      const client = makeClient(context.config);
+      const client = makeClient(context.config, template);
       const session = await client.createSession({ timeoutMs, idleTimeoutMs, ...(template ? { template } : {}) });
-      rememberSession(storeKey, session, template);
+      rememberSession(storeKey, session, template, ownerFromContext(context));
       return JSON.stringify({ sessionId: session.id, status: "ready" });
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      return sandboxErr(err);
     }
   },
 };
@@ -297,6 +499,11 @@ export const sandboxRun: ToolDefinition = {
     if (explicitSessionId) {
       const session = SESSION_STORE.get(explicitSessionId);
       if (!session) return `Error: Session ${explicitSessionId} not found.`;
+      if (!isSessionOwnedByContext(session, explicitSessionId, context)) {
+        return unauthorizedSessionMessage(explicitSessionId);
+      }
+      const roExplicit = readOnlyGuard(session, { command: cmd });
+      if (roExplicit) return roExplicit;
 
       try {
         const result = await session.commands.run(cmd, timeoutMs);
@@ -310,17 +517,21 @@ export const sandboxRun: ToolDefinition = {
         if (/aborted due to timeout|operation was aborted/i.test(msg)) {
           return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
         }
-        return `Error: ${msg}`;
+        return `Error: ${redactSecrets(msg)}`;
       }
     }
 
     // Try auto-resolve from conversation context
     const conversationId = context.meta?.["conversationId"];
-    const agentSlug = context.meta?.["agentSlug"] ?? "";
+    const storeKey = storeKeyFromContext(context);
     if (conversationId) {
-      const storeKey = agentSlug ? `${conversationId}_${agentSlug}` : conversationId;
-      const session = SESSION_STORE.get(storeKey);
+      const session = storeKey ? SESSION_STORE.get(storeKey) : undefined;
       if (session) {
+        if (!isSessionOwnedByContext(session, storeKey, context)) {
+          return unauthorizedSessionMessage(session.id);
+        }
+        const roStore = readOnlyGuard(session, { command: cmd });
+        if (roStore) return roStore;
         try {
           const result = await session.commands.run(cmd, timeoutMs);
           return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
@@ -333,18 +544,21 @@ export const sandboxRun: ToolDefinition = {
           if (/aborted due to timeout|operation was aborted/i.test(msg)) {
             return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
           }
-          return `Error: ${msg}`;
+          return `Error: ${redactSecrets(msg)}`;
         }
       }
     }
 
-    // No session found — fall back to one-shot
+    // No session found — fall back to one-shot. Honour a UI-pinned sandbox repo
+    // so the ephemeral VM uses the pinned template (with /services + browser),
+    // never the legacy kata default.
     try {
-      const client = makeClient(context.config);
+      const pinnedTemplate = await pinnedTemplateForContext(context);
+      const client = makeClient(context.config, pinnedTemplate);
       const result = await client.exec(cmd, { timeoutMs });
       return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      return sandboxErr(err);
     }
   },
 };
@@ -382,6 +596,11 @@ export const sandboxRunDetached: ToolDefinition = {
 
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found. Create one with sandbox-create first.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    const roDetached = readOnlyGuard(session, { command: cmd });
+    if (roDetached) return roDetached;
 
     try {
       const jobId = await session.commands.runDetached(cmd);
@@ -391,7 +610,7 @@ export const sandboxRunDetached: ToolDefinition = {
         evictSession(session);
         return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
       }
-      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      return sandboxErr(err);
     }
   },
 };
@@ -427,6 +646,9 @@ export const sandboxPollJob: ToolDefinition = {
 
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
 
     try {
       const status = await session.commands.pollJob(jobId);
@@ -438,7 +660,7 @@ export const sandboxPollJob: ToolDefinition = {
         evictSession(session);
         return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
       }
-      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      return sandboxErr(err);
     }
   },
 };
@@ -485,6 +707,11 @@ export const sandboxWriteFile: ToolDefinition = {
 
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    const roWrite = readOnlyGuard(session, { write: true });
+    if (roWrite) return roWrite;
 
     try {
       const buf = encoding === "base64" ? Buffer.from(content, "base64") : Buffer.from(content, "utf8");
@@ -495,7 +722,7 @@ export const sandboxWriteFile: ToolDefinition = {
         evictSession(session);
         return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
       }
-      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      return sandboxErr(err);
     }
   },
 };
@@ -542,9 +769,15 @@ export const sandboxReadFile: ToolDefinition = {
     if (!context) return "Error: No execution context available.";
     const sessionId = params["sessionId"] as string;
     const path = params["path"] as string;
+    if (isCredentialPath(path)) {
+      return JSON.stringify({ error: "Refused: path looks like a credential file" });
+    }
 
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
 
     try {
       const buf = await session.files.read(path);
@@ -571,7 +804,7 @@ export const sandboxReadFile: ToolDefinition = {
         evictSession(session);
         return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
       }
-      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      return sandboxErr(err);
     }
   },
 };
@@ -615,9 +848,15 @@ export const sandboxDeliverFiles: ToolDefinition = {
     if (!Array.isArray(paths) || paths.length === 0) {
       return "Error: paths must be a non-empty array of absolute file paths.";
     }
+    if (paths.some((p) => isCredentialPath(p))) {
+      return JSON.stringify({ error: "Refused: path looks like a credential file" });
+    }
 
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
 
     const blocks: string[] = [];
     const errors: string[] = [];
@@ -633,7 +872,7 @@ export const sandboxDeliverFiles: ToolDefinition = {
           evictSession(session);
           return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
         }
-        errors.push(`${p}: ${err instanceof Error ? err.message : String(err)}`);
+        errors.push(`${p}: ${redactSecrets(err instanceof Error ? err.message : String(err))}`);
       }
     }
 
@@ -651,6 +890,129 @@ export const sandboxDeliverFiles: ToolDefinition = {
     return result;
   },
 };
+
+/**
+ * Set git identity inside the sandbox so every agent commit has the
+ * human who triggered the run as AUTHOR and Xyne Spaces as COMMITTER —
+ * the standard "person authored it, automation committed it" split. So a
+ * commit shows up on Bitbucket with the user's face as author, while the
+ * record reflects that it landed via the Xyne Spaces bot.
+ *
+ *   - Author = context.meta.{userEmail,userName}, which claw populates
+ *     from the /run request in routes/run.ts:504-506.
+ *   - Committer = Xyne Spaces <noreply@spaces.xyne.juspay.net> (constant).
+ *
+ * Both are enforced per workdir via a `post-commit` hook (see the big
+ * comment below for why `git config` alone can't do it).
+ *
+ * Idempotent — safe to call on session reuse. If userEmail is missing
+ * (older /run callers don't pass it), we no-op and let git use whatever
+ * the sandbox image's baked identity is.
+ */
+async function configureGitIdentity(
+  session: Session,
+  workDirs: string[],
+  userEmail: string | undefined,
+  userName: string | undefined,
+  log: string[],
+): Promise<void> {
+  if (!userEmail) {
+    log.push("Git identity: userEmail not in context.meta — leaving sandbox defaults.");
+    return;
+  }
+  const safeName = (userName ?? userEmail.split("@")[0] ?? "Xyne User").replace(/['"\\$`]/g, "");
+  const safeEmail = userEmail.replace(/['"\\$`]/g, "");
+
+  // Xyne Spaces is the committer of every agent commit; the human stays
+  // the author. These come from the same identity previously used for the
+  // (now-removed) Co-Authored-By trailer.
+  const COMMITTER_NAME = "Xyne Spaces";
+  const COMMITTER_EMAIL = "noreply@spaces.xyne.juspay.net";
+
+  // ── The git-env override problem ─────────────────────────────────────
+  // The kata sandbox pod sets these container-level env vars (see
+  // claw-deployments/kata-infra/10-sandbox-template-gvisor.yaml:219-226):
+  //
+  //   GIT_AUTHOR_EMAIL = "john.doe@gmail.com"
+  //   GIT_AUTHOR_NAME  = "Xyne Workflow Bot"
+  //   (same for COMMITTER)
+  //
+  // Git's precedence is env vars > .git/config, so `git config user.email`
+  // alone does NOT change the commit author/committer. Verified blockers
+  // (probed 2026-06-03):
+  //   • /usr/local/bin is in PATH ahead of /usr/bin BUT root-owned — we
+  //     can't drop a wrapper there as nixuser.
+  //   • Nix-profile paths come first in PATH but writing there pollutes
+  //     the Nix profile (bad practice + may get overwritten).
+  //   • kata's /execute endpoint runs commands in non-interactive non-
+  //     login bash, so ~/.bashrc / ~/.profile / /etc/profile.d are NOT
+  //     sourced — env-export files in those locations don't get picked up.
+  //   • session.commands.run sends only {command} — no per-call env.
+  //
+  // SESSION-LOCAL solution: a `post-commit` hook per repo that runs
+  // immediately after every commit, unsets the bad env vars, exports the
+  // committer as Xyne Spaces, then re-amends the commit forcing the human
+  // user as author via `--author`. The amend's committer comes from the
+  // GIT_COMMITTER_* env we just set. Hooks live in `.git/hooks/` inside
+  // the per-claim PVC — completely session-local, no system-path writes
+  // needed, no permission issues. A re-entry guard (XYNE_POST_COMMIT_
+  // AMEND_GUARD env var) prevents the amend's own post-commit from looping.
+  //
+  // Result: commit lands with the baked bad identity → post-commit amends
+  // → final commit has the human user as author and Xyne Spaces as committer.
+  const postCommitHook = [
+    "#!/bin/sh",
+    "# Xyne session-local post-commit identity rewrite.",
+    "# Installed by sandbox-repo-setup so the human who triggered the",
+    "# agent run is the commit AUTHOR and Xyne Spaces is the COMMITTER,",
+    "# overriding the container's baked xyne.spaces/Workflow Bot identity.",
+    "# Hook is per-repo, lives in .git/hooks/, and is gone when the",
+    "# per-claim PVC is reset.",
+    "",
+    "# Re-entry guard: the amend below would re-fire this hook and loop.",
+    "[ \"$XYNE_POST_COMMIT_AMEND_GUARD\" = \"1\" ] && exit 0",
+    "",
+    "# Strip the pod-level identity env vars, then set the committer to",
+    "# Xyne Spaces. git inherits this env when the amend below runs.",
+    "unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL",
+    `export GIT_COMMITTER_NAME="${COMMITTER_NAME}"`,
+    `export GIT_COMMITTER_EMAIL="${COMMITTER_EMAIL}"`,
+    "export XYNE_POST_COMMIT_AMEND_GUARD=1",
+    "",
+    "# --author forces the human user as author (NOT --reset-author, which",
+    "# would copy the committer identity onto the author too). The committer",
+    "# comes from GIT_COMMITTER_* above. --no-edit keeps the message intact.",
+    // --allow-empty: if the original commit had no file changes (e.g. the
+    // doctor's smoke-test empty commit), the amend would otherwise refuse
+    // with "would make it empty" and exit 1, silenced by 2>/dev/null. The
+    // flag lets the amend rewrite identity on those commits too. stderr is
+    // silenced because an amend can fail harmlessly mid-rebase / cherry-pick.
+    `git commit --amend --no-edit --no-verify --allow-empty --author="${safeName} <${safeEmail}>" 2>/dev/null || true`,
+  ].join("\n");
+  const postCommitB64 = Buffer.from(postCommitHook, "utf8").toString("base64");
+
+  for (const dir of workDirs) {
+    try {
+      // Per-repo, all in one command:
+      //   1. Set config (cosmetic, but tools like `git log --format=%an`
+      //      of historical commits respect config)
+      //   2. Install post-commit hook → fixes author + committer via amend
+      const cmd =
+        `cd ${dir} && ` +
+        `git config user.email "${safeEmail}" && ` +
+        `git config user.name "${safeName}" && ` +
+        `mkdir -p .git/hooks && ` +
+        `echo "${postCommitB64}" | base64 -d > .git/hooks/post-commit && ` +
+        `chmod +x .git/hooks/post-commit`;
+      await session.commands.run(cmd, 10_000);
+      log.push(`Git identity for ${dir}: author ${safeName} <${safeEmail}>, committer ${COMMITTER_NAME} <${COMMITTER_EMAIL}> (post-commit rewrite)`);
+    } catch (err) {
+      // Non-fatal: failing to set identity shouldn't block the whole
+      // setup. The agent can still work; commits just won't be attributed.
+      log.push(`Git identity for ${dir}: WARN — ${redactSecrets(err instanceof Error ? err.message : String(err))}`);
+    }
+  }
+}
 
 export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
   // Build input schema. When the config has auxRepos, add an optional
@@ -690,20 +1052,55 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
     inputSchema: {
       type: "object",
       properties: inputProperties,
-      required: ["branchName"],
+      // No-repo profiles (e.g. "Browser (no repo)") have nothing to branch.
+      required: config.repoUrl ? ["branchName"] : [],
     },
 
     async execute(params, context) {
       if (!context) return "Error: No execution context available.";
       const conversationId = context.meta?.["conversationId"];
       if (!conversationId) return "Error: No conversationId in context.";
-      const agentSlug = context.meta?.["agentSlug"] ?? "";
-      const storeKey = agentSlug ? `${conversationId}_${agentSlug}` : conversationId;
+      const storeKey = storeKeyFromContext(context);
+      if (!storeKey) return "Error: No userId/conversationId in context.";
+
+      // No-repo profile (e.g. "Browser (no repo)") — nothing to clone or build.
+      // Ensure a session exists on this profile's template (browser-only stack)
+      // and return it; mirrors sandbox-create's reuse/create logic. The pin
+      // routes sandbox-create / sandbox-run one-shot to the same template, so the
+      // session is consistent however it was provisioned.
+      if (!config.repoUrl) {
+        const existing = SESSION_STORE.get(storeKey);
+        if (existing) {
+          if (!isSessionOwnedByContext(existing, storeKey, context)) {
+            return unauthorizedSessionMessage(existing.id);
+          }
+          if (await probeSession(existing, storeKey)) {
+            return JSON.stringify({ sessionId: existing.id, status: "ready", reused: true });
+          }
+          evictSession(existing, storeKey);
+        }
+        const noRepoDuration = (params["sessionDurationMs"] as number | undefined) ?? (config.sessionTimeoutMs || 60 * 60 * 1000);
+        const client = makeClient(context.config, config.template);
+        const session = await client.createSession({
+          timeoutMs: noRepoDuration,
+          idleTimeoutMs: config.idleTimeoutMs || 60 * 60 * 1000,
+          template: config.template,
+        });
+        rememberSession(storeKey, session, config.template, ownerFromContext(context));
+        return JSON.stringify({ sessionId: session.id, status: "ready", template: config.template, ports: config.ports || {} });
+      }
 
       const branchName = params["branchName"] as string;
       const baseBranch = (params["baseBranch"] as string | undefined) ?? config.defaultBranch;
       const sessionDurationMs = (params["sessionDurationMs"] as number | undefined) ?? (config.sessionTimeoutMs || 60 * 60 * 1000);
       const auxBranches = (params["auxBranches"] as Record<string, string> | undefined) ?? {};
+
+      // Pull the originating user's email/name from the run meta. routes/run.ts
+      // populates these from the /run request body. configureGitIdentity below
+      // will set git config + install the post-commit identity hook in every workdir.
+      const userEmail = context.meta?.["userEmail"];
+      const userName = context.meta?.["userName"];
+      const allWorkDirs = [config.workDir, ...(config.auxRepos?.map((r) => r.workDir) ?? [])];
 
       const log: string[] = [];
 
@@ -738,74 +1135,82 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             }
             if (!done) log.push(`Aux ${aux.name}: checkout still running after 60s; continuing.`);
           } catch (err) {
-            log.push(`Aux ${aux.name}: WARN error — ${err instanceof Error ? err.message : String(err)}`);
+            log.push(`Aux ${aux.name}: WARN error — ${redactSecrets(err instanceof Error ? err.message : String(err))}`);
           }
         }
       };
 
       const cached = SESSION_STORE.get(storeKey);
       if (cached) {
-        // Only reuse sessions that were created with THIS config's
-        // template. Two reasons to skip reuse:
-        //   1. Different template — e.g. session was a hyperswitch one
-        //      but this call is for xyne-spaces. The repo layout and
-        //      services are wrong; evict + create fresh.
-        //   2. Bare-warmpool VM (template-less sandbox-create session)
-        //      — no git creds, no Nix services, no prebaked node_modules.
-        // SESSION_TEMPLATE is populated by sandbox-repo-setup at
-        // rememberSession time. If absent (legacy session created
-        // before this tracking landed), fall back to the old fragile
-        // substring check.
-        const cachedTemplate =
-          SESSION_TEMPLATE.get(storeKey) ?? SESSION_TEMPLATE.get(cached.id);
-        const isRepoTemplate = cachedTemplate
-          ? cachedTemplate === config.template
-          : cached.id.includes("agent-workspace") || cached.id.includes("docker-dev");
-        if (isRepoTemplate && await probeSession(cached, storeKey)) {
-          log.push(`Reusing existing sandbox session ${cached.id}`);
-          try {
-            // The pod prebakes a shallow clone of the default branch.
-            // branchName might be:
-            //   (a) an existing branch on origin (resume work on it), or
-            //   (b) a brand-new branch to cut from baseBranch.
-            // Try (a) first: `git fetch origin <branchName>` succeeds iff
-            // the branch exists on remote → checkout from FETCH_HEAD.
-            // Fall back to (b): fetch baseBranch + cut new branch from
-            // its tip. `checkout -B` is idempotent on re-runs.
-            const checkoutJob = await cached.commands.runDetached(
-              `cd ${config.workDir} && ` +
-              `(if git fetch origin ${branchName} 2>/dev/null; then ` +
-              `git checkout -B ${branchName} FETCH_HEAD; else ` +
-              `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
-            );
-            const deadline = Date.now() + 30_000;
-            while (Date.now() < deadline) {
-              await new Promise((r) => setTimeout(r, 1_000));
-              const status = await cached.commands.pollJob(checkoutJob);
-              if (status.done) break;
-            }
-            log.push(`Checked out ${branchName} on existing session.`);
-          } catch (err) {
-            log.push(`Branch checkout failed: ${err instanceof Error ? err.message : String(err)} (continuing anyway)`);
-          }
-          // Re-run aux branch checkouts even on reuse: caller may have
-          // passed a different auxBranches map this turn. Idempotent if
-          // already on the requested branches.
-          await checkoutAuxBranches(cached);
-          return JSON.stringify({
-            sessionId: cached.id,
-            branch: branchName,
-            reused: true,
-            ports: config.ports || {},
-            log,
-          });
-        }
-        if (!isRepoTemplate) {
-          log.push(`Cached session ${cached.id} is on the wrong template — discarding and creating a fresh repo-template VM.`);
+        if (!isSessionOwnedByContext(cached, storeKey, context)) {
+          log.push(`Cached session ${cached.id} is not authorized for this user/conversation — ignoring.`);
         } else {
-          log.push(`Cached session ${cached.id} is dead — recreating.`);
+          // Only reuse sessions that were created with THIS config's
+          // template. Two reasons to skip reuse:
+          //   1. Different template — e.g. session was a hyperswitch one
+          //      but this call is for xyne-spaces. The repo layout and
+          //      services are wrong; evict + create fresh.
+          //   2. Bare-warmpool VM (template-less sandbox-create session)
+          //      — no git creds, no Nix services, no prebaked node_modules.
+          // SESSION_TEMPLATE is populated by sandbox-repo-setup at
+          // rememberSession time. If absent (legacy session created
+          // before this tracking landed), fall back to the old fragile
+          // substring check.
+          const cachedTemplate =
+            SESSION_TEMPLATE.get(storeKey) ?? SESSION_TEMPLATE.get(cached.id);
+          const isRepoTemplate = cachedTemplate
+            ? cachedTemplate === config.template
+            : cached.id.includes("agent-workspace") || cached.id.includes("docker-dev");
+          if (isRepoTemplate && await probeSession(cached, storeKey)) {
+            log.push(`Reusing existing sandbox session ${cached.id}`);
+            try {
+              // The pod prebakes a shallow clone of the default branch.
+              // branchName might be:
+              //   (a) an existing branch on origin (resume work on it), or
+              //   (b) a brand-new branch to cut from baseBranch.
+              // Try (a) first: `git fetch origin <branchName>` succeeds iff
+              // the branch exists on remote -> checkout from FETCH_HEAD.
+              // Fall back to (b): fetch baseBranch + cut new branch from
+              // its tip. `checkout -B` is idempotent on re-runs.
+              const checkoutJob = await cached.commands.runDetached(
+                `cd ${config.workDir} && ` +
+                `(if git fetch origin ${branchName} 2>/dev/null; then ` +
+                `git checkout -B ${branchName} FETCH_HEAD; else ` +
+                `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
+              );
+              const deadline = Date.now() + 30_000;
+              while (Date.now() < deadline) {
+                await new Promise((r) => setTimeout(r, 1_000));
+                const status = await cached.commands.pollJob(checkoutJob);
+                if (status.done) break;
+              }
+              log.push(`Checked out ${branchName} on existing session.`);
+            } catch (err) {
+              log.push(`Branch checkout failed: ${redactSecrets(err instanceof Error ? err.message : String(err))} (continuing anyway)`);
+            }
+            // Re-run aux branch checkouts even on reuse: caller may have
+            // passed a different auxBranches map this turn. Idempotent if
+            // already on the requested branches.
+            await checkoutAuxBranches(cached);
+            // Refresh git identity on reuse too — the userEmail/userName in
+            // meta come from the caller's /run payload, so if a different
+            // user picks up the conversation we want their identity now.
+            await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
+            return JSON.stringify({
+              sessionId: cached.id,
+              branch: branchName,
+              reused: true,
+              ports: config.ports || {},
+              log: log.map(redactSecrets),
+            });
+          }
+          if (!isRepoTemplate) {
+            log.push(`Cached session ${cached.id} is on the wrong template — discarding and creating a fresh repo-template VM.`);
+          } else {
+            log.push(`Cached session ${cached.id} is dead — recreating.`);
+          }
+          evictSession(cached, storeKey);
         }
-        evictSession(cached, storeKey);
       }
 
       log.push("Creating sandbox session...");
@@ -816,7 +1221,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         template: config.template,
         readyTimeoutMs: config.readyTimeoutMs || 10 * 60 * 1000,
       });
-      rememberSession(storeKey, session, config.template);
+      rememberSession(storeKey, session, config.template, ownerFromContext(context));
       log.push(`Session created: ${session.id}`);
 
       const pollUntilDone = async (jobId: string, label: string, timeoutMs: number) => {
@@ -826,7 +1231,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
           const status = await session.commands.pollJob(jobId);
           if (status.done) {
             if (status.exitCode !== null && status.exitCode !== 0) {
-              throw new Error(`${label} failed (exit ${status.exitCode}): ${status.stderr}`);
+              throw new Error(`${label} failed (exit ${status.exitCode}): ${redactSecrets(status.stderr ?? "")}`);
             }
             log.push(`${label} done.`);
             return status;
@@ -929,6 +1334,14 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // the long ceiling only matters for slow templates.
         const prebakeDeadline = Date.now() + 45 * 60_000;
         let prebakeDone = false;
+        let backendCrash = "";
+        // How long we tolerate the backend NOT binding :3001 before treating it
+        // as a hard crash (vs a slow-but-progressing build). Slow templates
+        // (hyperswitch cabal/cargo) legitimately take many minutes, so only trip
+        // this once services-up is present AND the backend dev log shows a fatal
+        // startup error — a crash, not slow progress.
+        const CRASH_GRACE_MS = 8 * 60_000;
+        const startedWaitAt = Date.now();
         while (Date.now() < prebakeDeadline) {
           try {
             const probe = await session.commands.run(
@@ -939,15 +1352,39 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
               prebakeDone = true;
               break;
             }
+            // Fast-fail on a DEFINITIVE backend crash so a bad golden bake (e.g.
+            // env-schema drift: "DATABASE_URL is required") surfaces in ~8 min,
+            // not after the full 45-min budget as a silent "Executing tools…".
+            if (Date.now() - startedWaitAt > CRASH_GRACE_MS) {
+              const diag = await session.commands.run(
+                `nc -z 127.0.0.1 3001 && echo up || (echo down; ` +
+                `grep -iE "Config validation error|is required|Error:|Cannot find|is not a function|EADDRINUSE" ` +
+                `/tmp/prebake-backend-dev.log 2>/dev/null | tail -6)`,
+                8_000,
+              ).catch(() => ({ stdout: "" }) as { stdout: string });
+              const out = (diag.stdout ?? "").trim();
+              if (out.startsWith("down") && out.length > "down".length) {
+                backendCrash = out.replace(/^down\s*/, "");
+                break;
+              }
+            }
           } catch (err) {
-            log.push(`prebake probe transient error (continuing): ${err instanceof Error ? err.message : String(err)}`);
+            log.push(`prebake probe transient error (continuing): ${redactSecrets(err instanceof Error ? err.message : String(err))}`);
           }
           await new Promise((r) => setTimeout(r, 5_000));
         }
         if (prebakeDone) {
           log.push("Prebake finished; proceeding to services + dev servers.");
+        } else if (backendCrash) {
+          // Loud, actionable failure instead of a silent timeout. Surface the
+          // backend crash tail so the agent (and humans) see the real cause.
+          log.push(
+            `Backend failed to start in this sandbox — the baked backend is crashing on boot ` +
+            `(likely a stale golden vs repo drift). Prebake never completed, so this dev sandbox ` +
+            `is not fully usable. Backend error tail:\n${redactSecrets(backendCrash)}`,
+          );
         } else {
-          log.push("Warning: prebake didn't finish in 10min — proceeding anyway, expect possible npm errors.");
+          log.push("Warning: prebake didn't finish in 45min — proceeding anyway, expect possible npm errors.");
         }
       } else {
         // Should never happen with the agent-workspace image (entrypoint
@@ -969,6 +1406,10 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       // them to the agent's requested branch. No-op when config has no
       // auxRepos (xyne-spaces and any other single-repo template).
       await checkoutAuxBranches(session);
+
+      // Author every commit as the human who triggered this run, with
+      // Xyne Spaces as committer. Runs across primary + aux workdirs.
+      await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
 
       const jobIds: Record<string, string> = {};
 
@@ -1091,55 +1532,284 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         branch: branchName,
         ...jobIds,
         ports: config.ports || {},
-        log,
+        log: log.map(redactSecrets),
       });
     },
   };
 }
 
+// Read-only git for the shared sbx-git sandbox: read ANY branch by ref without
+// a checkout (so concurrent runs can read different branches safely). Allowed
+// subcommands never mutate the working tree, local branches, or the remote.
+// `fetch` is permitted because it only appends objects + remote-tracking refs.
+const GIT_READ_SUBCMDS = new Set([
+  "fetch", "show", "grep", "diff", "log", "ls-tree", "ls-files",
+  "blame", "branch", "rev-parse", "cat-file", "shortlog", "describe", "tag",
+]);
+// Flags that could mutate state even under an allowed subcommand (e.g. `branch -D`).
+const GIT_READ_DENY_FLAGS = new Set([
+  "-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force",
+  "--set-upstream", "--set-upstream-to", "-u", "--track",
+]);
+// Block shell chaining / injection — args are passed through a shell string.
+const GIT_READ_SHELL_META = /[;&|`$(){}<>\n\r\\]/;
+
+/**
+ * git-read — read-only git in the shared sbx-git sandbox. Lets an agent read a
+ * specific branch by REF (never `git checkout`, which would corrupt the shared
+ * working tree for other runs). Typical flow:
+ *   git-read repo=xyne-spaces args=["fetch","--depth","1","origin","<branch>"]
+ *   git-read repo=xyne-spaces args=["grep","origin/<branch>","<pattern>"]
+ *   git-read repo=xyne-spaces args=["show","origin/<branch>:path/to/file"]
+ */
+export const gitRead: ToolDefinition = {
+  slug: "git-read",
+  name: "Git Read (read-only)",
+  description:
+    "Read-only git in the shared read-only sandbox. Read ANY branch by ref WITHOUT checkout. " +
+    "Allowed: fetch, show, grep, diff, log, ls-tree, ls-files, blame, branch, rev-parse, cat-file, shortlog, describe, tag. " +
+    "To read a branch: args=['fetch','--depth','1','origin','<branch>'] then args=['grep','origin/<branch>','<pattern>'] or args=['show','origin/<branch>:<path>']. " +
+    "Never checks out, writes, commits, or pushes.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      repo: { type: "string", description: "Repo dir under /workspace (e.g. 'xyne-spaces')." },
+      args: {
+        type: "array",
+        items: { type: "string" },
+        description: "Git args. First element must be a read-only subcommand (e.g. ['grep','origin/main','pattern']).",
+      },
+      sessionId: { type: "string", description: "Optional; defaults to the shared sbx-git session for this conversation." },
+      timeoutMs: { type: "number", description: "Command timeout ms (default 60000)." },
+    },
+    required: ["repo", "args"],
+  },
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const repo = ((params["repo"] as string) || "").trim();
+    const args = (params["args"] as string[]) || [];
+    const timeoutMs = (params["timeoutMs"] as number | undefined) ?? 60_000;
+    if (!repo || !/^[\w.-]+$/.test(repo)) return "Error: invalid repo name.";
+    if (!Array.isArray(args) || args.length === 0) return "Error: args required.";
+    const sub = String(args[0]);
+    if (!GIT_READ_SUBCMDS.has(sub)) {
+      return `Error: '${sub}' is not a read-only git subcommand. Allowed: ${[...GIT_READ_SUBCMDS].join(", ")}.`;
+    }
+    for (const a of args) {
+      if (typeof a !== "string") return "Error: all args must be strings.";
+      if (GIT_READ_SHELL_META.test(a)) return "Error: shell metacharacters are not allowed in args.";
+      if (GIT_READ_DENY_FLAGS.has(a)) return `Error: flag '${a}' can mutate state and is not allowed in git-read.`;
+    }
+    const { SBX_GIT } = await import("./repo-configs.js");
+    const repoPath = SBX_GIT.repoPaths[repo] ?? `/workspace/${repo}`;
+    const quoted = args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+    const cmd = `git -C '${repoPath}' ${quoted}`;
+
+    const explicit = params["sessionId"] as string | undefined;
+    const storeKey = storeKeyFromContext(context);
+    const session =
+      (explicit ? SESSION_STORE.get(explicit) : undefined) ??
+      (storeKey ? SESSION_STORE.get(storeKey) : undefined);
+    if (!session) return "Error: no sandbox session — call sandbox-repo-setup first.";
+    if (!isSessionOwnedByContext(session, explicit ?? storeKey, context)) {
+      return unauthorizedSessionMessage(session.id);
+    }
+    try {
+      const result = await session.commands.run(cmd, timeoutMs);
+      return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        evictSession(session, storeKey);
+        return "Error: sandbox session died (pod replaced). Call sandbox-repo-setup to re-provision.";
+      }
+      return sandboxErr(err);
+    }
+  },
+};
+
+/**
+ * Resolve (create-or-reuse) the SINGLE shared read-only sbx-git session and
+ * return the read-only result message for the agent. All scheduled/automation
+ * runs share one session keyed by SBX_GIT.sharedSessionKey, so there is no
+ * per-claim snapshot clone (the cause of the rate-limit storm). The session is
+ * marked SHARED so the per-conversation ownership check lets any caller use it;
+ * mutating tools are stripped from the palette for these runs (see SBX_GIT.disabledTools).
+ */
+async function resolveSbxGit(requestedRepo: string, context: ToolExecutionContext, reason?: string): Promise<string> {
+  const { SBX_GIT, sbxGitResultMessage } = await import("./repo-configs.js");
+  const key = SBX_GIT.sharedSessionKey;
+
+  // Operator-selected repo context (agent.config.sbxGitRepos → meta.sbxGitRepos,
+  // JSON string array). Advisory scope surfaced to the agent in the result text.
+  let focusRepos: string[] | undefined;
+  const rawFocus = context.meta?.["sbxGitRepos"];
+  if (rawFocus) {
+    try {
+      const parsed = JSON.parse(rawFocus);
+      if (Array.isArray(parsed)) focusRepos = parsed.filter((r): r is string => typeof r === "string");
+    } catch { /* malformed → treat as no scope */ }
+  }
+
+  // Bind this conversation's storeKey to the shared session too, so the
+  // read/grep/find/ls tools (which default to the conversation's session)
+  // operate on sbx-git without the agent having to pass the id explicitly.
+  const callerKey = storeKeyFromContext(context);
+  const bindCaller = (session: Session): void => {
+    if (callerKey && callerKey !== key) SESSION_STORE.set(callerKey, session);
+  };
+
+  // Reuse the live shared session if present + healthy.
+  const existing = SESSION_STORE.get(key);
+  if (existing) {
+    const alive = await probeSession(existing, key).catch(() => false);
+    if (alive) {
+      bindCaller(existing);
+      return sbxGitResultMessage(requestedRepo, existing.id, focusRepos, reason);
+    }
+    evictSession(existing, key);
+    SHARED_SESSIONS.delete(existing.id);
+  }
+
+  // Boot the one shared read-only sandbox (repos are cloned in its prebake).
+  try {
+    const client = makeClient(context.config, SBX_GIT.template);
+    const session = await client.createSession({ timeoutMs: SBX_GIT.sessionTimeoutMs, template: SBX_GIT.template });
+    // No owner → shared across conversations; mark it so ownership checks pass.
+    rememberSession(key, session, SBX_GIT.template);
+    bindCaller(session);
+    SHARED_SESSIONS.add(session.id);
+    READONLY_SESSIONS.add(session.id);
+    return sbxGitResultMessage(requestedRepo, session.id, focusRepos, reason);
+  } catch (err) {
+    return sandboxErr(err);
+  }
+}
+
+// A writable per-repo sandbox couldn't be PROVISIONED. Grounded in the ACTUAL
+// prod error (verified in logs): the kata claim never reaches Running —
+//   "Error: Timed out waiting for sandbox <name> to reach Running phase."
+// plus the codebase's own established transient/backend-unreachable signatures
+// (STALE_PATTERNS via isStaleSessionError: could-not-connect-to-backend-sandbox,
+// ECONNREFUSED/RESET, socket hang up, sandboxclaim-not-found).
+// Deliberately does NOT match user-input errors — "Repository not found",
+// "git fetch+checkout ... couldn't find remote ref", "No conversationId in
+// context" — those pass through unchanged (no read-only fallback).
+function isSandboxProvisioningFailure(result: string): boolean {
+  if (!result.startsWith("Error")) return false;
+  if (/timed out waiting for sandbox .* to reach running/i.test(result)) return true;
+  return isStaleSessionError(new Error(result));
+}
+
 export const sandboxRepoSetup: ToolDefinition = {
-  slug: "sandbox-repo-setup", 
+  slug: "sandbox-repo-setup",
   name: "Sandbox Repository Setup",
   description:
-    "**PREFERRED**: Set up any repository development environment in an isolated Kata sandbox. " +
-    "Specify the repo name to automatically clone, install dependencies, start services, and launch dev servers. " +
-    "Returns sessionId for subsequent sandbox operations.",
+    "Set up a repository workspace. For read-first repos (e.g. xyne-spaces) this DEFAULTS to an INSTANT " +
+    "READ-ONLY sandbox (shared git server, no clone/wait): use it for reading, grepping, inspecting code, " +
+    "and PR review — what you want almost always. Pass write:true ONLY when you must edit files, build, run " +
+    "tests, or commit — that claims a short-lived (~20 min, auto-expiring) writable dev sandbox for the given " +
+    "branch. Prefer read; escalate to write only when you actually need to change code, then let it expire.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
     type: "object",
     properties: {
       repoName: {
-        type: "string", 
+        type: "string",
         description: "Repository name (e.g. 'xyne-spaces', 'hyperswitch'). Must match a key in REPO_CONFIGS.",
+      },
+      write: {
+        type: "boolean",
+        description:
+          "Default false = instant READ-ONLY git sandbox (read/grep/inspect; no build/run/write). " +
+          "Set true ONLY to edit/build/run/commit — claims a short-lived (~20 min) writable dev sandbox that auto-expires. " +
+          "Do NOT set true just to look at code.",
       },
       branchName: {
         type: "string",
-        description: "New branch name to create (e.g. 'feat/my-feature')",
+        description: "Branch to create/checkout. Required only when write=true.",
       },
       sessionDurationMs: {
         type: "number",
-        description: "Session lifetime in milliseconds (default: 3600000 = 1 hour)",
+        description: "Write-sandbox lifetime in ms (default 1800000 = 30 min; write sandboxes are intentionally short-lived).",
       },
     },
-    required: ["repoName", "branchName"],
+    required: ["repoName"],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
-    
-    const repoName = params["repoName"] as string;
+
+    // Deterministic pin: if the agent is bound to a repo in its config
+    // (agent.config.sandboxRepo → context.meta.sandboxRepo), force THAT repo and
+    // ignore whatever repoName the LLM passed. This is what makes the setup
+    // deterministic — the operator picks the repo in the agent UI, not the model.
+    const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
+    const repoName = pinnedRepo || (params["repoName"] as string);
     const branchName = params["branchName"] as string;
     const sessionDurationMs = params["sessionDurationMs"] as number | undefined;
+    const wantWrite = params["write"] === true;
 
     // Import here to avoid circular dependency
-    const { REPO_CONFIGS } = await import("./repo-configs.js");
+    const { REPO_CONFIGS, isReadOnlyJob } = await import("./repo-configs.js");
+
+    // ── Routing ──────────────────────────────────────────────────────────
+    // 1. Always-read-only contexts → shared read-only sbx-git (no snapshot
+    //    clone): scheduled/automation runs and forceReadOnly (reviewer) agents.
+    // `allowWriteInReadOnlyJob` (per-agent opt-in, propagated from
+    // agent.config.allowWriteInReadOnlyJob) lets an automation/scheduled run
+    // escalate to a writable sandbox on write:true — e.g. the error-pipeline
+    // doctor implementing a fix + opening a PR unattended. This is the SAME flag
+    // that opts out of the tool-palette stripping in run.ts (processTask); we
+    // honor it here too so both halves of read-only enforcement stay in sync
+    // (previously it only affected the tool palette, leaving the sandbox routing
+    // read-only). It ONLY relaxes the isReadOnlyJob force; `forceReadOnlySandbox`
+    // (reviewer agents) still wins unconditionally. Default-off.
+    const allowWriteInReadOnlyJob = context.meta?.["allowWriteInReadOnlyJob"] === "true";
+    const forcedReadOnly =
+      (isReadOnlyJob(context.meta?.["eventType"], context.meta?.["conversationId"]) && !allowWriteInReadOnlyJob) ||
+      context.meta?.["forceReadOnlySandbox"] === "true";
+    if (forcedReadOnly) {
+      return resolveSbxGit(repoName, context);
+    }
+
     const config = REPO_CONFIGS[repoName];
-    
+
+    // 2. Per-repo READ-FIRST (config.readFirst, e.g. xyne-spaces): default every
+    //    interactive run to read-only sbx-git; only claim a writable golden dev
+    //    sandbox on explicit write:true. This is what removes the default
+    //    snapshot clones that tripped GCP's per-snapshot op-rate limit. Repos
+    //    WITHOUT readFirst fall through to legacy behavior (writable clone).
+    if (config?.readFirst === true && !wantWrite) {
+      return resolveSbxGit(repoName, context);
+    }
+
+    // 3. Provision a writable dev sandbox (golden clone). Reached when a
+    //    read-first repo asked write:true, OR a non-read-first (legacy) repo.
     if (!config) {
       const availableRepos = Object.keys(REPO_CONFIGS).join(", ");
       return `Error: Repository '${repoName}' not found. Available repos: ${availableRepos}`;
     }
+    // branchName is now optional in the schema (read-first calls don't pass it).
+    // On the writable path, default a missing branch to the repo's defaultBranch
+    // so a non-read-first (legacy) repo — or a write:true call that forgot the
+    // branch — still provisions cleanly instead of erroring. The agent can cut a
+    // feature branch afterwards via sandbox-run before pushing.
+    const effectiveBranch = branchName || config.defaultBranch;
+
+    // On-demand write sandbox lifetime: per-repo writeSessionTimeoutMs when set
+    // (e.g. xyne-spaces = 20 min, to keep concurrent golden-snapshot clones low),
+    // else the repo's normal sessionTimeoutMs — so other repos are unchanged.
+    const writeSessionMs = sessionDurationMs ?? config.writeSessionTimeoutMs ?? config.sessionTimeoutMs;
+
+    // Short idle release for write sandboxes when configured (xyne-spaces = 10 min):
+    // override the repo's idleTimeoutMs so the write sandbox auto-destroys after
+    // inactivity. Repos without writeIdleTimeoutMs keep their normal idle behavior.
+    const writeConfig = config.writeIdleTimeoutMs
+      ? { ...config, idleTimeoutMs: config.writeIdleTimeoutMs }
+      : config;
 
     // Force the correct template for repo setup (override config to avoid warmpool)
     const enhancedContext = {
@@ -1149,10 +1819,36 @@ export const sandboxRepoSetup: ToolDefinition = {
         "KATA_TEMPLATE": config.template  // Force the repo's template, bypass warmpool
       }
     };
-    
+
     // Create a temporary tool using the factory and execute it
-    const repoTool = makeRepoSetupTool(config);
-    return repoTool.execute({ branchName, sessionDurationMs }, enhancedContext);
+    const repoTool = makeRepoSetupTool(writeConfig);
+    let result: string;
+    try {
+      result = await repoTool.execute(
+        { branchName: effectiveBranch, ...(writeSessionMs ? { sessionDurationMs: writeSessionMs } : {}) },
+        enhancedContext,
+      );
+    } catch (err) {
+      result = sandboxErr(err);
+    }
+
+    // Fallback: if the WRITABLE per-repo sandbox could not be provisioned (claim
+    // never reached Running / no schedulable warm pod / backend unreachable),
+    // serve the repo READ-ONLY from the shared sbx-git sandbox instead of
+    // returning "unable to get machine". The agent can still read/grep the code;
+    // resolveSbxGit marks the session READ-ONLY so readOnlyGuard rejects any
+    // write/run/build against it. Only genuine provisioning failures trigger this
+    // — bad-branch / repo-not-found errors pass through unchanged.
+    if (isSandboxProvisioningFailure(result)) {
+      const firstLine = result.split("\n")[0]?.replace(/^Error:\s*/i, "").slice(0, 160) ?? "provisioning failed";
+      const reason =
+        `the writable dev sandbox could NOT be provisioned right now (${firstLine}) — likely no capacity for a fresh machine.`;
+      const ro = await resolveSbxGit(repoName, context, reason);
+      // Only substitute the read-only fallback if it actually came up; otherwise
+      // return the original provisioning error so the failure isn't masked.
+      if (!ro.startsWith("Error")) return ro;
+    }
+    return result;
   },
 };
 
@@ -1179,12 +1875,16 @@ export const sandboxDestroy: ToolDefinition = {
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
     const sessionId = params["sessionId"] as string;
-    const conversationId = context.meta?.["conversationId"];
-    const agentSlug = context.meta?.["agentSlug"] ?? "";
-    const storeKey = conversationId ? (agentSlug ? `${conversationId}_${agentSlug}` : conversationId) : undefined;
+    const storeKey = storeKeyFromContext(context);
 
+    const lookupKey = SESSION_STORE.has(sessionId) ? sessionId : storeKey;
     const session = SESSION_STORE.get(sessionId) ?? (storeKey ? SESSION_STORE.get(storeKey) : undefined);
     if (!session) return `Error: Session ${sessionId} not found or already destroyed.`;
+    if (!isSessionOwnedByContext(session, lookupKey, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    const roDestroy = readOnlyGuard(session, { destroy: true });
+    if (roDestroy) return roDestroy;
 
     let destroyError: string | undefined;
     try {

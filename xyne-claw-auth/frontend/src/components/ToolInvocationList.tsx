@@ -76,9 +76,14 @@ function ToolInvocationItem({
 
   // Subagent rows get a distinct border + icon so nested structure reads.
   const isSubagent = children && children.length > 0;
+  // A subagent spawned with run_in_background: the wrapper tool call returned
+  // immediately, so its live state lives in backgroundState (not status).
+  const isBackground = invocation.background === true;
+  const bgState = invocation.backgroundState;
+  const isBgRunning = isBackground && bgState === "running";
 
   return (
-    <div className={`rounded-md border ${invocation.isError ? "border-red-900/50 bg-red-950/20" : isSubagent ? "border-purple-900/50 bg-purple-950/10" : "border-zinc-800 bg-zinc-900/60"} p-2`}>
+    <div className={`rounded-md border ${invocation.isError || bgState === "error" ? "border-red-900/50 bg-red-950/20" : isBgRunning ? "border-amber-900/50 bg-amber-950/10" : isSubagent ? "border-purple-900/50 bg-purple-950/10" : "border-zinc-800 bg-zinc-900/60"} p-2`}>
       <button onClick={() => setExpanded(!expanded)} className="flex w-full items-start gap-2 text-left">
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`mt-1 shrink-0 text-zinc-500 transition ${expanded ? "rotate-90" : ""}`}>
           <polyline points="9 18 15 12 9 6" />
@@ -89,9 +94,14 @@ function ToolInvocationItem({
               <span className="rounded bg-purple-950 px-1.5 py-0.5 text-[10px] text-purple-300">{invocation.subagentName}</span>
             )}
             {isSubagent && <span className="text-xs text-purple-400">🤖</span>}
+            {isBackground && (
+              <span className="rounded bg-amber-950 px-1.5 py-0.5 text-[10px] text-amber-300">
+                {bgState === "error" ? "bg · failed" : bgState === "completed" ? "bg · done" : "⧗ background"}
+              </span>
+            )}
             <code className="font-mono text-zinc-200">{invocation.toolName}</code>
             {invocation.isError && <span className="rounded bg-red-950 px-1.5 py-0.5 text-[10px] text-red-400">error</span>}
-            <span className="ml-auto font-mono text-zinc-600">{invocation.durationMs}ms</span>
+            <span className="ml-auto font-mono text-zinc-600">{isBgRunning ? "running…" : `${invocation.durationMs}ms`}</span>
           </div>
           {!expanded && <p className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">{argsPreview}</p>}
         </div>

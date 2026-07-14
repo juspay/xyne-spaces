@@ -1,6 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { randomBytes } from "node:crypto";
+import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("agent-repository");
 
 /**
  * Build a unique, schema-valid slug for a clone. Strips any prior "-copy…"
@@ -8,7 +12,7 @@ import { randomBytes } from "node:crypto";
  * token. Pre-checks the DB and retries a few times; the DB unique index is the
  * real guard (caller catches P2002 and retries if we still race).
  */
-async function buildCloneSlug(sourceSlug: string): Promise<string> {
+async function buildCloneSlug(sourceSlug: string, orgId?: string | null): Promise<string> {
   const root = sourceSlug
     .replace(/-copy(-[a-z0-9]+)?$/, "")
     .slice(0, 40)
@@ -16,7 +20,13 @@ async function buildCloneSlug(sourceSlug: string): Promise<string> {
   for (let i = 0; i < 6; i++) {
     const token = randomBytes(3).toString("hex"); // 6 lowercase hex chars
     const candidate = `${root}-copy-${token}`;
-    const clash = await prisma.agent.findUnique({ where: { slug: candidate } });
+    const clash = ORG_SCOPED_SLUGS
+      ? orgId
+        ? await prisma.agent.findUnique({
+          where: { orgId_slug: { orgId, slug: candidate } },
+        })
+        : null
+      : null;
     if (!clash) return candidate;
   }
   return `${root}-copy-${Date.now().toString(36)}`;
@@ -38,11 +48,47 @@ const INCLUDE_TOOLS_SKILLS = {
 } as const;
 
 export const agentRepository = {
-  findBySlug: (slug: string) =>
-    prisma.agent.findUnique({ where: { slug } }),
+  findBySlug: (slug: string, orgId?: string | null) => {
+    if (!orgId) {
+      log.error("[agentRepository.findBySlug] missing orgId; refusing global slug lookup", { slug });
+      return Promise.resolve(null);
+    }
+    return prisma.agent.findUnique({
+      where: { orgId_slug: { orgId, slug } },
+    });
+  },
 
-  findBySlugWithRelations: (slug: string) =>
-    prisma.agent.findUnique({ where: { slug }, include: { ...INCLUDE_TOOLS_SKILLS, owner: true } }),
+  findBySlugWithRelations: (slug: string, orgId?: string | null) => {
+    if (!orgId) {
+      log.error("[agentRepository.findBySlugWithRelations] missing orgId; refusing global slug lookup", { slug });
+      return Promise.resolve(null);
+    }
+    return prisma.agent.findUnique({
+      where: { orgId_slug: { orgId, slug } },
+      include: { ...INCLUDE_TOOLS_SKILLS, owner: true },
+    });
+  },
+
+  /**
+   * S2S fallback for callers with NO derivable org — e.g. Spaces' claw-client
+   * (automation RUN_AGENT step) fetches agent metadata via GET /agents/:slug
+   * with an S2S key but no pinned user, so no org context exists. Same
+   * single-match-or-fail rule as the legacy webhook route: serve when the slug
+   * matches EXACTLY one agent (always true until a second org reuses a slug),
+   * fail loudly on cross-org ambiguity. Never silently picks across orgs.
+   */
+  findBySlugSingleMatchWithRelations: async (slug: string) => {
+    const matches = await prisma.agent.findMany({
+      where: { slug },
+      include: { ...INCLUDE_TOOLS_SKILLS, owner: true },
+      take: 2,
+    });
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) {
+      log.error("[agentRepository.findBySlugSingleMatchWithRelations] ambiguous slug across orgs; refusing", { slug });
+    }
+    return null;
+  },
 
   findById: (id: string) =>
     prisma.agent.findUnique({ where: { id } }),
@@ -53,11 +99,21 @@ export const agentRepository = {
   findByAppUserId: (appUserId: string) =>
     prisma.agent.findFirst({ where: { spacesAppUserId: appUserId } }),
 
-  findDefault: () =>
-    prisma.agent.findFirst({ where: { isDefault: true, enabled: true } }),
+  // Phase-2 §5a: resolve an agent by its globally-unique Spaces app id — the
+  // org-agnostic routing key for the external webhook path (once webhook URLs
+  // carry the appId instead of the org-ambiguous slug). Returns null for the
+  // never-published (null spacesAppId) case.
+  findBySpacesAppId: (spacesAppId: string) =>
+    prisma.agent.findFirst({ where: { spacesAppId } }),
 
-  findByNameInsensitive: (name: string) =>
-    prisma.agent.findFirst({ where: { name: { equals: name, mode: "insensitive" } } }),
+  // Phase-2: optional org scoping. `isDefault` becomes per-org — a fresh org has
+  // no default agent until provisioned, so callers must tolerate null. Omitting
+  // orgId keeps today's global behavior (one org → the Juspay default).
+  findDefault: (orgId?: string) =>
+    prisma.agent.findFirst({ where: { isDefault: true, enabled: true, ...(orgId ? { orgId } : {}) } }),
+
+  findByNameInsensitive: (name: string, orgId?: string) =>
+    prisma.agent.findFirst({ where: { name: { equals: name, mode: "insensitive" }, ...(orgId ? { orgId } : {}) } }),
 
   /**
    * Visibility rules:
@@ -74,16 +130,23 @@ export const agentRepository = {
    * listing — added 2026-06-06 — leaked every user's private agents into
    * admins' normal list; that is the regression this gating reverts.)
    */
-  listVisible: (opts: { userId?: string; isAdmin?: boolean } = {}) =>
-    prisma.agent.findMany({
-      where: opts.isAdmin
-        ? {}
-        : opts.userId
-          ? { OR: [{ scope: "global" }, { ownerUserId: opts.userId }, { shares: { some: { userId: opts.userId } } }] }
-          : { scope: "global" },
+  listVisible: (opts: { userId?: string; isAdmin?: boolean; orgId?: string } = {}) => {
+    // Base visibility (scope='global' now means ORG-global once orgId is applied).
+    const base: Prisma.AgentWhereInput = opts.isAdmin
+      ? {}
+      : opts.userId
+        ? { OR: [{ scope: "global" }, { ownerUserId: opts.userId }, { shares: { some: { userId: opts.userId } } }] }
+        : { scope: "global" };
+    // Phase-2: AND the caller's org when provided. Admin-within-org (`?scope=all`
+    // + orgId) sees every agent in THAT org; a platform admin with no orgId still
+    // sees all orgs (the CLAW_ADMIN cross-org decision stays at the route layer).
+    const where: Prisma.AgentWhereInput = opts.orgId ? { AND: [{ orgId: opts.orgId }, base] } : base;
+    return prisma.agent.findMany({
+      where,
       include: { ...INCLUDE_TOOLS_SKILLS, owner: true },
       orderBy: { name: "asc" as const },
-    }),
+    });
+  },
 
   create: (data: Prisma.AgentCreateInput) =>
     prisma.agent.create({ data, include: INCLUDE_TOOLS_SKILLS }),
@@ -117,8 +180,15 @@ export const agentRepository = {
     if (!source) return null;
 
     const name = (opts.name?.trim() || `${source.name} (Copy)`).slice(0, 200);
-    const slug = await buildCloneSlug(source.slug);
     const systemPrompt = source.systemPrompt;
+
+    // Phase-2: the clone is a PERSONAL agent for `newOwnerId`, so it belongs to
+    // the new owner's org (not necessarily the source's). Without this the clone
+    // is born orgId=null → excluded from the org-scoped `listVisible` and 404s in
+    // the org-scoped ACL middleware. `User.orgId` is NOT NULL, so this resolves
+    // for any real user.
+    const owner = await prisma.user.findUnique({ where: { id: newOwnerId }, select: { orgId: true } });
+    const slug = await buildCloneSlug(source.slug, owner?.orgId);
 
     return prisma.$transaction(async (tx) => {
       const clone = await tx.agent.create({
@@ -128,6 +198,7 @@ export const agentRepository = {
           systemPrompt,
           scope: "personal",
           owner: { connect: { id: newOwnerId } },
+          ...(owner?.orgId ? { org: { connect: { id: owner.orgId } } } : {}),
         },
       });
 
@@ -167,14 +238,14 @@ export const agentRepository = {
     });
   },
 
-  update: (slug: string, data: Prisma.AgentUpdateInput) =>
-    prisma.agent.update({ where: { slug }, data, include: INCLUDE_TOOLS_SKILLS }),
+  update: (slug: string, orgId: string, data: Prisma.AgentUpdateInput) =>
+    prisma.agent.update({ where: { orgId_slug: { orgId, slug } }, data, include: INCLUDE_TOOLS_SKILLS }),
 
   updateById: (id: string, data: Prisma.AgentUpdateInput) =>
     prisma.agent.update({ where: { id }, data, include: INCLUDE_TOOLS_SKILLS }),
 
-  delete: (slug: string) =>
-    prisma.agent.delete({ where: { slug } }),
+  delete: (slug: string, orgId: string) =>
+    prisma.agent.delete({ where: { orgId_slug: { orgId, slug } } }),
 
   // ── Prompt versioning ──────────────────────────────────────────────
   listPromptVersions: (agentId: string) =>
@@ -491,4 +562,3 @@ export const agentRepository = {
     }));
   },
 };
-

@@ -121,8 +121,10 @@ async function resolveKbContext(
   userId: string,
   agentSlug: string,
 ): Promise<KbResolution | { error: string }> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+  if (!user?.orgId) return { error: `User has no orgId: ${userId}` };
   const agent = await prisma.agent.findUnique({
-    where: { slug: agentSlug },
+    where: { orgId_slug: { orgId: user.orgId, slug: agentSlug } },
     include: { collections: true },
   });
   if (!agent) return { error: `Agent not found: ${agentSlug}` };
@@ -283,12 +285,26 @@ function deepLinkForFile(
   ctx: KbResolution,
   itemId: string,
   collectionId: string,
+  pageNumber?: number,
+  chunkIndex?: number,
 ): string {
   const meta = ctx.filesById.get(itemId);
   // Need workspaceId + projectId + channelId + rootCollectionId to land on the
   // file viewer route; without any of them the link would 404.
   if (!ctx.workspaceId) return "";
   if (!meta?.projectId || !meta.channelId || !meta.rootCollectionId) return "";
+  // `?page=<N>` is read by FileViewerLayout and forwarded as PdfViewer's 1-based
+  // `initialPage`; `?chunkIndex=<K>` (0-based) lets FileViewerPanel fetch the
+  // cited chunk's snippet and highlight it via pdf.js find. Query params don't
+  // affect route matching, so the chip still resolves when metadata is absent.
+  const params = new URLSearchParams();
+  if (typeof pageNumber === "number" && pageNumber >= 1) {
+    params.set("page", String(pageNumber));
+  }
+  if (typeof chunkIndex === "number" && chunkIndex >= 0) {
+    params.set("chunkIndex", String(chunkIndex));
+  }
+  const query = params.toString() ? `?${params.toString()}` : "";
   return (
     `/` +
     `${encodeURIComponent(ctx.workspaceId)}/` +
@@ -297,7 +313,8 @@ function deepLinkForFile(
     `${encodeURIComponent(meta.channelId)}/` +
     `${encodeURIComponent(meta.rootCollectionId)}/` +
     `${encodeURIComponent(meta.folderId)}/` +
-    `${encodeURIComponent(itemId)}`
+    `${encodeURIComponent(itemId)}` +
+    query
   );
 }
 
@@ -307,8 +324,9 @@ function fileCitation(
   fileName: string,
   collectionId: string,
   chunkIndex?: number,
+  pageNumber?: number,
 ): Citation {
-  const url = deepLinkForFile(ctx, itemId, collectionId);
+  const url = deepLinkForFile(ctx, itemId, collectionId, pageNumber, chunkIndex);
   return {
     kind: "collection-item",
     collectionItemId: itemId,
@@ -317,6 +335,7 @@ function fileCitation(
     label: fileName,
     ...(url ? { url } : {}),
     ...(typeof chunkIndex === "number" ? { chunkIndex } : {}),
+    ...(typeof pageNumber === "number" ? { pageNumber } : {}),
   };
 }
 
@@ -1008,8 +1027,17 @@ export async function handleKbGetChunks(args: {
     );
     lines.push(`    ${escapeXmlText(c.text)}`);
     lines.push(`  </chunk>`);
+    // page_numbers is 1-based (Docling) and sorted; first entry is the page the
+    // chunk starts on — that's where the viewer should land.
     citations.push(
-      fileCitation(ctx, args.fileId, fileMeta.name, fileMeta.collectionId, c.index),
+      fileCitation(
+        ctx,
+        args.fileId,
+        fileMeta.name,
+        fileMeta.collectionId,
+        c.index,
+        c.page_numbers?.[0],
+      ),
     );
   }
   lines.push(`</chunks>`);
@@ -1139,7 +1167,14 @@ export async function handleKbSearchWithinDoc(args: {
     lines.push(`  </hit>`);
     if (h.chunk_index !== null) {
       citations.push(
-        fileCitation(ctx, args.fileId, fileMeta.name, fileMeta.collectionId, h.chunk_index),
+        fileCitation(
+          ctx,
+          args.fileId,
+          fileMeta.name,
+          fileMeta.collectionId,
+          h.chunk_index,
+          h.page_numbers?.[0],
+        ),
       );
     }
   }

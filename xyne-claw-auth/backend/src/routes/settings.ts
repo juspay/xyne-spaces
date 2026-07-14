@@ -3,8 +3,12 @@ import crypto from "node:crypto";
 import {
   userProviderCredentialsRepository,
   userSubagentConfigRepository,
+  sharedProviderCredentialRepository,
+  agentProviderCredentialsRepository,
 } from "../repositories/index.js";
-import { getRequesterId } from "../middleware/agent-acl.js";
+import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { prisma } from "../db.js";
+import { writeAuditLog } from "../lib/audit.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { CONFIG } from "../config.js";
@@ -128,6 +132,119 @@ router.delete("/provider-credentials/:provider", async (req: Request<{ provider:
     res.json({ success: true });
   } catch (err) {
     log.error("[settings] delete credentials error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// POST /settings/provider-credentials/:provider/share — "connect once, share
+// to agents": promote the requester's PERSONAL credential into an org-level
+// SharedProviderCredential and bind the given agents to it. The personal row
+// becomes a binding too (NOT a sibling copy — two live copies of one OAuth
+// account invalidate each other's sessions; see SharedProviderCredential).
+// Re-calling with more agentIds reuses the existing shared credential.
+// Agents must belong to the requester (or requester is CLAW_ADMIN).
+router.post("/provider-credentials/:provider/share", async (req: Request<{ provider: string }>, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) { res.status(401).json({ success: false, error: "Unauthorized" }); return; }
+    const provider = req.params.provider;
+    if (!VALID_PROVIDERS.has(provider) || provider === "spaces") {
+      res.status(400).json({ success: false, error: "Provider cannot be shared" });
+      return;
+    }
+    const { name, agentIds, platform } = req.body as { name?: string; agentIds?: string[]; platform?: boolean };
+    const targetAgentIds = Array.isArray(agentIds) ? agentIds.filter((a): a is string => typeof a === "string" && !!a.trim()) : [];
+    if (targetAgentIds.length === 0) {
+      res.status(400).json({ success: false, error: "agentIds (non-empty array) is required" });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+    if (!user?.orgId) { res.status(400).json({ success: false, error: "No org context" }); return; }
+    const admin = await isClawAdmin(userId);
+    if (platform && !admin) {
+      res.status(403).json({ success: false, error: "Only CLAW_ADMIN can create platform-wide (cross-org) shared credentials" });
+      return;
+    }
+
+    // RAW row (not materialized): sharing a binding just reuses its shared cred.
+    const raw = await prisma.userProviderCredentials.findUnique({
+      where: { userId_provider: { userId, provider } },
+    });
+    if (!raw) {
+      res.status(404).json({ success: false, error: `Connect ${provider} in your settings first` });
+      return;
+    }
+
+    let sharedId = raw.sharedCredentialId;
+    if (!sharedId) {
+      if (!raw.encryptedKey) {
+        res.status(400).json({ success: false, error: `Your ${provider} credential has no key material — reconnect it first` });
+        return;
+      }
+      const shared = await sharedProviderCredentialRepository.create({
+        // platform:true (admin-only, checked above) → orgId NULL: bindable
+        // by agents of ANY org.
+        orgId: platform ? null : user.orgId,
+        provider,
+        name: name?.trim() || `${provider} (shared)`,
+        encryptedKey: raw.encryptedKey,
+        iv: raw.iv,
+        authTag: raw.authTag,
+        model: raw.model,
+        baseUrl: raw.baseUrl,
+        authType: raw.authType,
+        reasoningEffort: raw.reasoningEffort,
+        ownerUserId: userId,
+      });
+      sharedId = shared.id;
+      // Convert the personal row into a binding, keeping the user's model/
+      // effort choices as personal overrides.
+      await userProviderCredentialsRepository.bindShared(userId, provider, sharedId, {
+        model: raw.model,
+        reasoningEffort: raw.reasoningEffort,
+      });
+      await writeAuditLog({
+        actorUserId: userId,
+        eventType: "PROVIDER_CREDENTIAL_PROMOTED",
+        targetId: sharedId,
+        description: `Promoted personal ${provider} credential to shared "${name?.trim() || `${provider} (shared)`}"`,
+      });
+    }
+
+    // Scope check depends on the SHARED credential (may be a reused
+    // platform-wide one), not the requester's org.
+    const sharedRow = await sharedProviderCredentialRepository.findById(sharedId);
+    const sharedOrgId = sharedRow?.orgId ?? null;
+
+    const results: Array<{ agentId: string; ok: boolean; error?: string }> = [];
+    for (const agentId of targetAgentIds) {
+      const agent = await prisma.agent.findUnique({
+        where: { id: agentId },
+        select: { id: true, slug: true, orgId: true, ownerUserId: true },
+      });
+      // Platform-wide (orgId NULL) creds bind across orgs.
+      if (!agent || (sharedOrgId !== null && agent.orgId !== sharedOrgId)) {
+        results.push({ agentId, ok: false, error: "Agent not found in the credential's org" });
+        continue;
+      }
+      if (agent.ownerUserId !== userId && !admin) {
+        results.push({ agentId, ok: false, error: "You don't own this agent" });
+        continue;
+      }
+      await agentProviderCredentialsRepository.bindShared(agent.id, provider, sharedId);
+      await writeAuditLog({
+        actorUserId: userId,
+        eventType: "PROVIDER_CREDENTIAL_BOUND",
+        targetId: sharedId,
+        description: `Bound agent ${agent.slug} to shared ${provider} credential`,
+      });
+      results.push({ agentId, ok: true });
+    }
+
+    res.json({ success: true, data: { sharedCredentialId: sharedId, results } });
+  } catch (err) {
+    log.error("[settings] share provider credential error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
