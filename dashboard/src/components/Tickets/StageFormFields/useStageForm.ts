@@ -14,6 +14,7 @@ import {
   resolveDisplayFormFields,
   type ResolvedDisplayFormField,
 } from '../../../utils/board/resolveDisplayFormFields';
+import { buildLatestEntityWideValueByField } from '../../../utils/board/boardFormEntityValues';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 export type PersistMode = 'save' | 'submit' | 'move' | 'review';
@@ -50,14 +51,17 @@ export const areFieldValuesEqual = (
   right: readonly string[] = [],
 ): boolean => left.length === right.length && left.every((value, index) => value === right[index]);
 
-const computeFreshVisitVersion = (
+/** Visit version for the next write: max(ETA versions, stage form versions), then RESET/CONTINUE. */
+export const computeFreshVisitVersion = (
   etas: readonly StageVisitEta[],
+  maxFormVersion: number,
   reenterMode: ReenterMode,
 ): number => {
-  const maxVersion = etas.length > 0 ? Math.max(...etas.map(eta => eta.version ?? 1)) : 0;
-  if (maxVersion === 0) return 1;
-  if (reenterMode === ReenterMode.CONTINUE) return maxVersion;
-  return maxVersion + 1;
+  const maxFromEtas = etas.length > 0 ? Math.max(...etas.map(eta => eta.version ?? 1)) : 0;
+  const base = Math.max(maxFromEtas, maxFormVersion);
+  if (base === 0) return 1;
+  if (reenterMode === ReenterMode.CONTINUE) return base;
+  return base + 1;
 };
 
 const asArray = <T>(value: T[] | readonly T[] | undefined | null): T[] =>
@@ -216,44 +220,60 @@ export const useStageForm = ({
       });
     return map;
   }, [fields, targetStage.id, values]);
+
+  const latestEntityWideValueByField = useMemo(() => {
+    const fieldIds = new Set(fields.map(field => field.id));
+    return buildLatestEntityWideValueByField(values, fieldIds);
+  }, [fields, values]);
   const currentSavedFormData = useMemo(() => {
     const result: Record<string, string[]> = {};
-    latestValueRowByField.forEach((row, fieldId) => {
+    latestEntityWideValueByField.forEach((row, fieldId) => {
       result[fieldId] = toFieldValue(row.actualFieldValue);
     });
     return result;
-  }, [latestValueRowByField]);
+  }, [latestEntityWideValueByField]);
+
+  const stageEtasForTarget = useMemo(
+    () => (targetStageEtas ?? []).filter(eta => eta.stageId === targetStage.id),
+    [targetStage.id, targetStageEtas],
+  );
+
+  const resolveDraftVisitVersion = useCallback((): number => {
+    const mode = (reenterMode as ReenterMode | undefined) ?? ReenterMode.RESET;
+    // ID-reuse paths (CONTINUE / active request / linear) write at current max — do not bump.
+    const versionMode = shouldReuseExistingValueIds ? ReenterMode.CONTINUE : mode;
+    return computeFreshVisitVersion(stageEtasForTarget, maxStageVersion, versionMode);
+  }, [maxStageVersion, reenterMode, shouldReuseExistingValueIds, stageEtasForTarget]);
 
   useEffect(() => {
     if (!Array.isArray(formEntityValues)) return;
     if (ticketStageRequestsForTicket === undefined) return;
 
     const hydrateKey = `${ticket.id}:${targetStage.id}:${formId}`;
-    if (hydratedKeyRef.current === hydrateKey) return;
+    if (hydratedKeyRef.current === hydrateKey) {
+      // Form values arrived before ETAs (common on StagePicker). Keep formData; bump version only.
+      draftVersionRef.current = resolveDraftVisitVersion();
+      return;
+    }
 
-    const shouldPrefill = isNonLinearBoard ? hasActiveRequest || isContinueReentry : true;
     const prefilled: Record<string, string[]> = {};
     const draftIds = new Map<string, string>();
 
-    if (shouldPrefill) {
-      latestValueRowByField.forEach((value, fieldId) => {
-        const field = fields.find(item => item.id === fieldId);
-        if (!shouldReuseExistingValueIds && field?.fieldType === FormFieldType.DOC) return;
-        if (shouldReuseExistingValueIds) draftIds.set(fieldId, value.id);
-        const parsed = toFieldValue(value.actualFieldValue);
-        if (parsed.length > 0) prefilled[fieldId] = parsed;
-      });
-    }
-
-    const freshVisitVersion = computeFreshVisitVersion(
-      (targetStageEtas ?? []).filter(eta => eta.stageId === targetStage.id),
-      (reenterMode as ReenterMode | undefined) ?? ReenterMode.RESET,
-    );
+    fields.forEach(field => {
+      const entityWideValue = latestEntityWideValueByField.get(field.id);
+      if (shouldReuseExistingValueIds) {
+        const stageValue = latestValueRowByField.get(field.id);
+        if (stageValue) {
+          draftIds.set(field.id, stageValue.id);
+        }
+      }
+      if (!entityWideValue) return;
+      const parsed = toFieldValue(entityWideValue.actualFieldValue);
+      if (parsed.length > 0) prefilled[field.id] = parsed;
+    });
 
     draftValueIdsRef.current = draftIds;
-    draftVersionRef.current = shouldReuseExistingValueIds
-      ? Math.max(maxStageVersion, 1)
-      : freshVisitVersion;
+    draftVersionRef.current = resolveDraftVisitVersion();
     setFormData(prefilled);
     setLocalDocChanges(new Map());
     const signature = serializeFormData(prefilled);
@@ -262,17 +282,13 @@ export const useStageForm = ({
     hydratedKeyRef.current = hydrateKey;
   }, [
     latestValueRowByField,
+    latestEntityWideValueByField,
     fields,
     formEntityValues,
     formId,
-    hasActiveRequest,
-    isContinueReentry,
-    isNonLinearBoard,
-    maxStageVersion,
-    reenterMode,
+    resolveDraftVisitVersion,
     shouldReuseExistingValueIds,
     targetStage.id,
-    targetStageEtas,
     ticket.id,
     ticketStageRequestsForTicket,
   ]);
@@ -342,6 +358,8 @@ export const useStageForm = ({
       persistInFlightRef.current = true;
       setIsSaving(true);
       try {
+        // Recompute immediately before write so empty-ETA hydrate cannot leave version stuck at 1.
+        draftVersionRef.current = resolveDraftVisitVersion();
         const timestamp = Date.now();
         const docUploadsByField = new Map<
           string,
@@ -423,23 +441,47 @@ export const useStageForm = ({
             );
             mutationPromises.push(mutationResult.server);
           } else {
-            const formEntityValueId =
-              docUploadsByField.get(field.id)?.formEntityValueId ?? uuidv4();
-            draftValueIdsRef.current.set(field.id, formEntityValueId);
-            const mutationResult = zero.mutate(
-              mutators.formEntityValue.createV2({
-                id: formEntityValueId,
-                entityId: ticket.id,
-                entityType: FormEntityType.TICKET,
-                fieldId: field.id,
-                formId,
-                newValue: fieldValue,
-                timestamp,
-                contextId: targetStage.id,
-                version: draftVersionRef.current,
-              }),
+            // Safety net: if a row already exists at this visit version (e.g. wrong create
+            // path after reusable-field prefill), update it instead of colliding on unique key.
+            const existingAtVersion = values.find(
+              value =>
+                value.fieldId === field.id &&
+                value.contextId === targetStage.id &&
+                (value.version ?? 1) === draftVersionRef.current &&
+                // Ignore synthetic UI rows if they ever appear in the values list.
+                !value.id.startsWith('placeholder-') &&
+                !value.id.startsWith('prefill-'),
             );
-            mutationPromises.push(mutationResult.server);
+            if (existingAtVersion) {
+              draftValueIdsRef.current.set(field.id, existingAtVersion.id);
+              const mutationResult = zero.mutate(
+                mutators.formEntityValue.update({
+                  formEntityValueId: existingAtVersion.id,
+                  newValue: fieldValue,
+                  updatedAt: timestamp,
+                  expectedValueUpdatedAt: existingAtVersion.updatedAt ?? null,
+                }),
+              );
+              mutationPromises.push(mutationResult.server);
+            } else {
+              const formEntityValueId =
+                docUploadsByField.get(field.id)?.formEntityValueId ?? uuidv4();
+              draftValueIdsRef.current.set(field.id, formEntityValueId);
+              const mutationResult = zero.mutate(
+                mutators.formEntityValue.createV2({
+                  id: formEntityValueId,
+                  entityId: ticket.id,
+                  entityType: FormEntityType.TICKET,
+                  fieldId: field.id,
+                  formId,
+                  newValue: fieldValue,
+                  timestamp,
+                  contextId: targetStage.id,
+                  version: draftVersionRef.current,
+                }),
+              );
+              mutationPromises.push(mutationResult.server);
+            }
           }
         });
 
@@ -524,6 +566,7 @@ export const useStageForm = ({
       hasApprovers,
       localDocChanges,
       requestForStage?.id,
+      resolveDraftVisitVersion,
       resolveExistingValueId,
       targetStage.id,
       ticket.id,
@@ -601,12 +644,12 @@ export const useStageForm = ({
           base,
           mine,
           theirs,
-          theirsUpdatedAt: latestValueRowByField.get(field.id)?.updatedAt ?? null,
+          theirsUpdatedAt: latestEntityWideValueByField.get(field.id)?.updatedAt ?? null,
           ...(localDocChange && { localDocChange }),
         },
       ];
     });
-  }, [fields, formData, currentSavedFormData, latestValueRowByField, localDocChanges]);
+  }, [fields, formData, currentSavedFormData, latestEntityWideValueByField, localDocChanges]);
 
   const applyConflictResolution = useCallback(
     (resolution: Map<string, ConflictResolution>): StageFormResolvedInputs => {

@@ -12,9 +12,10 @@ import { cn } from '../../../utils/classNames';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCurrentUserRoleIds } from '../../../hooks/useRoles';
 import { TicketStageRequestStatus, BoardType, ApproverType, FormContextType } from '@xyne/shared';
-import type { Ticket, TicketStageRequest } from '@xyne/shared';
+import type { Ticket, TicketStageRequest, ReenterMode } from '@xyne/shared';
 import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
 import { StageFormModal } from '../StageFormModal/StageFormModal';
+import type { StageVisitEta } from '../StageFormFields/useStageForm';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 
 interface StagePickerProps {
@@ -22,15 +23,144 @@ interface StagePickerProps {
   stageName: string | null | undefined;
   stageLabel: string;
   boardId?: string | null;
-  /** When provided, called instead of directly mutating zero — allows the parent to intercept and show a form. */
-  onStageChange?: (
-    ticketId: string,
-    newStageName: string,
-    currentStageName: string | null | undefined,
-  ) => void;
+  /**
+   * When provided, called instead of mutating Zero / opening StageFormModal.
+   * By design this bypasses form and approval gates — the parent owns persistence
+   * and any form UI (e.g. bulk stage updates). Prefer omitting this prop when the
+   * picker should enforce transition forms itself.
+   */
+  onStageChange?:
+    | ((
+        ticketId: string,
+        newStageName: string,
+        currentStageName: string | null | undefined,
+      ) => void)
+    | undefined;
+  /** Fired after a stage change is successfully initiated (not when a form gate opens). */
+  onAfterStageChange?: ((stageName: string) => void) | undefined;
 }
 
 const SUPPORT_STAGES: ReadonlyArray<string> = ['Backlog', 'To Do', 'In Progress', 'Review', 'Done'];
+
+type StageGateStage = {
+  id: string;
+  sequenceNumber?: number | null;
+  approvers?: readonly {
+    userId: string | null;
+    roleId: string | null | undefined;
+    approverType?: string | null;
+  }[];
+};
+
+type LinearStageGateResult =
+  | { action: 'blocked'; message: string; description?: string }
+  | { action: 'open_form'; formId: string; hasApprovers: boolean }
+  | { action: 'submit_approval' }
+  | { action: 'proceed' };
+
+const resolveTransitionFormId = (
+  isNonLinearBoard: boolean,
+  matchingTransitionFormId: string | null | undefined,
+  targetStageId: string,
+  stageFormMap: ReadonlyMap<string, string>,
+): string | null => {
+  if (isNonLinearBoard) {
+    return matchingTransitionFormId ?? null;
+  }
+  return matchingTransitionFormId ?? stageFormMap.get(targetStageId) ?? null;
+};
+
+const evaluateLinearStageGate = ({
+  currentStage,
+  targetStage,
+  stageFormMap,
+  stages,
+}: {
+  currentStage: StageGateStage;
+  targetStage: StageGateStage;
+  stageFormMap: ReadonlyMap<string, string>;
+  stages: readonly StageGateStage[];
+}): LinearStageGateResult => {
+  const boardHasStagesWithApproval = stages.some(s => (s.approvers?.length ?? 0) > 0);
+  const boardHasStagesWithForms = stageFormMap.size > 0;
+  const shouldEnforceSequentialMovement = boardHasStagesWithApproval || boardHasStagesWithForms;
+
+  if (!shouldEnforceSequentialMovement) {
+    const targetStageFormId = stageFormMap.get(targetStage.id);
+    if (targetStageFormId) {
+      const hasApprovers = (targetStage.approvers?.length ?? 0) > 0;
+      return { action: 'open_form', formId: targetStageFormId, hasApprovers };
+    }
+    return { action: 'proceed' };
+  }
+
+  const currentSeq = currentStage.sequenceNumber;
+  const targetSeq = targetStage.sequenceNumber;
+
+  if (
+    currentSeq !== null &&
+    currentSeq !== undefined &&
+    targetSeq !== null &&
+    targetSeq !== undefined &&
+    targetSeq < currentSeq
+  ) {
+    return {
+      action: 'blocked',
+      message: 'Sequential movement only',
+      description: 'Backward stage changes require confirmation from ticket details',
+    };
+  }
+
+  const isNextStage =
+    currentSeq !== null &&
+    currentSeq !== undefined &&
+    targetSeq !== null &&
+    targetSeq !== undefined &&
+    targetSeq === currentSeq + 1;
+
+  if (!isNextStage) {
+    return {
+      action: 'blocked',
+      message: 'Sequential movement only',
+      description: 'You can only move to the next stage',
+    };
+  }
+
+  const targetStageFormId = stageFormMap.get(targetStage.id);
+  const hasApprovers = (targetStage.approvers?.length ?? 0) > 0;
+
+  if (targetStageFormId) {
+    return { action: 'open_form', formId: targetStageFormId, hasApprovers };
+  }
+
+  if (hasApprovers) {
+    return { action: 'submit_approval' };
+  }
+
+  return { action: 'proceed' };
+};
+
+const isStageApprover = (
+  approvers: StageGateStage['approvers'],
+  currentUserId: string | undefined,
+  currentUserRoleIds: readonly string[],
+): boolean => {
+  if (!approvers || approvers.length === 0) return false;
+  return approvers.some(approver => {
+    const type = String(approver.approverType ?? ApproverType.USER);
+    if (type === String(ApproverType.ROLE)) {
+      return !!approver.roleId && currentUserRoleIds.includes(approver.roleId);
+    }
+    if (type === String(ApproverType.USER)) {
+      return approver.userId === currentUserId;
+    }
+    return false;
+  });
+};
+
+const getTransitionReenterMode = (
+  transition?: { onReenter?: ReenterMode | null } | null,
+): ReenterMode | null => transition?.onReenter ?? null;
 
 export function StagePicker({
   ticketId,
@@ -38,6 +168,7 @@ export function StagePicker({
   stageLabel,
   boardId,
   onStageChange,
+  onAfterStageChange,
 }: StagePickerProps): ReactElement {
   const [open, setOpen] = useState(false);
   const zero = useZero();
@@ -50,6 +181,7 @@ export function StagePicker({
     targetStage: Stage;
     formId: string;
     hasApprovers: boolean;
+    reenterMode: ReenterMode | null;
   } | null>(null);
 
   const [ticketStageRequests] = useCachedQuery(queries.getTicketStageRequests({ ticketId }), {
@@ -62,7 +194,8 @@ export function StagePicker({
       ticketStageRequests?.find(
         request =>
           request.stageId === formModal.targetStage.id &&
-          request.status === TicketStageRequestStatus.SUBMITTED,
+          (request.status === TicketStageRequestStatus.DRAFT ||
+            request.status === TicketStageRequestStatus.SUBMITTED),
       ) ?? null
     );
   }, [formModal, ticketStageRequests]);
@@ -72,9 +205,51 @@ export function StagePicker({
     enabled: !!boardId && (open || formModal !== null),
   });
 
-  const openFormModal = (targetStage: Stage, formId: string, hasApprovers: boolean): void => {
-    setFormModal({ targetStage, formId, hasApprovers });
+  const formModalTargetStageEtas = useMemo<StageVisitEta[]>(() => {
+    if (!formModal || !ticketData) return [];
+    const stageEtaEntries: ReadonlyArray<{
+      id: string;
+      stageId: string;
+      version?: number | null;
+      stageEnteredAt: number;
+    }> = Array.isArray(ticketData.stageEtaEntries) ? ticketData.stageEtaEntries : [];
+    return stageEtaEntries
+      .filter(eta => eta.stageId === formModal.targetStage.id)
+      .map(eta => ({
+        id: eta.id,
+        stageId: eta.stageId,
+        version: eta.version ?? null,
+        stageEnteredAt: eta.stageEnteredAt,
+      }));
+  }, [formModal, ticketData]);
+
+  const openFormModal = (
+    targetStage: Stage,
+    formId: string,
+    hasApprovers: boolean,
+    reenterMode: ReenterMode | null = null,
+  ): void => {
+    setFormModal({ targetStage, formId, hasApprovers, reenterMode });
   };
+
+  const toStageShape = (
+    stageObj: {
+      id: string;
+      sequenceNumber?: number | null;
+      defaultTicketStatusV2?: Stage['defaultTicketStatusV2'];
+    },
+    name: string,
+  ): Stage => ({
+    id: stageObj.id,
+    name,
+    color: getStageColor(name),
+    ...(stageObj.sequenceNumber !== undefined && stageObj.sequenceNumber !== null
+      ? { sequenceNumber: stageObj.sequenceNumber }
+      : {}),
+    ...(stageObj.defaultTicketStatusV2 && {
+      defaultTicketStatusV2: stageObj.defaultTicketStatusV2,
+    }),
+  });
 
   // Query stages for this board.
   // Not gated by `open` so the data is always ready when the user clicks.
@@ -172,11 +347,13 @@ export function StagePicker({
         void zero.mutate(
           mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
         );
+        onAfterStageChange?.(next);
       }
       setOpen(false);
       return;
     }
 
+    // `stages` is loaded for this boardId only — name lookup is scoped to that list.
     const currentStageObj = stages?.find(s => s.name === currentStage);
     const targetStageObj = stages?.find(s => s.name === next);
 
@@ -204,28 +381,23 @@ export function StagePicker({
         // Linear board without explicit transition — fall through to direct move
       } else {
         // NON_LINEAR: use edge formId only (not stageFormMap) to avoid form on every move.
-        const transitionFormId: string | null = isNonLinear
-          ? (matchingTransition.formId ?? null)
-          : (matchingTransition.formId ?? stageFormMap.get(targetStageObj.id) ?? null);
+        const transitionFormId = resolveTransitionFormId(
+          isNonLinear,
+          matchingTransition.formId,
+          targetStageObj.id,
+          stageFormMap,
+        );
 
         if (transitionFormId) {
           if (onStageChange) {
             onStageChange(ticketId, next, stageName);
           } else {
-            // Edge-specific: only the matched edge's approvers count.
             const hasApproversForTarget = (matchingTransition.transitionApprovers?.length ?? 0) > 0;
             openFormModal(
-              {
-                id: targetStageObj.id,
-                name: next,
-                color: getStageColor(next),
-                sequenceNumber: targetStageObj.sequenceNumber ?? undefined,
-                ...(targetStageObj.defaultTicketStatusV2 && {
-                  defaultTicketStatusV2: targetStageObj.defaultTicketStatusV2,
-                }),
-              },
+              toStageShape(targetStageObj, next),
               transitionFormId,
               hasApproversForTarget,
+              getTransitionReenterMode(matchingTransition),
             );
           }
           setOpen(false);
@@ -260,10 +432,71 @@ export function StagePicker({
               }),
             );
             toast.success('Stage change request submitted for approval');
+            onAfterStageChange?.(next);
             setOpen(false);
             return;
           }
           // Approver falls through to direct move (self-approval via nonLinear.transition)
+        }
+      }
+    }
+
+    // Legacy linear-board gate when no explicit transition graph is configured.
+    if (!isNonLinear && !hasTransitions && currentStageObj && targetStageObj) {
+      const gateResult = evaluateLinearStageGate({
+        currentStage: currentStageObj,
+        targetStage: targetStageObj,
+        stageFormMap,
+        stages: stages ?? [],
+      });
+
+      if (gateResult.action === 'blocked') {
+        toast.error(gateResult.message, {
+          ...(gateResult.description ? { description: gateResult.description } : {}),
+        });
+        setOpen(false);
+        return;
+      }
+
+      if (gateResult.action === 'open_form') {
+        if (onStageChange) {
+          onStageChange(ticketId, next, stageName);
+        } else {
+          openFormModal(
+            toStageShape(targetStageObj, next),
+            gateResult.formId,
+            gateResult.hasApprovers,
+          );
+        }
+        setOpen(false);
+        return;
+      }
+
+      if (gateResult.action === 'submit_approval') {
+        const isApprover = isStageApprover(
+          targetStageObj.approvers,
+          currentUser?.id,
+          currentUserRoleIds,
+        );
+        if (!isApprover) {
+          const existingForTargetStage = (
+            ticketData?.ticketStageRequests as TicketStageRequest[] | undefined
+          )?.find((r: TicketStageRequest) => r.stageId === targetStageObj.id);
+          void zero.mutate(
+            mutators.ticketStageRequest.upsert({
+              id: existingForTargetStage?.id ?? uuidv4(),
+              ticketId,
+              stageId: targetStageObj.id,
+              status: TicketStageRequestStatus.SUBMITTED,
+              updatedBy: currentUser?.id || '',
+              updatedAt: Date.now(),
+              requestActivityId: uuidv4(),
+            }),
+          );
+          toast.success('Stage change request submitted for approval');
+          onAfterStageChange?.(next);
+          setOpen(false);
+          return;
         }
       }
     }
@@ -325,13 +558,19 @@ export function StagePicker({
               stageShape,
               directFormId,
               (latestMt?.transitionApprovers?.length ?? 0) > 0,
+              getTransitionReenterMode(latestMt),
             );
             return;
           }
 
           const refFormId = latestMt?.formId ?? null;
           if (refFormId && stageShape) {
-            openFormModal(stageShape, refFormId, (latestMt?.transitionApprovers?.length ?? 0) > 0);
+            openFormModal(
+              stageShape,
+              refFormId,
+              (latestMt?.transitionApprovers?.length ?? 0) > 0,
+              getTransitionReenterMode(latestMt),
+            );
             return;
           }
 
@@ -354,10 +593,16 @@ export function StagePicker({
                   stageShape,
                   freshFormId,
                   (freshMt?.transitionApprovers?.length ?? 0) > 0,
+                  getTransitionReenterMode(freshMt),
                 );
               }
             }
           }
+          return;
+        }
+
+        if (serverResult?.type !== 'error') {
+          onAfterStageChange?.(next);
         }
       });
     } else {
@@ -371,6 +616,7 @@ export function StagePicker({
           updatedAt: Date.now(),
         }),
       );
+      onAfterStageChange?.(next);
     }
     setOpen(false);
   };
@@ -447,6 +693,8 @@ export function StagePicker({
           hasApprovers={formModal.hasApprovers}
           isNonLinearBoard={isNonLinear}
           existingRequest={existingStageRequest}
+          reenterMode={formModal.reenterMode}
+          targetStageEtas={formModalTargetStageEtas}
         />
       )}
     </>

@@ -1,12 +1,30 @@
 import React, { useMemo, type ReactNode } from 'react';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { FileText } from 'lucide-react';
-import { FormFieldType, type FormEntityValues, type MessageAttachment } from '@xyne/shared';
+import {
+  FormFieldType,
+  type FormEntityValues,
+  type MessageAttachment,
+  type User,
+} from '@xyne/shared';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
+import { useUsers } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export type FormEntityValuesWithField = FormEntityValues & {
-  formField?: { fieldName: string; fieldType?: string } | null;
+  formField?: {
+    fieldName?: string | null;
+    fieldType?: FormFieldType | string | null;
+    globalField?: {
+      fieldName?: string | null;
+      fieldType?: FormFieldType | string | null;
+    } | null;
+  } | null;
+  globalField?: {
+    fieldName?: string | null;
+    fieldType?: FormFieldType | string | null;
+  } | null;
   attachments?: readonly MessageAttachment[] | null;
 };
 
@@ -20,13 +38,54 @@ const stringValuesFromJson = (value: unknown): string[] => {
   return [];
 };
 
+const getFieldName = (fv: FormEntityValuesWithField): string =>
+  fv.globalField?.fieldName ??
+  fv.formField?.globalField?.fieldName ??
+  fv.formField?.fieldName ??
+  fv.fieldId;
+
+const getFieldType = (fv: FormEntityValuesWithField): FormFieldType | string | undefined =>
+  fv.globalField?.fieldType ??
+  fv.formField?.globalField?.fieldType ??
+  fv.formField?.fieldType ??
+  undefined;
+
+const normalizeUserId = (userId: string): string =>
+  userId.startsWith('user:') ? userId.slice('user:'.length) : userId;
+
+const formatUserValues = (raw: unknown, userById: ReadonlyMap<string, User>): string => {
+  const userIds = stringValuesFromJson(raw);
+  if (userIds.length === 0) return '—';
+
+  return userIds
+    .map(userId => {
+      const normalizedUserId = normalizeUserId(userId);
+      const user = userById.get(normalizedUserId);
+      return user ? getUserDisplayName(user) : userId;
+    })
+    .join(', ');
+};
+
 const renderFieldValue = (
   fv: FormEntityValuesWithField,
   attachmentById: ReadonlyMap<string, MessageAttachment>,
+  userById: ReadonlyMap<string, User>,
 ): ReactNode => {
   const raw = fv.actualFieldValue ?? fv.fieldValue;
+  const fieldType = getFieldType(fv);
   if (raw === null || raw === undefined) return '—';
-  if (fv.formField?.fieldType === FormFieldType.DOC) {
+  if (fieldType === FormFieldType.BOOLEAN) {
+    if (typeof raw === 'boolean') return raw ? 'Yes' : 'No';
+    if (typeof raw === 'string') {
+      const normalized = raw.trim().toLowerCase();
+      if (normalized === 'true' || normalized === 'yes') return 'Yes';
+      if (normalized === 'false' || normalized === 'no') return 'No';
+    }
+  }
+  if (fieldType === FormFieldType.USER) {
+    return formatUserValues(raw, userById);
+  }
+  if (fieldType === FormFieldType.DOC) {
     const attachmentId = stringValuesFromJson(raw)[0];
     const attachment =
       fv.attachments?.[0] ?? (attachmentId ? attachmentById.get(attachmentId) : undefined);
@@ -66,10 +125,17 @@ export const FormViewerDialog: React.FC<FormViewerDialogProps> = ({
   visitIndex,
   formValues,
 }) => {
+  const users = useUsers();
+
+  const userById = useMemo(() => {
+    const usersList = Array.isArray(users) ? users : [];
+    return new Map(usersList.map(user => [user.id, user]));
+  }, [users]);
+
   const docAttachmentIds = useMemo(() => {
     const ids = new Set<string>();
     formValues.forEach(fv => {
-      if (fv.formField?.fieldType !== FormFieldType.DOC) return;
+      if (getFieldType(fv) !== FormFieldType.DOC) return;
       stringValuesFromJson(fv.actualFieldValue ?? fv.fieldValue).forEach(id => ids.add(id));
     });
     return Array.from(ids);
@@ -100,11 +166,9 @@ export const FormViewerDialog: React.FC<FormViewerDialogProps> = ({
           <div className='space-y-4'>
             {formValues.map(fv => (
               <div key={fv.id}>
-                <p className='text-xs font-medium text-muted-foreground mb-1'>
-                  {fv.formField?.fieldName ?? fv.fieldId}
-                </p>
+                <p className='text-xs font-medium text-muted-foreground mb-1'>{getFieldName(fv)}</p>
                 <div className='rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground min-h-[36px]'>
-                  {renderFieldValue(fv, attachmentById)}
+                  {renderFieldValue(fv, attachmentById, userById)}
                 </div>
               </div>
             ))}
