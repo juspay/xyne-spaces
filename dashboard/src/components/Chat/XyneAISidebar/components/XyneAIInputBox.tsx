@@ -283,7 +283,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     useEffect(() => {
       onOpenContextModalRef.current = onOpenContextModal;
     }, [onOpenContextModal]);
-    const { isMobile } = usePlatform();
+    const { isMobile, isMac } = usePlatform();
     const navigate = useNavigate();
 
     // Voice input
@@ -886,11 +886,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
             }
           }
 
-          // '/' when modal is NOT open → open the modal
-          if (event.key === '/' && !isContextModalOpenRef.current) {
+          // Cmd+/ (Mac) or Ctrl+/ (others) → open the context modal
+          if (
+            event.key === '/' &&
+            !isContextModalOpenRef.current &&
+            (event.ctrlKey || event.metaKey)
+          ) {
+            event.preventDefault();
             onOpenContextModalRef.current?.();
-            // Let '/' be typed into the editor
-            return false;
+            return true;
           }
 
           // Escape closes the context modal when it's open
@@ -1600,7 +1604,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   onClick={() => onOpenContextModal?.()}
                   className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0`}
                   aria-label='Add context'
-                  title='Add context'
+                  title={`Add context (${isMac ? '⌘' : 'Ctrl+'}/)`}
                   data-track-category='XyneAI'
                   data-track-name='OPEN_CONTEXT_MODAL'
                 >
