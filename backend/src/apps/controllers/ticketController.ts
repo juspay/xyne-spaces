@@ -16,6 +16,7 @@ import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '../types';
 import { emailService } from '@/services/emailService';
 import { uploadFiles } from '@/services/fileUploadService';
+import { config } from '@/config/env';
 import { buildEmailTicketAcknowledgmentBody } from '../core/emailUtils';
 import { extractEmailAddress } from '@/utils/email';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
@@ -40,6 +41,7 @@ import {
 
 const externalSourceRepo = new ExternalSourceRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
+const appsFilesBaseUrl = `${config.backendUrl.replace(/\/$/, '')}/api/apps/files`;
 
 const prismaClient = DatabaseClient.getInstance();
 
@@ -162,6 +164,11 @@ const SearchTicketsBodySchema = z.object({
   }
 });
 
+const TicketConversationQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().optional(),
+});
+
 function parseListBySenderChannelIds(query: Request['query']): string[] {
   const ids = new Set<string>();
 
@@ -186,6 +193,11 @@ function parseListBySenderChannelIds(query: Request['query']): string[] {
 }
 
 interface MerchantTicketsListCursor {
+  id: string;
+  createdAt: number;
+}
+
+interface TicketConversationCursor {
   id: string;
   createdAt: number;
 }
@@ -1739,6 +1751,19 @@ export class TicketController {
       const { ticketId } = req.params;
       const workspaceId = req.user?.workspaceId;
       const userId = req.user?.id;
+      const queryResult = TicketConversationQuerySchema.safeParse(req.query);
+
+      if (!queryResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: queryResult.error.errors,
+        });
+        return;
+      }
+
+      const { limit, cursor } = queryResult.data;
+      const decodedCursor = decodeCursor<TicketConversationCursor>(cursor);
 
       if (!ticketId) {
         res.status(400).json({
@@ -1798,14 +1823,37 @@ export class TicketController {
         return;
       }
 
-      const emails = await repositories.emails.findByConversationIdOrdered(ticket.conversationId);
+      const emails = await repositories.emails.findManyWithForwardCursor(
+        ticket.conversationId,
+        limit + 1,
+        decodedCursor,
+      );
+      const attachments = await repositories.messageAttachments.findByEmailIds(
+        emails.map(email => email.id),
+      );
+      const attachmentsByEmailId = new Map<string, typeof attachments>();
+
+      for (const attachment of attachments) {
+        const existing = attachmentsByEmailId.get(attachment.entityId) ?? [];
+        existing.push(attachment);
+        attachmentsByEmailId.set(attachment.entityId, existing);
+      }
+
+      const pagination = paginateResults(
+        emails,
+        limit,
+        (email): TicketConversationCursor => ({
+          id: email.id,
+          createdAt: email.createdAt.getTime(),
+        }),
+      );
 
       res.status(200).json({
         ticketId: ticket.id,
         xyneId: ticket.xyneId,
         conversationId: ticket.conversationId,
         channelId: ticket.channelId,
-        items: emails.map(email => ({
+        items: pagination.items.map(email => ({
           id: email.id,
           type: email.type,
           subject: email.subject,
@@ -1818,13 +1866,31 @@ export class TicketController {
           externalThreadId: email.externalThreadId,
           externalMessageId: email.externalMessageId,
           sentByUserId: email.sentByUserId,
+          attachments: (attachmentsByEmailId.get(email.id) ?? []).map(attachment => ({
+            id: attachment.id,
+            originalFilename: attachment.originalFilename,
+            mimetype: attachment.mimetype,
+            size: attachment.size,
+            url: `${appsFilesBaseUrl}/download/${attachment.id}`,
+            storagePath: attachment.url,
+            thumbnailUrl: attachment.thumbnailUrl,
+            width: attachment.width,
+            height: attachment.height,
+            createdAt: attachment.createdAt,
+            conversationId: attachment.conversationId,
+          })),
           createdAt: email.createdAt,
           updatedAt: email.updatedAt,
         })),
-        total: emails.length,
+        nextCursor: pagination.nextCursor,
+        hasMore: pagination.hasMore,
       });
     } catch (error) {
       logger.error('[TicketController] Error fetching ticket conversation:', error);
+      if (error instanceof Error && error.message === 'Invalid cursor format') {
+        res.status(400).json({ error: error.message, code: 'VALIDATION_ERROR' });
+        return;
+      }
       res.status(500).json({
         error: 'Internal server error',
         code: 'INTERNAL_ERROR',

@@ -141,6 +141,30 @@ export class EmailRepository {
     });
   }
 
+  async findManyWithForwardCursor(
+    conversationId: string,
+    limit: number,
+    cursor?: { id: string; createdAt: number }
+  ): Promise<Email[]> {
+    const where: any = { conversationId };
+
+    if (cursor) {
+      where.OR = [
+        { createdAt: { gt: new Date(cursor.createdAt) } },
+        {
+          createdAt: new Date(cursor.createdAt),
+          id: { gt: cursor.id },
+        },
+      ];
+    }
+
+    return await this.db.email.findMany({
+      where,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: limit,
+    });
+  }
+
   async findRootsByExternalThreadIds(
     externalThreadIds: string[]
   ): Promise<Array<{ id: string; externalThreadId: string }>> {
