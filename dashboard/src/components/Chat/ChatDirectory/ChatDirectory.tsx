@@ -77,6 +77,7 @@ import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import { useUnreadThreadsCount } from '../../../hooks/useUnreadThreadsCount';
+import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCount';
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
 import { stateMachineActor } from '../../../machines/stateMachine';
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
@@ -117,6 +118,7 @@ const ChatDirectory = ({
   const { isMobile } = usePlatform();
 
   const threadCount = useUnreadThreadsCount();
+  const overdueRemindersCount = useOverdueRemindersCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const prefetchRecap = usePrefetchRecap();
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
@@ -473,7 +475,10 @@ const ChatDirectory = ({
         </button>
         <button
           className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
+            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
+            overdueRemindersCount > 0
+              ? 'text-sidebar-unread-foreground'
+              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
           )}
           onClick={() => {
             void navigate('/chat/bookmarks');
@@ -481,11 +486,22 @@ const ChatDirectory = ({
           data-testid='open-bookmarks-button'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='OPEN_BOOKMARKS'
+          data-track-metadata={JSON.stringify({ overdueRemindersCount })}
         >
           <span className='size-5 flex items-center justify-center shrink-0'>
             <Bookmark className='size-4' />
           </span>
           <span className='flex-1 min-w-0 text-left truncate block'>Bookmarks</span>
+          {overdueRemindersCount > 0 && (
+            <span className='size-5 flex items-center justify-center shrink-0'>
+              <Badge
+                variant='success'
+                className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
+              >
+                {overdueRemindersCount > 10 ? '10+' : overdueRemindersCount}
+              </Badge>
+            </span>
+          )}
         </button>
         <button
           className={cn(
