@@ -84,6 +84,15 @@ export interface NonLinearTransitionEditorProps {
 
 // ─── Custom Stage Node ────────────────────────────────────────────────────────
 
+type HighlightState = 'selected' | 'connected' | 'dull' | 'normal';
+
+const NODE_HIGHLIGHT_CLASSES: Record<HighlightState, string> = {
+  selected: 'border-[#6276be] ring-2 ring-[#6276be]/30 bg-[#6276be]/5',
+  connected: 'border-[#6276be]/60 bg-[#6276be]/5',
+  dull: 'border-border opacity-40 grayscale-[40%]',
+  normal: 'border-border',
+};
+
 interface StageNodeData {
   stage: StageNode;
   onUpdate: (patch: Partial<StageNode>) => void;
@@ -95,9 +104,10 @@ interface StageNodeData {
   onSaveEta: (tempId: number) => void;
   onCancelEta: () => void;
   setEtaValue: (v: string) => void;
+  highlightState?: HighlightState;
 }
 
-const StageNodeComponent: React.FC<NodeProps<StageNodeData>> = ({ data, selected }) => {
+const StageNodeComponent: React.FC<NodeProps<StageNodeData>> = ({ data }) => {
   const {
     stage,
     onUpdate,
@@ -109,15 +119,14 @@ const StageNodeComponent: React.FC<NodeProps<StageNodeData>> = ({ data, selected
     onSaveEta,
     onCancelEta,
     setEtaValue,
+    highlightState = 'normal',
   } = data;
   const statusOption = getStatusOption(stage.defaultTicketStatusV2);
   const isEditingEta = editingEtaId === stage.tempId;
 
   return (
     <div
-      className={`w-[240px] bg-background rounded-[10px] border-2 shadow-[0px_2px_8px_0px_rgba(5,5,6,0.07)] transition-all ${
-        selected ? 'border-[#6276be]' : 'border-border'
-      }`}
+      className={`w-[240px] bg-background rounded-[10px] border-2 shadow-[0px_2px_8px_0px_rgba(5,5,6,0.07)] transition-all ${NODE_HIGHLIGHT_CLASSES[highlightState]}`}
     >
       {/* Handles */}
       <Handle
@@ -240,6 +249,7 @@ interface TransitionEdgeData {
   selectedEdgeId: string | null;
   isReciprocal?: boolean;
   curveOffset?: number;
+  highlightState?: HighlightState;
 }
 
 // ─── Graph Layout Helper ─────────────────────────────────────────────────────
@@ -359,6 +369,11 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
   const isSelected = data?.selectedEdgeId === id;
   const meta = data?.meta;
   const hasBadge = !!meta?.formId || meta?.requiresApproval;
+  const highlightState = data?.highlightState ?? 'normal';
+  const isDulled = highlightState === 'dull';
+  const isHighlighted = isSelected || highlightState === 'connected';
+  const strokeColor = isDulled ? '#cbd5e1' : isHighlighted ? '#6276be' : '#94a3b8';
+  const strokeWidth = isHighlighted ? 2.5 : 1.5;
 
   return (
     <>
@@ -368,9 +383,10 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
         d={finalEdgePath}
         markerEnd={markerEnd}
         style={{
-          stroke: isSelected ? '#6276be' : '#94a3b8',
-          strokeWidth: isSelected ? 2.5 : 1.5,
+          stroke: strokeColor,
+          strokeWidth,
           fill: 'none',
+          opacity: isDulled ? 0.35 : 1,
         }}
       />
       <path
@@ -389,6 +405,7 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
             position: 'absolute',
             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
             pointerEvents: 'all',
+            opacity: isDulled ? 0.35 : 1,
           }}
           className='nodrag nopan'
         >
@@ -398,7 +415,7 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
             data-track-category='board_stage_config'
             data-track-name='open_transition_config'
             className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium shadow-sm transition-all ${
-              isSelected
+              isHighlighted
                 ? 'bg-[#6276be] border-[#6276be] text-white'
                 : 'bg-background border-border text-muted-foreground hover:border-[#6276be] hover:text-[#6276be]'
             }`}
@@ -674,6 +691,22 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
   setEtaValue,
 }) => {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  const handleSelectEdge = useCallback((edgeId: string) => {
+    setSelectedEdgeId(edgeId);
+    setSelectedNodeId(null);
+  }, []);
+
+  const handleNodeClick = (_event: React.MouseEvent, node: Node) => {
+    setSelectedNodeId(node.id);
+    setSelectedEdgeId(null);
+  };
+
+  const handlePaneClick = () => {
+    setSelectedEdgeId(null);
+    setSelectedNodeId(null);
+  };
 
   // Track whether the user has manually dragged any node — if so, we
   // preserve their custom positions and don't auto-relayout on transition changes.
@@ -859,7 +892,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
             fromTempId,
             toTempId,
             meta,
-            onSelectEdge: setSelectedEdgeId,
+            onSelectEdge: handleSelectEdge,
             selectedEdgeId,
             isReciprocal,
             curveOffset,
@@ -868,7 +901,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
       });
     });
     setEdges(newEdges);
-  }, [transitionsByTempId, transitionsMeta, selectedEdgeId, setEdges]);
+  }, [transitionsByTempId, transitionsMeta, selectedEdgeId, setEdges, handleSelectEdge]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -911,6 +944,50 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     return { edgeId: selectedEdgeId, fromStage, toStage, fromTempId, toTempId, meta };
   }, [selectedEdgeId, edges, stages, transitionsMeta]);
 
+  // Highlight the selected node/edge and its direct connections; dull the rest.
+  const { displayNodes, displayEdges } = useMemo(() => {
+    const nodeState = new Map<string, HighlightState>();
+    const edgeState = new Map<string, HighlightState>();
+
+    if (selectedNodeId) {
+      nodeState.set(selectedNodeId, 'selected');
+      edges.forEach(e => {
+        if (e.source === selectedNodeId || e.target === selectedNodeId) {
+          edgeState.set(e.id, 'connected');
+          const other = e.source === selectedNodeId ? e.target : e.source;
+          if (!nodeState.has(other)) nodeState.set(other, 'connected');
+        }
+      });
+    } else if (selectedEdgeId) {
+      const edge = edges.find(e => e.id === selectedEdgeId);
+      if (edge) {
+        nodeState.set(edge.source, 'connected');
+        nodeState.set(edge.target, 'connected');
+        edgeState.set(edge.id, 'connected');
+      }
+    }
+
+    if (nodeState.size > 0) {
+      nodes.forEach(n => {
+        if (!nodeState.has(n.id)) nodeState.set(n.id, 'dull');
+      });
+      edges.forEach(e => {
+        if (!edgeState.has(e.id)) edgeState.set(e.id, 'dull');
+      });
+    }
+
+    return {
+      displayNodes: nodes.map(n => ({
+        ...n,
+        data: { ...n.data, highlightState: nodeState.get(n.id) ?? 'normal' },
+      })),
+      displayEdges: edges.map(e => ({
+        ...e,
+        data: { ...e.data, highlightState: edgeState.get(e.id) ?? 'normal' },
+      })),
+    };
+  }, [selectedNodeId, selectedEdgeId, nodes, edges]);
+
   return (
     <div className='relative w-full h-full' style={{ minHeight: 480 }}>
       {isTransitionsLoading && (
@@ -923,15 +1000,16 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
       )}
 
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={displayNodes}
+        edges={displayEdges}
         onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onEdgesDelete={onEdgesDelete}
+        onNodeClick={handleNodeClick}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
-        onPaneClick={() => setSelectedEdgeId(null)}
+        onPaneClick={handlePaneClick}
         fitView
         fitViewOptions={{ padding: 0.35 }}
         minZoom={0.3}
