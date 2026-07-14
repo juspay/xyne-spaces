@@ -92,6 +92,23 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async findByEmailIds(emailIds: string[]): Promise<MessageAttachment[]> {
+    if (emailIds.length === 0) {
+      return [];
+    }
+
+    return await this.db.messageAttachment.findMany({
+      where: {
+        entityId: {
+          in: emailIds,
+        },
+        entityType: AttachmentEntityType.EMAIL,
+        isDeleted: false,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async findTranscriptByMessageId(messageId: string): Promise<MessageAttachment | null> {
     return await this.db.messageAttachment.findFirst({
       where: {
