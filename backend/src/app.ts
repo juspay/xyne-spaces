@@ -533,7 +533,13 @@ export class App {
       next();
     };
 
-    this.app.post('/api/internal/postAsUser', validateS2SKey, new ChatController().postMessage);
+    this.app.post('/api/internal/postAsUser', validateS2SKey, (req: Request, res: Response) => {
+      // Mark this request so ChatController.postMessage persists the message as a
+      // USER message (posted on behalf of a real human) rather than a BOT message.
+      // Only the trusted S2S postAsUser route sets this; app-token callers never do.
+      (req as Request & { isPostAsUser?: boolean }).isPostAsUser = true;
+      void new ChatController().postMessage(req, res);
+    });
     this.app.post(
       '/api/internal/automations/claw-callback/:executionId/:stepName',
       validateS2SKey,

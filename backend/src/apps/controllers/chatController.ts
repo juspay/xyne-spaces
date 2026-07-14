@@ -260,6 +260,16 @@ export class ChatController {
           content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
       }
 
+      // Messages posted via the internal /api/internal/postAsUser route are authored
+      // on behalf of a real human user (Digital Twin approvals), so they must be
+      // persisted as USER messages — otherwise the dashboard renders them with the
+      // Xyne bot avatar/name instead of the user's profile picture. Every other
+      // (app-token) caller stays BOT. Gated on the trusted S2S route marker so an
+      // app token can never forge a message that appears to come from a human.
+      const messageType = (req as Request & { isPostAsUser?: boolean }).isPostAsUser
+        ? MessageType.USER
+        : MessageType.BOT;
+
       const result = await findOrCreateConversation(
         resolvedChannelId,
         userId,
@@ -267,7 +277,7 @@ export class ChatController {
         isMarkdown,
         conversationId,
         uploadedFiles,
-        MessageType.BOT,
+        messageType,
         { ...(isMarkdown && { contentFormat: ContentFormat.MARKDOWN }), ...metadata },
       );
 
