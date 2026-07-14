@@ -7,6 +7,7 @@ import {
   filterNavItemsByPermission,
   type NavigationItem,
 } from '../components/AppSidebar/navigationConfig';
+import { useClawDashboardVisibility } from './useClawDashboardVisibility';
 
 // Navigation items the current user is allowed to see, in canonical order.
 export const useVisibleNavigationItems = (): NavigationItem[] => {
@@ -16,9 +17,15 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
   const canManageOwnUserGroups = userGroups.some(
     group => group.createdBy === user?.id && group.workspaceId === user?.workspaceId,
   );
+  const { showClawDashboard } = useClawDashboardVisibility();
 
-  return useMemo(
-    () => filterNavItemsByPermission(NAVIGATION_ITEMS, permissions, canManageOwnUserGroups),
-    [permissions, canManageOwnUserGroups],
-  );
+  return useMemo(() => {
+    const permittedItems = filterNavItemsByPermission(
+      NAVIGATION_ITEMS,
+      permissions,
+      canManageOwnUserGroups,
+    );
+    if (showClawDashboard) return permittedItems;
+    return permittedItems.filter(item => item.path !== '/claw-agents');
+  }, [permissions, canManageOwnUserGroups, showClawDashboard]);
 };

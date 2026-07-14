@@ -117,6 +117,14 @@
     --desk-accent-badge-bg: #eef0fb;
     --desk-destructive: #ff4b4b;
     --desk-switch-track-off: #cdd1d6;
+
+    /* Claw agent-wizard AI accent (violet) — light themes */
+    --claw-ai-fg: #7c3aed;
+    --claw-ai-fg-muted: rgb(124 58 237 / 0.7);
+    --claw-ai-surface: #faf5ff;
+    --claw-ai-border: rgb(196 181 253 / 0.7);
+    --claw-ai-solid: #7c3aed;
+    --claw-ai-solid-hover: #6d28d9;
   }
 
   /* Classic theme - default theme with current design */
@@ -222,6 +230,14 @@
     --desk-accent-badge-bg: #eef0fb;
     --desk-destructive: #ff4b4b;
     --desk-switch-track-off: #cdd1d6;
+
+    /* Claw agent-wizard AI accent (violet) — light themes */
+    --claw-ai-fg: #7c3aed;
+    --claw-ai-fg-muted: rgb(124 58 237 / 0.7);
+    --claw-ai-surface: #faf5ff;
+    --claw-ai-border: rgb(196 181 253 / 0.7);
+    --claw-ai-solid: #7c3aed;
+    --claw-ai-solid-hover: #6d28d9;
   }
 
   /* Midnight theme - dark theme variant */
@@ -327,6 +343,14 @@
     --desk-accent-badge-bg: rgba(98, 118, 190, 0.2);
     --desk-destructive: #ff6b6b;
     --desk-switch-track-off: #43484e;
+
+    /* Claw agent-wizard AI accent (violet) — midnight */
+    --claw-ai-fg: #a78bfa;
+    --claw-ai-fg-muted: rgb(167 139 250 / 0.7);
+    --claw-ai-surface: rgb(46 16 101 / 0.25);
+    --claw-ai-border: rgb(109 40 217 / 0.4);
+    --claw-ai-solid: #7c3aed;
+    --claw-ai-solid-hover: #8b5cf6;
   }
 }
 
@@ -1908,6 +1932,22 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   100% {
     color: rgba(59, 130, 246, 0.2);
   }
+}
+
+/* Claw agent-creation wizard: per-step enter animation. */
+@keyframes claw-step-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.step-enter {
+  animation: claw-step-enter 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .dot-animate span {

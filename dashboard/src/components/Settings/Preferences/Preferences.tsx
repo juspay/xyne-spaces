@@ -765,6 +765,22 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           </div>
         )}
 
+        {!isMobile && (
+          <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+            <div>
+              <p className='text-sm font-medium text-foreground'>Show Claw Agents</p>
+              <p className='text-xs text-muted-foreground mt-0.5'>
+                Show the Claw Agents option in the Spaces sidebar.
+              </p>
+            </div>
+            <Switch
+              id='show-claw-agents'
+              checked={state.showClawDashboard}
+              onCheckedChange={state.setShowClawDashboard}
+            />
+          </div>
+        )}
+
         {detectReactNativeWebView() && (
           <Button
             type='button'
