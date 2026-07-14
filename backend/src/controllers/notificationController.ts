@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { notificationService } from '@/services/notificationService';
 import { unreadService } from '@/services/unreadService';
 import { apnsService } from '@/services/apnsService';
+import { fcmPushService } from '@/services/fcmService';
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
 
@@ -59,6 +60,31 @@ const preferencesSchema = z.record(
 export class NotificationController {
   private resolveSessionId(req: Request): string | undefined {
     return req.authenticatedSessionId;
+  }
+
+  private async resolveVoipTokenForCurrentUser(req: Request): Promise<{ voipToken: string; sessionId: string } | null> {
+    const userId = req.user?.id;
+    if (!userId) {
+      return null;
+    }
+
+    const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
+    if (sessions.length === 0) {
+      return null;
+    }
+
+    const preferredSessionId = this.resolveSessionId(req);
+    const preferredSession = preferredSessionId
+      ? sessions.find((session) => session.id === preferredSessionId && session.voipToken)
+      : undefined;
+    const fallbackSession = sessions.find((session) => session.voipToken);
+    const session = preferredSession ?? fallbackSession;
+
+    if (!session?.voipToken) {
+      return null;
+    }
+
+    return { voipToken: session.voipToken, sessionId: session.id };
   }
 
   async getVapidPublicKey(_req: Request, res: Response): Promise<void> {
@@ -412,10 +438,13 @@ export class NotificationController {
 
   async sendTestVoipPush(req: Request, res: Response): Promise<void> {
     try {
-      const { voipToken, callerName, callerId, actionUrl } = req.body;
+      const { callerName, callerId, actionUrl } = req.body;
+      const voipTarget = await this.resolveVoipTokenForCurrentUser(req);
 
-      if (!voipToken) {
-        res.status(400).json({ error: 'voipToken is required' });
+      if (!voipTarget) {
+        res.status(400).json({
+          error: 'No registered VoIP token found for the authenticated user',
+        });
         return;
       }
 
@@ -435,7 +464,7 @@ export class NotificationController {
         }
       }
 
-      const success = await apnsService.sendVoipPush(voipToken, {
+      const success = await apnsService.sendVoipPush(voipTarget.voipToken, {
         title: 'Incoming Space Call',
         message: 'Someone is calling you',
         type: 'INCOMING_CALL',

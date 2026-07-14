@@ -7,7 +7,6 @@ import { google } from 'googleapis';
 import { logger } from '@/utils/logger';
 import { GoogleService } from '@/services/googleService';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
-import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ExternalSourcePlatform } from '../core/types';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { authMiddleware } from '@/middleware/auth';
@@ -156,20 +155,6 @@ function redirectError(
   res.redirect(
     buildPostOAuthRedirect(frontendUrl, buildSupportPath(workspaceId, channelId, params), platform),
   );
-}
-
-function htmlPage(title: string, body: string, status: 'success' | 'error' = 'success'): string {
-  const color = status === 'success' ? '#4CAF50' : '#F44336';
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>${title}</title>
-<style>
-  body { font-family: sans-serif; max-width: 520px; margin: 60px auto; padding: 20px; }
-  .card { background: #fff; padding: 28px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
-  h1 { color: ${color}; margin-top: 0; }
-  code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; }
-  .muted { color: #888; margin-top: 24px; }
-</style></head>
-<body><div class="card">${body}</div></body></html>`;
 }
 
 async function createGoogleChannelConnectAuthUrl(
@@ -463,35 +448,9 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
   }
 });
 
-// POST /api/integrations/google/auth/start
-router.post('/auth/start', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { channelId } = req.body;
-    if (!channelId) { res.status(400).json({ error: 'channelId is required' }); return; }
-
-    const channel = await new ChannelRepository().findById(channelId);
-    if (!channel) { res.status(404).json({ error: 'Channel not found' }); return; }
-    if (channel.type !== 'EMAIL') {
-      res.status(400).json({ error: 'Channel must be of type EMAIL' }); return;
-    }
-
-    const state = Math.random().toString(36).substring(7);
-    await setOAuthState(state, { channelId, timestamp: Date.now() });
-
-    const authUrl = createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
-      access_type: 'offline',
-      scope: GMAIL_SCOPES,
-      prompt: 'consent',
-      state,
-    });
-
-    logger.info(`${TAG} OAuth flow initiated`, { channelId });
-    res.json({ authUrl, state });
-  } catch (error: any) {
-    logger.error(`${TAG} Error starting OAuth flow:`, error);
-    res.status(500).json({ error: 'Failed to start OAuth flow', details: error.message });
-  }
-});
+// Legacy /auth/start flow removed.
+// The frontend now uses the authenticated /connect/* entry points, which
+// validate workspace ownership before generating OAuth URLs.
 
 // GET /api/integrations/google/auth/callback
 router.get('/auth/callback', async (req: Request, res: Response): Promise<void> => {
@@ -1000,35 +959,6 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           frontendUrl,
           buildSupportPath(cd.workspaceId, txResult.channelId, params),
           stateData.platform,
-        ),
-      );
-    } else if (stateData.channelId) {
-      // /auth/start flow: channel was pre-created, resolve board from channel's project
-      const channelId = stateData.channelId;
-      let boardId: string | undefined;
-      const channel = await db.channel.findUnique({ where: { id: channelId } });
-      if (channel?.projectId) {
-        const board = await db.board.findFirst({
-          where: { projectId: channel.projectId },
-          orderBy: { createdAt: 'asc' },
-        });
-        boardId = board?.id;
-      }
-      const result = await GoogleService.setupExternalSource({
-        channelId,
-        emailAddress,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        boardId,
-      });
-      logger.info(`${TAG} Gmail integration setup complete`, { sourceName: result.sourceName });
-      res.send(htmlPage('Gmail Integration Successful', `
-        <h1>✓ Gmail Connected</h1>
-        <p><strong>Email:</strong> ${emailAddress}</p>
-        <p><strong>Source:</strong> <code>${result.sourceName}</code></p>
-        <p><strong>Webhook:</strong> <code>${result.webhookUrl}</code></p>
-        <p class="muted">You can close this window. New emails will sync automatically.</p>
-      `,
         ),
       );
     } else {

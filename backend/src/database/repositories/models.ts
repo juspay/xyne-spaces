@@ -23,9 +23,24 @@ export class ModelRepository extends BaseRepository<Model, CreateModelInput, Upd
     });
   }
 
+  async findByIdAndWorkspaceId(id: string, workspaceId: string): Promise<Model | null> {
+    return await this.db.model.findUnique({
+      where: { id, workspaceId },
+    });
+  }
+
   async findByUserDefinedId(userDefinedId: string): Promise<Model | null> {
     return await this.db.model.findUnique({
       where: { userDefinedId },
+    });
+  }
+
+  async findByUserDefinedIdAndWorkspaceId(
+    userDefinedId: string,
+    workspaceId: string,
+  ): Promise<Model | null> {
+    return await this.db.model.findUnique({
+      where: { userDefinedId, workspaceId },
     });
   }
 
@@ -53,9 +68,12 @@ export class ModelRepository extends BaseRepository<Model, CreateModelInput, Upd
     });
   }
 
-  async findByProvider(provider: string): Promise<Model[]> {
+  async findByProvider(provider: string, workspaceId?: string): Promise<Model[]> {
     return await this.db.model.findMany({
-      where: { provider },
+      where: {
+        provider,
+        ...(workspaceId ? { workspaceId } : {}),
+      },
     });
   }
 
@@ -74,9 +92,14 @@ export class ModelRepository extends BaseRepository<Model, CreateModelInput, Upd
     });
   }
 
-  async findBySearch(searchTerm: string): Promise<Model[]> {
+  async findBySearch(searchTerm: string, workspaceId?: string): Promise<Model[]> {
     const searchFilter = this.createSearchFilter(searchTerm, ['name', 'provider', 'userDefinedId']);
-    return this.findMany({ where: searchFilter });
+    return this.findMany({
+      where: {
+        ...searchFilter,
+        ...(workspaceId ? { workspaceId } : {}),
+      },
+    });
   }
   
   async upsert(userDefinedId: string, data: CreateModelInput): Promise<Model> {

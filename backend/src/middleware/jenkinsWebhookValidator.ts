@@ -5,16 +5,28 @@ import { config } from '@/config/env';
 
 class JenkinsWebhookMiddleware {
   private readonly webhookSecret: string;
+  private readonly webhookSecretConfigured: boolean;
 
   constructor() {
-    if (!config.jenkins.webhookSecret) {
+    this.webhookSecret = config.jenkins.webhookSecret || '';
+    this.webhookSecretConfigured = this.webhookSecret.trim().length > 0;
+
+    if (!this.webhookSecretConfigured) {
       logger.warn('JENKINS_WEBHOOK_SECRET is not configured, webhook updates will be rejected');
     }
-    this.webhookSecret = config.jenkins.webhookSecret;
   }
 
   verify = (req: Request, res: Response, next: NextFunction): void => {
     try {
+      if (!this.webhookSecretConfigured) {
+        logger.error('[Jenkins-Webhook-Validator] Rejecting webhook because JENKINS_WEBHOOK_SECRET is empty');
+        res.status(503).json({
+          error: 'Service Unavailable',
+          message: 'Webhook secret is not configured'
+        });
+        return;
+      }
+
       const signature = req.headers['x-jenkins-signature'];
       logger.info('[Webhook-Validator] Jenkins webhook received');
       logger.info('[Webhook-Validator] Signature header:', signature);

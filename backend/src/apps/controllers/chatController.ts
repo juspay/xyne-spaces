@@ -586,9 +586,27 @@ export class ChatController {
     // Forward to the external URL server-side (no CORS issues)
     // callerUserId is derived from the authenticated session (XYNE-12145)
     try {
+      const isInternalSpacesCallback = (() => {
+        try {
+          return new URL(actionableUrl).origin === new URL(config.backendUrl).origin;
+        } catch {
+          return false;
+        }
+      })();
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (isInternalSpacesCallback) {
+        const s2sKey = config.internalS2sKey;
+        if (s2sKey) {
+          headers['x-s2s-key'] = s2sKey;
+        } else {
+          logger.error('[dispatchAction] INTERNAL_S2S_KEY is missing; internal callback cannot be authenticated');
+        }
+      }
+
       const callbackRes = await fetch(actionableUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ actionId, context, messageId, conversationId, callerUserId }),
         signal: AbortSignal.timeout(30_000),
       });
