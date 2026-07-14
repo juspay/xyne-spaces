@@ -2,6 +2,7 @@ import { Prisma, Tag, TagMethod, TagsConfig } from '@prisma/client';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { TAG_FORMAT_REGEX } from '@xyne/shared';
 import { TagsConfigShapeSchema } from './schema';
+import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
 import type { CategoryCatalogEntry, CategoryConfig, GeneratedTag, PersistedTag, TagsConfigShape } from './types';
 
 export class TagServiceError extends Error {
@@ -120,9 +121,19 @@ export class TagService {
     const configs = await tagRepository.listActiveConfigsBySource(sourceType, workspaceId);
 
     const byName = new Map<string, CategoryCatalogEntry>();
+
+    // Persisted configs take priority since its custom definition from user.
     for (const row of configs) {
       const shape = row.config as unknown as TagsConfigShape;
       for (const [name, category] of Object.entries(shape.categories ?? {})) {
+        if (byName.has(name)) continue;
+        byName.set(name, { name, ...category });
+      }
+    }
+
+    // Seed defaults only for categories not already covered by a persisted config.
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) {
+      for (const [name, category] of Object.entries(DEFAULT_DESK_EMAIL_CONFIG.categories)) {
         if (byName.has(name)) continue;
         byName.set(name, { name, ...category });
       }
