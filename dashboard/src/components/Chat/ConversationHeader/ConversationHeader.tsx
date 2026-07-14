@@ -105,6 +105,7 @@ const ConversationHeader = ({
     headerPadding > 0 &&
     rowWidth - fullActionsWidthRef.current - headerPadding < MIN_TITLE_WIDTH;
   const { isMobile } = usePlatform();
+  const isActivityRightPanel = baseRoute === '/chat/activity' && !isMobile;
 
   // Get target user ID for 1:1 DM calls
   const targetUserId = getTargetUserIdForCall(channel?.scopeType, channel?.name, context.userID);
@@ -215,8 +216,13 @@ const ConversationHeader = ({
     );
 
   return (
-    <div className='h-[88px] bg-background border-b border-border'>
-      <div ref={rowRef} className='h-14 p-4 flex items-center justify-between gap-6'>
+    <div
+      className={cn(
+        'bg-background border-b border-border flex flex-col',
+        isActivityRightPanel ? 'h-[107px]' : 'h-[88px]',
+      )}
+    >
+      <div ref={rowRef} className='h-14 shrink-0 p-4 flex items-center justify-between gap-6'>
         <div ref={titleRef} className='flex items-center gap-2 text-foreground min-w-0 flex-1'>
           <Tooltip content={channelUserStatus?.isStarred ? 'Unstar' : 'Star'}>
             <Button
@@ -457,7 +463,7 @@ const ConversationHeader = ({
           )}
         </div>
       </div>
-      <div className='px-4'>
+      <div className='mt-auto px-4'>
         <Tabs.Root defaultValue={activeTab || 'chat'}>
           <Tabs.List className='flex items-center justify-start overflow-x-auto no-scrollbar'>
             {channelTabs?.map(tab => (

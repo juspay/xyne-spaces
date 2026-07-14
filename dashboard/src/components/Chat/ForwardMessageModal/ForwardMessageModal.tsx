@@ -804,7 +804,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
               <div className='flex-1 min-w-0'>
                 <div className='flex items-baseline gap-2 mb-1'>
                   <h4 className='text-sm font-semibold text-foreground'>
-                    {isCallMessage ? 'Xyne Call' : sender?.name || 'User'}
+                    {isCallMessage ? 'Xyne Call' : getUserDisplayName(sender)}
                   </h4>
                   <span className='text-xs text-muted-foreground'>
                     {formatRelativeTimestamp(message.createdAt)}
