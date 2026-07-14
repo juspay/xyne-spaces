@@ -3,7 +3,6 @@ import { useSelector } from '@xstate/react';
 import type { Zero } from '@rocicorp/zero';
 import { CallType, InvitationResponse } from '@xyne/shared';
 import { toast } from 'sonner';
-import { playAudio } from '../../../utils/audioPlayer';
 import { roomActor } from '../../../machines/roomMachine';
 import { MiniCallView } from './MiniCallView';
 import { FullCallView } from './FullCallView';
@@ -16,18 +15,23 @@ import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketM
 import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { EndCallModal } from '../EndCallModal/EndCallModal';
+import { AFKWarningModal } from '../AFKWarningModal/AFKWarningModal';
 import {
   useIsCallHost,
   useIsOnlyParticipant,
   useCallParticipants,
+  useIsLoneParticipant,
   findActiveCall,
   isCallRecording,
 } from '../../../hooks/useCalls';
+import { useAFKDetection } from '../hooks/useAFKDetection';
 import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
 import { ScreenPickerModal } from '../../ScreenPicker/ScreenPickerModal';
 import { mutators } from '../../../zero/mutators';
+import { playAudio } from '../../../utils/audioPlayer';
+
 import { isParticipantScreenShareEnabled } from '../../../utils/livekitScreenShare';
 import { logger, Logger } from '../../../utils/logger';
 import { CallWhiteboardSync } from '../CallWhiteboard';
@@ -210,6 +214,9 @@ export function CustomLiveKitRoom({
 
   const isOnlyParticipant = useIsOnlyParticipant(callParticipants);
 
+  // AFK detection: true when user is the only participant
+  const isLoneParticipant = useIsLoneParticipant(callParticipants);
+
   const internalCallId = useMemo(() => {
     const activeCall = findActiveCall(activeCalls, externalId);
     return (activeCall as { id?: string } | undefined)?.id;
@@ -328,6 +335,17 @@ export function CustomLiveKitRoom({
     // handleDisconnect will close thread panel and send DISCONNECT with endForAll=true
     handleDisconnect(true);
   }, [handleDisconnect]);
+
+  // AFK detection hook - shows warning modal when user is alone, auto-ends call if no response
+  const {
+    showAFKModal,
+    secondsRemaining: afkSecondsRemaining,
+    handleStay: handleAFKStay,
+    handleLeave: handleAFKLeave,
+  } = useAFKDetection({
+    isLoneParticipant,
+    onEndCall: handleEndForAll,
+  });
 
   const handleToggleThread = useCallback(() => {
     if (callUpdatesChannelId && metadata?.conversationId) {
@@ -455,6 +473,12 @@ export function CustomLiveKitRoom({
           onEndForAll={handleEndForAll}
           isHost={isHost}
         />
+        <AFKWarningModal
+          isOpen={showAFKModal}
+          secondsRemaining={afkSecondsRemaining}
+          onStay={handleAFKStay}
+          onLeave={handleAFKLeave}
+        />
         <AIInviteDialog
           isOpen={inviteDialogOpen}
           onClose={handleCloseInviteDialog}
@@ -532,6 +556,12 @@ export function CustomLiveKitRoom({
         onEndForSelf={() => handleDisconnect()}
         onEndForAll={handleEndForAll}
         isHost={isHost}
+      />
+      <AFKWarningModal
+        isOpen={showAFKModal}
+        secondsRemaining={afkSecondsRemaining}
+        onStay={handleAFKStay}
+        onLeave={handleAFKLeave}
       />
       <AIInviteDialog
         isOpen={inviteDialogOpen}
