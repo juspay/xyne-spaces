@@ -91,7 +91,7 @@ const ChatListItemComponent = ({
       data-index={dataIndex}
       id={`conv-${conversation.conversationId}`}
       data-hash-id={`conv-${conversation.conversationId}`}
-      className={'pt-0 pb-0'}
+      className={`${showAvatar ? 'pt-4' : 'pt-1'} pb-1`}
     >
       <ChatBubble
         message={message}
