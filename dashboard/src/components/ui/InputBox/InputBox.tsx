@@ -960,7 +960,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     });
 
     useEffect(() => {
-      editor?.setEditable(!disabled && !isSending);
+      editor?.setEditable(!disabled && !isSending, false);
     }, [editor, disabled, isSending]);
 
     // Keep mounted, non-focused editors in sync when another InputBox updates
