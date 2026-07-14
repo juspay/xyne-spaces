@@ -13,6 +13,7 @@ import { config } from '@/config/env';
 import jwt from 'jsonwebtoken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import { persistCalendarOAuthCredentials } from '@/services/calendarTokenRefresh';
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
@@ -20,6 +21,7 @@ export class MicrosoftAuthController {
   private userSessionService: UserSessionService | undefined;
   private clientId: string | undefined;
   private tenantId: string = '';
+  private msJwks!: ReturnType<typeof createRemoteJWKSet>;
 
   constructor() {
     const clientId = process.env.MICROSOFT_CLIENT_ID;
@@ -62,6 +64,10 @@ export class MicrosoftAuthController {
     this.tenantId = tenantId ?? '';
     this.userService = new UserService();
     this.userSessionService = new UserSessionService();
+    const jwksTenant = tenantId ?? 'common';
+    this.msJwks = createRemoteJWKSet(
+      new URL(`https://login.microsoftonline.com/${jwksTenant}/discovery/v2.0/keys`)
+    );
   }
 
   private getRedirectUrl(req: Request, platform: string, params: Record<string, string>): string {
@@ -218,6 +224,14 @@ export class MicrosoftAuthController {
     }
   };
 
+  private async verifyMicrosoftIdToken(idToken: string) {
+    const { payload } = await jwtVerify(idToken, this.msJwks, {
+      audience: this.clientId,
+      issuer: `https://login.microsoftonline.com/${this.tenantId}/v2.0`,
+    });
+    return payload as { email?: string; xms_edov?: boolean; oid?: string; tid?: string };
+  }
+
   handleCallback = async (req: Request, res: Response): Promise<void> => {
     const requestId = `MS_CALLBACK_${Date.now()}`;
     let resolvedPlatform: string = 'web';
@@ -313,6 +327,22 @@ export class MicrosoftAuthController {
         const tokenResult = await this.oauthClient.getToken(tokenParams);
         const { token } = tokenResult;
 
+        const idToken = token.id_token as string;
+        if (!idToken) {
+          throw new Error('No ID token received from Microsoft');
+        }
+        const idTokenClaims = await this.verifyMicrosoftIdToken(idToken);
+        const emailIsDomainVerified = idTokenClaims.xms_edov === true;
+
+        if (!emailIsDomainVerified) {
+          throw new Error('Email is not verified from Microsoft');
+        }
+
+        const verifiedEmail = idTokenClaims.email;
+        if (!verifiedEmail) {
+          throw new Error('No email claim in ID token');
+        }
+
         const accessToken = token.access_token as string;
         const accessTokenExpiry = this.getAccessTokenExpiry(token as Record<string, unknown>);
 
@@ -345,7 +375,7 @@ export class MicrosoftAuthController {
         const microsoftUserData = {
           provider: AuthProvider.MICROSOFT,
           providerUserId: profile.id,
-          email: profile.mail || profile.userPrincipalName,
+          email: verifiedEmail,
           name: profile.displayName,
           picture: undefined, // Microsoft Graph requires separate call for photo
         };
@@ -631,6 +661,23 @@ export class MicrosoftAuthController {
         throw new Error('No access token received from Microsoft');
       }
 
+      const idToken = token.id_token as string;
+      if (!idToken) {
+        throw new Error('No ID token received from Microsoft');
+      }
+      const idTokenClaims = await this.verifyMicrosoftIdToken(idToken);
+      logger.info(`[${requestId}] Verified Microsoft ID token claims`, { claims: idTokenClaims.xms_edov });
+
+      const emailIsDomainVerified = idTokenClaims.xms_edov === true;
+      if (!emailIsDomainVerified) {
+        throw new Error('Email is not verified from Microsoft');
+      }
+
+      const email = idTokenClaims.email;
+      if (!email) {
+        throw new Error('No email claim in ID token');
+      }
+
       logger.info(`[${requestId}] Fetching user profile from Microsoft Graph`);
       const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
         headers: {
@@ -651,15 +698,12 @@ export class MicrosoftAuthController {
         displayName: string;
       };
 
-      const email = profile.mail || profile.userPrincipalName;
-      if (!email) {
-        throw new Error('Email not available in Microsoft profile');
-      }
+      // Email was already verified from the ID token above.
 
       const workspaces = await this.userService.getWorkspacesByEmail(email);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(email);
       logger.info(`[${requestId}] User has ${workspaces.length} workspace(s), userExistsButRemoved: ${userExistsButRemoved}`);
-      logger.info(`[${requestId}] PROFILE: email=${email}, msId=${profile.id}, workspaceCount=${workspaces.length}`);
+      logger.info(`[${requestId}] PROFILE: email=${email}, msId=${profile.id}, verifiedOid=${idTokenClaims.oid ?? 'NULL'}, workspaceCount=${workspaces.length}`);
 
       const isProduction = process.env.NODE_ENV === 'production';
 
@@ -1060,6 +1104,24 @@ export class MicrosoftAuthController {
       }
       const token = tokenBody;
 
+      const idToken = tokenBody.id_token as string;
+      if (!idToken) {
+        throw new Error('No ID token received from Microsoft');
+      }
+
+      const idTokenClaims = await this.verifyMicrosoftIdToken(idToken);
+      logger.info(`[${requestId}] Verified Microsoft ID token claims`, { claims: idTokenClaims.xms_edov });
+
+      const emailIsDomainVerified = idTokenClaims.xms_edov === true;
+      if (!emailIsDomainVerified) {
+        throw new Error('Email is not verified from Microsoft');
+      }
+
+      const verifiedEmail = idTokenClaims.email;
+      if (!verifiedEmail) {
+        throw new Error('No email claim in ID token');
+      }
+
       // Verify the user's profile via Microsoft Graph using the access token
       logger.info(`[${requestId}] Fetching user profile from Microsoft Graph`);
       const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
@@ -1087,16 +1149,7 @@ export class MicrosoftAuthController {
         displayName: string;
       };
 
-      const email = profile.mail || profile.userPrincipalName;
-      if (!email) {
-        logger.error(`[${requestId}] Email not available in Microsoft profile`);
-        res.status(400).json({
-          success: false,
-          error: 'no_email',
-          message: 'Email not available in Microsoft profile',
-        });
-        return;
-      }
+      const email = verifiedEmail;
 
       const workspaces = await this.userService.getWorkspacesByEmail(email);
       logger.info(`[${requestId}] User has ${workspaces.length} workspace(s)`);
