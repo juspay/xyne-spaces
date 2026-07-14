@@ -404,7 +404,8 @@ export class ConversationService {
       await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
         conversation.conversationId,
         userId,
-        ConversationParticipation.MENTIONED
+        ConversationParticipation.MENTIONED,
+        channelId
       );
     }
 
@@ -414,7 +415,8 @@ export class ConversationService {
         await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
           conversation.conversationId,
           userId,
-          ConversationParticipation.MENTIONED
+          ConversationParticipation.MENTIONED,
+          channelId
         );
       }
     }
@@ -629,7 +631,8 @@ export class ConversationService {
       await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
         conversationId,
         userId,
-        ConversationParticipation.AUTHOR
+        ConversationParticipation.AUTHOR,
+        conversation.channelId
       );
     }
 
@@ -645,7 +648,8 @@ export class ConversationService {
         await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
           conversationId,
           userId,
-          ConversationParticipation.MENTIONED
+          ConversationParticipation.MENTIONED,
+          conversation.channelId
         );
       }
     }

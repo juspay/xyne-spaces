@@ -5217,7 +5217,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           const newLastReadAt = message.createdAt - 1;
 
-          // Upsert conversation_participants.lastReadAt
+          const latestReply = await tx.run(
+            zql.messages
+              .where('conversationId', conversationId)
+              .where('messageId', '!=', conversation.initialMessageId)
+              .orderBy('createdAt', 'desc')
+              .limit(1)
+          );
+          const trueLastReplyAt = latestReply[0] ? latestReply[0].createdAt : null;
+
+          // Upsert conversation_participants state so marking unread also subscribes the user.
           const existingParticipant = await tx.run(
             zql.conversation_participants
               .where('conversationId', conversationId)
@@ -5226,16 +5235,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
 
           if (!existingParticipant) {
-            // Find true lastReplyAt
-            const latestReply = await tx.run(
-              zql.messages
-                .where('conversationId', conversationId)
-                .where('messageId', '!=', conversation.initialMessageId)
-                .orderBy('createdAt', 'desc')
-                .limit(1)
-            );
-            const trueLastReplyAt = latestReply[0] ? latestReply[0].createdAt : null;
-
             await tx.mutate.conversation_participants.insert({
               id: participantId,
               conversationId,
@@ -5251,6 +5250,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.conversation_participants.update({
               id: existingParticipant.id,
               lastReadAt: newLastReadAt,
+              isSubscribed: true,
+              ...(existingParticipant.channelId !== conversation.channelId
+                ? { channelId: conversation.channelId }
+                : {}),
             });
           }
 
