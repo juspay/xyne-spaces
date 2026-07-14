@@ -3,6 +3,9 @@
  * and xyne-claw (for execution).
  */
 
+import type { Todo } from "../flow/plan-flow.js";
+import type { Citation } from "../types/citation.js";
+
 export interface ToolInputSchema {
   type: "object";
   properties: Record<string, unknown>;
@@ -30,10 +33,27 @@ export interface PendingResponse {
 export interface ToolExecutionContext {
   config: Record<string, string>;
   meta?: Record<string, string>;
+  /**
+   * The run's resolved LLM provider. Tools that make their OWN LLM call
+   * (e.g. create-ppt's slide-JSON generation) read this so they inherit the
+   * agent's configured model/key instead of a hardcoded fallback. Populated by
+   * xyne-claw's run dispatcher with the copilot proxy + base-URL defaulting
+   * already applied. Absent when the run has no bring-your-own provider — tools
+   * then fall back to the shared LiteLLM config.
+   */
+  providerConfig?: {
+    provider: string;
+    baseUrl?: string;
+    apiKey: string;
+    model: string;
+    authType?: string;
+  };
   pendingQuestions?: PendingQuestion[];
   pendingResponses?: PendingResponse[];
   /** Progress URL for streaming tool invocations to the frontend (claw agent only) */
   progressUrl?: string;
+  /** In-process progress emitter for SSE-only plan cards (claw agent only) */
+  emitPlan?: (todos: Todo[]) => void;
   /** Session ID for this agent run (claw agent only) */
   sessionId?: string;
   /** S2S key for authenticating with the progress endpoint (claw agent only) */
@@ -75,4 +95,15 @@ export interface ToolDefinition {
   isWriteTool?: boolean;
   /** The actual implementation — runs inside xyne-claw */
   execute: (params: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
+  /**
+   * Optional citation-aware variant. When present, MCP server wrappers (e.g.
+   * google-server) call THIS instead of `execute` to obtain `{ text, citations }`
+   * and attach the citations as MCP `_meta.citations`. `execute` stays the
+   * string-only contract used by in-process custom-tools and other wrappers, so
+   * tools that implement both keep `execute` returning just the text.
+   */
+  executeCited?: (
+    params: Record<string, unknown>,
+    context?: ToolExecutionContext,
+  ) => Promise<{ text: string; citations?: Citation[] }>;
 }

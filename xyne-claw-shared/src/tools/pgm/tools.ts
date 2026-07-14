@@ -1,9 +1,12 @@
 import path from "node:path";
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
-import { mkdirSync, existsSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { execSync, execFileSync } from "node:child_process";
 import { parse as yamlParse, stringify as yamlStringify, parseDocument } from "yaml";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
+
+import { createLogger } from "../../logger.js";
+const log = createLogger("tools");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -55,7 +58,9 @@ async function renderTemplate(ctx: ToolExecutionContext | undefined, name: strin
 
 function addChapterToQuarto(ctx: ToolExecutionContext | undefined, slug: string, filePath: string, partName: string): void {
   const quartoPath = path.join(programsDir(ctx), slug, "_quarto.yml");
-  const raw = execSync(`cat "${quartoPath}"`, { encoding: "utf-8" });
+  // No shell: read the file directly. `slug` flows into this path, so a shell
+  // string here (`cat "..."`) would be an injection sink.
+  const raw = readFileSync(quartoPath, "utf-8");
   const doc = parseDocument(raw);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,9 +80,9 @@ function addChapterToQuarto(ctx: ToolExecutionContext | undefined, slug: string,
     }
   }
 
-  execSync(`cat > "${quartoPath}" << 'YAMLEOF'\n${doc.toString()}\nYAMLEOF`, {
-    cwd: userDir(ctx),
-  });
+  // No shell: write directly (the old `cat > "..." << EOF` interpolated both
+  // the slug-derived path and the YAML body into a shell command).
+  writeFileSync(quartoPath, doc.toString());
 }
 
 function toSlug(name: string): string {
@@ -109,12 +114,35 @@ async function nextRunNumber(ctx: ToolExecutionContext | undefined, slug: string
 const SSH_KEY_PATH = process.env["SSH_KEY_PATH"] ?? "/tmp/ssh-keys/id_rsa";
 const GIT_ENV = { GIT_SSH_COMMAND: `ssh -i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no` };
 
+/**
+ * Allow only well-formed git remote URLs. PGM_REMOTE_URL is a platform-managed
+ * env var (NOT settable from agentConfig — see ensureGitRepo), but we still
+ * never build a shell string from it (see execFileSync below) and reject
+ * anything that isn't a recognised scheme/host form — defence against a
+ * misconfigured env value, and a hard backstop should the source ever change.
+ */
+function isSafeGitRemoteUrl(url: string): boolean {
+  if (!url || url.startsWith("-")) return false;
+  if (/^(ssh|https?|git):\/\/[^\s'"`;|&$()<>\\]+$/.test(url)) return true;      // scheme URLs
+  if (/^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\s'"`;|&$()<>\\]+$/.test(url)) return true; // scp-style user@host:path
+  return false;
+}
+
 function ensureGitRepo(ctx: ToolExecutionContext | undefined): void {
   const dir = userDir(ctx);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  const remoteUrl = ctx?.config?.["PGM_REMOTE_URL"] || process.env["PGM_REMOTE_URL"] || "";
-  console.log(`[pgm] ensureGitRepo: dir=${dir} remoteUrl=${remoteUrl || "(empty)"} configKeys=${JSON.stringify(Object.keys(ctx?.config ?? {}))}`);
+  // Platform config only: PGM_REMOTE_URL comes from the environment, never from
+  // agentConfig — a per-agent remote git URL is not a feature we want, and
+  // sourcing it from the frontend made it an RCE/SSRF vector.
+  const rawRemote = process.env["PGM_REMOTE_URL"] || "";
+  // Drop anything that isn't a valid git URL — fail safe (init a local repo)
+  // rather than feed a malformed/hostile value to git.
+  const remoteUrl = isSafeGitRemoteUrl(rawRemote) ? rawRemote : "";
+  if (rawRemote && !remoteUrl) {
+    log.warn(`[pgm] ensureGitRepo: rejecting invalid PGM_REMOTE_URL (${JSON.stringify(rawRemote)}) — using local repo`);
+  }
+  log.info(`[pgm] ensureGitRepo: dir=${dir} remoteUrl=${remoteUrl || "(empty)"} configKeys=${JSON.stringify(Object.keys(ctx?.config ?? {}))}`);
 
   const env = { ...process.env, ...GIT_ENV };
 
@@ -122,8 +150,8 @@ function ensureGitRepo(ctx: ToolExecutionContext | undefined): void {
     execSync("git rev-parse --git-dir", { cwd: dir, stdio: "pipe" });
   } catch {
     if (remoteUrl) {
-      // Clone from remote
-      execSync(`git clone ${remoteUrl} .`, { cwd: dir, stdio: "pipe", env });
+      // Clone from remote — NO shell (execFileSync), `--` stops option injection.
+      execFileSync("git", ["clone", "--", remoteUrl, "."], { cwd: dir, stdio: "pipe", env });
     } else {
       execSync("git init", { cwd: dir, stdio: "pipe" });
     }
@@ -135,10 +163,10 @@ function ensureGitRepo(ctx: ToolExecutionContext | undefined): void {
     try {
       const currentRemote = execSync("git remote get-url origin", { cwd: dir, encoding: "utf-8", stdio: "pipe" }).trim();
       if (currentRemote !== remoteUrl) {
-        execSync(`git remote set-url origin ${remoteUrl}`, { cwd: dir, stdio: "pipe" });
+        execFileSync("git", ["remote", "set-url", "origin", remoteUrl], { cwd: dir, stdio: "pipe" });
       }
     } catch {
-      execSync(`git remote add origin ${remoteUrl}`, { cwd: dir, stdio: "pipe" });
+      execFileSync("git", ["remote", "add", "origin", remoteUrl], { cwd: dir, stdio: "pipe" });
     }
   }
 }
@@ -451,21 +479,11 @@ export const pgmEditFile: ToolDefinition = {
   },
 };
 
-const PGM_GIT_CONFIG = {
-  PGM_REMOTE_URL: {
-    label: "PGM Data Remote Git URL",
-    default: "",
-    required: false as const,
-    placeholder: "ssh://git@bitbucket.example.com/user/pgm-data.git",
-  },
-};
-
 export const pgmCommit: ToolDefinition = {
   slug: "pgm-commit",
   name: "Git Commit",
   description: "Stage all changes and commit in the pgm data repo.",
   source: "custom:pgm",
-  configSchema: PGM_GIT_CONFIG,
   inputSchema: {
     type: "object",
     properties: {
@@ -484,7 +502,6 @@ export const pgmPush: ToolDefinition = {
   name: "Git Push",
   description: "Push the pgm data repo to its remote.",
   source: "custom:pgm",
-  configSchema: PGM_GIT_CONFIG,
   inputSchema: { type: "object", properties: {} },
   async execute(_args, ctx) {
     return gitExec(ctx, "git push") || "Pushed successfully.";
@@ -496,14 +513,13 @@ export const pgmPull: ToolDefinition = {
   name: "Git Pull",
   description: "Pull latest changes in the pgm data repo (with rebase).",
   source: "custom:pgm",
-  configSchema: PGM_GIT_CONFIG,
   inputSchema: { type: "object", properties: {} },
   async execute(_args, ctx) {
     try {
       return gitExec(ctx, "git pull --rebase") || "Already up to date.";
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[pgm-pull] git pull --rebase failed:", msg);
+      log.error("[pgm-pull] git pull --rebase failed:", msg);
       return `Git pull failed: ${msg}`;
     }
   },
@@ -660,6 +676,9 @@ export const pgmPublish: ToolDefinition = {
                 headers: {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${pgmSessionToken}`,
+                  // /sessions/:id/mcp/* requires the S2S key in addition to the
+                  // run's session token (see claw-auth routes/mcp.ts).
+                  ...(ctx?.s2sKey ? { "x-s2s-key": ctx.s2sKey } : {}),
                 },
                 body: JSON.stringify({
                   serverType: "xyne-spaces",
@@ -673,11 +692,11 @@ export const pgmPublish: ToolDefinition = {
                 const idMatch = lookupData.data.content.match(/ID:\s*(\S+)/);
                 if (idMatch?.[1]) {
                   channelId = idMatch[1];
-                  console.log(`[pgm-publish] Resolved channel "${channelName}" → ${channelId}`);
+                  log.info(`[pgm-publish] Resolved channel "${channelName}" → ${channelId}`);
                 }
               }
             } catch {
-              console.warn(`[pgm-publish] Failed to resolve channel "${channelName}", publishing as personal docs`);
+              log.warn(`[pgm-publish] Failed to resolve channel "${channelName}", publishing as personal docs`);
             }
           }
         }
@@ -688,7 +707,7 @@ export const pgmPublish: ToolDefinition = {
       // Final fallback: publish to the channel the user is talking in
       if (!channelId && ctx?.meta?.["channelId"]) {
         channelId = ctx.meta["channelId"];
-        console.log(`[pgm-publish] Using conversation channel ${channelId}`);
+        log.info(`[pgm-publish] Using conversation channel ${channelId}`);
       }
     }
 
@@ -722,7 +741,7 @@ export const pgmPublish: ToolDefinition = {
     // 3. Zip the _book/ directory
     const zipPath = path.join(programDir, "_book.zip");
     try {
-      execSync(`zip -r "${zipPath}" .`, { cwd: bookDir, encoding: "utf-8", timeout: 30_000 });
+      execFileSync("zip", ["-r", zipPath, "."], { cwd: bookDir, encoding: "utf-8", timeout: 30_000 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return `Failed to zip output: ${msg.slice(0, 500)}`;
@@ -771,6 +790,9 @@ export const pgmPublish: ToolDefinition = {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${publishSessionToken}`,
+          // /sessions/:id/mcp/* requires the S2S key in addition to the run's
+          // session token (see claw-auth routes/mcp.ts).
+          ...(ctx?.s2sKey ? { "x-s2s-key": ctx.s2sKey } : {}),
         },
         body: JSON.stringify(mcpPayload),
         signal: AbortSignal.timeout(120_000),
@@ -782,8 +804,8 @@ export const pgmPublish: ToolDefinition = {
         return `Publish failed: ${result.error || "Unknown error from MCP call"}`;
       }
 
-      // Clean up zip file
-      try { execSync(`rm "${zipPath}"`, { stdio: "pipe" }); } catch { /* ignore */ }
+      // Clean up zip file (no shell)
+      try { rmSync(zipPath, { force: true }); } catch { /* ignore */ }
 
       return result.data?.content || "Published successfully.";
     } catch (err) {

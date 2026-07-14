@@ -22,6 +22,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { CONFIG } from "../config.js";
+import { prisma } from "../db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("spaces-db");
@@ -208,7 +209,7 @@ export async function getSpacesAuthForUser(
     const tokenValid = row.accessToken && row.accessTokenExpiry && row.accessTokenExpiry.getTime() > now;
 
     if (tokenValid) {
-      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=hit ms=${elapsed}`);
+      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=hit workspaceId=${row.workspaceId} ms=${elapsed}`);
       return {
         token: row.accessToken!,
         sessionId: row.id,
@@ -229,7 +230,7 @@ export async function getSpacesAuthForUser(
       return null;
     }
     log.info(
-      `[spaces-db] read userId=${userId} caller=${caller} result=refreshed tokenLen=${freshToken.length}`,
+      `[spaces-db] read userId=${userId} caller=${caller} result=refreshed workspaceId=${row.workspaceId} tokenLen=${freshToken.length}`,
     );
     return {
       token: freshToken,
@@ -255,6 +256,9 @@ export interface SpacesUserProfile {
   id: string;
   email: string;
   name: string;
+  /// The user's current Spaces workspace (public.users.workspaceId). Used by
+  /// JIT to map the user to a claw org via SurfaceTenantLink. May be null.
+  workspaceId: string | null;
 }
 
 /**
@@ -277,7 +281,7 @@ export async function getSpacesUserById(
   const started = Date.now();
   try {
     const rows = await client.$queryRaw<Array<SpacesUserProfile>>`
-      SELECT id, email, name
+      SELECT id, email, name, "workspaceId"
       FROM public.users
       WHERE id = ${userId}
       LIMIT 1
@@ -314,12 +318,11 @@ export async function getWorkspaceIdForUser(
   userId: string,
   caller: SpacesAuthCaller = "unknown",
 ): Promise<string | null> {
-  const client = getClient();
-  if (!client) return null;
   if (!userId) return null;
 
   const started = Date.now();
-  try {
+  const client = getClient();
+  if (client) try {
     const rows = await client.$queryRaw<Array<{ workspaceId: string | null }>>`
       SELECT "workspaceId"
       FROM public.users
@@ -329,13 +332,112 @@ export async function getWorkspaceIdForUser(
     const workspaceId = rows[0]?.workspaceId ?? null;
     const elapsed = Date.now() - started;
     log.info(
-      `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=${workspaceId ? "hit" : "miss"} ms=${elapsed}`,
+      `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=${workspaceId ? "hit" : "miss"}${workspaceId ? ` workspaceId=${workspaceId}` : ""} ms=${elapsed}`,
     );
-    return workspaceId;
+    if (workspaceId) return workspaceId;
   } catch (err) {
     const elapsed = Date.now() - started;
     log.warn(
       `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { orgId: true },
+    });
+    if (!user?.orgId) return null;
+
+    const links = await prisma.surfaceTenantLink.findMany({
+      where: { surfaceType: "spaces", orgId: user.orgId },
+      select: { surfaceTenantId: true },
+      take: 2,
+    });
+    if (links.length === 1) {
+      const workspaceId = links[0]!.surfaceTenantId;
+      const elapsed = Date.now() - started;
+      log.info(
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=hit-claw-link workspaceId=${workspaceId} orgId=${user.orgId} ms=${elapsed}`,
+      );
+      return workspaceId;
+    }
+    if (links.length > 1) {
+      log.warn(
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=ambiguous-claw-link orgId=${user.orgId}`,
+      );
+    }
+    return null;
+  } catch (err) {
+    const elapsed = Date.now() - started;
+    log.warn(
+      `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=claw-link-error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Resolve the existing 1:1 Spaces DM channel between a human user and an
+ * installed app's APP user. This is read-only: callers fall back to headless
+ * delivery when no single channel is found.
+ */
+export async function getDmChannelForUserAndApp(
+  userId: string,
+  spacesAppId: string,
+): Promise<string | null> {
+  const client = getClient();
+  if (!client) return null;
+  const trimmedUserId = userId.trim();
+  const trimmedAppId = spacesAppId.trim();
+  if (!trimmedUserId || !trimmedAppId) return null;
+
+  const workspaceId = await getWorkspaceIdForUser(trimmedUserId, "mcp-runner");
+  if (!workspaceId) return null;
+
+  const appProviderUserId = `xyne-app-${trimmedAppId}`;
+  const started = Date.now();
+  try {
+    const rows = await client.$queryRaw<Array<{ id: string }>>`
+      WITH app_users AS (
+        SELECT ia."userId" AS id
+        FROM public.installed_apps ia
+        JOIN public.apps a ON a.id = ia."appId"
+        JOIN public.users creator ON creator.id = a."createdBy"
+        WHERE ia."appId" = ${trimmedAppId}
+          AND creator."workspaceId" = ${workspaceId}
+        UNION
+        SELECT app_user.id
+        FROM public.users app_user
+        WHERE app_user."providerUserId" = ${appProviderUserId}
+          AND (app_user."workspaceId" = ${workspaceId} OR app_user."workspaceId" IS NULL)
+      )
+      SELECT c.id
+      FROM public.channels c
+      JOIN public.channel_participants human_cp
+        ON human_cp."channelId" = c.id AND human_cp."userId" = ${trimmedUserId}
+      JOIN public.channel_participants app_cp
+        ON app_cp."channelId" = c.id AND app_cp."userId" IN (SELECT id FROM app_users)
+      WHERE c."scopeType" = 'DM'
+        AND (
+          SELECT COUNT(*)
+          FROM public.channel_participants count_cp
+          WHERE count_cp."channelId" = c.id
+        ) = 2
+      ORDER BY c."updatedAt" DESC
+      LIMIT 2
+    `;
+    const elapsed = Date.now() - started;
+    if (rows.length === 1) {
+      log.info(`[spaces-db] dm-channel userId=${trimmedUserId} spacesAppId=${trimmedAppId} workspaceId=${workspaceId} result=hit channelId=${rows[0]!.id} ms=${elapsed}`);
+      return rows[0]!.id;
+    }
+    log.info(`[spaces-db] dm-channel userId=${trimmedUserId} spacesAppId=${trimmedAppId} workspaceId=${workspaceId} result=${rows.length === 0 ? "miss" : "ambiguous"} ms=${elapsed}`);
+    return null;
+  } catch (err) {
+    const elapsed = Date.now() - started;
+    log.warn(
+      `[spaces-db] dm-channel userId=${trimmedUserId} spacesAppId=${trimmedAppId} workspaceId=${workspaceId} result=error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
     );
     return null;
   }

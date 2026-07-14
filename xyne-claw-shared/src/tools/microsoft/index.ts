@@ -31,4 +31,4 @@ export {
   microsoftTeamsChatSend,
 } from "./tools.js";
 
-export { microsoftFetch, refreshMicrosoftToken } from "./oauth.js";
+export { microsoftFetch, } from "./oauth.js";

@@ -10,10 +10,13 @@ export const agentRequestRepository = {
   findPendingSkill: (skillId: string) =>
     prisma.agentRequest.findFirst({ where: { targetType: "skill", skillId, status: "pending" } }),
 
-  listPending: () =>
-    prisma.agentRequest.findMany({ where: { status: "pending" }, orderBy: { createdAt: "desc" } }),
+  listPending: (orgId?: string) =>
+    prisma.agentRequest.findMany({
+      where: { status: "pending", ...(orgId ? { orgId } : {}) },
+      orderBy: { createdAt: "desc" },
+    }),
 
-  create: (data: { targetType?: string; agentId?: string; agentSlug?: string; skillId?: string; skillSlug?: string; requestType: string; requesterId: string; requestedName?: string | null }) =>
+  create: (data: { targetType?: string; agentId?: string; agentSlug?: string; skillId?: string; skillSlug?: string; requestType: string; requesterId: string; requestedName?: string | null; orgId: string }) =>
     prisma.agentRequest.create({ data }),
 
   updateStatus: (id: string, status: string, reviewerId: string, reviewNote?: string | null) =>

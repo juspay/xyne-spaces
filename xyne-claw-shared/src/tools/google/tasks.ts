@@ -13,6 +13,13 @@ interface TaskListsResponse {
   items?: TaskList[];
 }
 
+/** A task's external reference (e.g. the Gmail message it was created from). */
+interface TaskLink {
+  type?: string;
+  description?: string;
+  link?: string;
+}
+
 interface Task {
   id: string;
   title: string;
@@ -21,21 +28,54 @@ interface Task {
   due?: string;
   completed?: string;
   updated: string;
+  // "parent" is present on child tasks: the id of the task they nest under.
+  // Without honoring it, subtasks masquerade as top-level tasks.
   parent?: string;
+  // "position" is Google's canonical ordering key — a fixed-width string that
+  // sorts lexicographically. Item order is otherwise not guaranteed.
+  position?: string;
+  // "links" surfaces the task's source (e.g. the originating email) so
+  // "where did this task come from?" is answerable.
+  links?: TaskLink[];
 }
 
 interface TasksResponse {
   items?: Task[];
+  // "nextPageToken" signals that more tasks exist beyond the returned page;
+  // the count line must not present the page size as the full total.
+  nextPageToken?: string;
 }
 
-function formatTask(t: Task): string {
+function formatTask(t: Task, depth = 0): string {
   const status = t.status === "completed" ? "[x]" : "[ ]";
   const parts = [`${status} ${t.title}`];
   if (t.notes) parts.push(`  Notes: ${t.notes}`);
   if (t.due) parts.push(`  Due: ${t.due.split("T")[0]}`);
   if (t.completed) parts.push(`  Completed: ${t.completed.split("T")[0]}`);
+  // "updated" is parsed by the API but was previously never printed — surface
+  // the last-modified date so staleness/recency is answerable.
+  if (t.updated) parts.push(`  Updated: ${t.updated.split("T")[0]}`);
+  // "links" preserves the task's source (e.g. the source email) — previously dropped.
+  if (t.links && t.links.length > 0) {
+    for (const l of t.links) {
+      const label = l.description || l.type || "link";
+      parts.push(`  Link: ${label}${l.link ? ` (${l.link})` : ""}`);
+    }
+  }
   parts.push(`  ID: ${t.id}`);
-  return parts.join("\n");
+  // Indent every line by depth so subtasks render nested under their parent.
+  const pad = "  ".repeat(depth);
+  return parts.map((line) => pad + line).join("\n");
+}
+
+/** Sort by Google's canonical "position" key; tasks lacking it keep insertion order. */
+function byPosition(a: Task, b: Task): number {
+  if (a.position != null && b.position != null) {
+    return a.position < b.position ? -1 : a.position > b.position ? 1 : 0;
+  }
+  if (a.position != null) return -1;
+  if (b.position != null) return 1;
+  return 0;
 }
 
 /** List all task lists. */
@@ -69,8 +109,43 @@ export async function listTasks(
 
   if (tasks.length === 0) return "No tasks found.";
 
-  const lines = tasks.map((t) => formatTask(t));
-  return `${tasks.length} task(s):\n\n${lines.join("\n\n")}`;
+  // The API returns a FLAT list; child tasks carry a "parent" id. Rebuild the
+  // parent->child tree so subtasks render indented under their parent instead
+  // of appearing as top-level tasks.
+  const byId = new Map<string, Task>();
+  for (const t of tasks) byId.set(t.id, t);
+
+  const childrenOf = new Map<string, Task[]>();
+  const roots: Task[] = [];
+  for (const t of tasks) {
+    // Only nest under a parent that is actually in this page; an orphaned child
+    // (parent filtered out / on another page) falls back to top-level.
+    if (t.parent && byId.has(t.parent)) {
+      const siblings = childrenOf.get(t.parent) ?? [];
+      siblings.push(t);
+      childrenOf.set(t.parent, siblings);
+    } else {
+      roots.push(t);
+    }
+  }
+
+  // Order top-level tasks and each sibling group by "position".
+  roots.sort(byPosition);
+  for (const siblings of childrenOf.values()) siblings.sort(byPosition);
+
+  const rendered: string[] = [];
+  const walk = (t: Task, depth: number): void => {
+    rendered.push(formatTask(t, depth));
+    for (const child of childrenOf.get(t.id) ?? []) walk(child, depth + 1);
+  };
+  for (const root of roots) walk(root, 0);
+
+  // Be honest: a nextPageToken means more tasks exist beyond this page, so the
+  // returned count is NOT the total.
+  const header = data.nextPageToken
+    ? `${tasks.length} task(s) (more available beyond this page — increase maxResults or paginate):`
+    : `${tasks.length} task(s):`;
+  return `${header}\n\n${rendered.join("\n\n")}`;
 }
 
 /** Create a new task. */

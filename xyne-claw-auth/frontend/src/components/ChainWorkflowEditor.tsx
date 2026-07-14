@@ -9,11 +9,11 @@ import {
   type ChainWorkflowEdge,
   type ChainWorkflowNode,
 } from "../lib/api";
-import type { Agent } from "../lib/types";
+import type { Agent, AgentLight } from "../lib/types";
 
 interface Props {
   agent: Agent;
-  allAgents: Agent[];
+  allAgents: AgentLight[];
 }
 
 interface EditableEdge extends ChainWorkflowEdge {

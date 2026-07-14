@@ -141,6 +141,19 @@ export class StubMemoryProvider implements MemoryProvider {
     if (bank) bank.delete(memoryId);
   }
 
+  async deleteByTag(bankId: string, tag: string): Promise<number> {
+    const bank = this.banks.get(bankId);
+    if (!bank) return 0;
+    let deleted = 0;
+    for (const [id, m] of [...bank]) {
+      if (m.tags.includes(tag)) {
+        bank.delete(id);
+        deleted += 1;
+      }
+    }
+    return deleted;
+  }
+
   /** Test helper: clear all banks. Not part of the MemoryProvider interface. */
   reset(): void {
     this.banks.clear();

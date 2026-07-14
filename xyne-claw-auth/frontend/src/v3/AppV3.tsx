@@ -22,6 +22,7 @@ import { SubagentEditPageV3 } from "./components/SubagentEditPageV3";
 import { SkillsPageV3 } from "./components/SkillsPageV3";
 import { GatewaysPageV3 } from "./components/GatewaysPageV3";
 import { SettingsPageV3 } from "./components/SettingsPageV3";
+import { OrganizationsPageV3 } from "./components/OrganizationsPageV3";
 import { ChatPageV3 } from "./components/ChatPageV3";
 import { HomePageV3 } from "./components/home/HomePageV3";
 import { AgentsDashboardPageV3 } from "./components/AgentsDashboardPageV3";
@@ -30,6 +31,8 @@ import { DigitalTwinPageV3 } from "./components/digital-twin/DigitalTwinPageV3";
 import { AdminPageV3 } from "./components/AdminPageV3";
 import { MetricsPageV3 } from "./components/MetricsPageV3";
 import { EvalsPageV3 } from "./components/EvalsPageV3";
+import { ErrorPipelinePageV3 } from "./components/ErrorPipelinePageV3";
+import { CliLoginPageV3 } from "./components/CliLoginPageV3";
 import { ChatProvider } from "./hooks/useChat";
 
 
@@ -125,6 +128,12 @@ export function AppV3() {
       <TooltipProvider>
         <IconContext.Provider value={{ weight: "regular" }}>
           <ChatProvider>
+          {/* Standalone OAuth-approve page — rendered OUTSIDE the app shell so
+              the card centers on a clean full-viewport page (no sidebar/nav),
+              matching device-authorization UX (GitHub/Vercel style). */}
+          <Routes>
+            <Route path="/v3/cli-login" element={<CliLoginPageV3 />} />
+            <Route path="*" element={
           <ShellV3 isAdmin={isAdmin}>
           <Routes>
             <Route path="/v3" element={<Navigate to="/v3/home" replace />} />
@@ -171,6 +180,11 @@ export function AppV3() {
                 <SettingsPageV3 />
               </div>
             } />
+            <Route path="/v3/organizations" element={
+              <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                <OrganizationsPageV3 userId={userId} />
+              </div>
+            } />
             <Route path="/v3/metrics" element={
               <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
                 <MetricsPageV3 userId={userId} />
@@ -180,6 +194,15 @@ export function AppV3() {
               isAdmin ? (
                 <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
                   <EvalsPageV3 userId={userId} />
+                </div>
+              ) : isAdminLoading ? null : (
+                <Navigate to="/v3/home" replace />
+              )
+            } />
+            <Route path="/v3/error-pipeline" element={
+              isAdmin ? (
+                <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                  <ErrorPipelinePageV3 userId={userId} />
                 </div>
               ) : isAdminLoading ? null : (
                 <Navigate to="/v3/home" replace />
@@ -228,6 +251,8 @@ export function AppV3() {
             <Route path="/v3/projects" element={<Navigate to="/v3/dashboard" replace />} />
           </Routes>
         </ShellV3>
+            } />
+          </Routes>
           </ChatProvider>
         </IconContext.Provider>
       </TooltipProvider>

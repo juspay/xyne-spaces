@@ -28,6 +28,7 @@ export type AttentionActionIntent =
   | { type: "approve"; approvalId: string }
   | { type: "reject"; approvalId: string }
   | { type: "edit-approve"; approvalId: string; sessionId: string }
+  | { type: "open-agent-requests"; agentSlug: string }
   | { type: "investigate"; agentSlug: string }
   | { type: "open-workflow"; workflowId: string }
   | { type: "ack-view"; runId?: string; itemId: string }
@@ -50,6 +51,7 @@ const SEVERITY_ACCENT: Record<AttentionSeverity, string> = {
 const KIND_ICON = {
   failure: WarningCircleIcon,
   approval: ShieldCheckIcon,
+  agent_approval: ShieldCheckIcon,
   outlier: TrendDownIcon,
   dt_review: UserCircleIcon,
   workflow: GitBranchIcon,
@@ -59,6 +61,7 @@ const KIND_ICON = {
 const KIND_ICON_TINT: Record<AttentionItem["kind"], string> = {
   failure: "text-xyne-error",
   approval: "text-xyne-warning-fg",
+  agent_approval: "text-xyne-warning-fg",
   outlier: "text-xyne-warning",
   dt_review: "text-xyne-fg-secondary",
   workflow: "text-xyne-warning",
@@ -71,6 +74,10 @@ function titleFor(item: AttentionItem): string {
       return `${item.agentName} couldn't finish a task`;
     case "approval":
       return `${item.agentName} needs your go-ahead`;
+    case "agent_approval":
+      return item.requestKind === "clone"
+        ? `${item.agentName} has a clone request`
+        : `${item.agentName} has a delegation request`;
     case "outlier":
       return `${item.agentName} is performing below normal`;
     case "dt_review":
@@ -88,6 +95,10 @@ function subtitleFor(item: AttentionItem): string {
       return item.errorSummary;
     case "approval":
       return `${item.action} on ${item.targetSystem}`;
+    case "agent_approval":
+      return item.requestKind === "clone"
+        ? `${item.requesterName} wants to clone this agent`
+        : `${item.requesterName} wants to delegate to this agent`;
     case "outlier":
       return `${item.value}% success this month · usually >${item.threshold}%`;
     case "dt_review":
@@ -224,6 +235,15 @@ function ActionsFor({
             }
           />
         </div>
+      );
+    case "agent_approval":
+      return (
+        <GhostLink
+          label="Review"
+          onClick={() =>
+            onAction({ type: "open-agent-requests", agentSlug: item.agentSlug })
+          }
+        />
       );
     case "outlier":
       return (

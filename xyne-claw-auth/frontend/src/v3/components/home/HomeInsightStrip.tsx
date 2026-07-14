@@ -19,7 +19,7 @@ import type { UserDashboardAgentRow } from "../../../lib/api";
 // We only use channelId, conversationId, agentSlug, startedAt — all present in
 // AgentRunLight. See useHomeData for the source of truth.
 import type { AgentRunLight as AgentRun } from "../../../lib/api";
-import type { Agent } from "../../../lib/types";
+import type { AgentLight } from "../../../lib/types";
 import { formatTimeAgo, truncate } from "./homeUtils";
 
 const SPACES_APP_URL =
@@ -31,7 +31,7 @@ interface HomeInsightStripProps {
   yesterdayRuns: number;
   isLoading: boolean;
   lastRun?: AgentRun | null;
-  lastRunAgent?: Agent | null;
+  lastRunAgent?: AgentLight | null;
 }
 
 type TileAccent = "success" | "info" | "primary" | "neutral";

@@ -74,7 +74,7 @@ export function HomePageV3({ userId }: HomePageV3Props) {
     ? data.agents.find((a) => a.slug === data.lastRun!.agentSlug) ?? null
     : null;
 
-  const pendingApprovals = data.approvals.length;
+  const pendingApprovals = data.approvals.length + data.cloneApprovals.length + data.delegationApprovals.length;
 
   return (
     <div className="flex-1 overflow-x-hidden overflow-y-auto">

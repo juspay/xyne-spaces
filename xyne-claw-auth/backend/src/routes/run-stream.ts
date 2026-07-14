@@ -7,7 +7,10 @@ import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { gcsService } from "../services/gcsService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
+import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
+import { publishLiveEvent } from "../lib/live-conversation-bus.js";
+import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
 import { redisService } from "../redis.js";
 import {
   branchPiConversationId,
@@ -19,6 +22,7 @@ import {
 
 import { createLogger } from "../logger.js";
 const log = createLogger("run-stream");
+const SESSION_LOCKED_MESSAGE = "Still finishing your previous answer - try again in a few seconds.";
 
 const publicRouter = Router();
 const internalRouter = Router();
@@ -35,6 +39,7 @@ interface PendingStream {
   resolve: (result: {
     content: string;
     status: "completed" | "failed" | "cancelled";
+    errorCode?: string | undefined;
     pendingActions?: Array<Record<string, unknown>> | undefined;
     attachments?: StreamAttachment[] | undefined;
     toolInvocations?: unknown;
@@ -47,6 +52,7 @@ interface PendingStream {
 interface StreamMeta {
   userId: string;
   agentSlug: string;
+  orgId: string;
   conversationId: string;
   task: string;
   /** Branching: pre-created assistant placeholder id. The callback UPDATEs
@@ -72,6 +78,24 @@ function normalizeRunStatus(status: unknown): "completed" | "failed" | "cancelle
   if (status === "cancelled") return "cancelled";
   return "failed";
 }
+
+function isSessionLockedError(error: unknown): boolean {
+  return error === "session_locked" || error === "sessionLocked";
+}
+
+function widgetErrorContent(error: unknown, fallback: string): string {
+  return isSessionLockedError(error) ? SESSION_LOCKED_MESSAGE : fallback;
+}
+
+// `session_locked` is an internal HA signal (another worker owns the
+// conversation lock, or claw fail-closed because the lock service was briefly
+// unreachable). It is NOT an answer. The legacy webhook path drops it silently
+// (webhook.ts), but the SSE path streamed the raw token straight through as the
+// assistant reply (prod 2026-07-07: users saw the literal "session_locked" in
+// the askN sidebar). We rewrite it to this friendly, retryable message. Keep in
+// sync with the `session_locked` entry in dashboard askAIErrorMapping.ts.
+const SESSION_LOCKED_USER_MESSAGE =
+  "This conversation is still processing your previous message. Please wait a moment, then send it again.";
 
 /* ─────────────────────────────────────────────────────────────────────
    Cross-pod event bus (Redis pub/sub) — same pattern as agent-chat.ts.
@@ -114,6 +138,7 @@ type StreamBusEvent =
       conversationId: string;
       content: string;
       status: "completed" | "failed" | "cancelled";
+      errorCode?: string;
       sessionId?: string;
       pendingActions?: Array<Record<string, unknown>>;
       attachments?: StreamAttachment[];
@@ -148,6 +173,7 @@ function ensureStreamEventsSubscriber(): void {
     stream.resolve({
       content: msg.content,
       status: msg.status,
+      ...(msg.errorCode ? { errorCode: msg.errorCode } : {}),
       ...(msg.pendingActions?.length ? { pendingActions: msg.pendingActions } : {}),
       ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
       ...(msg.toolInvocations !== undefined ? { toolInvocations: msg.toolInvocations } : {}),
@@ -177,6 +203,7 @@ async function persistRunStreamResult(args: {
   userId: string;
   content: string;
   status: "completed" | "failed" | "cancelled";
+  orgId: string;
   attachments?: StreamAttachment[];
   sessionId?: string;
   /** Branching: when set, UPDATE this pre-created assistant placeholder row
@@ -210,6 +237,7 @@ async function persistRunStreamResult(args: {
             role: "assistant",
             content: args.content,
             status: args.status,
+            orgId: args.orgId,
           });
         })
     : await chatMessageRepository.create({
@@ -219,6 +247,7 @@ async function persistRunStreamResult(args: {
         role: "assistant",
         content: args.content,
         status: args.status,
+        orgId: args.orgId,
       });
 
   const persistedAttachments: PersistedAttachment[] = [];
@@ -267,6 +296,10 @@ async function persistRunStreamResult(args: {
  */
 publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
   const streamId = randomUUID();
+  // Periodic keepalive on the frontend leg (Spaces backend ← claw-auth).
+  // Started once the SSE response is open, stopped on disconnect and in the
+  // finally below. See the setInterval site for why this is required.
+  let backendKeepalive: ReturnType<typeof setInterval> | null = null;
 
   try {
     const {
@@ -319,6 +352,42 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
 
     const slug = typeof agentSlug === "string" && agentSlug ? agentSlug : "assistant";
     const convId = typeof conversationId === "string" && conversationId ? conversationId : `chat-${randomUUID()}`;
+    const requestOrgId = typeof req.headers["x-org-id"] === "string" && req.headers["x-org-id"].trim()
+      ? req.headers["x-org-id"].trim()
+      : undefined;
+    if (!requestOrgId) {
+      log.error("[run-stream] missing x-org-id; refusing global slug lookup", { slug });
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    const agentRow = await prisma.agent.findUnique({
+      where: { orgId_slug: { orgId: requestOrgId, slug } },
+      select: { id: true, orgId: true, config: true },
+    }).catch(() => null);
+    if (!agentRow) {
+      log.warn(`[run-stream/chat] agent org-scoped miss slug=${slug} orgId=${requestOrgId ?? "none"} userId=${userId}`);
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    const orgId = agentRow.orgId;
+
+    // Resolve the agent's provider credentials so this SSE run uses the agent's
+    // configured provider + model (e.g. a shared LiteLLM key) rather than the env
+    // platform default. run-stream is otherwise a pass-through: the Spaces
+    // backend sends provider="spaces" / no providerConfigs, which fell straight
+    // to claw's env LITELLM_MODEL. Agent-level resolution (the same shared
+    // resolver the headless + automation paths use). Body-supplied values win
+    // only when the agent has no configured creds.
+    const resolvedProviders = await resolveAgentProviderConfigs(agentRow).catch(() => null);
+    const resolvedProvider = resolvedProviders?.provider ?? (provider as string | undefined);
+    const resolvedProviderConfigs =
+      resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
+        ? resolvedProviders.providerConfigs
+        : (providerConfigs as Record<string, unknown> | undefined);
+    const resolvedProviderOrder =
+      resolvedProviders && resolvedProviders.providerOrder.length > 0
+        ? resolvedProviders.providerOrder
+        : undefined;
 
     // Branching-aware turn setup. Mirrors /agent-chat/:slug/chat — see that
     // route for the full design rationale. Three flows:
@@ -364,22 +433,38 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
     let userMsg: Awaited<ReturnType<typeof chatMessageRepository.create>> | undefined;
 
     if (isRegenerateFlag && parentUserMessageIdStr) {
+      let resolvedParentUserMessageId = parentUserMessageIdStr;
       const userMsgRow = existingMessages.find((m) => m.id === parentUserMessageIdStr && m.role === "user");
       if (!userMsgRow) {
-        res.status(400).json({ success: false, error: "Invalid parentUserMessageId for regenerate" });
-        return;
+        // The client can hold an OPTIMISTIC user-message id that was never
+        // swapped to the persisted one. The Ask-AI v2 stream emits `event: error`
+        // WITHOUT userMessageId when a turn errors/terminates before a clean
+        // `done` (see the error path below ~L901 + clawAgentService), so the
+        // frontend never learns that turn's real id and regenerating it sends
+        // the local optimistic id. The user row IS persisted, though (run-stream
+        // writes it before dispatch), so rather than a hard 400 we fall back to
+        // the LATEST persisted user message for this agent — for the linear
+        // Ask-AI thread that is exactly the turn being regenerated.
+        const agentMsgs = await chatMessageRepository.findByConversationAndAgent(convId, slug).catch(() => []);
+        const latestUser = [...agentMsgs].reverse().find((m) => m.role === "user");
+        if (!latestUser) {
+          res.status(400).json({ success: false, error: "Invalid parentUserMessageId for regenerate" });
+          return;
+        }
+        resolvedParentUserMessageId = latestUser.id;
+        log.warn(`[run-stream] regenerate parentUserMessageId=${parentUserMessageIdStr} not persisted (likely an optimistic id from an errored turn); falling back to latest user message ${latestUser.id} conv=${convId} agent=${slug}`);
       }
-      assistantParentId = parentUserMessageIdStr;
+      assistantParentId = resolvedParentUserMessageId;
       // Resolve from the existing ASSISTANT being regenerated (when the caller
       // provided it), so the path actually reaches its branch suffix — see
       // /agent-chat for the long-form rationale.
       const existingAssistantId = parentAssistantMessageIdStr
-        && existingMessages.some((m) => m.id === parentAssistantMessageIdStr && m.role === "assistant" && m.parentId === parentUserMessageIdStr)
+        && existingMessages.some((m) => m.id === parentAssistantMessageIdStr && m.role === "assistant" && m.parentId === resolvedParentUserMessageId)
         ? parentAssistantMessageIdStr
         : null;
       cloneSourcePiConversationId = resolvePiConversationIdForPath(
         existingMessages,
-        existingAssistantId ?? parentUserMessageIdStr,
+        existingAssistantId ?? resolvedParentUserMessageId,
         convId,
       );
       cloneBranchMode = "beforeLastUser";
@@ -408,6 +493,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
             role: "user",
             content: task.trim(),
             parentId: requestedParent?.id ?? null,
+            orgId,
           });
           createdUserMessageId = userMsg.id;
           assistantParentId = userMsg.id;
@@ -433,6 +519,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
             role: "user",
             content: task.trim(),
             parentId: userParentId,
+            orgId,
           });
           createdUserMessageId = userMsg.id;
           assistantParentId = userMsg.id;
@@ -455,6 +542,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
           content: "",
           status: "running",
           parentId: assistantParentId,
+          orgId,
         });
       } catch (msgErr) {
         log.warn("[run-stream] Failed to pre-create assistant placeholder:", msgErr instanceof Error ? msgErr.message : String(msgErr));
@@ -625,6 +713,22 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       Connection: "keep-alive",
     });
 
+    // Keepalive comment on the frontend leg (Spaces backend ← claw-auth).
+    // claw's own 25s KEEPALIVE_FRAME is an SSE *comment*, which the claw-auth
+    // consumer (consume-claw-stream.ts) parses to no event and therefore never
+    // re-emits toward the backend. During a long silent tool execution nothing
+    // else is written to this response either, so the backend↔claw-auth fetch
+    // body goes fully idle and gets severed — by undici's bodyTimeout or an L7
+    // proxy's idle-read timeout — surfacing as `[XyneAIv2] stream failed:
+    // terminated` even though the run completes and persists. A 15s comment
+    // keeps the socket warm under typical 30-60s idle windows; the backend's
+    // SSE parser ignores comment lines, so it's a pure liveness signal.
+    backendKeepalive = setInterval(() => {
+      if (!res.writableEnded && !res.destroyed) {
+        try { res.write(":ka\n\n"); } catch { /* response already torn down */ }
+      }
+    }, 15_000);
+
     // This pod now holds a live SSE stream — make sure it's subscribed to
     // the cross-pod event bus so progress/callback POSTs that land on OTHER
     // replicas get forwarded back here. Idempotent; safe to call repeatedly.
@@ -633,6 +737,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
     const resultPromise = new Promise<{
       content: string;
       status: "completed" | "failed" | "cancelled";
+      errorCode?: string | undefined;
       pendingActions?: Array<Record<string, unknown>> | undefined;
       attachments?: StreamAttachment[] | undefined;
       toolInvocations?: unknown;
@@ -668,6 +773,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
     streamMeta.set(streamId, {
       userId,
       agentSlug: slug,
+      orgId,
       conversationId: convId,
       task: task.trim(),
       ...(assistantMsg ? { assistantMessageId: assistantMsg.id } : {}),
@@ -689,7 +795,8 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       userEmail,
       task,
       agentSlug: slug,
-      provider,
+      orgId,
+      ...(resolvedProvider ? { provider: resolvedProvider } : {}),
       conversationId: convId,
       ...(piConversationId !== convId ? { piSessionConversationId: piConversationId } : {}),
       ...(isRegenerateFlag ? { isRegenerate: true } : {}),
@@ -702,7 +809,8 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       attachedContext,
       attachments: mergedAttachments.length > 0 ? mergedAttachments : attachments,
       contextFiles,
-      providerConfigs,
+      ...(resolvedProviderConfigs && Object.keys(resolvedProviderConfigs).length > 0 ? { providerConfigs: resolvedProviderConfigs } : {}),
+      ...(resolvedProviderOrder ? { providerOrder: resolvedProviderOrder } : {}),
       subagentProviders,
       researchContext,
       webSearchEnabled,
@@ -730,6 +838,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
     const UPSTREAM_ABORT_GRACE_MS = 3000;
     const upstreamAbort = new AbortController();
     req.on("close", () => {
+      if (backendKeepalive) { clearInterval(backendKeepalive); backendKeepalive = null; }
       pendingStreams.get(streamId)?.setClosed();
       if (upstreamAbort.signal.aborted) return;
       setTimeout(() => {
@@ -751,6 +860,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
         convId,
         slug,
         userId,
+        orgId,
         task,
         runRequestBody,
         cookie: req.headers["cookie"] as string | undefined,
@@ -758,6 +868,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
         internalCallbackUrl,
         res,
         upstreamSignal: upstreamAbort.signal,
+        ...(assistantMsg ? { assistantMessageId: assistantMsg.id } : {}),
       });
       const result = await resultPromise;
       if (!res.writableEnded && !res.destroyed) {
@@ -765,6 +876,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
           content: result.content,
           status: result.status,
           conversationId: convId,
+          ...(result.errorCode ? { errorCode: result.errorCode } : {}),
           // Stable ids + parent so the dashboard can swap optimistic ids and
           // stitch the new turn into the persisted tree. Missing these on
           // follow-ups left the new bot orphaned under the unsynced local
@@ -808,18 +920,21 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       // Persist failed assistant message — UPDATE the placeholder when we
       // pre-created one (keeps the assistant id stable for the frontend),
       // CREATE otherwise (first-turn errors before placeholder write).
-      const errContent = runBody.error ?? "Failed to start agent";
+      const errContent = widgetErrorContent(runBody.error, runBody.error ?? "Failed to start agent");
       try {
         if (assistantMsg) {
           await chatMessageRepository.update(assistantMsg.id, { content: errContent, status: "failed" });
         } else {
-          await chatMessageRepository.create({ conversationId: convId, agentSlug: slug, userId, role: "assistant", content: errContent, status: "failed" });
+          await chatMessageRepository.create({ conversationId: convId, agentSlug: slug, userId, role: "assistant", content: errContent, status: "failed", orgId });
         }
       } catch (msgErr) {
         log.warn("[run-stream] Failed to persist error assistant message:", msgErr instanceof Error ? msgErr.message : String(msgErr));
       }
 
-      res.write(`event: error\ndata: ${JSON.stringify({ error: errContent })}\n\n`);
+      res.write(`event: error\ndata: ${JSON.stringify({
+        error: errContent,
+        ...(runBody.error ? { errorCode: runBody.error } : {}),
+      })}\n\n`);
       res.end();
       return;
     }
@@ -832,6 +947,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
         sessionId: runBody.sessionId,
         userId,
         agentSlug: slug,
+        orgId,
         triggerSource: "chat",
         task: task.trim(),
         conversationId: convId,
@@ -845,6 +961,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
         content: result.content,
         status: result.status,
         conversationId: convId,
+        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
         // Branching: stable ids + parent so the client can swap optimistic
         // ids and stitch the message into the persisted tree.
         ...(assistantMsg ? { id: assistantMsg.id } : {}),
@@ -866,6 +983,8 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       res.write(`event: error\ndata: ${JSON.stringify({ error: err instanceof Error ? err.message : "Internal error" })}\n\n`);
       res.end();
     }
+  } finally {
+    if (backendKeepalive) clearInterval(backendKeepalive);
   }
 });
 
@@ -1019,8 +1138,13 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
   try {
     const body = req.body as Record<string, unknown>;
 
-    const rawResult = (body.result as string) || (body.error as string) || "";
+    const rawError = typeof body.error === "string" ? body.error : undefined;
+    const errorCode = rawError;
+    const rawResult = (body.result as string) || rawError || "";
     const status = normalizeRunStatus(body.status);
+    // Transient session-lock failure — never surface the raw token to the user.
+    const isSessionLockedFailure = status === "failed" &&
+      (body.error === "session_locked" || rawResult === "session_locked");
     const pendingActions = Array.isArray(body.pendingActions) ? body.pendingActions : undefined;
     const callbackAttachments = Array.isArray(body.attachments) ? body.attachments as StreamAttachment[] : undefined;
     const toolInvocations = body.toolInvocations;
@@ -1029,10 +1153,14 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     const model = typeof body.model === "string" ? body.model : undefined;
     const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
 
-    // Append LLM-provided citations (same logic as agent-chat.ts)
-    const content = status === "completed" && rawResult
-      ? appendCitations(rawResult, toolInvocations, { baseUrl: CONFIG.spacesAppUrl, includeCitations: true }, llmCitations)
-      : rawResult;
+    // Append LLM-provided citations (same logic as agent-chat.ts). For a
+    // session-lock failure, replace the raw token with a friendly, retryable
+    // message so it never renders as the assistant's answer.
+    const content = isSessionLockedFailure
+      ? SESSION_LOCKED_USER_MESSAGE
+      : status === "completed" && rawResult
+        ? appendCitations(rawResult, toolInvocations, { baseUrl: CONFIG.spacesAppUrl, includeCitations: true }, llmCitations)
+        : widgetErrorContent(rawError, rawResult);
 
     // Recover stream metadata. Local map is the fast path (SSE pod, SSE
     // transport's localhost callback replay); fall back to the callback body
@@ -1045,8 +1173,9 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       const bodyUserId = typeof body.userId === "string" ? body.userId : undefined;
       const bodyConvId = typeof body.conversationId === "string" ? body.conversationId : undefined;
       const bodyAgentSlug = typeof body.agentSlug === "string" ? body.agentSlug : undefined;
-      if (bodyUserId && bodyConvId && bodyAgentSlug) {
-        meta = { userId: bodyUserId, conversationId: bodyConvId, agentSlug: bodyAgentSlug, task: "" };
+      const bodyOrgId = typeof body.orgId === "string" ? body.orgId : undefined;
+      if (bodyUserId && bodyConvId && bodyAgentSlug && bodyOrgId) {
+        meta = { userId: bodyUserId, conversationId: bodyConvId, agentSlug: bodyAgentSlug, orgId: bodyOrgId, task: "" };
       } else if (sessionId) {
         try {
           const run = await agentRunRepository.findBySessionId(sessionId);
@@ -1055,6 +1184,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
               userId: run.userId,
               conversationId: run.conversationId ?? bodyConvId ?? "",
               agentSlug: run.agentSlug,
+              orgId: run.orgId,
               task: run.task ?? "",
             };
           }
@@ -1082,6 +1212,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           conversationId: meta.conversationId,
           agentSlug: meta.agentSlug,
           userId: meta.userId,
+          orgId: meta.orgId,
           content,
           status,
           ...(callbackAttachments?.length ? { attachments: callbackAttachments } : {}),
@@ -1104,7 +1235,9 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         await agentRunRepository.finalize(sessionId, {
           status: finalStatus,
           result: content,
-          error: status !== "completed" ? content : null,
+          // Keep the raw `session_locked` token in telemetry even though the
+          // user-facing `content` was rewritten to a friendly message.
+          error: status !== "completed" ? (isSessionLockedFailure ? "session_locked" : (rawError ?? content)) : null,
           ...(provider ? { provider } : {}),
           ...(model ? { model } : {}),
           toolsUsed: (body.toolsUsed as string[]) ?? [],
@@ -1118,6 +1251,15 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         log.warn(`[run-stream] Failed to finalize agent run:`, finalizeErr instanceof Error ? finalizeErr.message : String(finalizeErr));
       }
     }
+
+    // Live tap for VIEWERS: announce the run finished (AFTER the durable persist
+    // above, so a viewer's /messages refetch gets the final content) and tear
+    // down the delta coalescer. A late partial write is already a status-guarded
+    // no-op (persistRunStreamResult flipped status off "running").
+    if (CONFIG.liveToolCallsEnabled && meta?.conversationId && meta.userId) {
+      publishLiveEvent(meta.conversationId, { type: "done", conversationId: meta.conversationId, agentSlug: meta.agentSlug, userId: meta.userId, status, ts: Date.now() });
+    }
+    if (sessionId) endDeltaCoalescer(sessionId);
 
     // Resolve the SSE stream — locally if this pod owns it, otherwise fan
     // out via the cross-pod bus. The owning pod writes `event: done` and
@@ -1133,6 +1275,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       localStream.resolve({
         content,
         status,
+        ...(errorCode ? { errorCode } : {}),
         pendingActions,
         attachments: callbackAttachments && callbackAttachments.length > 0 ? callbackAttachments : undefined,
         toolInvocations,
@@ -1148,6 +1291,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         conversationId: meta.conversationId,
         content,
         status,
+        ...(errorCode ? { errorCode } : {}),
         ...(sessionId ? { sessionId } : {}),
         ...(pendingActions?.length ? { pendingActions } : {}),
         ...(callbackAttachments?.length ? { attachments: callbackAttachments } : {}),
@@ -1172,6 +1316,7 @@ interface RunViaSseOpts {
   convId: string;
   slug: string;
   userId: string;
+  orgId: string;
   task: string;
   runRequestBody: Record<string, unknown>;
   cookie: string | undefined;
@@ -1179,16 +1324,24 @@ interface RunViaSseOpts {
   internalCallbackUrl: string;
   res: Response;
   upstreamSignal?: AbortSignal;
+  /** Pre-created placeholder assistant row id — the live coalescer debounce-
+   *  persists partial content onto it so a reload shows answer-so-far. */
+  assistantMessageId?: string;
 }
 
 async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
-  const { streamId, convId, slug, userId, task, runRequestBody, cookie, xUserId, internalCallbackUrl, res, upstreamSignal } = opts;
+  const { streamId, convId, slug, userId, orgId, task, runRequestBody, cookie, xUserId, internalCallbackUrl, res, upstreamSignal, assistantMessageId } = opts;
   const stream = pendingStreams.get(streamId);
   if (!stream) {
     throw new Error(`pendingStream ${streamId} missing before SSE consume started`);
   }
 
+  const startedAt = Date.now();
   let sessionIdFromStarted: string | undefined;
+  // Set when claw emitted an early `cancelled` frame (user Stop). Lets the
+  // missing-done fallback below report a `cancelled` terminal state instead of
+  // a misleading `failed` when the cancelled `done` didn't make it back.
+  let sawCancelled = false;
   let agentRunStarted = false;
   const startAgentRunOnce = (sessionId: string) => {
     if (agentRunStarted) return;
@@ -1197,6 +1350,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       sessionId,
       userId,
       agentSlug: slug,
+      orgId,
       triggerSource: "chat",
       task: task.trim(),
       conversationId: convId,
@@ -1229,15 +1383,27 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       onInvocation: (sessionId, toolInvocation) => {
         stream.sendEvent("invocation", toolInvocation);
         agentRunRepository.appendToolInvocation(sessionId, toolInvocation as Record<string, unknown>).catch(() => {});
+        // Live tap for VIEWERS (reloaded tabs / Spaces): fan tool calls to the
+        // shared live-conversation-bus that GET /agent-chat/:slug/chat/:convId/live
+        // reads (same convId + slug as this run — no separate viewer bus needed).
+        if (CONFIG.liveToolCallsEnabled) publishLiveEvent(convId, { type: "invocation", conversationId: convId, agentSlug: slug, userId, toolInvocation, ts: Date.now() });
       },
-      onReasoning: (_sid, delta) => {
+      onReasoning: (sid, delta) => {
+        if (!delta) return;
         stream.sendEvent("reasoning", { delta });
+        // Coalesce reasoning → live bus + partial persist (viewers stream it).
+        if (CONFIG.liveToolCallsEnabled && sid) pushDelta(sid, convId, slug, assistantMessageId, undefined, delta, userId);
       },
-      onTextDelta: (_sid, delta) => {
+      onTextDelta: (sid, delta) => {
+        if (!delta) return;
         stream.sendEvent("delta", { content: delta });
+        if (CONFIG.liveToolCallsEnabled && sid) pushDelta(sid, convId, slug, assistantMessageId, delta, undefined, userId);
       },
       onAttachment: (_sid, attachment) => {
         stream.sendEvent("attachment", attachment);
+      },
+      onPlan: (_sid, todos) => {
+        stream.sendEvent("plan", { todos });
       },
       onSandboxPreview: (sessionId, payload) => {
         // Sandbox preview today lands on /webhook/progress which posts the
@@ -1265,6 +1431,9 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
           body: JSON.stringify({ sessionId, ...payload }),
           signal: AbortSignal.timeout(5_000),
         }).catch(() => {});
+        // Live tap for VIEWERS: the current tool label.
+        const toolLabel = (payload as { toolLabel?: string })?.toolLabel;
+        if (CONFIG.liveToolCallsEnabled && toolLabel) publishLiveEvent(convId, { type: "label", conversationId: convId, agentSlug: slug, userId, toolLabel, ts: Date.now() });
       },
       onDebug: (_sid, debugEvent) => {
         stream.sendEvent("debug", { debugEvent });
@@ -1275,13 +1444,68 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         // for the cancelled done frame (which is delayed by partial-state
         // collection + the /callback replay). The cancelled done still
         // follows and resolves the resultPromise normally.
+        sawCancelled = true;
         stream.sendEvent("cancelled", { reason: reason ?? "cancelled" });
       },
     },
   });
 
   if (!consumeResult.result) {
-    throw new Error("Claw SSE stream ended without a done frame");
+    // The stream ended without a `done` frame. This is NOT a normal completion
+    // — claw's finally→forceDone backstop guarantees a `done` on any clean
+    // return, so a missing one means the claw→proxy stream was severed mid-run
+    // (pod SIGKILL on deploy, OOM, or a transient proxy↔claw reset). The
+    // /internal/run proxy launders that into a clean EOF and, on a pipe error,
+    // an `error` frame we now capture as consumeResult.errorReason.
+    //
+    // Rather than throw here — which fires BEFORE the /callback replay below,
+    // leaving the pre-created assistant placeholder stuck in `running` forever
+    // and skipping AgentRun finalize — synthesise a terminal /callback (parity
+    // with agent-chat.ts) so persist + finalize + resolve run and the user sees
+    // a clean failed/cancelled turn. The reason is logged (below) for triage.
+    const terminalStatus = sawCancelled ? "cancelled" : "failed";
+    const technicalReason = consumeResult.errorReason
+      ?? "Claw SSE stream ended without a done frame";
+    const userFacingError = sawCancelled
+      ? "The request was cancelled."
+      : "The assistant was interrupted before it could finish responding. Please try again.";
+
+    // One structured line to disambiguate deploy-SIGKILL vs OOM vs idle-timeout
+    // in prod: elapsedMs clustered near a proxy timeout ⇒ transport cut;
+    // broad/random with eventCount>0 ⇒ abrupt pod death mid-run; ~0 elapsed with
+    // eventCount 0 / !sawStarted ⇒ died before `started`.
+    log.warn(
+      `[run-stream/sse] missing done frame — stream=${streamId} status=${terminalStatus} ` +
+      `reason=${JSON.stringify(technicalReason)} eventCount=${consumeResult.eventCount} ` +
+      `lastSeq=${consumeResult.lastSeq} lastEvent=${consumeResult.lastEventName ?? "none"} ` +
+      `sawStarted=${!!sessionIdFromStarted} sawCancelled=${sawCancelled} elapsedMs=${Date.now() - startedAt}`,
+    );
+
+    try {
+      const cbRes = await fetch(internalCallbackUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        },
+        body: JSON.stringify({
+          sessionId: sessionIdFromStarted ?? "",
+          userId,
+          conversationId: convId,
+          agentSlug: slug,
+          orgId,
+          status: terminalStatus,
+          error: userFacingError,
+        }),
+      });
+      if (!cbRes.ok) {
+        const text = await cbRes.text().catch(() => "");
+        log.warn(`[run-stream/sse] failed-callback returned ${cbRes.status}: ${text.slice(0, 300)}`);
+      }
+    } catch (err) {
+      log.error(`[run-stream/sse] failed-callback POST threw (stream=${streamId}): ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
   }
 
   const sessionId = sessionIdFromStarted ?? "";

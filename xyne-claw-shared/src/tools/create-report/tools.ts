@@ -27,6 +27,9 @@ import { marked } from "marked";
 import type { ToolDefinition } from "../types.js";
 import { buildHtmlDocument, sanitizeHtmlBody } from "./template.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("tools");
+
 const HTML_MIME = "text/html";
 
 /** Cap input markdown to bound server memory + downstream rendering cost.
@@ -129,7 +132,7 @@ export const createHtmlReportTool: ToolDefinition = {
       const fileName = safeFileName(title);
       const base64 = Buffer.from(fullHtml, "utf8").toString("base64");
 
-      console.log(
+      log.info(
         `[create-html-report] rendered ${fileName} (${(fullHtml.length / 1024).toFixed(1)}KB ` +
         `from ${detailsMarkdown.length.toLocaleString()}-char markdown, summary ${finalSummary.length} chars)`,
       );
@@ -141,7 +144,7 @@ export const createHtmlReportTool: ToolDefinition = {
       return `[ATTACHMENT:${fileName}:${HTML_MIME}]\n${base64}\n\n${finalSummary}`;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[create-html-report] error: ${msg}`);
+      log.error(`[create-html-report] error: ${msg}`);
       return `Error rendering HTML report: ${msg}`;
     }
   },

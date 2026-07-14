@@ -7,6 +7,7 @@
  * Sources today:
  *   - failure   ← runs[status="failed"]
  *   - approval  ← approvals[]
+ *   - agent_approval ← clone/delegation requests for agents I administer
  *   - outlier   ← dashboard30d.agentTable (success-rate threshold)
  *   - dt_review ← (no API yet — emitted empty)
  *   - workflow  ← (no signal on ChainWorkflow yet — emitted empty)
@@ -43,6 +44,14 @@ export interface ApprovalAttentionItem extends AttentionBase {
   canQuickApprove: boolean;
 }
 
+export interface AgentApprovalAttentionItem extends AttentionBase {
+  kind: "agent_approval";
+  requestKind: "clone" | "delegation";
+  agentSlug: string;
+  agentName: string;
+  requesterName: string;
+}
+
 export interface OutlierAttentionItem extends AttentionBase {
   kind: "outlier";
   agentSlug: string;
@@ -74,6 +83,7 @@ export interface AckAttentionItem extends AttentionBase {
 export type AttentionItem =
   | FailureAttentionItem
   | ApprovalAttentionItem
+  | AgentApprovalAttentionItem
   | OutlierAttentionItem
   | DtReviewAttentionItem
   | WorkflowAttentionItem
@@ -141,6 +151,37 @@ export function deriveAttentionItems(data: HomeData): UseAttentionItemsResult {
       action: a.action,
       targetSystem: a.targetSystem,
       canQuickApprove: !a.action.toLowerCase().includes("edit"),
+    });
+  });
+
+  // ── Agent approvals: clone and A2A delegation requests ───────────
+  data.cloneApprovals.forEach((r) => {
+    items.push({
+      kind: "agent_approval",
+      id: `clone-approval-${r.id}`,
+      severity: "high",
+      occurredAt: r.createdAt,
+      dismissible: false,
+      requestKind: "clone",
+      agentSlug: r.agentSlug ?? r.agentId ?? r.id,
+      agentName: r.agentName ?? r.agentSlug ?? "Agent",
+      requesterName: r.requesterName || r.requesterEmail || r.requesterId,
+    });
+  });
+
+  data.delegationApprovals.forEach((r) => {
+    const callee = r.callee;
+    const caller = r.caller;
+    items.push({
+      kind: "agent_approval",
+      id: `delegation-approval-${r.id}`,
+      severity: "high",
+      occurredAt: r.createdAt,
+      dismissible: false,
+      requestKind: "delegation",
+      agentSlug: callee?.slug ?? r.calleeAgentId,
+      agentName: callee?.name ?? r.calleeAgentId,
+      requesterName: caller?.name ?? caller?.slug ?? r.callerAgentId,
     });
   });
 

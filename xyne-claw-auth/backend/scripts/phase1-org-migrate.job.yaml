@@ -1,0 +1,49 @@
+# Phase-1 org-only migration + backfill, as a one-off Kubernetes Job.
+# Runs `scripts/phase1-pod-migrate.sh` inside a fresh pod that uses the SAME
+# image + env as the xyne-claw-auth deployment. Preferred over `kubectl exec`
+# into a serving pod. IDEMPOTENT — safe to delete + re-apply.
+#
+# BEFORE APPLYING, fill the 4 <PLACEHOLDERS> below. Get them from the live
+# deployment (replace NS + DEPLOY):
+#
+#   NS=xyne-apps
+#   DEPLOY=xyne-claw-auth        # `kubectl -n $NS get deploy | grep claw-auth`
+#   kubectl -n $NS get deploy $DEPLOY \
+#     -o jsonpath='IMAGE={.spec.template.spec.containers[0].image}{"\n"}'
+#   kubectl -n $NS get deploy $DEPLOY \
+#     -o jsonpath='ENVFROM={.spec.template.spec.containers[0].envFrom}{"\n"}'
+#   kubectl -n $NS get deploy $DEPLOY \
+#     -o jsonpath='WORKDIR={.spec.template.spec.containers[0].workingDir}{"\n"}'
+#
+# Then:
+#   kubectl -n <NAMESPACE> apply -f phase1-org-migrate.job.yaml
+#   kubectl -n <NAMESPACE> logs -f job/claw-auth-phase1-org
+#   # when done + logs show "remaining users with orgId IS NULL: 0":
+#   kubectl -n <NAMESPACE> delete job claw-auth-phase1-org
+#
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: claw-auth-phase1-org
+  namespace: <NAMESPACE>            # e.g. xyne-apps
+spec:
+  backoffLimit: 1                   # migration should not blindly retry-loop
+  ttlSecondsAfterFinished: 86400    # auto-clean after 24h
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: <SAME_IMAGE_AS_CLAW_AUTH_DEPLOYMENT>
+          # Path to the backend inside the image (where package.json + scripts/ live).
+          # Often /app or /app/xyne-claw-auth/backend — confirm with WORKDIR above.
+          workingDir: <BACKEND_WORKDIR_IN_IMAGE>
+          command: ["bash", "scripts/phase1-pod-migrate.sh"]
+          env:
+            # Whoever should become the org OWNER. If omitted, no OWNER is set.
+            - name: DEFAULT_ADMIN_EMAIL
+              value: "<john.doe@gmail.com>"
+          envFrom:
+            # The same secret/config the deployment uses — must provide DATABASE_URL.
+            - secretRef:
+                name: <CLAW_AUTH_ENV_SECRET_NAME>

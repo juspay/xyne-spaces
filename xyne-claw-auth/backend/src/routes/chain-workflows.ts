@@ -1,14 +1,15 @@
 import { Prisma } from "@prisma/client";
 import { Router, type Request, type Response } from "express";
 import { agentChainWorkflowRepository, agentRepository } from "../repositories/index.js";
-import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
-import { getSpacesAuthForUser } from "../lib/spaces-db.js";
+import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { setSession, type SessionContext } from "./webhook.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
+import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("chain-workflows");
@@ -200,10 +201,14 @@ async function callSpacesAutomations(
     // Fall back to the cached MCP-connection token if the live lookup misses.
     let token = "";
     let baseUrl = "";
+    let sessionId = "";
+    let workspaceId = "";
     const live = await getSpacesAuthForUser(userId, "require-auth").catch(() => null);
     if (live?.token) {
       token = live.token;
       baseUrl = CONFIG.spacesInternalUrl;
+      sessionId = live.sessionId;
+      workspaceId = live.workspaceId;
     } else {
       const connection = await prisma.userMcpConnection.findFirst({
         where: { userId, mcpServer: { type: "xyne-spaces" } },
@@ -212,16 +217,35 @@ async function callSpacesAutomations(
       const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
       const credentials = JSON.parse(decrypted) as Record<string, unknown>;
       token = typeof credentials["token"] === "string" ? credentials["token"].trim() : "";
+      sessionId = typeof credentials["sessionId"] === "string" ? credentials["sessionId"].trim() : "";
+      workspaceId = typeof credentials["workspaceId"] === "string" ? credentials["workspaceId"].trim() : "";
       baseUrl = typeof credentials["url"] === "string" && credentials["url"].trim()
         ? credentials["url"].trim()
         : CONFIG.spacesInternalUrl;
     }
     if (!token) return null;
+    if (!workspaceId) {
+      workspaceId = await getWorkspaceIdForUser(userId, "require-auth").catch(() => null) ?? "";
+      if (workspaceId) log.info(`[chain-workflows] resolved workspaceId=${workspaceId} from user row for automation userId=${userId}`);
+    }
+    const cookieParts: string[] = [];
+    if (sessionId) {
+      cookieParts.push(`user_session_id=${sessionId}`);
+      cookieParts.push(`xyne_session=${sessionId}`);
+    }
+    if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+    const cookieHeader = cookieParts.join("; ");
 
     const url = `${baseUrl}/api/automations${path}`;
     const res = await fetch(url, {
       method,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(sessionId ? { "x-session-id": sessionId } : {}),
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
+        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+      },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(15_000),
     });
@@ -863,16 +887,32 @@ router.get("/global-requests", async (req: Request, res: Response) => {
       res.status(403).json({ success: false, error: "Admin access required" });
       return;
     }
-    const rows = await agentChainWorkflowRepository.listPendingGlobalRequests();
+    const scope = getAdminOrgScope(req, "/chain-workflows/global-requests");
+    // TODO(admin-org-scope): workflow_global_requests has no orgId; scope through requestedByUserId.
+    const requestUserIds = scope.orgId
+      ? await prisma.user.findMany({
+        where: { orgId: scope.orgId },
+        select: { id: true },
+      }).then((users) => users.map((u) => u.id))
+      : undefined;
+    const rows = await agentChainWorkflowRepository.listPendingGlobalRequests(requestUserIds);
     // Attach requester display info (plain id → name/email).
     const userIds = Array.from(new Set(rows.map((r) => r.requestedByUserId)));
     const users = userIds.length
-      ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, email: true } })
+      ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, email: true, orgId: true } })
       : [];
     const userMap = new Map(users.map((u) => [u.id, u]));
+    const orgNames = scope.allOrgs ? await getOrgNameMap(users.map((u) => u.orgId)) : new Map();
     res.json({
       success: true,
-      data: rows.map((r) => ({ ...r, requestedByUser: userMap.get(r.requestedByUserId) ?? null })),
+      data: rows.map((r) => {
+        const user = userMap.get(r.requestedByUserId);
+        return {
+          ...r,
+          ...(scope.allOrgs ? withOrgLabel({ orgId: user?.orgId ?? null }, orgNames) : {}),
+          requestedByUser: user ?? null,
+        };
+      }),
     });
   } catch (err) {
     log.error("[chain-workflows] list global-requests error:", err);
@@ -1129,6 +1169,16 @@ router.post("/:id/trigger", requireS2S, async (req: Request<{ id: string }>, res
     // independent of whatever identity the trigger supplied. Otherwise fall
     // back to the trigger-supplied userId.
     const effectiveUserId = workflow.credentialUserId ?? userId;
+    const workflowOrgId = getOrgId(req)
+      ?? (await prisma.user.findUnique({
+        where: { id: workflow.credentialUserId ?? workflow.createdByUserId },
+        select: { orgId: true },
+    }))?.orgId;
+    if (!workflowOrgId) {
+      log.error(`[chain-workflows/trigger] orgId is required workflowId=${workflow.id} routeWorkflowId=${req.params.id} userId=${userId} effectiveUserId=${effectiveUserId} ownerUserId=${workflow.createdByUserId} credentialUserId=${workflow.credentialUserId ?? "none"} conversationId=${bodyConversationId ?? "none"} targetChannelId=${targetChannelId ?? "none"}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
 
     const definition = parseWorkflowDefinition(workflow.definition);
     if (!definition || definition.nodes.length === 0) {
@@ -1198,7 +1248,7 @@ router.post("/:id/trigger", requireS2S, async (req: Request<{ id: string }>, res
         }
 
         if (channelId) {
-          const agentRecord = await agentRepository.findBySlug(entryAgentSlug);
+          const agentRecord = await agentRepository.findBySlug(entryAgentSlug, workflowOrgId);
           if (agentRecord?.spacesAppToken) {
             const [ciphertext, iv, authTag] = agentRecord.spacesAppToken.split(":");
             const appToken = ciphertext && iv && authTag
@@ -1221,6 +1271,14 @@ router.post("/:id/trigger", requireS2S, async (req: Request<{ id: string }>, res
       }
     }
 
+    const entryAgentRecord = await agentRepository.findBySlug(entryAgentSlug, workflowOrgId);
+    if (!entryAgentRecord) {
+      log.warn(`[chain-workflows/trigger] agent org-scoped miss slug=${entryAgentSlug} orgId=${workflowOrgId ?? "none"} workflowId=${workflow.id} userId=${userId}`);
+      res.status(404).json({ success: false, error: `agent "${entryAgentSlug}" not found` });
+      return;
+    }
+    const dispatchOrgId = entryAgentRecord.orgId;
+
     log.info(`[chain-workflows/trigger] workflowId=${req.params.id} entryAgent=${entryAgentSlug} userId=${effectiveUserId}${workflow.credentialUserId ? " (creator-creds consent)" : ""} conversationId=${conversationId} channelId=${channelId}`);
 
     const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
@@ -1232,6 +1290,7 @@ router.post("/:id/trigger", requireS2S, async (req: Request<{ id: string }>, res
       },
       body: JSON.stringify({
         userId: effectiveUserId, task, agentSlug: entryAgentSlug,
+        orgId: dispatchOrgId,
         context: triggerPayload ?? {}, conversationId,
         callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
         progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
@@ -1250,19 +1309,20 @@ router.post("/:id/trigger", requireS2S, async (req: Request<{ id: string }>, res
 
     if (runBody.sessionId && conversationId) {
       try {
-        const agentRecord = await agentRepository.findBySlug(entryAgentSlug);
-        if (agentRecord?.spacesAppToken && agentRecord.spacesAppId) {
-          const [ciphertext, iv, authTag] = agentRecord.spacesAppToken.split(":");
+        if (entryAgentRecord?.spacesAppToken && entryAgentRecord.spacesAppId) {
+          const [ciphertext, iv, authTag] = entryAgentRecord.spacesAppToken.split(":");
           const appToken = ciphertext && iv && authTag
             ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
           const sessionContext: SessionContext = {
-            mentionedUserId: agentRecord.spacesAppUserId ?? userId,
+            mentionedUserId: entryAgentRecord.spacesAppUserId ?? userId,
             senderId, senderName, channelId,
             channelName: channelId, conversationId,
             task, agentSlug: entryAgentSlug,
+            agentId: entryAgentRecord.id,
+            agentOrgId: entryAgentRecord.orgId,
             responseMode: "conversation", appToken,
-            spacesAppId: agentRecord.spacesAppId,
-            spacesAppUserId: agentRecord.spacesAppUserId ?? "",
+            spacesAppId: entryAgentRecord.spacesAppId,
+            spacesAppUserId: entryAgentRecord.spacesAppUserId ?? "",
           };
           await setSession(runBody.sessionId, sessionContext);
           log.info(`[chain-workflows/trigger] stored session ctx sessionId=${runBody.sessionId} conversationId=${conversationId}`);

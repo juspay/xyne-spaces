@@ -234,13 +234,20 @@ function validateMcpInstanceMap(raw: unknown): Record<string, string> {
 export async function validateSubagentInput(
   prisma: PrismaClient,
   input: SubagentInput,
-  options: { isCreate: boolean },
+  options: { isCreate: boolean; orgId?: string | null },
 ): Promise<ValidatedSubagentInput> {
   const name = validateName(input.name, { allowBuiltin: false });
   // On update, the route handler must verify `name` matches the URL and
   // refuse name changes. Validation here treats name as just a string check.
   if (options.isCreate) {
-    const existing = await prisma.subagentDefinition.findUnique({ where: { name }, select: { id: true } });
+    if (!options.orgId) {
+      log.warn(`[subagent-resolver/validate] orgId is required name=${name}`);
+      throw new ValidationError("name", "orgId is required to validate subagent name");
+    }
+    const existing = await prisma.subagentDefinition.findUnique({
+      where: { orgId_name: { orgId: options.orgId, name } },
+      select: { id: true },
+    });
     if (existing) {
       throw new ValidationError("name", `a subagent named "${name}" already exists`);
     }
@@ -329,6 +336,7 @@ export interface ResolvedSubagent {
 export async function resolveSubagentsForRun(
   prisma: PrismaClient,
   requestedNames: string[],
+  orgId?: string,
 ): Promise<ResolvedSubagent[]> {
   if (!requestedNames || requestedNames.length === 0) return [];
 
@@ -337,7 +345,7 @@ export async function resolveSubagentsForRun(
 
   const customRows = missingFromBuiltins.length > 0
     ? await prisma.subagentDefinition.findMany({
-        where: { name: { in: missingFromBuiltins }, enabled: true },
+        where: { name: { in: missingFromBuiltins }, enabled: true, ...(orgId ? { orgId } : { id: "__missing_subagent_org__" }) },
         include: { skills: { include: { skill: { include: { files: true } } } } },
       })
     : [];
@@ -368,8 +376,9 @@ export async function resolveSubagentsForRun(
 export async function resolveCustomSubagentsForRun(
   prisma: PrismaClient,
   requestedNames: string[],
+  orgId?: string,
 ): Promise<CustomSubagentSpec[]> {
-  const all = await resolveSubagentsForRun(prisma, requestedNames);
+  const all = await resolveSubagentsForRun(prisma, requestedNames, orgId);
   return all
     .filter((r): r is ResolvedSubagent & { source: "custom"; custom: CustomSubagentSpec } => r.source === "custom" && !!r.custom)
     .map((r) => r.custom);

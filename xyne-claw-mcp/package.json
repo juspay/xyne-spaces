@@ -1,0 +1,22 @@
+{
+  "name": "xyne-claw-mcp",
+  "version": "0.1.0",
+  "description": "Claude Code MCP server for Xyne Claw",
+  "type": "module",
+  "bin": {
+    "xyne-claw-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}

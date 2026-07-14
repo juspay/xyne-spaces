@@ -153,7 +153,11 @@ export interface SearchArea {
   timestampField: string;
   /** Filterable fields for this area. */
   fields: FieldDef[];
-  /** Fields the agent may pass to `groupBy`. */
+  /** Fields the agent may pass to `groupBy`. Usually filter-field names, but may
+   *  also be a curated raw attribute column that isn't a filter (e.g. the
+   *  day-granular STRING `createdAt` = "12/05/2026" on ticket/message, grouped for
+   *  per-day counts — distinct from the ms `createdAtTimestamp` used by date
+   *  range FILTERS). Only list attribute columns; grouping needs an attribute. */
   allowedGroupByFields: string[];
   /** Rank profiles that actually EXIST on this area's source (verified vs the
    *  .sd files). Omitted → BASE_RANK_PROFILES (default_native + unranked, valid
@@ -215,7 +219,8 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     aclSchemaKey: "message",
     timestampField: "createdAtTimestamp",
     fields: chatFields("createdAtTimestamp"),
-    allowedGroupByFields: ["channelId", "userId", "messageType"],
+    // createdAt = day-string ("12/05/2026") → per-day grouping (not the ms timestamp).
+    allowedGroupByFields: ["channelId", "senderId", "senderEmail", "messageType", "conversationId", "createdAt"],
   },
 
   ticket: {
@@ -238,7 +243,8 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("conversationId", "Ticket conversation/thread id.", ["in"], "convId"),
       dateField("createdDate", "Ticket creation date (dd/mm/yy, IST).", "createdAtTimestamp"),
     ],
-    allowedGroupByFields: ["status", "priority", "stage", "assignedTo", "projectId", "channelId", "boardId"],
+    // createdAt = day-string ("12/05/2026") → per-day grouping (not the ms timestamp).
+    allowedGroupByFields: ["status", "priority", "stage", "assignedTo", "createdBy", "projectId", "channelId", "boardId", "createdAt"],
   },
 
   // Chat attachments are ingested into the `file` schema with subApp
@@ -258,7 +264,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("conversationId", "Conversation/thread the attachment belongs to.", ["in"], "conversationId"),
       dateField("createdDate", "Attachment creation date (dd/mm/yy, IST).", "createdAt"),
     ],
-    allowedGroupByFields: ["channelId"],
+    allowedGroupByFields: ["channelId", "uploaderId", "conversationId"],
   },
 
   canvas: {
@@ -279,7 +285,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("conversationId", "Conversation/call this transcript belongs to.", ["in"], "conversationId"),
       strField("callType", "Call type of the transcript.", ["in"], "callType"),
     ]),
-    allowedGroupByFields: ["channelId", "ownerId", "callType"],
+    allowedGroupByFields: ["channelId", "ownerId", "callType", "conversationId"],
   },
 
   file: {
@@ -296,7 +302,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("collectionId", "Knowledge-base collection id (collections subApp).", ["in"], "clId"),
       strField("folderId", "Knowledge-base folder id (collections subApp).", ["in"], "clFd"),
     ]),
-    allowedGroupByFields: ["channelId", "ownerId", "subApp"],
+    allowedGroupByFields: ["channelId", "ownerId", "subApp", "callType", "conversationId", "collectionId", "folderId"],
   },
 
   mail: {
@@ -318,7 +324,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("gmailThreadId", "Underlying Gmail thread id — groups the actual email thread (a mail + all its replies).", ["in"], "parentThreadId"),
       dateField("createdDate", "Mail date (dd/mm/yy, IST).", "timestamp"),
     ],
-    allowedGroupByFields: ["from", "channelId"],
+    allowedGroupByFields: ["from", "threadId", "channelId"],
   },
 
   user: {
@@ -345,7 +351,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("tags", "Memory tags.", ["containsAny"]),
       dateField("createdDate", "Memory creation date (dd/mm/yy, IST).", "createdAt"),
     ],
-    allowedGroupByFields: ["reviewStatus"],
+    allowedGroupByFields: ["reviewStatus", "agentUsed"],
     allowedDocTypes: ["FACT", "SOP"],
   },
 
@@ -358,7 +364,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("createdBy", "Creator user id.", ["contains"]),
       dateField("createdDate", "Project creation date (dd/mm/yy, IST).", "createdAt"),
     ],
-    allowedGroupByFields: [],
+    allowedGroupByFields: ["createdBy"],
   },
 };
 
@@ -397,6 +403,29 @@ for (const [areaName, area] of Object.entries(SEARCH_AREAS)) {
       if (!legal.has(op)) {
         throw new Error(`vespa-search-areas: area "${areaName}" field "${f.name}" declares op "${op}" illegal for ${f.dataType}/${f.tier}.`);
       }
+    }
+  }
+  // Every groupBy entry must be a real filter field of the area (grouping resolves
+  // name → FieldDef.vespaField). Also guards against grouping a non-attribute:
+  // date fields aren't attributes-you'd-group and shouldn't be listed.
+  for (const g of area.allowedGroupByFields) {
+    const gf = area.fields.find(f => f.name === g);
+    // A groupBy entry that isn't a filter field is a curated raw attribute column
+    // (e.g. the day-string `createdAt` for per-day grouping) — trusted as-is.
+    if (!gf) continue;
+    if (gf.dataType === "boolean") {
+      throw new Error(`vespa-search-areas: area "${areaName}" groupBy "${g}" is a boolean field — a trivial 2-way split; use a filter instead.`);
+    }
+    // A date FILTER field maps to the ms timestamp (unique per doc → one singleton
+    // group each). To group by day, list the day-string column (e.g. createdAt).
+    if (gf.dataType === "date") {
+      throw new Error(`vespa-search-areas: area "${areaName}" groupBy "${g}" is a date filter field (ms timestamp). Group by the day-string column instead.`);
+    }
+    // Multi-valued (array<string>) fields — flagged by a containsAny operator —
+    // must not be grouped: Vespa puts one doc into a group PER element, so counts
+    // overlap and no longer partition the docs (e.g. a mail with 5 `to`s → 5 groups).
+    if (gf.operators.includes("containsAny")) {
+      throw new Error(`vespa-search-areas: area "${areaName}" groupBy "${g}" is multi-valued — grouping an array double-counts docs. Group by a single-valued field.`);
     }
   }
 }
@@ -719,12 +748,18 @@ export function buildYqlFromParams(params: StructuredQueryParams, userId: string
     yql += ` order by ${col} ${dir}`;
   }
 
-  // 7b. Grouping (validated field).
+  // 7b. Grouping (validated field). groupBy takes a FILTER field name (what the
+  // LLM already knows); resolve it to the underlying Vespa column so grouping and
+  // filtering share one vocabulary (e.g. senderId → group(userId)).
   if (hasGroupBy) {
     if (!area.allowedGroupByFields.includes(params.groupBy!)) {
       throw new Error(`groupBy "${params.groupBy}" is not allowed for area "${params.searchArea}". Allowed: ${area.allowedGroupByFields.join(", ") || "(none)"}.`);
     }
-    yql += ` | ${buildGroupingClause(params.groupBy!, {
+    // Filter field → its Vespa column (senderId → userId); a curated raw column
+    // (e.g. createdAt) → as-is.
+    const gf = area.fields.find(f => f.name === params.groupBy);
+    const groupCol = gf?.vespaField ?? params.groupBy!;
+    yql += ` | ${buildGroupingClause(groupCol, {
       order: params.groupOrder === "asc" ? "asc" : "desc",
       maxGroups: clampInt(params.maxGroups, 1, MAX_GROUPS_CAP, DEFAULT_MAX_GROUPS),
       hitsPerGroup: clampInt(params.hitsPerGroup, 1, HITS_PER_GROUP_CAP, DEFAULT_HITS_PER_GROUP),

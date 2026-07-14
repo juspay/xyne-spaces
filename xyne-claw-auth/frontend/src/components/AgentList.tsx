@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Trash2, Globe } from "lucide-react";
-import type { Agent } from "../lib/types";
+import type { AgentLight } from "../lib/types";
 import {
   updateAgent,
   deleteAgent,
@@ -15,7 +15,7 @@ import {
 import { withAdminRequestAlert } from "../lib/admin-request-notice";
 
 interface Props {
-  agents: Agent[];
+  agents: AgentLight[];
   loading: boolean;
   isAdmin?: boolean;
   onUpdate: () => void;
@@ -142,7 +142,7 @@ export function AgentList({ agents, loading, onUpdate, userId, isAdmin }: Props)
   const navigate = useNavigate();
   const [providerSlug, setProviderSlug] = useState<string | null>(null);
 
-  const handleToggle = useCallback(async (agent: Agent) => {
+  const handleToggle = useCallback(async (agent: AgentLight) => {
     try {
       await updateAgent(agent.slug, { enabled: !agent.enabled });
       onUpdate();
@@ -153,7 +153,7 @@ export function AgentList({ agents, loading, onUpdate, userId, isAdmin }: Props)
 
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  const handleDelete = useCallback(async (agent: Agent) => {
+  const handleDelete = useCallback(async (agent: AgentLight) => {
     if (!confirm(`Delete "${agent.name}"? This cannot be undone.`)) return;
     setDeleting(agent.slug);
     try {
@@ -182,7 +182,7 @@ export function AgentList({ agents, loading, onUpdate, userId, isAdmin }: Props)
   const myAgents = agents.filter((a) => a.ownerUserId === userId);
   const sharedAgents = agents.filter((a) => a.scope !== "global" && a.ownerUserId !== userId && a.ownerUserId !== null);
 
-  const shareRoleBadge = (agent: Agent) => {
+  const shareRoleBadge = (agent: AgentLight) => {
     const share = agent.shares?.find((s) => s.userId === userId);
     if (!share) return null;
     const styles: Record<string, string> = {
@@ -197,7 +197,9 @@ export function AgentList({ agents, loading, onUpdate, userId, isAdmin }: Props)
     );
   };
 
-  const renderAgent = (agent: Agent, canDelete: boolean) => (
+  const renderAgent = (agent: AgentLight, canDelete: boolean) => {
+    const tools = agent.tools ?? [];
+    return (
         <div
           key={agent.id}
           className="cursor-pointer rounded-lg border border-zinc-800 bg-zinc-900 p-4 transition-colors hover:border-zinc-600"
@@ -263,23 +265,10 @@ export function AgentList({ agents, loading, onUpdate, userId, isAdmin }: Props)
               {agent.description && (
                 <p className="mt-1 text-sm text-zinc-400">{agent.description}</p>
               )}
-              {/* Subagent pills */}
-              {((agent.config?.tools as { subagents?: string[] })?.subagents ?? []).length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {((agent.config?.tools as { subagents?: string[] })?.subagents ?? []).map((s) => (
-                    <span
-                      key={s}
-                      className="rounded bg-purple-950 px-1.5 py-0.5 text-xs text-purple-400"
-                    >
-                      {s}
-                    </span>
-                  ))}
-                </div>
-              )}
               {/* Custom tool pills */}
-              {agent.tools.length > 0 && (
+              {tools.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
-                  {agent.tools.map((at) => (
+                  {tools.map((at) => (
                     <span
                       key={at.id}
                       className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-500"
@@ -316,7 +305,8 @@ export function AgentList({ agents, loading, onUpdate, userId, isAdmin }: Props)
           </div>
 
         </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-6">

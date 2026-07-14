@@ -6,6 +6,9 @@ import { inflateRawSync } from "zlib";
 import { PDFParse } from "pdf-parse";
 import { microsoftFetch } from "./oauth.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("onedrive");
+
 const BASE = "https://graph.microsoft.com/v1.0/me/drive";
 
 interface DriveItem {
@@ -212,7 +215,7 @@ export async function readFile(
     if (downloadUrl) {
       const response = await fetch(downloadUrl);
       if (response.ok) return Buffer.from(await response.arrayBuffer());
-      console.error(`[onedrive] downloadUrl fetch failed: ${response.status}`);
+      log.error(`[onedrive] downloadUrl fetch failed: ${response.status}`);
     }
     // Fallback to /content endpoint
     const response = await fetch(`${itemUrl}/content`, {
@@ -220,7 +223,7 @@ export async function readFile(
       redirect: "follow",
     });
     if (response.ok) return Buffer.from(await response.arrayBuffer());
-    console.error(`[onedrive] /content fetch failed: ${response.status}`);
+    log.error(`[onedrive] /content fetch failed: ${response.status}`);
     return null;
   }
 
@@ -233,7 +236,7 @@ export async function readFile(
     const buffer = await downloadContent();
     if (buffer) {
       const text = buffer.toString("utf-8");
-      return { text: `File: ${name}\n\n${text.length > 10000 ? text.slice(0, 10000) + "\n\n... (truncated)" : text}`, mime: mimeType };
+      return { text: `File: ${name}\n\n${text}`, mime: mimeType };
     }
   }
 
@@ -257,11 +260,10 @@ export async function readFile(
       const parser = new PDFParse({ data: new Uint8Array(buffer) });
       try {
         const result = await parser.getText();
-        let content = result.text.trim();
-        if (content.length > 10000) content = content.slice(0, 10000) + "\n\n... (truncated)";
+        const content = result.text.trim();
         return { text: `File: ${name} (PDF, ${result.total} pages)\n\n${content}`, mime: "application/pdf" };
       } catch (e) {
-        console.error(`[onedrive] PDF parse failed for ${name}:`, e);
+        log.error(`[onedrive] PDF parse failed for ${name}:`, e);
         return { text: `File: ${name} (PDF)\nFailed to extract text. Use the URL to open in browser.\nURL: ${meta.webUrl}`, mime: "application/pdf" };
       } finally {
         await parser.destroy().catch(() => {});
@@ -279,10 +281,9 @@ export async function readFile(
     if (buffer) {
       const content = parseDocxBuffer(buffer);
       if (content) {
-        const truncated = content.length > 10000 ? content.slice(0, 10000) + "\n\n... (truncated)" : content;
-        return { text: `File: ${name} (Word document)\n\n${truncated}`, mime: "text/plain" };
+        return { text: `File: ${name} (Word document)\n\n${content}`, mime: "text/plain" };
       }
-      console.error(`[onedrive] docx parse returned empty for ${name} (${buffer.length} bytes)`);
+      log.error(`[onedrive] docx parse returned empty for ${name} (${buffer.length} bytes)`);
     }
   }
 
@@ -296,10 +297,9 @@ export async function readFile(
     if (buffer) {
       const content = parseXlsxBuffer(buffer);
       if (content) {
-        const truncated = content.length > 10000 ? content.slice(0, 10000) + "\n\n... (truncated)" : content;
-        return { text: `File: ${name} (Excel spreadsheet)\n\n${truncated}`, mime: "text/csv" };
+        return { text: `File: ${name} (Excel spreadsheet)\n\n${content}`, mime: "text/csv" };
       }
-      console.error(`[onedrive] xlsx parse returned empty for ${name} (${buffer.length} bytes)`);
+      log.error(`[onedrive] xlsx parse returned empty for ${name} (${buffer.length} bytes)`);
     }
   }
 

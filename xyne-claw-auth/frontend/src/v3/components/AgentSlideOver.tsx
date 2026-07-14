@@ -33,7 +33,7 @@ const PROVIDER_LABELS_SLIDEOVER: Record<string, string> = {
   openrouter: "OpenRouter",
   kimi:       "Kimi",
 };
-import type { Agent } from "../../lib/types";
+import type { Agent, AgentLight } from "../../lib/types";
 import { SidePanel } from "./ui/SidePanel";
 import { Avatar } from "./ui/Avatar";
 import { Badge } from "./ui/Badge";
@@ -45,11 +45,12 @@ import {
   promoteAgent,
   demoteAgent,
   deleteAgent,
+  getAgentDetail,
 } from "../../lib/api";
 import { useSnackbar } from "./ui/Snackbar";
 
 interface AgentSlideOverProps {
-  agent: Agent | null;
+  agent: AgentLight | null;
   lastUsed: string | null;
   onClose: () => void;
   onEdit: (slug: string) => void;
@@ -64,7 +65,7 @@ interface AgentSlideOverProps {
   onAgentChanged?: () => void;
 }
 
-function ScopeBadge({ agent, userId }: { agent: Agent; userId: string }) {
+function ScopeBadge({ agent, userId }: { agent: AgentLight; userId: string }) {
   if (agent.shares?.some((s) => s.userId === userId)) {
     return (
       <span className="text-[12px] font-medium px-[10px] py-[2px] rounded-full bg-xyne-brand/10 text-xyne-brand border border-xyne-brand/20">
@@ -297,7 +298,7 @@ function CapabilityRow({
 }
 
 export function AgentSlideOver({
-  agent,
+  agent: rowAgent,
   lastUsed,
   onClose,
   onEdit,
@@ -309,6 +310,8 @@ export function AgentSlideOver({
   const { show: showSnackbar } = useSnackbar();
   const [publishing, setPublishing] = useState(false);
   const [togglePending, setTogglePending] = useState(false);
+  const [fullAgent, setFullAgent] = useState<Agent | null>(null);
+  const agent = fullAgent ?? rowAgent;
   const [localEnabled, setLocalEnabled] = useState<boolean>(agent?.enabled ?? true);
   const [adminBusy, setAdminBusy] = useState<"promote" | "demote" | "delete" | null>(null);
   const [confirmAction, setConfirmAction] =
@@ -319,6 +322,25 @@ export function AgentSlideOver({
       setLocalEnabled(agent.enabled);
     }
   }, [agent, togglePending]);
+
+  useEffect(() => {
+    if (!rowAgent) {
+      setFullAgent(null);
+      return;
+    }
+    let cancelled = false;
+    setFullAgent(null);
+    getAgentDetail(rowAgent.slug)
+      .then((detail) => {
+        if (!cancelled) setFullAgent(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setFullAgent(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rowAgent]);
 
   if (!agent) return null;
 
@@ -626,7 +648,7 @@ export function AgentSlideOver({
                 full picker lives in the Provider tab; this row is a
                 read-only summary. */}
           {(() => {
-            const cfg = agent.config as
+            const cfg = fullAgent?.config as
               | { providerOrder?: unknown; provider?: unknown }
               | undefined;
             const orderRaw = Array.isArray(cfg?.providerOrder)
@@ -676,13 +698,14 @@ export function AgentSlideOver({
             Subagents / Skills / Write tools / MCP tools / Git repo. */}
         {(() => {
           const cfgTools =
-            (agent.config as {
-              tools?: { subagents?: string[]; direct?: string[]; custom?: string[]; gateway?: string[] };
+            (fullAgent?.config as {
+              tools?: { subagents?: string[]; direct?: string[]; custom?: string[]; gateway?: string[]; callableAgents?: string[] };
             } | undefined)?.tools;
           const subagents = cfgTools?.subagents ?? [];
+          const callableAgents = cfgTools?.callableAgents ?? [];
           const writeToolSlugs = cfgTools?.direct ?? [];
           const mcpToolSlugs = cfgTools?.custom ?? [];
-          const skills = agent.skills ?? [];
+          const skills = fullAgent?.skills ?? [];
 
           const subagentChips =
             subagents.length > 0 ? (
@@ -695,6 +718,23 @@ export function AgentSlideOver({
                     className="text-[12px] px-2.5 py-0.5 rounded-full bg-xyne-brand/10 border border-xyne-brand/20 text-xyne-brand"
                   >
                     {slug}
+                  </span>
+                ))}
+              </div>
+            ) : null;
+
+          const callableAgentChips =
+            callableAgents.length > 0 ? (
+              <div data-id="agent-slideover-callable-agents" className="contents">
+                {callableAgents.map((slug) => (
+                  <span
+                    key={slug}
+                    data-id={`agent-slideover-callable-agent-${slug}`}
+                    title={`Delegated agent: ${slug}`}
+                    className="inline-flex items-center gap-1 text-[12px] px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-500/40 dark:text-amber-300"
+                  >
+                    {slug}
+                    <span className="text-[10px] font-medium">Agent · heavyweight</span>
                   </span>
                 ))}
               </div>
@@ -749,6 +789,15 @@ export function AgentSlideOver({
                   chips={subagentChips}
                   isOwner={isOwner}
                   emptyHint="Bring in other agents to handle parts of the work"
+                  onConfigure={() => onEdit(agent.slug)}
+                />
+                <CapabilityRow
+                  icon={<RobotIcon size={14} weight="fill" />}
+                  label="Agents"
+                  count={callableAgents.length}
+                  chips={callableAgentChips}
+                  isOwner={isOwner}
+                  emptyHint="Full agent loops delegated through A2A"
                   onConfigure={() => onEdit(agent.slug)}
                 />
                 <CapabilityRow

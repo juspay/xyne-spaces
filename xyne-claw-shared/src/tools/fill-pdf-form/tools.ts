@@ -29,6 +29,9 @@ import https from "node:https";
 import http from "node:http";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("tools");
+
 // pdf-lib is a runtime-only dependency of xyne-claw, not xyne-claw-shared.
 // We lazy-import it inside the handlers so the shared package can typecheck
 // without taking on the dep. claw-auth never executes these handlers (it
@@ -130,12 +133,12 @@ function pushAttachmentViaProgress(
       (res) => { res.resume(); }, // drain
     );
     req.on("error", (err) => {
-      console.warn(`[fill-pdf-form] pushAttachment failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[fill-pdf-form] pushAttachment failed: ${err instanceof Error ? err.message : String(err)}`);
     });
     req.write(body);
     req.end();
   } catch (err) {
-    console.warn(`[fill-pdf-form] pushAttachment threw: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[fill-pdf-form] pushAttachment threw: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

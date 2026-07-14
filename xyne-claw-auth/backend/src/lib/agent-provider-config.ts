@@ -1,4 +1,4 @@
-import { agentProviderCredentialsRepository } from "../repositories/index.js";
+import { agentProviderCredentialsRepository, sharedProviderCredentialRepository, userProviderCredentialsRepository } from "../repositories/index.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { extractCodexBearer } from "./codex-creds.js";
@@ -18,13 +18,26 @@ export interface ProviderConfig {
 }
 
 export interface ResolvedAgentProviders {
+  /** Resolved parent provider (first ordered entry that has creds). undefined ⇒ platform default. */
+  provider?: string;
   /** Decrypted, ready-to-use creds keyed by provider. Empty ⇒ run on the platform default (spaces/LiteLLM). */
   providerConfigs: Record<string, ProviderConfig>;
   /** The fallback chain claw-pod may walk on quota exhaustion. */
   providerOrder: string[];
+  /**
+   * The PRIMARY provider the pod should run on (the first provider in the order
+   * that has creds). Callers must forward this as the dispatch body's `provider`
+   * field — the pod keys its primary model off `provider`, NOT `providerOrder[0]`,
+   * and defaults to "spaces" (LiteLLM/kimi) when it's unset. Undefined ⇒ run on
+   * the platform default (kimi-first agents, or no premium creds).
+   */
+  parent?: string;
 }
 
-const KNOWN_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "spaces"]);
+/** The provider keys valid in an agent's config.providerOrder / config.provider.
+ *  SINGLE SOURCE OF TRUTH — imported by every dispatch site (webhook, agent-chat,
+ *  run-stream, flow-action) so adding a provider means editing ONE list. */
+export const KNOWN_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "litellm", "spaces"]);
 
 /**
  * Per-agent setting controlling which provider a SUBAGENT runs on when it has no
@@ -49,7 +62,7 @@ export function resolveSubagentProviderMode(config?: unknown): SubagentProviderM
   return cfg?.["subagentProviderMode"] === "parent" ? "parent" : "spaces";
 }
 
-type CredRow = {
+export type CredRow = {
   encryptedKey: string | null;
   iv: string | null;
   authTag: string | null;
@@ -59,8 +72,69 @@ type CredRow = {
   reasoningEffort: string | null;
 };
 
-/** Decrypt + shape one credential row into a ProviderConfig (null on failure). Mirrors webhook.ts:buildProviderConfig. */
-function buildProviderConfig(provider: string, row: CredRow): ProviderConfig | null {
+/**
+ * Where an agent-scoped credential's OAuth refresh must single-flight and
+ * persist. Binding rows (sharedCredentialId set) refresh against the SHARED
+ * row — one live provider session for every bound agent — while dedicated
+ * rows keep the per-agent key/write-back. Used by every agent-cred refresh
+ * site (this file, webhook.ts, agent-chat.ts) so the target logic can't drift.
+ */
+export function agentCredRefreshTarget(
+  agentId: string,
+  provider: string,
+  row: { sharedCredentialId?: string | null },
+): { credKey: string; persist: (enc: { encryptedKey: string; iv: string; authTag: string }) => Promise<void> } {
+  const sharedId = row.sharedCredentialId;
+  if (sharedId) {
+    return {
+      credKey: `shared:${sharedId}:${provider}`,
+      persist: async (enc) => {
+        await sharedProviderCredentialRepository.persistBundle(sharedId, enc);
+      },
+    };
+  }
+  return {
+    credKey: `agent:${agentId}:${provider}`,
+    persist: async (enc) => {
+      await agentProviderCredentialsRepository.upsert(agentId, provider, enc);
+    },
+  };
+}
+
+/** User-scope twin of agentCredRefreshTarget: personal credential rows can
+ *  also be bindings to a shared credential (the "connect once personally,
+ *  share to agents" flow), in which case the refresh must target the shared
+ *  row — otherwise the personal copy and the shared copy would hold two
+ *  OAuth sessions of the same account and invalidate each other. */
+export function userCredRefreshTarget(
+  userId: string,
+  provider: string,
+  row: { sharedCredentialId?: string | null },
+): { credKey: string; persist: (enc: { encryptedKey: string; iv: string; authTag: string }) => Promise<void> } {
+  const sharedId = row.sharedCredentialId;
+  if (sharedId) {
+    return {
+      credKey: `shared:${sharedId}:${provider}`,
+      persist: async (enc) => {
+        await sharedProviderCredentialRepository.persistBundle(sharedId, enc);
+      },
+    };
+  }
+  return {
+    credKey: `user:${userId}:${provider}`,
+    persist: async (enc) => {
+      await userProviderCredentialsRepository.upsert(userId, provider, enc);
+    },
+  };
+}
+
+/**
+ * Decrypt + shape one credential row into a ProviderConfig (null on failure).
+ * SINGLE SOURCE OF TRUTH for per-provider default models + OAuth-bundle
+ * extraction — imported by webhook / agent-chat / flow-action so a provider's
+ * default model lives in ONE place (they previously drifted).
+ */
+export function buildProviderConfig(provider: string, row: CredRow): ProviderConfig | null {
   if (!row.encryptedKey || !row.iv || !row.authTag) return null;
   try {
     const decrypted = decrypt(row.encryptedKey, row.iv, row.authTag, CONFIG.encryptionKey);
@@ -71,7 +145,11 @@ function buildProviderConfig(provider: string, row: CredRow): ProviderConfig | n
       decrypted;
     const defaultModel =
       provider === "copilot" ? "gpt-4o" :
-      provider === "codex" ? "gpt-4.1" :
+      // gpt-4.1 is NOT servable through Codex ChatGPT-account OAuth (OpenAI
+      // 400s "model is not supported when using Codex with a ChatGPT
+      // account") — every defaulted call failed and fell back to spaces.
+      provider === "codex" ? "gpt-5.5" :
+      provider === "litellm" ? "private-large" :
       "claude-sonnet-4-5";
     return {
       apiKey,
@@ -134,10 +212,9 @@ export async function resolveAgentProviderConfigs(
   if (claudeCfg && claudeCfg.authType === "oauth_token") {
     const credRow = agentCredsByProvider.get("claude");
     if (credRow) {
+      const target = agentCredRefreshTarget(agent.id, "claude", credRow);
       try {
-        claudeCfg.apiKey = await getValidClaudeBearer(`agent:${agent.id}:claude`, credRow, async (enc) => {
-          await agentProviderCredentialsRepository.upsert(agent.id, "claude", enc);
-        });
+        claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
       } catch (err) {
         log.warn("Claude OAuth refresh failed for agent — credential likely needs reconnect", {
           error: err instanceof Error ? err.message : String(err),
@@ -149,10 +226,9 @@ export async function resolveAgentProviderConfigs(
   if (codexCfg && codexCfg.authType === "oauth_token") {
     const credRow = agentCredsByProvider.get("codex");
     if (credRow) {
+      const target = agentCredRefreshTarget(agent.id, "codex", credRow);
       try {
-        codexCfg.apiKey = await getValidCodexBearer(`agent:${agent.id}:codex`, credRow, async (enc) => {
-          await agentProviderCredentialsRepository.upsert(agent.id, "codex", enc);
-        });
+        codexCfg.apiKey = await getValidCodexBearer(target.credKey, credRow, target.persist);
       } catch (err) {
         log.warn("Codex OAuth refresh failed for agent — credential likely needs reconnect", {
           error: err instanceof Error ? err.message : String(err),
@@ -176,5 +252,16 @@ export async function resolveAgentProviderConfigs(
 
   const providerOrder = agentProviderOrder.length > 0 ? agentProviderOrder : parent ? [parent] : [];
   log.info(`Provider resolution (headless): agent=${agent.id} mode=always-on parent=${parent ?? "spaces"} creds=[${Object.keys(providerConfigs).join(",")}] order=[${providerOrder.join(",")}]`);
-  return { providerConfigs, providerOrder };
+  // The primary is only usable if it names a provider we actually built creds
+  // for; "spaces" (or undefined) means fall through to the platform default,
+  // so leave it unset in that case. Returned under BOTH field names — run-
+  // stream reads `provider` (matches the dispatch-body field), the scheduled
+  // worker / automation webhook / run proxy read `parent`. Keep them in
+  // lockstep until consumers converge on one name.
+  const primaryParent = parent && providerConfigs[parent] ? parent : undefined;
+  return {
+    providerConfigs,
+    providerOrder,
+    ...(primaryParent ? { provider: primaryParent, parent: primaryParent } : {}),
+  };
 }

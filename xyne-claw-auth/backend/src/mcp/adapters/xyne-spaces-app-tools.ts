@@ -30,12 +30,14 @@ export const xyneSpacesAppToolsAdapter: StdioMcpAdapter = {
   buildCommand(credentials) {
     const appToken = (credentials["app_token"] as string | undefined) ?? "";
     const spacesUrl = (credentials["url"] as string | undefined) ?? "";
+    const workspaceId = (credentials["workspaceId"] as string | undefined) ?? "";
     return {
       cmd: "node",
       args: ["--import", "tsx/esm", SERVER_PATH],
       env: {
         XYNE_SPACES_APP_TOKEN: appToken,
         XYNE_SPACES_URL: spacesUrl,
+        XYNE_SPACES_WORKSPACE_ID: workspaceId,
       },
     };
   },

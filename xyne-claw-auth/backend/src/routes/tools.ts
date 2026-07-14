@@ -4,11 +4,12 @@ import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 import { syncToolsForServer, reconcileServerCatalog } from "../tool-sync.js";
-import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
+import { requireClawAdmin, getRequesterId, getOrgId } from "../middleware/agent-acl.js";
 import { SKIP_CATALOG_SOURCES } from "../catalog-skip.js";
 
 import { createLogger } from "../logger.js";
 import { gatewayCatalogSource, gatewayToolSelectionKey } from "../mcpgateway/key-format.js";
+import { requiresGatewayToolApproval } from "../mcpgateway/tool-approval.js";
 const log = createLogger("tools");
 
 const router = Router();
@@ -24,7 +25,7 @@ type CustomSubagentRow = {
 };
 
 type CustomSubagentDelegate = {
-  findMany: (args: { where: { enabled: boolean }; orderBy: { name: "asc" } }) => Promise<CustomSubagentRow[]>;
+  findMany: (args: { where: { enabled: boolean; orgId: string }; orderBy: { name: "asc" } }) => Promise<CustomSubagentRow[]>;
 };
 
 function getCustomSubagentDelegate(): CustomSubagentDelegate | undefined {
@@ -39,7 +40,7 @@ function isMissingTableError(err: unknown): boolean {
     && (err as { code?: string }).code === "P2021";
 }
 
-async function listCustomSubagentRows(): Promise<CustomSubagentRow[]> {
+async function listCustomSubagentRows(orgId: string): Promise<CustomSubagentRow[]> {
   const delegate = getCustomSubagentDelegate();
   if (!delegate) {
     // Backward-compat: older generated Prisma client (without subagentDefinition)
@@ -49,7 +50,7 @@ async function listCustomSubagentRows(): Promise<CustomSubagentRow[]> {
   }
   try {
     return await delegate.findMany({
-      where: { enabled: true },
+      where: { orgId, enabled: true },
       orderBy: { name: "asc" },
     });
   } catch (err) {
@@ -131,6 +132,8 @@ type GatewayToolDescriptor = {
   name: string;
   description: string;
   method?: string;
+  requiresApproval?: boolean;
+  isWriteTool?: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -146,21 +149,18 @@ function parseGatewayTools(rawTools: unknown): GatewayToolDescriptor[] {
       name: entry.name,
       description: typeof entry.description === "string" ? entry.description : "",
       ...(typeof entry.method === "string" ? { method: entry.method.toUpperCase() } : {}),
+      ...(typeof entry.requiresApproval === "boolean" ? { requiresApproval: entry.requiresApproval } : {}),
+      ...(typeof entry.isWriteTool === "boolean" ? { isWriteTool: entry.isWriteTool } : {}),
     });
   }
   return parsed;
-}
-
-function isGatewayWriteMethod(method: string | undefined): boolean {
-  if (!method) return false;
-  return method.toUpperCase() !== "GET";
 }
 
 function gatewayDisplayLabel(serviceName: string, backendId: string): string {
   return `${humanise(serviceName)} (${backendId})`;
 }
 
-export async function buildAvailableToolsCatalog(tenantUniqueId?: string): Promise<AvailableToolsCatalog> {
+export async function buildAvailableToolsCatalog(tenantUniqueId: string | undefined, orgId: string): Promise<AvailableToolsCatalog> {
   const gatewayTenant = tenantUniqueId ?? DEFAULT_GATEWAY_TENANT;
   const { SUBAGENT_DEFINITIONS } = await import("xyne-claw-shared");
 
@@ -194,7 +194,7 @@ export async function buildAvailableToolsCatalog(tenantUniqueId?: string): Promi
     // custom subagents from the subagent_definitions table. Both surfaces
     // need to appear in the agent edit page's subagent picker; the runtime
     // resolver decides which to hydrate per request.
-    const customSubagentRows = await listCustomSubagentRows();
+    const customSubagentRows = await listCustomSubagentRows(orgId);
     const subagents = [
       ...SUBAGENT_DEFINITIONS.map((d) => ({
         name: d.name,
@@ -416,7 +416,7 @@ export async function buildAvailableToolsCatalog(tenantUniqueId?: string): Promi
           slug: gatewayToolSelectionKey(row.serviceName, row.backendId, tool.name),
           name: tool.name,
           description: tool.description,
-          riskLevel: classifyRisk(tool.name, isGatewayWriteMethod(tool.method)),
+          riskLevel: classifyRisk(tool.name, requiresGatewayToolApproval(tool)),
         } satisfies IntegrationToolEntry));
 
         if (entries.length === 0) continue;
@@ -451,7 +451,7 @@ export async function buildAvailableToolsCatalog(tenantUniqueId?: string): Promi
     for (const sa of subagents) subagentToIntegration.set(sa.name, sa.serverType);
 
     const usage = new Map<string, number>();
-    const agentConfigs = await prisma.agent.findMany({ select: { config: true } });
+    const agentConfigs = await prisma.agent.findMany({ where: { orgId }, select: { config: true } });
     for (const a of agentConfigs) {
       const t = (a.config as { tools?: { custom?: string[]; direct?: string[]; subagents?: string[]; gateway?: string[] } } | null)?.tools;
       if (!t) continue;
@@ -491,6 +491,15 @@ router.get("/available", async (req: Request, res: Response) => {
     // Best-effort + bounded: per-server timeout, debounced in reconcileServerCatalog,
     // failures ignored (we still serve the current catalog).
     const userId = getRequesterId(req);
+    const orgId = getOrgId(req)
+      ?? (userId
+        ? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
+        : undefined);
+    if (!orgId) {
+      log.error(`[tools/available] orgId is required; refusing global tools catalog userId=${userId ?? "none"}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
     if (userId) {
       const connections = await prisma.userMcpConnection.findMany({
         where: { userId },
@@ -513,7 +522,7 @@ router.get("/available", async (req: Request, res: Response) => {
     }
 
     const tenantUniqueId = (req as Request & { user?: { workspaceId?: string } }).user?.workspaceId;
-    const catalog = await buildAvailableToolsCatalog(tenantUniqueId);
+    const catalog = await buildAvailableToolsCatalog(tenantUniqueId, orgId);
     res.json({ success: true, data: catalog });
   } catch (err) {
     log.error("[tools] available error:", err);

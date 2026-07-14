@@ -10,6 +10,7 @@ export interface AgentToolSelection {
   direct: string[];
   custom: string[];
   gateway: string[];
+  callableAgents: string[];
 }
 
 interface Props {
@@ -46,7 +47,7 @@ export function ToolPickerDialog({ open, onOpenChange, initial, onSave }: Props)
   }, [open, available]);
 
   const totalSelected =
-    selection.subagents.length + selection.direct.length + selection.custom.length;
+    selection.subagents.length + selection.direct.length + selection.custom.length + selection.callableAgents.length;
 
   const matchesSearch = (text: string) =>
     !search.trim() || text.toLowerCase().includes(search.trim().toLowerCase());

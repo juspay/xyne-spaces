@@ -1,16 +1,23 @@
 import { prisma } from "../db.js";
 
 export const userAgentConfigRepository = {
-  findByUserAndAgent: (userId: string, agentSlug: string) =>
-    prisma.userAgentConfig.findUnique({ where: { userId_agentSlug: { userId, agentSlug } } }),
+  findByUserAndAgent: (userId: string, orgId: string, agentSlug: string) =>
+    prisma.userAgentConfig.findUnique({ where: { userId_orgId_agentSlug: { userId, orgId, agentSlug } } }),
 
-  upsert: (userId: string, agentSlug: string, data: Record<string, unknown>) =>
+  listByUser: (userId: string, orgId: string) =>
+    prisma.userAgentConfig.findMany({
+      where: { userId, orgId },
+      select: { agentSlug: true, provider: true, chainConfig: true, updatedAt: true },
+      orderBy: { agentSlug: "asc" },
+    }),
+
+  upsert: (userId: string, agentSlug: string, data: Record<string, unknown>, orgId: string) =>
     prisma.userAgentConfig.upsert({
-      where: { userId_agentSlug: { userId, agentSlug } },
-      create: { userId, agentSlug, ...data } as never,
+      where: { userId_orgId_agentSlug: { userId, orgId, agentSlug } },
+      create: { userId, agentSlug, orgId, ...data } as never,
       update: data,
     }),
 
-  delete: (userId: string, agentSlug: string) =>
-    prisma.userAgentConfig.delete({ where: { userId_agentSlug: { userId, agentSlug } } }),
+  delete: (userId: string, orgId: string, agentSlug: string) =>
+    prisma.userAgentConfig.delete({ where: { userId_orgId_agentSlug: { userId, orgId, agentSlug } } }),
 };

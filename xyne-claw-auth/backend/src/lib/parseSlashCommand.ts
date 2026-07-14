@@ -22,6 +22,12 @@ export type SlashCommand =
   // `/compact [instructions]` — compact (summarize) the thread's context and
   // continue. Optional instructions steer what the summary should preserve.
   | { kind: "compact"; instructions: string }
+  // `/queue` — show the messages currently waiting behind the active run for
+  // this conversation (the mid-run message queue). Read-only; short-circuits.
+  | { kind: "queueShow" }
+  // `/queue clear` — drop the messages waiting behind the active run (does NOT
+  // stop the current run — that's `/stop`). Short-circuits.
+  | { kind: "queueClear" }
   // `/help` — list the available slash commands.
   | { kind: "help" };
 
@@ -33,9 +39,39 @@ export type SlashCommand =
 // the parser falls through (no false-positive goal start).
 const LEADING_MENTIONS = /^(?:@[\w.\-]+(?:\s+[\w.\-]+)*\s*)+/;
 
+// Commands recognized ANYWHERE in the message (not just at the start) — for
+// the "PR Rules Miner /stop" case, where the agent's display-name prefix
+// isn't an `@`-mention and so isn't stripped. DELIBERATELY restricted to the
+// arg-less control commands AND to tokens that END the message: arg-taking
+// commands (/goal, /compact, /queue …) use startsWith parsing, so a
+// mid-sentence mention like "can you check the /goal endpoint behavior"
+// would hijack a normal question into a goal-loop start. A trailing bare
+// /stop//help//clear cannot be prose.
+const TRAILING_COMMAND_TOKEN = /(?:^|\s)(\/(?:stop|help|clear))\s*$/i;
+
 export function parseSlashCommand(input: string | undefined | null): SlashCommand | null {
   if (!input) return null;
   const trimmed = input.trim().replace(LEADING_MENTIONS, "");
+
+  // Primary: message begins with the command (all commands, args allowed).
+  if (trimmed[0] === "/") {
+    const direct = parseFromSlash(trimmed);
+    if (direct) return direct;
+  }
+
+  // Fallback: an arg-less control command as the FINAL token after other text
+  // (un-`@`'d agent-name prefix). Bounded by whitespace + end-of-message so
+  // prose that merely mentions a command mid-sentence is never hijacked.
+  const match = TRAILING_COMMAND_TOKEN.exec(trimmed);
+  const commandToken = match?.[1];
+  if (commandToken) {
+    return parseFromSlash(commandToken.toLowerCase());
+  }
+  return null;
+}
+
+// Parse a string that is expected to START with a slash command.
+function parseFromSlash(trimmed: string): SlashCommand | null {
   if (trimmed.length === 0 || trimmed[0] !== "/") return null;
 
   const lower = trimmed.toLowerCase();
@@ -47,6 +83,14 @@ export function parseSlashCommand(input: string | undefined | null): SlashComman
   // through to a normal message). `/goal clear` stays goal-specific below.
   if (lower === "/clear") {
     return { kind: "clear" };
+  }
+  // `/queue clear` — drop the waiting messages (check before bare `/queue`).
+  if (lower === "/queue clear") {
+    return { kind: "queueClear" };
+  }
+  // `/queue` — exact match only; show the mid-run message queue for this thread.
+  if (lower === "/queue") {
+    return { kind: "queueShow" };
   }
   // `/compact` or `/compact <instructions>`.
   if (lower === "/compact") {

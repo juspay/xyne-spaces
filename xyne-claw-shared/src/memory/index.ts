@@ -20,8 +20,7 @@ export {
   getMemoryProvider,
   registerMemoryProvider,
   listMemoryProviders,
-  resetMemoryProviderCache,
-} from "./registry.js";
+  } from "./registry.js";
 export { HindsightProvider } from "./providers/hindsight.js";
 export { StubMemoryProvider } from "./providers/stub.js";
 export type { SessionTranscriptForCurator, SubsystemUpdate } from "./curator-types.js";
@@ -31,5 +30,6 @@ export type {
   UserMemoryCandidatePayload,
   UserMemoryDistillRequest,
   UserMemoryDistillResponse,
+  ExistingUserMemory,
 } from "./user-memory-types.js";
 export { USER_MEMORY_SUBSYSTEMS } from "./user-memory-types.js";

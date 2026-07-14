@@ -1,5 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("subagent-definition-repository");
 
 const includeSkills = {
   skills: {
@@ -8,24 +11,30 @@ const includeSkills = {
 } as const;
 
 export const subagentDefinitionRepository = {
-  listAll: () =>
+  listAll: (orgId?: string) =>
     prisma.subagentDefinition.findMany({
+      ...(orgId ? { where: { orgId } } : {}),
       include: includeSkills,
       orderBy: { name: "asc" },
     }),
 
-  listEnabled: () =>
+  listEnabled: (orgId?: string) =>
     prisma.subagentDefinition.findMany({
-      where: { enabled: true },
+      where: orgId ? { enabled: true, orgId } : { enabled: true },
       include: includeSkills,
       orderBy: { name: "asc" },
     }),
 
-  findByName: (name: string) =>
-    prisma.subagentDefinition.findUnique({
-      where: { name },
+  findByName: (name: string, orgId?: string | null) => {
+    if (!orgId) {
+      log.error("[subagentDefinitionRepository.findByName] missing orgId; refusing global name lookup", { name });
+      return Promise.resolve(null);
+    }
+    return prisma.subagentDefinition.findUnique({
+      where: { orgId_name: { orgId, name } },
       include: includeSkills,
-    }),
+    });
+  },
 
   findByNames: (names: string[]) =>
     names.length === 0
@@ -38,20 +47,20 @@ export const subagentDefinitionRepository = {
   create: (data: Prisma.SubagentDefinitionCreateInput) =>
     prisma.subagentDefinition.create({ data, include: includeSkills }),
 
-  update: (name: string, data: Prisma.SubagentDefinitionUpdateInput) =>
-    prisma.subagentDefinition.update({ where: { name }, data, include: includeSkills }),
+  update: (name: string, orgId: string, data: Prisma.SubagentDefinitionUpdateInput) =>
+    prisma.subagentDefinition.update({ where: { orgId_name: { orgId, name } }, data, include: includeSkills }),
 
   /** Soft-delete: flip enabled=false. Hard-delete is intentionally not exposed. */
-  disable: (name: string) =>
+  disable: (name: string, orgId: string) =>
     prisma.subagentDefinition.update({
-      where: { name },
+      where: { orgId_name: { orgId, name } },
       data: { enabled: false },
       include: includeSkills,
     }),
 
-  enable: (name: string) =>
+  enable: (name: string, orgId: string) =>
     prisma.subagentDefinition.update({
-      where: { name },
+      where: { orgId_name: { orgId, name } },
       data: { enabled: true },
       include: includeSkills,
     }),

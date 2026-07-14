@@ -8,7 +8,7 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      session?: { userId: string; sessionId: string; agentSlug?: string };
+      session?: { userId: string; sessionId: string; agentSlug?: string; spacesAppId?: string };
     }
   }
 }
@@ -40,6 +40,7 @@ export function requireSessionToken(req: Request, res: Response, next: NextFunct
     userId: session.uid,
     sessionId: session.sid,
     ...(session.aslug ? { agentSlug: session.aslug } : {}),
+    ...(session.appid ? { spacesAppId: session.appid } : {}),
   };
   next();
 }

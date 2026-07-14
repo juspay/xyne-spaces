@@ -28,6 +28,9 @@ import type {
   TagGroup,
 } from "../types.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("hindsight");
+
 export interface HindsightProviderConfig {
   url: string;
   tenant?: string;
@@ -149,7 +152,7 @@ export class HindsightProvider implements MemoryProvider {
         this.bankCache.add(bankId);
       }
     } catch (err) {
-      console.warn(`[hindsight] ensureBank(${bankId}) failed: ${errMsg(err)}`);
+      log.warn(`[hindsight] ensureBank(${bankId}) failed: ${errMsg(err)}`);
     }
   }
 
@@ -171,7 +174,7 @@ export class HindsightProvider implements MemoryProvider {
         signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.ensure),
       });
     } catch (err) {
-      console.warn(`[hindsight] applyBankTuning(${bankId}) failed: ${errMsg(err)}`);
+      log.warn(`[hindsight] applyBankTuning(${bankId}) failed: ${errMsg(err)}`);
     }
   }
 
@@ -325,6 +328,47 @@ export class HindsightProvider implements MemoryProvider {
     if (!res.ok && res.status !== 404) {
       throw new Error(`Hindsight delete ${res.status}`);
     }
+  }
+
+  /**
+   * Hard-delete every memory in the bank carrying `tag`. Hindsight's list
+   * endpoint can't filter by tag, so we page the RAW list here (where we can
+   * see `items.length` vs the page size to know when to stop — something the
+   * listMemories abstraction can't expose), collect matching ids, then DELETE
+   * each. Best-effort per id; returns the count actually deleted.
+   */
+  async deleteByTag(bankId: string, tag: string): Promise<number> {
+    if (!this.enabled) return 0;
+    const PAGE = 500;
+    const ids: string[] = [];
+    for (let offset = 0; ; offset += PAGE) {
+      const res = await fetch(
+        this.bankPath(bankId, `/memories/list?limit=${PAGE}&offset=${offset}`),
+        { method: "GET", headers: this.headers, signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.list) },
+      );
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Hindsight list ${res.status} during deleteByTag: ${txt.slice(0, 200)}`);
+      }
+      const data = (await res.json()) as { items?: Array<Record<string, unknown>> };
+      const items = data.items ?? [];
+      for (const it of items) {
+        const tags = (it["tags"] as string[] | undefined) ?? [];
+        const id = String(it["id"] ?? "");
+        if (id && tags.includes(tag)) ids.push(id);
+      }
+      if (items.length < PAGE) break; // last page
+    }
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        await this.deleteMemory(bankId, id);
+        deleted += 1;
+      } catch {
+        // best-effort — a single failed delete shouldn't abort the sweep
+      }
+    }
+    return deleted;
   }
 
   /**

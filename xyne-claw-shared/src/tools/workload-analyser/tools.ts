@@ -1,6 +1,6 @@
 import path from "node:path";
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 
@@ -267,8 +267,10 @@ export const workloadRenderReport: ToolDefinition = {
     const outputPath = path.join(reportDir, "index.html");
     const platform = process.platform;
     const openCmd = platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
-    execSync(`${openCmd} "${outputPath}"`, { stdio: "ignore" });
-    return `Rendered report '${args["slug"]}' and opened in browser.`;
+    // No shell (outputPath is slug-derived) and best-effort: on a headless pod
+    // there's no browser to open, so a failure here must not fail the tool.
+    try { execFileSync(openCmd, [outputPath], { stdio: "ignore" }); } catch { /* no display — fine */ }
+    return `Rendered report '${args["slug"]}' (output: ${outputPath}).`;
   },
 };
 

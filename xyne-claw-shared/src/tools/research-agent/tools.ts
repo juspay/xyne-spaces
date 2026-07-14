@@ -1,5 +1,8 @@
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("tools");
+
 /**
  * Push a tool invocation to the progress endpoint for streaming to frontend.
  * Mirrors the pushInvocation function in xyne-claw/src/agent.ts
@@ -20,7 +23,7 @@ function pushToolInvocation(
     body: JSON.stringify({ sessionId, toolInvocation: invocation }),
     signal: AbortSignal.timeout(5_000),
   }).catch((err) => {
-    console.warn(`[research-agent] Tool invocation push failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[research-agent] Tool invocation push failed: ${err instanceof Error ? err.message : String(err)}`);
   });
 }
 
@@ -33,6 +36,148 @@ interface ResearchAgentToolEvent {
   error?: string;
   duration_ms?: number;
 }
+
+type ResearchAgentContextSelection = { repositoryId?: string; productId?: string };
+
+const getResearchAgentHeaders = (apiKey: string): Record<string, string> => ({
+  "Content-Type": "application/json",
+  ...(apiKey ? { "Authorization": `Bearer ${apiKey}` } : {}),
+});
+
+const normalizeString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+
+const getResearchAgentSelection = (
+  params: Record<string, unknown>,
+  context: ToolExecutionContext,
+): ResearchAgentContextSelection | string => {
+  const productId = normalizeString(params["product"])
+    ?? normalizeString(params["product_id"])
+    ?? normalizeString(context.config["product_id"])
+    ?? normalizeString(context.config["RESEARCH_AGENT_PRODUCT_ID"]);
+  const repositoryId = normalizeString(params["repository"])
+    ?? normalizeString(params["repository_id"])
+    ?? normalizeString(context.config["repository_id"])
+    ?? normalizeString(context.config["RESEARCH_AGENT_REPOSITORY_ID"]);
+
+  if (!productId && !repositoryId) {
+    return "Error: Select a Research Agent product or repository in this agent's configuration, or pass product/repository to the tool.";
+  }
+
+  return { ...(repositoryId ? { repositoryId } : {}), ...(productId ? { productId } : {}) };
+};
+
+const getConfiguredRepositoryId = (params: Record<string, unknown>, context: ToolExecutionContext): string | undefined =>
+  normalizeString(params["repository"])
+    ?? normalizeString(params["repository_id"])
+    ?? normalizeString(context.config["repository_id"])
+    ?? normalizeString(context.config["RESEARCH_AGENT_REPOSITORY_ID"]);
+
+const getConfiguredProductId = (params: Record<string, unknown>, context: ToolExecutionContext): string | undefined =>
+  normalizeString(params["product"])
+    ?? normalizeString(params["product_id"])
+    ?? normalizeString(context.config["product_id"])
+    ?? normalizeString(context.config["RESEARCH_AGENT_PRODUCT_ID"]);
+
+type ResearchAgentOption = { id: string; name: string };
+
+const getOptionName = (row: Record<string, unknown>): string | undefined => {
+  const name = row["name"] ?? row["repo_name"] ?? row["repository_name"] ?? row["display_name"] ?? row["title"];
+  return typeof name === "string" && name.trim() ? name.trim() : undefined;
+};
+
+const normalizeOptions = (raw: unknown): ResearchAgentOption[] => {
+  const rows = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { data?: unknown[] })?.data)
+      ? (raw as { data: unknown[] }).data
+      : Array.isArray((raw as { items?: unknown[] })?.items)
+        ? (raw as { items: unknown[] }).items
+        : [];
+
+  return rows.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const record = row as Record<string, unknown>;
+    const id = record["id"];
+    if (typeof id !== "string" && typeof id !== "number") return [];
+    const idText = String(id).trim();
+    if (!idText) return [];
+    return [{ id: idText, name: getOptionName(record) ?? idText }];
+  });
+};
+
+const formatOptions = (label: string, options: ResearchAgentOption[]): string => {
+  if (!options.length) return `No Research Agent ${label} found.`;
+  return options.map((option) => `- name: ${option.name}\n  id: ${option.id}`).join("\n");
+};
+
+const formatResearchAgentTools = (label: string, raw: unknown): string => {
+  const rows = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { data?: unknown[] })?.data)
+      ? (raw as { data: unknown[] }).data
+      : Array.isArray((raw as { items?: unknown[] })?.items)
+        ? (raw as { items: unknown[] }).items
+        : [];
+
+  if (!rows.length) return `No Research Agent tools found for this ${label}.`;
+
+  return rows.map((row) => {
+    if (!row || typeof row !== "object") return `- ${String(row)}`;
+    const record = row as Record<string, unknown>;
+    const name = getOptionName(record) ?? normalizeString(record["slug"]) ?? normalizeString(record["tool_name"]) ?? "unknown";
+    const description = normalizeString(record["description"]);
+    const id = record["id"];
+    return [
+      `- name: ${name}`,
+      ...(typeof id === "string" || typeof id === "number" ? [`  id: ${String(id)}`] : []),
+      ...(description ? [`  description: ${description}`] : []),
+    ].join("\n");
+  }).join("\n");
+};
+
+const fetchResearchAgentTools = async (
+  context: ToolExecutionContext,
+  path: string,
+  label: string,
+): Promise<string> => {
+  const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "<research-agent-url>";
+  const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
+  const response = await fetch(`${apiUrl}${path}`, {
+    method: "GET",
+    headers: getResearchAgentHeaders(apiKey),
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!response.ok) {
+    return `Error fetching Research Agent tools for ${label}: ${response.status} ${await response.text()}`;
+  }
+
+  return formatResearchAgentTools(label, await response.json());
+};
+
+const fetchResearchAgentOptions = async (
+  context: ToolExecutionContext,
+  path: string,
+  label: string,
+): Promise<string> => {
+  const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "<research-agent-url>";
+  const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
+  const response = await fetch(`${apiUrl}${path}`, {
+    method: "GET",
+    headers: getResearchAgentHeaders(apiKey),
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!response.ok) {
+    return `Error fetching Research Agent ${label}: ${response.status} ${await response.text()}`;
+  }
+
+  return formatOptions(label, normalizeOptions(await response.json()));
+};
+
+const appendSessionId = (result: string, sessionId: string): string =>
+  `${result}\n\n---\nResearch Agent session_id: ${sessionId}`;
 
 export const RESEARCH_AGENT_CONFIG_SCHEMA = {
   RESEARCH_AGENT_API_URL: {
@@ -47,11 +192,125 @@ export const RESEARCH_AGENT_CONFIG_SCHEMA = {
     required: false as const,
     placeholder: "Optional API key for authentication (falls back to RESEARCH_AGENT_API_KEY env var)",
   },
-  DEFAULT_REPOSITORY_ID: {
-    label: "Default Repository ID",
-    default: "989d9105-d8f0-4549-b63b-ac2363054ec0",
-    required: false as const,
-    placeholder: "Default repository ID when none specified (for backward compatibility)",
+};
+
+export const listRepositories: ToolDefinition = {
+  slug: "list-repositories",
+  name: "List Repositories",
+  description: "List all Research Agent repositories as name + id. Use this when you want to override the agent's default repository/product config or choose a different codebase. Pass the returned repository id to query-codebase, review-pull-request, or list-repository-tools.",
+  source: "custom:research-agent",
+  configSchema: RESEARCH_AGENT_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
+
+  async execute(_params, context) {
+    if (!context) {
+      return "Error: No execution context available.";
+    }
+
+    try {
+      return await fetchResearchAgentOptions(context, "/api/crud/repositories", "repositories");
+    } catch (err) {
+      return `Error fetching Research Agent repositories: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  },
+};
+
+export const listProducts: ToolDefinition = {
+  slug: "list-products",
+  name: "List Products",
+  description: "List all Research Agent products as name + id. Use this when you want to override the agent's default repository/product config or choose a different product scope. Pass the returned product id to query-codebase, review-pull-request, or list-product-tools.",
+  source: "custom:research-agent",
+  configSchema: RESEARCH_AGENT_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
+
+  async execute(_params, context) {
+    if (!context) {
+      return "Error: No execution context available.";
+    }
+
+    try {
+      return await fetchResearchAgentOptions(context, "/api/crud/products", "products");
+    } catch (err) {
+      return `Error fetching Research Agent products: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  },
+};
+
+export const listRepositoryTools: ToolDefinition = {
+  slug: "list-repository-tools",
+  name: "List Repository Tools",
+  description: "List tools available to the external Research Agent for a repository, so you can decide whether a task should be offloaded to query-codebase or review-pull-request. The repository parameter is optional: if omitted, this uses the agent's configured default repository_id/RESEARCH_AGENT_REPOSITORY_ID. If no default exists, call list-repositories and pass a repository id.",
+  source: "custom:research-agent",
+  configSchema: RESEARCH_AGENT_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      repository: {
+        type: "string",
+        description: "Optional Research Agent repository ID. If omitted, the configured default repository_id/RESEARCH_AGENT_REPOSITORY_ID is used. Use list-repositories to find an ID when no default is set or when overriding it.",
+      },
+    },
+    required: [],
+  },
+
+  async execute(params, context) {
+    if (!context) {
+      return "Error: No execution context available.";
+    }
+
+    const repositoryId = getConfiguredRepositoryId(params, context);
+    if (!repositoryId) {
+      return "Error: No default repository ID is configured. Pass repository, or call list-repositories to find a repository ID.";
+    }
+
+    try {
+      return await fetchResearchAgentTools(context, `/api/crud/tools/repos/${encodeURIComponent(repositoryId)}`, "repository");
+    } catch (err) {
+      return `Error fetching Research Agent tools for repository: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  },
+};
+
+export const listProductTools: ToolDefinition = {
+  slug: "list-product-tools",
+  name: "List Product Tools",
+  description: "List tools available to the external Research Agent for a product, so you can decide whether a task should be offloaded to query-codebase or review-pull-request. The product parameter is optional: if omitted, this uses the agent's configured default product_id/RESEARCH_AGENT_PRODUCT_ID. If no default exists, call list-products and pass a product id.",
+  source: "custom:research-agent",
+  configSchema: RESEARCH_AGENT_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      product: {
+        type: "string",
+        description: "Optional Research Agent product ID. If omitted, the configured default product_id/RESEARCH_AGENT_PRODUCT_ID is used. Use list-products to find an ID when no default is set or when overriding it.",
+      },
+    },
+    required: [],
+  },
+
+  async execute(params, context) {
+    if (!context) {
+      return "Error: No execution context available.";
+    }
+
+    const productId = getConfiguredProductId(params, context);
+    if (!productId) {
+      return "Error: No default product ID is configured. Pass product, or call list-products to find a product ID.";
+    }
+
+    try {
+      return await fetchResearchAgentTools(context, `/api/crud/tools/products/${encodeURIComponent(productId)}`, "product");
+    } catch (err) {
+      return `Error fetching Research Agent tools for product: ${err instanceof Error ? err.message : String(err)}`;
+    }
   },
 };
 
@@ -59,10 +318,11 @@ export const queryCodebase: ToolDefinition = {
   slug: "query-codebase",
   name: "Query Codebase",
   description:
-    "Query the external research agent system for codebase knowledge. " +
-    "Use this when you need to: review PRs, plan implementations, " +
-    "debug issues without coding, understand code patterns, or get " +
-    "architecture guidance. The external system has full repository knowledge.",
+    "Ask the external Research Agent a codebase/logs/architecture question. " +
+    "It has repository context and can use tools available for the selected repository/product. " +
+    "repository and product are optional; if omitted, the agent's configured default repository_id/product_id is used. " +
+    "Use list-repositories/list-products to discover ids when you want to override the default. " +
+    "Use list-repository-tools/list-product-tools first when you need to inspect whether the selected external agent scope has the right tools before offloading.",
   source: "custom:research-agent",
   configSchema: RESEARCH_AGENT_CONFIG_SCHEMA,
   inputSchema: {
@@ -75,19 +335,19 @@ export const queryCodebase: ToolDefinition = {
           "Be specific: file paths, error messages, " +
           "branch names, or any context needed for accurate results.",
       },
+      repository: {
+        type: "string",
+        description: "Optional Research Agent repository ID. If omitted, the agent's configured default repository_id/RESEARCH_AGENT_REPOSITORY_ID is used. Use list-repositories to find an ID when overriding the default. If product is also set, product takes precedence.",
+      },
+      product: {
+        type: "string",
+        description: "Optional Research Agent product ID. If omitted, the agent's configured default product_id/RESEARCH_AGENT_PRODUCT_ID is used. Use list-products to find an ID when overriding the default. Product takes precedence over repository.",
+      },
       systemPrompt: {
         type: "string",
         description:
           "Optional custom system prompt to guide the research agent's behavior. " +
           "If not provided, the research agent will use its default behavior.",
-      },
-      repository: {
-        type: "string",
-        description: "Optional: Repository ID to query (overrides default context)",
-      },
-      product: {
-        type: "string",
-        description: "Optional: Product ID to query (overrides default context)",
       },
     },
     required: ["prompt"],
@@ -100,58 +360,18 @@ export const queryCodebase: ToolDefinition = {
 
     const prompt = params["prompt"] as string; 
     const systemPrompt = (params["systemPrompt"] as string) || "";
-    const explicitRepository = params["repository"] as string | undefined;
-    const explicitProduct = params["product"] as string | undefined;
 
     if (!prompt || !prompt.trim()) {
       return "Error: prompt is required.";
     }
 
-    const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "http://localhost:8080";
+    const selection = getResearchAgentSelection(params, context);
+    if (typeof selection === "string") return selection;
+
+    const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "<research-agent-url>";
     const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
-
-    const defaultRepositoryId = context.config["DEFAULT_REPOSITORY_ID"] ?? "";
-
-    // Determine repository/product from multiple sources (priority order):
-    // 1. Explicit tool parameters (LLM-provided)
-    // 2. Runtime researchContext from agent execution (frontend-selected)
-    // 3. Default repository ID from config
-    const runtimeContext = (context as unknown as { researchContext?: { type?: string; id?: string; name?: string; repositoryId?: string; productId?: string } }).researchContext;
-    
-    let repositoryId: string | undefined;
-    let productId: string | undefined;
-
-    // If explicit parameters are provided, validate they look like UUIDs (not names)
-    // This prevents the LLM from passing "My Product" instead of the actual ID
-    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    
-    if (explicitRepository && UUID_REGEX.test(explicitRepository)) {
-      repositoryId = explicitRepository;
-    } else if (explicitRepository) {
-      // Ignoring explicit repository (not a UUID)
-    }
-    
-    if (explicitProduct && UUID_REGEX.test(explicitProduct)) {
-      productId = explicitProduct;
-    } else if (explicitProduct) {
-      // Ignoring explicit product (not a UUID)
-    }
-
-    // If no valid explicit params, use runtime context from frontend
-    if (!repositoryId && !productId && runtimeContext) {
-      if (runtimeContext.type === "repository") {
-        // Use repositoryId if available, otherwise fallback to id
-        repositoryId = runtimeContext.repositoryId || runtimeContext.id;
-      } else if (runtimeContext.type === "product") {
-        // Use productId if available, otherwise fallback to id
-        productId = runtimeContext.productId || runtimeContext.id;
-      }
-    }
-
-    // Fall back to default if nothing specified
-    if (!repositoryId && !productId) {
-      repositoryId = defaultRepositoryId;
-    }
+    const repositoryId = selection.repositoryId;
+    const productId = selection.productId;
 
     const maxIterations = 3;
     let currentIteration = 0;
@@ -160,20 +380,18 @@ export const queryCodebase: ToolDefinition = {
       try {
         // Step 1: Create a session
         const sessionUrl = `${apiUrl}/api/chat/sessions`;
-        const sessionHeaders: Record<string, string> = {
-          "Content-Type": "application/json",
-          ...(apiKey ? { "Authorization": `Bearer ${apiKey}` } : {}),
-        };
+        const sessionHeaders = getResearchAgentHeaders(apiKey);
         // Build session body - research agent API accepts either repository_id or product_id
-        const sessionBody: Record<string, string> = {
+        const sessionBody: Record<string, any> = {
           title: "Xyne Doctor Research Query",
           session_type: "api_session",
+          metadata: context.meta
         };
         
-        if (repositoryId) {
-          sessionBody.repository_id = repositoryId;
-        } else if (productId) {
+        if (productId) {
           sessionBody.product_id = productId;
+        } else if (repositoryId) {
+          sessionBody.repository_id = repositoryId;
         }
         
         const sessionRes = await fetch(sessionUrl, {
@@ -366,7 +584,7 @@ export const queryCodebase: ToolDefinition = {
         }
 
         if (result) {
-          return result;
+          return appendSessionId(result, sessionId);
         }
 
         // No result in this iteration, retry
@@ -393,10 +611,10 @@ export const reviewPullRequest: ToolDefinition = {
   slug: "review-pull-request",
   name: "Review Pull Request",
   description:
-    "Review a Pull Request using the external research agent system. " +
-    "Performs deep code review: analyzing diff, checking patterns, " +
-    "finding potential bugs, security issues, and performance concerns. " +
-    "Requires source and destination branch names.",
+    "Ask the external Research Agent to review a pull request using codebase context, logs, and tools for the selected repository/product. " +
+    "Requires source and destination branch names. repository and product are optional; if omitted, the agent's configured default repository_id/product_id is used. " +
+    "Use list-repositories/list-products to discover ids when you want to override the default. " +
+    "Use list-repository-tools/list-product-tools first when you need to inspect whether the selected external agent scope has the right tools before offloading the review.",
   source: "custom:research-agent",
   configSchema: RESEARCH_AGENT_CONFIG_SCHEMA,
   inputSchema: {
@@ -409,6 +627,14 @@ export const reviewPullRequest: ToolDefinition = {
       destinationBranch: {
         type: "string",
         description: "The destination/target branch to merge into (e.g., 'main', 'develop')",
+      },
+      repository: {
+        type: "string",
+        description: "Optional Research Agent repository ID for this PR review. If omitted, the agent's configured default repository_id/RESEARCH_AGENT_REPOSITORY_ID is used. Use list-repositories to find an ID when overriding the default. If product is also set, product takes precedence.",
+      },
+      product: {
+        type: "string",
+        description: "Optional Research Agent product ID for this PR review. If omitted, the agent's configured default product_id/RESEARCH_AGENT_PRODUCT_ID is used. Use list-products to find an ID when overriding the default. Product takes precedence over repository.",
       },
       focusAreas: {
         type: "array",
@@ -439,16 +665,14 @@ export const reviewPullRequest: ToolDefinition = {
     if (!destinationBranch?.trim()) {
       return "Error: destinationBranch is required.";
     }
-    const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "http://localhost:8080";
-    const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
-    
-    const defaultRepositoryId = context.config["DEFAULT_REPOSITORY_ID"] ?? "";
 
-    // Get repository from runtime context or default
-    const runtimeContext = (context as unknown as { researchContext?: { type?: string; id?: string; repositoryId?: string } }).researchContext;
-    const repositoryId = runtimeContext?.type === "repository" 
-      ? (runtimeContext.repositoryId || runtimeContext.id) 
-      : defaultRepositoryId;
+    const selection = getResearchAgentSelection(params, context);
+    if (typeof selection === "string") return selection;
+
+    const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "<research-agent-url>";
+    const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
+    const repositoryId = selection.repositoryId;
+    const productId = selection.productId;
 
     // Build PR review specific prompt
     const focusAreasText = focusAreas.length > 0
@@ -486,15 +710,21 @@ Review Guidelines:
       try {
         // Step 1: Create a session
         const sessionUrl = `${apiUrl}/api/chat/sessions`;
-        const sessionHeaders: Record<string, string> = {
-          "Content-Type": "application/json",
-          ...(apiKey ? { "Authorization": `Bearer ${apiKey}` } : {}),
-        };
-        const sessionBody = {
+        const sessionHeaders = getResearchAgentHeaders(apiKey);
+        // `unknown` (not `string`) because `metadata` carries the context.meta
+        // object (Record<string,string> | undefined), not a string. The string
+        // fields below (product_id / repository_id) remain valid assignments.
+        const sessionBody: Record<string, unknown> = {
           title: `PR Review: ${sourceBranch} → ${destinationBranch}`,
-          repository_id: repositoryId,
           session_type: "api_session",
+          metadata: context.meta,
         };
+
+        if (productId) {
+          sessionBody.product_id = productId;
+        } else if (repositoryId) {
+          sessionBody.repository_id = repositoryId;
+        }
 
         const sessionRes = await fetch(sessionUrl, {
           method: "POST",
@@ -671,7 +901,7 @@ Review Guidelines:
         }
 
         if (result) {
-          return result;
+          return appendSessionId(result, sessionId);
         }
 
         currentIteration++;

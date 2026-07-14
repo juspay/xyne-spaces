@@ -37,7 +37,10 @@ export function Menu({
             data-id="menu-popup"
             className={cn(
               /* surface */
-              "min-w-[160px] overflow-hidden",
+              // Cap height + scroll so a long options list (e.g. the admin
+              // agent filter with hundreds of agents) scrolls inside the popup
+              // instead of growing full-height and overflowing the viewport.
+              "min-w-[160px] max-h-[min(70vh,24rem)] overflow-y-auto overflow-x-hidden",
               "rounded-[var(--comp-radius-lg)]",
               "bg-xyne-surface border border-xyne-border",
               "shadow-[var(--comp-shadow-lg)]",
@@ -103,6 +106,3 @@ export function MenuItem({
     </BaseMenu.Item>
   );
 }
-
-export const MenuSeparator  = BaseMenu.Separator;
-export const MenuGroupLabel = BaseMenu.GroupLabel;

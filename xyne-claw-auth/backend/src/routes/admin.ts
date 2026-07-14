@@ -1,14 +1,21 @@
 import { Router, type Request, type Response } from "express";
-import { requireClawAdmin, getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { requireClawAdmin, getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
 import { windowFromDays } from "../lib/time-window.js";
 import { writeAuditLog } from "../lib/audit.js";
-import { userRoleRepository, userRepository, auditLogRepository, agentRunRepository, agentRepository } from "../repositories/index.js";
+import { userRoleRepository, userRepository, auditLogRepository, agentRunRepository, agentRepository, sharedProviderCredentialRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { evictSession } from "../mcp/runner.js";
 import { getDoctorBitbucketStats } from "../services/bitbucket-stats.js";
+import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 
+import jwt from "jsonwebtoken";
+import { ERROR_PIPELINE } from "../config.js";
+import { INGEST_JWT_AUDIENCE } from "./error-pipeline.js";
+import { getQueue as epQueue } from "../error-pipeline/queue.js";
+import { bucketStats as epBucketStats } from "../error-pipeline/buckets.js";
+import { listFixRecords } from "../error-pipeline/runner/store.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("admin");
 
@@ -16,8 +23,16 @@ const router = Router();
 
 router.get("/roles", requireClawAdmin, async (_req: Request, res: Response) => {
   try {
+    // TODO(admin-org-scope): user_roles has no orgId by design; keep CLAW_ADMIN grants platform-global.
     const roles = await userRoleRepository.listByRole("CLAW_ADMIN");
-    res.json({ success: true, data: roles });
+    const orgNames = await getOrgNameMap(roles.map((r) => r.user.orgId));
+    res.json({
+      success: true,
+      data: roles.map((r) => ({
+        ...r,
+        user: withOrgLabel(r.user, orgNames),
+      })),
+    });
   } catch (err) {
     log.error("[admin] list roles error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
@@ -38,7 +53,10 @@ router.post("/roles", requireClawAdmin, async (req: Request, res: Response) => {
     }
 
     let targetUser = await userRepository.findById(raw);
-    if (!targetUser) targetUser = await userRepository.findByEmail(raw);
+    const requesterOrgId = getOrgId(req);
+    if (!targetUser && requesterOrgId) {
+      targetUser = await prisma.user.findFirst({ where: { email: raw, orgId: requesterOrgId } });
+    }
     if (!targetUser) {
       res.status(404).json({ success: false, error: `No user matches "${raw}"` });
       return;
@@ -105,15 +123,47 @@ router.get("/roles/check/:userId", async (req: Request<{ userId: string }>, res:
 
 router.get("/audit-logs", requireClawAdmin, async (req: Request, res: Response) => {
   try {
+    const scope = getAdminOrgScope(req, "/admin/audit-logs");
     const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
     const offset = Number(req.query["offset"] ?? 0);
     const eventType = req.query["eventType"] as string | undefined;
     const targetId = req.query["targetId"] as string | undefined;
+    const startRaw = req.query["startDate"] as string | undefined;
+    const endRaw = req.query["endDate"] as string | undefined;
+    const startDate = startRaw ? new Date(startRaw) : undefined;
+    const endDate = endRaw ? new Date(endRaw) : undefined;
+    const validStart = startDate && !Number.isNaN(startDate.getTime()) ? startDate : undefined;
+    const validEnd = endDate && !Number.isNaN(endDate.getTime()) ? endDate : undefined;
+    // TODO(admin-org-scope): agent_audit_logs has no orgId; scope through actor user org where possible.
+    const actorIds = scope.orgId
+      ? await prisma.user.findMany({
+        where: { orgId: scope.orgId },
+        select: { id: true },
+      }).then((rows) => rows.map((u) => u.id))
+      : null;
     const [logs, total] = await Promise.all([
-      auditLogRepository.list({ eventType, targetId, limit, offset }),
-      auditLogRepository.count({ eventType, targetId }),
+      auditLogRepository.list({ eventType, targetId, startDate: validStart, endDate: validEnd, limit, offset, actorUserIds: actorIds ?? undefined }),
+      auditLogRepository.count({ eventType, targetId, startDate: validStart, endDate: validEnd, actorUserIds: actorIds ?? undefined }),
     ]);
-    res.json({ success: true, data: logs, total, limit, offset });
+    const logActorIds = Array.from(new Set(logs.map((l) => l.actorUserId).filter((id): id is string => Boolean(id))));
+    const actors = logActorIds.length
+      ? await prisma.user.findMany({
+        where: { id: { in: logActorIds } },
+        select: { id: true, orgId: true },
+      })
+      : [];
+    const actorOrgById = new Map(actors.map((u) => [u.id, u.orgId] as const));
+    const orgNames = await getOrgNameMap(actors.map((u) => u.orgId));
+    res.json({
+      success: true,
+      data: logs.map((l) => {
+        const orgId = l.actorUserId ? (actorOrgById.get(l.actorUserId) ?? null) : null;
+        return scope.allOrgs ? withOrgLabel({ ...l, orgId }, orgNames) : l;
+      }),
+      total,
+      limit,
+      offset,
+    });
   } catch (err) {
     log.error("[admin] audit-logs error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
@@ -133,8 +183,9 @@ function cutoffFromDays(daysParam: unknown): Date | null {
 
 router.get("/ratings/stats", requireClawAdmin, async (req: Request, res: Response) => {
   try {
+    const scope = getAdminOrgScope(req, "/admin/ratings/stats");
     const cutoff = cutoffFromDays(req.query["days"] ?? "30");
-    const stats = await agentRunRepository.ratingStatsByAgent(cutoff);
+    const stats = await agentRunRepository.ratingStatsByAgent(cutoff, scope.orgId);
     res.json({ success: true, data: stats });
   } catch (err) {
     log.error("[admin] ratings/stats error:", err);
@@ -144,10 +195,12 @@ router.get("/ratings/stats", requireClawAdmin, async (req: Request, res: Respons
 
 router.get("/ratings/recent-downs", requireClawAdmin, async (req: Request, res: Response) => {
   try {
+    const scope = getAdminOrgScope(req, "/admin/ratings/recent-downs");
     const cutoff = cutoffFromDays(req.query["days"] ?? "30");
     const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
-    const rows = await agentRunRepository.recentDownRuns(cutoff, limit);
-    res.json({ success: true, data: rows });
+    const rows = await agentRunRepository.recentDownRuns(cutoff, limit, scope.orgId);
+    const orgNames = scope.allOrgs ? await getOrgNameMap(rows.map((r) => r.orgId)) : new Map();
+    res.json({ success: true, data: rows.map((r) => (scope.allOrgs ? withOrgLabel(r, orgNames) : r)) });
   } catch (err) {
     log.error("[admin] ratings/recent-downs error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
@@ -158,8 +211,34 @@ router.get("/ratings/recent-downs", requireClawAdmin, async (req: Request, res: 
 
 router.get("/usage/stats", requireClawAdmin, async (req: Request, res: Response) => {
   try {
+    const scope = getAdminOrgScope(req, "/admin/usage/stats");
     const cutoff = cutoffFromDays(req.query["days"] ?? "30");
-    const stats = await agentRunRepository.usageStatsByAgent(cutoff);
+    const rows = await prisma.agentRun.groupBy({
+      by: scope.allOrgs ? ["orgId", "agentSlug"] : ["agentSlug"],
+      where: {
+        ...(cutoff ? { startedAt: { gte: cutoff } } : {}),
+        ...(scope.orgId ? { orgId: scope.orgId } : {}),
+      },
+      _count: { _all: true },
+      _sum: {
+        tokensIn: true,
+        tokensOut: true,
+        tokensCacheRead: true,
+        tokensCacheWrite: true,
+      },
+    });
+    const orgNames = scope.allOrgs ? await getOrgNameMap(rows.map((r) => "orgId" in r ? r.orgId : null)) : new Map();
+    const stats = rows
+      .map((r) => ({
+        agentSlug: r.agentSlug,
+        ...("orgId" in r ? withOrgLabel({ orgId: r.orgId }, orgNames) : {}),
+        runs: r._count._all,
+        tokensIn: r._sum.tokensIn ?? 0,
+        tokensOut: r._sum.tokensOut ?? 0,
+        tokensCacheRead: r._sum.tokensCacheRead ?? 0,
+        tokensCacheWrite: r._sum.tokensCacheWrite ?? 0,
+      }))
+      .sort((a, b) => (b.tokensIn + b.tokensOut) - (a.tokensIn + a.tokensOut));
     res.json({ success: true, data: stats });
   } catch (err) {
     log.error("[admin] usage/stats error:", err);
@@ -171,6 +250,7 @@ router.get("/usage/stats", requireClawAdmin, async (req: Request, res: Response)
 
 router.get("/scheduled-jobs", requireClawAdmin, async (req: Request, res: Response) => {
   try {
+    const scope = getAdminOrgScope(req, "/admin/scheduled-jobs");
     const { status, agentSlug, userId } = req.query as {
       status?: string;
       agentSlug?: string;
@@ -180,6 +260,7 @@ router.get("/scheduled-jobs", requireClawAdmin, async (req: Request, res: Respon
     const offset = Math.max(Number(req.query["offset"] ?? 0), 0);
 
     const where: Record<string, unknown> = {};
+    if (scope.orgId) where["orgId"] = scope.orgId;
     if (status) where["status"] = status;
     if (agentSlug) where["agentSlug"] = agentSlug;
     if (userId) where["userId"] = userId;
@@ -197,12 +278,14 @@ router.get("/scheduled-jobs", requireClawAdmin, async (req: Request, res: Respon
     const userIds = Array.from(new Set(rows.map((r) => r.userId)));
     const users = await userRepository.findByIds(userIds);
     const userById = new Map(users.map((u) => [u.id, u]));
+    const orgNames = scope.allOrgs ? await getOrgNameMap(rows.map((r) => r.orgId)) : new Map();
 
     res.json({
       success: true,
       data: {
         rows: rows.map((r) => ({
           ...r,
+          ...(scope.allOrgs ? withOrgLabel({ orgId: r.orgId }, orgNames) : {}),
           delayMs: r.delayMs != null ? Number(r.delayMs) : null,
           user: userById.get(r.userId) ?? null,
         })),
@@ -219,23 +302,32 @@ router.get("/scheduled-jobs", requireClawAdmin, async (req: Request, res: Respon
 
 router.get("/mcp-servers", requireClawAdmin, async (_req: Request, res: Response) => {
   try {
+    // Platform-global by design: the Global MCP tab manages shared fallback registry/credentials.
     const servers = await prisma.mcpServer.findMany({
       include: { globalCredentials: true },
       orderBy: { name: "asc" },
     });
     res.json({
       success: true,
-      data: servers.map((s) => ({
-        id: s.id,
-        type: s.type,
-        name: s.name,
-        description: s.description,
-        enabled: s.enabled,
-        allowGlobalFallback: s.allowGlobalFallback,
-        hasGlobalCredentials: Boolean(s.globalCredentials),
-        globalCredentialsUpdatedAt: s.globalCredentials?.updatedAt ?? null,
-        globalCredentialsSetByUserId: s.globalCredentials?.setByUserId ?? null,
-      })),
+      data: servers.map((s) => {
+        // Legacy top-level fields reflect the deployment-wide default row
+        // (orgId NULL); org overrides are listed separately.
+        const defaultCreds = s.globalCredentials.find((c) => c.orgId === null) ?? null;
+        return {
+          id: s.id,
+          type: s.type,
+          name: s.name,
+          description: s.description,
+          enabled: s.enabled,
+          allowGlobalFallback: s.allowGlobalFallback,
+          hasGlobalCredentials: Boolean(defaultCreds),
+          globalCredentialsUpdatedAt: defaultCreds?.updatedAt ?? null,
+          globalCredentialsSetByUserId: defaultCreds?.setByUserId ?? null,
+          orgGlobalCredentials: s.globalCredentials
+            .filter((c) => c.orgId !== null)
+            .map((c) => ({ orgId: c.orgId, updatedAt: c.updatedAt, setByUserId: c.setByUserId })),
+        };
+      }),
     });
   } catch (err) {
     log.error("[admin] list mcp-servers error:", err);
@@ -271,31 +363,37 @@ router.put("/mcp-servers/:type/global-fallback", requireClawAdmin, async (req: R
 router.put("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req: Request<{ type: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
-    const { credentials } = req.body as { credentials?: Record<string, unknown> };
+    const { credentials, orgId } = req.body as { credentials?: Record<string, unknown>; orgId?: string };
     if (!credentials || typeof credentials !== "object" || Array.isArray(credentials)) {
       res.status(400).json({ success: false, error: "credentials object is required" });
       return;
+    }
+    // orgId omitted → deployment-wide default row (legacy behavior).
+    const credOrgId = typeof orgId === "string" && orgId.trim() ? orgId.trim() : null;
+    if (credOrgId) {
+      const org = await prisma.organization.findUnique({ where: { id: credOrgId } });
+      if (!org) { res.status(404).json({ success: false, error: "Organization not found" }); return; }
     }
     const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
     if (!server) { res.status(404).json({ success: false, error: "MCP server not found" }); return; }
 
     const enc = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
-    const row = await prisma.globalMcpCredentials.upsert({
-      where: { mcpServerId: server.id },
-      create: {
-        mcpServerId: server.id,
-        encryptedCreds: enc.ciphertext,
-        iv: enc.iv,
-        authTag: enc.authTag,
-        setByUserId: requesterId,
-      },
-      update: {
-        encryptedCreds: enc.ciphertext,
-        iv: enc.iv,
-        authTag: enc.authTag,
-        setByUserId: requesterId,
-      },
+    // Manual upsert: the composite unique includes a nullable orgId, which
+    // Prisma's upsert-where can't address for the NULL default row.
+    const existing = await prisma.globalMcpCredentials.findFirst({
+      where: { mcpServerId: server.id, orgId: credOrgId },
     });
+    const data = {
+      encryptedCreds: enc.ciphertext,
+      iv: enc.iv,
+      authTag: enc.authTag,
+      setByUserId: requesterId,
+    };
+    const row = existing
+      ? await prisma.globalMcpCredentials.update({ where: { id: existing.id }, data })
+      : await prisma.globalMcpCredentials.create({
+          data: { ...data, mcpServerId: server.id, orgId: credOrgId },
+        });
 
     // Evict every cached MCP child whose env was baked from the OLD global
     // creds — running children belong to users who don't have personal creds
@@ -309,13 +407,14 @@ router.put("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req
       actorUserId: requesterId,
       eventType: "MCP_GLOBAL_CREDENTIALS_SET",
       targetId: server.id,
-      description: `Global credentials updated for MCP server ${server.type}`,
+      description: `Global credentials updated for MCP server ${server.type}${credOrgId ? ` (org ${credOrgId})` : " (default)"}`,
     });
 
     res.json({
       success: true,
       data: {
         type: server.type,
+        orgId: credOrgId,
         updatedAt: row.updatedAt,
         setByUserId: row.setByUserId,
       },
@@ -329,19 +428,20 @@ router.put("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req
 router.delete("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req: Request<{ type: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
-    const server = await prisma.mcpServer.findUnique({
-      where: { type: req.params.type },
-      include: { globalCredentials: true },
-    });
+    // ?orgId=<id> deletes that org's override; omitted → the default row.
+    const orgIdParam = typeof req.query["orgId"] === "string" && req.query["orgId"].trim() ? req.query["orgId"].trim() : null;
+    const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
     if (!server) { res.status(404).json({ success: false, error: "MCP server not found" }); return; }
-    if (!server.globalCredentials) { res.status(404).json({ success: false, error: "No global credentials set" }); return; }
 
-    await prisma.globalMcpCredentials.delete({ where: { mcpServerId: server.id } });
+    const { count } = await prisma.globalMcpCredentials.deleteMany({
+      where: { mcpServerId: server.id, orgId: orgIdParam },
+    });
+    if (count === 0) { res.status(404).json({ success: false, error: "No global credentials set" }); return; }
     await writeAuditLog({
       actorUserId: requesterId,
       eventType: "MCP_GLOBAL_CREDENTIALS_REMOVED",
       targetId: server.id,
-      description: `Global credentials removed for MCP server ${server.type}`,
+      description: `Global credentials removed for MCP server ${server.type}${orgIdParam ? ` (org ${orgIdParam})` : " (default)"}`,
     });
     res.json({ success: true });
   } catch (err) {
@@ -352,21 +452,18 @@ router.delete("/mcp-servers/:type/global-credentials", requireClawAdmin, async (
 
 router.get("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req: Request<{ type: string }>, res: Response) => {
   try {
-    const server = await prisma.mcpServer.findUnique({
-      where: { type: req.params.type },
-      include: { globalCredentials: true },
-    });
+    // ?orgId=<id> inspects that org's override; omitted → the default row.
+    const orgIdParam = typeof req.query["orgId"] === "string" && req.query["orgId"].trim() ? req.query["orgId"].trim() : null;
+    const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
     if (!server) { res.status(404).json({ success: false, error: "MCP server not found" }); return; }
-    if (!server.globalCredentials) {
-      res.json({ success: true, data: { type: server.type, hasCredentials: false } });
+    const row = await prisma.globalMcpCredentials.findFirst({
+      where: { mcpServerId: server.id, orgId: orgIdParam },
+    });
+    if (!row) {
+      res.json({ success: true, data: { type: server.type, orgId: orgIdParam, hasCredentials: false } });
       return;
     }
-    const decrypted = decrypt(
-      server.globalCredentials.encryptedCreds,
-      server.globalCredentials.iv,
-      server.globalCredentials.authTag,
-      CONFIG.encryptionKey,
-    );
+    const decrypted = decrypt(row.encryptedCreds, row.iv, row.authTag, CONFIG.encryptionKey);
     const creds = JSON.parse(decrypted) as Record<string, unknown>;
     // Don't return secret values — only field names so the admin UI can show
     // "[set]" indicators. Admin sets new creds via PUT.
@@ -374,14 +471,230 @@ router.get("/mcp-servers/:type/global-credentials", requireClawAdmin, async (req
       success: true,
       data: {
         type: server.type,
+        orgId: orgIdParam,
         hasCredentials: true,
         credentialKeys: Object.keys(creds),
-        updatedAt: server.globalCredentials.updatedAt,
-        setByUserId: server.globalCredentials.setByUserId,
+        updatedAt: row.updatedAt,
+        setByUserId: row.setByUserId,
       },
     });
   } catch (err) {
     log.error("[admin] get global-credentials error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// ── Shared provider credentials (org-level, bound to selected agents) ───────
+// One stored OAuth bundle / API key (e.g. "Team Codex") referenced by many
+// agents via AgentProviderCredentials.sharedCredentialId. Kills the per-agent
+// token-copy pattern where every re-auth of one copy invalidated the others.
+
+const SHAREABLE_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "litellm"]);
+
+router.get("/provider-credentials", requireClawAdmin, async (req: Request, res: Response) => {
+  try {
+    const orgId = (typeof req.query["orgId"] === "string" && req.query["orgId"].trim()) || getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "No org context" }); return; }
+    const rows = await sharedProviderCredentialRepository.listByOrg(orgId);
+    res.json({
+      success: true,
+      data: rows.map((r) => ({
+        id: r.id,
+        provider: r.provider,
+        name: r.name,
+        model: r.model,
+        authType: r.authType,
+        hasKey: Boolean(r.encryptedKey),
+        ownerUserId: r.ownerUserId,
+        updatedAt: r.updatedAt,
+        boundAgents: r.agentBindings.map((b) => ({
+          agentId: b.agentId,
+          slug: b.agent.slug,
+          name: b.agent.name,
+          modelOverride: b.model,
+        })),
+      })),
+    });
+  } catch (err) {
+    log.error("[admin] list provider-credentials error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+/** Promote an agent's existing DEDICATED credential into a shared org
+ *  credential and re-bind that agent to it. The natural creation flow: connect
+ *  the provider on one agent via the existing UI, then promote + bind others. */
+router.post("/provider-credentials/promote", requireClawAdmin, async (req: Request, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req)!;
+    const { agentId, provider, name, platform } = req.body as { agentId?: string; provider?: string; name?: string; platform?: boolean };
+    if (!agentId || !provider || !name?.trim()) {
+      res.status(400).json({ success: false, error: "agentId, provider and name are required" });
+      return;
+    }
+    if (!SHAREABLE_PROVIDERS.has(provider)) {
+      res.status(400).json({ success: false, error: `provider must be one of: ${[...SHAREABLE_PROVIDERS].join(", ")}` });
+      return;
+    }
+    const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { id: true, orgId: true, slug: true } });
+    if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    // Read the RAW row (not the materialized view) — promoting a binding would
+    // otherwise copy the other shared cred's material into a new row.
+    const raw = await prisma.agentProviderCredentials.findUnique({
+      where: { agentId_provider: { agentId, provider } },
+    });
+    if (!raw?.encryptedKey || raw.sharedCredentialId) {
+      res.status(400).json({ success: false, error: "Agent has no dedicated credential for this provider to promote" });
+      return;
+    }
+    const shared = await sharedProviderCredentialRepository.create({
+      // platform:true → orgId NULL: bindable across orgs (this route is
+      // already CLAW_ADMIN-gated, which is the required privilege).
+      orgId: platform ? null : agent.orgId,
+      provider,
+      name: name.trim(),
+      encryptedKey: raw.encryptedKey,
+      iv: raw.iv,
+      authTag: raw.authTag,
+      model: raw.model,
+      baseUrl: raw.baseUrl,
+      authType: raw.authType,
+      reasoningEffort: raw.reasoningEffort,
+      ownerUserId: requesterId,
+    });
+    await agentProviderCredentialsRepository.bindShared(agentId, provider, shared.id, {
+      model: null, // shared default applies; set an override via bind if needed
+      reasoningEffort: null,
+    });
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "PROVIDER_CREDENTIAL_PROMOTED",
+      targetId: shared.id,
+      description: `Promoted ${provider} credential from agent ${agent.slug} to shared "${name.trim()}"`,
+    });
+    res.json({ success: true, data: { id: shared.id, provider, name: shared.name } });
+  } catch (err) {
+    log.error("[admin] promote provider-credential error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.post("/provider-credentials/:id/bind", requireClawAdmin, async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req)!;
+    const { agentId, model, reasoningEffort } = req.body as { agentId?: string; model?: string; reasoningEffort?: string };
+    if (!agentId) { res.status(400).json({ success: false, error: "agentId is required" }); return; }
+    const shared = await sharedProviderCredentialRepository.findById(req.params.id);
+    if (!shared) { res.status(404).json({ success: false, error: "Shared credential not found" }); return; }
+    const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { id: true, orgId: true, slug: true } });
+    if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    // orgId NULL = platform-wide credential, bindable by any org's agents.
+    if (shared.orgId && agent.orgId !== shared.orgId) {
+      res.status(403).json({ success: false, error: "Agent and credential belong to different orgs" });
+      return;
+    }
+    await agentProviderCredentialsRepository.bindShared(agentId, shared.provider, shared.id, {
+      model: model?.trim() || null,
+      reasoningEffort: reasoningEffort?.trim() || null,
+    });
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "PROVIDER_CREDENTIAL_BOUND",
+      targetId: shared.id,
+      description: `Bound agent ${agent.slug} to shared ${shared.provider} credential "${shared.name}"`,
+    });
+    res.json({ success: true, data: { agentId, provider: shared.provider, sharedCredentialId: shared.id } });
+  } catch (err) {
+    log.error("[admin] bind provider-credential error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.post("/provider-credentials/:id/unbind", requireClawAdmin, async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req)!;
+    const { agentId } = req.body as { agentId?: string };
+    if (!agentId) { res.status(400).json({ success: false, error: "agentId is required" }); return; }
+    const shared = await sharedProviderCredentialRepository.findById(req.params.id);
+    if (!shared) { res.status(404).json({ success: false, error: "Shared credential not found" }); return; }
+    const { count } = await prisma.agentProviderCredentials.deleteMany({
+      where: { agentId, provider: shared.provider, sharedCredentialId: shared.id },
+    });
+    if (count === 0) { res.status(404).json({ success: false, error: "Agent is not bound to this credential" }); return; }
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "PROVIDER_CREDENTIAL_UNBOUND",
+      targetId: shared.id,
+      description: `Unbound agent ${agentId} from shared ${shared.provider} credential "${shared.name}"`,
+    });
+    res.json({ success: true });
+  } catch (err) {
+    log.error("[admin] unbind provider-credential error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+/** Re-auth path: after reconnecting the provider on ONE agent (existing UI
+ *  flow writes a fresh dedicated bundle to that agent), adopt that bundle into
+ *  the shared row and re-bind the agent. Every bound agent picks up the new
+ *  session on its next run — no per-agent reconnects. */
+router.post("/provider-credentials/:id/adopt", requireClawAdmin, async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req)!;
+    const { agentId } = req.body as { agentId?: string };
+    if (!agentId) { res.status(400).json({ success: false, error: "agentId is required" }); return; }
+    const shared = await sharedProviderCredentialRepository.findById(req.params.id);
+    if (!shared) { res.status(404).json({ success: false, error: "Shared credential not found" }); return; }
+    const raw = await prisma.agentProviderCredentials.findUnique({
+      where: { agentId_provider: { agentId, provider: shared.provider } },
+    });
+    if (!raw?.encryptedKey || raw.sharedCredentialId) {
+      res.status(400).json({ success: false, error: "Agent has no fresh dedicated credential to adopt — reconnect the provider on it first" });
+      return;
+    }
+    await sharedProviderCredentialRepository.updateCredential(shared.id, {
+      encryptedKey: raw.encryptedKey,
+      iv: raw.iv,
+      authTag: raw.authTag,
+      authType: raw.authType,
+    });
+    await agentProviderCredentialsRepository.bindShared(agentId, shared.provider, shared.id, {
+      model: raw.model,
+      reasoningEffort: raw.reasoningEffort,
+    });
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "PROVIDER_CREDENTIAL_ADOPTED",
+      targetId: shared.id,
+      description: `Adopted fresh ${shared.provider} credential from agent ${agentId} into shared "${shared.name}"`,
+    });
+    res.json({ success: true });
+  } catch (err) {
+    log.error("[admin] adopt provider-credential error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.delete("/provider-credentials/:id", requireClawAdmin, async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req)!;
+    const shared = await sharedProviderCredentialRepository.findById(req.params.id);
+    if (!shared) { res.status(404).json({ success: false, error: "Shared credential not found" }); return; }
+    const bindings = await sharedProviderCredentialRepository.countBindings(shared.id);
+    if (bindings > 0) {
+      res.status(409).json({ success: false, error: `Credential has ${bindings} bound agent(s) — unbind them first` });
+      return;
+    }
+    await sharedProviderCredentialRepository.delete(shared.id);
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "PROVIDER_CREDENTIAL_DELETED",
+      targetId: shared.id,
+      description: `Deleted shared ${shared.provider} credential "${shared.name}"`,
+    });
+    res.json({ success: true });
+  } catch (err) {
+    log.error("[admin] delete provider-credential error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -590,6 +903,208 @@ router.get("/dashboard/bitbucket-stats", async (_req: Request, res: Response) =>
     res.json({ success: true, data });
   } catch (err) {
     log.error("[admin] bitbucket-stats error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// Mint the Grafana error-pipeline ingest JWT. Claw admins only. The signing
+// secret never leaves xyne-claw's env — this proxies to claw's internal
+// mint endpoint (gated by the S2S key that only services hold) and returns
+// the expiring, aud=error-pipeline token to paste into Grafana's webhook
+// Authorization field. No kubectl, no secret handling.
+router.post("/error-pipeline/token", requireClawAdmin, async (req: Request, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req)!;
+    if (!ERROR_PIPELINE.jwtSecret) {
+      res.status(503).json({ success: false, error: "ERROR_PIPELINE_JWT_SECRET not configured" });
+      return;
+    }
+    const days = Number((req.body as { days?: unknown })?.days ?? 90);
+    if (!Number.isFinite(days) || days <= 0 || days > 365) {
+      res.status(400).json({ success: false, error: "days must be 1-365" });
+      return;
+    }
+    const token = jwt.sign(
+      { iss: "xyne-claw-auth", sub: "grafana-webhook" },
+      ERROR_PIPELINE.jwtSecret,
+      { algorithm: "HS256", audience: INGEST_JWT_AUDIENCE, expiresIn: `${days}d` },
+    );
+    const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    // Traceability without a schema change: AgentAuditEvent is a Prisma enum
+    // and token minting doesn't fit any existing value; the actor + expiry are
+    // queryable in logs.
+    log.info(`[admin] error-pipeline ingest JWT minted by ${requesterId} (expires ${expiresAt})`);
+    res.json({ success: true, data: { token, expiresAt } });
+  } catch (err) {
+    log.error("[admin] error-pipeline token mint error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// Error-pipeline inspection — the pipeline lives in THIS service now, so
+// these read the queue/store directly (the old S2S proxies to claw are gone).
+router.get("/error-pipeline/items/:bucket", requireClawAdmin, async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Number(req.query["limit"] ?? 100) || 100, 500);
+    const bucket = String(req.params["bucket"] ?? "default");
+    const items = await epQueue().peekItems(bucket, limit);
+    res.json({ success: true, data: { bucket, count: items.length, items } });
+  } catch (err) {
+    log.error("[admin] error-pipeline items error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// Seed / factory-reset the error-pipeline bucket taxonomy (12 buckets with
+// the grounded markers from the backend code scan). Idempotent upsert by
+// name — same admin-endpoint pattern as the signing-secret backfill; NOTE:
+// overwrites any markers/matchOrder/description edited via admin since.
+router.post("/error-pipeline/seed", requireClawAdmin, async (req: Request, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req)!;
+    const { ERROR_BUCKET_SEED } = await import("../lib/error-bucket-seed.js");
+    for (const b of ERROR_BUCKET_SEED) {
+      await prisma.errorBucket.upsert({
+        where: { name: b.name },
+        create: { name: b.name, description: b.description, keywords: b.keywords ?? [], matchOrder: b.matchOrder, markers: b.markers ?? "" },
+        update: { description: b.description, keywords: b.keywords ?? [], matchOrder: b.matchOrder, markers: b.markers ?? "" },
+      });
+    }
+    const total = await prisma.errorBucket.count();
+    log.info(`[admin] error-pipeline buckets seeded by ${requesterId} (${ERROR_BUCKET_SEED.length} upserted, ${total} total)`);
+    res.json({ success: true, data: { upserted: ERROR_BUCKET_SEED.length, total } });
+  } catch (err) {
+    log.error("[admin] error-pipeline seed error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.get("/error-pipeline/buckets", requireClawAdmin, async (_req: Request, res: Response) => {
+  try {
+    res.json({ success: true, data: { buckets: await epBucketStats() } });
+  } catch (err) {
+    log.error("[admin] error-pipeline buckets error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// Flush a lane's queue — drops all queued/pending items + their dedup markers
+// for that lane (admin escape hatch for a junk-flooded lane; no redis-cli
+// needed). The taxonomy row stays; only the Redis stream is cleared.
+router.post("/error-pipeline/buckets/:name/flush", requireClawAdmin, async (req: Request<{ name: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req)!;
+    const name = String(req.params.name).trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+      res.status(400).json({ success: false, error: "Invalid bucket name" });
+      return;
+    }
+    const dropped = await epQueue().flushBucket(name);
+    log.warn(`[admin] error-pipeline bucket "${name}" flushed by ${requesterId} (${dropped} items)`);
+    res.json({ success: true, data: { bucket: name, dropped } });
+  } catch (err) {
+    log.error("[admin] error-pipeline flush error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.get("/error-pipeline/fixes", requireClawAdmin, async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Number(req.query["limit"] ?? 200) || 200, 500);
+    res.json({ success: true, data: { fixes: await listFixRecords(limit) } });
+  } catch (err) {
+    log.error("[admin] error-pipeline fixes error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// ── Error-pipeline bucket rule editing (CRUD on error_buckets) ───────
+// claw-auth owns the table, so these write directly; xyne-claw's classifier
+// picks up changes within ~60s (its in-memory rules-cache TTL). This is the
+// whole point of the DB-backed taxonomy: when a new subsystem merges, add a
+// lane or tune an existing lane's markers from the UI — no deploy.
+
+router.get("/error-pipeline/rules", requireClawAdmin, async (_req: Request, res: Response) => {
+  try {
+    const rules = await prisma.errorBucket.findMany({
+      orderBy: { matchOrder: "asc" },
+      select: { name: true, description: true, keywords: true, markers: true, matchOrder: true, enabled: true, updatedAt: true },
+    });
+    res.json({ success: true, data: rules });
+  } catch (err) {
+    log.error("[admin] error-pipeline rules list error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.put("/error-pipeline/rules/:name", requireClawAdmin, async (req: Request<{ name: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req)!;
+    const name = String(req.params.name).trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+      res.status(400).json({ success: false, error: "Bucket name must be lowercase letters, digits and dashes (e.g. tickets-desk)." });
+      return;
+    }
+
+    if (name === "needs-human") {
+      res.status(400).json({ success: false, error: '"needs-human" is reserved (dead-letter lane).' });
+      return;
+    }
+    const body = req.body as { description?: string; keywords?: string[]; markers?: string; matchOrder?: number; enabled?: boolean };
+
+    if (name === "default" && body.enabled === false) {
+      res.status(400).json({ success: false, error: "The default bucket cannot be disabled — it is the routing fallback." });
+      return;
+    }
+    const markers = typeof body.markers === "string" ? body.markers.trim() : "";
+    // Reject an invalid regex so a typo can't silently kill a lane's matching.
+    if (markers) {
+      try { new RegExp(markers); }
+      catch (e) { res.status(400).json({ success: false, error: `Invalid advanced regex: ${e instanceof Error ? e.message : "bad pattern"}` }); return; }
+    }
+    const keywords = Array.isArray(body.keywords)
+      ? body.keywords.map((k) => String(k).trim()).filter(Boolean)
+      : [];
+    const description = typeof body.description === "string" ? body.description.trim() : "";
+    const matchOrder = Number.isInteger(body.matchOrder) ? (body.matchOrder as number) : 20;
+    const enabled = typeof body.enabled === "boolean" ? body.enabled : true;
+    const saved = await prisma.errorBucket.upsert({
+      where: { name },
+      create: { name, description, keywords, markers, matchOrder, enabled },
+      update: { description, keywords, markers, matchOrder, enabled },
+    });
+    log.info(`[admin] error-pipeline rule "${name}" saved by ${requesterId}`);
+    res.json({ success: true, data: saved });
+  } catch (err) {
+    log.error("[admin] error-pipeline rule save error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.delete("/error-pipeline/rules/:name", requireClawAdmin, async (req: Request<{ name: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req)!;
+    const name = String(req.params.name).trim().toLowerCase();
+    if (name === "default") {
+      res.status(400).json({ success: false, error: "The default bucket is the fallback lane and cannot be deleted." });
+      return;
+    }
+    // Refuse to strand queued work: after a restart no worker or stats row
+    // would cover this lane's stream, silently losing the items.
+    const depth = (await epQueue().stats([name]))[name];
+    if (depth && depth.queued + depth.pending > 0) {
+      res.status(409).json({ success: false, error: `Bucket "${name}" still has ${depth.queued + depth.pending} queued/in-flight item(s) — let them drain (or reroute them) before deleting.` });
+      return;
+    }
+    await prisma.errorBucket.delete({ where: { name } });
+    log.info(`[admin] error-pipeline rule "${name}" deleted by ${requesterId}`);
+    res.json({ success: true });
+  } catch (err: unknown) {
+    if (err instanceof Error && "code" in err && (err as { code: string }).code === "P2025") {
+      res.status(404).json({ success: false, error: "Bucket not found" });
+      return;
+    }
+    log.error("[admin] error-pipeline rule delete error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

@@ -13,22 +13,27 @@
  * piece of UI state (active category, search, detail pin, suggestion) is owned
  * internally so a host just wires availableTools + selection.
  */
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Sparkles, ChevronRight, Loader2, Check, X, Info } from "lucide-react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Sparkles, ChevronRight, Loader2, Check, X, Info, AlertTriangle } from "lucide-react";
+import type { AgentLight } from "../../lib/types";
 import {
   suggestTools,
   type AvailableTools,
   type IntegrationToolEntry,
   type ToolSuggestion,
   type ResearchAgentOption,
+  type AgentDelegationGrant,
+  type DelegationIdentityMode,
 } from "../../lib/api";
 import { parseGatewaySelectionKey, parseGatewaySource } from "../lib/gatewayKeys";
+import { ConfirmDialog } from "./ui/ConfirmDialog";
 
 export interface ToolboxSelection {
   subagents: string[];
   direct: string[];
   custom: string[];
   gateway?: string[];
+  callableAgents?: string[];
 }
 
 const SUBAGENT_EMOJI: Record<string, string> = {
@@ -105,6 +110,20 @@ interface ResearchAgentConfig {
   loading?: boolean;
 }
 
+interface DelegatedAgentsConfig {
+  currentAgentSlug: string;
+  isOrchestratorTier?: boolean;
+  agents: AgentLight[];
+  grants: AgentDelegationGrant[];
+  loading?: boolean;
+  disabled?: boolean;
+  onAddGrant: (calleeSlug: string, identityMode: DelegationIdentityMode) => Promise<void>;
+  onDeleteGrant: (grant: AgentDelegationGrant) => Promise<void>;
+  onAddConfigEntry: (calleeSlug: string) => Promise<void>;
+  onCreateGrantForConfig: (calleeSlug: string) => Promise<void>;
+  onRemoveConfigEntry: (calleeSlug: string) => Promise<void>;
+}
+
 interface Props {
   availableTools: AvailableTools | null;
   loading?: boolean;
@@ -120,8 +139,22 @@ interface Props {
   autoSuggest?: boolean;
   /** Optional Research-Agent context block (product/repository pins). */
   researchAgent?: ResearchAgentConfig;
+  /** Optional A2A delegated agents control surface. Uses host-owned grant/config handlers. */
+  delegatedAgents?: DelegatedAgentsConfig;
   /** Show the "Toolbox · tools" caption at the top. Default true. */
   showCaption?: boolean;
+}
+
+function AgentHeavyweightBadge({ compact = false }: { compact?: boolean }) {
+  return (
+    <span
+      className={`shrink-0 rounded-full border border-amber-200 bg-amber-50 font-medium text-amber-700 dark:border-amber-500/40 dark:bg-amber-900/20 dark:text-amber-300 ${
+        compact ? "px-1 py-0.5 text-[9px]" : "px-1.5 py-0.5 text-[9px]"
+      }`}
+    >
+      Agent · heavyweight
+    </span>
+  );
 }
 
 export function ToolboxPicker({
@@ -134,6 +167,7 @@ export function ToolboxPicker({
   suggestContext,
   autoSuggest = false,
   researchAgent,
+  delegatedAgents,
   showCaption = true,
 }: Props) {
   const [toolTab, setToolTab] = useState("all");
@@ -152,6 +186,9 @@ export function ToolboxPicker({
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [refineIntent, setRefineIntent] = useState("");
   const didAutoSuggest = useRef(false);
+  const [delegationBusy, setDelegationBusy] = useState<string | null>(null);
+  const [pendingDeleteGrant, setPendingDeleteGrant] = useState<AgentDelegationGrant | null>(null);
+  const [pendingBulkAgentDelete, setPendingBulkAgentDelete] = useState(false);
 
   // Responsive layout pick (only when `variant` is not forced).
   const rootRef = useRef<HTMLDivElement>(null);
@@ -178,7 +215,14 @@ export function ToolboxPicker({
     onChange({ ...value, [key]: value[key].length === all.length ? [] : all });
   const toggleCustomGroup = (slugs: string[], allSelected: boolean) =>
     onChange({ ...value, custom: allSelected ? value.custom.filter((x) => !slugs.includes(x)) : [...new Set([...value.custom, ...slugs])] });
-  const clearAll = () => onChange({ subagents: [], direct: [], custom: [], gateway: [] });
+  const clearAll = () =>
+    onChange({
+      subagents: [],
+      direct: [],
+      custom: [],
+      gateway: [],
+      callableAgents: delegatedAgents ? (value.callableAgents ?? []) : [],
+    });
   const toggleSection = (key: string) =>
     setExpandedSections((prev) => {
       const next = new Set(prev);
@@ -220,7 +264,7 @@ export function ToolboxPicker({
   // tools shouldn't re-suggest (matches V1's "suggest once" behavior).
   useEffect(() => {
     if (!autoSuggest || didAutoSuggest.current || !suggestContext || !availableTools) return;
-    if (value.subagents.length || value.direct.length || value.custom.length || (value.gateway?.length ?? 0) > 0) return;
+    if (value.subagents.length || value.direct.length || value.custom.length || (value.gateway?.length ?? 0) > 0 || (value.callableAgents?.length ?? 0) > 0) return;
     const intent = (suggestContext.systemPrompt || "").trim() || (suggestContext.description || "").trim();
     if (!intent) return;
     didAutoSuggest.current = true;
@@ -252,7 +296,7 @@ export function ToolboxPicker({
       for (const t of tools) if (suggestedNames.has(t.name)) directSet.add(parseGatewaySource(source) ? t.slug : t.name);
     for (const g of availableTools.customGroups)
       for (const t of g.tools) if (suggestedNames.has(t.name)) customSet.add(t.slug);
-    onChange({ subagents: Array.from(subagentSet), direct: Array.from(directSet), custom: Array.from(customSet), gateway: value.gateway ?? [] });
+    onChange({ subagents: Array.from(subagentSet), direct: Array.from(directSet), custom: Array.from(customSet), gateway: value.gateway ?? [], callableAgents: value.callableAgents ?? [] });
     setSuggestionApplied(true);
   };
 
@@ -419,6 +463,74 @@ export function ToolboxPicker({
     return Array.from(keys);
   })();
 
+  const agentOptions = useMemo(
+    () =>
+      delegatedAgents
+        ? delegatedAgents.agents
+            .filter((a) => a.slug !== delegatedAgents.currentAgentSlug)
+            .sort((a, b) => a.name.localeCompare(b.name))
+        : [],
+    [delegatedAgents],
+  );
+  const agentBySlug = useMemo(() => new Map(agentOptions.map((a) => [a.slug, a])), [agentOptions]);
+  const configAgentSlugs = useMemo(() => new Set(value.callableAgents ?? []), [value.callableAgents]);
+  const grantBySlug = useMemo(() => {
+    const map = new Map<string, AgentDelegationGrant>();
+    for (const grant of delegatedAgents?.grants ?? []) {
+      if (grant.status === "rejected") continue;
+      const slug = grant.callee?.slug;
+      if (slug) map.set(slug, grant);
+    }
+    return map;
+  }, [delegatedAgents?.grants]);
+  const selectedAgentSlugs = useMemo(
+    () => Array.from(new Set([...configAgentSlugs, ...grantBySlug.keys()])),
+    [configAgentSlugs, grantBySlug],
+  );
+  const selectedAgentCount = selectedAgentSlugs.length;
+  const isOrchestratorTier = delegatedAgents?.isOrchestratorTier === true;
+  const grantsMissingConfig = (delegatedAgents?.grants ?? []).filter((grant) => {
+    const slug = grant.callee?.slug;
+    return slug && !configAgentSlugs.has(slug);
+  });
+  const configMissingGrants = selectedAgentSlugs.filter((slug) => configAgentSlugs.has(slug) && !grantBySlug.has(slug));
+  const runDelegationAction = async (key: string, fn: () => Promise<void>) => {
+    if (!delegatedAgents || delegatedAgents.disabled || delegationBusy) return;
+    setDelegationBusy(key);
+    try {
+      await fn();
+    } finally {
+      setDelegationBusy(null);
+    }
+  };
+  const handleAgentChipToggle = (agentSlug: string) => {
+    if (!delegatedAgents || delegatedAgents.disabled || delegationBusy) return;
+    const grant = grantBySlug.get(agentSlug);
+    const selected = configAgentSlugs.has(agentSlug) || !!grant;
+    if (!selected) {
+      void runDelegationAction(`add-agent:${agentSlug}`, () => delegatedAgents.onAddGrant(agentSlug, "user"));
+      return;
+    }
+    if (grant) {
+      setPendingDeleteGrant(grant);
+      return;
+    }
+    void runDelegationAction(`remove-config:${agentSlug}`, () => delegatedAgents.onRemoveConfigEntry(agentSlug));
+  };
+  const handleAgentBulkToggle = (allSelected: boolean) => {
+    if (!delegatedAgents || delegatedAgents.disabled || delegationBusy) return;
+    if (allSelected) {
+      setPendingBulkAgentDelete(true);
+      return;
+    }
+    const missing = agentOptions.filter((a) => !configAgentSlugs.has(a.slug) && !grantBySlug.has(a.slug));
+    void runDelegationAction("agents-select-all", async () => {
+      for (const agentOption of missing) {
+        await delegatedAgents.onAddGrant(agentOption.slug, "user");
+      }
+    });
+  };
+
   const searchQ = toolSearch.trim().toLowerCase();
   // Category-aware search: when the query matches a category/group *label*
   // (e.g. "integrations", "built-in", "analytics", "github") we surface every
@@ -428,6 +540,7 @@ export function ToolboxPicker({
     const set = new Set<string>();
     if (!searchQ || !availableTools) return set;
     if (labelMatchesSearch("Subagents")) for (const sa of availableTools.subagents) set.add(sa.name);
+    if (labelMatchesSearch("Agents")) for (const a of agentOptions) set.add(a.slug);
     const allMcp = labelMatchesSearch("MCP Tools") || labelMatchesSearch("mcp");
     for (const [source, tools] of mcpEntries)
       if (allMcp || labelMatchesSearch(formatServerLabel(source))) for (const t of tools) set.add(t.name);
@@ -438,13 +551,50 @@ export function ToolboxPicker({
   })();
   const toolMatchesSearch = (name: string) =>
     !searchQ || name.toLowerCase().includes(searchQ) || humanizeToolName(name).toLowerCase().includes(searchQ) || categoryMatchedNames.has(name);
+  const agentMatchesSearch = (agentOption: AgentLight) =>
+    !searchQ ||
+    agentOption.name.toLowerCase().includes(searchQ) ||
+    agentOption.slug.toLowerCase().includes(searchQ) ||
+    (agentOption.description ?? "").toLowerCase().includes(searchQ) ||
+    categoryMatchedNames.has(agentOption.slug);
   const sectionOpen = (key: string, toolNames: string[]) =>
     searchQ ? toolNames.some((n) => toolMatchesSearch(n)) : expandedSections.has(key);
   const sectionVisible = (toolNames: string[]) => !searchQ || toolNames.some((n) => toolMatchesSearch(n));
 
-  type SelectionCat = "subagents" | "integrations" | "builtin";
-  const selectionItems: Array<{ label: string; key: string; cat: SelectionCat; riskLevel: "read" | "write" | "destructive" | undefined; onRemove: () => void }> = [
+  type SelectionCat = "subagents" | "callableAgents" | "integrations" | "builtin";
+  const selectionItems: Array<{
+    label: string;
+    key: string;
+    cat: SelectionCat;
+    riskLevel: "read" | "write" | "destructive" | undefined;
+    badge?: string;
+    status?: "pending" | "approved" | "rejected";
+    slug?: string;
+    onRemove: () => void;
+  }> = [
     ...value.subagents.map((name) => ({ label: name, key: `sa-${name}`, cat: "subagents" as const, riskLevel: "read" as const, onRemove: () => toggle("subagents", name) })),
+    ...selectedAgentSlugs.map((slug) => {
+      const grant = grantBySlug.get(slug);
+      const label = agentBySlug.get(slug)?.name ?? grant?.callee?.name ?? slug;
+      return {
+      label,
+      key: `ca-${slug}`,
+      cat: "callableAgents" as const,
+      riskLevel: "write" as const,
+      badge: "Agent · heavyweight",
+      status: grant?.status,
+      slug,
+      onRemove: () => {
+        if (!delegatedAgents) {
+          onChange({ ...value, callableAgents: (value.callableAgents ?? []).filter((x) => x !== slug) });
+          return;
+        }
+        const existingGrant = grantBySlug.get(slug);
+        if (existingGrant) setPendingDeleteGrant(existingGrant);
+        else void runDelegationAction(`remove-config:${slug}`, () => delegatedAgents.onRemoveConfigEntry(slug));
+      },
+    };
+    }),
     // value.direct holds every selected MCP-integration tool (read + write).
     ...selectedDirectKeys.map((key) => {
       const info = toolInfoMap.get(key);
@@ -461,10 +611,11 @@ export function ToolboxPicker({
   ];
   const SELECTION_CAT_META: Record<SelectionCat, { label: string; dot: string }> = {
     subagents: { label: "Subagents", dot: "bg-violet-500" },
+    callableAgents: { label: "Agents", dot: "bg-amber-500" },
     integrations: { label: "MCP Tools", dot: "bg-emerald-500" },
     builtin: { label: "Built-in tools", dot: "bg-slate-400" },
   };
-  const groupedSelection = (["subagents", "integrations", "builtin"] as SelectionCat[])
+  const groupedSelection = (["subagents", "callableAgents", "integrations", "builtin"] as SelectionCat[])
     .map((cat) => ({ cat, ...SELECTION_CAT_META[cat], items: selectionItems.filter((s) => s.cat === cat) }))
     .filter((g) => g.items.length > 0);
 
@@ -494,6 +645,8 @@ export function ToolboxPicker({
     const groups: RailGroup[] = [];
     if (availableTools.subagents.length > 0)
       groups.push({ key: "subagents", label: "Subagents", dot: "bg-violet-500", selCount: value.subagents.length, totalCount: availableTools.subagents.length, hasDestructive: false });
+    if (delegatedAgents && agentOptions.length > 0)
+      groups.push({ key: "agents", label: "Agents", dot: "bg-amber-500", selCount: selectedAgentCount, totalCount: agentOptions.length, hasDestructive: false });
     if (serverChildren.length > 0)
       groups.push({ key: "integrations", label: "MCP Tools", dot: "bg-emerald-500", children: serverChildren, ...rollup(serverChildren) });
     if (customChildren.length > 0)
@@ -540,6 +693,72 @@ export function ToolboxPicker({
       {displayName}
     </button>
   );
+
+  const makeAgentChip = (agentOption: AgentLight) => {
+    const grant = grantBySlug.get(agentOption.slug);
+    const selected = configAgentSlugs.has(agentOption.slug) || !!grant;
+    const pendingApproval = grant?.status === "pending";
+    const disabled = delegatedAgents?.disabled || delegationBusy !== null;
+    const pendingTitle = `waiting for ${agentOption.name}'s owner to approve`;
+    return (
+      <button
+        key={agentOption.slug}
+        type="button"
+        onClick={() => handleAgentChipToggle(agentOption.slug)}
+        title={pendingApproval ? pendingTitle : agentOption.slug}
+        aria-pressed={selected}
+        disabled={disabled}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition disabled:cursor-not-allowed disabled:opacity-60 ${
+          pendingApproval
+            ? "border-dashed border-amber-400 bg-amber-50 text-amber-800 dark:border-amber-500/70 dark:bg-amber-900/20 dark:text-amber-300"
+            : selected
+            ? "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/50 dark:bg-indigo-900/20 dark:text-indigo-300"
+            : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary hover:border-xyne-border-strong"
+        }`}
+      >
+        <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+        <span className="truncate">{agentOption.name}</span>
+        {pendingApproval && (
+          <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.04em] text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+            pending
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  const delegationWarnings = delegatedAgents && (grantsMissingConfig.length > 0 || configMissingGrants.length > 0) ? (
+    <div className="mb-3 flex flex-col gap-2">
+      {grantsMissingConfig.map((grant) => {
+        const slug = grant.callee!.slug;
+        return (
+          <DelegationMismatchWarning
+            key={`grant-missing-config-${grant.id}`}
+            text={`Delegation to ${slug} won't work: missing config entry.`}
+            actionLabel="Add config"
+            busy={delegationBusy === `config:${slug}`}
+            disabled={delegatedAgents.disabled || delegationBusy !== null}
+            onClick={() => void runDelegationAction(`config:${slug}`, () => delegatedAgents.onAddConfigEntry(slug))}
+          />
+        );
+      })}
+      {configMissingGrants.map((slug) => (
+        <DelegationMismatchWarning
+          key={`config-missing-grant-${slug}`}
+          text={`Delegation to ${agentBySlug.get(slug)?.name ?? slug} won't work: missing grant.`}
+          actionLabel="Create grant"
+          busy={delegationBusy === `grant:${slug}`}
+          disabled={delegatedAgents.disabled || delegationBusy !== null}
+          onClick={() => void runDelegationAction(`grant:${slug}`, () => delegatedAgents.onCreateGrantForConfig(slug))}
+        />
+      ))}
+    </div>
+  ) : null;
+  const orchestratorAgentsNote = isOrchestratorTier ? (
+    <p className="mb-3 rounded-lg border border-xyne-border-subtle bg-xyne-surface px-3 py-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
+      This agent can call all global agents (orchestrator tier).
+    </p>
+  ) : null;
 
   const suggestBlock = suggestContext ? (
     <>
@@ -674,10 +893,55 @@ export function ToolboxPicker({
     </div>
   ) : null;
 
+  const delegationConfirmDialogs = delegatedAgents ? (
+    <>
+      <ConfirmDialog
+        open={pendingDeleteGrant !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteGrant(null);
+        }}
+        title="Delete delegation grant"
+        description={
+          pendingDeleteGrant?.callee
+            ? `Remove delegation to ${pendingDeleteGrant.callee.name}? This also removes ${pendingDeleteGrant.callee.slug} from tools.callableAgents.`
+            : "Remove this delegation grant?"
+        }
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => {
+          const grant = pendingDeleteGrant;
+          if (!grant) return;
+          void runDelegationAction(`delete:${grant.id}`, () => delegatedAgents.onDeleteGrant(grant));
+          setPendingDeleteGrant(null);
+        }}
+      />
+      <ConfirmDialog
+        open={pendingBulkAgentDelete}
+        onOpenChange={setPendingBulkAgentDelete}
+        title="Delete delegation grants"
+        description="Remove all selected delegated agents from grants and tools.callableAgents?"
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => {
+          setPendingBulkAgentDelete(false);
+          void runDelegationAction("agents-deselect-all", async () => {
+            for (const grant of Array.from(grantBySlug.values())) {
+              await delegatedAgents.onDeleteGrant(grant);
+            }
+            for (const slug of configMissingGrants) {
+              await delegatedAgents.onRemoveConfigEntry(slug);
+            }
+          });
+        }}
+      />
+    </>
+  ) : null;
+
   /* ── render ──────────────────────────────────────────────────────── */
   if (large) {
     return (
       <div ref={rootRef} className={`flex flex-col min-h-0${largeHeight ? "" : " flex-1"}`} style={largeHeight ? { height: largeHeight } : undefined}>
+        {delegationConfirmDialogs}
         <div className="shrink-0 overflow-y-auto px-1 py-1 space-y-3 border-b border-xyne-border-subtle" style={{ maxHeight: "220px" }}>
           {showCaption && <SectionCaption friendly="Toolbox" technical="tools" />}
           {researchBlock}
@@ -779,7 +1043,7 @@ export function ToolboxPicker({
                   const activeMcp = !globalSearch ? mcpEntries.find(([s]) => s === toolTab) : null;
                   const activeCustom = !globalSearch ? availableTools.customGroups.find((g) => g.source === toolTab) : null;
 
-                  const renderGroup = (title: string, chips: React.ReactNode[], selCount: number, totalCount: number, onSelectAll?: () => void, allSelected?: boolean) => (
+                  const renderGroup = (title: string, chips: React.ReactNode[], selCount: number, totalCount: number, onSelectAll?: () => void, allSelected?: boolean, beforeChips?: React.ReactNode) => (
                     <div className="mb-6 last:mb-0">
                       <div className="flex items-center gap-2 mb-2.5">
                         <h3 className="text-[12px] font-semibold uppercase tracking-[0.06em] text-xyne-fg-tertiary">{title}</h3>
@@ -790,6 +1054,7 @@ export function ToolboxPicker({
                           </button>
                         )}
                       </div>
+                      {beforeChips}
                       <div className="flex flex-wrap gap-1.5">{chips}</div>
                     </div>
                   );
@@ -797,6 +1062,9 @@ export function ToolboxPicker({
                   const subagentChips = showSubagents
                     ? availableTools.subagents.filter((sa) => toolMatchesSearch(sa.name)).map((sa) => makeChip(sa.name, `${SUBAGENT_EMOJI[sa.name] ?? "🤖"} ${sa.name}`, sa.name, value.subagents.includes(sa.name), "read", () => toggle("subagents", sa.name)))
                     : [];
+                  const showAgents = !!delegatedAgents && (globalSearch || toolTab === "all" || toolTab === "agents") && (agentOptions.length > 0 || isOrchestratorTier);
+                  const agentChips = showAgents && !isOrchestratorTier ? agentOptions.filter(agentMatchesSearch).map(makeAgentChip) : [];
+                  const allAgentsSelected = agentOptions.length > 0 && agentOptions.every((a) => configAgentSlugs.has(a.slug) || grantBySlug.has(a.slug));
 
                   const mcpSections = (activeMcp ? [activeMcp] : (globalSearch || toolTab === "all" || toolTab === "integrations") ? mcpEntries : []).map(([source, tools]) => {
                     const matched = tools.filter((t) => toolMatchesSearch(t.name));
@@ -835,7 +1103,7 @@ export function ToolboxPicker({
                     return { label, chips, selCount, totalCount: g.tools.length, onSelectAll: () => toggleCustomGroup(slugs, allSelected), allSelected };
                   });
 
-                  const hasAnything = subagentChips.length > 0 || mcpSections.some((s) => s.chips.length > 0) || customSections.some((s) => s.chips.length > 0);
+                  const hasAnything = subagentChips.length > 0 || agentChips.length > 0 || (showAgents && isOrchestratorTier) || mcpSections.some((s) => s.chips.length > 0) || customSections.some((s) => s.chips.length > 0);
                   if (!hasAnything) {
                     return <p className="py-8 text-center text-[13px] text-xyne-fg-tertiary" role="status">{searchQ ? `No tools match "${toolSearch}"` : "No tools in this category."}</p>;
                   }
@@ -845,6 +1113,23 @@ export function ToolboxPicker({
                   return (
                     <div>
                       {showSubagents && subagentChips.length > 0 && renderGroup("Subagents", subagentChips, value.subagents.length, availableTools.subagents.length, () => toggleAll("subagents", availableTools.subagents.map((sa) => sa.name)), subagentAllSel)}
+                      {showAgents && (agentChips.length > 0 || delegationWarnings || isOrchestratorTier) && renderGroup(
+                        "Agents",
+                        agentChips,
+                        isOrchestratorTier ? agentOptions.length : selectedAgentCount,
+                        agentOptions.length,
+                        isOrchestratorTier ? undefined : () => handleAgentBulkToggle(allAgentsSelected),
+                        allAgentsSelected,
+                        <>
+                          {orchestratorAgentsNote}
+                          {!isOrchestratorTier && delegatedAgents.loading && (
+                            <p className="mb-3 rounded-lg border border-xyne-border-subtle bg-xyne-surface px-3 py-2 text-[12px] text-xyne-fg-tertiary">
+                              Loading delegation grants…
+                            </p>
+                          )}
+                          {!isOrchestratorTier && delegationWarnings}
+                        </>,
+                      )}
                       {mcpSections.map(({ source, chips, selCount, totalCount, onSelectAll, allSelected }) => chips.length > 0 && renderGroup(formatServerLabel(source), chips, selCount, totalCount, onSelectAll, allSelected))}
                       {customSections.map(({ label, chips, selCount, totalCount, onSelectAll, allSelected }) => chips.length > 0 && renderGroup(label, chips, selCount, totalCount, onSelectAll, allSelected))}
                     </div>
@@ -904,10 +1189,25 @@ export function ToolboxPicker({
                         <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-xyne-fg-tertiary">{grp.label}</span>
                         <span className="text-[10px] tabular-nums text-xyne-fg-tertiary">{grp.items.length}</span>
                       </div>
-                      {grp.items.map(({ label, key, riskLevel, onRemove }) => (
-                        <div key={key} role="listitem" className="flex items-center gap-2 px-5 py-1.5 hover:bg-xyne-surface-subtle group transition-colors">
+                      {grp.items.map(({ label, key, riskLevel, badge, status, onRemove }) => (
+                        <div
+                          key={key}
+                          role="listitem"
+                          title={status === "pending" ? `waiting for ${label}'s owner to approve` : undefined}
+                          className={`group flex items-center gap-2 px-5 py-1.5 transition-colors hover:bg-xyne-surface-subtle ${
+                            status === "pending" ? "border-y border-dashed border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-900/10" : ""
+                          }`}
+                        >
                           <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${riskDotCls(riskLevel)}`} aria-hidden="true" />
                           <span className="flex-1 min-w-0 truncate text-[12px] text-xyne-fg-primary">{label}</span>
+                          {badge && (
+                            <AgentHeavyweightBadge compact />
+                          )}
+                          {status === "pending" && (
+                            <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.04em] text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                              pending
+                            </span>
+                          )}
                           <button type="button" onClick={onRemove} aria-label={`Remove ${label}`} className="flex-shrink-0 text-xyne-fg-tertiary opacity-0 group-hover:opacity-100 hover:text-red-500 focus-visible:opacity-100 focus-visible:outline-none transition-all">
                             <X size={12} />
                           </button>
@@ -929,6 +1229,7 @@ export function ToolboxPicker({
   // ── COMPACT MODE ──
   return (
     <div ref={rootRef} className="space-y-5">
+      {delegationConfirmDialogs}
       {showCaption && <SectionCaption friendly="Toolbox" technical="tools" />}
       {researchBlock}
       {suggestBlock}
@@ -952,10 +1253,27 @@ export function ToolboxPicker({
                       <span className="text-[10px] tabular-nums text-xyne-fg-tertiary">{grp.items.length}</span>
                     </div>
                     <div className="flex flex-wrap gap-1">
-                      {grp.items.map(({ label, key, riskLevel, onRemove }) => (
-                        <span key={key} role="listitem" className="inline-flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-50 dark:border-indigo-500/50 dark:bg-indigo-900/20 px-2 py-0.5 text-[11px] text-indigo-700 dark:text-indigo-300">
+                      {grp.items.map(({ label, key, riskLevel, badge, status, onRemove }) => (
+                        <span
+                          key={key}
+                          role="listitem"
+                          title={status === "pending" ? `waiting for ${label}'s owner to approve` : undefined}
+                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
+                            status === "pending"
+                              ? "border-dashed border-amber-400 bg-amber-50 text-amber-800 dark:border-amber-500/70 dark:bg-amber-900/20 dark:text-amber-300"
+                              : "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/50 dark:bg-indigo-900/20 dark:text-indigo-300"
+                          }`}
+                        >
                           <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${riskDotCls(riskLevel)}`} aria-hidden="true" />
                           {label}
+                          {badge && (
+                            <AgentHeavyweightBadge compact />
+                          )}
+                          {status === "pending" && (
+                            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.04em] text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                              pending
+                            </span>
+                          )}
                           <button type="button" onClick={onRemove} aria-label={`Remove ${label}`} className="ml-0.5 rounded-full hover:text-red-500 transition-colors focus-visible:outline-none"><X size={10} /></button>
                         </span>
                       ))}
@@ -979,8 +1297,9 @@ export function ToolboxPicker({
             const integrationsCount = mcpEntries.reduce((s, [, tools]) => s + tools.length, 0);
             const builtinCount = availableTools.customGroups.reduce((s, g) => s + g.tools.length, 0);
             const tabs: Tab[] = [
-              { key: "all", label: "All", count: availableTools.subagents.length + integrationsCount + builtinCount },
+              { key: "all", label: "All", count: availableTools.subagents.length + agentOptions.length + integrationsCount + builtinCount },
               { key: "subagents", label: "Subagents", dot: "bg-violet-500", count: availableTools.subagents.length },
+              { key: "agents", label: "Agents", dot: "bg-amber-500", count: agentOptions.length },
               { key: "integrations", label: "MCP Tools", dot: "bg-emerald-500", count: integrationsCount },
               { key: "builtin", label: "Built-in tools", dot: "bg-slate-400", count: builtinCount },
             ].filter((t) => t.count > 0);
@@ -1052,6 +1371,49 @@ export function ToolboxPicker({
                       </button>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {delegatedAgents && (agentOptions.length > 0 || isOrchestratorTier) && (!!searchQ || toolTab === "all" || toolTab === "agents") && (
+            <div>
+              <div className="flex items-center gap-1">
+                <button type="button" onClick={() => toggleSection("agents")} aria-expanded={searchQ ? (isOrchestratorTier || agentOptions.some(agentMatchesSearch)) : expandedSections.has("agents")} aria-controls="toolbox-agents" className="flex flex-1 items-center gap-2 rounded px-1 py-1.5 text-left hover:bg-xyne-surface-subtle transition-colors">
+                  <ChevronRight size={14} className={`flex-shrink-0 text-xyne-fg-tertiary transition-transform duration-150 ${(searchQ ? (isOrchestratorTier || agentOptions.some(agentMatchesSearch)) : expandedSections.has("agents")) ? "rotate-90" : ""}`} aria-hidden="true" />
+                  <span className="text-[13px] font-semibold text-xyne-fg-primary">Agents</span>
+                  <span className="text-[11px] font-normal text-xyne-fg-tertiary">· delegated agents</span>
+                  <span className="ml-auto text-[11px] tabular-nums text-xyne-fg-tertiary">{isOrchestratorTier ? agentOptions.length : selectedAgentCount > 0 ? `${selectedAgentCount}/${agentOptions.length}` : agentOptions.length}</span>
+                </button>
+                {!isOrchestratorTier && (
+                  <button type="button" onClick={() => handleAgentBulkToggle(agentOptions.every((a) => configAgentSlugs.has(a.slug) || grantBySlug.has(a.slug)))} disabled={delegatedAgents.disabled || delegationBusy !== null} className="flex-shrink-0 px-1.5 py-1 text-[11px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary transition-colors disabled:cursor-not-allowed disabled:opacity-50">
+                    {agentOptions.every((a) => configAgentSlugs.has(a.slug) || grantBySlug.has(a.slug)) ? "Deselect" : "Select all"}
+                  </button>
+                )}
+              </div>
+              {(searchQ ? (isOrchestratorTier || agentOptions.some(agentMatchesSearch)) : expandedSections.has("agents")) && (
+                <div id="toolbox-agents" className="pt-2 pl-6" role="group" aria-label="Agents">
+                  {orchestratorAgentsNote}
+                  {!isOrchestratorTier && (
+                  <p className="mb-2 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-500/40 dark:bg-amber-900/20 dark:text-amber-300">
+                    <span aria-hidden="true">⚠️</span>
+                    <span>
+                      Delegated agents run a <strong>full agent loop</strong> — their own prompt, tools, and model — so each
+                      delegation is slow and expensive. Adding an agent you don't own asks its owner for approval first.
+                    </span>
+                  </p>
+                  )}
+                  {!isOrchestratorTier && delegatedAgents.loading && (
+                    <p className="mb-3 rounded-lg border border-xyne-border-subtle bg-xyne-surface px-3 py-2 text-[12px] text-xyne-fg-tertiary">
+                      Loading delegation grants…
+                    </p>
+                  )}
+                  {!isOrchestratorTier && delegationWarnings}
+                  {!isOrchestratorTier && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {agentOptions.filter(agentMatchesSearch).map(makeAgentChip)}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1142,11 +1504,40 @@ export function ToolboxPicker({
             </div>
           )}
 
-          {searchQ && !availableTools.subagents.some((sa) => toolMatchesSearch(sa.name)) && !availableTools.writeTools.some((t) => toolMatchesSearch(t.name)) && !mcpEntries.some(([, tools]) => tools.some((t) => toolMatchesSearch(t.name))) && !availableTools.customGroups.some((g) => g.tools.some((t) => toolMatchesSearch(t.name))) && (
+          {searchQ && !availableTools.subagents.some((sa) => toolMatchesSearch(sa.name)) && !agentOptions.some(agentMatchesSearch) && !availableTools.writeTools.some((t) => toolMatchesSearch(t.name)) && !mcpEntries.some(([, tools]) => tools.some((t) => toolMatchesSearch(t.name))) && !availableTools.customGroups.some((g) => g.tools.some((t) => toolMatchesSearch(t.name))) && (
             <p className="py-6 text-center text-[13px] text-xyne-fg-tertiary" role="status">No tools match &ldquo;{toolSearch}&rdquo;</p>
           )}
         </>
       ) : <p className="text-[13px] text-xyne-fg-muted">Failed to load tools.</p>}
+    </div>
+  );
+}
+
+function DelegationMismatchWarning({
+  text,
+  actionLabel,
+  busy,
+  disabled,
+  onClick,
+}: {
+  text: string;
+  actionLabel: string;
+  busy: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-xyne-warning-border bg-xyne-warning-bg px-3 py-2 text-[12px] text-xyne-warning-fg">
+      <AlertTriangle size={14} className="shrink-0" />
+      <span className="min-w-0 flex-1">{text}</span>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled || busy}
+        className="shrink-0 rounded-full border border-xyne-warning-border bg-xyne-surface px-2.5 py-1 text-[11px] font-medium text-xyne-fg-primary transition-colors hover:bg-xyne-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {busy ? "Fixing…" : actionLabel}
+      </button>
     </div>
   );
 }

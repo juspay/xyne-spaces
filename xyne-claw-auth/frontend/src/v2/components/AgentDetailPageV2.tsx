@@ -11,7 +11,7 @@ import {
   getAvailableTools, listSkills,
 } from "../../lib/api";
 import { toolColor } from "../utils";
-import type { Agent, ScheduledJob, ScheduledJobRun } from "../../lib/types";
+import type { Agent, AgentLight, ScheduledJob, ScheduledJobRun } from "../../lib/types";
 import { JobCard, RunCard, StatusBadge } from "./common/JobRunCards";
 import { ChainEditor } from "./common/ChainEditor";
 import { MemoryTab } from "./MemoryTab";
@@ -537,7 +537,7 @@ export function AgentDetailPageV2({ userId, isAdmin }: Props) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
   const [runs, setRuns] = useState<ScheduledJobRun[]>([]);
-  const [allAgents, setAllAgents] = useState<Agent[]>([]);
+  const [allAgents, setAllAgents] = useState<AgentLight[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("jobs");

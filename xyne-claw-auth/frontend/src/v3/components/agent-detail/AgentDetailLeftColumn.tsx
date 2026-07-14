@@ -17,10 +17,10 @@ import {
   ArrowDownIcon,
   PencilSimpleIcon,
 } from "@phosphor-icons/react";
-import type { Agent } from "../../../lib/types";
+import type { Agent, AgentLight } from "../../../lib/types";
 import { PromptVersionHistory } from "../../../components/PromptVersionHistory";
 import type { AgentPermissions } from "../../lib/agentPermissions";
-import type { ClaudeModelInfo, AvailableTools, Skill, ProviderCredential, SandboxRepoOption, SbxGitRepoOption, ResearchAgentOption } from "../../../lib/api";
+import type { AgentDelegationGrant, ClaudeModelInfo, AvailableTools, DelegationIdentityMode, Skill, ProviderCredential, SandboxRepoOption, SbxGitRepoOption, ResearchAgentOption } from "../../../lib/api";
 import { generateOutputFormat } from "../../../lib/api";
 import type { AgentProvider } from "../../hooks/useAgents";
 import type { AgentToolSelection } from "../ToolPickerDialog";
@@ -1461,6 +1461,14 @@ interface Props {
   draftTools: AgentToolSelection;
   onDraftToolsChange: Dispatch<SetStateAction<AgentToolSelection>>;
   availableTools: AvailableTools | null;
+  allAgents: AgentLight[];
+  delegationGrants: AgentDelegationGrant[];
+  delegationLoading: boolean;
+  onAddDelegationGrant: (calleeSlug: string, identityMode: DelegationIdentityMode) => Promise<void>;
+  onDeleteDelegationGrant: (grant: AgentDelegationGrant) => Promise<void>;
+  onAddDelegationConfigEntry: (calleeSlug: string) => Promise<void>;
+  onCreateDelegationGrantForConfig: (calleeSlug: string) => Promise<void>;
+  onRemoveDelegationConfigEntry: (calleeSlug: string) => Promise<void>;
 
   // Skills
   draftSkillIds: string[];
@@ -1569,7 +1577,6 @@ interface Props {
   onDraftAutoGoalChange: (v: boolean) => void;
 
   // Dialog callbacks
-  onOpenToolPicker: () => void;
   onOpenSkillPicker: () => void;
   /** Opens the RenameHandleDialog. Only shown to the owner — admins use
       their own moderation path; contributors can't rename. */
@@ -1662,6 +1669,14 @@ export function AgentDetailLeftColumn({
   draftTools,
   onDraftToolsChange,
   availableTools,
+  allAgents,
+  delegationGrants,
+  delegationLoading,
+  onAddDelegationGrant,
+  onDeleteDelegationGrant,
+  onAddDelegationConfigEntry,
+  onCreateDelegationGrantForConfig,
+  onRemoveDelegationConfigEntry,
   draftSkillIds,
   onToggleSkill,
   availableSkills,
@@ -1709,7 +1724,6 @@ export function AgentDetailLeftColumn({
   draftOutputRequireTools,
   onDraftOutputRequireToolsChange,
   sandboxRepoOptions,
-  onOpenToolPicker,
   onOpenSkillPicker,
   onRequestRenameHandle,
 }: Props) {
@@ -1765,7 +1779,7 @@ export function AgentDetailLeftColumn({
    *  can wire triggers without leaving the tab. */
   const [focusedSubagent, setFocusedSubagent] = useState<string | null>(null);
 
-  const totalTools = draftTools.subagents.length + draftTools.direct.length + draftTools.custom.length + draftTools.gateway.length;
+  const totalTools = draftTools.subagents.length + draftTools.direct.length + draftTools.custom.length + draftTools.gateway.length + draftTools.callableAgents.length;
   const totalSubagents = availableTools?.subagents.length ?? 0;
   const totalWriteTools = availableTools?.writeTools.length ?? 0;
   const totalMcpTools = availableTools?.customGroups.flatMap((g) => g.tools).length ?? 0;
@@ -1799,7 +1813,7 @@ export function AgentDetailLeftColumn({
         if (integrationToolSelected(intg, t, draftTools)) enabledIntegrationTools++;
       }
     }
-    const totalEnabled = draftTools.subagents.length + enabledIntegrationTools;
+    const totalEnabled = draftTools.subagents.length + draftTools.callableAgents.length + enabledIntegrationTools;
     const totalAvailable = availableTools.subagents.length + totalIntegrationTools;
     return { totalEnabled, totalAvailable };
   }, [availableTools, draftTools]);
@@ -2118,10 +2132,23 @@ export function AgentDetailLeftColumn({
           availableTools={availableTools}
           loading={!availableTools}
           value={draftTools}
-          onChange={(next) => onDraftToolsChange((prev) => ({ ...prev, ...next, gateway: next.gateway ?? prev.gateway }))}
+          onChange={(next) => onDraftToolsChange((prev) => ({ ...prev, ...next, gateway: next.gateway ?? prev.gateway, callableAgents: next.callableAgents ?? prev.callableAgents }))}
           largeHeight="560px"
           showCaption={false}
           suggestContext={{ systemPrompt: prompt, description: agent.description ?? undefined }}
+          delegatedAgents={permissions.role === "owner" ? {
+            currentAgentSlug: agent.slug,
+            isOrchestratorTier: agent.delegationTier === "orchestrator",
+            agents: allAgents,
+            grants: delegationGrants,
+            loading: delegationLoading,
+            disabled: !permissions.canEdit,
+            onAddGrant: onAddDelegationGrant,
+            onDeleteGrant: onDeleteDelegationGrant,
+            onAddConfigEntry: onAddDelegationConfigEntry,
+            onCreateGrantForConfig: onCreateDelegationGrantForConfig,
+            onRemoveConfigEntry: onRemoveDelegationConfigEntry,
+          } : undefined}
         />
       </div>
       )}

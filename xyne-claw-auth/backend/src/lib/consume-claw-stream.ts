@@ -16,7 +16,7 @@
 //
 // Auth: same `x-s2s-key` header that the legacy POST path uses. No handshake.
 
-import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus } from "xyne-claw-shared";
+import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo } from "xyne-claw-shared";
 
 export interface ClawStreamHandlers {
   onStarted?: (sessionId: string) => void | Promise<void>;
@@ -25,9 +25,16 @@ export interface ClawStreamHandlers {
   onTextDelta?: (sessionId: string, delta: string) => void | Promise<void>;
   onAttachment?: (sessionId: string, attachment: Extract<ClawStreamEvent, { event: "attachment" }>["attachment"]) => void | Promise<void>;
   onSandboxPreview?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "sandbox-preview" }>["payload"]) => void | Promise<void>;
+  onPlan?: (sessionId: string, todos: Todo[]) => void | Promise<void>;
   onProgressLabel?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "progress-label" }>["payload"]) => void | Promise<void>;
   onDebug?: (sessionId: string, debugEvent: unknown) => void | Promise<void>;
   onCancelled?: (sessionId: string, reason: string | undefined) => void | Promise<void>;
+  /** A terminal `error` frame. The /internal/run proxy injects one of these
+   *  (carrying the real ECONNRESET / body-timeout / pod-death reason) when the
+   *  upstream claw stream breaks, then still closes the response cleanly — so
+   *  without an explicit handler the failure reason is silently discarded and
+   *  the stream just looks like it "ended without a done frame". */
+  onError?: (sessionId: string | undefined, error: string) => void | Promise<void>;
   /** Called for every frame regardless of type — useful for seq tracking /
    *  drop detection / observability sinks that want everything. */
   onAny?: (event: ClawStreamEvent) => void;
@@ -54,6 +61,15 @@ export interface ConsumeClawStreamResult {
   eventCount: number;
   /** Highest seq observed. -1 if no frames arrived. */
   lastSeq: number;
+  /** The reason from a terminal `error` frame, if one arrived before EOF (the
+   *  real transport/lifecycle failure the /internal/run proxy injects). This is
+   *  what lets a missing-`done` close be reported with its actual cause instead
+   *  of the generic "ended without a done frame". Undefined if no error frame. */
+  errorReason: string | undefined;
+  /** The `event` name of the last frame parsed before EOF. Lets a caller tell
+   *  "ended right after started" from "ended after an error frame" from "ended
+   *  mid-delta" without re-plumbing every event. Undefined if no frames. */
+  lastEventName: string | undefined;
 }
 
 export async function consumeClawStream(opts: ConsumeClawStreamOptions): Promise<ConsumeClawStreamResult> {
@@ -97,6 +113,8 @@ export async function consumeAlreadyOpenStream(
   let lastSeq = -1;
   let expectedSeq = 0;
   let result: ClawDoneStatus | undefined;
+  let errorReason: string | undefined;
+  let lastEventName: string | undefined;
 
   const reader = body.getReader();
   try {
@@ -114,10 +132,13 @@ export async function consumeAlreadyOpenStream(
           lastSeq = event.seq;
           expectedSeq = event.seq + 1;
         }
+        lastEventName = event.event;
         try { handlers.onAny?.(event); } catch (err) { logHandlerError("onAny", err); }
         await dispatch(event, handlers);
         if (event.event === "done") {
           result = event.result;
+        } else if (event.event === "error") {
+          errorReason = event.error;
         }
       }
     }
@@ -125,7 +146,7 @@ export async function consumeAlreadyOpenStream(
     try { reader.releaseLock(); } catch { /* ignore */ }
   }
 
-  return { result, eventCount, lastSeq };
+  return { result, eventCount, lastSeq, errorReason, lastEventName };
 }
 
 async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): Promise<void> {
@@ -149,6 +170,9 @@ async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): P
       case "sandbox-preview":
         await handlers.onSandboxPreview?.(event.sessionId, event.payload);
         return;
+      case "plan":
+        await handlers.onPlan?.(event.sessionId, event.todos);
+        return;
       case "progress-label":
         await handlers.onProgressLabel?.(event.sessionId, event.payload);
         return;
@@ -158,8 +182,10 @@ async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): P
       case "cancelled":
         await handlers.onCancelled?.(event.sessionId, event.reason);
         return;
-      case "done":
       case "error":
+        await handlers.onError?.(event.sessionId, event.error);
+        return;
+      case "done":
         return;
     }
   } catch (err) {
@@ -248,6 +274,9 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
         },
         onSandboxPreview: async (sessionId, payload) => {
           await postProgress({ sessionId, ...payload });
+        },
+        onPlan: async (sessionId, todos) => {
+          await postProgress({ sessionId, kind: "plan", todos });
         },
         onProgressLabel: async (sessionId, payload) => {
           await postProgress({ sessionId, ...payload });

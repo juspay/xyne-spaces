@@ -11,8 +11,9 @@ import {
   WarningCircleIcon,
   FloppyDiskIcon,
   PencilSimpleIcon,
+  ShareNetworkIcon,
 } from "@phosphor-icons/react";
-import type { Agent } from "../../../../lib/types";
+import type { Agent, AgentLight } from "../../../../lib/types";
 import { useSnackbar } from "../../ui/Snackbar";
 import { Menu, MenuItem } from "../../ui/Menu";
 import { Dialog } from "../../ui/Dialog";
@@ -22,6 +23,8 @@ import {
   listAgentProviderCredentials,
   setAgentProviderCredential,
   deleteAgentProviderCredential,
+  shareAgentProviderCredential,
+  listAgents,
   startAgentCodexOauth,
   exchangeAgentCodexOauth,
   listAgentCodexModels,
@@ -36,7 +39,7 @@ import { SpacesDefaultRowV3 } from "./SpacesDefaultRowV3";
  * kept untouched in state + payloads; only what the user reads changes.
  * ───────────────────────────────────────────────────────────────────── */
 
-type ProviderKey = "codex" | "claude" | "copilot" | "openrouter" | "spaces";
+type ProviderKey = "codex" | "claude" | "copilot" | "openrouter" | "litellm" | "spaces";
 
 const PROVIDER_DISPLAY: Record<string, string> = {
   spaces: "Spaces",
@@ -44,6 +47,7 @@ const PROVIDER_DISPLAY: Record<string, string> = {
   claude: "Anthropic Claude",
   codex: "OpenAI Codex",
   openrouter: "OpenRouter",
+  litellm: "LiteLLM (own key)",
 };
 
 const AUTH_TYPE_DISPLAY: Record<string, string> = {
@@ -51,7 +55,7 @@ const AUTH_TYPE_DISPLAY: Record<string, string> = {
   oauth_token: "OAuth",
 };
 
-const ALL_PROVIDERS: ProviderKey[] = ["codex", "claude", "copilot", "openrouter", "spaces"];
+const ALL_PROVIDERS: ProviderKey[] = ["codex", "claude", "copilot", "openrouter", "litellm", "spaces"];
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -141,7 +145,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({
-    provider: "codex" as "copilot" | "claude" | "codex" | "openrouter",
+    provider: "codex" as "copilot" | "claude" | "codex" | "openrouter" | "litellm",
     apiKey: "",
     model: "",
     baseUrl: "",
@@ -173,6 +177,55 @@ export function ProviderTabV3({ agent, userId }: Props) {
   const [claudeCode, setClaudeCode] = useState("");
   const [claudeBusy, setClaudeBusy] = useState(false);
   const [claudeErr, setClaudeErr] = useState<string | null>(null);
+
+  // Share-to-agents dialog. Promotes this agent's credential into an
+  // org-level shared credential (one OAuth session) and binds selected
+  // agents to it — the fix for per-agent token copies of one ChatGPT
+  // account invalidating each other on every re-auth.
+  const [shareProvider, setShareProvider] = useState<string | null>(null);
+  const [shareName, setShareName] = useState("");
+  const [shareAgents, setShareAgents] = useState<AgentLight[] | null>(null);
+  const [shareSelected, setShareSelected] = useState<Set<string>>(new Set());
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareErr, setShareErr] = useState<string | null>(null);
+
+  const openShare = (c: AgentProviderCredentialStatus) => {
+    setShareProvider(c.provider);
+    setShareName(c.sharedCredentialName ?? `${PROVIDER_DISPLAY[c.provider] ?? c.provider} (shared)`);
+    setShareSelected(new Set());
+    setShareErr(null);
+    setShareAgents(null);
+    void listAgents()
+      .then((all) => setShareAgents(all.filter((a) => a.id !== agent.id && a.enabled)))
+      .catch((err) => setShareErr(err instanceof Error ? err.message : "Failed to load agents"));
+  };
+
+  const submitShare = async () => {
+    if (!shareProvider || shareSelected.size === 0) return;
+    setShareBusy(true);
+    setShareErr(null);
+    try {
+      const { results } = await shareAgentProviderCredential(agent.slug, shareProvider, {
+        name: shareName.trim() || undefined,
+        agentIds: [...shareSelected],
+      });
+      const ok = results.filter((r) => r.ok);
+      const failed = results.filter((r) => !r.ok);
+      showSnackbar({
+        variant: failed.length === 0 ? "success" : "error",
+        title:
+          failed.length === 0
+            ? `Shared with ${ok.length} agent(s)`
+            : `Shared with ${ok.length}, failed for ${failed.map((f) => f.slug ?? f.agentId).join(", ")} (${failed[0]?.error ?? "error"})`,
+      });
+      setShareProvider(null);
+      await reload();
+    } catch (err) {
+      setShareErr(err instanceof Error ? err.message : "Failed to share credential");
+    } finally {
+      setShareBusy(false);
+    }
+  };
 
   // Codex model list — fetched after a codex credential exists on the agent.
   // The OAuth bundle is required to hit ChatGPT backend's /codex/models, so
@@ -255,6 +308,54 @@ export function ProviderTabV3({ agent, userId }: Props) {
     }, 400);
     return () => { cancelled = true; clearTimeout(t); };
   }, [form.provider, form.apiKey, hasClaudeCred, agent.slug, userId]);
+
+  // LiteLLM model list — lists the models the entered key can access on the
+  // proxy (POST /provider-credentials/litellm/models). Fetched with the just-
+  // typed key + base URL while adding, or against the saved cred afterwards.
+  // Debounced so we don't hit the proxy on every keystroke of the pasted key.
+  const [litellmModels, setLitellmModels] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [litellmModelsErr, setLitellmModelsErr] = useState<string | null>(null);
+  const hasLitellmCred = creds.some((c) => c.provider === "litellm" && c.configured);
+  useEffect(() => {
+    if (form.provider !== "litellm") {
+      setLitellmModels(null);
+      setLitellmModelsErr(null);
+      return;
+    }
+    const typedKey = form.apiKey.trim();
+    const typedBase = form.baseUrl.trim();
+    // Need a key to list against: either the one being typed, or an already-
+    // saved LiteLLM cred (resolved + decrypted server-side).
+    if (!typedKey && !hasLitellmCred) {
+      setLitellmModels(null);
+      setLitellmModelsErr(null);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const { listAgentLitellmModels } = await import("../../../../lib/api");
+          // Just-typed key → send it (+ base URL if typed). Otherwise fall back
+          // to the saved cred server-side, optionally overriding its base URL.
+          const payload = typedKey
+            ? { apiKey: typedKey, ...(typedBase ? { baseUrl: typedBase } : {}) }
+            : (typedBase ? { baseUrl: typedBase } : undefined);
+          const rows = await listAgentLitellmModels(agent.slug, payload);
+          if (!cancelled) {
+            setLitellmModels(rows);
+            setLitellmModelsErr(null);
+          }
+        } catch (err) {
+          if (!cancelled) {
+            setLitellmModels(null);
+            setLitellmModelsErr(err instanceof Error ? err.message : "Failed to load LiteLLM models");
+          }
+        }
+      })();
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [form.provider, form.apiKey, form.baseUrl, hasLitellmCred, agent.slug]);
 
   const reload = async () => {
     setLoading(true);
@@ -748,6 +849,15 @@ export function ProviderTabV3({ agent, userId }: Props) {
                         Missing key
                       </span>
                     )}
+                    {c.sharedCredentialId && (
+                      <span
+                        title="This agent uses an org-level shared credential — one login session shared by every bound agent. Re-authenticating it on any bound agent fixes all of them at once."
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-xyne-info-fg bg-xyne-info-bg border border-xyne-info-border rounded-full px-2 py-0.5"
+                      >
+                        <ShareNetworkIcon size={11} weight="bold" />
+                        Shared{c.sharedCredentialName ? ` · ${c.sharedCredentialName}` : ""}
+                      </span>
+                    )}
                   </div>
                   {/* Model + base URL — labeled rows, not concatenated. */}
                   <div className="grid grid-cols-[80px_1fr] gap-x-3 gap-y-0.5 text-[12px]">
@@ -772,6 +882,21 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   </div>
                 </div>
                 <div className="shrink-0 flex items-center gap-1">
+                  {c.configured && (
+                    <button
+                      type="button"
+                      onClick={() => openShare(c)}
+                      title={
+                        c.sharedCredentialId
+                          ? "Bind more agents to this shared credential"
+                          : `Share this ${PROVIDER_DISPLAY[c.provider] ?? c.provider} credential with other agents (one login for all of them)`
+                      }
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-md text-xyne-fg-tertiary hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary transition-colors"
+                      aria-label="Share credential with agents"
+                    >
+                      <ShareNetworkIcon size={14} weight="bold" />
+                    </button>
+                  )}
                   {/* Edit opens the same form prefilled — apiKey stays blank,
                       which setAgentProviderCredential treats as "keep the
                       stored key", so model/baseUrl/authType are editable
@@ -831,7 +956,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                     </button>
                   )}
                 >
-                  {(["codex", "claude", "copilot", "openrouter"] as const).map((key) => (
+                  {(["codex", "claude", "copilot", "openrouter", "litellm"] as const).map((key) => (
                     <MenuItem
                       key={key}
                       selected={form.provider === key}
@@ -843,6 +968,9 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   ))}
                 </Menu>
               </div>
+              {/* LiteLLM is always an API key (Bearer) — no OAuth path — so the
+                  auth-type selector is hidden for it. */}
+              {form.provider !== "litellm" && (
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-semibold text-xyne-fg-secondary">
                   Auth type
@@ -872,6 +1000,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   ))}
                 </Menu>
               </div>
+              )}
               {/* Claude Pro/Max OAuth — point users at `claude setup-token` from
                   Claude Code, mirroring the user-level Settings UI banner. */}
               {form.provider === "claude" && form.authType === "oauth_token" && (
@@ -1060,15 +1189,17 @@ export function ProviderTabV3({ agent, userId }: Props) {
                 </div>
               )}
               {(() => {
-                // Model dropdown sourced from /v1/models — for BOTH codex and
-                // claude (claude reuses the same listClaudeModels the user-level
-                // Settings UI uses). Free-text only when the list is unavailable.
+                // Model dropdown sourced from /v1/models — for codex, claude,
+                // and litellm (each scoped to that credential's key). Free-text
+                // only when the list is unavailable.
                 const modelOptions =
                   form.provider === "codex" ? codexModels :
-                  form.provider === "claude" ? claudeModels : null;
+                  form.provider === "claude" ? claudeModels :
+                  form.provider === "litellm" ? litellmModels : null;
                 const modelOptionsErr =
                   form.provider === "codex" ? codexModelsErr :
-                  form.provider === "claude" ? claudeModelsErr : null;
+                  form.provider === "claude" ? claudeModelsErr :
+                  form.provider === "litellm" ? litellmModelsErr : null;
                 const providerLabel = PROVIDER_DISPLAY[form.provider] ?? form.provider;
                 return (
               <div className="flex flex-col gap-1.5">
@@ -1121,6 +1252,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                 {modelOptionsErr && (
                   <p className="text-[12px] text-xyne-warning-fg">
                     Couldn't load {providerLabel} models — free-text is fine.
+                    <span className="block text-[11px] text-xyne-fg-muted mt-0.5 break-words">{modelOptionsErr}</span>
                   </p>
                 )}
               </div>
@@ -1136,10 +1268,14 @@ export function ProviderTabV3({ agent, userId }: Props) {
                 <input
                   value={form.baseUrl}
                   onChange={(e) => setForm((p) => ({ ...p, baseUrl: e.target.value }))}
-                  placeholder="https://openrouter.ai/api/v1"
+                  placeholder={form.provider === "litellm" ? "blank = platform LiteLLM proxy" : "https://openrouter.ai/api/v1"}
                   className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 text-[13px] text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)]"
                 />
               </div>
+              {/* Reasoning effort is a premium-provider knob (gpt-5.x/o-series/
+                  Claude thinking) — not meaningful for the generic LiteLLM proxy,
+                  so it's hidden for litellm. */}
+              {form.provider !== "litellm" && (
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-semibold text-xyne-fg-secondary">
                   Reasoning effort
@@ -1175,6 +1311,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   How much the model thinks per step. Applies to reasoning models (gpt-5.x, o-series; thinking level for Claude). High adds 5–15s per tool call — it compounds fast in long sessions.
                 </p>
               </div>
+              )}
             </div>
             {error && (
               <div className="mt-3 flex items-start gap-2 rounded-lg border border-xyne-error-border bg-xyne-error-bg px-3 py-2 text-[12px] text-xyne-error-fg">
@@ -1204,6 +1341,68 @@ export function ProviderTabV3({ agent, userId }: Props) {
       </div>
 
       {/* ─── Info Modal — explains the selection / preference order ─── */}
+      <Dialog
+        open={shareProvider !== null}
+        onOpenChange={(open) => { if (!open) setShareProvider(null); }}
+        title={`Share ${shareProvider ? (PROVIDER_DISPLAY[shareProvider] ?? shareProvider) : ""} credential with agents`}
+        description="Selected agents use this same login. One re-connect fixes all of them; separate logins of the same account would keep invalidating each other."
+        maxWidth={520}
+      >
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1 text-[12px] text-xyne-fg-secondary">
+            Shared credential name
+            <input
+              type="text"
+              value={shareName}
+              onChange={(e) => setShareName(e.target.value)}
+              className="rounded-md border border-xyne-border bg-xyne-surface px-2.5 py-1.5 text-[13px] text-xyne-fg-primary"
+              placeholder="Team Codex"
+            />
+          </label>
+          <div className="text-[12px] text-xyne-fg-secondary">Agents to bind</div>
+          <div className="max-h-64 overflow-y-auto rounded-lg border border-xyne-border divide-y divide-xyne-border">
+            {shareAgents === null ? (
+              <div className="px-3 py-4 text-center text-[12px] text-xyne-fg-tertiary">Loading agents…</div>
+            ) : shareAgents.length === 0 ? (
+              <div className="px-3 py-4 text-center text-[12px] text-xyne-fg-tertiary">No other agents available.</div>
+            ) : (
+              shareAgents.map((a) => (
+                <label key={a.id} className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-xyne-surface-sunken">
+                  <input
+                    type="checkbox"
+                    checked={shareSelected.has(a.id)}
+                    onChange={(e) => {
+                      setShareSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(a.id);
+                        else next.delete(a.id);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] text-xyne-fg-primary truncate">{a.name}</span>
+                    <span className="block text-[11px] text-xyne-fg-tertiary truncate">{a.slug}</span>
+                  </span>
+                </label>
+              ))
+            )}
+          </div>
+          <div className="text-[11px] text-xyne-fg-tertiary">
+            You can bind agents you own (admins can bind any). Binding replaces the agent's own {shareProvider ? (PROVIDER_DISPLAY[shareProvider] ?? shareProvider) : ""} credential.
+          </div>
+          {shareErr && <div className="text-[12px] text-xyne-error-fg">{shareErr}</div>}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setShareProvider(null)} disabled={shareBusy}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitShare()} disabled={shareBusy || shareSelected.size === 0}>
+              {shareBusy ? "Sharing…" : `Share with ${shareSelected.size} agent(s)`}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
       <Dialog
         open={infoOpen}
         onOpenChange={setInfoOpen}

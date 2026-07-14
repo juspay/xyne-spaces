@@ -124,6 +124,9 @@ export function NeedsAttentionPanel({
         case "edit-approve":
           navigate("/v3/control-center?tab=approvals");
           return;
+        case "open-agent-requests":
+          navigate(`/v3/agents/${encodeURIComponent(intent.agentSlug)}`);
+          return;
         case "investigate":
           // DT review uses agentSlug "dt" as a sentinel; route accordingly.
           if (intent.agentSlug === "dt") {

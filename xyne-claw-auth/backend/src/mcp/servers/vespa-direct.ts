@@ -132,9 +132,11 @@ export const ACL = {
   simple: (userId: string) =>
     `permissions contains "${esc(userId)}"`,
 
-  // channel (chat_container): a channel the user is a member of, OR a public
-  // channel. chat_container has a direct `permissions` (member list) and an
-  // `isPrivate` bool; public == isPrivate false (same convention as file ACL).
+  // Member-or-public guard, shared by channel (chat_container) AND ticket:
+  // visible if the user is in `permissions` (member list) OR the (owning) channel
+  // is public (`isPrivate` false). chat_container has a direct `permissions` +
+  // `isPrivate` bool; ticket imports both from its channelRef. public == isPrivate
+  // false (same convention as file ACL).
   channel: (userId: string) =>
     `(permissions contains "${esc(userId)}" or isPrivate contains "false")`,
 
@@ -157,6 +159,7 @@ interface SearchResult {
   relevanceScore?: number;
   metadata?: Record<string, unknown>;
   searchContext?: Record<string, unknown>;
+  rawFields?: Record<string, unknown>;
 }
 
 /**
@@ -188,7 +191,10 @@ function str(...vals: unknown[]): string | undefined {
   return undefined;
 }
 
-export function transformHit(hit: Record<string, unknown>): SearchResult {
+export function transformHit(
+  hit: Record<string, unknown>,
+  includeRawFields = false,
+): SearchResult {
   const f = (hit["fields"] ?? {}) as Record<string, unknown>;
   const docType = String(f["docType"] ?? f["sddocname"] ?? "unknown");
   const relevance = typeof hit["relevance"] === "number" ? hit["relevance"] : 0;
@@ -201,15 +207,21 @@ export function transformHit(hit: Record<string, unknown>): SearchResult {
   const textVal = Array.isArray(f["text"]) ? (f["text"] as string[]).join(" ") : String(f["text"] ?? "");
 
   if (docType === "message" || docType === "chat") {
-    title = String(f["channelName"] ?? f["channelId"] ?? "Message");
-    subtitle = String(f["userId"] ?? f["senderId"] ?? "");
+    // chat_message's channel name is `messageChannelName` (not `channelName`), and
+    // the sender's display name is `username` — both were dropped, leaving a raw
+    // channelId title and a nameless sender.
+    title = String(f["messageChannelName"] ?? f["channelName"] ?? f["channelId"] ?? "Message");
+    subtitle = String(f["username"] ?? f["userId"] ?? f["senderId"] ?? "");
     context = textVal;
   } else if (docType === "ticket") {
     title = String(f["title"] ?? f["xyneId"] ?? "Ticket");
     subtitle = String(f["xyneId"] ?? "");
     context = String(f["description"] ?? f["initialMessage"] ?? textVal);
   } else if (docType === "file") {
-    title = String(f["fileName"] ?? f["title"] ?? "File");
+    // fileName comes back with Vespa <hi>…</hi> highlight markup on query
+    // matches — strip it; this string becomes the citation chip label / KB
+    // fileName (a raw `<hi>` label leaks into the deep-linked file chip).
+    title = String(f["fileName"] ?? f["title"] ?? "File").replace(/<\/?hi>/gi, "");
     subtitle = String(f["subApp"] ?? "");
     // file content lives in `description` + `chunks` (both in the default
     // summary; `text` doesn't exist on file). description is the summary
@@ -223,6 +235,8 @@ export function transformHit(hit: Record<string, unknown>): SearchResult {
   } else if (docType === "channel") {
     title = String(f["name"] ?? f["channelName"] ?? "Channel");
     subtitle = String(f["scopeType"] ?? "");
+    // channel body: description + topic (either may be empty).
+    context = [String(f["description"] ?? ""), String(f["topic"] ?? "")].filter(Boolean).join(" — ") || undefined;
   } else if (docType === "attachment") {
     title = String(f["fileName"] ?? f["filename"] ?? f["title"] ?? "Attachment");
     subtitle = String(f["channelName"] ?? "");
@@ -240,6 +254,10 @@ export function transformHit(hit: Record<string, unknown>): SearchResult {
     title = str(String(f["subject"] ?? "").replace(/<\/?hi>/gi, "")) ?? "Email";
     subtitle = String(f["from"] ?? "");
     context = Array.isArray(f["chunks"]) ? (f["chunks"] as string[]).join(" ") : textVal;
+  } else if (docType === "project") {
+    // project's name field (not `title`) is the human label; description is body.
+    title = String(f["name"] ?? f["title"] ?? f["docId"] ?? "Project");
+    context = String(f["description"] ?? textVal);
   } else {
     title = String(f["title"] ?? f["docId"] ?? docType);
     // Surface whatever body the schema/summary provides: description +
@@ -278,6 +296,34 @@ export function transformHit(hit: Record<string, unknown>): SearchResult {
   const viewAccessId = str(f["viewAccessId"], fileMeta["viewAccessId"]);
   const ticketId = docType === "file" ? str(f["ticketId"], fileMeta["ticketId"]) : undefined;
   const mailId = docType === "mail" ? str(f["docId"]) : undefined;
+  // KB collection files carry their deep-link ids denormalized on the doc
+  // (ingest mapper.ts mapFile): clId=root collection, clFd=parent folder,
+  // projectId=owning channel's project. channelId is imported from channelRef.
+  // Surfacing them lets renderDirectResult build the /knowledge-base file URL
+  // (a collection-item citation) instead of a channel-level thread chip.
+  const collectionId = docType === "file" ? str(f["clId"], fileMeta["clId"]) : undefined;
+  const folderId = docType === "file" ? str(f["clFd"], fileMeta["clFd"]) : undefined;
+  const projectId = docType === "file" ? str(f["projectId"], fileMeta["projectId"]) : undefined;
+
+  // Broaden the surfaced fields — the raw doc carries structured attributes
+  // (assignee/creator/board/project names, priority/stage, owner, mime/size, mail
+  // recipients, tags) that the renderer already supports but the transform used to
+  // drop. Include whatever is present so the LLM sees the real metadata, not just
+  // title/context. Arrays are joined; ids kept so the agent can reuse them.
+  const tags = Array.isArray(f["tags"]) ? (f["tags"] as string[]).filter(Boolean).join(", ") : str(f["tags"]);
+  const toList = Array.isArray(f["to"]) ? (f["to"] as string[]).join(", ") : str(f["to"]);
+  const ccList = Array.isArray(f["cc"]) ? (f["cc"] as string[]).join(", ") : str(f["cc"]);
+  const labelList = Array.isArray(f["labels"]) ? (f["labels"] as string[]).join(", ") : str(f["labels"]);
+  // Mail-specific extras (gated on docType so message/ticket — which also have a
+  // `threadId`/`generatedTags` — don't pick these up redundantly). Arrays joined.
+  const isMail = docType === "mail";
+  const join = (v: unknown) => (Array.isArray(v) ? (v as string[]).filter(Boolean).join(", ") : str(v));
+  const bccList = isMail ? join(f["bcc"]) : undefined;
+  const attachNames = isMail ? join(f["attachmentFilenames"]) : undefined;
+  const mailPeople = isMail ? join(f["entityPeople"]) : undefined;
+  const mailProducts = isMail ? join(f["entityProducts"]) : undefined;
+  const mailMerchants = isMail ? join(f["entityMerchants"]) : undefined;
+  const mailGenTags = isMail ? join(f["generatedTags"]) : undefined;
 
   return {
     id: String(f["docId"] ?? hit["id"] ?? ""),
@@ -288,20 +334,67 @@ export function transformHit(hit: Record<string, unknown>): SearchResult {
     relevanceScore: relevance,
     metadata: {
       ...(tsStr ? { timestamp: tsStr } : {}),
+      ...(f["updatedAt"] ? { updatedAt: String(f["updatedAt"]) } : {}),
       ...(f["channelName"] ? { channelName: String(f["channelName"]) } : {}),
       ...(f["status"] ? { status: String(f["status"]) } : {}),
+      ...(f["priority"] ? { priority: String(f["priority"]) } : {}),
+      ...(f["stage"] ? { stage: String(f["stage"]) } : {}),
+      ...(f["messageType"] ? { messageType: String(f["messageType"]) } : {}),
+      // channel attributes.
+      ...(f["visibility"] ? { visibility: String(f["visibility"]) } : {}),
+      ...(typeof f["memberCount"] === "number" ? { memberCount: f["memberCount"] } : {}),
+      ...(f["lastActivityAt"] ? { lastActivityAt: String(f["lastActivityAt"]) } : {}),
     },
     searchContext: {
       ...(channelId ? { channelId } : {}),
       ...(conversationId ? { conversationId } : {}),
       ...(messageId ? { messageId } : {}),
       ...(f["userId"] ? { senderId: String(f["userId"]) } : {}),
+      ...(f["userEmail"] ? { senderEmail: String(f["userEmail"]) } : {}),
+      ...(f["username"] ? { senderName: String(f["username"]) } : {}),
+      ...(typeof f["replyCount"] === "number" && f["replyCount"] > 0 ? { replyCount: f["replyCount"] } : {}),
       ...(f["xyneId"] ? { xyneId: String(f["xyneId"]) } : {}),
       ...(f["subApp"] ? { subApp: String(f["subApp"]) } : {}),
+      // Ticket people (names for display, ids for follow-up queries).
+      ...(f["createdByName"] ? { creatorName: String(f["createdByName"]) } : {}),
+      ...(f["assignedToName"] ? { assigneeName: String(f["assignedToName"]) } : {}),
+      ...(f["closedByName"] ? { closedByName: String(f["closedByName"]) } : {}),
+      ...(f["createdBy"] ? { createdBy: String(f["createdBy"]) } : {}),
+      ...(f["assignedTo"] ? { assignedTo: String(f["assignedTo"]) } : {}),
+      ...(f["boardName"] ? { boardName: String(f["boardName"]) } : {}),
+      ...(f["projectName"] ? { projectName: String(f["projectName"]) } : {}),
+      ...(f["projectId"] ? { projectId: String(f["projectId"]) } : {}),
+      ...(tags ? { tags } : {}),
+      // File owner + type/size.
+      ...(f["ownerId"] ? { ownerId: String(f["ownerId"]) } : {}),
+      ...(f["ownerEmail"] ? { ownerEmail: String(f["ownerEmail"]) } : {}),
+      ...(f["mimeType"] ? { mimeType: String(f["mimeType"]) } : {}),
+      ...(typeof f["fileSize"] === "number" ? { fileSize: f["fileSize"] } : {}),
+      // Mail recipients / labels.
+      ...(toList ? { to: toList } : {}),
+      ...(ccList ? { cc: ccList } : {}),
+      ...(bccList ? { bcc: bccList } : {}),
+      ...(labelList ? { labels: labelList } : {}),
+      // Mail thread ids (to pull the full reply thread), attachments, extracted
+      // entities, and provenance.
+      ...(isMail && f["threadId"] ? { threadId: String(f["threadId"]) } : {}),
+      ...(isMail && f["parentThreadId"] ? { gmailThreadId: String(f["parentThreadId"]) } : {}),
+      ...(attachNames ? { attachments: attachNames } : {}),
+      ...(mailPeople ? { people: mailPeople } : {}),
+      ...(mailProducts ? { products: mailProducts } : {}),
+      ...(mailMerchants ? { merchants: mailMerchants } : {}),
+      ...(mailGenTags ? { generatedTags: mailGenTags } : {}),
+      ...(isMail && f["entity"] ? { entity: String(f["entity"]) } : {}),
+      ...(isMail && f["app"] ? { app: String(f["app"]) } : {}),
+      ...(isMail && f["fileType"] ? { fileType: String(f["fileType"]) } : {}),
       ...(viewAccessId ? { viewAccessId } : {}),
       ...(ticketId ? { ticketId } : {}),
       ...(mailId ? { mailId } : {}),
+      ...(collectionId ? { collectionId } : {}),
+      ...(folderId ? { folderId } : {}),
+      ...(projectId ? { projectId } : {}),
     },
+    ...(includeRawFields ? { rawFields: f } : {}),
   };
 }
 
@@ -384,9 +477,8 @@ async function callVespa(payload: Record<string, unknown>, endpoint: string): Pr
  * - message / attachment / mail / mail_attachment / memory:
  *     permissions contains "<userId>"  (buildChatConditions)
  * - ticket:
- *     permissions contains "<userId>" ONLY when no projectId filter is present.
- *     When projectId is present, project scope is the access control (buildTicketConditions).
- *     yql is passed so we can check whether projectId already appears.
+ *     Member-or-public: `permissions contains "<userId>" or isPrivate contains "false"`
+ *     (permissions + isPrivate are imported from the ticket's channelRef).
  * - file:
  *     per-subApp OR'd guards (buildFileConditions, all-subApps path)
  * - channel (chat_container):
@@ -415,8 +507,9 @@ export function aclConditionForSchema(schema: string, userId: string, _yql: stri
     case "memory":
       return ACL.simple(userId);
     case "ticket":
-      // buildPermGuard always AND's permissions for ticket regardless of projectId.
-      return ACL.simple(userId);
+      // Ticket imports permissions + isPrivate from its channel, so the guard is
+      // the member-or-public-channel rule: in permissions OR the channel is public.
+      return ACL.channel(userId);
     case "file":
       // Use filePerm (buildPermGuard equivalent) not fileAll (buildFileConditions inner conditions).
       // The guard is what main AND's on top; it covers all subApps including RCA.
@@ -511,6 +604,19 @@ function injectAclGuard(yql: string, userId: string): string {
   return tail ? `${head} (${body}) and ${acl} ${tail}` : `${head} (${body}) and ${acl}`;
 }
 
+function injectWorkspaceGuard(yql: string, workspaceId: string): string {
+  const workspace = `workspaceId contains "${esc(workspaceId)}"`;
+  const { whereStart, tailStart } = splitYqlClauses(yql);
+  const tail = yql.slice(tailStart).trim();
+  if (whereStart === null) {
+    const head = yql.slice(0, tailStart).trimEnd();
+    return tail ? `${head} where ${workspace} ${tail}` : `${head} where ${workspace}`;
+  }
+  const head = yql.slice(0, whereStart);
+  const body = yql.slice(whereStart, tailStart).trim();
+  return tail ? `${head} (${body}) and ${workspace} ${tail}` : `${head} (${body}) and ${workspace}`;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export interface DirectSearchResponse {
@@ -538,12 +644,16 @@ export async function queryDirect(
   vespaQueryEndpoint: string,
   rankProfile?: string,
   rankInputs?: Record<string, unknown>,
+  workspaceId?: string,
+  includeRawFields = false,
 ): Promise<DirectSearchResponse> {
   if (!userId) throw new Error("queryDirect: userId is required for ACL enforcement — XYNE_USER_ID is not set.");
+  if (workspaceId !== undefined && !workspaceId.trim()) throw new Error("queryDirect: workspaceId is required for workspace enforcement.");
   // Rewrite any dd/mm/yy date literals the agent wrote inline to epoch ms before
   // ACL injection / execution — the timestamp fields Vespa compares against are ms.
   const datedYql = convertDateLiteralsToMs(yql.trim());
-  const safeYql = injectAclGuard(datedYql, userId);
+  const aclYql = injectAclGuard(datedYql, userId);
+  const safeYql = workspaceId ? injectWorkspaceGuard(aclYql, workspaceId.trim()) : aclYql;
 
   // Rank profile selection:
   //  1. An explicit profile wins — the caller (agent) reads the schema's
@@ -616,14 +726,14 @@ export async function queryDirect(
         groups: groups.map(g => ({
           groupValue: g.groupValue,
           count: g.vespaCount ?? g.hits.length,
-          results: g.hits.map(h => transformHit(h)),
+          results: g.hits.map(h => transformHit(h, includeRawFields)),
         })),
         debug,
       },
     };
   }
 
-  const results = children.map(h => transformHit(h));
+  const results = children.map(h => transformHit(h, includeRawFields));
   return {
     success: true,
     data: {

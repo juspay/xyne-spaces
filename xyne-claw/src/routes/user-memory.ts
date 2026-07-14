@@ -31,7 +31,7 @@ userMemoryRouter.post("/internal/user-memory/distill", validateS2SKey, async (re
       .filter((r): r is UserMemoryRecord =>
         !!r && typeof r === "object" &&
         typeof (r as UserMemoryRecord).id === "string" &&
-        (["message", "call", "canvas"] as const).includes((r as UserMemoryRecord).type) &&
+        (["message", "call", "canvas", "mention_reply"] as const).includes((r as UserMemoryRecord).type) &&
         typeof (r as UserMemoryRecord).ts === "string" &&
         typeof (r as UserMemoryRecord).text === "string",
       );
@@ -41,7 +41,24 @@ userMemoryRouter.post("/internal/user-memory/distill", validateS2SKey, async (re
       return;
     }
 
-    const candidates = await distillUserMemory(body.userId, { from: body.window.from, to: body.window.to }, records);
+    // Existing memories are optional context so the curator can update instead
+    // of duplicate. Shape-filter defensively; a malformed entry just drops.
+    const existingMemories = Array.isArray(body.existingMemories)
+      ? body.existingMemories.filter(
+          (m): m is NonNullable<UserMemoryDistillRequest["existingMemories"]>[number] =>
+            !!m && typeof m === "object" &&
+            typeof (m as { id?: unknown }).id === "string" &&
+            typeof (m as { subsystem?: unknown }).subsystem === "string" &&
+            typeof (m as { text?: unknown }).text === "string",
+        )
+      : [];
+
+    const candidates = await distillUserMemory(
+      body.userId,
+      { from: body.window.from, to: body.window.to },
+      records,
+      existingMemories,
+    );
     res.json({ success: true, candidates });
   } catch (err) {
     log.error(`[user-memory-route] distill failed: ${err instanceof Error ? err.message : String(err)}`);

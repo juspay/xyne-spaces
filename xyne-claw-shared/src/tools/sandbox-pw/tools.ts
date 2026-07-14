@@ -23,6 +23,10 @@ import path from "node:path";
 
 import type { ToolDefinition } from "../types.js";
 import { getOrSpawnSandboxPwClient, evictSandboxPwClient } from "./client.js";
+import { buildSandboxStoreKey } from "../sandbox/tools.js";
+
+import { createLogger } from "../../logger.js";
+const log = createLogger("tools");
 
 // playwright-mcp writes screenshots / page snapshots into a `.playwright-mcp/`
 // directory inside its cwd (we spawn it with cwd=/tmp). The MCP response is
@@ -61,12 +65,12 @@ async function inlinePlaywrightAttachments(text: string): Promise<string> {
       const ext = (file.split(".").pop() ?? "png").toLowerCase();
       const mime = MIME_BY_EXT[ext] ?? "application/octet-stream";
       chosen = { file, base64: buf.toString("base64"), mime };
-      console.log(`[sandbox-pw] inlined ${file} (${buf.length} bytes, ${mime})`);
+      log.info(`[sandbox-pw] inlined ${file} (${buf.length} bytes, ${mime})`);
       break;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       failures.push(`${file}: ${msg}`);
-      console.warn(`[sandbox-pw] failed to inline attachment ${file}: ${msg}`);
+      log.warn(`[sandbox-pw] failed to inline attachment ${file}: ${msg}`);
     }
   }
   if (!chosen) {
@@ -74,7 +78,7 @@ async function inlinePlaywrightAttachments(text: string): Promise<string> {
     // happens when the file lives in the sandbox VM only (different fs mount)
     // or playwright-mcp cleaned it up before we got there. The text result
     // still flows through; only the inline image bytes are lost.
-    console.log(
+    log.info(
       `[sandbox-pw] no inline attachment for ${matches.size} referenced file(s) ` +
       `(text still returned). Files: [${[...matches].join(", ")}]. Read failures: [${failures.join(" | ")}]`,
     );
@@ -275,8 +279,12 @@ function makeSandboxPwTool(spec: PwToolSpec): ToolDefinition {
       if (!context) return "Error: No execution context available.";
       const conversationId = context.meta?.["conversationId"];
       if (!conversationId) return "Error: No conversationId in context.";
-      const agentSlug = context.meta?.["agentSlug"] ?? "";
-      const storeKey = agentSlug ? `${conversationId}_${agentSlug}` : conversationId;
+      const storeKey = buildSandboxStoreKey(
+        context.meta?.["userId"],
+        conversationId,
+        context.meta?.["agentSlug"],
+      );
+      if (!storeKey) return "Error: No userId/conversationId in context.";
 
       // URL validation for navigate. Common upstream bug: chat UI renders a
       // markdown link as visible text "Open link" / similar, parent agent

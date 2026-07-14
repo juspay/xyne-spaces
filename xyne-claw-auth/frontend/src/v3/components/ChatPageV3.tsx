@@ -42,6 +42,7 @@ import { useConversationMeta } from "../hooks/useConversationMeta";
 import {
   deleteChatConversation,
   listChatConversations,
+  listChatLitellmModels,
   listRuns,
   pollChatMessages,
   subscribeLiveConversation,
@@ -55,12 +56,13 @@ import {
   type ConversationSummary,
   type ChatMsg,
   type PendingAction,
+  type PlanTodo,
   type ProviderCredential,
   type ToolInvocation,
 } from "../../lib/api";
 import { ContextPicker } from "../../components/ContextPicker";
 import { DebugDrawer } from "../../components/DebugDrawer";
-import type { Agent } from "../../lib/types";
+import type { AgentLight } from "../../lib/types";
 import { Avatar, nameToHsl } from "./ui/Avatar";
 import { Dialog } from "./ui/Dialog";
 import { SessionExportMenu } from "./ui/SessionExportMenu";
@@ -172,9 +174,73 @@ function ProviderSelect({
   );
 }
 
+/* ── per-chat LiteLLM model switcher ─────────────────────────────────
+ * Lists the models the agent's shared (admin-set) LiteLLM key can access and
+ * lets any chat participant pin one for the current conversation. Empty models
+ * ⇒ renders nothing (agent has no litellm credential). value "" = agent default
+ * (no override). See ChatPageV3's fetch effect + handleSend(modelOverride). */
+function ModelSelect({
+  value,
+  models,
+  defaultModel,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  models: Array<{ id: string; name: string }>;
+  defaultModel: string | null;
+  disabled: boolean;
+  onChange: (model: string) => void;
+}) {
+  const options = useMemo(
+    () => [
+      { value: "", label: defaultModel ? `Default (${defaultModel})` : "Agent default" },
+      ...models.map((m) => ({ value: m.id, label: m.name })),
+    ],
+    [models, defaultModel],
+  );
+  if (models.length === 0) return null;
+  const current = options.find((o) => o.value === value) ?? options[0];
+
+  return (
+    <Menu
+      side="bottom"
+      align="start"
+      trigger={(triggerProps) => (
+        <button
+          {...(triggerProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
+          type="button"
+          data-id="model-select"
+          disabled={disabled}
+          className="flex w-full items-center gap-2 rounded-lg border border-xyne-border-subtle bg-xyne-surface px-3 py-2 text-left text-[13px] transition-colors hover:border-xyne-border hover:bg-xyne-surface-subtle disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-xyne-fg-muted">
+            Model
+          </span>
+          <span className="flex-1 truncate font-medium text-xyne-fg-primary">
+            {current?.label ?? value}
+          </span>
+          <CaretDownIcon size={12} className="shrink-0 text-xyne-fg-tertiary" />
+        </button>
+      )}
+    >
+      {options.map((opt) => (
+        <MenuItem
+          key={opt.value || "__default__"}
+          selected={opt.value === value}
+          onSelect={() => { if (opt.value !== value) onChange(opt.value); }}
+          trailing={opt.value === value ? <CheckIcon size={12} className="text-xyne-brand" /> : undefined}
+        >
+          {opt.label}
+        </MenuItem>
+      ))}
+    </Menu>
+  );
+}
+
 /* ── typing indicator ────────────────────────────────────────────── */
 
-function TypingIndicator({ agent }: { agent: Agent }) {
+function TypingIndicator({ agent }: { agent: AgentLight }) {
   return (
     <div data-id="typing-indicator" className="flex items-end gap-2">
       <div
@@ -212,10 +278,14 @@ function humanizeToolName(raw: string): string {
 //   [clf-abc123_1]  – underscore separator instead of #
 //   [abc123_1]      – missing clf- prefix + underscore separator
 //   【clf-abc123#1】 – full-width brackets ( tolerated )
-// The tool-call id character class allows `.` and `:` in addition to the
-// usual `[A-Za-z0-9_-]`.
-const CLAW_CITATION_TOKEN_RE = /([【\[\u27e6])((?:clf-)?[A-Za-z0-9_.:-]+[#_]\d+)([】\]\u27e7])/g;
-const CLAW_CITATION_HREF_RE = /^cite:((?:clf-)?[A-Za-z0-9_.:-]+)#(\d+)$/;
+// The tool-call id is matched generically — any run of chars that isn't the
+// `#`/`_` separator boundary, whitespace, or a bracket — rather than an
+// allow-list. Tool-call ids vary by provider (OpenAI `call_…`, Responses
+// composite `call_…|fc_…`, function paths `functions.x:2`), and an enumerated
+// charset kept silently dropping new formats. `\d+` still pins the chunk, so
+// malformed ranges like `#1-#10` fail to match and get stripped.
+const CLAW_CITATION_TOKEN_RE = /([【\[\u27e6])((?:clf-)?[^#\s【\[⟦】\]⟧]+[#_]\d+)([】\]\u27e7])/g;
+const CLAW_CITATION_HREF_RE = /^cite:((?:clf-)?[^#\s【\[⟦】\]⟧]+)#(\d+)$/;
 /**
  * Catch-all for malformed clf tokens the LLM sometimes hallucinates.
  * Example: [clf-functions.Xyne_Spaces__spaces-messages:#6#25]
@@ -228,14 +298,14 @@ function stripMalformedCitations(text: string): string {
   return text.replace(CLAW_CITATION_MALFORMED_RE, "");
 }
 
-interface CitationRef {
+export interface CitationRef {
   toolCallId: string;
   chunkIndex: number;
   key: string;
   token: string;
 }
 
-interface CitationChunk {
+export interface CitationChunk {
   key: string;
   token: string;
   toolCallId: string;
@@ -244,14 +314,14 @@ interface CitationChunk {
   title: string;
 }
 
-interface CitationLookup {
+export interface CitationLookup {
   invocation: ToolInvocation;
   messageId: string;
   chunk: CitationChunk;
   chunks: CitationChunk[];
 }
 
-interface CitationSelection {
+export interface CitationSelection {
   key: string;
   ref: CitationRef;
   citationNumber: number;
@@ -279,7 +349,7 @@ function citationNumberKey(toolCallId: string, chunkIndex: number): string {
   return `${normalizeCitationToolCallId(toolCallId)}#${chunkIndex}`;
 }
 
-function buildCitationKeyAliases(toolCallId: string, chunkIndex: number): string[] {
+export function buildCitationKeyAliases(toolCallId: string, chunkIndex: number): string[] {
   const raw = normalizeCitationToolCallId(toolCallId);
   const prefixed = toolCallId.startsWith("clf-") ? toolCallId : `clf-${toolCallId}`;
   return Array.from(new Set([
@@ -312,7 +382,7 @@ function parseClawCitationRef(input: string): CitationRef | null {
     .replace(/[】\]\u27e7]$/, "");
 
   // ── 3. Try canonical strict form: clf-<id>#<chunk> ───────────────────
-  let match = cleaned.match(/^(clf-[A-Za-z0-9_.:-]+)#(\d+)$/);
+  let match = cleaned.match(/^(clf-[^#\s【\[⟦】\]⟧]+)#(\d+)$/);
   if (match) {
     const toolCallId = match[1]!;
     const chunkIndex = Number(match[2]!);
@@ -327,7 +397,7 @@ function parseClawCitationRef(input: string): CitationRef | null {
 
   // ── 4. Fallback: missing clf- prefix ─────────────────────────────────
   // e.g. "abc123#14" or "abc123_14"
-  match = cleaned.match(/^([A-Za-z0-9_.:-]+)[#_](\d+)$/);
+  match = cleaned.match(/^([^#\s【\[⟦】\]⟧]+)[#_](\d+)$/);
   if (match) {
     const rawId = match[1]!;
     // Don't double-prefix if the id already starts with clf-
@@ -434,7 +504,7 @@ function extractInvocationResultText(result: string): string {
   return result;
 }
 
-function parseInvocationCitationChunks(invocation: ToolInvocation): CitationChunk[] {
+export function parseInvocationCitationChunks(invocation: ToolInvocation): CitationChunk[] {
   const lines = extractInvocationResultText(invocation.result ?? "").split(/\r?\n/);
   const chunks: CitationChunk[] = [];
   let current: CitationChunk | null = null;
@@ -449,7 +519,7 @@ function parseInvocationCitationChunks(invocation: ToolInvocation): CitationChun
 
   for (const line of lines) {
     // Tolerant chunk-header regex: accepts clf- prefix (optional), # or _ separator.
-    const match = line.match(/^\s*([【\[\u27e6])((?:clf-)?[A-Za-z0-9_.:-]+)[#_](\d+)([】\]\u27e7])\s*(.*)$/);
+    const match = line.match(/^\s*([【\[\u27e6])((?:clf-)?[^#\s【\[⟦】\]⟧]+)[#_](\d+)([】\]\u27e7])\s*(.*)$/);
     if (match) {
       pushCurrent();
       const toolCallId = ensureClfPrefix(match[2]!);
@@ -474,6 +544,26 @@ function parseInvocationCitationChunks(invocation: ToolInvocation): CitationChun
 
   pushCurrent();
   return chunks;
+}
+
+/**
+ * Flatten a message's CITED sources into a plain-text, numbered list — for the
+ * evals CSV export. Numbering mirrors the inline chips exactly: only tokens
+ * whose backing chunk is present are counted, in first-appearance order, so
+ * `[n]` here matches the rendered `[n]` chip. Returns "" when nothing resolves.
+ * Keeps every citation internal private — the CSV util never touches them.
+ */
+export function citedChunksFor(answer: string, invocations: ToolInvocation[]): string {
+  const allChunks = invocations.flatMap((inv) => parseInvocationCitationChunks(inv));
+  if (allChunks.length === 0) return "";
+  const knownIds = new Set(allChunks.map((c) => normalizeCitationToolCallId(c.toolCallId)));
+  const numbers = buildCitationNumbers(answer, knownIds);
+  if (numbers.size === 0) return "";
+  const chunkByKey = new Map(allChunks.map((c) => [citationNumberKey(c.toolCallId, c.chunkIndex), c] as const));
+  return [...numbers.entries()]
+    .sort((a, b) => a[1] - b[1])
+    .map(([key, n]) => `[${n}] ${chunkByKey.get(key)?.text ?? ""}`.trim())
+    .join("\n");
 }
 
 function CitationChip({
@@ -513,16 +603,22 @@ function CitationChip({
   );
 }
 
-function CitationMarkdown({
+export function CitationMarkdown({
   content,
   invocations,
   selectedCitationKey,
   onOpenCitation,
+  // When true (chat default) tokens whose tool-call id isn't among `invocations`
+  // are stripped. Evals pass false so every [clf-…] token renders as a numbered
+  // chip even when the turn's captured tool invocations don't line up — better a
+  // visible chip than a silently dropped citation.
+  filterUnknownCitations = true,
 }: {
   content: string;
   invocations: ToolInvocation[];
   selectedCitationKey: string | null;
   onOpenCitation: (citation: CitationRef, citationNumber: number, numbers: Map<string, number>) => void;
+  filterUnknownCitations?: boolean;
 }) {
   const knownToolCallIds = useMemo(() => {
     const ids = new Set<string>();
@@ -532,8 +628,8 @@ function CitationMarkdown({
     return ids;
   }, [invocations]);
   const citationNumbers = useMemo(
-    () => buildCitationNumbers(content, knownToolCallIds),
-    [content, knownToolCallIds]
+    () => buildCitationNumbers(content, filterUnknownCitations ? knownToolCallIds : undefined),
+    [content, knownToolCallIds, filterUnknownCitations]
   );
   const linkedContent = useMemo(
     () => linkifyClawCitations(content, citationNumbers),
@@ -576,7 +672,7 @@ function CitationMarkdown({
   );
 }
 
-function CitationPanel({
+export function CitationPanel({
   selection,
   citation,
   width,
@@ -807,14 +903,21 @@ function InvocationItem({
   const isRunning = invocation.status === "running";
   const runningChildren = children?.filter((c) => c.status === "running").length ?? 0;
   const completedChildren = (children?.length ?? 0) - runningChildren;
+  // A subagent spawned with run_in_background: the wrapper tool call returned
+  // immediately, so its live state lives in backgroundState (not status).
+  const isBackground = invocation.background === true;
+  const bgState = invocation.backgroundState;
+  const isBgRunning = isBackground && bgState === "running";
 
-  const containerClass = invocation.isError
+  const containerClass = invocation.isError || bgState === "error"
     ? "border-red-300 bg-red-50 dark:border-red-900/50 dark:bg-red-950/20"
-    : isRunning
-      ? "border-blue-300 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/10"
-      : isSubagent
-        ? "border-purple-300 bg-purple-50 dark:border-purple-900/50 dark:bg-purple-950/10"
-        : "border-xyne-border-subtle bg-xyne-surface-subtle";
+    : isBgRunning
+      ? "border-amber-300 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/10"
+      : isRunning
+        ? "border-blue-300 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/10"
+        : isSubagent
+          ? "border-purple-300 bg-purple-50 dark:border-purple-900/50 dark:bg-purple-950/10"
+          : "border-xyne-border-subtle bg-xyne-surface-subtle";
 
   return (
     <div data-id="invocation-item" className={`rounded-lg border ${containerClass}`}>
@@ -828,10 +931,14 @@ function InvocationItem({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-[12px]">
-            {(isRunning || runningChildren > 0) && (
+            {isBgRunning ? (
+              // Detached background subagent still running — amber pulse, NOT the
+              // blue dot of a blocking tool, so it reads as "fired and moved on".
+              <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-500" />
+            ) : (isRunning || runningChildren > 0) && !isBackground ? (
               <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-            )}
-            {!isRunning && !isSubagent && (
+            ) : null}
+            {!isRunning && !isBgRunning && !isSubagent && (
               <WrenchIcon size={11} className="shrink-0 text-xyne-fg-tertiary" />
             )}
             {invocation.subagentName && (
@@ -840,6 +947,11 @@ function InvocationItem({
               </span>
             )}
             {isSubagent && <RobotIcon size={12} className="text-purple-500" />}
+            {isBackground && (
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                {bgState === "error" ? "bg · failed" : bgState === "completed" ? "bg · done" : "⧗ background"}
+              </span>
+            )}
             <span className="font-medium text-xyne-fg-primary">
               {humanizeToolName(invocation.toolName)}
             </span>
@@ -856,7 +968,7 @@ function InvocationItem({
               </span>
             )}
             <span className="ml-auto font-mono text-[10px] text-xyne-fg-muted">
-              {isRunning ? "running…" : `${invocation.durationMs}ms`}
+              {isRunning || isBgRunning ? "running…" : `${invocation.durationMs}ms`}
             </span>
           </div>
           {!expanded && (
@@ -877,7 +989,7 @@ function InvocationItem({
           <div>
             <div className="mb-0.5 text-xyne-fg-tertiary">Result</div>
             <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-xyne-surface p-2 font-mono text-xyne-fg-secondary">
-              {isRunning ? "⏳ waiting for result..." : invocation.result || "(empty)"}
+              {isRunning ? "⏳ waiting for result..." : isBgRunning ? "⏳ running in background…" : invocation.result || "(empty)"}
             </pre>
           </div>
           {children && children.length > 0 && (
@@ -1109,6 +1221,48 @@ function PendingActionItem({
   );
 }
 
+const PLAN_STATUS_CLASSES: Record<PlanTodo["status"], string> = {
+  pending: "text-xyne-fg-muted",
+  in_progress: "text-xyne-brand",
+  completed: "text-xyne-success-fg",
+  failed: "text-xyne-error-fg",
+};
+
+function PlanStatusIcon({ status }: { status: PlanTodo["status"] }) {
+  if (status === "completed") return <CheckIcon size={13} weight="bold" />;
+  if (status === "failed") return <XIcon size={13} weight="bold" />;
+  if (status === "in_progress") return <ClockIcon size={13} weight="bold" />;
+  return <DotsThreeIcon size={14} weight="bold" />;
+}
+
+function LivePlanCard({ todos }: { todos: PlanTodo[] }) {
+  const done = todos.filter((todo) => todo.status === "completed").length;
+  const failed = todos.filter((todo) => todo.status === "failed").length;
+
+  return (
+    <div className="w-full max-w-[520px] rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 text-[13px] text-xyne-fg-primary shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="font-medium">Plan</span>
+        <span className="text-[11px] text-xyne-fg-muted">
+          {done}/{todos.length} done{failed ? `, ${failed} failed` : ""}
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        {todos.map((todo, index) => (
+          <div key={todo.id || index} className="flex min-w-0 items-start gap-2">
+            <span className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center ${PLAN_STATUS_CLASSES[todo.status]}`}>
+              <PlanStatusIcon status={todo.status} />
+            </span>
+            <span className={`min-w-0 break-words leading-snug ${todo.status === "in_progress" ? "font-medium" : ""}`}>
+              {todo.title}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ── message thread ──────────────────────────────────────────────── */
 
 function MessageThread({
@@ -1119,6 +1273,7 @@ function MessageThread({
   userAbbr,
   streamingMsgId,
   liveInvocations,
+  livePlanTodos,
   liveReasoning,
   invocationsByMsgId,
   reasoningByMsgId,
@@ -1138,10 +1293,11 @@ function MessageThread({
   messages: ChatMsg[];
   sending: boolean;
   toolLabel: string | null;
-  agent: Agent;
+  agent: AgentLight;
   userAbbr: string;
   streamingMsgId: string | null;
   liveInvocations: ToolInvocation[];
+  livePlanTodos: PlanTodo[];
   liveReasoning: string;
   invocationsByMsgId: Map<string, ToolInvocation[]>;
   reasoningByMsgId: Map<string, string>;
@@ -1167,6 +1323,18 @@ function MessageThread({
   const [editingText, setEditingText] = useState("");
   const threadRef = useRef<HTMLDivElement>(null);
   const safeInvocationsByMsgId = invocationsByMsgId ?? new Map<string, ToolInvocation[]>();
+  // Conversation-wide flat union of every turn's tool invocations. Citations are
+  // SESSION-scoped: a follow-up turn frequently re-cites a `[clf-…]` chunk from a
+  // tool call in an EARLIER turn (the tool isn't re-run this turn). CitationMarkdown
+  // gates token rendering on the tool-call ids it's given, so it must see the whole
+  // conversation's invocations — not just the current message's — or cross-turn
+  // tokens get stripped. Resolution (`citationIndex`) is already conversation-wide.
+  const allConversationInvocations = useMemo(() => {
+    const out: ToolInvocation[] = [];
+    for (const list of safeInvocationsByMsgId.values()) out.push(...list);
+    out.push(...liveInvocations);
+    return out;
+  }, [safeInvocationsByMsgId, liveInvocations]);
   const safeReasoningByMsgId = reasoningByMsgId ?? new Map<string, string>();
   const safePendingActionsByMsgId = pendingActionsByMsgId ?? new Map<string, PendingAction[]>();
   // Tracks whether the user is at (or very near) the bottom of the thread.
@@ -1342,6 +1510,7 @@ function MessageThread({
         const msgPendingActions = safePendingActionsByMsgId.get(msg.id) ?? [];
 
         const hasInvocations = msgInvocations.length > 0;
+        const hasPlan = isStream && livePlanTodos.length > 0;
         const hasReasoning = !!msgReasoning && msgReasoning.length > 0;
         const hasText = msg.content.length > 0;
         const showThinkingPill = isStream && !hasInvocations && !hasReasoning && !hasText;
@@ -1375,6 +1544,8 @@ function MessageThread({
                 <ReasoningBlock text={msgReasoning!} streaming={isStream} />
               )}
 
+              {hasPlan && <LivePlanCard todos={livePlanTodos} />}
+
               {hasInvocations && <InvocationBlocks invocations={msgInvocations} />}
 
               {msgPendingActions.length > 0 && (
@@ -1396,7 +1567,7 @@ function MessageThread({
                   <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2">
                     <CitationMarkdown
                       content={msg.content}
-                      invocations={msgInvocations}
+                      invocations={allConversationInvocations}
                       selectedCitationKey={selectedCitationKey}
                       onOpenCitation={onOpenCitation}
                     />
@@ -1491,7 +1662,7 @@ function ConvItem({
   pinned: boolean;
   /** Custom title from localStorage, otherwise the server-derived first-message title. */
   displayTitle: string;
-  agent?: Agent | null;
+  agent?: AgentLight | null;
   onSelect: () => void;
   onTogglePin: () => void;
   onRename: (next: string) => void;
@@ -1674,6 +1845,10 @@ function LeftPanel({
   onPickAgent,
   onClearAgent,
   onProviderChange,
+  litellmModels,
+  litellmDefaultModel,
+  selectedModel,
+  onModelChange,
   onNewConversation,
   onSelectConv,
   onTogglePin,
@@ -1681,14 +1856,18 @@ function LeftPanel({
   onRequestDelete,
   onBrowseAgents,
 }: {
-  activeAgent: Agent | null;
-  agents: Agent[];
+  activeAgent: AgentLight | null;
+  agents: AgentLight[];
   conversations: ConversationWithAgent[];
   convLoading: boolean;
   activeConvId: string | undefined;
   selectedProvider: string;
   providers: ProviderCredential[];
   providerChanging: boolean;
+  litellmModels: Array<{ id: string; name: string }>;
+  litellmDefaultModel: string | null;
+  selectedModel: string;
+  onModelChange: (model: string) => void;
   isPinned: (convId: string) => boolean;
   titleFor: (conv: ConversationWithAgent) => string;
   onPickAgent: () => void;
@@ -1827,6 +2006,13 @@ function LeftPanel({
           providers={providers}
           disabled={!activeAgent || providerChanging}
           onChange={onProviderChange}
+        />
+        <ModelSelect
+          value={selectedModel}
+          models={litellmModels}
+          defaultModel={litellmDefaultModel}
+          disabled={!activeAgent}
+          onChange={onModelChange}
         />
       </div>
 
@@ -2003,7 +2189,7 @@ function CenterHeader({
   onOpenDashboard,
   onOpenDebugger,
 }: {
-  agent: Agent;
+  agent: AgentLight;
   convTitle?: string;
   /** Active conversation id — used to fetch per-conversation token totals. */
   conversationId: string | undefined;
@@ -2520,7 +2706,7 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
  * TODO(agent-recipes): once the schema gains an `agent.starterPrompts` field,
  * prefer those over the heuristic — author-defined beats inferred every time.
  */
-function deriveSamplePrompts(agent: Agent): string[] {
+function deriveSamplePrompts(agent: AgentLight): string[] {
   const tools = agent.tools ?? [];
   const prompts = new Set<string>();
 
@@ -2581,7 +2767,7 @@ function StudioCarousel({
   onSelectAgent,
   onTrySample,
 }: {
-  agents: Agent[];
+  agents: AgentLight[];
   onSelectAgent: (slug: string) => void;
   onTrySample: (slug: string, prompt: string) => void;
 }) {
@@ -2816,7 +3002,7 @@ function EmptyState({
   onSelectAgent,
   onTrySample,
 }: {
-  agents: Agent[];
+  agents: AgentLight[];
   loading: boolean;
   onSelectAgent: (slug: string) => void;
   onTrySample: (slug: string, prompt: string) => void;
@@ -2892,7 +3078,7 @@ function AgentPickerModal({
   onSelect,
   onClose,
 }: {
-  agents: Agent[];
+  agents: AgentLight[];
   loading: boolean;
   onSelect: (slug: string) => void;
   onClose: () => void;
@@ -2989,6 +3175,7 @@ export function ChatPageV3() {
     sending,
     toolLabel,
     invocations: liveInvocations,
+    planTodos: livePlanTodos,
     reasoning: liveReasoning,
     invocationsByMsgId,
     reasoningByMsgId,
@@ -3067,6 +3254,11 @@ export function ChatPageV3() {
   const [providers, setProviders]             = useState<ProviderCredential[]>([]);
   const [selectedProvider, setSelectedProvider] = useState("spaces");
   const [providerChanging, setProviderChanging] = useState(false);
+  // Per-chat LiteLLM model switcher: models the agent's shared key can access,
+  // its configured default, and the currently-picked model ("" = agent default).
+  const [litellmModels, setLitellmModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [litellmDefaultModel, setLitellmDefaultModel] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [leftPanelWidth, setLeftPanelWidth]   = useState<number>(() => {
     try {
       const saved = localStorage.getItem("chat-left-panel-width");
@@ -3287,6 +3479,31 @@ export function ChatPageV3() {
     setSelectedProvider(providerMap[activeAgentSlug ?? ""] ?? "spaces");
   }, [activeAgentSlug, providerMap]);
 
+  /* Load the agent's shared LiteLLM models for the in-chat model switcher, and
+   * reset the per-chat model pick whenever the active agent changes. Empty list
+   * (no litellm credential, or error) ⇒ the picker hides itself. */
+  useEffect(() => {
+    setSelectedModel("");
+    if (!activeAgentSlug || !userId) {
+      setLitellmModels([]);
+      setLitellmDefaultModel(null);
+      return;
+    }
+    let cancelled = false;
+    listChatLitellmModels(activeAgentSlug, userId)
+      .then(({ models, defaultModel }) => {
+        if (cancelled) return;
+        setLitellmModels(models);
+        setLitellmDefaultModel(defaultModel);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLitellmModels([]);
+        setLitellmDefaultModel(null);
+      });
+    return () => { cancelled = true; };
+  }, [activeAgentSlug, userId]);
+
   /* Load conversations when agent changes (specific agent) or on mount (all agents) */
   useEffect(() => {
     if (!userId) {
@@ -3390,9 +3607,11 @@ export function ChatPageV3() {
     const slug = activeAgentSlug;
     const convId = conversationId;
     const close = subscribeLiveConversation(slug, convId, userId, {
-      onSnapshot: ({ inProgress }) => applyLiveEvent(convId, { type: "snapshot", inProgress }),
+      onSnapshot: ({ inProgress, partial }) => applyLiveEvent(convId, { type: "snapshot", inProgress, ...(partial ? { partial } : {}) }),
       onLabel: (label) => applyLiveEvent(convId, { type: "label", toolLabel: label }),
       onInvocation: (inv) => applyLiveEvent(convId, { type: "invocation", toolInvocation: inv }),
+      onTextDelta: (d) => applyLiveEvent(convId, { type: "delta", textDelta: d }),
+      onReasoningDelta: (d) => applyLiveEvent(convId, { type: "delta", reasoningDelta: d }),
       onDone: () => {
         applyLiveEvent(convId, { type: "done" });
         let attempts = 0;
@@ -3520,6 +3739,9 @@ export function ChatPageV3() {
       const { messages: msgs, invocationsByMsgId, reasoningByMsgId } = await pollChatMessages(conv.agentSlug, conv.conversationId);
       loadConversation(msgs, conv.conversationId, invocationsByMsgId, reasoningByMsgId);
       setSelectedCitation(null);
+      // Per-chat model pick doesn't carry across conversations — start each at
+      // the agent default.
+      setSelectedModel("");
       if (switchingAgent) {
         setActiveAgentSlug(conv.agentSlug);
         setInputValue("");
@@ -3545,6 +3767,7 @@ export function ChatPageV3() {
       clear();
       setInputValue("");
       setSelectedCitation(null);
+      setSelectedModel("");
     } else {
       setShowModal(true);
     }
@@ -3631,13 +3854,13 @@ export function ChatPageV3() {
 
   const handleRegenerate = useCallback((assistantMessageId: string) => {
     if (!activeAgentSlug || sending) return;
-    void regenerate(activeAgentSlug, userId, assistantMessageId);
-  }, [activeAgentSlug, sending, regenerate, userId]);
+    void regenerate(activeAgentSlug, userId, assistantMessageId, selectedModel || undefined);
+  }, [activeAgentSlug, sending, regenerate, userId, selectedModel]);
 
   const handleEditUserMessage = useCallback((userMessageId: string, text: string) => {
     if (!activeAgentSlug || sending) return;
-    void editLatestUserMessage(activeAgentSlug, userId, userMessageId, text);
-  }, [activeAgentSlug, sending, editLatestUserMessage, userId]);
+    void editLatestUserMessage(activeAgentSlug, userId, userMessageId, text, selectedModel || undefined);
+  }, [activeAgentSlug, sending, editLatestUserMessage, userId, selectedModel]);
 
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
@@ -3700,6 +3923,8 @@ export function ChatPageV3() {
         await send(activeAgentSlug, userId, placeholderText, {
           attachmentIds: uploadedIds.length > 0 ? uploadedIds : undefined,
           attachedContext: contextSnapshot.length > 0 ? contextSnapshot : undefined,
+          // Per-chat model switch: pin the picked LiteLLM model for this turn.
+          ...(selectedModel ? { modelOverride: selectedModel } : {}),
         });
         listChatConversations(activeAgentSlug, userId)
           .then((convs) => setConversations(convs.map((c) => ({ ...c, agentSlug: activeAgentSlug }))))
@@ -3794,6 +4019,10 @@ export function ChatPageV3() {
             onPickAgent={() => setShowModal(true)}
             onClearAgent={handleClearAgent}
             onProviderChange={handleProviderChange}
+            litellmModels={litellmModels}
+            litellmDefaultModel={litellmDefaultModel}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
             onNewConversation={handleNewConversation}
             onSelectConv={handleSelectConv}
             onTogglePin={handleTogglePin}
@@ -3853,6 +4082,7 @@ export function ChatPageV3() {
                     userAbbr={userAbbr}
                     streamingMsgId={streamingMsgId}
                     liveInvocations={liveInvocations}
+                    livePlanTodos={livePlanTodos}
                     liveReasoning={liveReasoning}
                     invocationsByMsgId={invocationsByMsgId}
                     reasoningByMsgId={reasoningByMsgId}

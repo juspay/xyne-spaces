@@ -8,49 +8,245 @@ datasource db {
 }
 
 model User {
-  id           String   @id
-  email        String   @unique
-  name         String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  connections  UserMcpConnection[]
-  identities   GatewayIdentity[]
-  agents       Agent[]
-  agentConfigs UserAgentConfig[]
-  roles        UserRole[]
-  sharedAgents AgentShare[]
-  sharedSubagents SubagentShare[]
-  skills           Skill[]
-  providerCredentials UserProviderCredentials[]
-  subagentConfigs     UserSubagentConfig[]
-  createdChainWorkflows AgentChainWorkflow[]    @relation("CreatedChainWorkflows")
+  id                    String                     @id
+  email                 String
+  name                  String
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  connections           UserMcpConnection[]
+  identities            GatewayIdentity[]
+  agents                Agent[]
+  agentConfigs          UserAgentConfig[]
+  roles                 UserRole[]
+  sharedAgents          AgentShare[]
+  sharedSubagents       SubagentShare[]
+  skills                Skill[]
+  providerCredentials   UserProviderCredentials[]
+  surfaceAccessTokens   SurfaceAccessToken[]
+  surfaceIdentities     UserSurfaceIdentity[]
+  subagentConfigs       UserSubagentConfig[]
+  createdChainWorkflows AgentChainWorkflow[]       @relation("CreatedChainWorkflows")
   createdChainBindings  ChannelAgentChainBinding[] @relation("CreatedChainBindings")
 
   /// Digital Twin opt-in. Pipeline (backfill + daily curator + recall) is fully
-/// dormant when false — nothing about this user's Spaces data gets read.
-  digitalTwinEnabled       Boolean    @default(false)
-  digitalTwinEnabledAt     DateTime?
+  /// dormant when false — nothing about this user's Spaces data gets read.
+  digitalTwinEnabled                   Boolean               @default(false)
+  digitalTwinEnabledAt                 DateTime?
   /// Optional string appended to the end of every Digital Twin reply
   /// (mention-driven flow). Capped at 500 chars. Empty / null = no suffix.
   /// Typical use: disclaimer ("— sent via Digital Twin"), contact line,
   /// or a "may contain mistakes" footer.
-  digitalTwinResponseSuffix String?
+  digitalTwinResponseSuffix            String?
   /// Per-user memory approval mode. "manual" preserves the existing
   /// review queue; "auto" lets the curator retain high-confidence
   /// candidates immediately while falling back to pending on retain failure.
-  digitalTwinMemoryApprovalMode String @default("manual")
+  digitalTwinMemoryApprovalMode        String                @default("manual")
   /// Minimum curator confidence required when auto-approval is enabled.
-  digitalTwinMemoryAutoApproveMinScore Float @default(0.9)
+  digitalTwinMemoryAutoApproveMinScore Float                 @default(0.9)
   /// Per-source backfill state. JSON shape:
   ///   { messages: { from, to, cursor, complete },
   ///     calls:    { from, to, cursor, complete },
   ///     canvases: { from, to, cursor, complete } }
   /// `cursor` walks newest → oldest; `complete=true` set when cursor crosses `from`.
   /// Restart-resumable: BullMQ jobs re-pick up from cursor on pod restart.
-  digitalTwinBackfillState Json?
-  userMemoryCandidates     UserMemoryCandidate[]
+  digitalTwinBackfillState             Json?
+  userMemoryCandidates                 UserMemoryCandidate[]
 
+  /// Multi-tenancy (phase 1, org-only). Required: every user belongs to exactly
+  /// one org (the "Juspay" default until multi-org ships). Enforced NOT NULL by
+  /// migration `20260705170000_phase1_orgid_notnull` AFTER the backfill filled
+  /// every row. Every user-creation path sets it at insert time (users-jit.ts,
+  /// routes/users.ts). Does NOT change `User.id` (still the Spaces user id).
+  orgId          String
+  org            Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  orgMemberships OrgMember[]
+
+  @@unique([email, orgId])
   @@map("users")
+}
+
+/// Top-level tenant. Phase 1 introduces exactly one org ("Juspay") that every
+/// existing user is backfilled into; multi-org comes later. Additive only —
+/// nothing about agent behavior or the Spaces integration depends on this yet.
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum OrgStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum SurfaceIdentityMode {
+  USER_ID
+  ACCESS_TOKEN
+}
+
+enum SurfaceStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Organization {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  createdBy   String
+  status      OrgStatus @default(ACTIVE)
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  members             OrgMember[]
+  users               User[]
+  agents              Agent[]
+  skills              Skill[]
+  subagentDefinitions SubagentDefinition[]
+  surfaceTenantLinks  SurfaceTenantLink[]
+
+  @@map("organizations")
+}
+
+model Surface {
+  id                     String                @id @default(cuid())
+  key                    String                @unique
+  identityMode           SurfaceIdentityMode
+  supportsUserResolution Boolean               @default(false)
+  capabilities           Json?
+  status                 SurfaceStatus         @default(ACTIVE)
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  connectedSurfaces      ConnectedSurface[]
+  identities             UserSurfaceIdentity[]
+  agents                 SurfaceAgent[]
+  accessTokens           SurfaceAccessToken[]
+
+  @@map("surfaces")
+}
+
+model ConnectedSurface {
+  id              String        @id @default(cuid())
+  orgId           String
+  surfaceId       String
+  surface         Surface       @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
+  surfaceTenantId String        @default("")
+  accessToken     String?       @db.Text
+  refreshToken    String?       @db.Text
+  tokenExpiresAt  DateTime?
+  config          Json?
+  status          SurfaceStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([orgId, surfaceId, surfaceTenantId])
+  @@index([orgId])
+  @@map("connected_surfaces")
+}
+
+model UserSurfaceIdentity {
+  id                 String        @id @default(cuid())
+  surfaceId          String
+  surface            Surface       @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
+  surfaceWorkspaceId String        @default("")
+  surfaceUserId      String
+  orgId              String
+  userId             String?
+  user               User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  status             SurfaceStatus @default(ACTIVE)
+  lastSeenAt         DateTime?
+  linkedAt           DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@unique([surfaceId, surfaceWorkspaceId, surfaceUserId])
+  @@index([orgId])
+  @@index([userId])
+  @@map("user_surface_identities")
+}
+
+model SurfaceAgent {
+  id               String   @id @default(cuid())
+  agentId          String
+  agent            Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  surfaceId        String
+  surface          Surface  @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
+  surfaceTenantId  String   @default("")
+  surfaceChannelId String?
+  signingSecret    String?  @db.Text
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([agentId, surfaceId, surfaceTenantId])
+  @@index([surfaceId])
+  @@map("surface_agents")
+}
+
+model SurfaceAccessToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId      String
+  surfaceId  String
+  surface    Surface   @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
+  client     String?
+  name       String?
+  tokenHash  String    @unique
+  prefix     String
+  scopes     String[]  @default([])
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([userId, surfaceId])
+  @@index([orgId])
+  @@map("surface_access_tokens")
+}
+
+/// Maps an external surface's tenant (today: a Spaces workspace, i.e.
+/// public.users.workspaceId) to a claw Organization. One org can have several
+/// tenant links (a Spaces org has several workspaces), so this is a table, not
+/// a column. Used by JIT (users-jit.ts) to place a newly-mirrored user in the
+/// RIGHT claw org instead of the hardcoded default — the prerequisite for a
+/// second tenant (e.g. NammaYatri) sharing one Spaces DB.
+/// `surfaceType` generalizes it: Slack/Teams later = an INSERT with a new
+/// surfaceType, not a schema migration. Narrow forerunner of plan.md's
+/// ConnectedSurface (which adds per-surface credentials — needed only for
+/// surfaces that don't share our DB).
+model SurfaceTenantLink {
+  id              String       @id @default(cuid())
+  surfaceType     String       @default("spaces") /// "spaces" | "slack" | "teams" | ...
+  surfaceTenantId String /// Spaces workspaceId, Slack team id (T123…), ...
+  orgId           String
+  organization    Organization @relation(fields: [orgId], references: [id])
+  createdAt       DateTime     @default(now())
+
+  @@unique([surfaceType, surfaceTenantId])
+  @@index([orgId])
+  @@map("surface_tenant_links")
+}
+
+/// Membership of a User in an Organization. Keyed by `userId` (not email — the
+/// email-keying in the abandoned workspace design was a workspace-era artifact).
+model OrgMember {
+  id        String    @id @default(cuid())
+  orgId     String
+  userId    String
+  role      OrgRole   @default(MEMBER)
+  invitedBy String?
+  joinedAt  DateTime  @default(now())
+  leftAt    DateTime?
+
+  organization Organization @relation(fields: [orgId], references: [id])
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+  @@map("org_members")
 }
 
 /// Per-user candidate memories awaiting the user's own review. Grouped into
@@ -61,42 +257,42 @@ model User {
 /// agent reads them — the recall gate on `memory-search` enforces this when
 /// the agent is the Digital Twin (slug=`assistant`) and the user has opted in.
 model UserMemoryCandidate {
-  id                String   @id @default(cuid())
-  userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   /// Cluster label. One of: "style" | "expertise" | "projects" |
   /// "relationships" | "preferences" | "decisions" | "context" | "docs"
-  subsystem         String
+  subsystem String
 
   /// The memory text the curator emitted, ≤ 1500 chars.
-  text              String
+  text       String
   /// If the user edited before approving, the edited version goes here; the
   /// curator's original stays in `text` for audit.
-  editedText        String?
+  editedText String?
 
   /// Origin records the curator drew from. JSON shape:
   ///   [{ type: "message"|"call"|"canvas", id, channelId?, ts }]
   /// Used to show citations on the review card and to dedupe across windows.
-  sourceRefs        Json
+  sourceRefs Json
 
   /// Curator's 0-1 confidence. Used to sort the cluster view top-down and to
   /// pick "highlights" if we ever shift away from cluster-batched approval.
-  signalScore       Float
+  signalScore Float
 
   /// "pending" | "approved" | "rejected"
-  status            String   @default("pending")
+  status            String  @default("pending")
   /// Set on approve — the Hindsight memory ID this content was retained as.
   hindsightMemoryId String?
 
   /// Which run emitted this candidate. "backfill:<jobId>:<source>:<windowKey>"
   /// or "daily:<YYYY-MM-DD>:<source>" or "upload:<filename>".
-  source            String
+  source String
 
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  approvedAt        DateTime?
-  rejectedAt        DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  approvedAt DateTime?
+  rejectedAt DateTime?
 
   @@index([userId, status])
   @@index([userId, subsystem, status])
@@ -117,31 +313,35 @@ model UserRole {
 }
 
 model UserAgentConfig {
-  id           String   @id @default(cuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  agentSlug    String
-  provider     String   @default("spaces")
-  chainConfig  Json?    /// Per-user agent chain config: { onComplete, onFailure }
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentSlug   String
+  provider    String   @default("spaces")
+  chainConfig Json? /// Per-user agent chain config: { onComplete, onFailure }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  @@unique([userId, agentSlug])
+  /// Denormalized org scope for org-scoped per-user agent config uniqueness.
+  orgId String
+
+  @@unique([userId, orgId, agentSlug])
+  @@index([orgId])
   @@map("user_agent_configs")
 }
 
 model AgentChainWorkflow {
-  id              String                    @id @default(cuid())
-  name            String
-  definition      Json
-  isPublished     Boolean                   @default(true)
+  id               String                     @id @default(cuid())
+  name             String
+  definition       Json
+  isPublished      Boolean                    @default(true)
   /// When true, this workflow has been promoted to "global" by an admin: its
   /// bindings are opened to all users (userId="*"). Set on approval of a
   /// WorkflowGlobalRequest.
-  global          Boolean                   @default(false)
+  global           Boolean                    @default(false)
   /// JSON array of trigger entries. Each entry:
   /// { id: string, type: string, channels: [{ channelId, spacesAutomationId }] }
-  triggers        Json                      @default("[]")
+  triggers         Json                       @default("[]")
   /// When non-null, the workflow owner has CONSENTED to run triggered
   /// executions with this user's credentials (their connected MCP/tool
   /// creds) instead of the agent's app identity. The value is the consenting
@@ -154,13 +354,13 @@ model AgentChainWorkflow {
   /// agent's page-level triggers (entry node = this agent). It is hidden from
   /// the Workflows list and edited only via the agent page's Triggers section.
   /// One per agent (unique). Null = a normal user-authored chain workflow.
-  agentTriggerSlug String?                   @unique
-  createdByUserId String
-  createdByUser   User                      @relation("CreatedChainWorkflows", fields: [createdByUserId], references: [id], onDelete: Cascade)
-  createdAt       DateTime                  @default(now())
-  updatedAt       DateTime                  @updatedAt
-  bindings        ChannelAgentChainBinding[]
-  globalRequests  WorkflowGlobalRequest[]
+  agentTriggerSlug String?                    @unique
+  createdByUserId  String
+  createdByUser    User                       @relation("CreatedChainWorkflows", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  bindings         ChannelAgentChainBinding[]
+  globalRequests   WorkflowGlobalRequest[]
 
   // A workflow name is scoped to its creator: a single user can't own two
   // workflows with the same name, so a name unambiguously identifies one of
@@ -176,18 +376,18 @@ model AgentChainWorkflow {
 /// and approves (sets workflow.global=true and rewires its bindings to
 /// userId="*") or rejects. Mirrors the McpConnectorEditRequest flow.
 model WorkflowGlobalRequest {
-  id               String             @id @default(cuid())
-  workflowId       String
-  workflow         AgentChainWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  id                String             @id @default(cuid())
+  workflowId        String
+  workflow          AgentChainWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   /// User who requested promotion. Plain id (no FK), mirroring edit-requests.
   requestedByUserId String
   /// "pending" | "approved" | "rejected" | "cancelled"
-  status           String             @default("pending")
-  reviewedByUserId String?
-  reviewedAt       DateTime?
-  reviewNote       String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  status            String             @default("pending")
+  reviewedByUserId  String?
+  reviewedAt        DateTime?
+  reviewNote        String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   @@index([status, createdAt])
   @@index([workflowId, status])
@@ -221,20 +421,29 @@ model ChannelAgentChainBinding {
 }
 
 model UserProviderCredentials {
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider     String   /// "spaces" | "copilot" | "claude"
-  encryptedKey String?  @db.Text
-  iv           String?
-  authTag      String?
-  model        String?
-  baseUrl      String?
-  authType     String?  /// "api_key" (default) | "oauth_token" — how to send the credential at runtime
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        String /// "spaces" | "copilot" | "claude"
+  encryptedKey    String?  @db.Text
+  iv              String?
+  authTag         String?
+  model           String?
+  baseUrl         String?
+  authType        String? /// "api_key" (default) | "oauth_token" — how to send the credential at runtime
   reasoningEffort String? /// "low" | "medium" | "high" — only meaningful for reasoning-capable models (codex gpt-5.x, etc.). Null = service default ("medium").
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  /// When set, this row is a BINDING to a SharedProviderCredential (same
+  /// semantics as AgentProviderCredentials.sharedCredentialId): key material
+  /// comes from the shared row; model/reasoningEffort here are overrides.
+  /// Critical when a personal credential is promoted to shared — the personal
+  /// row must become a binding, NOT keep a sibling copy, or the two rows'
+  /// refreshes would invalidate each other's OAuth session.
+  sharedCredentialId String?
+  sharedCredential   SharedProviderCredential? @relation(fields: [sharedCredentialId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@id([userId, provider])
+  @@index([sharedCredentialId])
   @@map("user_provider_credentials")
 }
 
@@ -242,7 +451,7 @@ model UserSubagentConfig {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   subagentName String
-  provider     String   /// references UserProviderCredentials.provider
+  provider     String /// references UserProviderCredentials.provider
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -260,46 +469,90 @@ model UserSubagentConfig {
 model AgentProviderCredentials {
   agentId         String
   agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  provider        String   /// "copilot" | "claude" | "codex" | "openrouter" | ...
+  provider        String /// "copilot" | "claude" | "codex" | "openrouter" | ...
   encryptedKey    String?  @db.Text
   iv              String?
   authTag         String?
   model           String?
   baseUrl         String?
-  authType        String?  /// "api_key" (default) | "oauth_token"
-  reasoningEffort String?  /// "low" | "medium" | "high" — only meaningful for reasoning-capable models. Null = service default ("medium").
+  authType        String? /// "api_key" (default) | "oauth_token"
+  reasoningEffort String? /// "low" | "medium" | "high" — only meaningful for reasoning-capable models. Null = service default ("medium").
   createdByUserId String?
+  /// When set, this row is a BINDING: key material comes from the referenced
+  /// SharedProviderCredential (this row's encryptedKey/iv/authTag stay null),
+  /// while model/reasoningEffort/baseUrl here act as per-agent OVERRIDES.
+  /// Solves the OAuth cross-invalidation problem: N agents on one ChatGPT
+  /// account each holding a token COPY invalidate each other on every
+  /// re-auth/refresh; a binding means ONE stored session shared by all.
+  sharedCredentialId String?
+  sharedCredential   SharedProviderCredential? @relation(fields: [sharedCredentialId], references: [id], onDelete: SetNull)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@id([agentId, provider])
   @@index([createdByUserId])
+  @@index([sharedCredentialId])
   @@map("agent_provider_credentials")
 }
 
+/// Org-level named provider credential (e.g. "Team Codex") stored ONCE and
+/// bound to selected agents via AgentProviderCredentials.sharedCredentialId.
+/// OAuth refresh writes the rotated bundle back HERE (single-flight keyed by
+/// this row's id), so exactly one live provider session exists per credential
+/// no matter how many agents use it. Admin-managed; the decrypted key is never
+/// returned by any API — only decrypted in-process at dispatch time.
+model SharedProviderCredential {
+  id              String   @id @default(cuid())
+  /// NULL = platform-wide credential (CLAW_ADMIN-only to create): bindable by
+  /// agents of ANY org — e.g. one Codex ChatGPT account serving both Juspay
+  /// and NY agents. Non-null = scoped to that org (owners can create/bind).
+  orgId           String?
+  provider        String /// "codex" | "claude" | "copilot" | "openrouter" | ...
+  name            String /// display name shown in pickers, e.g. "Team Codex (NY)"
+  encryptedKey    String?  @db.Text
+  iv              String?
+  authTag         String?
+  model           String? /// default model for bindings without an override
+  baseUrl         String?
+  authType        String? /// "api_key" (default) | "oauth_token"
+  reasoningEffort String?
+  ownerUserId     String? /// who connected it; re-auth gated to owner/admin
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  agentBindings   AgentProviderCredentials[]
+  userBindings    UserProviderCredentials[]
+
+  @@unique([orgId, provider, name])
+  @@index([orgId])
+  @@map("shared_provider_credentials")
+}
+
 model Agent {
-  id                   String           @id @default(cuid())
-  slug                 String           @unique
-  name                 String
-  description          String           @default("")
-  systemPrompt         String           @db.Text
-  scope                String           @default("global")
-  ownerUserId          String?
-  owner                User?            @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  enabled              Boolean          @default(true)
-  isDefault            Boolean          @default(false)
-  color                String           @default("#6366f1")
-  modelId              String           @default("")
-  config               Json             @default("{}")
-  spacesAppId          String?          @unique
-  spacesAppUserId      String?
-  spacesAppToken       String?  @db.Text
+  id                    String                     @id @default(cuid())
+  slug                  String
+  name                  String
+  description           String                     @default("")
+  systemPrompt          String                     @db.Text
+  scope                 String                     @default("global")
+  delegationTier        String                     @default("standard")
+  ownerUserId           String?
+  owner                 User?                      @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  orgId                 String
+  org                   Organization               @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  enabled               Boolean                    @default(true)
+  isDefault             Boolean                    @default(false)
+  color                 String                     @default("#6366f1")
+  modelId               String                     @default("")
+  config                Json                       @default("{}")
+  spacesAppId           String?                    @unique
+  spacesAppUserId       String?
+  spacesAppToken        String?                    @db.Text
   /// HMAC-SHA256 secret claw-auth uses to verify Spaces' `X-Xyne-Signature`
   /// header on inbound webhook calls. Encrypted at rest with the AES-256-GCM
   /// 3-tuple format (ciphertext:iv:authTag, base64). Same plaintext as
   /// Spaces' `installed_apps.signingSecret` but stored under claw-auth's
   /// encryption format. See lib/spaces-app-secret.ts.
-  signingSecret        String?  @db.Text
+  signingSecret         String?                    @db.Text
   /// Prompt versioning. `systemPrompt` above stays the denormalized copy of the
   /// ACTIVE version so every runtime read path is unchanged. These point at the
   /// active row in `agent_prompt_versions`: `activePromptVersionId` is the row
@@ -308,19 +561,53 @@ model Agent {
   activePromptVersionId String?
   activePromptVersion   Int?
   kbScope               String                     @default("COLLECTIONS")
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  promotedBy           String?
-  promotedAt           DateTime?
-  tools                AgentTool[]
-  skills               AgentSkill[]
-  collections          AgentCollection[]
-  shares               AgentShare[]
-  mcpConnections       AgentMcpConnection[]
-  providerCredentials  AgentProviderCredentials[]
-  promptVersions       AgentPromptVersion[]
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  promotedBy            String?
+  promotedAt            DateTime?
+  tools                 AgentTool[]
+  skills                AgentSkill[]
+  collections           AgentCollection[]
+  shares                AgentShare[]
+  mcpConnections        AgentMcpConnection[]
+  providerCredentials   AgentProviderCredentials[]
+  promptVersions        AgentPromptVersion[]
+  surfaceAgents         SurfaceAgent[]
 
+  @@unique([orgId, slug])
+  @@index([orgId])
   @@map("agents")
+}
+
+/// RBAC allow-list for Agent-to-Agent (A2A) delegation. Each enabled row grants
+/// the `callerAgentId` agent permission to delegate a self-contained task to the
+/// `calleeAgentId` agent at runtime. Resolution is FAIL-CLOSED: with no enabled
+/// grant, xyne-claw is never handed a callable-agent tool for that pair, so the
+/// LLM cannot delegate. Stored as plain ids (no FK relations) to keep the Agent
+/// model untouched; uniqueness is enforced on the (caller, callee) pair.
+/// See xyne-claw/src/agent-delegation.ts for the runtime governor this feeds.
+model AgentDelegationGrant {
+  id              String   @id @default(cuid())
+  callerAgentId   String
+  calleeAgentId   String
+  /// 'user' (default) = the callee runs under the SAME human end-user identity
+  /// as the top-level run (a callee can never exceed what the human may already
+  /// do — contains the confused-deputy risk). 'callee_app' = run under the
+  /// callee agent's own app identity (opt-in, riskier; audited).
+  identityMode      String    @default("user")
+  enabled           Boolean   @default(true)
+  /// "pending" | "approved" | "rejected"
+  status            String    @default("pending")
+  approvedByUserId String?
+  approvedAt        DateTime?
+  createdByUserId   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([callerAgentId, calleeAgentId])
+  @@index([callerAgentId])
+  @@index([calleeAgentId, status])
+  @@map("agent_delegation_grants")
 }
 
 /// Append-only history of an agent's system prompt. A new row is created on
@@ -364,9 +651,9 @@ model AgentRun {
   sessionId        String    @unique
   userId           String
   agentSlug        String
-  provider         String?   /// LLM provider used for the run: spaces|codex|claude|copilot|openrouter
-  model            String?   /// Concrete model id, e.g. private-large, open-large, gpt-5.5
-  triggerSource    String    /// "spaces" | "scheduled" | "chat" | "api"
+  provider         String? /// LLM provider used for the run: spaces|codex|claude|copilot|openrouter
+  model            String? /// Concrete model id, e.g. private-large, open-large, gpt-5.5
+  triggerSource    String /// "spaces" | "scheduled" | "chat" | "api"
   status           String    @default("running") /// "running" | "completed" | "failed" | "cancelled"
   currentToolLabel String?
   task             String    @db.Text
@@ -379,7 +666,7 @@ model AgentRun {
   error            String?   @db.Text
   reasoning        String?   @db.Text
   toolsUsed        String[]  @default([])
-  toolInvocations  Json?     /// Array<ToolInvocation> with args, result (truncated), durationMs, isError
+  toolInvocations  Json? /// Array<ToolInvocation> with args, result (truncated), durationMs, isError
   tokensIn         Int?
   tokensOut        Int?
   tokensCacheRead  Int?
@@ -396,7 +683,7 @@ model AgentRun {
   tokensPerSec     Int?
   toolMs           Int?
   lastRetryReason  String?   @db.Text
-  rating           String?   /// "up" | "down"
+  rating           String? /// "up" | "down"
   ratingComment    String?   @db.Text
   ratedAt          DateTime?
   /// The agent's active prompt version number at run-start. Lets quality /
@@ -415,11 +702,20 @@ model AgentRun {
   /// siblings (regenerate / edit-user branches), so chronological pairing of
   /// runs ↔ assistant messages is ambiguous. Populated in the chat-callback.
   chatMessageId    String?
+  orgId            String
 
   @@index([userId, status, startedAt])
   @@index([agentSlug, startedAt])
   @@index([provider, completedAt])
   @@index([chatMessageId])
+  @@index([orgId])
+  /// Every workspace-metrics window query filters on a bare completedAt range
+  /// (no leading equality), which none of the composite indexes can serve —
+  /// without this, each dashboard load seq-scans agent_runs 8x. Apply in prod
+  /// manually: CREATE INDEX CONCURRENTLY IF NOT EXISTS
+  ///   "agent_runs_completedAt_triggerSource_idx"
+  ///   ON "agent_runs" ("completedAt", "triggerSource");
+  @@index([completedAt, triggerSource])
   @@map("agent_runs")
 }
 
@@ -428,7 +724,7 @@ model ChatMessage {
   conversationId String
   agentSlug      String
   userId         String
-  role           String   // "user" | "assistant"
+  role           String // "user" | "assistant"
   content        String   @db.Text
   reasoning      String?  @db.Text
   status         String   @default("completed")
@@ -439,19 +735,21 @@ model ChatMessage {
   /// The UI projects one selected path; siblings are reachable via the pager.
   parentId       String?
 
-  attachments    ChatAttachment[]
+  attachments ChatAttachment[]
+  orgId       String
 
   @@index([conversationId, createdAt])
   @@index([userId, agentSlug])
+  @@index([orgId])
   @@map("chat_messages")
 }
 
 model ChatAttachment {
-  id               String       @id @default(cuid())
+  id               String   @id @default(cuid())
   chatMessageId    String?
   uploaderUserId   String
-  storageProvider  String       @default("gcs")
-  url              String       // GCS object path (bucket-relative)
+  storageProvider  String   @default("gcs")
+  url              String // GCS object path (bucket-relative)
   thumbnailUrl     String?
   originalFilename String
   mimeType         String
@@ -459,9 +757,9 @@ model ChatAttachment {
   width            Int?
   height           Int?
   metadata         Json?
-  createdAt        DateTime     @default(now())
+  createdAt        DateTime @default(now())
 
-  chatMessage      ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: Cascade)
+  chatMessage ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: Cascade)
 
   @@index([chatMessageId])
   @@index([uploaderUserId, createdAt])
@@ -469,17 +767,17 @@ model ChatAttachment {
 }
 
 model AgentRequest {
-  id          String   @id @default(cuid())
-  targetType  String   @default("agent") // "agent" | "skill"
-  agentId     String?
-  agentSlug   String?
-  skillId     String?
-  skillSlug   String?
-  requestType String   // "push_to_spaces" | "push_to_global" | "clone"
-  requesterId String
-  status      String   @default("pending") // "pending" | "approved" | "rejected"
-  reviewerId  String?
-  reviewNote  String?
+  id            String   @id @default(cuid())
+  targetType    String   @default("agent") // "agent" | "skill"
+  agentId       String?
+  agentSlug     String?
+  skillId       String?
+  skillSlug     String?
+  requestType   String // "push_to_spaces" | "push_to_global" | "clone"
+  requesterId   String
+  status        String   @default("pending") // "pending" | "approved" | "rejected"
+  reviewerId    String?
+  reviewNote    String?
   // For requestType == "clone": the name the requester chose for their copy,
   // captured at request time and applied when the owner approves. Null → the
   // clone falls back to "<source> (Copy)".
@@ -488,12 +786,14 @@ model AgentRequest {
   // was approved. Lets the approve path stay idempotent (replay returns the
   // same clone) and gives the frontend a deep-link target.
   resultAgentId String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  orgId         String
 
   @@index([status])
   @@index([requesterId])
   @@index([agentId])
+  @@index([orgId])
   @@map("agent_requests")
 }
 
@@ -532,6 +832,19 @@ enum AgentAuditEvent {
   // this keeps the Prisma-generated type in sync so a fresh `prisma generate`
   // (e.g. the Docker build) accepts `eventType: "AGENT_CONFIG_UPDATED"`.
   AGENT_CONFIG_UPDATED
+  // General agent edits (name/description/prompt/model/enabled/slug/color).
+  // Tools-only edits stay on AGENT_CONFIG_UPDATED. Added by migration
+  // 20260709120000_agent_updated_event (ALTER TYPE ADD VALUE) — this keeps the
+  // Prisma-generated type in sync so `eventType: "AGENT_UPDATED"` typechecks.
+  AGENT_UPDATED
+  // Shared provider credentials (org-level, bound to selected agents). Added
+  // by migration 20260715003000_shared_provider_credentials (ALTER TYPE ADD
+  // VALUE).
+  PROVIDER_CREDENTIAL_PROMOTED
+  PROVIDER_CREDENTIAL_BOUND
+  PROVIDER_CREDENTIAL_UNBOUND
+  PROVIDER_CREDENTIAL_ADOPTED
+  PROVIDER_CREDENTIAL_DELETED
 }
 
 model AgentAuditLog {
@@ -547,25 +860,29 @@ model AgentAuditLog {
 }
 
 model Skill {
-  id           String           @id @default(cuid())
-  slug         String           @unique
-  name         String
-  label        String           @default("")
-  description  String           @default("")
-  content      String           @db.Text
-  source       String           @default("seeded")
-  scope        String           @default("global")
-  ownerUserId  String?
-  owner        User?            @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  enabled      Boolean          @default(true)
-  promotedBy   String?
-  promotedAt   DateTime?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  agents       AgentSkill[]
-  subagents    SubagentSkill[]
-  files        SkillFile[]
+  id          String          @id @default(cuid())
+  slug        String
+  name        String
+  label       String          @default("")
+  description String          @default("")
+  content     String          @db.Text
+  source      String          @default("seeded")
+  scope       String          @default("global")
+  ownerUserId String?
+  owner       User?           @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  enabled     Boolean         @default(true)
+  promotedBy  String?
+  promotedAt  DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  orgId       String
+  org         Organization    @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  agents      AgentSkill[]
+  subagents   SubagentSkill[]
+  files       SkillFile[]
 
+  @@unique([orgId, slug])
+  @@index([orgId])
   @@map("skills")
 }
 
@@ -574,7 +891,6 @@ model Skill {
  * Skill.content). Materialized into the session workspace under
  * `data/session-skills/<scope>/<slug>/<relativePath>` so pi's resource
  * loader sees the whole directory.
- *
  * relativePath is always a normalized POSIX path inside the skill dir —
  * no leading slash, no "..", no absolute paths. Enforced at write time.
  */
@@ -627,15 +943,15 @@ model AgentCollection {
 }
 
 model Tool {
-  id          String   @id @default(cuid())
-  slug        String   @unique
+  id          String      @id @default(cuid())
+  slug        String      @unique
   name        String
-  description String   @default("")
+  description String      @default("")
   source      String
-  inputSchema Json     @default("{}")
-  enabled     Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  inputSchema Json        @default("{}")
+  enabled     Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
   agents      AgentTool[]
 
   @@map("tools")
@@ -654,13 +970,13 @@ model AgentTool {
 }
 
 model Gateway {
-  id         String   @id @default(cuid())
-  type       String   @unique
+  id         String            @id @default(cuid())
+  type       String            @unique
   name       String
-  config     Json     @default("{}")
-  enabled    Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  config     Json              @default("{}")
+  enabled    Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
   identities GatewayIdentity[]
 
   @@map("gateways")
@@ -680,15 +996,15 @@ model GatewayIdentity {
 }
 
 model McpServer {
-  id          String   @id @default(cuid())
-  name        String
-  type        String
-  url         String
-  description String?
-  enabled     Boolean  @default(true)
-  transport   String   @default("stdio")
-  credentialSchema    Json?
-  credentialForm      Json?
+  id                   String                    @id @default(cuid())
+  name                 String
+  type                 String
+  url                  String
+  description          String?
+  enabled              Boolean                   @default(true)
+  transport            String                    @default("stdio")
+  credentialSchema     Json?
+  credentialForm       Json?
   launchConfigTemplate Json?
   httpConfigTemplate   Json?
   healthcheckSpec      Json?
@@ -699,20 +1015,20 @@ model McpServer {
   /// admins must opt-in per server (e.g. enable it for shared infra creds
   /// like a corporate Bitbucket bot, but never for per-user OAuth like
   /// google/microsoft/xyne-spaces).
-  allowGlobalFallback Boolean @default(false)
+  allowGlobalFallback  Boolean                   @default(false)
   /// When true, binary content this server's tools return (EmbeddedResource
   /// blob / image / audio) is forwarded to the user as a file attachment
   /// instead of being dropped. Server-level because the runner only ever
   /// extracts binary blocks — a text/data tool on the same server returns text
   /// and is unaffected. Admin-toggleable; surfaced via the resolved connector
   /// definition so the runner reads it without a per-tool catalog query.
-  forwardFiles Boolean @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  connections UserMcpConnection[]
-  agentConnections AgentMcpConnection[]
-  globalCredentials GlobalMcpCredentials?
-  editRequests      McpConnectorEditRequest[]
+  forwardFiles         Boolean                   @default(false)
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  connections          UserMcpConnection[]
+  agentConnections     AgentMcpConnection[]
+  globalCredentials    GlobalMcpCredentials[]
+  editRequests         McpConnectorEditRequest[]
 
   @@unique([type])
   @@index([enabled])
@@ -737,9 +1053,9 @@ model McpServer {
 /// one is open replaces the previous (the prior row's status flips to
 /// `superseded` so the audit trail is preserved).
 model McpConnectorEditRequest {
-  id            String    @id @default(cuid())
-  mcpServerId   String
-  mcpServer     McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  mcpServerId String
+  mcpServer   McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
 
   /// User who proposed the change. Captured via x-user-id at submission time.
   proposedByUserId String
@@ -754,7 +1070,7 @@ model McpConnectorEditRequest {
   proposedFields Json
 
   /// "pending" | "approved" | "rejected" | "superseded" | "cancelled"
-  status        String    @default("pending")
+  status String @default("pending")
 
   /// Set on approve/reject/supersede.
   reviewedByUserId String?
@@ -762,8 +1078,8 @@ model McpConnectorEditRequest {
   /// Admin's reject note OR system-generated note for supersede/cancel.
   reviewNote       String?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([mcpServerId, status])
   @@index([status, createdAt])
@@ -773,10 +1089,17 @@ model McpConnectorEditRequest {
 /// Admin-managed global credentials per MCP server. At call time, user-level
 /// credentials take precedence; this row is the fallback when a user hasn't
 /// connected the server personally AND McpServer.allowGlobalFallback=true.
+///
+/// Org-scoped (2026-07-14): orgId=NULL is the deployment-wide default row
+/// (legacy behavior); a row with orgId set overrides the default for that
+/// org's agents/users. Uniqueness of the NULL-org default is enforced by a
+/// partial unique index in the migration — Postgres treats NULLs as distinct,
+/// so the composite @@unique alone would allow duplicate default rows.
 model GlobalMcpCredentials {
   id             String    @id @default(cuid())
-  mcpServerId    String    @unique
+  mcpServerId    String
   mcpServer      McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  orgId          String?
   encryptedCreds String
   iv             String
   authTag        String
@@ -784,6 +1107,8 @@ model GlobalMcpCredentials {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  @@unique([mcpServerId, orgId])
+  @@index([mcpServerId])
   @@map("global_mcp_credentials")
 }
 
@@ -843,55 +1168,57 @@ model AgentMcpConnection {
 }
 
 model ScheduledJob {
-  id               String    @id @default(cuid())
-  userId           String
-  agentSlug        String
-  task             String    @db.Text
-  context          String?   @db.Text
-  channelId        String?
-  conversationId   String?
+  id              String            @id @default(cuid())
+  userId          String
+  agentSlug       String
+  task            String            @db.Text
+  context         String?           @db.Text
+  channelId       String?
+  conversationId  String?
   // Spaces workspace the job was scheduled in. Required by Spaces app API
   // (postMessage / openDm) when the worker delivers results. Captured from
   // the `xyne_last_workspace` cookie at job-creation time. Nullable for rows
   // created before this column existed; those jobs can't deliver to Spaces
   // and will need to be recreated by the user.
-  workspaceId      String?
-  type             String
-  delayMs          BigInt?
-  cronExpression   String?
-  maxRuns          Int?
-  runCount         Int       @default(0)
-  status           String    @default("active")
-  bullJobId        String?
-  bullSchedulerId  String?   @unique
-  nextRunAt        DateTime?
-  lastRunAt        DateTime?
-  label            String?
-  replyMode        String    @default("thread")
+  workspaceId     String?
+  type            String
+  delayMs         BigInt?
+  cronExpression  String?
+  maxRuns         Int?
+  runCount        Int               @default(0)
+  status          String            @default("active")
+  bullJobId       String?
+  bullSchedulerId String?           @unique
+  nextRunAt       DateTime?
+  lastRunAt       DateTime?
+  label           String?
+  replyMode       String            @default("thread")
   // Override channel for `replyMode = "channel"` deliveries. NULL means
   // "use the originating channelId" so existing rows behave unchanged.
-  targetChannelId  String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  runs             ScheduledJobRun[]
+  targetChannelId String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  runs            ScheduledJobRun[]
+  orgId           String
 
   @@index([status])
   @@index([userId])
   @@index([agentSlug])
+  @@index([orgId])
   @@map("scheduled_jobs")
 }
 
 model ScheduledJobRun {
-  id              String       @id @default(cuid())
-  scheduledJobId  String
-  scheduledJob    ScheduledJob @relation(fields: [scheduledJobId], references: [id], onDelete: Cascade)
-  sessionId       String?
-  status          String
-  result          String?      @db.Text
-  error           String?      @db.Text
-  startedAt       DateTime     @default(now())
-  completedAt     DateTime?
-  createdAt       DateTime     @default(now())
+  id             String       @id @default(cuid())
+  scheduledJobId String
+  scheduledJob   ScheduledJob @relation(fields: [scheduledJobId], references: [id], onDelete: Cascade)
+  sessionId      String?
+  status         String
+  result         String?      @db.Text
+  error          String?      @db.Text
+  startedAt      DateTime     @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
 
   @@index([scheduledJobId])
   @@map("scheduled_job_runs")
@@ -902,18 +1229,18 @@ model ScheduledJobRun {
 // validation rejects names that collide with built-ins at create time so
 // the runtime resolver can simply prefer built-ins on lookup.
 model SubagentDefinition {
-  id                String   @id @default(cuid())
-  name              String   @unique
-  description       String
-  progressLabels    Json
-  systemPrompt      String   @db.Text
-  paramName         String   @default("question")
-  paramDescription  String
+  id               String          @id @default(cuid())
+  name             String
+  description      String
+  progressLabels   Json
+  systemPrompt     String          @db.Text
+  paramName        String          @default("question")
+  paramDescription String
   // Same JSON shape as Agent.config.tools — parsed by parseToolsConfig
   // in xyne-claw-shared. Defines which tools the subagent's child LLM
   // can call.
-  tools             Json
-  enabled           Boolean  @default(true)
+  tools            Json
+  enabled          Boolean         @default(true)
   /// Per-MCP-server instance pin. Companion to AgentMcpConnection.slug —
   /// lets the subagent restrict itself to ONE agent-pinned MCP instance
   /// per server type. Example:
@@ -922,29 +1249,33 @@ model SubagentDefinition {
   /// surfaces just that instance's tools (e.g. `grafana-prod__query`).
   /// NULL or missing keys = inherit all instances of that server type
   /// from the parent agent (Stance A — today's behavior).
-  mcpInstanceMap    Json?
+  mcpInstanceMap   Json?
   /// Creator / owner. NULL only for legacy or admin-seeded rows. The CRUD
   /// route fills this with the requester's userId on create and uses it as
   /// the ACL anchor (owner + shares + admin can edit; everyone reads).
-  createdByUserId   String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  skills            SubagentSkill[]
-  shares            SubagentShare[]
+  createdByUserId  String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  orgId            String
+  org              Organization    @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  skills           SubagentSkill[]
+  shares           SubagentShare[]
 
+  @@unique([orgId, name])
+  @@index([orgId])
   @@map("subagent_definitions")
 }
 
 model SubagentShare {
-  id                    String   @id @default(cuid())
-  subagentDefinitionId  String
-  userId                String
+  id                   String   @id @default(cuid())
+  subagentDefinitionId String
+  userId               String
   /// "EDITOR" by default. Subagents are globally visible to all users so
   /// a separate VIEWER role is meaningless; shares are strictly about
   /// granting additional edit rights beyond the owner.
-  role                  String   @default("EDITOR")
-  sharedBy              String?
-  createdAt             DateTime @default(now())
+  role                 String   @default("EDITOR")
+  sharedBy             String?
+  createdAt            DateTime @default(now())
 
   subagentDefinition SubagentDefinition @relation(fields: [subagentDefinitionId], references: [id], onDelete: Cascade)
   user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -954,55 +1285,56 @@ model SubagentShare {
 }
 
 model SubagentSkill {
-  id                    String             @id @default(cuid())
-  subagentDefinitionId  String
-  subagentDefinition    SubagentDefinition @relation(fields: [subagentDefinitionId], references: [id], onDelete: Cascade)
-  skillId               String
-  skill                 Skill              @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  id                   String             @id @default(cuid())
+  subagentDefinitionId String
+  subagentDefinition   SubagentDefinition @relation(fields: [subagentDefinitionId], references: [id], onDelete: Cascade)
+  skillId              String
+  skill                Skill              @relation(fields: [skillId], references: [id], onDelete: Cascade)
 
   @@unique([subagentDefinitionId, skillId])
   @@map("subagent_skills")
 }
 
-
 model PendingMemoryReview {
-  id                 String    @id @default(cuid())
-  agentSlug          String
-  userId             String?   /// null for "shared" scope reviews
+  id                String   @id @default(cuid())
+  agentSlug         String
+  userId            String? /// null for "shared" scope reviews
   /// Hindsight memory ID. NULL until the candidate is approved — on approve,
   /// the curator-distilled content is retained to Hindsight and the returned
   /// memory id stored here. On reject, stays NULL (Hindsight never sees it).
-  hindsightMemoryId  String?
-  content            String    @db.Text
-  scope              String    /// "shared" | "user"
-  category           String?   /// Set by the curator: "preference" | "fact" | "pattern" | "caution"
+  hindsightMemoryId String?
+  content           String   @db.Text
+  scope             String /// "shared" | "user"
+  category          String? /// Set by the curator: "preference" | "fact" | "pattern" | "caution"
   /// Session that produced this candidate. Used for audit + retain tagging.
-  sessionId          String?
+  sessionId         String?
   /// Subsystem this candidate targets (curator-classified). Subsystem
   /// taxonomy is discovered from Hindsight tags (subsystem:X), NOT hardcoded.
-  subsystem          String?
+  subsystem         String?
   /// "create" | "update". Determines whether approve retains (+ deletes the
   /// replaced memory) or only retains.
-  action             String?
+  action            String?
   /// On update: the Hindsight memory ID this candidate will REPLACE on approve.
   /// On create: NULL.
-  replacesMemoryId   String?
+  replacesMemoryId  String?
   /// True when the curator proposed a subsystem name that doesn't yet exist
   /// in the bank — admin should scrutinize naming before approving.
-  isNewSubsystem     Boolean   @default(false)
-  status             String    @default("pending") /// "pending" | "approved" | "rejected"
-  spacesMessageId    String?   /// Spaces message ID of the approval request (for updates)
-  curatorReasoning   String?   @db.Text /// Why the nightly curator emitted this candidate
-  curatorConfidence  Float?
-  tokensIn           Int?
-  tokensOut          Int?
-  toolCount          Int?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  isNewSubsystem    Boolean  @default(false)
+  status            String   @default("pending") /// "pending" | "approved" | "rejected"
+  spacesMessageId   String? /// Spaces message ID of the approval request (for updates)
+  curatorReasoning  String?  @db.Text /// Why the nightly curator emitted this candidate
+  curatorConfidence Float?
+  tokensIn          Int?
+  tokensOut         Int?
+  toolCount         Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  orgId             String
 
   @@index([status])
   @@index([agentSlug])
   @@index([agentSlug, status])
+  @@index([orgId])
   @@map("pending_memory_reviews")
 }
 
@@ -1013,32 +1345,34 @@ model PendingMemoryReview {
 /// only on approval does the transcript get retained to the memory provider.
 /// This means rejected sessions cost zero LLM extraction tokens.
 model PendingBatchReview {
-  id                    String   @id @default(cuid())
-  agentSlug             String
-  reviewDate            String   /// YYYY-MM-DD — date the sessions ran (UTC)
-  status                String   @default("pending") /// "pending" | "approved" | "rejected" | "partial"
+  id                 String   @id @default(cuid())
+  agentSlug          String
+  reviewDate         String /// YYYY-MM-DD — date the sessions ran (UTC)
+  status             String   @default("pending") /// "pending" | "approved" | "rejected" | "partial"
   /// All session IDs in this batch that passed the heuristic filter
   /// (i.e., are eligible for human review).
-  sessionIds            String[]
+  sessionIds         String[]
   /// Subset of sessionIds the admin actually approved. Populated on approve.
-  approvedSessionIds    String[] @default([])
+  approvedSessionIds String[] @default([])
   /// Session IDs the heuristic skipped (with reasons). JSON shape:
   /// [{ sessionId, reason }]. Surfaced to admin for transparency.
-  heuristicSkipped      Json?
+  heuristicSkipped   Json?
   /// Spaces message ID of the approval-digest message (for follow-ups).
-  spacesMessageId       String?
+  spacesMessageId    String?
   /// On approval, the Hindsight memory IDs returned from each retain call.
   /// JSON shape: { sessionId: [memoryId, ...] }. Used for follow-up audit / rollback.
-  retainedMemoryIds     Json?
+  retainedMemoryIds  Json?
   /// Cached agent's memoryApprovalStrategy at batch creation time, so changing
   /// the agent config later doesn't break in-flight batches.
-  approvalStrategy      String   @default("HUMAN_ONLY")
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  approvalStrategy   String   @default("HUMAN_ONLY")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  orgId              String
 
   @@unique([agentSlug, reviewDate])
   @@index([status])
   @@index([agentSlug, status])
+  @@index([orgId])
   @@map("pending_batch_reviews")
 }
 
@@ -1049,14 +1383,16 @@ model MemoryRecallHit {
   id                String   @id @default(cuid())
   agentSlug         String
   hindsightMemoryId String
-  userId            String   /// The user whose session triggered the recall
+  userId            String /// The user whose session triggered the recall
   sessionId         String
-  scope             String   /// "shared" | "user" — denormalised for fast filtering
-  rank              Int?     /// 1-based position in the recall result list
+  scope             String /// "shared" | "user" — denormalised for fast filtering
+  rank              Int? /// 1-based position in the recall result list
   recalledAt        DateTime @default(now())
+  orgId             String
 
   @@index([agentSlug, recalledAt])
   @@index([hindsightMemoryId])
+  @@index([orgId])
   @@map("memory_recall_hits")
 }
 
@@ -1068,31 +1404,33 @@ model MemoryRecallHit {
 /// audit. The webhook re-looper reads `runPayload` to refire claw's /run with
 /// the same provider/agent/skills context on each subsequent turn.
 model ActiveGoal {
-  id              String   @id @default(cuid())
-  conversationId  String   @unique          /// Spaces thread id — UNIQUE
-  channelId       String?
-  workspaceId     String?
-  userId          String                    /// User who started the goal
-  agentSlug       String
-  condition       String                    /// Verbatim exit-condition text
-  status          String   @default("active") /// "active" | "done" | "cancelled" | "failed"
-  turnCount       Int      @default(0)      /// Turns completed so far
-  maxTurns        Int      @default(5)      /// Hard cap, enforced by relooper. Default 5: covers worker → audit → 1-2 fix cycles. Longer loops tend to burn LLM cost on judge-driven rabbit holes (e.g. judge falsely flagging missing attachments).
-  lastTurnResult  String?                   /// Most recent worker output (≤ 4KB stored)
-  lastReason      String?                   /// Last boss reason or terminal reason
-  runPayload      Json                      /// Stashed first-turn /run inputs to replay
+  id             String   @id @default(cuid())
+  conversationId String   @unique /// Spaces thread id — UNIQUE
+  channelId      String?
+  workspaceId    String?
+  userId         String /// User who started the goal
+  agentSlug      String
+  condition      String /// Verbatim exit-condition text
+  status         String   @default("active") /// "active" | "done" | "cancelled" | "failed"
+  turnCount      Int      @default(0) /// Turns completed so far
+  maxTurns       Int      @default(5) /// Hard cap, enforced by relooper. Default 5: covers worker → audit → 1-2 fix cycles. Longer loops tend to burn LLM cost on judge-driven rabbit holes (e.g. judge falsely flagging missing attachments).
+  lastTurnResult String? /// Most recent worker output (≤ 4KB stored)
+  lastReason     String? /// Last boss reason or terminal reason
+  runPayload     Json /// Stashed first-turn /run inputs to replay
   /// Audit-pass state machine — defends against LLM-judge false positives.
   /// "none"    : default. Judge fires every turn; done→terminate.
   /// "pending" : judge said done in "none" mode, audit task was fired; the
   ///             next worker result is the audit response, not a normal turn.
   /// "done"    : audit already happened (clean or reopened+fixed). Judge's
   ///             next done vote terminates without re-auditing.
-  auditState      String   @default("none")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  auditState     String   @default("none")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  orgId          String
 
   @@index([userId, status])
   @@index([status, updatedAt])
+  @@index([orgId])
   @@map("active_goals")
 }
 
@@ -1111,26 +1449,28 @@ model ActiveGoal {
 ///   redundant-subagent-call, tool-misuse, ext-api-failure,
 ///   permission-denied, memory-miss, identity-bleed, no-actionable
 model AgentImprovementCandidate {
-  id            String   @id @default(cuid())
-  agentSlug     String
-  bucket        String   /// see enum in failure-curator.ts
-  rootCause     String   /// see enum in failure-curator.ts
-  finding       String   @db.Text /// 1-2 sentence concrete description
-  evidence      Json     /// string[] of agent_runs.sessionId — ≥2
-  proposedFix   Json     /// { type, description } — see ImprovementCandidate type
-  confidence    String   @default("medium") /// "high" | "medium" | "low"
-  status        String   @default("pending") /// "pending" | "applied" | "dismissed"
+  id          String   @id @default(cuid())
+  agentSlug   String
+  bucket      String /// see enum in failure-curator.ts
+  rootCause   String /// see enum in failure-curator.ts
+  finding     String   @db.Text /// 1-2 sentence concrete description
+  evidence    Json /// string[] of agent_runs.sessionId — ≥2
+  proposedFix Json /// { type, description } — see ImprovementCandidate type
+  confidence  String   @default("medium") /// "high" | "medium" | "low"
+  status      String   @default("pending") /// "pending" | "applied" | "dismissed"
   /// Audit metadata for dedupe + UI. Includes:
   ///   - mergeCount: how many curator runs reinforced this candidate
   ///   - lastEvidenceAt: max(completedAt) across all evidence sessions
   ///   - dismissUntil: ISO timestamp; suppresses similar findings for 7d
   ///                   after dismiss (matched on agentSlug+bucket+rootCause)
-  metadata      Json?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  orgId       String
 
   @@index([agentSlug, status, updatedAt])
   @@index([status, createdAt])
+  @@index([orgId])
   @@map("agent_improvement_candidates")
 }
 
@@ -1139,15 +1479,18 @@ model AgentImprovementCandidate {
 /// since the last time we generated candidates, so we don't re-process
 /// the same sessions over and over.
 model AgentCuratorState {
-  agentSlug         String   @id
-  lastProcessedAt   DateTime
-  lastRunAt         DateTime @default(now())
+  agentSlug       String   @id
+  lastProcessedAt DateTime
+  lastRunAt       DateTime @default(now())
   /// How many curator invocations have we made for this agent
-  invocationCount   Int      @default(0)
+  invocationCount Int      @default(0)
   /// How many candidates emitted total (across all invocations)
-  candidateCount    Int      @default(0)
-  updatedAt         DateTime @updatedAt
+  candidateCount  Int      @default(0)
+  updatedAt       DateTime @updatedAt
 
+  orgId String
+
+  @@index([orgId])
   @@map("agent_curator_state")
 }
 
@@ -1158,15 +1501,15 @@ model AgentCuratorState {
 /// is enough to tag where it came from (manual / support-email / spaces / …)
 /// when an ingestion pipeline or webhook starts feeding rows in.
 model EvalFolder {
-  id            String             @id @default(cuid())
-  name          String
-  conversations EvalConversation[]
-  source        String?            // e.g. "spaces"
-  sourceKind    String?            // "channel" | "email-channel"
+  id              String             @id @default(cuid())
+  name            String
+  conversations   EvalConversation[]
+  source          String? // e.g. "spaces"
+  sourceKind      String? // "channel" | "email-channel"
   sourceChannelId String?
-  createdBy     String?
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  createdBy       String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   @@index([sourceChannelId])
   @@map("eval_folders")
@@ -1177,19 +1520,19 @@ model EvalFolder {
 /// stored here — it's chosen per-run, so the same conversation can be evaluated
 /// against different agents over time.
 model EvalConversation {
-  id          String           @id @default(cuid())
-  folderId    String
-  folder      EvalFolder       @relation(fields: [folderId], references: [id], onDelete: Cascade)
-  title       String
-  turns       Json
-  source      String?
-  externalId  String?
+  id                String              @id @default(cuid())
+  folderId          String
+  folder            EvalFolder          @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  title             String
+  turns             Json
+  source            String?
+  externalId        String?
   externalUpdatedAt DateTime?
   lastMessageId     String?
-  createdBy   String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  turnResults EvalGeneratedTurn[]
+  createdBy         String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  turnResults       EvalGeneratedTurn[]
 
   @@index([folderId, createdAt])
   @@map("eval_conversations")
@@ -1200,19 +1543,31 @@ model EvalConversation {
 /// batch run) — used to show progress. The browser orchestrates the replay via
 /// the agent-chat SSE endpoint and writes each turn back as it completes.
 model EvalGeneration {
-  id              String           @id @default(cuid())
+  id              String              @id @default(cuid())
   agentSlug       String
-  status          String           @default("running") /// "running" | "completed" | "failed" | "cancelled"
+  status          String              @default("running") /// "running" | "completed" | "failed" | "cancelled"
   genProvider     String?
   genModel        String?
   conversationIds String[]
   folderId        String?
   createdBy       String?
-  startedAt       DateTime         @default(now())
+  /// Groups the N sibling runs (one per agent, up to 3) of a single multi-agent
+  /// comparison. Each agent still gets its own EvalGeneration row (own runId,
+  /// own genProvider/genModel, own turns); they share this id so the UI can pull
+  /// and align them side by side. Null for a plain single-agent run.
+  comparisonId    String?
+  /// 0-based position of this agent within its comparison (the order the user
+  /// picked them). Makes the "primary" (seq 0) baseline stable across reloads —
+  /// startedAt alone can tie for back-to-back inserts. Null for single-agent runs.
+  comparisonSeq   Int?
+  startedAt       DateTime            @default(now())
   completedAt     DateTime?
   turnResults     EvalGeneratedTurn[]
+  orgId           String
 
   @@index([folderId, startedAt])
+  @@index([orgId])
+  @@index([comparisonId])
   @@map("eval_generations")
 }
 
@@ -1270,18 +1625,18 @@ model EvalJudge {
 /// `judgeName`/`model` are denormalized so a deleted judge's past scores still
 /// render (no hard FK to EvalJudge on purpose).
 model EvalVerdict {
-  id           String         @id @default(cuid())
+  id           String            @id @default(cuid())
   turnResultId String
   turnResult   EvalGeneratedTurn @relation(fields: [turnResultId], references: [id], onDelete: Cascade)
   judgeId      String
   judgeName    String
   score        Int?
-  reasoning    String?        @db.Text
-  status       String         @default("scored")
-  model        String         @default("default")
+  reasoning    String?           @db.Text
+  status       String            @default("scored")
+  model        String            @default("default")
   passId       String?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
   @@unique([turnResultId, judgeId, model])
   @@index([turnResultId])
@@ -1294,16 +1649,16 @@ model EvalVerdict {
 // ==========================================
 
 model ServiceRegistry {
-  id              String   @id @default(uuid())
-  tenantId        String   @map("tenant_id")
-  tenantUniqueId  String   @map("tenant_unique_id")
-  serviceName     String   @map("service_name")
-  backendId       String   @map("backend_id")
-  backendUrl      String   @map("backend_url")
-  tools           Json
-  xAuthHeaderName String?  @map("x_auth_header_name")
-  tokenEndpointUrl String? @map("token_endpoint_url")
-  registeredAt    DateTime @default(now()) @map("registered_at")
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
+  tenantUniqueId   String   @map("tenant_unique_id")
+  serviceName      String   @map("service_name")
+  backendId        String   @map("backend_id")
+  backendUrl       String   @map("backend_url")
+  tools            Json
+  xAuthHeaderName  String?  @map("x_auth_header_name")
+  tokenEndpointUrl String?  @map("token_endpoint_url")
+  registeredAt     DateTime @default(now()) @map("registered_at")
 
   @@unique([tenantUniqueId, serviceName, backendId], name: "unique_service_backend_tenant")
   @@index([tenantUniqueId])
@@ -1312,3 +1667,23 @@ model ServiceRegistry {
   @@map("service_registry")
 }
 
+// Error-pipeline bucket taxonomy + routing rules (Grafana → Claw auto-fix).
+// The classifier in xyne-claw fetches these at runtime: marker regexes give
+// the deterministic fast-path, descriptions feed the LLM fallback's prompt,
+// mode gates the future runner. Editable without a deploy (admin UI/API).
+// mode is a plain string (auto | review | drop) — no Postgres enum, per the
+// enum→text convention.
+model ErrorBucket {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String   @default("") // one-liner for the LLM prompt
+  keywords     String[] @default([]) // literal phrases (auto-escaped, case-insensitive) — the friendly editor
+  markers      String   @default("") // advanced: raw regex, unioned with keywords. Escape hatch for power patterns.
+  matchOrder   Int      @default(20) // pattern-check order, ascending (1 = tried first; default bucket = 25). NOT urgency.
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([enabled, matchOrder])
+  @@map("error_buckets")
+}

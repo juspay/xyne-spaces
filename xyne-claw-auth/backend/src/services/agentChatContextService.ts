@@ -32,14 +32,6 @@ export interface ContextFile {
   content: string;
 }
 
-export interface ActivityContext {
-  eventName: string;
-  eventCategory?: string;
-  timestamp?: string;
-  metadata?: Record<string, unknown>;
-  relatedData?: Record<string, unknown>;
-}
-
 interface ChannelRow {
   id: string;
   name: string;

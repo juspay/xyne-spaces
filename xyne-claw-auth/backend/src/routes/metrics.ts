@@ -15,27 +15,43 @@
 import { Router, type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
-import { isClawAdmin } from "../middleware/agent-acl.js";
+import { isClawAdmin, getOrgId } from "../middleware/agent-acl.js";
+import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { backfillFailureCurator } from "../services/failure-curator-worker.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("metrics");
 
 /**
- * Per-request user scope. Admins see the full workspace; everyone else only
- * sees runs they personally triggered. The returned `userFilter` is a
- * Prisma.sql fragment ready to drop into any agent_runs query — empty when
- * admin, `AND "userId" = '<uid>'` otherwise. Encapsulated so every route
- * applies the same rule consistently.
+ * Per-request metrics scope. Admins see every user in their org; everyone
+ * else keeps the legacy personal-run view. CLAW_ADMIN can explicitly request
+ * orgScope=all, which bypasses the org filter and is audit-logged by
+ * getAdminOrgScope.
  */
-async function resolveUserScope(req: Request): Promise<{ userId: string; userFilter: Prisma.Sql; scopeUserId: string | undefined }> {
+async function resolveMetricsScope(req: Request, endpoint: string): Promise<{
+  userId: string;
+  userFilter: Prisma.Sql;
+  orgFilter: Prisma.Sql;
+  scopeUserId: string | undefined;
+  scopeOrgId: string | undefined;
+  allOrgs: boolean;
+}> {
   const userId = String(req.headers["x-user-id"] ?? "");
   if (!userId) throw new Error("x-user-id header is required");
   const admin = await isClawAdmin(userId);
+  const adminScope = getAdminOrgScope(req, endpoint, admin);
+  const fallbackOrgId = adminScope.orgId
+    ?? (adminScope.allOrgs ? undefined : (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId);
+  if (!adminScope.allOrgs && !fallbackOrgId) {
+    throw new Error("orgId is required");
+  }
   return {
     userId,
     userFilter: admin ? Prisma.empty : Prisma.sql`AND "userId" = ${userId}`,
+    orgFilter: adminScope.allOrgs ? Prisma.empty : Prisma.sql`AND "orgId" = ${fallbackOrgId}`,
     scopeUserId: admin ? undefined : userId,
+    scopeOrgId: adminScope.allOrgs ? undefined : fallbackOrgId,
+    allOrgs: adminScope.allOrgs,
   };
 }
 
@@ -43,6 +59,9 @@ export const metricsRouter = Router();
 
 const ALLOWED_DAYS = new Set([1, 7, 30]);
 const DEFAULT_DAYS = 7;
+
+type TriggerGroup = "user" | "automation" | "scheduled" | "api";
+const TRIGGER_GROUPS: TriggerGroup[] = ["user", "automation", "scheduled", "api"];
 
 function parseDays(req: Request): number {
   const raw = Number(req.query["days"]);
@@ -60,10 +79,16 @@ interface DayBucket {
   avgLlmMs: number | null;
   avgToolMs: number | null;
   errorRate: number; // 0..1
+  user?: number;
+  automation?: number;
+  scheduled?: number;
+  api?: number;
 }
 
 interface AgentRow {
   agentSlug: string;
+  orgId?: string | null;
+  orgName?: string | null;
   runs: number;
   p50TotalMs: number | null;
   p95TotalMs: number | null;
@@ -82,6 +107,17 @@ interface ProviderRow {
   p95TtftMs: number | null;
   avgTokensPerSec: number | null;
   errorRate: number;
+}
+
+interface TriggerRow {
+  trigger: TriggerGroup;
+  runs: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  errorRate: number;
+  p50TotalMs: number | null;
+  p95TotalMs: number | null;
 }
 
 interface SlowSessionToolRow {
@@ -113,6 +149,7 @@ async function fetchSlowSessions(opts: {
   windowEnd: Date;
   agentSlug?: string | undefined;
   scopeUserId?: string | undefined;
+  scopeOrgId?: string | undefined;
   limit: number;
 }): Promise<SlowSession[]> {
   const rows = await prisma.agentRun.findMany({
@@ -121,6 +158,7 @@ async function fetchSlowSessions(opts: {
       totalMs: { not: null },
       ...(opts.agentSlug ? { agentSlug: opts.agentSlug } : {}),
       ...(opts.scopeUserId ? { userId: opts.scopeUserId } : {}),
+      ...(opts.scopeOrgId ? { orgId: opts.scopeOrgId } : {}),
     },
     select: {
       sessionId: true, agentSlug: true,
@@ -212,6 +250,9 @@ async function fetchSentiment(opts: {
   windowEnd: Date;
   agentSlug: string;
   userFilter: Prisma.Sql;
+  orgFilter: Prisma.Sql;
+  scopeUserId?: string | undefined;
+  scopeOrgId?: string | undefined;
 }): Promise<AgentSentiment> {
   const rows = await prisma.$queryRaw<Array<{
     total_runs: bigint;
@@ -241,6 +282,7 @@ async function fetchSentiment(opts: {
       AND "completedAt" >= ${opts.windowStart}
       AND "completedAt" <  ${opts.windowEnd}
       ${opts.userFilter}
+      ${opts.orgFilter}
   `;
 
   const r = rows[0];
@@ -258,6 +300,8 @@ async function fetchSentiment(opts: {
       completedAt: { gte: opts.windowStart, lt: opts.windowEnd },
       ratingComment: { not: null },
       rating: { in: ["up", "down"] },
+      ...(opts.scopeUserId ? { userId: opts.scopeUserId } : {}),
+      ...(opts.scopeOrgId ? { orgId: opts.scopeOrgId } : {}),
     },
     select: { sessionId: true, rating: true, ratingComment: true, completedAt: true },
     orderBy: { ratedAt: "desc" },
@@ -299,6 +343,7 @@ async function fetchToolLatency(opts: {
   windowEnd: Date;
   agentSlug: string;
   userFilter: Prisma.Sql;
+  orgFilter: Prisma.Sql;
   limit: number;
 }): Promise<ToolLatencyRow[]> {
   const rows = await prisma.$queryRaw<Array<{
@@ -327,6 +372,7 @@ async function fetchToolLatency(opts: {
       AND r."toolInvocations" IS NOT NULL
       AND NULLIF(inv->>'durationMs','') IS NOT NULL
       ${opts.userFilter}
+      ${opts.orgFilter}
     GROUP BY inv->>'toolName'
     ORDER BY total_ms DESC NULLS LAST
     LIMIT ${opts.limit}
@@ -365,6 +411,7 @@ interface MetricsResponse {
     errorRate: number;
   };
   perDay: DayBucket[];
+  byTrigger: TriggerRow[];
   topAgents: AgentRow[];
   byProvider: ProviderRow[];
   slowSessions: SlowSession[];
@@ -377,7 +424,7 @@ interface MetricsResponse {
  */
 metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const { userFilter, scopeUserId } = await resolveUserScope(req);
+    const { userFilter, orgFilter, scopeUserId, scopeOrgId } = await resolveMetricsScope(req, "/metrics/agent");
     const slug = req.params.slug;
     const days = parseDays(req);
     const windowEnd = new Date();
@@ -409,7 +456,12 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
       WHERE "agentSlug" = ${slug}
         AND "completedAt" >= ${windowStart}
         AND "completedAt" <  ${windowEnd}
+        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
+        -- completedAt = sweep time; counting them as window activity paints
+        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
+        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
         ${userFilter}
+        ${orgFilter}
       GROUP BY 1
       ORDER BY 1 ASC
     `;
@@ -441,7 +493,12 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
       WHERE "agentSlug" = ${slug}
         AND "completedAt" >= ${windowStart}
         AND "completedAt" <  ${windowEnd}
+        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
+        -- completedAt = sweep time; counting them as window activity paints
+        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
+        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
         ${userFilter}
+        ${orgFilter}
     `;
 
     const prevRaw = await prisma.$queryRaw<Array<{
@@ -460,6 +517,7 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
         AND "completedAt" >= ${prevWindowStart}
         AND "completedAt" <  ${windowStart}
         ${userFilter}
+        ${orgFilter}
     `;
 
     const round = (n: number | null): number | null => (n == null ? null : Math.round(n));
@@ -513,9 +571,9 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
           errorRate: runs > 0 ? errors / runs : 0,
         };
       }),
-      slowSessions: await fetchSlowSessions({ windowStart, windowEnd, agentSlug: slug, scopeUserId, limit: 20 }),
-      toolLatency:  await fetchToolLatency({ windowStart, windowEnd, agentSlug: slug, userFilter, limit: 30 }),
-      sentiment:    await fetchSentiment({ windowStart, windowEnd, agentSlug: slug, userFilter }),
+      slowSessions: await fetchSlowSessions({ windowStart, windowEnd, agentSlug: slug, scopeUserId, scopeOrgId, limit: 20 }),
+      toolLatency:  await fetchToolLatency({ windowStart, windowEnd, agentSlug: slug, userFilter, orgFilter, limit: 30 }),
+      sentiment:    await fetchSentiment({ windowStart, windowEnd, agentSlug: slug, userFilter, orgFilter, scopeUserId, scopeOrgId }),
     });
   } catch (err) {
     log.error("[metrics/agent] error:", err);
@@ -525,7 +583,7 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
 
 metricsRouter.get("/global", async (req: Request, res: Response) => {
   try {
-    const { userFilter, scopeUserId } = await resolveUserScope(req);
+    const { userFilter, orgFilter, scopeUserId, scopeOrgId, allOrgs } = await resolveMetricsScope(req, "/metrics/global");
     const days = parseDays(req);
     const windowEnd = new Date();
     const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
@@ -558,7 +616,12 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
       FROM "agent_runs"
       WHERE "completedAt" >= ${windowStart}
         AND "completedAt" <  ${windowEnd}
+        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
+        -- completedAt = sweep time; counting them as window activity paints
+        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
+        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
         ${userFilter}
+        ${orgFilter}
       GROUP BY 1
       ORDER BY 1 ASC
     `;
@@ -566,6 +629,7 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
     // Per-agent leaderboard, top 20 by runs.
     const topAgentsRaw = await prisma.$queryRaw<Array<{
       agentSlug: string;
+      orgId: string;
       runs: bigint;
       p50_total_ms: number | null;
       p95_total_ms: number | null;
@@ -575,6 +639,7 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
     }>>`
       SELECT
         "agentSlug",
+        "orgId",
         COUNT(*)                                                   AS runs,
         PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
         PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms,
@@ -584,8 +649,13 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
       FROM "agent_runs"
       WHERE "completedAt" >= ${windowStart}
         AND "completedAt" <  ${windowEnd}
+        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
+        -- completedAt = sweep time; counting them as window activity paints
+        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
+        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
         ${userFilter}
-      GROUP BY "agentSlug"
+        ${orgFilter}
+      GROUP BY "agentSlug", "orgId"
       ORDER BY runs DESC
       LIMIT 20
     `;
@@ -614,10 +684,95 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
       FROM "agent_runs"
       WHERE "completedAt" >= ${windowStart}
         AND "completedAt" <  ${windowEnd}
+        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
+        -- completedAt = sweep time; counting them as window activity paints
+        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
+        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
         AND provider IS NOT NULL
         ${userFilter}
+        ${orgFilter}
       GROUP BY provider, model
       ORDER BY runs DESC, provider ASC, model ASC NULLS LAST
+    `;
+
+    // Pre-existing automation rows keep their old labels: webhook automation
+    // history was written as api, and other internal automation dispatches
+    // fell through as spaces before triggerSource=automation existed.
+    const byTriggerRaw = await prisma.$queryRaw<Array<{
+      trigger_group: TriggerGroup;
+      runs: bigint;
+      completed: bigint;
+      failed: bigint;
+      cancelled: bigint;
+      p50_total_ms: number | null;
+      p95_total_ms: number | null;
+    }>>`
+      WITH classified AS (
+        SELECT
+          CASE
+            WHEN "triggerSource" IN ('spaces', 'chat') THEN 'user'
+            WHEN "triggerSource" = 'automation' THEN 'automation'
+            WHEN "triggerSource" = 'scheduled' THEN 'scheduled'
+            WHEN "triggerSource" = 'api' THEN 'api'
+            ELSE 'user'
+          END AS trigger_group,
+          status,
+          "totalMs"
+        FROM "agent_runs"
+        WHERE "completedAt" >= ${windowStart}
+          AND "completedAt" <  ${windowEnd}
+          -- Janitor closures of month-old zombie rows (orphan-finalizer)
+          -- carry completedAt = sweep time; counting them as window activity
+          -- paints false failure spikes on sweep days (2026-07-08 backlog).
+          AND (error IS NULL OR error <> 'interrupted (orphaned run)')
+          ${userFilter}
+          ${orgFilter}
+      )
+      SELECT
+        trigger_group,
+        COUNT(*)                                                   AS runs,
+        COUNT(*) FILTER (WHERE status = 'completed')               AS completed,
+        COUNT(*) FILTER (WHERE status = 'failed')                  AS failed,
+        COUNT(*) FILTER (WHERE status = 'cancelled')               AS cancelled,
+        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms
+      FROM classified
+      GROUP BY trigger_group
+      ORDER BY trigger_group ASC
+    `;
+
+    const perDayTriggerRaw = await prisma.$queryRaw<Array<{
+      day: Date;
+      trigger_group: TriggerGroup;
+      runs: bigint;
+    }>>`
+      WITH classified AS (
+        SELECT
+          date_trunc('day', "completedAt")::date AS day,
+          CASE
+            WHEN "triggerSource" IN ('spaces', 'chat') THEN 'user'
+            WHEN "triggerSource" = 'automation' THEN 'automation'
+            WHEN "triggerSource" = 'scheduled' THEN 'scheduled'
+            WHEN "triggerSource" = 'api' THEN 'api'
+            ELSE 'user'
+          END AS trigger_group
+        FROM "agent_runs"
+        WHERE "completedAt" >= ${windowStart}
+          AND "completedAt" <  ${windowEnd}
+          -- Janitor closures of month-old zombie rows (orphan-finalizer)
+          -- carry completedAt = sweep time; counting them as window activity
+          -- paints false failure spikes on sweep days (2026-07-08 backlog).
+          AND (error IS NULL OR error <> 'interrupted (orphaned run)')
+          ${userFilter}
+          ${orgFilter}
+      )
+      SELECT
+        day,
+        trigger_group,
+        COUNT(*) AS runs
+      FROM classified
+      GROUP BY day, trigger_group
+      ORDER BY day ASC, trigger_group ASC
     `;
 
     // Current period totals.
@@ -643,7 +798,12 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
       FROM "agent_runs"
       WHERE "completedAt" >= ${windowStart}
         AND "completedAt" <  ${windowEnd}
+        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
+        -- completedAt = sweep time; counting them as window activity paints
+        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
+        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
         ${userFilter}
+        ${orgFilter}
     `;
 
     // Previous-period totals for delta computation.
@@ -662,6 +822,7 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
       WHERE "completedAt" >= ${prevWindowStart}
         AND "completedAt" <  ${windowStart}
         ${userFilter}
+        ${orgFilter}
     `;
 
     const round = (n: number | null): number | null => (n == null ? null : Math.round(n));
@@ -672,6 +833,29 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
     const p = prevRaw[0];
     const prevRuns = p ? Number(p.runs) : 0;
     const prevErrors = p ? Number(p.errors) : 0;
+    const orgNames = allOrgs ? await getOrgNameMap(topAgentsRaw.map((r) => r.orgId)) : new Map();
+    const byTriggerLookup = new Map<TriggerGroup, TriggerRow>();
+    for (const r of byTriggerRaw) {
+      const runs = Number(r.runs);
+      const errors = Number(r.failed) + Number(r.cancelled);
+      byTriggerLookup.set(r.trigger_group, {
+        trigger: r.trigger_group,
+        runs,
+        completed: Number(r.completed),
+        failed: Number(r.failed),
+        cancelled: Number(r.cancelled),
+        errorRate: runs > 0 ? errors / runs : 0,
+        p50TotalMs: round(r.p50_total_ms ?? null),
+        p95TotalMs: round(r.p95_total_ms ?? null),
+      });
+    }
+    const triggerCountsByDay = new Map<string, Record<TriggerGroup, number>>();
+    for (const r of perDayTriggerRaw) {
+      const day = r.day.toISOString().slice(0, 10);
+      const counts = triggerCountsByDay.get(day) ?? { user: 0, automation: 0, scheduled: 0, api: 0 };
+      counts[r.trigger_group] = Number(r.runs);
+      triggerCountsByDay.set(day, counts);
+    }
 
     const response: MetricsResponse = {
       days,
@@ -698,10 +882,12 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
                    (prevRuns > 0 ? prevErrors / prevRuns : 0),
       },
       perDay: perDayRaw.map((r) => {
+        const day = r.day.toISOString().slice(0, 10);
         const runs = Number(r.runs);
         const errors = Number(r.failed) + Number(r.cancelled);
+        const triggerCounts = triggerCountsByDay.get(day) ?? { user: 0, automation: 0, scheduled: 0, api: 0 };
         return {
-          day: r.day.toISOString().slice(0, 10),
+          day,
           runs,
           completed: Number(r.completed),
           failed: Number(r.failed),
@@ -711,19 +897,34 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
           avgLlmMs: round(r.avg_llm_ms ?? null),
           avgToolMs: round(r.avg_tool_ms ?? null),
           errorRate: runs > 0 ? errors / runs : 0,
+          user: triggerCounts.user,
+          automation: triggerCounts.automation,
+          scheduled: triggerCounts.scheduled,
+          api: triggerCounts.api,
         };
       }),
+      byTrigger: TRIGGER_GROUPS.map((trigger) => byTriggerLookup.get(trigger) ?? ({
+        trigger,
+        runs: 0,
+        completed: 0,
+        failed: 0,
+        cancelled: 0,
+        errorRate: 0,
+        p50TotalMs: null,
+        p95TotalMs: null,
+      })),
       topAgents: topAgentsRaw.map((r) => {
         const runs = Number(r.runs);
-        return {
+        return withOrgLabel({
           agentSlug: r.agentSlug,
+          orgId: r.orgId,
           runs,
           p50TotalMs: round(r.p50_total_ms ?? null),
           p95TotalMs: round(r.p95_total_ms ?? null),
           avgLlmMs: round(r.avg_llm_ms ?? null),
           avgToolMs: round(r.avg_tool_ms ?? null),
           errorRate: runs > 0 ? Number(r.errors) / runs : 0,
-        };
+        }, orgNames);
       }),
       byProvider: byProviderRaw.map((r) => {
         const runs = Number(r.runs);
@@ -739,7 +940,7 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
           errorRate: runs > 0 ? Number(r.errors) / runs : 0,
         };
       }),
-      slowSessions: await fetchSlowSessions({ windowStart, windowEnd, scopeUserId, limit: 20 }),
+      slowSessions: await fetchSlowSessions({ windowStart, windowEnd, scopeUserId, scopeOrgId, limit: 20 }),
     };
 
     res.json(response);
@@ -765,32 +966,43 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
 // For the :id-based endpoints (apply/dismiss) we look up the candidate
 // first to find its agentSlug, then run the same gate.
 
-async function authorizeAgentEdit(req: Request, res: Response, agentSlug: string): Promise<string | null> {
+async function authorizeAgentEdit(req: Request, res: Response, agentSlug: string): Promise<{ userId: string; orgId: string } | null> {
   const userId = String(req.headers["x-user-id"] ?? "");
   if (!userId) { res.status(401).json({ error: "x-user-id header is required" }); return null; }
-  const agent = await prisma.agent.findUnique({
-    where: { slug: agentSlug },
+  const editOrgId = getOrgId(req);
+  if (!editOrgId) {
+    log.error(`[metrics/authorize-agent-edit] orgId is required; refusing global agent lookup agentSlug=${agentSlug} userId=${userId}`);
+    res.status(400).json({ error: "orgId is required" });
+    return null;
+  }
+  const agent = await prisma.agent.findFirst({
+    where: { slug: agentSlug, orgId: editOrgId },
     select: { id: true, ownerUserId: true },
   });
-  if (!agent) { res.status(404).json({ error: "Agent not found" }); return null; }
+  if (!agent) {
+    log.warn(`[metrics/authorize-agent-edit] agent org-scoped miss slug=${agentSlug} orgId=${editOrgId ?? "none"} userId=${userId}`);
+    res.status(404).json({ error: "Agent not found" });
+    return null;
+  }
   const admin = await isClawAdmin(userId);
-  if (admin) return userId;
-  if (agent.ownerUserId === userId) return userId;
+  if (admin) return { userId, orgId: editOrgId };
+  if (agent.ownerUserId === userId) return { userId, orgId: editOrgId };
   const share = await prisma.agentShare.findUnique({
     where: { agentId_userId: { agentId: agent.id, userId } },
     select: { role: true },
   });
-  if (share && (share.role === "EDITOR" || share.role === "CONTRIBUTOR")) return userId;
+  if (share && (share.role === "EDITOR" || share.role === "CONTRIBUTOR")) return { userId, orgId: editOrgId };
   res.status(403).json({ error: "Only the agent owner, contributors, or an admin can perform this action" });
   return null;
 }
 
 metricsRouter.get("/agent/:slug/improvements", async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    if (!(await authorizeAgentEdit(req, res, req.params.slug))) return;
+    const authorized = await authorizeAgentEdit(req, res, req.params.slug);
+    if (!authorized) return;
     const slug = req.params.slug;
     const candidates = await prisma.agentImprovementCandidate.findMany({
-      where: { agentSlug: slug, status: "pending" },
+      where: { orgId: authorized.orgId, agentSlug: slug, status: "pending" },
       orderBy: [{ confidence: "desc" }, { updatedAt: "desc" }],
       take: 100,
     });
@@ -820,16 +1032,21 @@ metricsRouter.post("/improvements/:id/apply", async (req: Request<{ id: string }
     // Resolve the candidate first so we know which agent to gate on.
     const candidate = await prisma.agentImprovementCandidate.findUnique({
       where: { id: req.params.id },
-      select: { agentSlug: true },
+      select: { agentSlug: true, orgId: true },
     });
     if (!candidate) { res.status(404).json({ error: "Candidate not found" }); return; }
-    const editorUid = await authorizeAgentEdit(req, res, candidate.agentSlug);
-    if (!editorUid) return;
+    const authorized = await authorizeAgentEdit(req, res, candidate.agentSlug);
+    if (!authorized) return;
+    if (candidate.orgId !== authorized.orgId) {
+      log.warn(`[metrics/improvements] candidate org mismatch; refusing apply candidateId=${req.params.id} candidateOrgId=${candidate.orgId} orgId=${authorized.orgId} agentSlug=${candidate.agentSlug}`);
+      res.status(404).json({ error: "Candidate not found" });
+      return;
+    }
     const updated = await prisma.agentImprovementCandidate.update({
       where: { id: req.params.id },
       data: {
         status: "applied",
-        metadata: { appliedBy: editorUid, appliedAt: new Date().toISOString() } as unknown as Prisma.InputJsonValue,
+        metadata: { appliedBy: authorized.userId, appliedAt: new Date().toISOString() } as unknown as Prisma.InputJsonValue,
       },
     });
     res.json({ ok: true, id: updated.id, status: updated.status });
@@ -843,18 +1060,23 @@ metricsRouter.post("/improvements/:id/dismiss", async (req: Request<{ id: string
   try {
     const candidate = await prisma.agentImprovementCandidate.findUnique({
       where: { id: req.params.id },
-      select: { agentSlug: true },
+      select: { agentSlug: true, orgId: true },
     });
     if (!candidate) { res.status(404).json({ error: "Candidate not found" }); return; }
-    const editorUid = await authorizeAgentEdit(req, res, candidate.agentSlug);
-    if (!editorUid) return;
+    const authorized = await authorizeAgentEdit(req, res, candidate.agentSlug);
+    if (!authorized) return;
+    if (candidate.orgId !== authorized.orgId) {
+      log.warn(`[metrics/improvements] candidate org mismatch; refusing dismiss candidateId=${req.params.id} candidateOrgId=${candidate.orgId} orgId=${authorized.orgId} agentSlug=${candidate.agentSlug}`);
+      res.status(404).json({ error: "Candidate not found" });
+      return;
+    }
     const reason = String((req.body ?? {})["reason"] ?? "");
     const updated = await prisma.agentImprovementCandidate.update({
       where: { id: req.params.id },
       data: {
         status: "dismissed",
         metadata: {
-          dismissedBy: editorUid,
+          dismissedBy: authorized.userId,
           dismissedAt: new Date().toISOString(),
           ...(reason ? { dismissReason: reason.slice(0, 500) } : {}),
         } as unknown as Prisma.InputJsonValue,

@@ -22,7 +22,7 @@ import {
   subagentShareRepository,
   userRepository,
 } from "../repositories/index.js";
-import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
 import {
   ValidationError,
   validateSubagentInput,
@@ -120,9 +120,10 @@ async function canEditSubagent(row: NonNullable<DbRow>, userId: string): Promise
 }
 
 // ── GET / — list all (builtins + customs) ────────────────────────────────
-router.get("/", async (_req: Request, res: Response) => {
+router.get("/", async (req: Request, res: Response) => {
   try {
-    const customs = await subagentDefinitionRepository.listAll();
+    // Phase-2: org-scope custom subagents (built-ins are platform-wide below).
+    const customs = await subagentDefinitionRepository.listAll(getOrgId(req));
     // Batch-load shares for every custom in one query so the list view can
     // show share badges without N round-trips.
     const sharesByDef = new Map<string, Awaited<ReturnType<typeof subagentShareRepository.listBySubagent>>>();
@@ -158,11 +159,17 @@ router.get("/:name", async (req: Request, res: Response) => {
     const builtin = SUBAGENT_DEFINITIONS.find((d) => d.name === name);
     if (builtin) return res.json({ success: true, data: builtinAsListItem(builtin) });
 
-    const row = await subagentDefinitionRepository.findByName(name);
-    if (!row) return res.status(404).json({ success: false, error: "subagent not found" });
+    const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+    if (!row) {
+      log.warn(`[subagents/get] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
+      return res.status(404).json({ success: false, error: "subagent not found" });
+    }
     const shares = await subagentShareRepository.listBySubagent(row.id);
     const creator = row.createdByUserId
-      ? await prisma.user.findUnique({ where: { id: row.createdByUserId }, select: { name: true, email: true } })
+      ? await prisma.user.findUnique({
+        where: { id: row.createdByUserId },
+        select: { name: true, email: true },
+      })
       : null;
 
     return res.json({ success: true, data: dbRowAsListItem(row, shares, creator) });
@@ -179,7 +186,12 @@ router.post("/", async (req: Request, res: Response) => {
     if (!requesterId) {
       return res.status(401).json({ success: false, error: "x-user-id header is required" });
     }
-    const validated = await validateSubagentInput(prisma, req.body, { isCreate: true });
+    const orgId = getOrgId(req);
+    if (!orgId) {
+      log.warn(`[subagents/create] orgId is required requesterId=${requesterId} name=${typeof req.body?.name === "string" ? req.body.name : "none"}`);
+      return res.status(400).json({ success: false, error: "orgId is required" });
+    }
+    const validated = await validateSubagentInput(prisma, req.body, { isCreate: true, orgId });
 
     const created = await subagentDefinitionRepository.create({
       name: validated.name,
@@ -195,6 +207,9 @@ router.post("/", async (req: Request, res: Response) => {
         ? { mcpInstanceMap: validated.mcpInstanceMap as object }
         : {}),
       createdByUserId: requesterId,
+      // Phase-2: stamp the creating org so no null-org subagent is minted (which
+      // would block the future NOT-NULL flip).
+      org: { connect: { id: orgId } },
       ...(validated.skillIds.length > 0
         ? {
             skills: {
@@ -228,8 +243,11 @@ router.put("/:name", async (req: Request, res: Response) => {
         error: `"${name}" is a built-in subagent and cannot be modified`,
       });
     }
-    const existing = await subagentDefinitionRepository.findByName(name);
-    if (!existing) return res.status(404).json({ success: false, error: "subagent not found" });
+    const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+    if (!existing) {
+      log.warn(`[subagents/update] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+      return res.status(404).json({ success: false, error: "subagent not found" });
+    }
 
     if (!(await canEditSubagent(existing, requesterId))) {
       return res.status(403).json({
@@ -246,10 +264,10 @@ router.put("/:name", async (req: Request, res: Response) => {
     const validated = await validateSubagentInput(
       prisma,
       { ...(req.body as Record<string, unknown>), name } as Parameters<typeof validateSubagentInput>[1],
-      { isCreate: false },
+      { isCreate: false, orgId: existing.orgId },
     );
 
-    const updated = await subagentDefinitionRepository.update(name, {
+    const updated = await subagentDefinitionRepository.update(name, existing.orgId, {
       description: validated.description,
       progressLabels: validated.progressLabels,
       systemPrompt: validated.systemPrompt,
@@ -264,7 +282,7 @@ router.put("/:name", async (req: Request, res: Response) => {
     });
 
     await subagentDefinitionRepository.replaceSkills(updated.id, validated.skillIds);
-    const refreshed = await subagentDefinitionRepository.findByName(name);
+    const refreshed = await subagentDefinitionRepository.findByName(name, getOrgId(req));
     const shares = refreshed ? await subagentShareRepository.listBySubagent(refreshed.id) : [];
     return res.json({ success: true, data: dbRowAsListItem(refreshed!, shares) });
   } catch (err) {
@@ -289,15 +307,18 @@ router.delete("/:name", async (req: Request, res: Response) => {
         error: `"${name}" is a built-in subagent and cannot be deleted`,
       });
     }
-    const existing = await subagentDefinitionRepository.findByName(name);
-    if (!existing) return res.status(404).json({ success: false, error: "subagent not found" });
+    const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+    if (!existing) {
+      log.warn(`[subagents/delete] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+      return res.status(404).json({ success: false, error: "subagent not found" });
+    }
     if (!(await canEditSubagent(existing, requesterId))) {
       return res.status(403).json({
         success: false,
         error: "Only the owner, contributors, or admins can disable this subagent",
       });
     }
-    await subagentDefinitionRepository.disable(name);
+    await subagentDefinitionRepository.disable(name, existing.orgId);
     return res.json({ success: true });
   } catch (err) {
     log.error("[subagents] delete error:", err);
@@ -317,15 +338,18 @@ router.post("/:name/enable", async (req: Request, res: Response) => {
     if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
       return res.status(400).json({ success: false, error: "built-ins are always enabled" });
     }
-    const existing = await subagentDefinitionRepository.findByName(name);
-    if (!existing) return res.status(404).json({ success: false, error: "subagent not found" });
+    const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+    if (!existing) {
+      log.warn(`[subagents/restore] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+      return res.status(404).json({ success: false, error: "subagent not found" });
+    }
     if (!(await canEditSubagent(existing, requesterId))) {
       return res.status(403).json({
         success: false,
         error: "Only the owner, contributors, or admins can re-enable this subagent",
       });
     }
-    const updated = await subagentDefinitionRepository.enable(name);
+    const updated = await subagentDefinitionRepository.enable(name, existing.orgId);
     const shares = await subagentShareRepository.listBySubagent(updated.id);
     return res.json({ success: true, data: dbRowAsListItem(updated, shares) });
   } catch (err) {
@@ -343,8 +367,11 @@ router.get("/:name/shares", async (req: Request, res: Response) => {
     if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
       return res.json({ success: true, data: [] });
     }
-    const row = await subagentDefinitionRepository.findByName(name);
-    if (!row) return res.status(404).json({ success: false, error: "subagent not found" });
+    const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+    if (!row) {
+      log.warn(`[subagents/shares] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
+      return res.status(404).json({ success: false, error: "subagent not found" });
+    }
     const shares = await subagentShareRepository.listBySubagent(row.id);
     return res.json({
       success: true,
@@ -374,8 +401,11 @@ router.post("/:name/shares", async (req: Request, res: Response) => {
     if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
       return res.status(400).json({ success: false, error: "built-in subagents cannot be shared" });
     }
-    const row = await subagentDefinitionRepository.findByName(name);
-    if (!row) return res.status(404).json({ success: false, error: "subagent not found" });
+    const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+    if (!row) {
+      log.warn(`[subagents/share] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+      return res.status(404).json({ success: false, error: "subagent not found" });
+    }
     if (!(await canEditSubagent(row, requesterId))) {
       return res.status(403).json({
         success: false,
@@ -396,7 +426,10 @@ router.post("/:name/shares", async (req: Request, res: Response) => {
     // Resolve userIdOrEmail to a real userId. Accept either form so the
     // frontend can let users type an email without an extra lookup hop.
     let target = await userRepository.findById(userIdOrEmail);
-    if (!target) target = await userRepository.findByEmail(userIdOrEmail);
+    const requesterOrgId = getOrgId(req);
+    if (!target && requesterOrgId) {
+      target = await prisma.user.findFirst({ where: { email: userIdOrEmail, orgId: requesterOrgId } });
+    }
     if (!target) {
       return res.status(404).json({ success: false, error: `No user matches "${userIdOrEmail}"` });
     }
@@ -433,8 +466,11 @@ router.delete("/:name/shares/:userId", async (req: Request, res: Response) => {
     if (!name || !userId) {
       return res.status(400).json({ success: false, error: "name and userId are required" });
     }
-    const row = await subagentDefinitionRepository.findByName(name);
-    if (!row) return res.status(404).json({ success: false, error: "subagent not found" });
+    const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+    if (!row) {
+      log.warn(`[subagents/unshare] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId} targetUserId=${userId}`);
+      return res.status(404).json({ success: false, error: "subagent not found" });
+    }
     if (!(await canEditSubagent(row, requesterId))) {
       return res.status(403).json({
         success: false,

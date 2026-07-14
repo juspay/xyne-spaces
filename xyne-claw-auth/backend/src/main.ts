@@ -27,11 +27,15 @@ import { knowledgeBaseRouter } from "./routes/knowledge-base.js";
 import subagentsRouter from "./routes/subagents.js";
 import sandboxRouter from "./routes/sandbox.js";
 import { adminRouter } from "./routes/admin.js";
+import { organizationsRouter } from "./routes/organizations.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "./routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { agentChatRouter, agentChatInternalRouter } from "./routes/agent-chat.js";
 import { sessionsArchiveRouter } from "./routes/sessions-archive.js";
+import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "./routes/error-pipeline.js";
+import { ERROR_PIPELINE } from "./config.js";
+import { runner as errorPipelineRunner } from "./error-pipeline/runner/runner.js";
 import { googleOAuthRouter, googleCallbackRouter } from "./routes/google-oauth.js";
 import { microsoftOAuthRouter, microsoftCallbackRouter } from "./routes/microsoft-oauth.js";
 import { calendlyOAuthRouter, calendlyCallbackRouter } from "./routes/calendly-oauth.js";
@@ -56,15 +60,19 @@ import { memoryRouter } from "./routes/memory.js";
 import { digitalTwinRouter } from "./routes/digital-twin.js";
 import { controlCenterRouter } from "./routes/control-center.js";
 import { evalsRouter } from "./routes/evals/index.js";
+import { cliAuthRouter } from "./routes/cli-auth.js";
 import { mcpGatewayRouter } from "./mcpgateway/index.js";
 import { initScheduledJobsWorker, closeWorker } from "./queue/scheduled-jobs-worker.js";
 import { closeQueue } from "./queue/scheduled-jobs-queue.js";
 import { initRunRecoveryWorker, closeRunRecoveryWorker } from "./queue/run-recovery-worker.js";
 import { initDigitalTwinBackfillWorker } from "./queue/digital-twin-backfill-worker.js";
+import { initAgentBackfillWorker, closeAgentBackfillWorker } from "./queue/agent-backfill-worker.js";
+import { closeAgentBackfillQueue } from "./queue/agent-backfill-queue.js";
 import { initEvalImportWorker, closeEvalImportWorker } from "./queue/eval-import-worker.js";
 import { initEvalGenerationWorker, closeEvalGenerationWorker } from "./queue/eval-generation-worker.js";
 import { initEvalJudgeWorker, closeEvalJudgeWorker } from "./queue/eval-judge-worker.js";
 import { initFailureCuratorWorker, closeFailureCuratorWorker } from "./services/failure-curator-worker.js";
+import { initOrphanFinalizerWorker, closeOrphanFinalizerWorker } from "./services/orphan-finalizer-worker.js";
 import { closeBackfillQueue } from "./queue/digital-twin-backfill-queue.js";
 import { bootstrapCustomTools } from "./bootstrap-tools.js";
 import { initMemoryCron } from "./services/memoryCronService.js";
@@ -107,6 +115,14 @@ app.use((req, _res, next) => {
   if (!s2sKeyMatches(req.headers["x-s2s-key"])) {
     delete req.headers["x-user-id"];
   }
+  // Phase-2: `x-org-id` / `x-user-role` are ALWAYS server-derived (set by
+  // attachOrgContext from the verified session) and are never a legitimate
+  // inbound header — not even over S2S (verified: xyne-claw sends neither).
+  // Strip them unconditionally here so org context is fail-closed uniformly,
+  // including on requireStrictS2S / unauthenticated mounts. The per-auth-
+  // middleware strips remain as defense-in-depth.
+  delete req.headers["x-org-id"];
+  delete req.headers["x-user-role"];
   next();
 });
 
@@ -126,6 +142,7 @@ app.use(`${BASE}/users`, requireAuth, connectionsRouter);
 app.use(`${BASE}/sessions`, mcpRouter);
 app.use(`${BASE}/gateways`, requireAuth, requireClawAdmin, gatewaysRouter);
 app.use(`${BASE}/agents`, requireAuth, agentsRouter);
+app.use(`${BASE}/cli`, cliAuthRouter);
 app.use(`${BASE}/chain-workflows`, requireAuth, chainWorkflowsRouter);
 app.use(`${BASE}/spaces`, requireAuth, spacesRouter);
 app.use(`${BASE}/tools`, requireAuth, toolsRouter);
@@ -133,6 +150,7 @@ app.use(`${BASE}/skills`, requireAuth, skillsRouter);
 app.use(`${BASE}/knowledge-base`, requireAuth, knowledgeBaseRouter);
 app.use(`${BASE}/subagents`, requireAuth, subagentsRouter);
 app.use(`${BASE}/sandbox`, requireAuth, sandboxRouter);
+app.use(`${BASE}/organizations`, requireAuth, organizationsRouter);
 app.use(`${BASE}/admin`, requireAuth, adminRouter);
 // TEMPORARY — delete this mount + the import above + the file after backfill.
 app.use(`${BASE}/admin`, requireAuth, adminBackfillSigningSecretsRouter);
@@ -140,6 +158,8 @@ app.use(`${BASE}/dashboard`, requireAuth, dashboardRouter);
 app.use(`${BASE}/agent-chat`, requireAuth, agentChatRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
 app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
+app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
+app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
 // Generic live OAuth-token read for every connector — GET /users/:userId/oauth/:provider/token.
 // Mounted before the per-provider routers (which now only serve authorize/callback)
 // so it owns the `/token` path. Same requireAuth guard; the handler additionally
@@ -247,38 +267,55 @@ const server = app.listen(CONFIG.port, () => {
       log.warn(`[boot] npx cache scrub failed:`, err);
     }
   })();
-  initScheduledJobsWorker();
-  initRunRecoveryWorker();
-  initDigitalTwinBackfillWorker();
-  initEvalImportWorker();
-  initEvalGenerationWorker();
-  initEvalJudgeWorker();
-  initMemoryCron();
-  initDigitalTwinDaily();
-  initFailureCuratorWorker();
+
+  if (ERROR_PIPELINE.isRunnerPod) {
+    log.info("[boot] runner pod — starting pipeline workers, skipping all other background workers/crons");
+    errorPipelineRunner.start();
+  } else {
+    // Normal API pod: the full background fleet, no runner.
+    initScheduledJobsWorker();
+    initRunRecoveryWorker();
+    initDigitalTwinBackfillWorker();
+    initAgentBackfillWorker();
+    initEvalImportWorker();
+    initEvalGenerationWorker();
+    initEvalJudgeWorker();
+    initMemoryCron();
+    initDigitalTwinDaily();
+    initFailureCuratorWorker();
+    initOrphanFinalizerWorker();
   // Upsert custom tools from the shared registry so newly added tools (e.g.
-  // google-sheets-create, google-forms-create) show up in the agent UI on
-  // restart without needing a manual POST /tools/sync call.
-  void bootstrapCustomTools();
-  // Jobs persist in Redis. A full Redis wipe loses schedulers; there is no
-  // auto-reconcile from Postgres. If that ever happens, restore by iterating
-  // active ScheduledJob rows and calling enqueueCronJob / enqueueDelayedJob.
-  // Warm the Bitbucket-author stats cache (PR/commit counts for xyne-doctor)
-  // so the admin dashboard's stat cards never serve a cold fetch.
-  startBitbucketStatsBackgroundRefresh();
+    // google-sheets-create, google-forms-create) show up in the agent UI on
+    // restart without needing a manual POST /tools/sync call.
+    void bootstrapCustomTools();
+    // Jobs persist in Redis. A full Redis wipe loses schedulers; there is no
+    // auto-reconcile from Postgres. If that ever happens, restore by iterating
+    // active ScheduledJob rows and calling enqueueCronJob / enqueueDelayedJob.
+    // Warm the Bitbucket-author stats cache (PR/commit counts for xyne-doctor)
+    // so the admin dashboard's stat cards never serve a cold fetch.
+    startBitbucketStatsBackgroundRefresh();
+  }
 });
 
 async function shutdown(signal: string): Promise<void> {
   log.info(`[xyne-claw-auth] ${signal}. Shutting down.`);
-  stopBitbucketStatsBackgroundRefresh();
-  await closeWorker().catch(() => {});
-  await closeRunRecoveryWorker().catch(() => {});
-  await closeEvalImportWorker().catch(() => {});
-  await closeEvalGenerationWorker().catch(() => {});
-  await closeEvalJudgeWorker().catch(() => {});
-  closeFailureCuratorWorker();
-  await closeQueue().catch(() => {});
-  await closeBackfillQueue().catch(() => {});
+  if (ERROR_PIPELINE.isRunnerPod) {
+    errorPipelineRunner.stop();
+  } else {
+    // API pod: drain the background fleet (none of it ran on the runner pod).
+    stopBitbucketStatsBackgroundRefresh();
+    await closeWorker().catch(() => {});
+    await closeRunRecoveryWorker().catch(() => {});
+    await closeEvalImportWorker().catch(() => {});
+    await closeEvalGenerationWorker().catch(() => {});
+    await closeEvalJudgeWorker().catch(() => {});
+    closeFailureCuratorWorker();
+    closeOrphanFinalizerWorker();
+    await closeQueue().catch(() => {});
+    await closeBackfillQueue().catch(() => {});
+    await closeAgentBackfillWorker().catch(() => {});
+    await closeAgentBackfillQueue().catch(() => {});
+  }
   await redisService.disconnect().catch(() => {});
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10_000).unref();

@@ -47,7 +47,7 @@ export const CURRENT_USER_ID = extractUserIdFromToken(DEFAULT_TOKEN);
 export async function spacesFetch(path: string, init?: RequestInit, auth?: SpacesAuthContext): Promise<unknown> {
   const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
   const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
-  const workspaceId = auth?.workspaceId ?? process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "";
+  const workspaceId = auth ? (auth.workspaceId ?? "") : (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "");
   const baseUrl = resolveBaseUrl(auth?.baseUrl);
 
   if (!baseUrl) {
@@ -163,7 +163,7 @@ export async function spacesFetchBuffer(
 ): Promise<{ buffer: Buffer; contentType: string }> {
   const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
   const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
-  const workspaceId = auth?.workspaceId ?? process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "";
+  const workspaceId = auth ? (auth.workspaceId ?? "") : (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "");
   const baseUrl = resolveBaseUrl(auth?.baseUrl);
   if (!baseUrl) throw new Error("Spaces base URL not configured");
   if (!token) throw new Error("Spaces auth token missing");
@@ -199,7 +199,7 @@ export async function spacesFetchBuffer(
 export async function spacesFetchText(path: string, auth?: SpacesAuthContext): Promise<string> {
   const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
   const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
-  const workspaceId = auth?.workspaceId ?? process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "";
+  const workspaceId = auth ? (auth.workspaceId ?? "") : (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "");
   const baseUrl = resolveBaseUrl(auth?.baseUrl);
   if (!baseUrl) throw new Error("Spaces base URL not configured");
   if (!token) throw new Error("Spaces auth token missing");

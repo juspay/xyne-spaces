@@ -25,6 +25,8 @@ import {
   listCodexModelsForUser,
   startCodexOauth,
   exchangeCodexOauth,
+  shareMyProviderCredential,
+  listAgents,
   type ProviderCredential,
   type SubagentRouting,
   type GitHubDeviceCode,
@@ -42,7 +44,9 @@ import {
   CopyIcon,
   PlugIcon,
   CaretRightIcon,
+  ShareNetworkIcon,
 } from "@phosphor-icons/react";
+import type { AgentLight } from "../../lib/types";
 
 /* =================================================================== */
 /*  CONFIG                                                              */
@@ -214,6 +218,7 @@ function AIProvidersSection({
   onError: (msg: string) => void;
 }) {
   const [activeDialog, setActiveDialog] = useState<string | null>(null);
+  const [shareDialog, setShareDialog] = useState<string | null>(null);
   const credMap = new Map(credentials.map((c) => [c.provider, c]));
 
   return (
@@ -242,6 +247,7 @@ function AIProvidersSection({
               credential={credMap.get(id)}
               isDefault={id === defaultProvider}
               onOpenDialog={() => setActiveDialog(id)}
+              onShare={() => setShareDialog(id)}
             />
           ))}
         </div>
@@ -256,7 +262,149 @@ function AIProvidersSection({
           onError={onError}
         />
       )}
+
+      {shareDialog && (
+        <ShareToAgentsDialog
+          provider={shareDialog}
+          userId={userId}
+          onClose={() => setShareDialog(null)}
+          onMutate={onMutate}
+        />
+      )}
     </section>
+  );
+}
+
+/* =================================================================== */
+/*  SHARE-TO-AGENTS DIALOG                                              */
+/* =================================================================== */
+
+/** Promote the user's personal credential into an org-level shared credential
+ *  and bind selected agents. One login session serves every bound agent (and
+ *  the user), so a single re-connect heals all of them — separate logins of
+ *  the same account keep invalidating each other's OAuth sessions. */
+function ShareToAgentsDialog({
+  provider,
+  userId,
+  onClose,
+  onMutate,
+}: {
+  provider: string;
+  userId: string;
+  onClose: () => void;
+  onMutate: () => void;
+}) {
+  const meta = PROVIDER_META[provider];
+  const displayName = meta?.name ?? provider;
+  const [name, setName] = useState(`${displayName} (shared)`);
+  const [agents, setAgents] = useState<AgentLight[] | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  useEffect(() => {
+    void listAgents()
+      .then((all) => setAgents(all.filter((a) => a.enabled)))
+      .catch((e) => setErr(e instanceof Error ? e.message : "Failed to load agents"));
+  }, []);
+
+  const submit = async () => {
+    if (selected.size === 0) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const { results } = await shareMyProviderCredential(userId, provider, {
+        name: name.trim() || undefined,
+        agentIds: [...selected],
+      });
+      const ok = results.filter((r) => r.ok).length;
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length === 0) {
+        setDone(`Shared with ${ok} agent(s).`);
+        onMutate();
+      } else {
+        setErr(`Shared with ${ok}; failed for ${failed.length}: ${failed[0]?.error ?? "error"}`);
+        if (ok > 0) onMutate();
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to share credential");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={`Share ${displayName} with agents`}
+      description="Selected agents run on this same login. Re-connecting it once fixes every bound agent."
+      maxWidth={520}
+    >
+      {done ? (
+        <div className="flex flex-col gap-4">
+          <p className="text-[13px] text-xyne-fg-secondary">{done}</p>
+          <div className="flex justify-end">
+            <Button onClick={onClose}>Close</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1 text-[12px] text-xyne-fg-secondary">
+            Shared credential name
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="rounded-md border border-xyne-border bg-xyne-surface px-2.5 py-1.5 text-[13px] text-xyne-fg-primary"
+              placeholder={`${displayName} (shared)`}
+            />
+          </label>
+          <div className="text-[12px] text-xyne-fg-secondary">Agents to bind</div>
+          <div className="max-h-64 overflow-y-auto rounded-lg border border-xyne-border divide-y divide-xyne-border">
+            {agents === null ? (
+              <div className="px-3 py-4 text-center text-[12px] text-xyne-fg-tertiary">Loading agents…</div>
+            ) : agents.length === 0 ? (
+              <div className="px-3 py-4 text-center text-[12px] text-xyne-fg-tertiary">No agents available.</div>
+            ) : (
+              agents.map((a) => (
+                <label key={a.id} className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-xyne-surface-sunken">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(a.id)}
+                    onChange={(e) => {
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(a.id);
+                        else next.delete(a.id);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] text-xyne-fg-primary truncate">{a.name}</span>
+                    <span className="block text-[11px] text-xyne-fg-tertiary truncate">{a.slug}</span>
+                  </span>
+                </label>
+              ))
+            )}
+          </div>
+          <div className="text-[11px] text-xyne-fg-tertiary">
+            You can bind agents you own (admins can bind any). Binding replaces the agent&apos;s own {displayName} credential.
+          </div>
+          {err && <div className="text-[12px] text-xyne-error-fg">{err}</div>}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={onClose} disabled={busy}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submit()} disabled={busy || selected.size === 0}>
+              {busy ? "Sharing…" : `Share with ${selected.size} agent(s)`}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Dialog>
   );
 }
 
@@ -266,12 +414,14 @@ function ProviderCard({
   credential,
   isDefault,
   onOpenDialog,
+  onShare,
 }: {
   id: string;
   meta: (typeof PROVIDER_META)[string];
   credential?: ProviderCredential;
   isDefault: boolean;
   onOpenDialog: () => void;
+  onShare: () => void;
 }) {
   const isConnected = credential?.hasApiKey ?? false;
   const Icon = meta.icon;
@@ -329,7 +479,18 @@ function ProviderCard({
         </p>
       )}
 
-      <div className="mt-auto flex justify-end">
+      <div className="mt-auto flex justify-end gap-2">
+        {isConnected && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onShare}
+            title="Share this login with selected agents — one session for all of them, one re-connect to fix all of them"
+          >
+            <ShareNetworkIcon size={14} weight="bold" />
+            Share
+          </Button>
+        )}
         <Button size="sm" variant={isConnected ? "secondary" : "primary"} onClick={onOpenDialog}>
           {actionLabel}
         </Button>

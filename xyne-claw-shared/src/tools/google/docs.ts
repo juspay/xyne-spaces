@@ -26,8 +26,32 @@ interface StructuralElement {
       alignment?: string;      // "START", "CENTER", "END", "JUSTIFIED"
     };
   };
-  table?: unknown;       // skip for now, can add later
+  table?: Table;          // table content — now recursed by readDocument (was dropped)
   sectionBreak?: unknown; // skip for now
+}
+
+/**
+ * Google Docs table shape (documents#Table / TableRow / TableCell).
+ * A table is rows -> cells, and each cell's `content` is ITSELF an array of
+ * StructuralElement (paragraphs and, rarely, nested tables) — so extracting
+ * cell text requires recursion, exactly like the top-level body.content walk.
+ */
+interface Table {
+  rows?: number;
+  columns?: number;
+  tableRows?: TableRow[];
+}
+
+interface TableRow {
+  startIndex?: number;
+  endIndex?: number;
+  tableCells?: TableCell[];
+}
+
+interface TableCell {
+  startIndex?: number;
+  endIndex?: number;
+  content?: StructuralElement[]; // recursive: same shape as body.content
 }
 
 interface ParagraphElement {
@@ -113,6 +137,53 @@ export async function appendToDocument(token: string, documentId: string, text: 
   return `Appended ${text.length} chars to document ${documentId}`;
 }
 
+/** Concatenate the raw text of a paragraph's textRun elements. */
+function paragraphText(paragraph: NonNullable<StructuralElement["paragraph"]>): string {
+  let text = "";
+  for (const run of paragraph.elements ?? []) {
+    // Only textRun carries text; inline objects / page breaks / smart-chips have
+    // no `.content` and are simply skipped (they never crashed, just no text).
+    if (run.textRun?.content) text += run.textRun.content;
+  }
+  return text;
+}
+
+/**
+ * Extract readable text from a table cell's `content` array. A cell holds
+ * paragraphs and, rarely, nested tables — recurse so no inner cell text is
+ * dropped. Newlines are collapsed so one cell renders on one line.
+ */
+function cellText(content: StructuralElement[] | undefined): string {
+  const parts: string[] = [];
+  for (const element of content ?? []) {
+    if (element.paragraph) {
+      const t = paragraphText(element.paragraph).replace(/\s+/g, " ").trim();
+      if (t) parts.push(t);
+    } else if (element.table) {
+      // Nested table inside a cell: recurse so its cell text is preserved too.
+      const nested = tableRowsText(element.table)
+        .map((row) => row.join(" | "))
+        .join(" ; ");
+      if (nested) parts.push(`[table: ${nested}]`);
+    }
+  }
+  return parts.join(" ");
+}
+
+/** Build a 2-D array (rows -> cells) of extracted cell text for a table. */
+function tableRowsText(table: Table): string[][] {
+  const rows: string[][] = [];
+  // table.tableRows[].tableCells[].content[] — the path readDocument used to skip.
+  for (const row of table.tableRows ?? []) {
+    const cells: string[] = [];
+    for (const cell of row.tableCells ?? []) {
+      cells.push(cellText(cell.content));
+    }
+    rows.push(cells);
+  }
+  return rows;
+}
+
 /** Read a document's structural content with index positions. */
 export async function readDocument(token: string, documentId: string): Promise<string> {
   if (!documentId.trim()) throw new Error("documentId is required");
@@ -146,8 +217,19 @@ export async function readDocument(token: string, documentId: string): Promise<s
           if (style?.fontSize?.magnitude) formatting.push(`size:${style.fontSize.magnitude}pt`);
 
           const fmt = formatting.length > 0 ? ` [${formatting.join(", ")}]` : "";
+          // Keep the [start-end] range annotation — downstream edit tools depend on it.
           lines.push(`[${start}-${end}]${fmt} ${JSON.stringify(text)}`);
         }
+      }
+    } else if (element.table) {
+      // Tables were previously dropped ("skip for now"). Recurse
+      // table.tableRows[].tableCells[].content[] and render each row readably
+      // (cells joined by " | ") so no cell text is lost.
+      const start = element.startIndex ?? 0;
+      const end = element.endIndex ?? 0;
+      lines.push(`[${start}-${end}] [Table]`);
+      for (const row of tableRowsText(element.table)) {
+        lines.push(row.join(" | "));
       }
     }
   }

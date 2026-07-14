@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import type { Agent, AgentShare, ScheduledJob } from "../../lib/types";
+import type { Agent, AgentLight, AgentShare, ScheduledJob } from "../../lib/types";
 import type {
   ClaudeModelInfo,
   AvailableTools,
@@ -27,6 +27,9 @@ import {
   promoteAgent,
   demoteAgent,
   cloneAgent,
+  listDelegationGrants,
+  createDelegationGrant,
+  deleteDelegationGrant,
   listAgents,
   listAgentShares,
   listProviderCredentials,
@@ -37,6 +40,8 @@ import {
   type SandboxRepoOption,
   type SbxGitRepoOption,
   type ResearchAgentOption,
+  type AgentDelegationGrant,
+  type DelegationIdentityMode,
 } from "../../lib/api";
 import { ADMIN_REQUEST_FORWARDED_MESSAGE } from "../../lib/admin-request-notice";
 import type { AgentProvider } from "../hooks/useAgents";
@@ -47,7 +52,7 @@ import { AgentDetailLeftColumn } from "./agent-detail/AgentDetailLeftColumn";
 import { AgentDetailRightColumn, type TabId } from "./agent-detail/AgentDetailRightColumn";
 import { AgentDetailSkeleton } from "./agent-detail/AgentDetailSkeleton";
 import { AgentNotFound } from "./agent-detail/AgentNotFound";
-import { ToolPickerDialog, type AgentToolSelection } from "./ToolPickerDialog";
+import type { AgentToolSelection } from "./ToolPickerDialog";
 import { SkillPickerDialog } from "./SkillPickerDialog";
 import { ChainWorkflowModal } from "./ChainWorkflowModal";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -63,6 +68,7 @@ function extractToolsFromConfig(config: Record<string, unknown> | undefined | nu
     direct:    t.direct ?? [],
     custom:    t.custom ?? [],
     gateway:   t.gateway ?? [],
+    callableAgents: t.callableAgents ?? [],
   };
 }
 
@@ -105,7 +111,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [draftTools, setDraftTools] = useState<AgentToolSelection>({ subagents: [], direct: [], custom: [], gateway: [] });
+  const [draftTools, setDraftTools] = useState<AgentToolSelection>({ subagents: [], direct: [], custom: [], gateway: [], callableAgents: [] });
   const [draftSkillIds, setDraftSkillIds] = useState<string[]>([]);
   const [draftKbResources, setDraftKbResources] = useState<import("./KnowledgeBasePicker").KbSelection[]>([]);
   const [draftKbScope, setDraftKbScope] = useState<"COLLECTIONS" | "USER">("COLLECTIONS");
@@ -184,7 +190,6 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // card drops into that panel. Provider settings now live in the left
   // column's "Model & provider" card, not the right rail.
   const [activeTab, setActiveTab] = useState<TabId>("overview");
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
 
@@ -193,7 +198,9 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   const [chainLoading, setChainLoading] = useState(true);
   const [chainModalOpen, setChainModalOpen] = useState(false);
   const [editingChainWorkflow, setEditingChainWorkflow] = useState<ChainWorkflow | null>(null);
-  const [allAgents, setAllAgents] = useState<Agent[]>([]);
+  const [allAgents, setAllAgents] = useState<AgentLight[]>([]);
+  const [delegationGrants, setDelegationGrants] = useState<AgentDelegationGrant[]>([]);
+  const [delegationLoading, setDelegationLoading] = useState(false);
   const [deleteWorkflowTarget, setDeleteWorkflowTarget] = useState<ChainWorkflow | null>(null);
 
   /* ── delete agent state ────────────────────────────────────────── */
@@ -219,7 +226,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       getUserAgentConfig(slug, userId).catch(() => ({ provider: "spaces", model: null } as { provider: string; model: string | null })),
       listScheduledJobs({ agentSlug: slug, userId }).catch(() => [] as ScheduledJob[]),
       listClaudeModelsForUser(userId).catch(() => [] as ClaudeModelInfo[]),
-      listAgents(userId).catch(() => [] as Agent[]),
+      listAgents(userId).catch(() => [] as AgentLight[]),
       listChainWorkflows().catch(() => [] as Array<ChainWorkflow | { workflow: ChainWorkflow }>),
       listAgentShares(slug, userId).catch(() => [] as AgentShare[]),
     ])
@@ -303,6 +310,32 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     return getAgentPermissions(agent, userId, shares, isAdmin);
   }, [agent, userId, shares, isAdmin]);
 
+  useEffect(() => {
+    if (!slug || permissions?.role !== "owner") {
+      setDelegationGrants([]);
+      setDelegationLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDelegationLoading(true);
+    listDelegationGrants(slug)
+      .then((grants) => {
+        if (!cancelled) setDelegationGrants(grants);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error("[agent-detail] load delegation grants error:", err);
+          setDelegationGrants([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDelegationLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, permissions?.role]);
+
   const dirty = useMemo(() => {
     if (!agent) return false;
     const basePrompt = agent.systemPrompt ?? agent.description ?? "";
@@ -342,6 +375,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       !sameSet(draftTools.direct, baseTools.direct) ||
       !sameSet(draftTools.custom, baseTools.custom) ||
       !sameSet(draftTools.gateway, baseTools.gateway) ||
+      !sameSet(draftTools.callableAgents, baseTools.callableAgents) ||
       !sameSet(draftSkillIds, baseSkills) ||
       kbChanged ||
       kbScopeChanged ||
@@ -405,7 +439,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     setSavingConfig(true);
     try {
       const nextConfig = { ...(agent.config ?? {}) } as Record<string, unknown>;
-      if (draftTools.subagents.length || draftTools.direct.length || draftTools.custom.length || draftTools.gateway.length) {
+      if (draftTools.subagents.length || draftTools.direct.length || draftTools.custom.length || draftTools.gateway.length || draftTools.callableAgents.length) {
         nextConfig.tools = draftTools;
       } else {
         delete nextConfig.tools;
@@ -450,11 +484,6 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       } else {
         delete nextConfig.verifyResponses;
         delete nextConfig.verifyResponseCriteria;
-      }
-      if (draftCitationReflection) {
-        nextConfig.citationReflection = true;
-      } else {
-        delete nextConfig.citationReflection;
       }
       if (draftCitationReflection) {
         nextConfig.citationReflection = true;
@@ -557,6 +586,129 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       setSavingConfig(false);
     }
   }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftAutoGoal, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+
+  const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
+    if (!agent) throw new Error("Agent not loaded");
+    const nextConfig = { ...(agent.config ?? {}) } as Record<string, unknown>;
+    if (
+      nextTools.subagents.length ||
+      nextTools.direct.length ||
+      nextTools.custom.length ||
+      nextTools.gateway.length ||
+      nextTools.callableAgents.length
+    ) {
+      nextConfig.tools = nextTools;
+    } else {
+      delete nextConfig.tools;
+    }
+    const updated = await updateAgent(agent.slug, { config: nextConfig });
+    setAgent(updated);
+    setDraftTools(extractToolsFromConfig(updated.config));
+    return updated;
+  }, [agent]);
+
+  const addCallableAgentSlug = useCallback((slugToAdd: string): AgentToolSelection => {
+    const set = new Set(draftTools.callableAgents);
+    set.add(slugToAdd);
+    return { ...draftTools, callableAgents: Array.from(set) };
+  }, [draftTools]);
+
+  const removeCallableAgentSlug = useCallback((slugToRemove: string): AgentToolSelection => {
+    return { ...draftTools, callableAgents: draftTools.callableAgents.filter((s) => s !== slugToRemove) };
+  }, [draftTools]);
+
+  const upsertGrantState = useCallback((grant: AgentDelegationGrant) => {
+    setDelegationGrants((prev) => {
+      const withoutExisting = prev.filter((g) => g.id !== grant.id && g.calleeAgentId !== grant.calleeAgentId);
+      return [grant, ...withoutExisting];
+    });
+  }, []);
+
+  const handleAddDelegationGrant = useCallback(async (calleeSlug: string, identityMode: DelegationIdentityMode) => {
+    if (!agent) return;
+    try {
+      const grant = await createDelegationGrant(agent.slug, { calleeSlug, identityMode });
+      upsertGrantState(grant);
+      await persistToolsConfig(addCallableAgentSlug(calleeSlug));
+      if (grant.status === "approved") {
+        showSnackbar({ variant: "success", title: "Delegation enabled", description: `${grant.callee?.name ?? calleeSlug} can now be delegated to.` });
+      } else {
+        const ownerName = grant.callee?.ownerName;
+        showSnackbar({
+          variant: "success",
+          title: "Approval requested",
+          description: ownerName
+            ? `${ownerName} (owner of ${grant.callee?.name ?? calleeSlug}) has been asked to approve this delegation.`
+            : `The owner of ${grant.callee?.name ?? calleeSlug} has been asked to approve this delegation.`,
+        });
+      }
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Failed to enable delegation",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  }, [agent, addCallableAgentSlug, persistToolsConfig, upsertGrantState, showSnackbar]);
+
+  const handleDeleteDelegationGrant = useCallback(async (grant: AgentDelegationGrant) => {
+    if (!agent) return;
+    const calleeSlug = grant.callee?.slug;
+    try {
+      await deleteDelegationGrant(agent.slug, grant.id);
+      setDelegationGrants((prev) => prev.filter((g) => g.id !== grant.id));
+      if (calleeSlug) await persistToolsConfig(removeCallableAgentSlug(calleeSlug));
+      showSnackbar({ variant: "success", title: "Delegation removed" });
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Failed to remove delegation",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  }, [agent, persistToolsConfig, removeCallableAgentSlug, showSnackbar]);
+
+  const handleAddDelegationConfigEntry = useCallback(async (calleeSlug: string) => {
+    try {
+      await persistToolsConfig(addCallableAgentSlug(calleeSlug));
+      showSnackbar({ variant: "success", title: "Delegation config fixed" });
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Failed to fix delegation config",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  }, [addCallableAgentSlug, persistToolsConfig, showSnackbar]);
+
+  const handleCreateDelegationGrantForConfig = useCallback(async (calleeSlug: string) => {
+    if (!agent) return;
+    try {
+      const grant = await createDelegationGrant(agent.slug, { calleeSlug, identityMode: "user" });
+      upsertGrantState(grant);
+      await persistToolsConfig(addCallableAgentSlug(calleeSlug));
+      showSnackbar({ variant: "success", title: "Delegation grant fixed" });
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Failed to fix delegation grant",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  }, [agent, addCallableAgentSlug, persistToolsConfig, upsertGrantState, showSnackbar]);
+
+  const handleRemoveDelegationConfigEntry = useCallback(async (calleeSlug: string) => {
+    try {
+      await persistToolsConfig(removeCallableAgentSlug(calleeSlug));
+      showSnackbar({ variant: "success", title: "Delegation config removed" });
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Failed to remove delegation config",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  }, [persistToolsConfig, removeCallableAgentSlug, showSnackbar]);
 
   const handleDeleteWorkflow = useCallback(async () => {
     if (!deleteWorkflowTarget) return;
@@ -780,6 +932,14 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             draftTools={draftTools}
             onDraftToolsChange={setDraftTools}
             availableTools={availableTools}
+            allAgents={allAgents}
+            delegationGrants={delegationGrants}
+            delegationLoading={delegationLoading}
+            onAddDelegationGrant={handleAddDelegationGrant}
+            onDeleteDelegationGrant={handleDeleteDelegationGrant}
+            onAddDelegationConfigEntry={handleAddDelegationConfigEntry}
+            onCreateDelegationGrantForConfig={handleCreateDelegationGrantForConfig}
+            onRemoveDelegationConfigEntry={handleRemoveDelegationConfigEntry}
             draftSkillIds={draftSkillIds}
             onToggleSkill={toggleSkill}
             availableSkills={availableSkills}
@@ -827,7 +987,6 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onDraftOutputTemplateChange={setDraftOutputTemplate}
             draftOutputRequireTools={draftOutputRequireTools}
             onDraftOutputRequireToolsChange={setDraftOutputRequireTools}
-            onOpenToolPicker={() => setPickerOpen(true)}
             onOpenSkillPicker={() => setSkillPickerOpen(true)}
             onRequestRenameHandle={() => setRenameOpen(true)}
           />
@@ -856,13 +1015,6 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
           />
         </div>
       </div>
-
-      <ToolPickerDialog
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        initial={draftTools}
-        onSave={(next) => setDraftTools(next)}
-      />
 
       <SkillPickerDialog
         open={skillPickerOpen}

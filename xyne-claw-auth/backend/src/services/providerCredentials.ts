@@ -29,7 +29,9 @@ interface ProviderRuntimeConfig {
 /** Per-provider model used when the credential row doesn't pin one. */
 function defaultModelForProvider(provider: string): string {
   if (provider === "copilot") return "gpt-4o";
-  if (provider === "codex") return "gpt-4.1";
+  // gpt-4.1 is NOT servable through Codex ChatGPT-account OAuth (400
+  // "model is not supported when using Codex with a ChatGPT account").
+  if (provider === "codex") return "gpt-5.5";
   return "claude-sonnet-4-5";
 }
 

@@ -4,8 +4,8 @@ import { spacesAppFetchGet } from "../lib/spaces-api.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { getRequesterId } from "../middleware/agent-acl.js";
-import { getSpacesAuthForUser } from "../lib/spaces-db.js";
+import { getRequesterId, getOrgId } from "../middleware/agent-acl.js";
+import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("spaces");
@@ -70,6 +70,7 @@ async function resolveUserSpacesAuth(userId: string): Promise<SpacesAuthContext 
       token: live.token,
       baseUrl: CONFIG.spacesInternalUrl,
       ...(live.sessionId ? { sessionId: live.sessionId } : {}),
+      workspaceId: live.workspaceId,
     };
   }
 
@@ -89,25 +90,36 @@ async function resolveUserSpacesAuth(userId: string): Promise<SpacesAuthContext 
   const tokenRaw = credentials["token"];
   const urlRaw = credentials["url"];
   const sessionIdRaw = credentials["sessionId"];
+  const workspaceIdRaw = credentials["workspaceId"];
 
   const token = typeof tokenRaw === "string" ? tokenRaw.trim() : "";
   if (!token) return null;
 
   const baseUrl = typeof urlRaw === "string" && urlRaw.trim() ? urlRaw.trim() : CONFIG.spacesInternalUrl;
   const sessionId = typeof sessionIdRaw === "string" && sessionIdRaw.trim() ? sessionIdRaw.trim() : undefined;
+  const workspaceIdFromCreds = typeof workspaceIdRaw === "string" && workspaceIdRaw.trim() ? workspaceIdRaw.trim() : undefined;
+  const workspaceId = workspaceIdFromCreds ?? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null) ?? undefined;
+  if (!workspaceIdFromCreds && workspaceId) {
+    log.info(`[spaces] resolved workspaceId=${workspaceId} from user row for cached auth userId=${userId}`);
+  }
 
   return {
     token,
     baseUrl,
     ...(sessionId ? { sessionId } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
   };
 }
 
-async function resolveAgentAppToken(agentSlug?: string): Promise<string | null> {
+async function resolveAgentAppToken(orgId: string | undefined, agentSlug?: string): Promise<string | null> {
+  if (!orgId) {
+    log.error(`[spaces] orgId is required; refusing global app-token lookup agentSlug=${agentSlug ?? "none"}`);
+    return null;
+  }
   const agent = await prisma.agent.findFirst({
     where: agentSlug
-      ? { slug: agentSlug, spacesAppToken: { not: null } }
-      : { spacesAppToken: { not: null } },
+      ? { orgId, slug: agentSlug, spacesAppToken: { not: null } }
+      : { orgId, isDefault: true, spacesAppToken: { not: null } },
     select: { spacesAppToken: true },
   });
   if (!agent?.spacesAppToken) return null;
@@ -133,6 +145,8 @@ router.get("/channels", async (req: Request, res: Response) => {
   }
 
   const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"].trim() : undefined;
+  const orgId = getOrgId(req)
+    ?? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId;
   const q = typeof req.query["q"] === "string" ? req.query["q"].trim() : "";
   const scopeType =
     typeof req.query["scopeType"] === "string" ? req.query["scopeType"] : "DEFAULT";
@@ -201,7 +215,7 @@ router.get("/channels", async (req: Request, res: Response) => {
   }
 
   // Path 2: no user MCP connection — use agent app token with /api/apps/channel/list
-  const appToken = await resolveAgentAppToken(agentSlug).catch((err) => {
+  const appToken = await resolveAgentAppToken(orgId, agentSlug).catch((err) => {
     log.error("[spaces/channels] failed to load agent app token:", err);
     return null;
   });

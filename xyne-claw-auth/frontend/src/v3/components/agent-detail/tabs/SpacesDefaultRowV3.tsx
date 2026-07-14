@@ -160,6 +160,7 @@ export function SpacesDefaultRowV3({ agent }: Props) {
               </div>
               <div className="text-[11px] text-xyne-fg-tertiary">
                 No credential needed. Used when no provider above serves the run, and as the final quota fallback.
+                To run on your own key and pick from its models, add a “LiteLLM (own key)” provider above.
               </div>
             </>
           )}

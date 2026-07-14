@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useAdminStatus } from "./useAdminStatus";
 import type {
-  Agent,
+  AgentLight,
   McpServer,
   Gateway,
   UserConnection,
@@ -16,6 +16,8 @@ import {
   type UserDashboardAgentRow,
   type ChainWorkflow,
   type Approval,
+  type CloneRequestItem,
+  type AgentDelegationPendingRequest,
   type DigitalTwinStatus,
   type MemoryBankStats,
   ApiError,
@@ -28,6 +30,8 @@ import {
   getUserDashboard,
   listChainWorkflows,
   listPendingApprovals,
+  listIncomingCloneRequests,
+  listPendingDelegationRequestsForMe,
   getDigitalTwinStatus,
   getDigitalTwinStats,
   listConnections,
@@ -59,7 +63,7 @@ export interface NewSinceLastVisit {
 }
 
 export interface HomeData {
-  agents: Agent[];
+  agents: AgentLight[];
   skills: Skill[];
   servers: McpServer[];
   gateways: Gateway[];
@@ -74,6 +78,8 @@ export interface HomeData {
   dashboard30d: UserDashboardData | null;
   workflows: ChainWorkflow[];
   approvals: Approval[];
+  cloneApprovals: CloneRequestItem[];
+  delegationApprovals: AgentDelegationPendingRequest[];
   /** Full Digital Twin status (pendingCandidates, approvedCandidates, etc). */
   digitalTwin: DigitalTwinStatus | null;
   /** Digital Twin memory bank stats for the past 7 days. Null if DT disabled or unavailable. */
@@ -118,7 +124,7 @@ export interface HomeData {
   newSinceLastVisit: NewSinceLastVisit;
   todayRuns: number;
   todaySuccessRate: number | null;
-  topAgents: Agent[];
+  topAgents: AgentLight[];
   lastRun: AgentRunLight | null;
   nudges: Nudge[];
   outlierAgent: OutlierAgent | null;
@@ -134,7 +140,7 @@ export function useHomeData(): HomeData {
   const { isAdmin, isAdminLoading } = useAdminStatus();
   const userId = auth.status === "authenticated" ? auth.user.id : null;
 
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<AgentLight[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [servers, setServers] = useState<McpServer[]>([]);
   const [gateways, setGateways] = useState<Gateway[]>([]);
@@ -144,6 +150,8 @@ export function useHomeData(): HomeData {
   const [dashboard30d, setDashboard30d] = useState<UserDashboardData | null>(null);
   const [workflows, setWorkflows] = useState<ChainWorkflow[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [cloneApprovals, setCloneApprovals] = useState<CloneRequestItem[]>([]);
+  const [delegationApprovals, setDelegationApprovals] = useState<AgentDelegationPendingRequest[]>([]);
   const [digitalTwin, setDigitalTwin] = useState<DigitalTwinStatus | null>(null);
   const [dtStats, setDtStats] = useState<MemoryBankStats | null>(null);
   const [userConnections, setUserConnections] = useState<UserConnection[]>([]);
@@ -176,6 +184,8 @@ export function useHomeData(): HomeData {
       getUserDashboard(userId, 30),
       listChainWorkflows(),
       isAdmin ? listPendingApprovals() : Promise.resolve([]),
+      listIncomingCloneRequests(userId),
+      listPendingDelegationRequestsForMe(userId),
       getDigitalTwinStatus(userId),
       listConnections(userId),
       listScheduledJobs({ userId }),
@@ -192,6 +202,8 @@ export function useHomeData(): HomeData {
       dashboard30dRes,
       workflowsRes,
       approvalsRes,
+      cloneApprovalsRes,
+      delegationApprovalsRes,
       digitalTwinRes,
       userConnectionsRes,
       scheduledJobsRes,
@@ -267,6 +279,22 @@ export function useHomeData(): HomeData {
     } else if (!isPermissionDenied(approvalsRes.reason)) {
       console.error("useHomeData: failed to load approvals", approvalsRes.reason);
       hasError = true;
+    }
+
+    if (cloneApprovalsRes.status === "fulfilled") {
+      setCloneApprovals(cloneApprovalsRes.value.filter((r) => r.status === "pending"));
+    } else if (!isPermissionDenied(cloneApprovalsRes.reason)) {
+      console.error("useHomeData: failed to load clone approvals", cloneApprovalsRes.reason);
+      hasError = true;
+      setAttentionLoadError(true);
+    }
+
+    if (delegationApprovalsRes.status === "fulfilled") {
+      setDelegationApprovals(delegationApprovalsRes.value.filter((r) => r.status === "pending"));
+    } else if (!isPermissionDenied(delegationApprovalsRes.reason)) {
+      console.error("useHomeData: failed to load delegation approvals", delegationApprovalsRes.reason);
+      hasError = true;
+      setAttentionLoadError(true);
     }
 
     if (digitalTwinRes.status === "fulfilled") {
@@ -436,7 +464,7 @@ export function useHomeData(): HomeData {
     .map(([slug]) => slug);
   const topAgents = top3Slugs
     .map((slug) => agents.find((a) => a.slug === slug))
-    .filter((a): a is Agent => a !== undefined);
+    .filter((a): a is AgentLight => a !== undefined);
 
   const lastRun = runs[0] ?? null;
 
@@ -456,6 +484,15 @@ export function useHomeData(): HomeData {
       priority: 1,
       message: `${approvals.length} approval${approvals.length > 1 ? "s" : ""} pending`,
       action: { label: "Review", href: "/v3/control-center" },
+    });
+  }
+  if (cloneApprovals.length + delegationApprovals.length > 0) {
+    const count = cloneApprovals.length + delegationApprovals.length;
+    nudges.push({
+      id: "pending-agent-approvals",
+      priority: 1,
+      message: `${count} agent approval${count > 1 ? "s" : ""} pending`,
+      action: { label: "Review", href: "/v3/agents" },
     });
   }
 
@@ -519,6 +556,8 @@ export function useHomeData(): HomeData {
       dashboard30d: null,
       workflows: [],
       approvals: [],
+      cloneApprovals: [],
+      delegationApprovals: [],
       digitalTwin: null,
       dtStats: null,
       userConnections: [],
@@ -567,6 +606,8 @@ export function useHomeData(): HomeData {
     dashboard30d,
     workflows,
     approvals,
+    cloneApprovals,
+    delegationApprovals,
     digitalTwin,
     dtStats,
     userConnections,

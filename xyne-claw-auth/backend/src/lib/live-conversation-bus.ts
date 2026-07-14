@@ -31,6 +31,10 @@ const channelFor = (conversationId: string) => CHANNEL_PREFIX + conversationId;
 export type LiveEvent =
   | { type: "label"; conversationId: string; agentSlug?: string | undefined; userId: string; toolLabel: string; ts: number }
   | { type: "invocation"; conversationId: string; agentSlug?: string | undefined; userId: string; toolInvocation: unknown; ts: number }
+  // Coalesced assistant text/reasoning fragments (one event per ~250ms batch) so
+  // VIEWERS (reloaded tabs, Spaces) stream the answer live instead of seeing it
+  // appear all-at-once on `done`. Either/both fields may be present per batch.
+  | { type: "delta"; conversationId: string; agentSlug?: string | undefined; userId: string; textDelta?: string; reasoningDelta?: string; ts: number }
   | { type: "done"; conversationId: string; agentSlug?: string | undefined; userId: string; status: string; ts: number };
 
 // In-process fan-out: each /live SSE handler registers a listener keyed by

@@ -19,11 +19,61 @@ export interface FormQuestion {
   options?: string[];
 }
 
+// Subtree of forms.get item[].questionItem.question — mirrors the Google Forms API
+// `Question` union so getForm can surface type/options/required instead of dropping them.
+interface FormChoiceOption {
+  value?: string;
+  isOther?: boolean;
+}
+interface FormChoiceQuestion {
+  type?: string; // RADIO | CHECKBOX | DROP_DOWN
+  options?: FormChoiceOption[];
+  shuffle?: boolean;
+}
+interface FormTextQuestion {
+  paragraph?: boolean; // true = long-answer (PARAGRAPH), false/absent = short-answer
+}
+interface FormScaleQuestion {
+  low?: number;
+  high?: number;
+  lowLabel?: string;
+  highLabel?: string;
+}
+interface FormDateQuestion {
+  includeTime?: boolean;
+  includeYear?: boolean;
+}
+interface FormTimeQuestion {
+  duration?: boolean;
+}
+interface FormQuestionNode {
+  questionId?: string;
+  required?: boolean;
+  choiceQuestion?: FormChoiceQuestion;
+  textQuestion?: FormTextQuestion;
+  scaleQuestion?: FormScaleQuestion;
+  dateQuestion?: FormDateQuestion;
+  timeQuestion?: FormTimeQuestion;
+  fileUploadQuestion?: unknown;
+}
+interface FormItem {
+  itemId?: string;
+  title?: string;
+  description?: string; // per-item description (distinct from form-level info.description)
+  questionItem?: { question?: FormQuestionNode };
+  questionGroupItem?: unknown; // grid of sub-questions
+  pageBreakItem?: unknown; // section header / page break
+  textItem?: unknown; // static text block
+  imageItem?: unknown;
+  videoItem?: unknown;
+}
+
 interface FormResponse {
   formId: string;
   responderUri?: string;
-  info?: { title?: string; documentTitle?: string };
-  items?: Array<{ itemId: string; title?: string }>;
+  // info.description is returned by the API but was previously never surfaced.
+  info?: { title?: string; documentTitle?: string; description?: string };
+  items?: FormItem[];
 }
 
 function buildQuestionItem(q: FormQuestion): Record<string, unknown> {
@@ -108,16 +158,80 @@ export async function addQuestionsToForm(
   return `Added ${questions.length} question(s) to form ${formId}`;
 }
 
-/** Read a form: title + questions + responder URL. */
+/**
+ * Render one forms.get item as human-readable lines, preserving the question
+ * type, choice options, scale range and required flag the API returns — all of
+ * which the previous "N. title" mapping silently dropped.
+ */
+function formatFormItem(it: FormItem, index: number): string {
+  const lines: string[] = [];
+  const title = it.title?.trim() || "(untitled)";
+  const q = it.questionItem?.question;
+
+  if (q) {
+    // Derive the answer type + any type-specific detail from the question union.
+    let typeMarker = "QUESTION";
+    const detail: string[] = [];
+    if (q.choiceQuestion) {
+      // choiceQuestion.type is the exact API enum (RADIO | CHECKBOX | DROP_DOWN).
+      typeMarker = q.choiceQuestion.type ?? "CHOICE";
+      // choiceQuestion.options[].value holds the answer choices — previously dropped.
+      const opts = (q.choiceQuestion.options ?? [])
+        .map((o) => (o.isOther ? `${o.value ?? "Other"} (other)` : o.value))
+        .filter((v): v is string => typeof v === "string" && v.length > 0);
+      if (opts.length > 0) detail.push(`Options: ${opts.join(", ")}`);
+    } else if (q.textQuestion) {
+      // textQuestion.paragraph distinguishes long-answer from short-answer.
+      typeMarker = q.textQuestion.paragraph ? "PARAGRAPH" : "SHORT_ANSWER";
+    } else if (q.scaleQuestion) {
+      // scaleQuestion.low/high define the linear-scale range — previously dropped.
+      typeMarker = "SCALE";
+      const { low, high, lowLabel, highLabel } = q.scaleQuestion;
+      detail.push(`Scale: ${low ?? "?"} to ${high ?? "?"}`);
+      if (lowLabel || highLabel) detail.push(`Labels: ${lowLabel ?? ""} … ${highLabel ?? ""}`.trim());
+    } else if (q.dateQuestion) {
+      typeMarker = "DATE";
+    } else if (q.timeQuestion) {
+      // timeQuestion.duration = true means it asks for an elapsed duration.
+      typeMarker = q.timeQuestion.duration ? "DURATION" : "TIME";
+    } else if (q.fileUploadQuestion) {
+      typeMarker = "FILE_UPLOAD";
+    }
+    // question.required — was never surfaced, so mandatory fields looked optional.
+    const requiredMarker = q.required ? " (required)" : "";
+    lines.push(`${index + 1}. ${title} [${typeMarker}]${requiredMarker}`);
+    if (it.description?.trim()) lines.push(`   ${it.description.trim()}`);
+    for (const d of detail) lines.push(`   ${d}`);
+  } else {
+    // Non-question items still render with their title and a type marker instead of
+    // being mislabeled as questions.
+    let typeMarker = "ITEM";
+    if (it.pageBreakItem) typeMarker = "SECTION";
+    else if (it.textItem) typeMarker = "TEXT";
+    else if (it.imageItem) typeMarker = "IMAGE";
+    else if (it.videoItem) typeMarker = "VIDEO";
+    else if (it.questionGroupItem) typeMarker = "QUESTION_GROUP";
+    lines.push(`${index + 1}. ${title} [${typeMarker}]`);
+    if (it.description?.trim()) lines.push(`   ${it.description.trim()}`);
+  }
+  return lines.join("\n");
+}
+
+/** Read a form: title + description + typed questions/options + responder URL. */
 export async function getForm(token: string, formId: string): Promise<string> {
   if (!formId.trim()) throw new Error("formId is required");
   const form = (await googleFetch(`${BASE}/forms/${encodeURIComponent(formId)}`, token)) as FormResponse;
-  const items = (form.items ?? []).map((it, i) => `${i + 1}. ${it.title ?? "(untitled)"}`);
-  return [
+  const items = (form.items ?? []).map((it, i) => formatFormItem(it, i));
+  const out = [
     `Form: ${form.info?.title ?? "(untitled)"}`,
+  ];
+  // info.description is returned by the API but was previously never shown.
+  if (form.info?.description?.trim()) out.push(`Description: ${form.info.description.trim()}`);
+  out.push(
     `Form ID: ${form.formId}`,
     `Responder URL: ${form.responderUri ?? "(unavailable)"}`,
     `Edit URL: https://docs.google.com/forms/d/${form.formId}/edit`,
     items.length > 0 ? `Questions:\n${items.join("\n")}` : "Questions: (none)",
-  ].join("\n");
+  );
+  return out.join("\n");
 }

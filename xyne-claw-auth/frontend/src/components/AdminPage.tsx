@@ -17,18 +17,29 @@ import {
   deleteAdminMcpGlobalCreds, setAdminMcpFallbackFlag,
   getCredentialFields,
   type AdminRole, type AuditLogEntry, type AgentRequestItem,
+  type AdminOrgScope,
   type AgentUsageStat, type AdminScheduledJob,
   type AdminMcpServerSummary, type AdminMcpGlobalCredsDetail,
 } from "../lib/api";
-import type { Agent, McpServer, CredentialField } from "../lib/types";
+import type { Agent, AgentLight, McpServer, CredentialField } from "../lib/types";
 
 interface Props {
   userId: string;
 }
 
+function OrgBadge({ orgName, orgId }: { orgName?: string | null; orgId?: string | null }) {
+  return (
+    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">
+      {orgName ?? orgId ?? "unknown org"}
+    </span>
+  );
+}
+
 export function AdminPage({ userId }: Props) {
   const navigate = useNavigate();
   const [tab, setTab] = useState<"requests" | "connectors" | "mcpedits" | "workflowreqs" | "agents" | "admins" | "audit" | "usage" | "scheduled" | "globalmcp">("requests");
+  const [allOrgs, setAllOrgs] = useState(false);
+  const adminOrgScope: AdminOrgScope = allOrgs ? "all" : "org";
   const [mcpRequests, setMcpRequests] = useState<McpServer[]>([]);
   const [mcpRequestsLoading, setMcpRequestsLoading] = useState(false);
   const [mcpRejectingId, setMcpRejectingId] = useState<string | null>(null);
@@ -51,7 +62,7 @@ export function AdminPage({ userId }: Props) {
   const [scheduledStatusFilter, setScheduledStatusFilter] = useState<"" | "active" | "completed" | "cancelled">("");
   const [scheduledLoading, setScheduledLoading] = useState(false);
   const SCHEDULED_PAGE_SIZE = 50;
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<AgentLight[]>([]);
   const [admins, setAdmins] = useState<AdminRole[]>([]);
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [auditTotal, setAuditTotal] = useState(0);
@@ -71,22 +82,22 @@ export function AdminPage({ userId }: Props) {
     try {
       const [a, r, reqs] = await Promise.all([
         // Admin panel: the full roster across all users (server enforces admin).
-        listAgents(userId, true),
-        listAdminRoles(userId).catch(() => []),
-        listPendingRequests(userId).catch(() => []),
+        listAgents(userId, true, adminOrgScope),
+        listAdminRoles(userId, adminOrgScope).catch(() => []),
+        listPendingRequests(userId, adminOrgScope).catch(() => []),
       ]);
       setAgents(a);
       setAdmins(r);
       setRequests(reqs);
     } catch (err) { console.error("[admin] load error:", err); } finally { setLoading(false); }
-  }, [userId]);
+  }, [userId, adminOrgScope]);
 
   useEffect(() => { load(); }, [load]);
 
   const loadAuditLogs = useCallback(async () => {
     setAuditLoading(true);
     try {
-      const { rows, total } = await listAuditLogsPaged(userId, { limit: AUDIT_PAGE_SIZE, offset: auditOffset });
+      const { rows, total } = await listAuditLogsPaged(userId, { limit: AUDIT_PAGE_SIZE, offset: auditOffset, orgScope: adminOrgScope });
       setLogs(rows);
       setAuditTotal(total);
     } catch (err) {
@@ -94,7 +105,7 @@ export function AdminPage({ userId }: Props) {
     } finally {
       setAuditLoading(false);
     }
-  }, [userId, auditOffset]);
+  }, [userId, auditOffset, adminOrgScope]);
 
   useEffect(() => {
     if (tab === "audit") loadAuditLogs();
@@ -103,12 +114,12 @@ export function AdminPage({ userId }: Props) {
   const loadUsage = useCallback(async () => {
     setUsageLoading(true);
     try {
-      const stats = await listAgentUsageStats(userId, usageRange).catch(() => []);
+      const stats = await listAgentUsageStats(userId, usageRange, adminOrgScope).catch(() => []);
       setUsageStats(stats);
     } finally {
       setUsageLoading(false);
     }
-  }, [userId, usageRange]);
+  }, [userId, usageRange, adminOrgScope]);
 
   useEffect(() => {
     if (tab === "usage") loadUsage();
@@ -196,14 +207,14 @@ export function AdminPage({ userId }: Props) {
   const loadWorkflowRequests = useCallback(async () => {
     setWorkflowRequestsLoading(true);
     try {
-      const rows = await listWorkflowGlobalRequests(userId);
+      const rows = await listWorkflowGlobalRequests(userId, adminOrgScope);
       setWorkflowRequests(rows);
     } catch (err) {
       console.error("[admin] workflow global-requests load error:", err);
     } finally {
       setWorkflowRequestsLoading(false);
     }
-  }, [userId]);
+  }, [userId, adminOrgScope]);
 
   useEffect(() => {
     if (tab === "workflowreqs") loadWorkflowRequests();
@@ -238,6 +249,7 @@ export function AdminPage({ userId }: Props) {
         status: scheduledStatusFilter || undefined,
         limit: SCHEDULED_PAGE_SIZE,
         offset: scheduledOffset,
+        orgScope: adminOrgScope,
       });
       setScheduledJobs(result.rows);
       setScheduledTotal(result.total);
@@ -246,7 +258,12 @@ export function AdminPage({ userId }: Props) {
     } finally {
       setScheduledLoading(false);
     }
-  }, [userId, scheduledStatusFilter, scheduledOffset]);
+  }, [userId, scheduledStatusFilter, scheduledOffset, adminOrgScope]);
+
+  useEffect(() => {
+    setAuditOffset(0);
+    setScheduledOffset(0);
+  }, [adminOrgScope]);
 
   useEffect(() => {
     if (tab === "scheduled") loadScheduledJobs();
@@ -421,7 +438,7 @@ export function AdminPage({ userId }: Props) {
     try { await demoteAgent(slug, userId); load(); } catch (err) { console.error("[admin] demote error:", err); }
   };
 
-  const handleDelete = async (agent: Agent) => {
+  const handleDelete = async (agent: AgentLight) => {
     if (!confirm(`Delete "${agent.name}"? This cannot be undone.`)) return;
     try { await deleteAgent(agent.slug, userId); load(); } catch (err) { console.error("[admin] delete error:", err); }
   };
@@ -465,7 +482,7 @@ export function AdminPage({ userId }: Props) {
     // Check if agent already has a Spaces App
     try {
       const agent = await getAgentDetail(agentSlug);
-      if (agent.spacesAppId && agent.spacesAppToken) {
+      if (agent.spacesAppId && agent.spacesAppTokenConfigured) {
         setSpacesFlow({ requestId, agentSlug, step: "done" });
       } else if (agent.spacesAppId) {
         setSpacesFlow({ requestId, agentSlug, step: "install" });
@@ -562,9 +579,20 @@ export function AdminPage({ userId }: Props) {
         <ChevronLeft size={16} /> Back to Dashboard
       </button>
 
-      <div className="mb-6 flex items-center gap-3">
-        <Shield size={24} className="text-red-400" />
-        <h1 className="text-xl font-semibold">Admin Panel</h1>
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Shield size={24} className="text-red-400" />
+          <h1 className="text-xl font-semibold">Admin Panel</h1>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={allOrgs}
+            onChange={(e) => setAllOrgs(e.target.checked)}
+            className="h-4 w-4 accent-purple-500"
+          />
+          All orgs
+        </label>
       </div>
 
       {/* Tabs */}
@@ -603,6 +631,7 @@ export function AdminPage({ userId }: Props) {
                       <span className={`rounded px-1.5 py-0.5 text-xs ${r.requestType === "push_to_global" ? "bg-green-950 text-green-400" : "bg-blue-950 text-blue-400"}`}>
                         {r.requestType === "push_to_global" ? "Push to Global" : "Push to Spaces"}
                       </span>
+                      {allOrgs && <OrgBadge orgName={r.orgName} orgId={r.orgId} />}
                       <span className="font-medium">{r.targetType === "skill" ? (r.skillName ?? r.skillSlug) : (r.agentName ?? r.agentSlug)}</span>
                     </div>
                     <p className="mt-1 text-xs text-zinc-500">
@@ -964,6 +993,7 @@ export function AdminPage({ userId }: Props) {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-zinc-100">{req.workflow.name}</span>
                         <span className="rounded bg-green-900/40 px-1.5 py-0.5 text-xs text-green-300">push to global</span>
+                        {allOrgs && <OrgBadge orgName={req.orgName} orgId={req.orgId} />}
                       </div>
                       <p className="mt-1 text-xs text-zinc-500">
                         Requested by{" "}
@@ -1078,7 +1108,7 @@ export function AdminPage({ userId }: Props) {
             <h3 className="mb-2 text-sm font-medium text-zinc-400">Global Agents ({globalAgents.length})</h3>
             <div className="space-y-2">
               {globalAgents.map((a) => {
-                const registered = Boolean(a.spacesAppId && a.spacesAppToken);
+                const registered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
                 const hasApp = Boolean(a.spacesAppId);
                 return (
                   <div key={a.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
@@ -1087,6 +1117,7 @@ export function AdminPage({ userId }: Props) {
                       <div>
                         <span className="font-medium">{a.name}</span>
                         <span className="ml-2 text-xs text-zinc-500">{a.slug}</span>
+                        {allOrgs && <span className="ml-2"><OrgBadge orgName={a.orgName} orgId={a.orgId} /></span>}
                         <span className={`ml-2 rounded px-1.5 py-0.5 text-xs ${registered ? "bg-green-950 text-green-400" : "bg-amber-950 text-amber-400"}`}>
                           {registered ? "Registered" : "Not registered"}
                         </span>
@@ -1144,7 +1175,7 @@ export function AdminPage({ userId }: Props) {
             ) : (
               <div className="space-y-2">
                 {personalAgents.map((a) => {
-                  const pRegistered = Boolean(a.spacesAppId && a.spacesAppToken);
+                  const pRegistered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
                   return (
                   <div key={a.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -1152,6 +1183,7 @@ export function AdminPage({ userId }: Props) {
                       <div>
                         <span className="font-medium">{a.name}</span>
                         <span className="ml-2 text-xs text-zinc-500">{a.slug}</span>
+                        {allOrgs && <span className="ml-2"><OrgBadge orgName={a.orgName} orgId={a.orgId} /></span>}
                         {a.ownerUserId && <span className="ml-2 text-xs text-zinc-600">owner: {a.ownerUserId.slice(0, 8)}...</span>}
                       </div>
                     </div>
@@ -1201,6 +1233,7 @@ export function AdminPage({ userId }: Props) {
                 <div>
                   <span className="font-medium">{r.user.name}</span>
                   <span className="ml-2 text-sm text-zinc-500">{r.user.email}</span>
+                  {allOrgs && <span className="ml-2"><OrgBadge orgName={r.user.orgName} orgId={r.user.orgId} /></span>}
                   <span className="ml-2 text-xs text-zinc-600">granted {new Date(r.createdAt).toLocaleDateString()}</span>
                 </div>
                 <button onClick={() => handleRevoke(r.userId)}
@@ -1230,6 +1263,7 @@ export function AdminPage({ userId }: Props) {
                     <tr className="border-b border-zinc-800 bg-zinc-900 text-left text-xs text-zinc-500">
                       <th className="px-3 py-2">Time</th>
                       <th className="px-3 py-2">Event</th>
+                      {allOrgs && <th className="px-3 py-2">Org</th>}
                       <th className="px-3 py-2">Description</th>
                     </tr>
                   </thead>
@@ -1245,6 +1279,11 @@ export function AdminPage({ userId }: Props) {
                             "bg-zinc-800 text-zinc-400"
                           }`}>{l.eventType}</span>
                         </td>
+                        {allOrgs && (
+                          <td className="px-3 py-2">
+                            <OrgBadge orgName={l.orgName} orgId={l.orgId} />
+                          </td>
+                        )}
                         <td className="px-3 py-2 text-zinc-400">{l.description}</td>
                       </tr>
                     ))}
@@ -1336,6 +1375,7 @@ export function AdminPage({ userId }: Props) {
                   <thead>
                     <tr className="border-b border-zinc-800 bg-zinc-900 text-left text-xs text-zinc-500">
                       <th className="px-3 py-2">Agent</th>
+                      {allOrgs && <th className="px-3 py-2">Org</th>}
                       <th className="px-3 py-2 text-right">Runs</th>
                       <th className="px-3 py-2 text-right">Tokens In</th>
                       <th className="px-3 py-2 text-right">Tokens Out</th>
@@ -1345,8 +1385,13 @@ export function AdminPage({ userId }: Props) {
                   </thead>
                   <tbody>
                     {usageStats.map((s) => (
-                      <tr key={s.agentSlug} className="border-b border-zinc-800/50 hover:bg-zinc-900/50">
+                      <tr key={`${s.orgId ?? "org"}:${s.agentSlug}`} className="border-b border-zinc-800/50 hover:bg-zinc-900/50">
                         <td className="px-3 py-2 font-medium text-zinc-200">{s.agentSlug}</td>
+                        {allOrgs && (
+                          <td className="px-3 py-2">
+                            <OrgBadge orgName={s.orgName} orgId={s.orgId} />
+                          </td>
+                        )}
                         <td className="px-3 py-2 text-right font-mono text-zinc-400">{s.runs.toLocaleString()}</td>
                         <td className="px-3 py-2 text-right font-mono text-blue-400">{s.tokensIn.toLocaleString()}</td>
                         <td className="px-3 py-2 text-right font-mono text-purple-400">{s.tokensOut.toLocaleString()}</td>
@@ -1390,6 +1435,7 @@ export function AdminPage({ userId }: Props) {
                   <thead>
                     <tr className="border-b border-zinc-800 bg-zinc-900 text-left text-xs text-zinc-500">
                       <th className="px-3 py-2">User</th>
+                      {allOrgs && <th className="px-3 py-2">Org</th>}
                       <th className="px-3 py-2">Agent</th>
                       <th className="px-3 py-2">Type</th>
                       <th className="px-3 py-2">Schedule</th>
@@ -1406,6 +1452,11 @@ export function AdminPage({ userId }: Props) {
                           <div className="truncate max-w-[18ch]" title={j.user?.email ?? j.userId}>{j.user?.email ?? j.userId}</div>
                           {j.user?.name && <div className="truncate text-xs text-zinc-500 max-w-[18ch]">{j.user.name}</div>}
                         </td>
+                        {allOrgs && (
+                          <td className="px-3 py-2">
+                            <OrgBadge orgName={j.orgName} orgId={j.orgId} />
+                          </td>
+                        )}
                         <td className="px-3 py-2 font-medium text-zinc-200">{j.agentSlug}</td>
                         <td className="px-3 py-2">
                           <span className={`rounded px-1.5 py-0.5 text-xs ${j.type === "cron" ? "bg-blue-950 text-blue-400" : "bg-purple-950 text-purple-400"}`}>{j.type}</span>

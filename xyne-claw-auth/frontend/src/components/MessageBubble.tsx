@@ -588,10 +588,15 @@ function InvocationItem({
   const runningChildren =
     children?.filter((c) => c.status === "running").length ?? 0;
   const completedChildren = (children?.length ?? 0) - runningChildren;
+  // A subagent spawned with run_in_background: the wrapper tool call returned
+  // immediately, so its live state lives in backgroundState (not status).
+  const isBackground = invocation.background === true;
+  const bgState = invocation.backgroundState;
+  const isBgRunning = isBackground && bgState === "running";
 
   return (
     <div
-      className={`rounded-md border ${invocation.isError ? "border-red-900/50 bg-red-950/20" : isRunning ? "border-blue-900/50 bg-blue-950/10" : isSubagent ? "border-purple-900/50 bg-purple-950/10" : "border-zinc-700 bg-zinc-900/50"}`}
+      className={`rounded-md border ${invocation.isError || bgState === "error" ? "border-red-900/50 bg-red-950/20" : isBgRunning ? "border-amber-900/50 bg-amber-950/10" : isRunning ? "border-blue-900/50 bg-blue-950/10" : isSubagent ? "border-purple-900/50 bg-purple-950/10" : "border-zinc-700 bg-zinc-900/50"}`}
     >
       <button
         onClick={() => setExpanded(!expanded)}
@@ -610,15 +615,24 @@ function InvocationItem({
         </svg>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-xs">
-            {(isRunning || runningChildren > 0) && (
+            {isBgRunning ? (
+              // Detached background subagent still running — amber pulse, NOT the
+              // blue spinner of a blocking tool, so it reads as "fired and moved on".
+              <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-500" />
+            ) : (isRunning || runningChildren > 0) && !isBackground ? (
               <Loader2 size={10} className="animate-spin text-blue-400" />
-            )}
+            ) : null}
             {invocation.subagentName && (
               <span className="rounded bg-purple-950 px-1.5 py-0.5 text-[10px] text-purple-300">
                 {invocation.subagentName}
               </span>
             )}
             {isSubagent && <span className="text-xs">🤖</span>}
+            {isBackground && (
+              <span className="rounded bg-amber-950 px-1.5 py-0.5 text-[10px] text-amber-300">
+                {bgState === "error" ? "bg · failed" : bgState === "completed" ? "bg · done" : "⧗ background"}
+              </span>
+            )}
             <span className="text-zinc-200">
               {humanizeToolName(invocation.toolName)}
             </span>
@@ -635,7 +649,7 @@ function InvocationItem({
               </span>
             )}
             <span className="ml-auto font-mono text-zinc-600">
-              {isRunning ? "running…" : `${invocation.durationMs}ms`}
+              {isRunning || isBgRunning ? "running…" : `${invocation.durationMs}ms`}
             </span>
           </div>
           {!expanded && (
@@ -658,7 +672,9 @@ function InvocationItem({
             <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-2 font-mono text-zinc-300">
               {isRunning
                 ? "⏳ waiting for result..."
-                : invocation.result || "(empty)"}
+                : isBgRunning
+                  ? "⏳ running in background…"
+                  : invocation.result || "(empty)"}
             </pre>
           </div>
           {/* Nested child invocations only show when the subagent row is expanded.

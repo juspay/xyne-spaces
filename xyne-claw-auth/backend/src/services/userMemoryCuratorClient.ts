@@ -16,6 +16,7 @@ import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
 import type {
+  ExistingUserMemory,
   UserMemoryCandidatePayload,
   UserMemoryDistillRequest,
   UserMemoryDistillResponse,
@@ -24,14 +25,14 @@ import type {
 
 const logger = createLogger("user-memory-curator-client", createTraceId());
 const DISTILL_TIMEOUT_MS = Number(
-  process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 90_000,
+  process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 600_000,
 );
 const TWIN_BANK_ID = bankIdForAgent("digital-twin");
 const memory = getMemoryProvider();
 const DEFAULT_AUTO_APPROVE_MIN_SCORE = 0.9;
 
 interface SourceRef {
-  type: "message" | "call" | "canvas";
+  type: "message" | "call" | "canvas" | "mention_reply";
   id: string;
   channelId?: string;
   ts: string;
@@ -103,6 +104,45 @@ export async function distillUserMemoryViaClaw(
   }
 }
 
+/** How many of the user's existing memories to pull for update-vs-create
+ *  reconciliation. Note: the twin bank is shared across all opted-in users and
+ *  Hindsight's list endpoint can't tag-filter server-side, so listMemories
+ *  fetches a wide page then filters to `user:<id>` client-side. 200 comfortably
+ *  covers a single user at today's opt-in scale; if the shared bank grows large
+ *  enough that a user's memories fall outside the first page, switch this to a
+ *  tag-scoped recall() (server-side filtered) keyed off the batch gist. */
+const MAX_EXISTING_MEMORIES = 200;
+
+/**
+ * Pull this user's already-approved memories from the twin bank so the curator
+ * can update an existing fact instead of emitting a near-duplicate. Best-effort:
+ * on any provider error we return [] and the curator simply creates as before.
+ */
+async function fetchExistingUserMemories(userId: string): Promise<ExistingUserMemory[]> {
+  try {
+    const page = await memory.listMemories(TWIN_BANK_ID, {
+      tags: [`user:${userId}`],
+      limit: MAX_EXISTING_MEMORIES,
+    });
+    const out: ExistingUserMemory[] = [];
+    for (const m of page.memories) {
+      if (!m.id) continue;
+      const subsystem = (m.tags ?? [])
+        .find((t) => t.startsWith("subsystem:"))
+        ?.slice("subsystem:".length);
+      if (!subsystem) continue;  // no subsystem tag → can't reconcile safely
+      out.push({ id: m.id, subsystem, text: m.content ?? "" });
+    }
+    return out;
+  } catch (err) {
+    logger.warn("[user-memory-curator-client] fetchExistingUserMemories failed — curator will create-only", {
+      userId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+}
+
 /**
  * High-level: take a record batch, run it through the curator, persist
  * candidates with resolved sourceRefs. Used by both the backfill worker (per
@@ -120,10 +160,13 @@ export async function curateAndPersistBatch(args: {
   const { userId, window, records, source } = args;
   if (records.length === 0) return 0;
 
+  const existingMemories = await fetchExistingUserMemories(userId);
+
   const candidates = await distillUserMemoryViaClaw({
     userId,
     window: { from: window.from.toISOString(), to: window.to.toISOString() },
     records,
+    existingMemories,
   });
 
   if (candidates.length === 0) return 0;
@@ -227,4 +270,80 @@ export async function curateAndPersistBatch(args: {
     minScore,
   });
   return result.count;
+}
+
+/** Ops kill-switch for the forward loop. On by default; set to "false" to stop
+ *  learning from twin replies without a redeploy of the approve path. */
+const LEARN_FROM_REPLIES = process.env["DIGITAL_TWIN_LEARN_FROM_REPLIES"] !== "false";
+/** Cap each side of the pair so the combined record stays well under the
+ *  curator's 1500-char/record ceiling. */
+const MAX_PAIR_PART_CHARS = 650;
+
+/**
+ * Forward learning. When a user approves (or edits) a Digital Twin draft and it
+ * posts as them, that (incoming message → the user's final reply) pair is the
+ * single highest-signal example of how they actually respond. Feed it through
+ * the SAME curator so the twin's own outcomes refine the user's style /
+ * relationship memories — the self-learning loop that runs alongside the daily
+ * + backfill pipeline.
+ *
+ * Fire-and-forget from the approve handler: never awaited in the request path,
+ * never throws out. Uses only the final approved/edited text (the user's real
+ * voice), not the twin's draft. Respects the user's approval mode via
+ * curateAndPersistBatch (auto-approve vs pending review).
+ */
+export async function learnFromTwinReply(args: {
+  /** The impersonated (mentioned) user — whose memory this refines. */
+  userId: string;
+  /** The incoming message that mentioned the user. */
+  incomingTask: string;
+  /** The final text posted as the user (edited or the approved draft). */
+  reply: string;
+  conversationId: string;
+  channelId?: string;
+  channelName?: string;
+}): Promise<void> {
+  if (!LEARN_FROM_REPLIES) return;
+  const incoming = (args.incomingTask ?? "").trim();
+  const reply = (args.reply ?? "").trim();
+  if (!args.userId || !incoming || !reply) return;
+
+  const nowIso = new Date().toISOString();
+  const text = [
+    `Someone mentioned the user${args.channelName ? ` in #${args.channelName}` : ""}. Incoming message:`,
+    `"${incoming.slice(0, MAX_PAIR_PART_CHARS)}"`,
+    "",
+    "The user's actual reply, posted as themselves:",
+    `"${reply.slice(0, MAX_PAIR_PART_CHARS)}"`,
+  ].join("\n");
+
+  const record: UserMemoryRecord = {
+    id: `twin-reply:${args.conversationId}:${nowIso}`,
+    type: "mention_reply",
+    ts: nowIso,
+    ...(args.channelId ? { channelId: args.channelId } : {}),
+    ...(args.channelName ? { channelName: args.channelName } : {}),
+    text,
+  };
+
+  try {
+    const now = new Date();
+    const inserted = await curateAndPersistBatch({
+      userId: args.userId,
+      window: { from: now, to: now },
+      records: [record],
+      source: `twin-approval:${args.conversationId}`,
+    });
+    logger.info("[user-memory-curator-client] learned from twin reply", {
+      userId: args.userId,
+      conversationId: args.conversationId,
+      candidates: inserted,
+    });
+  } catch (err) {
+    logger.warn("[user-memory-curator-client] learnFromTwinReply failed", {
+      userId: args.userId,
+      conversationId: args.conversationId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
 }

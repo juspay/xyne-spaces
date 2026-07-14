@@ -4,7 +4,6 @@
  */
 
 import type { ToolDefinition } from "./types.js";
-import * as pgm from "./pgm/index.js";
 import * as google from "./google/index.js";
 import * as microsoft from "./microsoft/index.js";
 import * as schedule from "./schedule/index.js";
@@ -20,10 +19,14 @@ import * as genius from "./genius/index.js";
 import * as webSearch from "./web-search/index.js";
 import * as deepResearch from "./deep-research/index.js";
 import * as generateImage from "./generate-image/index.js";
-import * as workload from "./workload-analyser/index.js";
 import * as createPdf from "./create-pdf/index.js";
 import * as fillPdfForm from "./fill-pdf-form/index.js";
 import * as jenkins from "./jenkins/index.js";
+import * as getAgentRuns from "./get-agent-runs/index.js";
+import * as postmanSbx from "./postman-sbx/index.js";
+import * as todo from "./todo/index.js";
+import * as orchestrator from "./orchestrator/index.js";
+import * as agentIntrospect from "./agent-introspect/index.js";
 
 /** All custom tools, keyed by slug */
 const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
@@ -32,25 +35,13 @@ function register(tool: ToolDefinition): void {
   CUSTOM_TOOLS[tool.slug] = tool;
 }
 
-// Register pgm tools
-register(pgm.pgmListPrograms);
-register(pgm.pgmReadProgram);
-register(pgm.pgmReadTask);
-register(pgm.pgmReadRun);
-register(pgm.pgmListTasks);
-register(pgm.pgmListRuns);
-register(pgm.pgmCreateProgram);
-register(pgm.pgmWriteTask);
-register(pgm.pgmWriteRun);
-register(pgm.pgmEditFile);
-register(pgm.pgmCommit);
-register(pgm.pgmPush);
-register(pgm.pgmPull);
-register(pgm.pgmRender);
-register(pgm.pgmPublish);
+// PGM tools disabled: they render user/model-controlled Quarto documents in
+// the claw process. Re-enable only after moving rendering into the sandbox or
+// hard-disabling document execution.
 
 // Register schedule + ask-question + add-citations tools
 register(schedule.scheduleTask);
+register(schedule.scheduledJobControl);
 register(askQuestion.askUserQuestion);
 register(addCitations.addCitationsTool);
 
@@ -59,6 +50,13 @@ register(google.googleGmailSearch);
 register(google.googleGmailRead);
 register(google.googleGmailDraft);
 register(google.googleGmailTrash);
+register(google.googleGmailMarkRead);
+register(google.googleGmailArchive);
+register(google.googleGmailStar);
+register(google.googleGmailSpam);
+register(google.googleGmailUntrash);
+register(google.googleGmailLabelsList);
+register(google.googleGmailModifyLabels);
 register(google.googleGmailAttachment);
 register(google.googleCalendarEvents);
 register(google.googleCalendarCreate);
@@ -120,6 +118,10 @@ register(microsoft.microsoftTeamsChatMessages);
 register(microsoft.microsoftTeamsChatSend);
 
 // Register research-agent tools
+register(researchAgent.listRepositories);
+register(researchAgent.listProducts);
+register(researchAgent.listRepositoryTools);
+register(researchAgent.listProductTools);
 register(researchAgent.queryCodebase);
 register(researchAgent.reviewPullRequest);
 
@@ -165,6 +167,31 @@ register(jenkins.jenkinsTriggerBuild);
 register(jenkins.jenkinsGetBuildStatus);
 register(jenkins.jenkinsListBuilds);
 register(jenkins.jenkinsGetBuildLogs);
+// get-agent-runs (custom:system) DEREGISTERED 2026-07-15: it returned
+// cross-user run history — task text + user emails — to ANY agent without
+// admin privileges (privacy leak). Superseded by the privacy-bounded
+// `get_agent_runs` introspect tool (aggregates org-wide; task samples limited
+// to runs the requesting user can see). Definition kept on disk for reference.
+// register(getAgentRuns.getAgentRunsTool);
+
+// Register postman_sbx (sandbox-resident collection execution)
+register(postmanSbx.postmanSbxRunCollection);
+
+// Register plan-tracking tools (todo-write / todo-read). The agent maintains an
+// explicit todo list that renders as a live, in-place-updating card in the
+// Spaces thread (via claw-auth's kind:"plan" progress handler). todo-write
+// fires the render using ctx.progressUrl/sessionId/s2sKey — threaded by
+// loadCustomTools — so no extra wiring is needed here.
+register(todo.todoWriteTool);
+register(todo.todoReadTool);
+
+// Register claw-auth-executed orchestrator proposal tool. The catalog row
+// appears under System Tools; runtime execution is handled by routes/mcp.ts.
+register(orchestrator.proposeAgentCallTool);
+
+// Agent-introspection tools — definitions only; executed claw-auth-side (see
+// xyne-claw-shared/src/tools/agent-introspect/tools.ts header).
+for (const t of agentIntrospect.AGENT_INTROSPECT_TOOL_DEFS) register(t);
 
 // Register sandbox tools
 register(sandbox.sandboxCreate);
@@ -176,17 +203,10 @@ register(sandbox.sandboxReadFile);
 register(sandbox.sandboxDeliverFiles);
 register(sandbox.sandboxDestroy);
 register(sandbox.sandboxRepoSetup);
+register(sandbox.gitRead);
 
-// Register workload tools
-register(workload.workloadInitRepo);
-register(workload.workloadPull);
-register(workload.workloadListReports);
-register(workload.workloadReadReport);
-register(workload.workloadWriteReport);
-register(workload.workloadRenderReport);
-register(workload.workloadCommit);
-register(workload.workloadPush);
-register(workload.workloadComputeCapacity);
+// Workload tools disabled for the same reason as PGM: Quarto rendering is
+// process-local execution and the report body is model/user-controlled.
 
 
 // Register sandbox-pw tools (browser via @playwright/mcp through sandbox-router-test)

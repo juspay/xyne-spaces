@@ -24,7 +24,7 @@ import {
   type Skill,
   type ChainWorkflow,
 } from "../lib/api";
-import type { McpServer, UserConnection, CredentialField, Gateway, Agent } from "../lib/types";
+import type { McpServer, UserConnection, CredentialField, Gateway, AgentLight } from "../lib/types";
 import { ConnectionList } from "./ConnectionList";
 import { AddConnectionDialog } from "./AddConnectionDialog";
 import { GatewayList } from "./GatewayList";
@@ -172,7 +172,7 @@ export function DashboardPage({ userId, isAdmin }: Props) {
   const [connections, setConnections] = useState<UserConnection[]>([]);
   const [credentialFields, setCredentialFields] = useState<Record<string, CredentialField[]>>({});
   const [gateways, setGateways] = useState<Gateway[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<AgentLight[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [workflows, setWorkflows] = useState<ChainWorkflow[]>([]);
   const [loading, setLoading] = useState(false);

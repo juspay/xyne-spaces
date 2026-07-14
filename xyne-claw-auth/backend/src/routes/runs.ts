@@ -1,8 +1,9 @@
 import { Router, type Request, type Response } from "express";
 import { agentRunRepository, agentRepository } from "../repositories/index.js";
-import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { renderClaudeCodeJsonl, renderMarkdown, renderClaudeProjectZip, type SessionExportRun } from "../lib/session-export.js";
+import { prisma } from "../db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("runs");
@@ -22,20 +23,34 @@ router.get("/", async (req: Request, res: Response) => {
     const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
     const limit = typeof req.query["limit"] === "string" ? Math.min(parseInt(req.query["limit"], 10) || 50, 200) : 50;
 
-    // Admin "All Runs": every user's runs of a single agent, ACL-filtered
+    // "All Runs": every user's runs of a single agent, ACL-filtered
     // (your own always; other users' only when usedUserToken=false). Requires
-    // an agentSlug (scoped to one agent) and claw-admin.
+    // an agentSlug (scoped to one agent) and claw-admin or contributor access.
     const scopeAll = req.query["scope"] === "all";
     if (scopeAll) {
       if (!agentSlug) {
         res.status(400).json({ success: false, error: "agentSlug is required for scope=all" });
         return;
       }
-      if (!(await isClawAdmin(userId))) {
-        res.status(403).json({ success: false, error: "Admin only" });
+      const orgId = getOrgId(req);
+      if (!orgId) {
+        log.warn(`[runs/all] orgId is required userId=${userId} agentSlug=${agentSlug}`);
+        res.status(400).json({ success: false, error: "orgId is required" });
         return;
       }
-      const allRuns = await agentRunRepository.listAllForAgent(agentSlug, userId, {
+      const access = await getAgentEditAccess(userId, agentSlug, orgId);
+      if (!access) {
+        log.warn(`[runs/all] agent org-scoped miss userId=${userId} agentSlug=${agentSlug} orgId=${orgId}`);
+        res.status(404).json({ success: false, error: "Agent not found" });
+        return;
+      }
+      const admin = await isClawAdmin(userId);
+      if (!admin && !access.canEdit) {
+        log.warn(`[runs/all] denied userId=${userId} agentSlug=${agentSlug} orgId=${orgId}`);
+        res.status(403).json({ success: false, error: "Only admins, the owner, or contributors can view all runs for this agent" });
+        return;
+      }
+      const allRuns = await agentRunRepository.listAllForAgent(agentSlug, access.agent.orgId, userId, {
         ...(status ? { status } : {}),
         ...(conversationId ? { conversationId } : {}),
         limit,
@@ -126,17 +141,40 @@ router.get("/by-agent/:slug", requireS2S, async (req: Request<{ slug: string }>,
       ? Math.min(Math.max(parseInt(req.query["limit"], 10) || 50, 1), 200)
       : 50;
     const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
+    const requesterId = getRequesterId(req);
+    let orgId = getOrgId(req)
+      ?? (requesterId
+        ? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId
+        : undefined);
+    // S2S-key-only callers (the runtime's get-agent-runs tool sends no
+    // x-user-id) have no derivable org — resolve the agent by slug with the
+    // single-match-or-fail rule instead (loud 404 on cross-org ambiguity),
+    // same pattern as GET /agents/:slug.
+    if (!orgId) {
+      const matches = await prisma.agent.findMany({ where: { slug }, select: { orgId: true }, take: 2 });
+      if (matches.length === 1) {
+        orgId = matches[0]!.orgId;
+      } else if (matches.length > 1) {
+        log.error(`[runs/by-agent] ambiguous slug across orgs; refusing (slug=${slug})`);
+      }
+    }
+    if (!orgId) {
+      log.warn(`[runs/by-agent] orgId is required requesterId=${requesterId ?? "none"} slug=${slug}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
 
     // Existence check — return 404 instead of empty array so the agent can
     // distinguish "this agent doesn't exist" (typo) from "no recent runs"
     // (real but quiet agent).
-    const agent = await agentRepository.findBySlug(slug);
+    const agent = await agentRepository.findBySlug(slug, orgId);
     if (!agent) {
+      log.warn(`[runs/by-agent] agent org-scoped miss slug=${slug} orgId=${orgId ?? "none"} requesterId=${requesterId ?? "none"}`);
       res.status(404).json({ success: false, error: `agent "${slug}" not found` });
       return;
     }
 
-    const runs = await agentRunRepository.listByAgentSlug(slug, {
+    const runs = await agentRunRepository.listByAgentSlug(slug, orgId, {
       since,
       limit,
       ...(status ? { status } : {}),
@@ -214,8 +252,9 @@ router.get("/session/export", async (req: Request, res: Response) => {
 
     if (format === "claude-project") {
       // Full zip bundle: CLAUDE.md (agent prompt) + .claude/agents/*.md (subagents) + .claude/skills/*.md (attached skills) + session jsonl + README
-      const agentRow = await agentRepository.findBySlugWithRelations(agentSlug);
+      const agentRow = await agentRepository.findBySlugWithRelations(agentSlug, getOrgId(req));
       if (!agentRow) {
+        log.warn(`[runs/export] agent org-scoped miss slug=${agentSlug} orgId=${getOrgId(req) ?? "none"} conversationId=${conversationId ?? "none"}`);
         res.status(404).json({ success: false, error: "Agent not found" });
         return;
       }

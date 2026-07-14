@@ -13,10 +13,58 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { expandSpacesMentions } from "../../lib/mention-transform.js";
+import { expandSpacesMentions, resolveUnboundMentions } from "../../lib/mention-transform.js";
+import { buildSpacesMentionLookupsDb } from "../../lib/mention-lookups.js";
+import { spacesDbAvailable } from "../../lib/spaces-db.js";
 
 const APP_TOKEN = process.env["XYNE_SPACES_APP_TOKEN"] ?? "";
 const SPACES_URL = process.env["XYNE_SPACES_URL"] ?? "";
+const WORKSPACE_ID = process.env["XYNE_SPACES_WORKSPACE_ID"]?.trim() ?? "";
+
+const COUNT_USER_MENTION_RE =
+  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[([A-Za-z0-9_-]{8,64})\]/g;
+const COUNT_GROUP_MENTION_RE =
+  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[group:([A-Za-z0-9_-]{8,64}):([^\]]+)\]/g;
+
+function countBracketedMentions(input: string): number {
+  const parts = input.split(/(```[\s\S]*?```)/g);
+  let count = 0;
+  for (let i = 0; i < parts.length; i += 2) {
+    count += [...parts[i]!.matchAll(COUNT_USER_MENTION_RE)].length;
+    count += [...parts[i]!.matchAll(COUNT_GROUP_MENTION_RE)].length;
+  }
+  return count;
+}
+
+async function prepareMessageContent(rawContent: string): Promise<string> {
+  let resolved = rawContent;
+  let resolvedCount = 0;
+
+  if (!WORKSPACE_ID) {
+    console.warn("[apps-send-message] mention resolution skipped reason=no_workspace_id");
+  } else if (!spacesDbAvailable()) {
+    console.warn("[apps-send-message] mention resolution skipped reason=spaces_db_unavailable");
+  } else {
+    try {
+      const beforeCount = countBracketedMentions(rawContent);
+      resolved = await resolveUnboundMentions(
+        rawContent,
+        buildSpacesMentionLookupsDb(WORKSPACE_ID),
+      );
+      resolvedCount = Math.max(0, countBracketedMentions(resolved) - beforeCount);
+    } catch (err) {
+      resolved = rawContent;
+      console.warn(
+        `[apps-send-message] mention resolution skipped reason=error err=${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  console.error(
+    `[apps-send-message] mention resolution resolved-count=${resolvedCount} workspaceId=${WORKSPACE_ID || "(none)"}`,
+  );
+  return expandSpacesMentions(resolved);
+}
 
 async function spacesAppFetch(path: string, body: Record<string, unknown>): Promise<unknown> {
   const url = `${SPACES_URL}/api/apps${path}`;
@@ -74,7 +122,9 @@ const SEND_MESSAGE_TOOL = {
     "for a group, or `@channel` / `@here` for specials. Resolve userId first via spaces-users / " +
     "spaces-search / spaces-whoami — never invent one. " +
     "" +
-    "Simple usage: provide conversationId (reply in a DIFFERENT thread) or channelId (post in a DIFFERENT channel) with content. " +
+    "Simple usage: provide conversationId (reply in a DIFFERENT thread), channelId (post in a DIFFERENT channel), " +
+    "or targetUserId (open/find a bot DM with that user and post there) with content. " +
+    "Use targetUserId for personal DMs; do not pass a human-human DM conversationId/channelId because the bot is not a participant there. " +
     "Cross-channel posting: provide targetChannelId to post in a different channel — the bot auto-joins PUBLIC channels " +
     "and reports failure for PRIVATE channels. When targetChannelId is set, confirms the action in the source thread.",
   inputSchema: {
@@ -84,6 +134,7 @@ const SEND_MESSAGE_TOOL = {
       conversationId: { type: "string", description: "Reply in this conversation thread (used when no targetChannelId)" },
       channelId: { type: "string", description: "Post in this channel (used when no targetChannelId and no conversationId)" },
       targetChannelId: { type: "string", description: "Cross-channel posting: Channel ID to post in. Posts there and confirms in source thread." },
+      targetUserId: { type: "string", description: "Personal DM posting: user ID to DM as the bot. Opens/finds a bot↔user DM before posting." },
       sourceConversationId: { type: "string", description: "Source conversation/thread ID for the confirmation reply when using targetChannelId (auto-detected from session if omitted)" },
     },
     required: ["content"],
@@ -112,13 +163,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
     }
     try {
       const rawContent = String((args as Record<string, unknown>)["content"] ?? "");
-      // Deterministically expand `@Name[userId]` shorthand into the HTML span
-      // Spaces needs. Idempotent on already-expanded content.
-      const content = expandSpacesMentions(rawContent);
       const conversationId = (args as Record<string, unknown>)["conversationId"] as string | undefined;
       const channelId = (args as Record<string, unknown>)["channelId"] as string | undefined;
       const targetChannelId = (args as Record<string, unknown>)["targetChannelId"] as string | undefined;
+      const targetUserId = (args as Record<string, unknown>)["targetUserId"] as string | undefined;
       const sourceConversationId = ((args as Record<string, unknown>)["sourceConversationId"] as string | undefined) ?? conversationId;
+      // Resolve bare `@Name` / `@email` / dotted handles first, then
+      // deterministically expand bracketed shorthand into Spaces' HTML spans.
+      const content = await prepareMessageContent(rawContent);
+
+      if (targetUserId) {
+        // Personal DM: a human-human DM does not include the bot, so first
+        // open/find the bot↔user DM with app credentials, then post there.
+        const dmRequest = WORKSPACE_ID ? { targetUserId, workspaceId: WORKSPACE_ID } : { targetUserId };
+        const dm = (await spacesAppFetch("/channel/openDm", dmRequest)) as { channelId?: string };
+        if (!dm.channelId) {
+          throw new Error("Spaces app API returned no channelId for bot DM");
+        }
+        await spacesAppFetch("/chat/postMessage", { channelId: dm.channelId, text: content });
+        return { content: [{ type: "text", text: `Message sent to DM with ${targetUserId}` }] };
+      }
 
       if (!targetChannelId) {
         // Simple send: conversationId → reply in thread, channelId → post in channel

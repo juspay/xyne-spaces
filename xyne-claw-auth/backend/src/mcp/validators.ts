@@ -1,4 +1,5 @@
 import { createLogger } from "../logger.js";
+import { spacesFetch, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
 const log = createLogger("validators");
 
 type ValidatorFn = (
@@ -19,11 +20,72 @@ export async function validateWriteAction(
   credentials: Record<string, unknown>,
 ): Promise<string | null> {
   const fn = VALIDATORS[`${serverType}/${tool}`];
-  if (!fn) return null;
+  if (fn) {
+    try {
+      const error = await fn(params, credentials);
+      if (error) return error;
+    } catch (err) {
+      log.warn(`[validator] ${serverType}/${tool} threw, allowing approval:`, err instanceof Error ? err.message : err);
+      return null;
+    }
+  }
+
+  return validateTargetConversationId(serverType, tool, params, credentials);
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function targetConversationId(params: Record<string, unknown>): string | undefined {
+  return stringField(params["conversationId"]) ?? stringField(params["targetConversationId"]);
+}
+
+function targetChannelId(params: Record<string, unknown>): string | undefined {
+  return stringField(params["channelId"]);
+}
+
+async function validateTargetConversationId(
+  serverType: string,
+  tool: string,
+  params: Record<string, unknown>,
+  credentials: Record<string, unknown>,
+): Promise<string | null> {
+  if (serverType !== "xyne-spaces") return null;
+  const conversationId = targetConversationId(params);
+  const channelId = targetChannelId(params);
+
+  if (tool === "user-send-message") {
+    if (!!conversationId === !!channelId) {
+      return "provide exactly one target: use conversationId for an existing thread or channelId to post into a channel";
+    }
+  }
+
+  if (!conversationId) return null;
+
   try {
-    return await fn(params, credentials);
+    const auth: SpacesAuthContext = {};
+    const token = stringField(credentials["token"]);
+    const sessionId = stringField(credentials["sessionId"]);
+    const workspaceId = stringField(credentials["workspaceId"]);
+    const baseUrl = stringField(credentials["url"]);
+    if (token) auth.token = token;
+    if (sessionId) auth.sessionId = sessionId;
+    if (workspaceId) auth.workspaceId = workspaceId;
+    if (baseUrl) auth.baseUrl = baseUrl;
+
+    await spacesFetch(
+      `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=1`,
+      { method: "GET" },
+      auth,
+    );
+    return null;
   } catch (err) {
-    log.warn(`[validator] ${serverType}/${tool} threw, allowing approval:`, err instanceof Error ? err.message : err);
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/Spaces API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
+      return `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread`;
+    }
+    log.warn(`[validator] ${serverType}/${tool} conversation lookup failed open conversationId=${conversationId}:`, msg);
     return null;
   }
 }

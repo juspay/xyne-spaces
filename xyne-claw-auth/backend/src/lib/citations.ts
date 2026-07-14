@@ -67,6 +67,110 @@ export function collectCitationIconUrls(
   return out;
 }
 
+/**
+ * The compact citation lookup baked into a bot thread message's metadata so a
+ * re-opened Spaces thread can render clickable citation chips WITHOUT re-calling
+ * claw. `clawCitations` is a slimmed toolInvocations list (only `toolCallId` +
+ * `citations`, the two fields the frontend `findCitationForChunk` needs);
+ * `clawCitationIcons` is the de-duplicated `iconKey → data:URI` map the sidebar
+ * `/messages` payload ships as a top-level `icons` field.
+ */
+export interface ThreadCitationMeta {
+  clawCitations: Array<{ toolCallId: string; citations: StructuredCitation[] }>;
+  clawCitationIcons: Record<string, string>;
+}
+
+/** Safety backstop: never bake more than this many citations into a single
+ *  message's metadata, so a pathological run can't bloat the Postgres row.
+ *  Set well above a realistic cited-source count — token-scoping (below) is the
+ *  real bound. Whole invocations are kept intact (never sliced mid-array) so a
+ *  token's `#chunkIndex` always resolves. */
+const MAX_THREAD_CITATIONS = 200;
+
+/**
+ * Extract the set of `toolCallId`s that the reply text actually cites, from its
+ * inline `[clf-<toolCallId>#<n>]` tokens. Returns null when the text has no
+ * tokens (caller then falls back to baking every citeable invocation).
+ *
+ * IMPORTANT: nested-subagent runs surface a PARENT wrapper invocation whose
+ * `citations` are the concatenated aggregate of its children (with duplicated
+ * chunk indices) — the tokens never reference that wrapper, only the child
+ * invocations. Scoping to the referenced ids drops the useless aggregate and
+ * keeps exactly the child rows `findCitationForChunk` needs.
+ */
+function extractCitedToolCallIds(text: unknown): Set<string> | null {
+  if (typeof text !== "string" || !text.includes("clf-")) return null;
+  const ids = new Set<string>();
+  const re = /\[clf-([^\][]+?)\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const body = m[1];
+    if (!body) continue;
+    const hashIdx = body.lastIndexOf("#");
+    if (hashIdx <= 0) continue;
+    if (!/^\d+$/.test(body.slice(hashIdx + 1))) continue;
+    ids.add(body.slice(0, hashIdx));
+  }
+  return ids.size > 0 ? ids : null;
+}
+
+/**
+ * Build {@link ThreadCitationMeta} from a run's tool invocations. Returns null
+ * when nothing citeable is present (so callers can omit the keys entirely).
+ *
+ * `replyText` is the assistant message being posted; when it carries inline
+ * `[clf-…]` tokens we bake ONLY the invocations those tokens reference (see
+ * {@link extractCitedToolCallIds}). The citation objects are forwarded whole —
+ * they already carry `iconKey` (stamped by claw's `recordCitations`) and every
+ * routing field the frontend `buildClawCitationUrl` reads.
+ */
+export function buildThreadCitationMeta(
+  toolInvocations: unknown,
+  replyText?: unknown,
+): ThreadCitationMeta | null {
+  if (!Array.isArray(toolInvocations)) return null;
+  const citedIds = extractCitedToolCallIds(replyText);
+  // When the caller gave us the reply text but it cites nothing, bake nothing —
+  // don't dump every citation into a token-less message. The include-everything
+  // fallback only applies when no text was passed at all (citedIds === null AND
+  // no replyText), which keeps older callers working.
+  if (typeof replyText === "string" && !citedIds) return null;
+  const clawCitations: Array<{
+    toolCallId: string;
+    citations: StructuredCitation[];
+  }> = [];
+  const usedInvocations: unknown[] = [];
+  let total = 0;
+  for (const inv of toolInvocations) {
+    if (total >= MAX_THREAD_CITATIONS) break;
+    if (!inv || typeof inv !== "object") continue;
+    const rec = inv as Record<string, unknown>;
+    const toolCallId =
+      typeof rec["toolCallId"] === "string" ? rec["toolCallId"] : undefined;
+    const citations = rec["citations"];
+    if (!toolCallId || !Array.isArray(citations) || citations.length === 0)
+      continue;
+    // Only bake what the reply actually cites (when we can tell). Drops the
+    // redundant subagent parent-wrapper aggregate and bounds the row size.
+    if (citedIds && !citedIds.has(toolCallId)) continue;
+    const structured = citations.filter((c): c is StructuredCitation =>
+      isStructuredCitation(c),
+    );
+    if (structured.length === 0) continue;
+    // Keep whole invocations intact so `#chunkIndex` always resolves — stop
+    // adding once we'd blow the backstop rather than truncating an array.
+    if (total > 0 && total + structured.length > MAX_THREAD_CITATIONS) break;
+    clawCitations.push({ toolCallId, citations: structured });
+    usedInvocations.push(inv);
+    total += structured.length;
+  }
+  if (clawCitations.length === 0) return null;
+  return {
+    clawCitations,
+    clawCitationIcons: collectCitationIconUrls(usedInvocations),
+  };
+}
+
 interface Citation {
   label: string;
   url: string;

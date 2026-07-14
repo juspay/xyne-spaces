@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   PlusIcon,
   CaretRightIcon,
   ArrowsClockwiseIcon,
   PlugsConnectedIcon,
+  MagnifyingGlassIcon,
 } from "@phosphor-icons/react";
 import type { McpServer, UserConnection, HealthResult, CredentialField } from "../../lib/types";
 import {
@@ -12,7 +13,6 @@ import {
   groupMcpsByCategory,
   type AgentCategoryId,
 } from "../lib/agentCategory";
-import { CategoryChip } from "./ui/CategoryChip";
 import {
   createConnection,
   createServer,
@@ -25,7 +25,6 @@ import {
 } from "../../lib/api";
 import { useMcpConnectors } from "../hooks/useMcpConnectors";
 import { useSnackbar } from "./ui/Snackbar";
-import { PageListHeader } from "./ui/PageListHeader";
 import { Avatar } from "./ui/Avatar";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
@@ -36,55 +35,147 @@ import { AddConnectionDialog } from "./dialogs/AddConnectionDialog";
 
 // ── Helper components ─────────────────────────────────────────────────
 
-function TransportBadge({ transport }: { transport?: string }) {
-  if (transport === "stdio") {
-    return (
-      <span className="text-[10px] font-medium px-[6px] py-[1px] rounded-full bg-xyne-warning-bg text-xyne-warning-fg border border-xyne-warning-border">
-        stdio
-      </span>
-    );
-  }
-  if (transport === "http") {
-    return (
-      <span className="text-[10px] font-medium px-[6px] py-[1px] rounded-full bg-xyne-success-bg text-xyne-success-fg border border-xyne-success-border">
-        http
-      </span>
-    );
-  }
-  return null;
+/**
+ * Bordered icon tile. Prefers the logo.dev PNG, falls back to a legacy SVG,
+ * then to initials — so connectors without a fetched logo still render.
+ */
+function McpIconBox({ type, name }: { type: string; name: string }) {
+  const candidates = [
+    `/claw/assets/mcp/${type}.png`,
+    `/claw/assets/mcp/${type}.svg`,
+  ];
+  const [idx, setIdx] = useState(0);
+  const src = candidates[idx];
+
+  return (
+    <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg">
+      {src ? (
+        <img
+          key={src}
+          src={src}
+          alt=""
+          className="size-full object-contain"
+          onError={() => setIdx((i) => i + 1)}
+        />
+      ) : (
+        <Avatar name={name} size={36} shape="square" />
+      )}
+    </div>
+  );
 }
 
-function ScopeBadge({ connectorMeta }: { connectorMeta?: Record<string, unknown> | null }) {
-  const scope = connectorMeta?.scope as string | undefined;
-  if (scope === "global") {
-    return <Badge as="span" label="global" variant="info" size="sm" />;
-  }
-  if (scope === "personal") {
-    return <Badge as="span" label="personal" variant="neutral" size="sm" />;
-  }
-  return null;
-}
-
-function McpServerIcon({ type, name }: { type: string; name: string }) {
-  const [error, setError] = useState(false);
-
-  if (error) {
+/** Small colored status dot mirroring a connection's health check. */
+function ConnectionHealthDot({
+  health,
+}: {
+  health: HealthResult | "checking" | null | undefined;
+}) {
+  if (health === "checking") {
     return (
-      <Avatar
-        name={name}
-        size={32}
-        shape="square"
+      <ArrowsClockwiseIcon size={12} className="animate-spin text-xyne-fg-tertiary" />
+    );
+  }
+  if (health) {
+    const label = health.healthy
+      ? health.latencyMs
+        ? `Healthy · ${health.latencyMs}ms`
+        : "Healthy"
+      : "Unhealthy";
+    return (
+      <span
+        title={label}
+        className={`h-[7px] w-[7px] shrink-0 rounded-full ${
+          health.healthy ? "bg-xyne-success-fg" : "bg-xyne-error-fg"
+        }`}
       />
     );
   }
+  return (
+    <span
+      title="Not checked"
+      className="h-[7px] w-[7px] shrink-0 rounded-full bg-xyne-border-strong"
+    />
+  );
+}
+
+/**
+ * Marketplace-style connector card. Mirrors the shadcn `Item` structure
+ * (media / content / actions slots): a rounded, muted, clickable surface
+ * with a bordered icon tile, a title + one-line description, and a trailing
+ * chevron. `actions` renders inside the actions slot, before the chevron.
+ */
+function McpItemCard({
+  server,
+  onClick,
+  disabled = false,
+  actions,
+  dataId = "connector-row",
+}: {
+  server: McpServer;
+  onClick?: () => void;
+  disabled?: boolean;
+  actions?: ReactNode;
+  dataId?: string;
+}) {
+  const hasDescription = !!server.description;
 
   return (
-    <img
-      src={`/claw/assets/mcp/${type}.svg`}
-      alt={type}
-      className="w-[32px] h-[32px]"
-      onError={() => setError(true)}
-    />
+    <div
+      data-slot="item"
+      data-id={dataId}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled || undefined}
+      onClick={disabled ? undefined : onClick}
+      onKeyDown={
+        disabled
+          ? undefined
+          : (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+      }
+      className={[
+        "group/item flex w-full flex-wrap items-center gap-3.5 rounded-2xl border border-transparent",
+        "bg-xyne-surface-sunken/60 px-4 py-3.5 text-sm outline-none transition-colors duration-100",
+        disabled
+          ? "cursor-default opacity-60"
+          : "cursor-pointer hover:bg-xyne-surface-sunken focus-visible:border-xyne-border-focus focus-visible:ring-[3px] focus-visible:ring-xyne-border-focus/15",
+      ].join(" ")}
+    >
+      <div
+        data-slot="item-media"
+        className={`flex shrink-0 items-center justify-center gap-2 ${
+          hasDescription ? "translate-y-0.5 self-start" : ""
+        }`}
+      >
+        <McpIconBox type={server.type} name={server.name} />
+      </div>
+
+      <div data-slot="item-content" className="flex min-w-0 flex-1 flex-col gap-1">
+        <div
+          data-slot="item-title"
+          className="line-clamp-1 flex w-fit items-center gap-2 text-sm font-medium leading-snug text-xyne-fg-primary"
+        >
+          {server.name}
+        </div>
+        {hasDescription && (
+          <p
+            data-slot="item-description"
+            className="line-clamp-1 text-left text-sm font-normal text-xyne-fg-tertiary"
+          >
+            {server.description}
+          </p>
+        )}
+      </div>
+
+      <div data-slot="item-actions" className="flex items-center gap-2">
+        {actions}
+        <CaretRightIcon size={16} className="shrink-0 text-xyne-fg-tertiary" />
+      </div>
+    </div>
   );
 }
 
@@ -93,7 +184,6 @@ function McpServerIcon({ type, name }: { type: string; name: string }) {
 interface ConnectedMcpRowProps {
   server: McpServer;
   connection: UserConnection;
-  category: AgentCategoryId;
   healthMap: Record<string, HealthResult | "checking" | null>;
   onSelect: (server: McpServer, connection: UserConnection) => void;
   onDisconnect: (connection: UserConnection) => void;
@@ -102,7 +192,6 @@ interface ConnectedMcpRowProps {
 function ConnectedMcpRow({
   server,
   connection,
-  category,
   healthMap,
   onSelect,
   onDisconnect,
@@ -110,79 +199,25 @@ function ConnectedMcpRow({
   const health = healthMap[connection.id];
 
   return (
-    <div
-      data-id="connector-row"
+    <McpItemCard
+      server={server}
       onClick={() => onSelect(server, connection)}
-      className={`flex items-center gap-[12px] px-[14px] py-[10px] bg-xyne-surface border border-xyne-border rounded-xl cursor-pointer transition-[border-color] mb-[6px] ${
-        health && health !== "checking" && health.healthy
-          ? "hover:border-xyne-success/30"
-          : health && health !== "checking" && !health.healthy
-            ? "hover:border-xyne-error/30"
-            : "hover:border-xyne-border-strong"
-      }`}
-    >
-      {/* Icon */}
-      <div className="flex shrink-0 w-[60px] items-center justify-center">
-        <McpServerIcon type={server.type} name={server.name} />
-      </div>
-
-      {/* Name + badges */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-[8px] min-w-0">
-          <div className="truncate text-[14px] font-medium text-xyne-fg-primary">
-            {server.name}
-          </div>
-          <div className="flex gap-[6px] flex-shrink-0">
-            <TransportBadge transport={server.transport} />
-            <ScopeBadge connectorMeta={server.connectorMeta} />
-            <CategoryChip
-              categoryId={category}
-              dataIdPrefix="connected-mcp-row-category"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Health status */}
-      <div className="flex shrink-0 items-center">
-        {health === "checking" && (
-          <span className="text-[11px] text-xyne-fg-tertiary flex items-center gap-[4px]">
-            <ArrowsClockwiseIcon size={12} className="animate-spin" />
-            Checking...
-          </span>
-        )}
-        {health && health !== "checking" && health.healthy && (
-          <span className="text-[11px] text-xyne-success-fg flex items-center gap-[4px]">
-            <span className="w-[6px] h-[6px] rounded-full bg-xyne-success-fg" />
-            {health.latencyMs ? `${health.latencyMs}ms` : "Healthy"}
-          </span>
-        )}
-        {health && health !== "checking" && !health.healthy && (
-          <span className="text-[11px] text-xyne-error-fg flex items-center gap-[4px]">
-            <span className="w-[6px] h-[6px] rounded-full bg-xyne-error-fg" />
-            Unhealthy
-          </span>
-        )}
-        {(health === null || health === undefined) && (
-          <span className="text-[11px] text-xyne-fg-tertiary">- not checked</span>
-        )}
-      </div>
-
-      {/* Disconnect */}
-      <button
-        data-id="connector-disconnect-btn"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDisconnect(connection);
-        }}
-        className="shrink-0 text-[12px] text-xyne-fg-secondary hover:text-xyne-fg-primary px-[8px] py-[4px] rounded-full border border-xyne-border hover:border-xyne-border-strong transition-colors"
-      >
-        Disconnect
-      </button>
-
-      {/* Caret */}
-      <CaretRightIcon size={14} className="shrink-0 text-xyne-fg-tertiary" />
-    </div>
+      actions={
+        <>
+          <ConnectionHealthDot health={health} />
+          <button
+            data-id="connector-disconnect-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDisconnect(connection);
+            }}
+            className="shrink-0 rounded-full border border-xyne-border px-[10px] py-[4px] text-[12px] text-xyne-fg-secondary transition-colors hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+          >
+            Disconnect
+          </button>
+        </>
+      }
+    />
   );
 }
 
@@ -190,84 +225,23 @@ function ConnectedMcpRow({
 
 interface AvailableMcpRowProps {
   server: McpServer;
-  category: AgentCategoryId;
-  connecting: boolean;
   onSelect: (server: McpServer) => void;
-  onConnect: (server: McpServer) => void;
 }
 
-function AvailableMcpRow({
-  server,
-  category,
-  connecting,
-  onSelect,
-  onConnect,
-}: AvailableMcpRowProps) {
+function AvailableMcpRow({ server, onSelect }: AvailableMcpRowProps) {
   const isDisabled = server.enabled === false;
 
   return (
-    <div
-      data-id="connector-row"
-      onClick={isDisabled ? undefined : () => onSelect(server)}
-      className={[
-        "flex items-center gap-[12px] px-[14px] py-[10px] bg-xyne-surface border border-xyne-border rounded-xl mb-[6px]",
-        isDisabled
-          ? "opacity-60"
-          : "cursor-pointer transition-[border-color] hover:border-xyne-border-strong",
-      ].join(" ")}
-    >
-      {/* Icon */}
-      <div className="flex shrink-0 w-[60px] items-center justify-center">
-        <McpServerIcon type={server.type} name={server.name} />
-      </div>
-
-      {/* Name + badges + description */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-[8px] min-w-0">
-          <div className="truncate text-[14px] font-medium text-xyne-fg-primary">
-            {server.name}
-          </div>
-          <div className="flex gap-[6px] flex-shrink-0">
-            <TransportBadge transport={server.transport} />
-            <ScopeBadge connectorMeta={server.connectorMeta} />
-            <CategoryChip
-              categoryId={category}
-              dataIdPrefix="available-mcp-row-category"
-            />
-          </div>
-        </div>
-        {server.description && (
-          <p className="text-[11px] text-xyne-fg-secondary truncate mt-[2px]">
-            {server.description}
-          </p>
-        )}
-      </div>
-
-      {/* Connect / Disabled */}
-      <div className="flex shrink-0 items-center gap-[8px]">
-        {isDisabled ? (
-          <span className="text-[11px] text-xyne-fg-tertiary px-[8px]">
-            Disabled
-          </span>
-        ) : (
-          <>
-            <Button
-              data-id="connector-connect-btn"
-              variant="primary"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onConnect(server);
-              }}
-              disabled={connecting}
-            >
-              {connecting ? "Connecting..." : "Connect"}
-            </Button>
-            <CaretRightIcon size={14} className="text-xyne-fg-tertiary" />
-          </>
-        )}
-      </div>
-    </div>
+    <McpItemCard
+      server={server}
+      disabled={isDisabled}
+      onClick={() => onSelect(server)}
+      actions={
+        isDisabled ? (
+          <span className="px-[2px] text-[11px] text-xyne-fg-tertiary">Disabled</span>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -283,6 +257,39 @@ function serverMatchesSearch(server: McpServer, query: string): boolean {
 }
 
 // ── MCPPageV3 ─────────────────────────────────────────────────────────
+
+/** One row in the left category filter rail. */
+function CategoryRailItem({
+  label,
+  count,
+  active,
+  onClick,
+  title,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={`flex w-full items-center justify-between gap-2 px-[10px] py-[6px] text-left text-[14px] transition-colors ${
+        active
+          ? "font-semibold text-xyne-fg-primary"
+          : "text-xyne-fg-tertiary hover:text-xyne-fg-primary"
+      }`}
+    >
+      <span className="truncate">{label}</span>
+      <span className="shrink-0 text-[11px] tabular-nums text-xyne-fg-tertiary/60">
+        {count}
+      </span>
+    </button>
+  );
+}
 
 interface Props {
   userId: string;
@@ -512,39 +519,38 @@ export function MCPPageV3({ userId }: Props) {
     [userId, reload, showSnackbar],
   );
 
-  const handleConnect = useCallback(
-    (server: McpServer) => {
-      const isOAuth = server.type === "google" || server.type === "microsoft" || server.oauth === true;
-      const isAutoConnect = server.type === "xyne-spaces";
-      const hasCredentialFields =
-        (credentialFields[server.type]?.length ?? 0) > 0 ||
-        (server.credentialForm?.fields?.length ?? 0) > 0;
-
-      if (isOAuth || isAutoConnect || !hasCredentialFields) {
-        connect(server)
-          .then(() => {
-            if (!isOAuth) showSnackbar({ variant: "success", title: `${server.name} connected` });
-          })
-          .catch((err: unknown) => {
-            showSnackbar({
-              variant: "error",
-              title: `Failed to connect ${server.name}`,
-              description: err instanceof Error ? err.message : undefined,
-            });
-          });
-      } else {
-        setConnectServerId(server.id);
-        setEditServerId(undefined);
-        setEditDefinitionServerId(undefined);
-        setShowAddDialog(true);
-      }
-    },
-    [connect, credentialFields, showSnackbar]
-  );
-
   const handleDisconnectRequest = useCallback((conn: UserConnection) => {
     setPendingDisconnect(conn);
   }, []);
+
+  // Connectors that need credentials but aren't OAuth (e.g. Amplitude) must
+  // collect their credential fields via the AddConnectionDialog first. The raw
+  // connect() would post empty credentials, which the backend rejects — and the
+  // sidebar swallows the error, so the button appears to "do nothing".
+  const requiresCredentials = useCallback((s: McpServer) => {
+    if (s.oauth) return false;
+    if (s.type === "google" || s.type === "microsoft" || s.type === "xyne-spaces") return false;
+    const hasFormFields = (s.credentialForm?.fields?.length ?? 0) > 0;
+    const hasSchema = !!s.credentialSchema && Object.keys(s.credentialSchema).length > 0;
+    return hasFormFields || hasSchema;
+  }, []);
+
+  const handleConnect = useCallback(async (server: McpServer) => {
+    if (requiresCredentials(server)) {
+      setConnectServerId(server.id);
+      setShowAddDialog(true);
+      return;
+    }
+    try {
+      await connect(server);
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Connection failed",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  }, [requiresCredentials, connect, showSnackbar]);
 
   // OAuth callback params
   useEffect(() => {
@@ -591,82 +597,68 @@ export function MCPPageV3({ userId }: Props) {
 
   return (
     <>
-      {/* Main list panel */}
-      <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
-        <PageListHeader
-          title="MCPs"
-          subtitle="Connect external apps (Slack, GitHub, BigQuery…) so your agents can read from them and act on them."
-          icon={<PlugsConnectedIcon size={18} />}
-          stats={[
-            { value: loading ? undefined : dedupedServers.length, label: "Total" },
-            { value: loading ? undefined : connectedCount, label: "Connected", highlight: "success" as const },
-            { value: loading ? undefined : availableCount, label: "Available" },
-          ]}
-          createLabel="Add MCP"
-          onCreateClick={() => setShowAddDialog(true)}
-          searchValue={inputValue}
-          onSearchChange={setInputValue}
-          searchPlaceholder="Search integrations…"
-          trailingFilters={
-            visibleCategories.length > 1 ? (
-              <>
-                {/* "All" chip — explicit reset, styled like a primary tab so
-                    it reads as the default state when nothing is filtered. */}
-                <button
-                  type="button"
-                  data-id="mcp-category-chip-all"
-                  title="Show all integrations"
-                  onClick={() => handleCategoryFilter(null)}
-                  className={`inline-flex items-center gap-[5px] px-[10px] py-[5px] rounded-[20px] text-[12px] cursor-pointer border transition-colors font-medium font-sans whitespace-nowrap ${
-                    !activeCategoryId
-                      ? "bg-xyne-fg-primary text-xyne-fg-inverse border-xyne-fg-primary"
-                      : "bg-transparent text-xyne-fg-secondary border-xyne-border hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
-                  }`}
-                >
-                  <span>All</span>
-                  <span
-                    className={`text-[11px] tabular-nums ${
-                      !activeCategoryId ? "opacity-70" : "opacity-60"
-                    }`}
-                  >
-                    {searchFilteredServers.length}
-                  </span>
-                </button>
-                {visibleCategories.map((cat) => {
-                  const count =
-                    groupedByCategory.get(cat.id)?.length ?? 0;
-                  const isActive = activeCategoryId === cat.id;
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      data-id={`mcp-category-chip-${cat.id}`}
-                      title={cat.description}
-                      onClick={() =>
-                        handleCategoryFilter(isActive ? null : cat.id)
-                      }
-                      className={`inline-flex items-center gap-[5px] px-[10px] py-[5px] rounded-[20px] text-[12px] cursor-pointer border transition-colors font-medium font-sans whitespace-nowrap ${
-                        isActive
-                          ? `${cat.chipClass} shadow-sm`
-                          : "bg-transparent text-xyne-fg-secondary border-xyne-border hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
-                      }`}
-                    >
-                      <span>{cat.shortLabel}</span>
-                      <span
-                        className={`text-[11px] tabular-nums ${
-                          isActive ? "opacity-70" : "opacity-60"
-                        }`}
-                      >
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </>
-            ) : undefined
-          }
-          loading={loading}
-        />
+      {/* Main list panel: [filter rail] [header + grid] */}
+      <div className="flex flex-1 overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+        {/* Left filter rail — category filters, moved off the top bar */}
+        <aside
+          data-id="mcp-filter-rail"
+          className="flex w-[210px] shrink-0 flex-col gap-[1px] overflow-y-auto bg-xyne-surface px-[16px] py-[20px]"
+        >
+          <CategoryRailItem
+            label="All"
+            count={searchFilteredServers.length}
+            active={!activeCategoryId}
+            onClick={() => handleCategoryFilter(null)}
+          />
+          {visibleCategories.map((cat) => (
+            <CategoryRailItem
+              key={cat.id}
+              label={cat.shortLabel}
+              title={cat.description}
+              count={groupedByCategory.get(cat.id)?.length ?? 0}
+              active={activeCategoryId === cat.id}
+              onClick={() =>
+                handleCategoryFilter(activeCategoryId === cat.id ? null : cat.id)
+              }
+            />
+          ))}
+
+          {/* Connected count — kept in the fixed-width rail so it never
+              crowds the header at narrow widths */}
+          <div className="mt-[16px] flex items-center gap-[8px] px-[10px] text-[13px] text-xyne-fg-tertiary">
+            <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-xyne-success-fg" />
+            {loading ? "…" : `${connectedServerIds.size} connected`}
+          </div>
+        </aside>
+
+        {/* Main column — header + scrollable grid */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+        {/* Header — title + search + create, aligned to the cards container */}
+        <div className="flex-shrink-0 bg-xyne-surface py-[20px]">
+          <div className="mx-auto flex w-full max-w-[1024px] items-center gap-4 px-[20px]">
+            <h1 className="min-w-0 text-[30px] font-bold leading-none tracking-tight text-xyne-fg-primary">
+              MCPs
+            </h1>
+            <div className="ml-auto flex items-center gap-3">
+              <div className="flex w-[320px] items-center gap-2 rounded-full border border-xyne-border bg-xyne-surface-sunken px-[16px] py-[10px] transition-colors focus-within:border-xyne-border-strong">
+                <MagnifyingGlassIcon size={16} className="shrink-0 text-xyne-fg-tertiary" />
+                <input
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  placeholder="Search marketplace"
+                  className="w-full min-w-0 border-0 bg-transparent text-[14px] text-xyne-fg-primary placeholder:text-xyne-fg-tertiary focus:outline-none focus:ring-0"
+                />
+              </div>
+              <button
+                onClick={() => setShowAddDialog(true)}
+                className="flex flex-shrink-0 items-center gap-1.5 rounded-full bg-blue-600 px-[20px] py-[10px] text-[14px] font-semibold text-white transition-colors hover:bg-blue-700"
+              >
+                <PlusIcon size={16} weight="bold" />
+                Create MCP
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* C) Main content */}
         <div data-id="mcp-page-body" className="flex-1 overflow-y-auto py-[16px]">
@@ -684,7 +676,7 @@ export function MCPPageV3({ userId }: Props) {
                     </span>
                     <Badge as="span" label={String(connectedServers.length)} variant="success" size="sm" />
                   </div>
-                  <div className="flex flex-col">
+                  <div className="grid grid-cols-1 gap-[10px] md:grid-cols-2">
                     {connectedServers.map((server) => {
                       const conn = getConnection(server.id)!;
                       return (
@@ -692,7 +684,6 @@ export function MCPPageV3({ userId }: Props) {
                           key={server.id}
                           server={server}
                           connection={conn}
-                          category={serverIdToCategory.get(server.id) ?? "other"}
                           healthMap={healthMap}
                           onSelect={(s, c) => {
                             setSelectedServer(s);
@@ -715,18 +706,15 @@ export function MCPPageV3({ userId }: Props) {
                     </span>
                     <Badge as="span" label={String(availableServers.length)} variant="neutral" size="sm" />
                   </div>
-                  <div className="flex flex-col">
+                  <div className="grid grid-cols-1 gap-[10px] md:grid-cols-2">
                     {availableServers.map((server) => (
                       <AvailableMcpRow
                         key={server.id}
                         server={server}
-                        category={serverIdToCategory.get(server.id) ?? "other"}
-                        connecting={connectingId === server.id}
                         onSelect={(s) => {
                           setSelectedServer(s);
                           setSelectedConnection(null);
                         }}
-                        onConnect={handleConnect}
                       />
                     ))}
                   </div>
@@ -778,6 +766,7 @@ export function MCPPageV3({ userId }: Props) {
           )}
           </div>
         </div>
+        </div>
       </div>
 
       {/* Detail sidebar */}
@@ -799,7 +788,7 @@ export function MCPPageV3({ userId }: Props) {
               healthMap={healthMap}
               healthCheckedAt={healthCheckedAt}
               userId={userId}
-              onConnect={connect}
+              onConnect={handleConnect}
               onDisconnect={disconnect}
               onCheckHealth={checkHealth}
               onEdit={() => {

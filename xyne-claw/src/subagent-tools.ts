@@ -21,7 +21,7 @@ import {
 import { workspacePath } from "./workspace.js";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, SERVER } from "./config.js";
-import { ensureSessionDebugDir } from "./session-store.js";
+import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
 import { SUBAGENT_DEFINITIONS, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
 import { resolveModel, applyCopilotProxyIfNeeded, capCustomToolOutput, pushDebugProgress, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type DebugEventRecord, type ProgressDest, type ToolInvocation } from "./agent.js";
@@ -31,8 +31,11 @@ import { createScopedToolMap } from "./scoped-tools.js";
 import type { ClawStreamMeta } from "xyne-claw-shared";
 import { takeCitations, recordCitations } from "./citations.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
+import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
+import { metric } from "./metrics.js";
 import crypto from "node:crypto";
-import { dirname, isAbsolute } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("subagent-tools");
@@ -316,6 +319,31 @@ function pushChildLabel(progressUrl: ProgressDest, sessionId: string, toolLabel:
  * conditions (`toolsMustInclude`) can match against nested tools like
  * `Bitbucket__create_pull_request`, not just the wrapper name `bitbucket`.
  */
+/** A subagent spawned with `run_in_background`: its DETACHED execution promise
+ *  plus lifecycle state. The parent's model loop gets an immediate ack and keeps
+ *  working; runTask (agent.ts) drains this registry after the loop settles and
+ *  injects each completed result back into the parent session. Keyed by the
+ *  spawning tool_call_id — which is also the `parentToolCallId` of the child's
+ *  nested tool rows, so the wrapper invocation and its children line up. */
+export interface BackgroundSubagentTask {
+  /** == the spawning tool_call_id. */
+  taskId: string;
+  subagentName: string;
+  question: string;
+  startedAt: number;
+  status: "running" | "completed" | "error";
+  /** The detached doExecute() promise. Its rejection is swallowed by an attached
+   *  handler that records status/error — the drain loop reads these, never the
+   *  raw promise result. */
+  promise: Promise<SubagentExecResult>;
+  /** Child answer text, filled on completion. */
+  result?: string;
+  error?: string;
+  /** True once runTask has injected this back into the parent session. */
+  delivered: boolean;
+}
+export type BackgroundSubagentRegistry = Map<string, BackgroundSubagentTask>;
+
 export interface SubagentProgressCtx {
   progressUrl?: ProgressDest;
   parentSessionId: string;
@@ -333,6 +361,12 @@ export interface SubagentProgressCtx {
    *  completion. Without this wire, parent-side cancel only stops the parent
    *  LLM loop — child sessions keep burning tokens and tool calls. */
   abortSignal?: AbortSignal;
+  /** Present on the TOP-LEVEL run only. When set, a subagent tool called with
+   *  `run_in_background: true` registers its detached execution here and returns
+   *  an immediate ack instead of blocking; runTask drains it after the model
+   *  loop settles. Absent (e.g. nested contexts) ⇒ `run_in_background` is not
+   *  exposed and every call runs blocking, as before. */
+  backgroundRegistry?: BackgroundSubagentRegistry;
 }
 
 // ── Shared MCP loader helper ──────────────────────────────────────────────
@@ -470,11 +504,69 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
     progressLabels: def.progressLabels,
     parameters: Type.Object({
       [def.paramName]: Type.String({ description: def.paramDescription }),
+      // Only exposed on the top-level run (where a background registry exists).
+      // Lets the parent fire this subagent non-blocking; its result is delivered
+      // back automatically before the parent finishes (runTask's drain loop).
+      ...(progressCtx?.backgroundRegistry
+        ? {
+            run_in_background: Type.Optional(
+              Type.Boolean({
+                description:
+                  "Run this subagent in the BACKGROUND (non-blocking). You get an immediate acknowledgement and keep working; its result is delivered back to you automatically before you finish your reply. Use for slow, independent work you can overlap with other tools/subagents. Leave unset when you need the result to decide your very next step. Do NOT poll for it.",
+              }),
+            ),
+          }
+        : {}),
     }),
     async execute(_toolCallId: string, params: unknown) {
       const question = (params as Record<string, string>)[def.paramName] ?? "";
       const execStartedAt = Date.now();
       log.info(`[${def.name}] Subagent start t=${execStartedAt} call=${_toolCallId.slice(0,8)}: ${question.slice(0, 100)}`);
+
+      // ── Background (non-blocking) spawn. If the parent asked for
+      // run_in_background AND this run has a background registry (top-level
+      // only), kick doExecute() off DETACHED, register it, and return an
+      // immediate ack so the parent's turn continues. runTask drains the
+      // registry after the model loop settles and injects the result back
+      // (agent.ts). Deliberately BYPASSES memoization — a background spawn is an
+      // explicit, intentional fan-out, not a dedupe candidate.
+      if ((params as Record<string, unknown>)["run_in_background"] === true && progressCtx?.backgroundRegistry) {
+        const promise = doExecute();
+        const task: BackgroundSubagentTask = {
+          taskId: _toolCallId,
+          subagentName: def.name,
+          question,
+          startedAt: execStartedAt,
+          status: "running",
+          promise,
+          delivered: false,
+        };
+        // Record terminal status off the detached promise; the attached handler
+        // also prevents an unhandled-rejection crash (the drain loop reads
+        // task.result/task.error, never the raw promise).
+        promise.then(
+          (r) => {
+            task.status = "completed";
+            task.result = (r.content?.[0] as { text?: string } | undefined)?.text ?? "";
+          },
+          (err) => {
+            task.status = "error";
+            task.error = err instanceof Error ? err.message : String(err);
+          },
+        );
+        progressCtx.backgroundRegistry.set(_toolCallId, task);
+        log.info(`[${def.name}] Spawned in background (task=${_toolCallId.slice(0, 8)})`);
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              `Started "${def.name}" in the background (task ${_toolCallId}). It is running now — ` +
+              `continue with other work. Its result will be delivered to you automatically before you ` +
+              `finish your reply; do NOT block on it or poll for it.`,
+          }],
+          details: {},
+        };
+      }
 
       // ── (D) Memoization: identical (subagent, question) inside the same
       // parent run resolves to the SAME promise, so concurrent duplicate
@@ -510,6 +602,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       // can clear the timer on early failures without leaking the interval.
       let stickyLabel: string | null = null;
       let sessionRef: unknown = null;
+      let toolBudget: ToolBudgetTracker | null = null;
       // Hoisted so the finally can clean it up regardless of success/error.
       let childSkillScope: string | null = null;
       const toolsUsed: string[] = [];
@@ -646,9 +739,26 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // the session-skills dir) as READ-ONLY roots so the subagent can read
         // SKILL.md without the gate denying it. Mirrors agent.ts. Write stays
         // confined to childWorkingDir.
+        //
+        // Over-large MCP/retrieval results a subagent produces spill to the
+        // PARENT conversation's session dir: mcp.ts promoteIfOversized() writes
+        // to toolOutputDir, which run.ts froze as
+        // toolOutputBaseDir(conversationId, …) = sessionDir(RAW conversationId).
+        // The child is handed that ABSOLUTE path + "read it", but its file-tool
+        // gate is rooted at workspaces/<sessionId> (a SIBLING of sessions/), so
+        // the read was denied ("… is outside the session working directory").
+        // Mirror the parent's fix (agent.ts) — allow ONLY that conversation's
+        // `.context` subdir as a READ-ONLY root; the rest of the session dir
+        // (transcript / debug) stays out of reach and write stays confined.
+        // parentMeta.conversationId is the RAW id — matches run.ts's spill dir
+        // exactly, incl. branched runs (both ignore piSessionConversationId).
+        const sessionContextRoot = progressCtx?.parentMeta?.conversationId
+          ? join(sessionDir(progressCtx.parentMeta.conversationId), ".context")
+          : null;
         const childSkillReadRoots = Array.from(
           new Set<string>([
             ...(childSkillsDir ? [childSkillsDir] : []),
+            ...(sessionContextRoot ? [sessionContextRoot] : []),
             ...childResourceLoader
               .getSkills()
               .skills.map((s) => (s as { filePath?: string }).filePath)
@@ -694,6 +804,11 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           resourceLoader: childResourceLoader,
         });
         sessionRef = session;
+        installLlmCallMetrics(session.agent, parentSessionId ?? `subagent-${def.name}`);
+        toolBudget = installToolBudget(session.agent, {
+          sessionId: parentSessionId ?? `subagent-${def.name}`,
+          budgetScale: 0.5,
+        });
 
         // Mid-turn compaction + the assistant-tail resume guard (mirrors agent.ts).
         // Without this the child never checks the tool_result that just landed
@@ -791,10 +906,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             try {
               const resStr =
                 typeof event.result === "string" ? event.result : JSON.stringify(event.result);
-              // Charset matches agent.ts CITE_RE: real toolCallIds carry `.`,
-              // `_` and `:` (e.g. functions.Xyne_Spaces__spaces-tickets:2) —
-              // a narrower class silently drops those tokens.
-              if (resStr && /\[clf-[a-z0-9._:-]+#\d+\]/i.test(resStr)) {
+              // Generic id match (mirrors agent.ts CITE_RE) — toolCallIds vary
+              // by provider, so match any non-delimiter run instead of an
+              // allow-list that would silently drop new id formats.
+              if (resStr && /\[clf-[^#\s[\]]+#\d+\]/i.test(resStr)) {
                 citedToolOutputs.push(resStr);
               }
             } catch { /* ignore non-serializable results */ }
@@ -1100,9 +1215,9 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // away. Self-limiting: citedToolOutputs only fills when child results
         // carried tokens (the retrieval case), so this is a no-op otherwise.
         if (citedToolOutputs.length > 0) {
-          // Charset matches agent.ts CITE_RE ([a-z0-9._:-]) — see the capture
-          // site above for why the wider class matters.
-          const tokenRe = /\[clf-[a-z0-9._:-]+#\d+\]/gi;
+          // Generic id match (mirrors agent.ts CITE_RE) — see the capture site
+          // above for why an allow-list would silently drop new id formats.
+          const tokenRe = /\[clf-[^#\s[\]]+#\d+\]/gi;
           const seenInText = new Set((text.match(tokenRe) ?? []).map((t) => t.toLowerCase()));
           const missing: string[] = [];
           for (const chunk of citedToolOutputs) {
@@ -1217,6 +1332,12 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // didn't, leaking the session's listeners/extension context on every
         // failed subagent. Best-effort.
         try { (sessionRef as { dispose?: () => void } | null)?.dispose?.(); } catch { /* ignore */ }
+        if (toolBudget) {
+          metric.observe("tool_calls_per_run", toolBudget.calls, {
+            session: progressCtx?.parentSessionId ?? `subagent-${def.name}`,
+            agent: def.name,
+          });
+        }
         // Delete the per-invocation skills dir so it doesn't accumulate on disk.
         if (childSkillScope) await deleteSessionSkills(childSkillScope);
       }
@@ -1445,7 +1566,23 @@ export function buildSubagentTools(
       }
       const palette = resolveCustomSubagentTools(spec.tools, groups, customTools);
       if (palette.length === 0) {
-        log.warn(`[buildSubagentTools] Custom subagent "${spec.name}" resolved to 0 tools — skipping (check its tools config against live MCP groups)`);
+        const referenced = (spec.tools.direct?.length ?? 0) + (spec.tools.custom?.length ?? 0);
+        if (referenced > 0) {
+          // The subagent references tools but none survived in the live MCP
+          // groups. Since claw-auth's enforcement RETAINS subagent-referenced
+          // servers (2026-07-08 fix), the overwhelmingly common cause is now
+          // benign: the runner simply has no credentials/connection for the
+          // backing server — that case was silently skipped for months and
+          // logging it at error level produced ~2.7k false alarms/day
+          // (2026-07-09). warn with full detail; the enforcement-regression
+          // class is separately visible via claw-auth's "retained server="
+          // and "enforced-drop" log lines.
+          log.warn(
+            `[buildSubagentTools] Custom subagent "${spec.name}" resolved to 0 tools despite referencing ${referenced} (direct=${spec.tools.direct?.length ?? 0} custom=${spec.tools.custom?.length ?? 0}) — skipping (no creds for its server, or dropped upstream); available groups: [${groups.map((g) => g.serverType).join(",")}]`,
+          );
+        } else {
+          log.warn(`[buildSubagentTools] Custom subagent "${spec.name}" resolved to 0 tools — skipping (check its tools config against live MCP groups)`);
+        }
         continue;
       }
       const syntheticDef: SubagentDefinition = {

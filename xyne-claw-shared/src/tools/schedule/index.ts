@@ -1,1 +1,1 @@
-export { scheduleTask } from "./tools.js";
+export { scheduleTask, scheduledJobControl } from "./tools.js";

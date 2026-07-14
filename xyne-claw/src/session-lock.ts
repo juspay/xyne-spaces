@@ -13,9 +13,10 @@
  *  - TTL-bounded: if this pod dies, the lock auto-frees so another pod (or a
  *    run-recovery refire) can take over. We refresh on every turn to keep it
  *    alive across long runs.
- *  - FAIL-OPEN: if the lock service is unreachable, acquire() resolves true so
- *    runs aren't blocked by a Redis/claw-auth blip. The lock is anti-corruption
- *    insurance, not a gate that should halt the fleet.
+ *  - FAIL-CLOSED by default: if the lock service is unreachable, acquire()
+ *    resolves false so claw-auth's queue/recovery layer can retry instead of
+ *    risking a split-brain session. Set SESSION_LOCK_REQUIRED=false only for
+ *    local dev without Redis.
  */
 import { randomUUID } from "node:crypto";
 import { SERVER } from "./config.js";
@@ -23,7 +24,20 @@ import { metric } from "./metrics.js";
 
 const POD_ID = randomUUID();
 export const SESSION_LOCK_TTL_MS = Number(process.env["SESSION_LOCK_TTL_MS"] ?? 15 * 60 * 1000);
-const LOCK_CALL_TIMEOUT_MS = 5_000;
+// HTTP budget for a single lock acquire/refresh/release call to claw-auth.
+// 5s was too tight: under claw-auth S2S latency (prod 2026-07-07 saw multi-second
+// /mcp/tools responses), the acquire fetch timed out and — because acquisition
+// is FAIL-CLOSED by default — every affected run was rejected with
+// `session_locked` (metric session_lock_failclosed reason=exception). A larger,
+// env-tunable budget lets a slow-but-alive lock service respond instead of
+// spuriously fail-closing. Kept well under the run's own timeout.
+const LOCK_CALL_TIMEOUT_MS = Number(process.env["SESSION_LOCK_CALL_TIMEOUT_MS"] ?? 15_000);
+const LOCK_RETRY_INTERVAL_MS = 1_500;
+const configuredSessionLockWaitMs = Number(process.env["SESSION_LOCK_WAIT_MS"] ?? 25_000);
+export const SESSION_LOCK_WAIT_MS = Number.isFinite(configuredSessionLockWaitMs)
+  ? Math.max(0, configuredSessionLockWaitMs)
+  : 25_000;
+const SESSION_LOCK_REQUIRED = (process.env["SESSION_LOCK_REQUIRED"] ?? "true").toLowerCase() !== "false";
 
 function lockUrl(conversationId: string, suffix = ""): string {
   const base = SERVER.authServiceUrl.replace(/\/$/, "");
@@ -36,27 +50,81 @@ function holderToken(conversationId: string): string {
 
 /**
  * Try to acquire the lock for `conversationId`. Returns true if this pod now
- * owns it (or if locking is disabled / unreachable — fail-open), false if
- * another pod currently owns it.
+ * owns it, false if another pod owns it or the lock service failed while
+ * SESSION_LOCK_REQUIRED=true.
  */
-export async function acquireSessionLock(conversationId: string): Promise<boolean> {
-  if (!SERVER.s2sKey) return true; // locking disabled without an S2S key
+async function tryAcquireSessionLock(conversationId: string, timeoutMs = LOCK_CALL_TIMEOUT_MS): Promise<boolean> {
+  if (!SERVER.s2sKey) return !SESSION_LOCK_REQUIRED; // local dev escape hatch
   try {
     const res = await fetch(lockUrl(conversationId), {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-s2s-key": SERVER.s2sKey },
       body: JSON.stringify({ holder: holderToken(conversationId), ttlMs: SESSION_LOCK_TTL_MS }),
-      signal: AbortSignal.timeout(LOCK_CALL_TIMEOUT_MS),
+      signal: AbortSignal.timeout(Math.max(1, timeoutMs)),
     });
     if (!res.ok) {
-      metric.count("session_lock_failopen", { reason: `http_${res.status}` });
-      return true; // fail-open
+      metric.count(SESSION_LOCK_REQUIRED ? "session_lock_failclosed" : "session_lock_failopen", { reason: `http_${res.status}` });
+      return !SESSION_LOCK_REQUIRED;
     }
-    const data = (await res.json()) as { acquired?: boolean };
+    const data = (await res.json()) as { acquired?: boolean; degraded?: boolean };
+    if (data.degraded === true) {
+      metric.count(SESSION_LOCK_REQUIRED ? "session_lock_failclosed" : "session_lock_failopen", { reason: "degraded" });
+      return !SESSION_LOCK_REQUIRED;
+    }
     return data.acquired !== false;
   } catch {
-    metric.count("session_lock_failopen", { reason: "exception" });
-    return true; // fail-open — never block a run because the lock service hiccupped
+    metric.count(SESSION_LOCK_REQUIRED ? "session_lock_failclosed" : "session_lock_failopen", { reason: "exception" });
+    return !SESSION_LOCK_REQUIRED;
+  }
+}
+
+export async function acquireSessionLock(conversationId: string): Promise<boolean> {
+  const deadline = Date.now() + SESSION_LOCK_WAIT_MS;
+  let attempts = 0;
+
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (attempts > 0 && remaining <= 0) {
+      metric.count("session_lock_wait_retry", { result: "exhausted", attempts: String(attempts) });
+      return false;
+    }
+
+    attempts++;
+    const acquired = await tryAcquireSessionLock(
+      conversationId,
+      SESSION_LOCK_WAIT_MS === 0 ? LOCK_CALL_TIMEOUT_MS : Math.min(LOCK_CALL_TIMEOUT_MS, Math.max(1, remaining)),
+    );
+    if (acquired) {
+      if (attempts > 1) {
+        metric.count("session_lock_wait_retry", { result: "acquired", attempts: String(attempts) });
+      }
+      return true;
+    }
+
+    const remainingAfterAttempt = deadline - Date.now();
+    if (remainingAfterAttempt <= 0) {
+      if (attempts > 1) metric.count("session_lock_wait_retry", { result: "exhausted", attempts: String(attempts) });
+      return false;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, Math.min(LOCK_RETRY_INTERVAL_MS, remainingAfterAttempt)));
+  }
+}
+
+/** Non-mutating lock check for inventory/backfill tooling. */
+export async function isSessionLockActive(conversationId: string): Promise<boolean> {
+  if (!SERVER.s2sKey) return false;
+  try {
+    const res = await fetch(lockUrl(conversationId), {
+      method: "GET",
+      headers: { "x-s2s-key": SERVER.s2sKey },
+      signal: AbortSignal.timeout(LOCK_CALL_TIMEOUT_MS),
+    });
+    if (!res.ok) return SESSION_LOCK_REQUIRED;
+    const data = (await res.json()) as { locked?: boolean };
+    return data.locked === true;
+  } catch {
+    return SESSION_LOCK_REQUIRED;
   }
 }
 

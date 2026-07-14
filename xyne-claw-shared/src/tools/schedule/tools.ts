@@ -27,22 +27,49 @@ export const scheduleTask: ToolDefinition = {
     "Do NOT convert to UTC; the backend pins the scheduler to IST. " +
     "\n\nBy default the scheduled run's result is posted back as a reply in the originating " +
     "thread — same as how the agent already responds in the current conversation. " +
-    "ONLY set `replyMode = \"channel\"` when the user EXPLICITLY asks for the output to be " +
-    "posted as a top-level channel message (e.g. \"post the result to the channel\", \"send it " +
-    "to #engineering\", \"don't reply in the thread, just post it\"). Do not ask the user " +
+    'ONLY set `replyMode = "channel"` when the user EXPLICITLY asks for the output to be ' +
+    'posted as a top-level channel message (e.g. "post the result to the channel", "send it ' +
+    'to #engineering", "don\'t reply in the thread, just post it"). Do not ask the user ' +
     "where to post — defaulting to thread is correct for the common case.",
   source: "custom:schedule",
   configSchema: SCHEDULE_CONFIG_SCHEMA,
   inputSchema: {
     type: "object",
     properties: {
-      task: { type: "string", description: "The task description for the future agent run" },
-      type: { type: "string", enum: ["once", "cron"], description: "'once' for one-shot, 'cron' for recurring" },
-      delayMs: { type: "number", description: "For type='once': delay in milliseconds (e.g. 86400000 for 24h, 3600000 for 1h)" },
-      cronExpression: { type: "string", description: "For type='cron': standard 5-field cron expression (e.g. '0 9 * * 1-5')" },
-      label: { type: "string", description: "Human-friendly name for this scheduled task" },
-      maxRuns: { type: "number", description: "For type='cron': maximum number of runs before auto-completing. Omit for unlimited." },
-      replyMode: { type: "string", enum: ["thread", "channel"], description: "Optional. Defaults to 'thread' (reply in the originating conversation). Set to 'channel' ONLY when the user explicitly asked for a top-level channel post — do not infer or ask." },
+      task: {
+        type: "string",
+        description: "The task description for the future agent run",
+      },
+      type: {
+        type: "string",
+        enum: ["once", "cron"],
+        description: "'once' for one-shot, 'cron' for recurring",
+      },
+      delayMs: {
+        type: "number",
+        description:
+          "For type='once': delay in milliseconds (e.g. 86400000 for 24h, 3600000 for 1h)",
+      },
+      cronExpression: {
+        type: "string",
+        description:
+          "For type='cron': standard 5-field cron expression (e.g. '0 9 * * 1-5')",
+      },
+      label: {
+        type: "string",
+        description: "Human-friendly name for this scheduled task",
+      },
+      maxRuns: {
+        type: "number",
+        description:
+          "For type='cron': maximum number of runs before auto-completing. Omit for unlimited.",
+      },
+      replyMode: {
+        type: "string",
+        enum: ["thread", "channel"],
+        description:
+          "Optional. Defaults to 'thread' (reply in the originating conversation). Set to 'channel' ONLY when the user explicitly asked for a top-level channel post — do not infer or ask.",
+      },
     },
     required: ["task", "type"],
   },
@@ -52,10 +79,13 @@ export const scheduleTask: ToolDefinition = {
     const userId = meta["userId"];
     const agentSlug = meta["agentSlug"];
 
-    if (!userId) return "Error: Cannot schedule — no user identity available in execution context.";
-    if (!agentSlug) return "Error: Cannot schedule — no agent slug available in execution context.";
+    if (!userId)
+      return "Error: Cannot schedule — no user identity available in execution context.";
+    if (!agentSlug)
+      return "Error: Cannot schedule — no agent slug available in execution context.";
 
-    const authUrl = context.config["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003";
+    const authUrl =
+      context.config["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003";
     const s2sKey = context.config["XYNE_CLAW_S2S_KEY"] ?? "";
     const type = params["type"] as string;
 
@@ -99,7 +129,8 @@ export const scheduleTask: ToolDefinition = {
         error?: string;
       };
 
-      if (!data.success) return `Error scheduling task: ${data.error ?? "unknown error"}`;
+      if (!data.success)
+        return `Error scheduling task: ${data.error ?? "unknown error"}`;
 
       const job = data.data!;
       const label = (params["label"] as string) ?? (params["task"] as string);
@@ -110,6 +141,132 @@ export const scheduleTask: ToolDefinition = {
       return `Scheduled recurring "${label}" with cron "${params["cronExpression"]}" (job ID: ${job.id})`;
     } catch (err) {
       return `Error scheduling task: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  },
+};
+
+export const scheduledJobControl: ToolDefinition = {
+  slug: "scheduled-job-control",
+  name: "Control Scheduled Job",
+  description:
+    "Pause, resume, cancel, or update an existing scheduled agent job. " +
+    "When this tool is called from a scheduled-job run, use jobId='current' to control the schedule that triggered this turn. " +
+    "Use action='pause' to temporarily stop future runs, action='resume' to restart a paused job, action='cancel' to permanently stop future runs, and action='update' to rewrite the task/prompt (pass 'task') and/or the label (pass 'label') the job runs on each fire. " +
+    "Only control jobs owned by the current user/agent; do not use guessed job IDs.",
+  source: "custom:schedule",
+  configSchema: SCHEDULE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["pause", "resume", "cancel", "update"],
+        description:
+          "The control action to apply. Use 'update' to rewrite the task/prompt (and optionally the label) the job runs on each fire.",
+      },
+      jobId: {
+        type: "string",
+        description:
+          "Scheduled job id, or 'current' when running inside that scheduled job",
+      },
+      reason: {
+        type: "string",
+        description: "Optional human-readable reason for audit/logging",
+      },
+      task: {
+        type: "string",
+        description:
+          "For action='update': the new task/prompt the agent should run on each fire. Takes effect on the next run.",
+      },
+      label: {
+        type: "string",
+        description:
+          "For action='update': optional new human-friendly label for the job.",
+      },
+    },
+    required: ["action", "jobId"],
+  },
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const meta = context.meta ?? {};
+    const userId = meta["userId"];
+    const agentSlug = meta["agentSlug"];
+
+    if (!userId)
+      return "Error: Cannot control scheduled job — no user identity available in execution context.";
+    if (!agentSlug)
+      return "Error: Cannot control scheduled job — no agent slug available in execution context.";
+
+    const action = params["action"] as string;
+    if (!["pause", "resume", "cancel", "update"].includes(action)) {
+      return "Error: action must be one of pause, resume, cancel, or update.";
+    }
+    if (action === "update" && params["task"] == null && params["label"] == null) {
+      return "Error: action='update' requires 'task' and/or 'label'.";
+    }
+
+    const requestedJobId = String(params["jobId"] ?? "").trim();
+    const currentScheduledJobId = meta["scheduledJobId"];
+    const jobId =
+      requestedJobId === "current" ? currentScheduledJobId : requestedJobId;
+    if (!jobId) {
+      return requestedJobId === "current"
+        ? "Error: This run is not associated with a scheduled job, so jobId='current' cannot be resolved."
+        : "Error: jobId is required.";
+    }
+
+    const authUrl =
+      context.config["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003";
+    const s2sKey = context.config["XYNE_CLAW_S2S_KEY"] ?? "";
+
+    try {
+      const res = await fetch(
+        `${authUrl}/claw/api/v1/scheduled-jobs/${encodeURIComponent(jobId)}/${action}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(s2sKey ? { "x-s2s-key": s2sKey } : {}),
+          },
+          body: JSON.stringify({
+            userId,
+            agentSlug,
+            reason: params["reason"],
+            currentScheduledJobId,
+            ...(action === "update"
+              ? {
+                  ...(params["task"] != null ? { task: params["task"] } : {}),
+                  ...(params["label"] != null ? { label: params["label"] } : {}),
+                }
+              : {}),
+          }),
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+
+      const data = (await res.json().catch(() => null)) as {
+        success?: boolean;
+        data?: { id?: string; status?: string };
+        error?: string;
+      } | null;
+
+      if (!res.ok || !data?.success) {
+        return `Error: Failed to ${action} scheduled job ${jobId}: ${data?.error ?? res.statusText}`;
+      }
+
+      if (action === "update") {
+        return `Updated scheduled job ${jobId}${params["task"] != null ? " (new task/prompt)" : ""}${params["label"] != null ? " (new label)" : ""}.`;
+      }
+      const status =
+        data.data?.status ??
+        (action === "resume"
+          ? "active"
+          : action === "pause"
+            ? "paused"
+            : "cancelled");
+      return `Scheduled job ${jobId} is now ${status}.`;
+    } catch (err) {
+      return `Error: Failed to ${action} scheduled job: ${err instanceof Error ? err.message : String(err)}`;
     }
   },
 };

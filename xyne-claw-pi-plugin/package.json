@@ -1,0 +1,17 @@
+{
+  "name": "xyne-claw",
+  "version": "0.1.0",
+  "description": "Xyne Claw integration for the xyne CLI — log in to Claw and invoke remote agents (agents, sessions, run) as tools and via the /claw command.",
+  "type": "module",
+  "license": "MIT",
+  "pi": {
+    "extensions": ["index.ts"]
+  },
+  "keywords": ["xyne", "claw", "pi", "extension", "agent"],
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.80.3",
+    "@earendil-works/pi-coding-agent": "^0.80.3",
+    "@types/node": "^22",
+    "typescript": "^5.8"
+  }
+}

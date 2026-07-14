@@ -1561,6 +1561,37 @@ export function DebugDrawer({ open, agentSlug, conversationId, onClose, inline =
     };
   }, [open, agentSlug, conversationId, artifactsReadyVersion, refreshVersion]);
 
+  // A VIEWER / reloaded tab has no driving stream (`running` is false), so the
+  // fetch runs once. When the fetched bundle is a PARTIAL in-progress run
+  // (claw's incremental debug write, or the DB-synthesized in-progress bundle
+  // the /debug route returns before completion), poll so the drawer stays live
+  // until the run finishes. Stops automatically once the bundle is no longer
+  // marked in-progress or the drawer closes.
+  const bundleInProgress = useMemo(() => {
+    if (!bundle) return false;
+    if ((bundle.debugSession as { inProgress?: boolean } | null)?.inProgress === true) return true;
+    return (bundle.runs ?? []).some((r) => (r.data as { inProgress?: boolean } | undefined)?.inProgress === true);
+  }, [bundle]);
+  // Stop the in-progress poll once a fetch errors — when the run completes the
+  // DB-synth /debug route 404s (no in-progress runs left), which throws here; we
+  // must tear down or the interval loops forever. Reset on open / conversation nav.
+  const [livePollStopped, setLivePollStopped] = useState(false);
+  useEffect(() => { setLivePollStopped(false); }, [open, agentSlug, conversationId]);
+  useEffect(() => {
+    // Only a VIEWER polls; the driving tab already streams debug via liveEvents.
+    if (!open || running || !agentSlug || !conversationId || !bundleInProgress || livePollStopped) return;
+    let cancelled = false;
+    const id = window.setInterval(() => {
+      fetchConversationDebugArtifacts(agentSlug, conversationId)
+        .then((data) => { if (!cancelled) setBundle(data); }) // a completed bundle flips bundleInProgress → effect tears down
+        .catch(() => { if (!cancelled) setLivePollStopped(true); });
+    }, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [open, running, agentSlug, conversationId, bundleInProgress, livePollStopped]);
+
   if (!open) return null;
 
   const panel = (

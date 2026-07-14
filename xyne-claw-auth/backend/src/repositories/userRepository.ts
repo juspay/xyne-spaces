@@ -8,7 +8,7 @@ export const userRepository = {
     prisma.user.findUnique({ where: { id }, select }),
 
   findByEmail: (email: string) =>
-    prisma.user.findUnique({ where: { email } }),
+    prisma.user.findFirst({ where: { email } }),
 
   findByIds: (ids: string[]) =>
     ids.length === 0 ? Promise.resolve([]) : prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true } }),

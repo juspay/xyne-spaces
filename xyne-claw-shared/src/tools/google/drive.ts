@@ -2,85 +2,24 @@
  * Google Drive API helpers — read/export files.
  */
 
-import { inflateRawSync } from "zlib";
 import { PDFParse } from "pdf-parse";
 import { googleFetch } from "./oauth.js";
+import { type CitedText, inlineCitationToken, externalCitation, driveFileUrl } from "./citations.js";
+import { xlsxToText } from "./office.js";
+import type { Citation } from "../../types/citation.js";
 
 const BASE = "https://www.googleapis.com/drive/v3";
 const MAX_DRIVE_UPLOAD_BYTES = 1_000_000; // 1MB text payload guardrail
 const MAX_DRIVE_SEARCH_RESULTS = 50;
-
-// ── Minimal ZIP + XLSX parser ────────────────────────────────────────
-
-/** Extract a file from a ZIP buffer by filename. */
-function zipExtract(zip: Buffer, target: string): Buffer | undefined {
-  let offset = 0;
-  while (offset < zip.length - 4) {
-    if (zip[offset] !== 0x50 || zip[offset + 1] !== 0x4b || zip[offset + 2] !== 0x03 || zip[offset + 3] !== 0x04) break;
-
-    const method = zip.readUInt16LE(offset + 8);
-    const compressedSize = zip.readUInt32LE(offset + 18);
-    const nameLen = zip.readUInt16LE(offset + 26);
-    const extraLen = zip.readUInt16LE(offset + 28);
-    const name = zip.subarray(offset + 30, offset + 30 + nameLen).toString("utf-8");
-    const dataStart = offset + 30 + nameLen + extraLen;
-
-    if (name === target) {
-      const data = zip.subarray(dataStart, dataStart + compressedSize);
-      if (method === 0) return data; // stored
-      if (method === 8) return inflateRawSync(data); // deflate
-      return undefined;
-    }
-
-    offset = dataStart + compressedSize;
-  }
-  return undefined;
-}
-
-/** Parse an xlsx buffer and return CSV-like text. */
-function parseXlsxBuffer(buffer: Buffer): string | undefined {
-  const ssXml = zipExtract(buffer, "xl/sharedStrings.xml");
-  const sharedStrings: string[] = [];
-  if (ssXml) {
-    const ssText = ssXml.toString("utf-8");
-    for (const m of ssText.matchAll(/<t[^>]*>([^<]*)<\/t>/g)) {
-      sharedStrings.push(m[1] ?? "");
-    }
-  }
-
-  const rows: string[][] = [];
-  for (let i = 1; i <= 20; i++) {
-    const sheetXml = zipExtract(buffer, `xl/worksheets/sheet${i}.xml`);
-    if (!sheetXml) break;
-
-    if (i > 1) rows.push([`--- Sheet ${i} ---`]);
-
-    const sheetText = sheetXml.toString("utf-8");
-    for (const rowMatch of sheetText.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)) {
-      const cells: string[] = [];
-      for (const cellMatch of rowMatch[1]!.matchAll(/<c[^>]*?(?: t="([^"]*)")?[^>]*>(?:[\s\S]*?<v>([^<]*)<\/v>)?[\s\S]*?<\/c>/g)) {
-        const type = cellMatch[1];
-        const value = cellMatch[2] ?? "";
-        if (type === "s") {
-          const idx = parseInt(value, 10);
-          cells.push(sharedStrings[idx] ?? value);
-        } else {
-          cells.push(value);
-        }
-      }
-      if (cells.length > 0) rows.push(cells);
-    }
-  }
-
-  if (rows.length === 0) return undefined;
-  return rows.map((r) => r.join(",")).join("\n");
-}
 
 interface DriveFile {
   id: string;
   name: string;
   mimeType: string;
   size?: string;
+  modifiedTime?: string;
+  webViewLink?: string;
+  owners?: Array<{ displayName?: string; emailAddress?: string }>;
 }
 
 interface DriveListResponse {
@@ -112,6 +51,111 @@ function extractFileId(urlOrId: string): string {
   return urlOrId;
 }
 
+/** Extract the tab/sheet gid from a Google Sheets URL (#gid=, ?gid=, &gid=). */
+function extractGid(urlOrId: string): string | undefined {
+  const m = urlOrId.match(/[#?&]gid=(\d+)/);
+  return m ? m[1] : undefined;
+}
+
+export interface ReadDriveOptions {
+  /** Target a specific tab by its gid (from the sheet URL's #gid=). */
+  gid?: string | undefined;
+  /** Target a specific tab by its title (case-insensitive). */
+  tab?: string | undefined;
+  /** A1 range within the targeted tab, e.g. "A1:Z" or "A500:Z1000". */
+  range?: string | undefined;
+  /** Max rows to return per tab before windowing (default 5000). */
+  maxRows?: number | undefined;
+}
+
+const DEFAULT_MAX_SHEET_ROWS = 5000;
+const MAX_SHEET_OUTPUT_CHARS = 100000;
+
+/**
+ * Coerce a raw Sheets API values row (numbers/booleans → strings) AND pad every
+ * row to the widest row's column count. The values API omits trailing empty
+ * cells, so rows arrive ragged; without padding, columns misalign down the sheet
+ * and a "column E of the Acme row" question is answered from the wrong cell.
+ */
+function coerceRows(rows: unknown[][]): string[][] {
+  const coerced = rows.map((row) => row.map((cell) => (cell == null ? "" : String(cell))));
+  const width = coerced.reduce((max, row) => Math.max(max, row.length), 0);
+  for (const row of coerced) {
+    while (row.length < width) row.push("");
+  }
+  return coerced;
+}
+
+/**
+ * Read a Google Sheets spreadsheet via the Sheets values API.
+ * Honors a target tab (gid or title) and an A1 range, and windows large tabs
+ * by row count instead of blindly slicing the top of the concatenated text.
+ */
+async function readSpreadsheet(
+  token: string,
+  fileId: string,
+  meta: DriveFile,
+  opts: ReadDriveOptions,
+): Promise<{ text: string; mime: string }> {
+  // 1) List tabs.
+  const sheetsData = (await googleFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${fileId}?includeGridData=false`,
+    token,
+  )) as { sheets?: Array<{ properties: { sheetId: number; title: string } }> };
+  const allSheets = sheetsData.sheets ?? [];
+  if (allSheets.length === 0) throw new Error("No sheets returned by Sheets API");
+
+  // 2) Resolve the target tab. gid wins over tab name; otherwise read every tab.
+  let targets = allSheets;
+  let targetNote = "";
+  if (opts.gid != null) {
+    const match = allSheets.find((s) => String(s.properties.sheetId) === String(opts.gid));
+    if (match) {
+      targets = [match];
+    } else {
+      targetNote = `\n(Note: no tab with gid=${opts.gid} found; reading all tabs. Available: ${allSheets
+        .map((s) => `${s.properties.title} [gid=${s.properties.sheetId}]`)
+        .join(", ")})`;
+    }
+  } else if (opts.tab) {
+    const match = allSheets.find((s) => s.properties.title.toLowerCase() === opts.tab!.toLowerCase());
+    if (match) {
+      targets = [match];
+    } else {
+      targetNote = `\n(Note: no tab named "${opts.tab}" found; reading all tabs. Available: ${allSheets
+        .map((s) => s.properties.title)
+        .join(", ")})`;
+    }
+  }
+
+  const maxRows = opts.maxRows && opts.maxRows > 0 ? opts.maxRows : DEFAULT_MAX_SHEET_ROWS;
+  const parts: string[] = [];
+
+  for (const sheet of targets) {
+    const title = sheet.properties.title;
+    const a1 = opts.range && opts.range.trim() ? `'${title}'!${opts.range.trim()}` : `'${title}'`;
+    const valuesData = (await googleFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${fileId}/values/${encodeURIComponent(a1)}?majorDimension=ROWS`,
+      token,
+    )) as { values?: unknown[][] };
+    let rows = coerceRows(valuesData.values ?? []);
+    const total = rows.length;
+    let footer = "";
+    if (rows.length > maxRows) {
+      rows = rows.slice(0, maxRows);
+      footer = `\n... (showing first ${maxRows} of ${total} rows; pass range like "A${maxRows + 1}:Z" or a larger maxRows to read more)`;
+    }
+    const body = rows.length > 0 ? valuesToCsv(rows) : "(empty)";
+    parts.push(`--- Sheet: ${title} (gid=${sheet.properties.sheetId}, ${total} row(s)) ---\n${body}${footer}`);
+  }
+
+  let content = parts.join("\n\n") + targetNote;
+  if (content.length > MAX_SHEET_OUTPUT_CHARS) {
+    content = content.slice(0, MAX_SHEET_OUTPUT_CHARS) + "\n\n... (output truncated; narrow the range or tab)";
+  }
+  return { text: `File: ${meta.name} (read via Sheets API)\n\n${content}`, mime: "text/csv" };
+}
+
 async function getFileMetadata(token: string, fileId: string): Promise<DriveFile> {
   return (await googleFetch(
     `${BASE}/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,size`,
@@ -130,8 +174,10 @@ function detectWorkspaceType(url: string): string | undefined {
 export async function readDriveFile(
   token: string,
   urlOrId: string,
+  opts: ReadDriveOptions = {},
 ): Promise<{ text: string; dataUrl?: string; mime: string }> {
   const fileId = extractFileId(urlOrId);
+  const gid = opts.gid ?? extractGid(urlOrId);
   const meta = await getFileMetadata(token, fileId);
 
   const detectedType = detectWorkspaceType(urlOrId);
@@ -141,66 +187,22 @@ export async function readDriveFile(
   if (exportInfo) {
     // Google Sheets / xlsx: try multiple strategies
     if (detectedType === "application/vnd.google-apps.spreadsheet" || effectiveMime.includes("spreadsheet")) {
-      // Strategy 1: Get sheet metadata + CSV export per sheet
+      // Preferred: read via the Sheets values API, honoring the target tab (gid/name) and range.
       try {
-        const sheetsApiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${fileId}?includeGridData=false`;
-        const sheetsData = (await googleFetch(sheetsApiUrl, token)) as {
-          sheets?: Array<{ properties: { sheetId: number; title: string } }>;
-        };
-        const sheets = sheetsData.sheets ?? [];
-        const parts: string[] = [];
-
-        for (const sheet of sheets) {
-          const sheetName = sheet.properties.title;
-          const exportUrl = `https://docs.google.com/spreadsheets/d/${fileId}/export?format=csv&gid=${sheet.properties.sheetId}`;
-          const response = await fetch(exportUrl, {
-            headers: { Authorization: `Bearer ${token}` },
-            redirect: "follow",
-          });
-          if (response.ok) {
-            parts.push(`--- Sheet: ${sheetName} ---\n${await response.text()}`);
-          } else {
-            const valuesData = (await googleFetch(
-              `https://sheets.googleapis.com/v4/spreadsheets/${fileId}/values/${encodeURIComponent(`'${sheetName}'`)}`,
-              token,
-            )) as { values?: string[][] };
-            const rows = valuesData.values ?? [];
-            parts.push(`--- Sheet: ${sheetName} ---\n${rows.length > 0 ? valuesToCsv(rows) : "(empty)"}`);
-          }
-        }
-
-        let content = parts.join("\n\n");
-        if (content.length > 20000) content = content.slice(0, 20000) + "\n\n... (truncated)";
-        return { text: `File: ${meta.name} (exported as csv)\n\n${content}`, mime: "text/csv" };
+        return await readSpreadsheet(token, fileId, meta, { ...opts, gid });
       } catch {
-        // Strategy 1 failed
+        // Sheets API path failed (e.g. an .xlsx blob that is not a native Google Sheet).
       }
 
-      // Strategy 2: Direct Sheets API values
-      try {
-        const valuesData = (await googleFetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${fileId}/values/A1:ZZ10000`,
-          token,
-        )) as { values?: string[][] };
-        const rows = valuesData.values ?? [];
-        if (rows.length > 0) {
-          let content = valuesToCsv(rows);
-          if (content.length > 20000) content = content.slice(0, 20000) + "\n\n... (truncated)";
-          return { text: `File: ${meta.name} (read via Sheets API)\n\n${content}`, mime: "text/csv" };
-        }
-      } catch {
-        // Strategy 2 failed
-      }
-
-      // Strategy 3: Download raw xlsx and parse
+      // Fallback: download the raw xlsx and parse it locally.
       try {
         const dlUrl = `${BASE}/files/${encodeURIComponent(fileId)}?alt=media`;
         const dlResponse = await fetch(dlUrl, { headers: { Authorization: `Bearer ${token}` } });
         if (dlResponse.ok) {
           const buffer = Buffer.from(await dlResponse.arrayBuffer());
-          const content = parseXlsxBuffer(buffer);
+          const content = xlsxToText(buffer);
           if (content) {
-            const truncated = content.length > 20000 ? content.slice(0, 20000) + "\n\n... (truncated)" : content;
+            const truncated = content.length > MAX_SHEET_OUTPUT_CHARS ? content.slice(0, MAX_SHEET_OUTPUT_CHARS) + "\n\n... (truncated)" : content;
             return { text: `File: ${meta.name} (xlsx)\n\n${truncated}`, mime: "text/csv" };
           }
         }
@@ -227,10 +229,7 @@ export async function readDriveFile(
       const err = await response.text();
       throw new Error(`Drive export failed: ${response.status} ${err}`);
     }
-    let content = await response.text();
-    if (content.length > 20000) {
-      content = content.slice(0, 20000) + "\n\n... (truncated)";
-    }
+    const content = await response.text();
     return {
       text: `File: ${meta.name} (exported as ${exportInfo.ext})\n\n${content}`,
       mime: exportInfo.mime,
@@ -251,10 +250,7 @@ export async function readDriveFile(
 
   // Text-based files
   if (meta.mimeType.startsWith("text/") || meta.mimeType === "application/json") {
-    let content = buffer.toString("utf-8");
-    if (content.length > 20000) {
-      content = content.slice(0, 20000) + "\n\n... (truncated)";
-    }
+    const content = buffer.toString("utf-8");
     return { text: `File: ${meta.name}\n\n${content}`, mime: meta.mimeType };
   }
 
@@ -263,10 +259,7 @@ export async function readDriveFile(
     const parser = new PDFParse({ data: new Uint8Array(buffer) });
     try {
       const result = await parser.getText();
-      let content = result.text.trim();
-      if (content.length > 20000) {
-        content = content.slice(0, 20000) + "\n\n... (truncated)";
-      }
+      const content = result.text.trim();
       return {
         text: `File: ${meta.name} (PDF, ${result.total} pages)\n\n${content}`,
         mime: "application/pdf",
@@ -304,7 +297,7 @@ export async function searchDriveFiles(
   token: string,
   query: string,
   maxResults: number,
-): Promise<string> {
+): Promise<CitedText> {
   const cappedResults = Math.min(Math.max(maxResults, 1), MAX_DRIVE_SEARCH_RESULTS);
   const looksLikeRawQuery =
     /\b(name|fullText|mimeType|modifiedTime|parents|trashed)\b/.test(query) ||
@@ -314,20 +307,30 @@ export async function searchDriveFiles(
   const q = looksLikeRawQuery ? query : `name contains '${escaped}' or fullText contains '${escaped}'`;
   const url = new URL(`${BASE}/files`);
   url.searchParams.set("q", `${q} and trashed = false`);
-  url.searchParams.set("fields", "files(id,name,mimeType,size)");
+  url.searchParams.set("fields", "files(id,name,mimeType,size,modifiedTime,webViewLink,owners(displayName,emailAddress))");
   url.searchParams.set("pageSize", String(cappedResults));
   url.searchParams.set("orderBy", "modifiedTime desc");
 
   const data = (await googleFetch(url.toString(), token)) as DriveListResponse;
   const files = data.files ?? [];
 
-  if (files.length === 0) return `No files found for "${query}".`;
+  if (files.length === 0) return { text: `No files found for "${query}".` };
 
-  const lines = files.map((f) => {
+  const citations: Citation[] = [];
+  const lines = files.map((f, i) => {
+    const idx = i + 1;
     const size = f.size ? ` (${(Number(f.size) / 1024).toFixed(1)} KB)` : "";
-    return `- ${f.name}${size}\n  Type: ${f.mimeType}\n  ID: ${f.id}`;
+    const c = externalCitation({ app: "gdrive", url: driveFileUrl(f.id, f.mimeType), chunkIndex: idx, label: f.name });
+    if (c) citations.push(c);
+    const detail: string[] = [`  Type: ${f.mimeType}`, `  ID: ${f.id}`];
+    if (f.modifiedTime) detail.push(`  Modified: ${f.modifiedTime.slice(0, 10)}`);
+    const owner = f.owners?.[0];
+    if (owner?.displayName || owner?.emailAddress) {
+      detail.push(`  Owner: ${owner.displayName ?? owner.emailAddress}${owner.emailAddress && owner.displayName ? ` <${owner.emailAddress}>` : ""}`);
+    }
+    return `${inlineCitationToken(idx)} - ${f.name}${size}\n${detail.join("\n")}`;
   });
-  return `Found ${files.length} file(s):\n\n${lines.join("\n\n")}`;
+  return { text: `Found ${files.length} file(s):\n\n${lines.join("\n\n")}`, citations };
 }
 
 // ── Drive write helpers ──────────────────────────────────────────────

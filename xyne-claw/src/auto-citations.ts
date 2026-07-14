@@ -23,7 +23,7 @@ import { recordCitations } from "./citations.js";
 /** Matches an existing inline clf citation token (same shape agent.ts's citation
  *  reflection uses). A result already carrying one is self-citing — we skip it
  *  so tools that emit their own citations are never double-processed. */
-const CLF_TOKEN_RE = /\[clf-[a-z0-9._:-]+#\d+\]/i;
+const CLF_TOKEN_RE = /\[clf-[^#\s[\]]+#\d+\]/i;
 
 /** Paragraphs shorter than this are merged forward so we don't mint a citation
  *  per stray line. */

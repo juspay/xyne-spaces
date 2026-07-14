@@ -9,13 +9,13 @@
 import { useNavigate } from "react-router-dom";
 import { ClockIcon, ArrowRightIcon } from "@phosphor-icons/react";
 import { Skeleton } from "../ui/Skeleton";
-import type { Agent } from "../../../lib/types";
+import type { AgentLight } from "../../../lib/types";
 import type { ScheduledJob } from "../../../lib/types";
 import { formatTimeUntil, truncate } from "./homeUtils";
 
 interface NextScheduledPeekProps {
   job: ScheduledJob | null;
-  agents: Agent[];
+  agents: AgentLight[];
   isLoading: boolean;
 }
 

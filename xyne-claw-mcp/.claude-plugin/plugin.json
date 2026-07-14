@@ -1,0 +1,8 @@
+{
+  "name": "xyne-claw",
+  "description": "Log in to Xyne Claw and invoke remote agents from Claude Code",
+  "version": "0.1.0",
+  "author": {
+    "name": "Xyne"
+  }
+}

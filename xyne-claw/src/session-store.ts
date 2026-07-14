@@ -14,12 +14,12 @@
  * deleted. Next sweep retries. This trades PVC headroom for zero data loss.
  */
 
-import { mkdir, readdir, readFile, rename, stat, statfs, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rename, stat, statfs, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PATHS, SERVER } from "./config.js";
-import { gcsRestoreSession, gcsUploadSessionFromDisk, gcsSessionUpdatedAt, type SessionDiskFile } from "./gcs.js";
+import { gcsRestoreSessionToDisk, gcsUploadSessionFromDisk, gcsSessionUpdatedAt, type SessionDiskFile } from "./gcs.js";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
@@ -35,12 +35,17 @@ const SESSION_TTL_HOURS = Number(process.env["SESSION_TTL_HOURS"] ?? 6);
 const SESSION_TTL_MS = SESSION_TTL_HOURS * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 15 * 60 * 1000; // 15 min — also the disk-pressure check cadence
 const ARCHIVE_TIMEOUT_MS = 120_000; // 2 min — sessions can be tens of MB
+const ARCHIVE_RETRY_ATTEMPTS = Math.max(1, Number(process.env["SESSION_ARCHIVE_RETRY_ATTEMPTS"] ?? 3));
+const ARCHIVE_RETRY_BACKOFF_MS = Math.max(0, Number(process.env["SESSION_ARCHIVE_RETRY_BACKOFF_MS"] ?? 1_000));
 // Disk-pressure backstop: when the sessions volume crosses the high-water
 // mark, evict least-recently-used idle sessions (archive-then-delete, same
 // strictness as the TTL path) until usage drops below the low-water mark —
 // regardless of TTL. Makes ENOSPC structurally unreachable under burst load.
 const DISK_HIGH_WATER_PCT = Number(process.env["SESSION_DISK_HIGH_WATER_PCT"] ?? 80);
 const DISK_LOW_WATER_PCT = Number(process.env["SESSION_DISK_LOW_WATER_PCT"] ?? 70);
+const SESSIONS_PVC_FALLBACK = (process.env["SESSIONS_PVC_FALLBACK"] ?? "true").toLowerCase() !== "false";
+const SESSIONS_PVC_FALLBACK_DIR = process.env["SESSIONS_PVC_FALLBACK_DIR"] ?? "/pvc-sessions";
+log.warn(`[session-store] PVC fallback mode=${SESSIONS_PVC_FALLBACK ? "enabled" : "disabled"} dir=${SESSIONS_PVC_FALLBACK_DIR}`);
 
 function sessionsRoot(): string {
   return path.join(PATHS.dataDir, "sessions");
@@ -123,13 +128,44 @@ async function listSessionFiles(dir: string): Promise<SessionDiskFile[]> {
   return out;
 }
 
+async function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sessionSizeBytes(files: SessionDiskFile[]): number {
+  return files.reduce((sum, f) => sum + f.sizeBytes, 0);
+}
+
+function bareConversationIdForStoreKey(storeKey: string): string | null {
+  const i = storeKey.lastIndexOf("_");
+  if (i <= 0 || i >= storeKey.length - 1) return null;
+  return storeKey.slice(0, i);
+}
+
+function isActiveSessionOrBareSpillDir(name: string): boolean {
+  if (activeSessions.has(name)) return true;
+  for (const active of activeSessions) {
+    if (bareConversationIdForStoreKey(active) === name) return true;
+  }
+  return false;
+}
+
 /**
  * Upload a single session's files to GCS — directly when running on GKE
  * (Workload Identity), via claw-auth's S2S archive endpoint otherwise.
  * Returns true on success. On any failure (GCS error, claw-auth down, S2S
  * mismatch), returns false — the caller MUST leave the local dir intact.
  */
-export async function archiveSessionToGcs(conversationId: string): Promise<boolean> {
+interface ArchiveSessionOptions {
+  createOnly?: boolean;
+}
+
+async function archiveSessionDirToGcs(
+  conversationId: string,
+  options: ArchiveSessionOptions = {},
+): Promise<boolean> {
+  const started = Date.now();
   const dir = sessionDir(conversationId);
   if (!existsSync(dir)) return true; // already gone, treat as archived
 
@@ -148,10 +184,22 @@ export async function archiveSessionToGcs(conversationId: string): Promise<boole
   // its S2S endpoint 503s exactly when SIGTERM'd runs need checkpointing
   // (prod incident 2026-06-09). Returns false when direct GCS is unavailable
   // (no credentials) or any upload fails.
-  if (await gcsUploadSessionFromDisk(conversationId, diskFiles)) {
+  if (await gcsUploadSessionFromDisk(conversationId, diskFiles, options.createOnly ? { createOnly: true } : {})) {
     metric.count("session_archive", { result: "ok", path: "gcs" });
+    metric.observe("session_archive_duration_ms", Date.now() - started, {
+      result: "ok",
+      path: "gcs",
+      files: diskFiles.length,
+      bytes: sessionSizeBytes(diskFiles),
+    });
     log.info(`[session-store] Archived ${conversationId} (${diskFiles.length} files, direct GCS)`);
     return true;
+  }
+
+  if (options.createOnly) {
+    metric.count("session_archive", { result: "fail", path: "gcs", reason: "create_only_failed" });
+    log.warn(`[session-store] Create-only direct GCS archive failed for ${conversationId}`);
+    return false;
   }
 
   if (!SERVER.s2sKey) {
@@ -199,6 +247,12 @@ export async function archiveSessionToGcs(conversationId: string): Promise<boole
       return false;
     }
     metric.count("session_archive", { result: "ok", path: "clawauth" });
+    metric.observe("session_archive_duration_ms", Date.now() - started, {
+      result: "ok",
+      path: "clawauth",
+      files: diskFiles.length,
+      bytes: sessionSizeBytes(diskFiles),
+    });
     log.info(`[session-store] Archived ${conversationId} (${data.uploaded ?? files.length} files)`);
     return true;
   } catch (err) {
@@ -208,33 +262,176 @@ export async function archiveSessionToGcs(conversationId: string): Promise<boole
   }
 }
 
+async function archiveBareSpillDirWithRetries(
+  storeKey: string,
+  attempts: number,
+  options: ArchiveSessionOptions = {},
+): Promise<boolean> {
+  const bareConversationId = bareConversationIdForStoreKey(storeKey);
+  if (!bareConversationId) return true;
+  if (!existsSync(sessionDir(bareConversationId))) return true;
+
+  let lastAttempt = 0;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    lastAttempt = attempt;
+    const ok = await archiveSessionDirToGcs(bareConversationId, options);
+    if (ok) return true;
+    if (attempt < attempts) {
+      await sleep(ARCHIVE_RETRY_BACKOFF_MS * attempt);
+    }
+  }
+  metric.count("session_spill_archive_failed", { conversationId: bareConversationId, storeKey, attempts: lastAttempt });
+  log.warn(`[session-store] Bare spill archive failed for ${storeKey} companion ${bareConversationId}; leaving spill dir on disk`);
+  return false;
+}
+
+export async function archiveSessionToGcs(
+  conversationId: string,
+  options: ArchiveSessionOptions = {},
+): Promise<boolean> {
+  const ok = await archiveSessionDirToGcs(conversationId, options);
+  if (ok) {
+    await archiveBareSpillDirWithRetries(conversationId, 1, options);
+  }
+  return ok;
+}
+
+export async function archiveSessionToGcsWithRetries(
+  conversationId: string,
+  attempts = ARCHIVE_RETRY_ATTEMPTS,
+  options: ArchiveSessionOptions = {},
+): Promise<boolean> {
+  let lastAttempt = 0;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    lastAttempt = attempt;
+    const ok = await archiveSessionDirToGcs(conversationId, options);
+    if (ok) {
+      await archiveBareSpillDirWithRetries(conversationId, attempts, options);
+      return true;
+    }
+    if (attempt < attempts) {
+      await sleep(ARCHIVE_RETRY_BACKOFF_MS * attempt);
+    }
+  }
+  metric.count("session_archive_failed", { conversationId, attempts: lastAttempt });
+  log.error(`session_archive_failed conversationId=${conversationId} attempts=${lastAttempt}`);
+  return false;
+}
+
+export type SessionRestoreOutcome = "restored" | "missing" | "failed";
+
+async function restoreBareSpillFromPvcFallback(storeKey: string): Promise<void> {
+  const bareConversationId = bareConversationIdForStoreKey(storeKey);
+  if (!bareConversationId) return;
+  const source = path.join(SESSIONS_PVC_FALLBACK_DIR, bareConversationId);
+  const local = sessionDir(bareConversationId);
+  if (!existsSync(source) || existsSync(local)) return;
+
+  const tmp = `${local}.pvc-${Date.now()}`;
+  try {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+    await cp(source, tmp, { recursive: true, force: false, errorOnExist: false });
+    if (existsSync(local)) {
+      await rm(tmp, { recursive: true, force: true }).catch(() => {});
+      return;
+    }
+    await rename(tmp, local);
+    metric.count("session_spill_pvc_fallback_hit", { conversationId: bareConversationId, storeKey });
+    log.error(`session_spill_pvc_fallback_hit conversationId=${bareConversationId} storeKey=${storeKey} source=${source}`);
+    const healed = await archiveSessionToGcsWithRetries(bareConversationId, ARCHIVE_RETRY_ATTEMPTS, { createOnly: true });
+    if (!healed) {
+      log.error(`session_spill_pvc_fallback_self_heal_failed conversationId=${bareConversationId} storeKey=${storeKey}`);
+    }
+  } catch (err) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+    log.error(`[session-store] PVC fallback spill restore failed for ${storeKey}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+async function restoreFromPvcFallback(conversationId: string): Promise<boolean> {
+  if (!SESSIONS_PVC_FALLBACK) return false;
+  const source = path.join(SESSIONS_PVC_FALLBACK_DIR, conversationId);
+  if (!existsSync(source)) return false;
+  const local = sessionDir(conversationId);
+  const tmp = `${local}.pvc-${Date.now()}`;
+  try {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+    await cp(source, tmp, { recursive: true, force: false, errorOnExist: false });
+    await rm(local, { recursive: true, force: true }).catch(() => {});
+    await rename(tmp, local);
+    metric.count("session_pvc_fallback_hit", { conversationId });
+    log.error(`session_pvc_fallback_hit conversationId=${conversationId} source=${source}`);
+    await restoreBareSpillFromPvcFallback(conversationId);
+    const healed = await archiveSessionToGcsWithRetries(conversationId, ARCHIVE_RETRY_ATTEMPTS, { createOnly: true });
+    if (!healed) {
+      log.error(`session_pvc_fallback_self_heal_failed conversationId=${conversationId}`);
+    }
+    return true;
+  } catch (err) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+    log.error(`[session-store] PVC fallback restore failed for ${conversationId}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
+async function restoreBareSpillFromArchive(storeKey: string): Promise<void> {
+  const bareConversationId = bareConversationIdForStoreKey(storeKey);
+  if (!bareConversationId) return;
+  if (existsSync(sessionDir(bareConversationId))) return;
+
+  const restored = await gcsRestoreSessionToDisk(bareConversationId, sessionDir(bareConversationId));
+  if (restored === "restored") {
+    metric.count("session_spill_restore", { result: "ok", path: "gcs", storeKey });
+    log.info(`[session-store] Restored bare spill ${bareConversationId} for ${storeKey} (direct GCS stream)`);
+  } else if (restored === "missing") {
+    await restoreBareSpillFromPvcFallback(storeKey);
+  } else if (restored === null) {
+    metric.count("session_spill_restore", { result: "fail", path: "gcs", storeKey });
+    log.warn(`[session-store] Bare spill restore unavailable for ${storeKey} companion ${bareConversationId}; proceeding without spill files`);
+    await restoreBareSpillFromPvcFallback(storeKey);
+  }
+}
+
 /**
  * Lazy-restore a session from GCS — directly when running on GKE, via
- * claw-auth's S2S restore endpoint otherwise.
- * If files are returned, writes them to the local session dir and returns
- * true. If no archive exists for this conversationId, returns false (the
- * caller treats it as "start fresh"). Throws nothing — restore is best
- * effort; failures degrade to "no session" instead of blocking the run.
+ * claw-auth's capped S2S restore endpoint only as a deprecated fallback, then
+ * finally from the read-only PVC canary mount if enabled.
  */
-export async function restoreSessionFromArchive(conversationId: string): Promise<boolean> {
-  if (existsSync(sessionDir(conversationId))) return true; // already local, nothing to do
-
-  // PRIMARY path: read GCS directly (same object layout as claw-auth's
-  // sessions-archive.ts, so the two paths are interchangeable). null means
-  // direct GCS is unavailable/errored → fall back to the claw-auth round-trip;
-  // an empty array means GCS is reachable and no archive exists → start fresh.
-  const direct = await gcsRestoreSession(conversationId);
-  if (direct !== null) {
-    if (direct.length === 0) return false;
-    await writeRestoredFiles(conversationId, direct);
-    log.info(`[session-store] Restored ${conversationId} (${direct.length} files, direct GCS)`);
-    return true;
+export async function restoreSessionFromArchiveDetailed(conversationId: string): Promise<SessionRestoreOutcome> {
+  if (existsSync(sessionDir(conversationId))) {
+    await restoreBareSpillFromArchive(conversationId);
+    return "restored"; // already local, nothing to do
   }
 
-  if (!SERVER.s2sKey) return false;
+  const started = Date.now();
+  const direct = await gcsRestoreSessionToDisk(conversationId, sessionDir(conversationId));
+  if (direct === "restored") {
+    await restoreBareSpillFromArchive(conversationId);
+    metric.count("session_restore", { result: "ok", path: "gcs" });
+    metric.observe("session_restore_duration_ms", Date.now() - started, { result: "ok", path: "gcs" });
+    log.info(`[session-store] Restored ${conversationId} (direct GCS stream)`);
+    return "restored";
+  }
+  if (direct === "missing") {
+    if (await restoreFromPvcFallback(conversationId)) {
+      await restoreBareSpillFromArchive(conversationId);
+      metric.count("session_restore", { result: "ok", path: "pvc_fallback" });
+      metric.observe("session_restore_duration_ms", Date.now() - started, { result: "ok", path: "pvc_fallback" });
+      return "restored";
+    }
+    metric.count("session_restore", { result: "missing", path: "gcs" });
+    return "missing";
+  }
+
+  if (!SERVER.s2sKey) {
+    metric.count("session_restore", { result: "fail", path: "none", reason: "no_s2s" });
+    log.error(`session_restore_failed conversationId=${conversationId} reason=gcs_restore_failed_no_s2s`);
+    return "failed";
+  }
 
   const url = `${SERVER.authServiceUrl.replace(/\/$/, "")}/claw/api/v1/internal/sessions/restore/${encodeURIComponent(conversationId)}`;
   try {
+    log.warn(`[session-store] deprecated claw-auth restore fallback used for ${conversationId}`);
     const res = await fetch(url, {
       method: "GET",
       headers: { "x-s2s-key": SERVER.s2sKey },
@@ -243,20 +440,43 @@ export async function restoreSessionFromArchive(conversationId: string): Promise
 
     if (!res.ok) {
       log.warn(`[session-store] Restore HTTP ${res.status} for ${conversationId}`);
-      return false;
+      metric.count("session_restore", { result: "fail", path: "clawauth", reason: `http_${res.status}` });
+      log.error(`session_restore_failed conversationId=${conversationId} reason=clawauth_http_${res.status}`);
+      return "failed";
     }
     const data = (await res.json()) as { success?: boolean; files?: { path: string; contentBase64: string }[] };
     if (!data.success || !Array.isArray(data.files) || data.files.length === 0) {
-      return false;
+      if (data.success && Array.isArray(data.files) && data.files.length === 0) {
+        if (await restoreFromPvcFallback(conversationId)) {
+          await restoreBareSpillFromArchive(conversationId);
+          metric.count("session_restore", { result: "ok", path: "pvc_fallback" });
+          metric.observe("session_restore_duration_ms", Date.now() - started, { result: "ok", path: "pvc_fallback" });
+          return "restored";
+        }
+        metric.count("session_restore", { result: "missing", path: "clawauth" });
+        return "missing";
+      }
+      metric.count("session_restore", { result: "fail", path: "clawauth", reason: "rejected" });
+      log.error(`session_restore_failed conversationId=${conversationId} reason=clawauth_rejected`);
+      return "failed";
     }
 
     await writeRestoredFiles(conversationId, data.files);
+    await restoreBareSpillFromArchive(conversationId);
+    metric.count("session_restore", { result: "ok", path: "clawauth" });
+    metric.observe("session_restore_duration_ms", Date.now() - started, { result: "ok", path: "clawauth" });
     log.info(`[session-store] Restored ${conversationId} (${data.files.length} files) from archive`);
-    return true;
+    return "restored";
   } catch (err) {
     log.warn(`[session-store] Restore call failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
-    return false;
+    metric.count("session_restore", { result: "fail", path: "clawauth", reason: "exception" });
+    log.error(`session_restore_failed conversationId=${conversationId} reason=clawauth_exception`);
+    return "failed";
   }
+}
+
+export async function restoreSessionFromArchive(conversationId: string): Promise<boolean> {
+  return (await restoreSessionFromArchiveDetailed(conversationId)) === "restored";
 }
 
 async function writeRestoredFiles(conversationId: string, files: { path: string; contentBase64: string }[]): Promise<void> {
@@ -290,8 +510,7 @@ async function writeRestoredFiles(conversationId: string, files: { path: string;
 //   local-fresh      — local copy at least as new as GCS → use local
 //   restored-stale   — GCS newer than local → local wiped, GCS restored
 //   local-unverified — GCS unreachable → use local and log loudly
-//   stale-keep       — GCS newer but restore FAILED → keep stale local
-//                      (continuity beats hard failure; the fork is logged)
+//   restore-failed   — GCS newer but restore FAILED → reject the run loudly
 
 /** Clock-skew + write-latency margin for the local-vs-GCS comparison. */
 const FRESHNESS_SKEW_MS = Number(process.env["SESSION_FRESHNESS_SKEW_MS"] ?? 2_000);
@@ -324,12 +543,33 @@ export type SessionFreshness =
   | "local-fresh"
   | "restored-stale"
   | "local-unverified"
-  | "stale-keep";
+  | "restore-failed";
+
+export class SessionRestoreStaleError extends Error {
+  constructor(
+    public readonly conversationId: string,
+    public readonly localAt: number,
+    public readonly gcsAt: number,
+  ) {
+    super(
+      `Failed to restore newer GCS archive for ${conversationId}; refusing to run against stale local session`,
+    );
+    this.name = "SessionRestoreStaleError";
+  }
+}
+
+export class SessionRestoreFailedError extends Error {
+  constructor(public readonly conversationId: string) {
+    super(`Failed to verify or restore GCS archive for ${conversationId}; refusing to start a fresh local session`);
+    this.name = "SessionRestoreFailedError";
+  }
+}
 
 /**
  * Make the local session dir current before a resume. Call AFTER acquiring
- * the conversation lock. Never throws — every failure degrades to the most
- * conversation-preserving option available.
+ * the conversation lock. Throws only for the corruption-prone case where GCS is
+ * known newer than local but restore failed; that is safer than silently
+ * forking a stale JSONL.
  */
 export async function ensureFreshSession(conversationId: string): Promise<SessionFreshness> {
   const localAt = hasSession(conversationId) ? await localSessionUpdatedAt(conversationId) : 0;
@@ -342,8 +582,17 @@ export async function ensureFreshSession(conversationId: string): Promise<Sessio
     if (hasSession(conversationId)) {
       await rm(sessionDir(conversationId), { recursive: true, force: true }).catch(() => {});
     }
-    const restored = await restoreSessionFromArchive(conversationId).catch(() => false);
-    decision = restored ? "restored-missing" : "fresh-start";
+    const restore = await restoreSessionFromArchiveDetailed(conversationId).catch((): SessionRestoreOutcome => "failed");
+    if (restore === "restored") {
+      decision = "restored-missing";
+    } else if (restore === "missing") {
+      decision = "fresh-start";
+    } else {
+      decision = "restore-failed";
+      metric.count("session_freshness", { decision });
+      log.error(`session_restore_failed conversationId=${conversationId} reason=restore_failed_missing_local`);
+      throw new SessionRestoreFailedError(conversationId);
+    }
   } else {
     gcsAt = await gcsSessionUpdatedAt(conversationId);
     if (gcsAt === null) {
@@ -352,30 +601,40 @@ export async function ensureFreshSession(conversationId: string): Promise<Sessio
       decision = "local-fresh";
     } else {
       // Local is stale — the last flush came from another pod. Move it aside
-      // (NOT delete) so a failed restore can roll back to the stale copy:
-      // a slightly-forked conversation beats a vanished one.
+      // (NOT delete) so a failed restore can roll back before rejecting.
       const dir = sessionDir(conversationId);
       const backup = `${dir}.stale-${Date.now()}`;
       try {
         await rename(dir, backup);
       } catch {
-        // Can't move it aside — proceed with the stale local rather than risk
-        // a partial mix of old+new files.
-        decision = "stale-keep";
+        decision = "restore-failed";
         metric.count("session_freshness", { decision });
-        log.warn(`[session-store] freshness ${conversationId}: stale local could not be moved aside — keeping stale copy`);
-        return decision;
+        log.error(`session_restore_failed conversationId=${conversationId} reason=stale_local_move_failed local=${new Date(localAt).toISOString()} gcs=${new Date(gcsAt).toISOString()}`);
+        throw new SessionRestoreStaleError(conversationId, localAt, gcsAt);
       }
-      const restored = await restoreSessionFromArchive(conversationId).catch(() => false);
-      if (restored) {
+      const restore = await restoreSessionFromArchiveDetailed(conversationId).catch((): SessionRestoreOutcome => "failed");
+      if (restore === "restored") {
+        const restoredAt = await localSessionUpdatedAt(conversationId);
+        if (restoredAt + FRESHNESS_SKEW_MS < gcsAt) {
+          decision = "restore-failed";
+          await rm(sessionDir(conversationId), { recursive: true, force: true }).catch(() => {});
+          await rename(backup, dir).catch(() => {});
+          metric.count("session_freshness", { decision });
+          log.error(
+            `session_restore_failed conversationId=${conversationId} reason=restored_copy_stale local=${new Date(localAt).toISOString()} gcs=${new Date(gcsAt).toISOString()} restored=${restoredAt ? new Date(restoredAt).toISOString() : "none"}`,
+          );
+          throw new SessionRestoreStaleError(conversationId, localAt, gcsAt);
+        }
         decision = "restored-stale";
         await rm(backup, { recursive: true, force: true }).catch(() => {});
       } else {
-        decision = "stale-keep";
+        decision = "restore-failed";
         await rename(backup, dir).catch(() => {});
         log.error(
-          `[session-store] freshness: GCS is newer but restore FAILED for ${conversationId} — rolled back to stale local (turns after ${new Date(localAt).toISOString()} may be missing)`,
+          `session_restore_failed conversationId=${conversationId} reason=restore_failed_stale_local local=${new Date(localAt).toISOString()} gcs=${new Date(gcsAt).toISOString()}`,
         );
+        metric.count("session_freshness", { decision });
+        throw new SessionRestoreStaleError(conversationId, localAt, gcsAt);
       }
     }
   }
@@ -459,13 +718,17 @@ export function scheduleSessionCheckpoint(conversationId: string): void {
 }
 
 /** Synchronously flush one session to GCS now (cancels any pending debounce). */
-export async function flushSessionNow(conversationId: string): Promise<void> {
+export async function flushSessionNow(conversationId: string): Promise<boolean> {
   const st = checkpointState.get(conversationId);
   if (st?.timer) {
     clearTimeout(st.timer);
     st.timer = null;
   }
-  await archiveSessionToGcs(conversationId).catch(() => {});
+  return archiveSessionToGcsWithRetries(conversationId).catch((err) => {
+    metric.count("session_archive_failed", { conversationId, attempts: ARCHIVE_RETRY_ATTEMPTS, reason: "exception" });
+    log.error(`session_archive_failed conversationId=${conversationId} attempts=${ARCHIVE_RETRY_ATTEMPTS} error=${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  });
 }
 
 /**
@@ -476,10 +739,14 @@ export async function flushAllActiveSessions(budgetMs: number): Promise<void> {
   const ids = [...activeSessions];
   if (ids.length === 0) return;
   log.info(`[session-store] SIGTERM flush: ${ids.length} active session(s) → GCS`);
-  await Promise.race([
+  const result = await Promise.race([
     Promise.allSettled(ids.map((id) => flushSessionNow(id))),
-    new Promise((resolve) => setTimeout(resolve, budgetMs)),
+    new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), budgetMs)),
   ]);
+  if (result === "timeout") {
+    metric.count("session_archive_failed", { reason: "flush_timeout", active: ids.length });
+    log.error(`session_archive_failed reason=flush_timeout active=${ids.length} budgetMs=${budgetMs}`);
+  }
 }
 
 /**
@@ -615,7 +882,7 @@ export async function cleanupSessions(): Promise<void> {
         const stats = await stat(dir);
         if (now - stats.mtimeMs <= SESSION_TTL_MS) continue;
 
-        const archived = await archiveSessionToGcs(entry);
+        const archived = await archiveSessionToGcsWithRetries(entry);
         if (!archived) {
           archiveFailed++;
           continue; // leave on disk, next sweep retries
@@ -686,7 +953,7 @@ async function evictForDiskPressure(): Promise<void> {
   for (const entry of entries) {
     usedPct = await sessionsVolumeUsedPct();
     if (usedPct === null || usedPct <= DISK_LOW_WATER_PCT) break;
-    if (activeSessions.has(entry.name)) {
+    if (isActiveSessionOrBareSpillDir(entry.name)) {
       skipped++;
       continue; // never evict under a running session
     }
@@ -695,7 +962,7 @@ async function evictForDiskPressure(): Promise<void> {
       await rm(dir, { recursive: true, force: true }).catch(() => {});
       continue;
     }
-    if (await archiveSessionToGcs(entry.name)) {
+    if (await archiveSessionToGcsWithRetries(entry.name)) {
       await rm(dir, { recursive: true, force: true }).catch(() => {});
       evicted++;
     } else {

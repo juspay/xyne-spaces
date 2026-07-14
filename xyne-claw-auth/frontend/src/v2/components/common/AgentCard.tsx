@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Agent } from "../../../lib/types";
+import type { AgentLight } from "../../../lib/types";
 import { ProviderPopup } from "./ProviderPopup";
 import { Toggle } from "./Toggle";
 
@@ -21,7 +21,7 @@ function Pill({ children, green }: { children: React.ReactNode; green?: boolean 
 
 // ── AgentCard ─────────────────────────────────────────────────────────
 interface Props {
-  agent: Agent;
+  agent: AgentLight;
   userId: string;
   onUpdate: () => void;
 }

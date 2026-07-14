@@ -73,20 +73,21 @@ async function tickOnce(): Promise<void> {
   const tStart = Date.now();
   try {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const active = await prisma.$queryRaw<Array<{ agentSlug: string }>>`
-      SELECT DISTINCT "agentSlug" FROM "agent_runs"
+    const active = await prisma.$queryRaw<Array<{ orgId: string; agentSlug: string }>>`
+      SELECT DISTINCT "orgId", "agentSlug" FROM "agent_runs"
        WHERE "completedAt" >= ${since}
+         AND "orgId" IS NOT NULL
        LIMIT 200
     `;
     let processed = 0;
     let totalCandidates = 0;
-    for (const { agentSlug } of active) {
+    for (const { orgId, agentSlug } of active) {
       try {
-        const n = await processAgent(agentSlug);
+        const n = await processAgent(orgId, agentSlug);
         if (n >= 0) processed++;
         totalCandidates += Math.max(0, n);
       } catch (err) {
-        log.warn(`[failure-curator-worker] agent=${agentSlug} failed:`, err instanceof Error ? err.message : String(err));
+        log.warn(`[failure-curator-worker] orgId=${orgId} agent=${agentSlug} failed:`, err instanceof Error ? err.message : String(err));
       }
     }
     log.info(`[failure-curator-worker] tick done: ${processed}/${active.length} agents processed, ${totalCandidates} candidates in ${Date.now() - tStart}ms`);
@@ -96,14 +97,14 @@ async function tickOnce(): Promise<void> {
 }
 
 /** Returns the number of NEW candidates emitted, or -1 if we skipped early. */
-async function processAgent(agentSlug: string): Promise<number> {
+async function processAgent(orgId: string, agentSlug: string): Promise<number> {
   // 1. Watermark lookup
-  const state = await prisma.agentCuratorState.findUnique({ where: { agentSlug } });
+  const state = await prisma.agentCuratorState.findFirst({ where: { orgId, agentSlug } });
   const now = new Date();
   const fallbackSince = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const since = state?.lastProcessedAt ?? fallbackSince;
 
-  const { emitted, advanceTo } = await processAgentRange(agentSlug, since, now, /*advanceWatermark=*/true);
+  const { emitted, advanceTo } = await processAgentRange(orgId, agentSlug, since, now, /*advanceWatermark=*/true);
   if (emitted === -1) return -1;
 
   // Watermark advance happens inside processAgentRange when advanceWatermark=true.
@@ -125,13 +126,23 @@ async function processAgent(agentSlug: string): Promise<number> {
  * whether that's a noop or a soft error.
  */
 export async function processAgentRange(
+  orgId: string,
   agentSlug: string,
   since: Date,
   now: Date,
   advanceWatermark = false,
 ): Promise<{ emitted: number; advanceTo: Date | null }> {
+  const agentRow = await prisma.agent.findUnique({
+    where: { orgId_slug: { orgId, slug: agentSlug } },
+    select: { orgId: true, systemPrompt: true },
+  });
+  if (!agentRow) {
+    log.warn(`[failure-curator-worker] missing agent slug=${agentSlug} orgId=${orgId}; skipping curator run`);
+    return { emitted: -1, advanceTo: null };
+  }
+
   // 2. Detect negatives
-  const negatives = await selectNegativeSessions({ agentSlug, since, now, maxPerBucket: 40 });
+  const negatives = await selectNegativeSessions({ orgId, agentSlug, since, now, maxPerBucket: 40 });
   if (negatives.length < MIN_BATCH) {
     // Diagnostic log so we can see exactly how many negatives each agent
     // produced, and which bucket. Without this the only signal is "0/N
@@ -140,25 +151,23 @@ export async function processAgentRange(
     if (negatives.length > 0) {
       const byBucket: Record<string, number> = {};
       for (const n of negatives) byBucket[n.bucket] = (byBucket[n.bucket] ?? 0) + 1;
-      log.info(`[failure-curator-worker] skip agent=${agentSlug}: ${negatives.length} negatives below MIN_BATCH=${MIN_BATCH} (${JSON.stringify(byBucket)})`);
+      log.info(`[failure-curator-worker] skip orgId=${orgId} agent=${agentSlug}: ${negatives.length} negatives below MIN_BATCH=${MIN_BATCH} (${JSON.stringify(byBucket)})`);
     }
     // Don't advance the watermark — accumulate until we have enough.
     return { emitted: -1, advanceTo: null };
   }
-  log.info(`[failure-curator-worker] process agent=${agentSlug}: ${negatives.length} negatives, calling curator`);
+  log.info(`[failure-curator-worker] process orgId=${orgId} agent=${agentSlug}: ${negatives.length} negatives, calling curator`);
 
   // 3. Pull contextWindow for pattern context (NOT used as evidence by the LLM)
   const ctxSince = new Date(Math.max(now.getTime() - MAX_CONTEXT_WINDOW_DAYS * 24 * 60 * 60 * 1000, 0));
   const context = await prisma.agentRun.findMany({
-    where: { agentSlug, completedAt: { gte: ctxSince, lt: now } },
+    where: { orgId: agentRow.orgId, agentSlug, completedAt: { gte: ctxSince, lt: now } },
     select: { sessionId: true, status: true, task: true, totalMs: true, completedAt: true, llmTotalMs: true, toolMs: true, llmRetries: true, lastRetryReason: true, result: true, error: true },
     orderBy: { completedAt: "desc" },
     take: MAX_CONTEXT_SESSIONS,
   });
 
   // 4. Resolve current systemPrompt so the curator doesn't propose duplicate rules
-  const agentRow = await prisma.agent.findUnique({ where: { slug: agentSlug }, select: { systemPrompt: true } });
-
   // 5. Call claw curator
   const payload = {
     agentSlug,
@@ -187,13 +196,13 @@ export async function processAgentRange(
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
-      log.warn(`[failure-curator-worker] claw responded ${res.status} for agent=${agentSlug}`);
+      log.warn(`[failure-curator-worker] claw responded ${res.status} for orgId=${orgId} agent=${agentSlug}`);
       return { emitted: -1, advanceTo: null }; // don't advance — try again next tick
     }
     const json = await res.json() as { success?: boolean; candidates?: CuratorCandidate[] };
     candidates = json.candidates ?? [];
   } catch (err) {
-    log.warn(`[failure-curator-worker] claw call failed for agent=${agentSlug}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[failure-curator-worker] claw call failed for orgId=${orgId} agent=${agentSlug}:`, err instanceof Error ? err.message : String(err));
     return { emitted: -1, advanceTo: null };
   }
 
@@ -201,30 +210,41 @@ export async function processAgentRange(
   const newWatermark = negatives.reduce((m, n) => (n.completedAt.getTime() > m.getTime() ? n.completedAt : m), since);
   let emitted = 0;
   for (const c of candidates) {
-    const merged = await dedupeMergeOrInsert(agentSlug, c);
+    const merged = await dedupeMergeOrInsert(agentSlug, agentRow.orgId, c);
     if (merged === "inserted") emitted++;
   }
 
   // 7. Advance watermark only if caller asked. Backfill skips this so the
   //    hourly worker's incremental scan isn't disturbed.
   if (advanceWatermark) {
-    await prisma.agentCuratorState.upsert({
-      where: { agentSlug },
-      create: {
-        agentSlug,
-        lastProcessedAt: newWatermark,
-        lastRunAt: now,
-        invocationCount: 1,
-        candidateCount: emitted,
-        updatedAt: now,
-      },
-      update: {
-        lastProcessedAt: newWatermark,
-        lastRunAt: now,
-        invocationCount: { increment: 1 },
-        candidateCount: { increment: emitted },
-      },
-    });
+    const existingState = await prisma.agentCuratorState.findFirst({ where: { orgId: agentRow.orgId, agentSlug } });
+    if (existingState) {
+      await prisma.agentCuratorState.update({
+        where: { agentSlug: existingState.agentSlug },
+        data: {
+          lastProcessedAt: newWatermark,
+          lastRunAt: now,
+          invocationCount: { increment: 1 },
+          candidateCount: { increment: emitted },
+        },
+      });
+    } else {
+      try {
+        await prisma.agentCuratorState.create({
+          data: {
+            agentSlug,
+            orgId: agentRow.orgId,
+            lastProcessedAt: newWatermark,
+            lastRunAt: now,
+            invocationCount: 1,
+            candidateCount: emitted,
+            updatedAt: now,
+          },
+        });
+      } catch (err) {
+        log.error(`[failure-curator-worker] state create failed orgId=${agentRow.orgId} agent=${agentSlug}; schema lacks orgId_agentSlug unique key`, err instanceof Error ? err.message : String(err));
+      }
+    }
   }
 
   return { emitted, advanceTo: newWatermark };
@@ -237,7 +257,7 @@ export interface BackfillReport {
   agentsProcessed: number;
   agentsSkipped: number;
   candidatesEmitted: number;
-  perAgent: Array<{ agentSlug: string; emitted: number; skippedReason?: string }>;
+  perAgent: Array<{ orgId: string; agentSlug: string; emitted: number; skippedReason?: string }>;
 }
 
 /**
@@ -262,15 +282,19 @@ export async function backfillFailureCurator(opts: {
   const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
   // Decide the agent set
-  let agentSlugs: string[];
+  let agentPairs: Array<{ orgId: string; agentSlug: string }>;
   if (opts.agentSlug) {
-    agentSlugs = [opts.agentSlug];
+    agentPairs = await prisma.agent.findMany({
+      where: { slug: opts.agentSlug },
+      select: { orgId: true, slug: true },
+    }).then((rows) => rows.map((row) => ({ orgId: row.orgId, agentSlug: row.slug })));
   } else {
-    const rows = await prisma.$queryRaw<Array<{ agentSlug: string }>>`
-      SELECT DISTINCT "agentSlug" FROM "agent_runs"
+    agentPairs = await prisma.$queryRaw<Array<{ orgId: string; agentSlug: string }>>`
+      SELECT DISTINCT "orgId", "agentSlug" FROM "agent_runs"
        WHERE "completedAt" >= ${since}
+         AND "orgId" IS NOT NULL
     `;
-    agentSlugs = rows.map((r) => r.agentSlug).sort();
+    agentPairs = agentPairs.sort((a, b) => a.agentSlug.localeCompare(b.agentSlug) || a.orgId.localeCompare(b.orgId));
   }
 
   const perAgent: BackfillReport["perAgent"] = [];
@@ -280,20 +304,21 @@ export async function backfillFailureCurator(opts: {
 
   // Run with a bounded concurrency. Simple semaphore via Promise.all on
   // chunks — clean enough for ≤200 agents (the realistic ceiling).
-  for (let i = 0; i < agentSlugs.length; i += CONCURRENCY) {
-    const chunk = agentSlugs.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(chunk.map(async (slug) => {
+  for (let i = 0; i < agentPairs.length; i += CONCURRENCY) {
+    const chunk = agentPairs.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(chunk.map(async ({ orgId, agentSlug: slug }) => {
       try {
-        const { emitted } = await processAgentRange(slug, since, now, /*advanceWatermark=*/false);
-        return { slug, emitted, skippedReason: undefined as string | undefined };
+        const { emitted } = await processAgentRange(orgId, slug, since, now, /*advanceWatermark=*/false);
+        return { orgId, slug, emitted, skippedReason: undefined as string | undefined };
       } catch (err) {
-        return { slug, emitted: -1, skippedReason: err instanceof Error ? err.message : String(err) };
+        return { orgId, slug, emitted: -1, skippedReason: err instanceof Error ? err.message : String(err) };
       }
     }));
     for (const r of results) {
       if (r.emitted < 0) {
         skipped++;
         perAgent.push({
+          orgId: r.orgId,
           agentSlug: r.slug,
           emitted: 0,
           ...(r.skippedReason ? { skippedReason: r.skippedReason } : { skippedReason: `too few negatives (<${MIN_BATCH}) or LLM error` }),
@@ -301,7 +326,7 @@ export async function backfillFailureCurator(opts: {
       } else {
         processed++;
         totalEmitted += r.emitted;
-        perAgent.push({ agentSlug: r.slug, emitted: r.emitted });
+        perAgent.push({ orgId: r.orgId, agentSlug: r.slug, emitted: r.emitted });
       }
     }
   }
@@ -309,7 +334,7 @@ export async function backfillFailureCurator(opts: {
   return {
     windowStart: since.toISOString(),
     windowEnd: now.toISOString(),
-    agentsConsidered: agentSlugs.length,
+    agentsConsidered: agentPairs.length,
     agentsProcessed: processed,
     agentsSkipped: skipped,
     candidatesEmitted: totalEmitted,
@@ -357,11 +382,12 @@ function trimForCurator(n: NegativeSession) {
  *
  * Returns "inserted" or "merged" — caller uses that for the candidateCount.
  */
-async function dedupeMergeOrInsert(agentSlug: string, c: CuratorCandidate): Promise<"inserted" | "merged" | "suppressed"> {
+async function dedupeMergeOrInsert(agentSlug: string, orgId: string, c: CuratorCandidate): Promise<"inserted" | "merged" | "suppressed"> {
   // Suppression: if a recent dismiss for this (bucket, rootCause) is still
   // within its 7-day cool-down, skip silently.
   const cool = await prisma.agentImprovementCandidate.findFirst({
     where: {
+      orgId,
       agentSlug,
       bucket: c.bucket,
       rootCause: c.rootCause,
@@ -374,7 +400,7 @@ async function dedupeMergeOrInsert(agentSlug: string, c: CuratorCandidate): Prom
 
   // Find pending overlap
   const existing = await prisma.agentImprovementCandidate.findMany({
-    where: { agentSlug, bucket: c.bucket, rootCause: c.rootCause, status: "pending" },
+    where: { orgId, agentSlug, bucket: c.bucket, rootCause: c.rootCause, status: "pending" },
     select: { id: true, evidence: true, confidence: true, metadata: true },
     orderBy: { updatedAt: "desc" },
     take: 5,
@@ -405,6 +431,7 @@ async function dedupeMergeOrInsert(agentSlug: string, c: CuratorCandidate): Prom
   await prisma.agentImprovementCandidate.create({
     data: {
       agentSlug,
+      orgId,
       bucket: c.bucket,
       rootCause: c.rootCause,
       finding: c.finding,

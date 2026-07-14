@@ -6,7 +6,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./types.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition } from "./connector-definitions.js";
-import { getSpacesAuthForUser } from "../lib/spaces-db.js";
+import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -151,7 +151,7 @@ async function getOrCreateSession(
   // session if Spaces' middleware has rotated the JWT. Without this, the
   // creds-loader's "live-first hit" is computed and then thrown away — the
   // child keeps calling Spaces with a stale env-baked token and 401s.
-  if (serverType === "xyne-spaces") {
+  if (serverType === "xyne-spaces" || serverType === "xyne-dashboard") {
     const live = await getSpacesAuthForUser(userId, "mcp-runner");
     if (live) {
       credentials = {
@@ -168,7 +168,8 @@ async function getOrCreateSession(
       const appToken = await resolveAppTokenForAppUser(userId);
       if (appToken) {
         log.info(`[mcp/runner] xyne-spaces app-mode for app user ${userId} (no session, using app token)`);
-        credentials = { ...credentials, token: appToken, authMode: "app", userId };
+        const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
+        credentials = { ...credentials, token: appToken, authMode: "app", userId, ...(workspaceId ? { workspaceId } : {}) };
       } else {
         credentials = { ...credentials, userId };
       }

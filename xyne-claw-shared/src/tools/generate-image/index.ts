@@ -6,6 +6,9 @@
 import https from "node:https";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 
+import { createLogger } from "../../logger.js";
+const log = createLogger("index");
+
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
 /** POST JSON using native https */
@@ -202,7 +205,7 @@ export const generateImageTool: ToolDefinition = {
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[generate-image] error: ${msg}`);
+      log.error(`[generate-image] error: ${msg}`);
       return `Error generating image: ${msg}`;
     }
   },

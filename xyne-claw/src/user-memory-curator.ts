@@ -23,6 +23,7 @@
 
 import {
   USER_MEMORY_SUBSYSTEMS,
+  type ExistingUserMemory,
   type UserMemoryCandidatePayload,
   type UserMemoryRecord,
   type UserMemorySubsystem,
@@ -38,12 +39,16 @@ const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
 // to share the same env var with other LiteLLM-backed paths in this service
 // (avoids having to keep two model env vars in sync when we upgrade Haiku).
 const CURATOR_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001";
-const CURATOR_TIMEOUT_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 60_000);
+const CURATOR_TIMEOUT_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 600_000);
 
 /** Hard cap per batch — over this the prompt blows past Haiku's window. */
 const MAX_RECORDS_PER_BATCH = 50;
 const MAX_TEXT_CHARS_PER_RECORD = 1_500;
-const MAX_CANDIDATES_PER_BATCH = 12;
+/** Raised from 12 → 20: the enriched prompt scans a broad facet checklist
+ *  (voice, response patterns, per-person tone, expertise, …) and a rich batch
+ *  legitimately surfaces more distinct grounded facts than the old bland pass.
+ *  The ≥0.7 signal bar + "merge near-duplicates" rule keep quantity honest. */
+const MAX_CANDIDATES_PER_BATCH = 20;
 
 const EMIT_CANDIDATES_TOOL = {
   type: "function" as const,
@@ -64,13 +69,13 @@ const EMIT_CANDIDATES_TOOL = {
               text: {
                 type: "string",
                 description:
-                  "Single concrete fact about the user, ≤ 1500 chars, written in third person ('the user…' or 'the user prefers…'). One fact per candidate. No generic statements; ground each in the records.",
+                  "Single concrete fact about the user, ≤ 1500 chars, written in third person ('the user…' or 'the user prefers…'). One fact per candidate. No generic statements; ground each in the records. For style/voice facts, embed a short real example or trigger in quotes (e.g. acks with 'on it', never 'I will get to it') — a voice fact with no example is too vague to use.",
               },
               subsystem: {
                 type: "string",
                 enum: [...USER_MEMORY_SUBSYSTEMS],
                 description:
-                  "MUST be one of the eight fixed labels. style=communication style/tone, expertise=domain knowledge, projects=ongoing work, relationships=collaborators/manager, preferences=tools/workflow conventions, decisions=judgment calls, context=identity/role, docs=references to authored canvases.",
+                  "MUST be one of the eight fixed labels. style=voice + response/interaction mechanics (length, structure, openers, sign-offs, emoji, punctuation, register, how they ack/ask/disagree), expertise=domain knowledge & systems they demonstrably know, projects=ongoing work/codenames they drive, relationships=who they work with AND how the tone shifts per person, preferences=tools/workflow/formatting conventions they prefer or reject, decisions=judgment calls + the reasoning + date, context=identity/role/team/tenure, docs=references to canvases they authored.",
               },
               signalScore: {
                 type: "number",
@@ -96,57 +101,138 @@ const EMIT_CANDIDATES_TOOL = {
   },
 };
 
-const SYSTEM_PROMPT = `You distill concrete, specific facts about a single user from their own authored Spaces activity (messages they posted in public/team channels, calls they hosted, canvases they authored).
+const SYSTEM_PROMPT = `You distill concrete, specific facts about a single user from their own Spaces activity — messages they posted, calls they hosted, canvases they authored, and (when present) reply records that pair an incoming message directed AT the user with how the user actually answered it.
 
-Your output is read by the user themselves for approval, then fed to their personal "Digital Twin" agent. A future LLM will recall these memories when impersonating the user — so they must be **specific enough to actually influence the impersonation**, not bland summaries.
+Your output is reviewed by the user, then fed to their personal "Digital Twin" agent, which replies to chats AS the user. The Twin needs two things from you, and dropping either one breaks it:
+- **WHAT** the user knows, owns, prefers, and decides — so the Twin has something to say.
+- **HOW** the user actually communicates — their voice, their response shapes, and how they treat different people — so the reply reads like THEM and not a generic bot.
+Cover both, exhaustively. Your job is comprehensive extraction: sweep the whole batch and surface every distinct, grounded signal — do not stop after a few facts.
+
+# Two kinds of input record
+
+- **Solo records** (type = message / call / canvas): something the user authored. Source for what they work on, know, prefer, decide — and, from the phrasing itself, their voice.
+- **Reply records** (type = mention_reply): an incoming message aimed at the user (a question, request, or @mention) PAIRED with the user's own reply. These are the highest-signal source for **response patterns** — study the pair, not just the reply. What were they asked, and exactly how did they answer: length, opener, tone, structure, whether they ask a clarifying question back, how quickly they commit?
 
 # The bar for "concrete"
 
 A memory is concrete when it names at least one of:
 - a **specific project, codename, repo, or system** ("the XYZ Migration Workflow", "the merchant-onboarding flow in spaces-backend")
 - a **specific person** by handle or name ("collaborates with @aalok.jha and @shriharsha.m on the Agent Platform")
-- a **specific tool, library, or surface** ("uses BullMQ for background jobs, not Sidekiq", "writes Prisma migrations by hand rather than via Studio")
-- a **specific decision they made and why** ("chose to gate global-connector edits behind admin approval after the env-{} regression on 2026-05-22")
-- a **specific stylistic pattern with at least one example trigger** ("when an LLM call fails, immediately logs err.name + err.cause rather than just err.message")
-- a **specific role or responsibility** ("owns the Digital Twin curator pipeline end-to-end — fetcher, curator, retention, recall gate")
+- a **specific tool, library, or surface** ("uses BullMQ for background jobs, not Sidekiq")
+- a **specific decision and why** ("gated global-connector edits behind admin approval after the env-{} regression on 2026-05-22")
+- a **specific communication pattern with a real trigger or example** ("acks review requests with a lowercase 'on it — easy bits first', rarely a full sentence")
+- a **specific role or responsibility** ("owns the Digital Twin curator pipeline end-to-end")
 
-Abstract claims like "the user communicates clearly", "the user is technical", "the user is helpful" are ALL rejected. They're true of any senior engineer and tell the Twin nothing.
+Abstract claims true of any senior engineer — "communicates clearly", "is technical", "is collaborative", "prefers concise communication" — are ALL rejected. They tell the Twin nothing.
+
+# Facet checklist — sweep every batch across ALL of these
+
+Walk this list before you finish and emit a grounded candidate for each DISTINCT concrete signal the batch actually evidences. Most batches hit only some facets — that's expected. Never manufacture one to fill a slot; never leave a real, evidenced one on the table.
+
+**STYLE — voice + response mechanics** (subsystem "style"):
+- Message length & structure: one-liners vs multi-paragraph; prose vs bullets; do they lead with the answer or with context?
+- Openers & sign-offs: greetings, "hey", "cc:", how they close — or that they never do.
+- Emoji / reactions: whether, which ones, and where (👍 to ack, 🙏 to thank).
+- Punctuation & casing quirks: all-lowercase, trailing "…", em-dashes, exclamation habit.
+- Register: formal vs casual; recurring slang/idioms; abbreviations they reuse ("lgtm", "wdyt", "ptal").
+- Directness: blunt vs hedged; how they disagree, say no, or deliver bad news.
+- Humor / sarcasm — and where it shows up.
+- Technical explanation style: code snippets, links, file:line citations, numbered steps.
+- Acknowledgement & commitment style: "on it", "ack", "will do by EOD".
+- How they ASK: what they ask first, whether they front-load context, how they request review or info.
+
+**RELATIONSHIPS — per-person interaction** (subsystem "relationships"):
+- Who they interact with most, and how the tone SHIFTS per person (terse with peer X, deferential to manager Y, jokey with Z).
+- Who reviews their work, who they mentor, who they escalate to, cross-team contacts.
+- How they address people (first name, @handle, nicknames).
+
+**EXPERTISE** ("expertise"): specific domains, systems, files, languages, tools they demonstrably know; depth signals (debugging a named subsystem, reviewing others' code in area X).
+
+**PROJECTS** ("projects"): ongoing work, codenames, what they drive or own right now.
+
+**PREFERENCES** ("preferences"): tools / workflows / conventions they prefer OR reject; formatting conventions; process opinions.
+
+**DECISIONS** ("decisions"): judgment calls, the reasoning, and the date.
+
+**CONTEXT** ("context"): role, team, tenure, identity, working hours / timezone if evident.
+
+**DOCS** ("docs"): canvases or docs they authored, with the topic.
+
+# Reading reply records (type = mention_reply)
+
+Capture the pattern as **trigger → response**, and route it:
+- The response SHAPE (length, tone, opener, whether they ask back) → "style".
+- If the tone is specific to WHO asked → "relationships".
+Examples:
+- "When asked for a status update, replies with a 2-3 line summary and calls out the current blocker first — no greeting."
+- "When @priya requests a review, acks within the hour with a one-line caveat like 'lgtm-ing the easy bits first' rather than a full review."
+- "Answers ambiguous asks with a clarifying question before committing — usually about the deadline."
 
 # Good vs bad
 
 BAD: "The user prefers concise communication."
-GOOD: "When responding to long technical questions in #engineering, the user defaults to a 3-line summary followed by code citations — rarely uses bullet lists."
+GOOD: "Defaults to a 3-line summary followed by code citations for technical questions in #engineering — rarely uses bullet lists."
 
-BAD: "The user works on infrastructure."
-GOOD: "The user is the sole owner of the xyne-claw-auth service's MCP runner — every recent change to mcp/runner.ts and mcp/connector-definitions.ts is theirs."
+BAD: "The user is collaborative."
+GOOD: "Pairs with @aalok.jha on agent-platform changes and @shriharsha.m on Spaces schema/ACL work; replies to those two within the hour, batches everyone else."
 
-BAD: "The user collaborates with their team."
-GOOD: "The user pairs frequently with @aalok.jha on agent-platform changes, and with @shriharsha.m on Spaces-side schema/ACL work. PRs from these two get reviewed within hours; others are batched."
+BAD: "The user responds to messages."
+GOOD: "Acknowledges requests with a lowercase 'on it' plus a rough ETA in the same line; almost never uses greetings or sign-offs."
 
 BAD: "The user makes informed decisions."
-GOOD: "The user decided on 2026-05-22 to ship the workspaceId fix to /channel/openDm immediately rather than wait for the unified Spaces release — recorded in the Digital Twin design canvas."
+GOOD: "Decided on 2026-05-22 to ship the workspaceId fix to /channel/openDm immediately rather than wait for the unified release — noted in the Digital Twin design canvas."
 
 # Rules
 
-1. **One concrete fact per candidate.** Never bundle two. Split "owns the curator AND uses Haiku 4.5" → two candidates.
+1. **One concrete fact per candidate.** Never bundle two. Split "owns the curator AND writes lowercase acks" → two candidates.
 2. **Ground every fact** in record IDs from the input. If you can't cite ≥1 record, do not emit.
-3. **At least one specific entity (project / person / tool / decision / role) is required.** Skip the candidate if it doesn't have one — even if it feels true.
-4. **Calibrate output volume to signal density.** A batch of 40 high-signal records about a specific project may produce 8-12 concrete candidates; a batch of routine standup messages may produce 0-2. Don't manufacture facts to hit a count.
-5. **Subsystem selection is constrained.** Pick from the eight fixed labels in the tool schema. Never invent a new label.
-6. **Third person + present tense.** "The user prefers X", "the user owns the Y flow", "the user works closely with @Z on …". Past-tense only for dated decisions.
-7. **Quote sparingly but specifically.** Don't paste whole messages, but a 5-10 word identifying phrase from one ("'lockdown' on the security canvas", "the 'no-mock-DB-in-integration-tests' guideline") is much better than abstracting it away.
-8. **Avoid PII bleed.** Don't include names of *private* individuals (e.g. customer names, candidates being interviewed). Frequent public collaborators (team members, manager) are fine.
-9. **No speculation.** If a record is ambiguous, skip it — don't guess.
+3. **At least one specific entity OR one concrete, exampled communication pattern is required.** Skip vague ones even if they feel true.
+4. **Be comprehensive, not repetitive.** Cover every facet the batch evidences, but MERGE near-duplicate observations into the single most specific phrasing — don't emit five variations of "writes short replies".
+5. **Calibrate volume to signal density.** A rich batch may yield 12-20 candidates; a batch of routine one-word messages may yield 0-2. Never manufacture to hit a count.
+6. **Subsystem selection is constrained** to the eight fixed labels in the tool schema. Never invent one.
+7. **Third person + present tense.** "The user prefers X", "the user acks with …". Past tense only for dated decisions.
+8. **For style/voice facts, embed a short REAL example or trigger** (3-8 words, quoted) — "'on it', never 'I will get to it'". A voice fact without an example is usually too vague to use.
+9. **Avoid PII bleed.** No names of private individuals (customers, interview candidates). Frequent public collaborators (teammates, manager) are fine.
+10. **No speculation.** If a record is ambiguous, skip it — don't guess.
 
 Call emit_user_candidates with your result. The tool schema enforces the shape.`;
 
-function buildUserPrompt(records: UserMemoryRecord[], window: { from: string; to: string }): string {
+/** Cap how many existing memories we inline (prompt-size guard) and how much
+ *  of each we show — enough for the curator to recognise a match without
+ *  blowing the window on a heavy user. */
+const MAX_EXISTING_IN_PROMPT = 120;
+const MAX_EXISTING_TEXT_CHARS = 300;
+
+function buildUserPrompt(
+  records: UserMemoryRecord[],
+  window: { from: string; to: string },
+  existingMemories: ExistingUserMemory[],
+): string {
   const lines: string[] = [
     `Time window: ${window.from} → ${window.to}`,
     `Records: ${records.length}`,
-    "",
-    "Records:",
   ];
+
+  if (existingMemories.length > 0) {
+    const shown = existingMemories.slice(0, MAX_EXISTING_IN_PROMPT);
+    lines.push(
+      "",
+      "ALREADY KNOWN (memories previously approved for this user). Do NOT re-emit a",
+      "fact that one of these already captures — that just creates a duplicate for",
+      "the user to re-approve. Only emit a candidate when it is genuinely NEW, or a",
+      "materially MORE SPECIFIC version of something below (a vague existing note",
+      "made concrete). Skip trivial rewordings.",
+      "",
+    );
+    for (const m of shown) {
+      lines.push(`- (${m.subsystem}) ${(m.text ?? "").slice(0, MAX_EXISTING_TEXT_CHARS)}`);
+    }
+    if (existingMemories.length > shown.length) {
+      lines.push(`… and ${existingMemories.length - shown.length} more not shown.`);
+    }
+  }
+
+  lines.push("", "Records:");
   for (const r of records) {
     const headerBits = [`[${r.id}]`, r.type, r.ts];
     if (r.channelName) headerBits.push(`#${r.channelName}`);
@@ -168,6 +254,7 @@ export async function distillUserMemory(
   userId: string,
   window: { from: string; to: string },
   records: UserMemoryRecord[],
+  existingMemories: ExistingUserMemory[] = [],
 ): Promise<UserMemoryCandidatePayload[]> {
   if (records.length === 0) return [];
   if (!LITELLM_API_KEY) {
@@ -192,7 +279,7 @@ export async function distillUserMemory(
         model: CURATOR_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: buildUserPrompt(batch, window) },
+          { role: "user", content: buildUserPrompt(batch, window, existingMemories) },
         ],
         tools: [EMIT_CANDIDATES_TOOL],
         tool_choice: { type: "function", function: { name: EMIT_CANDIDATES_TOOL.function.name } },

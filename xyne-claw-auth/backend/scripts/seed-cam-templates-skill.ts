@@ -133,6 +133,22 @@ async function main(): Promise<void> {
   console.log(`[seed-cam-templates] skill:  ${SKILL_SLUG}`);
   console.log(`[seed-cam-templates] agent:  ${agentSlug}`);
 
+  const orgIdFromEnv = process.env["ORG_ID"]?.trim() || undefined;
+  const matchingAgents = await prisma.agent.findMany({
+    where: { slug: agentSlug, ...(orgIdFromEnv ? { orgId: orgIdFromEnv } : {}) },
+    select: { id: true, slug: true, orgId: true },
+  });
+  if (!orgIdFromEnv && matchingAgents.length > 1) {
+    throw new Error(`AGENT_SLUG "${agentSlug}" exists in multiple orgs. Set ORG_ID and re-run.`);
+  }
+  const fallbackOrg = matchingAgents.length === 0
+    ? await prisma.organization.findFirst({ where: { name: "Juspay" }, select: { id: true } })
+    : null;
+  const orgId = orgIdFromEnv ?? matchingAgents[0]?.orgId ?? fallbackOrg?.id;
+  if (!orgId) {
+    throw new Error("Cannot seed skill without an org. Set ORG_ID, or create the Juspay organization first.");
+  }
+
   const files = await walkFiles(absRoot);
   if (files.length === 0) {
     console.error(`No files found under ${absRoot}.`);
@@ -187,11 +203,13 @@ async function main(): Promise<void> {
   // 1. Upsert the Skill row (content remains the static SKILL_CONTENT).
   const skill = await skillRepository.upsertBySlug(
     SKILL_SLUG,
+    orgId,
     {
       slug: SKILL_SLUG,
       name: SKILL_NAME,
       description: "AcroForm PDF templates the credit-appraisal-agent fills.",
       content: SKILL_CONTENT,
+      org: { connect: { id: orgId } },
     },
     {
       name: SKILL_NAME,
@@ -220,7 +238,7 @@ async function main(): Promise<void> {
   }
 
   // 3. Bind the skill to the agent.
-  const agent = await prisma.agent.findUnique({ where: { slug: agentSlug } });
+  const agent = matchingAgents[0] ?? null;
   if (!agent) {
     console.warn(
       `[seed-cam-templates] Agent slug "${agentSlug}" not found — skill is seeded but not attached. Attach via the admin UI, or set AGENT_SLUG to an existing slug and re-run.`,

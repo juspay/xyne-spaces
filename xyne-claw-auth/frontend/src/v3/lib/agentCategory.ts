@@ -11,7 +11,7 @@
  * registry doubles as the API-side whitelist.
  */
 
-import type { Agent, McpServer } from "../../lib/types";
+import type { AgentLight, McpServer } from "../../lib/types";
 
 /* ── Registry ──────────────────────────────────────────────────────── */
 
@@ -153,7 +153,7 @@ function groupByCategory<T>(
 
 /* ── Agents ────────────────────────────────────────────────────────── */
 
-function buildAgentHaystack(agent: Agent): string {
+function buildAgentHaystack(agent: AgentLight): string {
   const toolBits: string[] = [];
   for (const t of agent.tools ?? []) {
     if (t.tool?.slug) toolBits.push(t.tool.slug);
@@ -167,13 +167,13 @@ function buildAgentHaystack(agent: Agent): string {
   return [agent.name ?? "", agent.description ?? "", ...toolBits].join(" ");
 }
 
-export function deriveAgentCategory(agent: Agent): AgentCategoryId {
+export function deriveAgentCategory(agent: AgentLight): AgentCategoryId {
   return deriveCategoryFromHaystack(buildAgentHaystack(agent));
 }
 
 export function groupAgentsByCategory(
-  agents: readonly Agent[],
-): Map<AgentCategoryId, Agent[]> {
+  agents: readonly AgentLight[],
+): Map<AgentCategoryId, AgentLight[]> {
   return groupByCategory(agents, deriveAgentCategory);
 }
 

@@ -161,6 +161,15 @@ export interface MemoryProvider {
   /** Hard delete. Required for the HITL force-delete and rejection paths. */
   deleteMemory(bankId: string, memoryId: string): Promise<void>;
 
+  /**
+   * Bulk hard-delete every memory carrying `tag`. Returns the count deleted.
+   * Used by the digital-twin "delete my memories" flow: per-memory ids aren't
+   * tracked in our DB (async retain returns none, so candidate.hindsightMemoryId
+   * is always null), which makes per-id delete unable to reach them. Deleting by
+   * tag reaches every memory regardless. Optional — callers feature-detect.
+   */
+  deleteByTag?(bankId: string, tag: string): Promise<number>;
+
   /** Capable providers only. Capability flag: `reflect`. */
   reflect?(bankId: string, query: string): Promise<ReflectResult>;
 

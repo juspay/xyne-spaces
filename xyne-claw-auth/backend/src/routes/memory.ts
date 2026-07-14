@@ -23,8 +23,9 @@ import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { requireAuth, requireUserAuth } from "../middleware/require-auth.js";
-import { isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
-import { curateApprovedTranscript, readSessionTranscript, backfillBatches, type SessionTranscript } from "../services/memoryCronService.js";
+import { isClawAdmin, requireClawAdmin, getOrgId } from "../middleware/agent-acl.js";
+import { curateApprovedTranscript, readSessionTranscript, type SessionTranscript } from "../services/memoryCronService.js";
+import { enqueueAgentBackfill } from "../queue/agent-backfill-queue.js";
 
 const logger = createLogger("memory-review", createTraceId());
 
@@ -659,16 +660,22 @@ memoryRouter.get("/banks/:agentSlug/stats", requireUserAuth, async (req, res) =>
     }
 
     // ── Non-digital-twin: legacy agent-memory path ───────────────────
+    const orgId = getOrgId(req);
+    if (!orgId) {
+      logger.error(`[memory/stats] orgId is required; refusing global memory stats agentSlug=${agentSlug}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
     const listFilter: { limit: number; offset: number; tags?: string[] } = { limit: 500, offset: 0 };
     if (userTag) listFilter.tags = [userTag];
 
     const [allPage, pendingBatchCount, totalRecalls, topHits] = await Promise.all([
       memory.listMemories(bankId, listFilter).catch(() => ({ memories: [], total: 0 })),
-      prisma.pendingBatchReview.count({ where: { agentSlug, status: "pending" } }),
-      prisma.memoryRecallHit.count({ where: { agentSlug, recalledAt: { gte: cutoff } } }),
+      prisma.pendingBatchReview.count({ where: { orgId, agentSlug, status: "pending" } }),
+      prisma.memoryRecallHit.count({ where: { orgId, agentSlug, recalledAt: { gte: cutoff } } }),
       prisma.memoryRecallHit.groupBy({
         by: ["hindsightMemoryId"],
-        where: { agentSlug, recalledAt: { gte: cutoff } },
+        where: { orgId, agentSlug, recalledAt: { gte: cutoff } },
         _count: { _all: true },
         _max: { recalledAt: true },
         orderBy: { _count: { hindsightMemoryId: "desc" } },
@@ -1134,8 +1141,9 @@ memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, re
     }
 
     // Owner/admin gate.
-    const agent = await agentRepository.findBySlug(agentSlug);
+    const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
     if (!agent) {
+      logger.warn(`[memory/upload-md] agent org-scoped miss slug=${agentSlug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
@@ -1165,6 +1173,7 @@ memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, re
       sessionId: `upload-${now.getTime()}-${filename}`.slice(0, 200),
       userId,
       agentSlug,
+      orgId: agent.orgId,
       conversationId: null,
       channelId: null,
       task: `Knowledge upload "${filename}" — extract durable, reusable facts and guidelines from this document for the agent's memory.`,
@@ -1257,7 +1266,13 @@ memoryRouter.get("/batches", requireUserAuth, async (req, res) => {
     }
 
     // ── Non-twin agents: legacy pendingBatchReview path ──────────────
-    const where: Record<string, unknown> = {};
+    const orgId = getOrgId(req);
+    if (!orgId) {
+      logger.error(`[memory/batches] orgId is required; refusing global batch list agentSlug=${agentSlug ?? "none"} status=${status ?? "none"}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
+    const where: Record<string, unknown> = { orgId };
     if (agentSlug) where["agentSlug"] = agentSlug;
     if (status) where["status"] = status;
 
@@ -1414,10 +1429,24 @@ memoryRouter.post("/recall-hits", requireAuth, async (req, res) => {
       return;
     }
 
+    const slugs = [...new Set(hits.map((h) => h?.agentSlug).filter((x): x is string => typeof x === "string" && !!x))];
+    const orgId = getOrgId(req);
+    if (!orgId) {
+      logger.warn(`[memory/recall-hits] orgId is required slugs=${slugs.join(",") || "none"} hitCount=${hits.length}`);
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
+    const agents = await prisma.agent.findMany({
+      where: { orgId, slug: { in: slugs } },
+      select: { slug: true },
+    });
+    const agentSlugs = new Set(agents.map((agent) => agent.slug));
+
     const rows = hits
-      .filter((h) => h && h.agentSlug && h.hindsightMemoryId && h.userId && h.sessionId && h.scope && h.recalledAt)
+      .filter((h) => h && h.agentSlug && agentSlugs.has(h.agentSlug) && h.hindsightMemoryId && h.userId && h.sessionId && h.scope && h.recalledAt)
       .map((h) => ({
         agentSlug: h.agentSlug,
+        orgId,
         hindsightMemoryId: h.hindsightMemoryId,
         userId: h.userId,
         sessionId: h.sessionId,
@@ -1618,13 +1647,20 @@ memoryRouter.post("/banks/:agentSlug/backfill", requireUserAuth, async (req, res
       return;
     }
 
-    const summary = await backfillBatches(agentSlug, { from, to });
-    logger.info("[memory] Backfill triggered", {
+    // Enqueue a background job instead of running the walk+curate inline.
+    // `backfillBatches` auto-curates each session (an LLM call apiece), so a
+    // multi-day range blows past the ~60s nginx gateway timeout → 504. The
+    // worker (agent-backfill-worker) runs it async; the UI polls the Pending
+    // Review counts. Idempotent per (agent, range) at the queue level.
+    const requestedBy = (req as { user?: { id?: string } }).user?.id;
+    const jobId = await enqueueAgentBackfill({
       agentSlug,
-      by: (req as { user?: { id?: string } }).user?.id,
-      ...summary,
+      from,
+      to,
+      ...(requestedBy ? { requestedBy } : {}),
     });
-    res.json({ success: true, data: summary });
+    logger.info("[memory] Backfill enqueued", { agentSlug, from, to, jobId, by: requestedBy });
+    res.status(202).json({ success: true, data: { jobId, status: "queued", from, to } });
   } catch (err) {
     logger.error("[memory] POST /banks/:agentSlug/backfill failed", {
       err: err instanceof Error ? err.message : String(err),
@@ -1673,8 +1709,9 @@ memoryRouter.get("/banks/:agentSlug/status", requireUserAuth, async (req, res) =
       });
       return;
     }
-    const agent = await agentRepository.findBySlug(agentSlug);
+    const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
     if (!agent) {
+      logger.warn(`[memory/status] agent org-scoped miss slug=${agentSlug} orgId=${getOrgId(req) ?? "none"}`);
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
@@ -1699,8 +1736,9 @@ memoryRouter.post("/banks/:agentSlug/enable", requireUserAuth, async (req, res) 
     if (!(await checkTwinAccess(req, res, agentSlug, "bank-op"))) return;
     const body = (req.body ?? {}) as { sharedAllowed?: boolean; approvalStrategy?: string };
 
-    const agent = await agentRepository.findBySlug(agentSlug);
+    const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
     if (!agent) {
+      logger.warn(`[memory/enable] agent org-scoped miss slug=${agentSlug} orgId=${getOrgId(req) ?? "none"}`);
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
@@ -1714,7 +1752,7 @@ memoryRouter.post("/banks/:agentSlug/enable", requireUserAuth, async (req, res) 
       config["memoryApprovalStrategy"] = "HUMAN_ONLY";
     }
 
-    await agentRepository.update(agentSlug, { config: config as Prisma.InputJsonValue });
+    await agentRepository.update(agentSlug, agent.orgId, { config: config as Prisma.InputJsonValue });
 
     logger.info("[memory] Agent enrolled in memory", {
       agentSlug,
@@ -1739,8 +1777,9 @@ memoryRouter.post("/banks/:agentSlug/disable", requireUserAuth, async (req, res)
   try {
     const agentSlug = req.params["agentSlug"] as string;
     if (!(await checkTwinAccess(req, res, agentSlug, "bank-op"))) return;
-    const agent = await agentRepository.findBySlug(agentSlug);
+    const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
     if (!agent) {
+      logger.warn(`[memory/disable] agent org-scoped miss slug=${agentSlug} orgId=${getOrgId(req) ?? "none"}`);
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
@@ -1748,7 +1787,7 @@ memoryRouter.post("/banks/:agentSlug/disable", requireUserAuth, async (req, res)
     const config = { ...((agent.config as Record<string, unknown>) ?? {}) };
     config["memoryEnabled"] = false;
 
-    await agentRepository.update(agentSlug, { config: config as Prisma.InputJsonValue });
+    await agentRepository.update(agentSlug, agent.orgId, { config: config as Prisma.InputJsonValue });
 
     logger.info("[memory] Agent unenrolled from memory", {
       agentSlug,

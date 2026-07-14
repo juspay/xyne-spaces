@@ -93,36 +93,6 @@ export async function listSubsystemTaxonomy(
 
 // ── Retain / delete passthroughs (used by cron + admin force-delete) ──────
 
-/**
- * Direct-retain helper. Memory is agent-wide — always tagged "shared".
- * `userId` is accepted for audit-style metadata only; it does NOT scope the
- * memory.
- */
-export async function retainContent(
-  agentSlug: string,
-  userId: string,
-  content: string,
-  metadata?: Record<string, string>,
-): Promise<void> {
-  if (!HINDSIGHT.enabled) return;
-  const provider = getMemoryProvider();
-  const bank = bankIdForAgent(agentSlug);
-  await provider.retain(bank, [
-    {
-      content,
-      tags: ["shared"],
-      metadata: { ...(metadata ?? {}), retainedBy: userId },
-    },
-  ]);
-}
-
-export async function deleteMemory(agentSlug: string, memoryId: string): Promise<void> {
-  if (!HINDSIGHT.enabled) return;
-  const provider = getMemoryProvider();
-  const bank = bankIdForAgent(agentSlug);
-  await provider.deleteMemory(bank, memoryId);
-}
-
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
