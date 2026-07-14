@@ -10,6 +10,7 @@ import { useEnterSendsMessage } from './useEnterSendsMessage';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import { useCallJoinSettings } from './useCallJoinSettings';
+import { useClawDashboardVisibility } from './useClawDashboardVisibility';
 import { useCallMediaQualitySettings } from './useCallMediaQualitySettings';
 import {
   getLinkOpenExternalDefault,
@@ -41,6 +42,7 @@ export function usePreferencesState(enabled: boolean) {
   const { askAIVersion, setAskAIVersion } = useAskAIVersion();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
   const { searchMode, setSearchMode } = useSearchMode();
+  const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
     useThreadBroadcastMentions();
   const {
@@ -132,6 +134,8 @@ export function usePreferencesState(enabled: boolean) {
     setEnterSendsMessage,
     searchMode,
     setSearchMode,
+    showClawDashboard,
+    setShowClawDashboard,
     allowThreadBroadcastMentions,
     setAllowThreadBroadcastMentions,
     linksOpenExternalByDefault,

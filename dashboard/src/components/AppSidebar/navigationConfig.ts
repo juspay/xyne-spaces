@@ -28,6 +28,7 @@ import {
   Zap,
   Atom,
   MessageSquareText,
+  Bot,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -81,6 +82,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     iconSize: 18,
   },
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom },
+  { path: '/claw-agents', label: 'Claw Agents', icon: Bot },
 ];
 
 // Core items that are always in the toolbar. Users cannot remove these — their

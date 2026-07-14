@@ -56,20 +56,32 @@ export default defineConfig({
     port: 5173,
     host: true,
     allowedHosts: ['dashboard', 'localhost', '.localhost'],
-    proxy: process.env.VITE_ENVIRONMENT === 'test' ? {
-      '/api': {
-        target: process.env.VITE_API_BASE_URL,
+    proxy: {
+      // Same-origin proxy so the dashboard can call the claw-auth backend
+      // (which sets no CORS headers) during local dev, mirroring
+      // xyne-claw-auth/frontend/vite.config.ts.
+      '/claw/api/v1': {
+        target: process.env.VITE_CLAW_BACKEND_URL || 'http://localhost:3003',
         changeOrigin: true,
         secure: false,
-        ws: true,
       },
-      '/zero': {
-        target: process.env.VITE_ZERO_SERVER,
-        changeOrigin: true,
-        secure: false,
-        ws: true,
-      },
-    } : undefined,
+      ...(process.env.VITE_ENVIRONMENT === 'test'
+        ? {
+            '/api': {
+              target: process.env.VITE_API_BASE_URL,
+              changeOrigin: true,
+              secure: false,
+              ws: true,
+            },
+            '/zero': {
+              target: process.env.VITE_ZERO_SERVER,
+              changeOrigin: true,
+              secure: false,
+              ws: true,
+            },
+          }
+        : {}),
+    },
   },
   resolve: {
     alias: {
