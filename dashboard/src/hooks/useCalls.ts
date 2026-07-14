@@ -183,6 +183,17 @@ export const useIsOnlyParticipant = (participants: CallParticipants) => {
 };
 
 /**
+ * Check if the current user is alone in the call (for AFK detection)
+ * @param participants - Array of call participants
+ * @returns true if there's exactly one active participant
+ */
+export const useIsLoneParticipant = (participants: CallParticipants): boolean => {
+  return useMemo(() => {
+    return getActiveParticipants(participants).length === 1;
+  }, [participants]);
+};
+
+/**
  * Check if a channel has an active call, respecting callUpdatesChannel for post-to-channel calls.
  * @param channelId - The channel ID to check
  * @returns true if any active call is broadcasting to this channel
