@@ -1,4 +1,5 @@
 import { tagService } from './service';
+import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
 import type { TagsConfigShape } from './types';
 
 export interface TagGroup {
@@ -32,7 +33,11 @@ export async function getGroupedTagsWithConfig(
     tagService.listTags(sourceId, sourceType),
     tagService.getConfig(configKey),
   ]);
-  const categories = (configRow?.config as unknown as TagsConfigShape | undefined)?.categories ?? {};
+
+  const parsedCategories = (configRow?.config as unknown as TagsConfigShape | undefined)?.categories;
+  const categories =
+    parsedCategories ??
+    (sourceType === DESK_EMAIL_SOURCE_TYPE ? DEFAULT_DESK_EMAIL_CONFIG.categories : {});
 
   const byCategory = new Map<string, TagGroupWithConfig>();
 

@@ -33,6 +33,9 @@ import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { AttachmentUploadError } from '@/integrations/core/baseMailReplySender';
 import { extractEmailAddress } from '@/utils/email';
 import { emailService } from '@/services/emailService';
+import { config as appConfig } from '@/config/env';
+import { tagGenerationPipeline } from '@/tags/pipeline';
+import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 
 interface ReplyEmailRequest {
   body: string;
@@ -396,6 +399,17 @@ export class EmailController {
       // Record the first response time for SLA tracking.
       // Uses newEmail.createdAt so the timestamp matches the persisted email record.
       await emailService.recordFirstResponse(conversationId, newEmail.createdAt);
+
+      if (appConfig.enableTagGenerationPipeline && channel.workspaceId) {
+        void tagGenerationPipeline.addGenerationJob({
+          sourceId: newEmail.id,
+          sourceType: DESK_EMAIL_SOURCE_TYPE,
+          workspaceId: channel.workspaceId,
+          configKey: deskEmailConfigKey(conversation.channelId),
+        }).catch((err: unknown) => {
+          logger.error(`[TagFramework] Failed to enqueue tag generation for reply email ${newEmail.id}`, err);
+        });
+      }
 
       void (async (): Promise<void> => {
         try {

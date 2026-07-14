@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { ChannelRole, TagMethod } from '@prisma/client';
-import { tagService, TagsConfigShapeSchema, invalidateTagConfigCache } from '@/tags';
+import { tagService, TagsConfigShapeSchema, invalidateTagConfigCache, DEFAULT_DESK_EMAIL_CONFIG } from '@/tags';
 import { deskEmailConfigKey, DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 import { getGroupedTagsWithConfig } from '@/tags/presentation';
 import type { TagsConfigShape } from '@/tags';
@@ -68,9 +68,13 @@ export class DeskTagsConfigController {
 
     try {
       const config = await tagService.getConfig(deskEmailConfigKey(channelId));
-      const parsed = TagsConfigShapeSchema.safeParse(config?.config);
+      if (!config) {
+        res.status(200).json({ categories: DEFAULT_DESK_EMAIL_CONFIG.categories, isDefault: true });
+        return;
+      }
+      const parsed = TagsConfigShapeSchema.safeParse(config.config);
       const categories = parsed.success ? parsed.data.categories : {};
-      res.status(200).json({ categories });
+      res.status(200).json({ categories, isDefault: false });
     } catch (error) {
       logger.error('[DESK-TAGS-CONFIG] Failed to get config', { channelId, error });
       res.status(500).json({ error: 'Failed to get tag generation config' });
@@ -178,7 +182,10 @@ export class DeskTagsConfigController {
 
     try {
       const configRow = await tagService.getConfig(configKey);
-      const catConfig = (configRow?.config as any)?.categories?.[category];
+      const configCategories = configRow
+        ? ((configRow.config as any)?.categories ?? {})
+        : DEFAULT_DESK_EMAIL_CONFIG.categories;
+      const catConfig = configCategories[category];
       if (!catConfig) {
         res.status(400).json({ error: `Tag category "${category}" is not configured` });
         return;

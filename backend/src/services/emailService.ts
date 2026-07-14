@@ -1434,6 +1434,17 @@ export class EmailService {
         logger.error(`[EmailService] Error pushing Vespa job for mail ${email.id}:`, error);
       });
 
+      if (config.enableTagGenerationPipeline && channel?.workspaceId) {
+        void tagGenerationPipeline.addGenerationJob({
+          sourceId: email.id,
+          sourceType: DESK_EMAIL_SOURCE_TYPE,
+          workspaceId: channel.workspaceId,
+          configKey: deskEmailConfigKey(conversation.channelId),
+        }).catch((err: unknown) => {
+          logger.error(`[TagFramework] Failed to enqueue tag generation for email ${email.id}`, err);
+        });
+      }
+
       // Create MessageAttachment entries for email attachments
       await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel?.workspaceId ?? '', uploadedFiles);
 

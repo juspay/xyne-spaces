@@ -1,7 +1,29 @@
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import type { TagGenerationPipeline } from './pipeline';
+import type { TagsConfigShape } from './types';
 
 export const DESK_EMAIL_SOURCE_TYPE = 'desk-email';
+
+export const DEFAULT_DESK_EMAIL_CONFIG: TagsConfigShape = {
+  categories: {
+    priority: {
+      method: 'llm',
+      color: '#ef4444',
+      tags: ['low', 'medium', 'high', 'critical'],
+      count: 1,
+      is_new_tag_allowed: false,
+      prompt: 'Assess the urgency of the latest email. Use "critical" for system outages, data loss, or complete blockers affecting the customer\'s business operations. Use "high" for time-sensitive issues, broken core features, or very frustrated customers needing immediate attention. Use "medium" for issues that are impacting the customer but have a workaround, or need attention within a day or two. Use "low" for general questions, minor inconveniences, or non-urgent requests.',
+    },
+    sentiment: {
+      method: 'llm',
+      color: '#8b5cf6',
+      tags: ['positive', 'neutral', 'negative'],
+      count: 1,
+      is_new_tag_allowed: false,
+      prompt: 'Assess the overall tone and sentiment of the customer in the latest email. Use "positive" for satisfied or appreciative tone, "negative" for frustrated or angry tone, and "neutral" for factual or calm tone.',
+    },
+  },
+};
 
 export function deskEmailConfigKey(channelId: string): string {
   return `desk-channel:${channelId}`;

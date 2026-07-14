@@ -7,6 +7,7 @@ import { tagRepository } from '@/database/repositories/tagRepository';
 import { generateLlmTags } from './generators/llm';
 import { TagsConfigShapeSchema } from './schema';
 import { tagService } from './service';
+import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
 import type {
   CategoryConfig,
   ContextBuilderFn,
@@ -25,12 +26,74 @@ export type GeneratorMethod = 'llm';
 const CONFIG_CACHE_TTL_SECONDS = 120;
 const configCacheKey = (key: string) => `tag-config:${key}`;
 
+function getDefaultConfig(sourceType: string): TagsConfigShape | null {
+  if (sourceType === DESK_EMAIL_SOURCE_TYPE) return DEFAULT_DESK_EMAIL_CONFIG;
+  return null;
+}
+
 export async function invalidateTagConfigCache(configKey: string): Promise<void> {
   try {
     await redisService.del(configCacheKey(configKey));
   } catch (err) {
     logger.warn(`[TAG][PIPELINE] Failed to invalidate config cache for "${configKey}":`, err);
   }
+}
+
+// Checks whether there is an active, non-empty config for the given configKey.
+// Also warms the Redis cache so the first worker job reads from cache rather
+// than hitting the DB. Returns false (and caches 'null') for opted-out channels
+// so the caller can skip enqueuing entirely.
+async function hasActiveConfig(configKey: string, sourceType: string): Promise<boolean> {
+  try {
+    const cached = await redisService.get(configCacheKey(configKey));
+    if (cached === 'null') return false;
+    if (cached) {
+      const parsed = TagsConfigShapeSchema.safeParse(JSON.parse(cached));
+      if (parsed.success) {
+        return true;
+      }
+    }
+  } catch (err) {
+    logger.warn(`[TAG][PIPELINE] Redis cache read failed for "${configKey}", falling through to DB:`, err);
+  }
+
+  const configRow = await tagRepository.getActiveConfigByKey(configKey);
+  if (configRow) {
+    const parsed = TagsConfigShapeSchema.safeParse(configRow.config);
+    if (parsed.success && Object.values(parsed.data.categories).some(c => c.method !== 'manual')) {
+      try {
+        await redisService.set(configCacheKey(configKey), JSON.stringify(parsed.data), CONFIG_CACHE_TTL_SECONDS);
+      } catch (err) {
+        logger.warn(`[TAG][PIPELINE] Failed to cache config for "${configKey}":`, err);
+      }
+      return true;
+    }
+    // Row exists but empty, all-manual, or corrupted — treat as opted out, cache sentinel.
+    try {
+      await redisService.set(configCacheKey(configKey), 'null', CONFIG_CACHE_TTL_SECONDS);
+    } catch (err) {
+      logger.warn(`[TAG][PIPELINE] Failed to cache sentinel for "${configKey}":`, err);
+    }
+    return false;
+  }
+
+  const defaultConfig = getDefaultConfig(sourceType);
+  if (defaultConfig) {
+    // No DB row but source type has a default — warm cache with default so the worker reads it from Redis.
+    try {
+      await redisService.set(configCacheKey(configKey), JSON.stringify(defaultConfig), CONFIG_CACHE_TTL_SECONDS);
+    } catch (err) {
+      logger.warn(`[TAG][PIPELINE] Failed to cache default config for "${configKey}":`, err);
+    }
+    return true;
+  }
+
+  try {
+    await redisService.set(configCacheKey(configKey), 'null', CONFIG_CACHE_TTL_SECONDS);
+  } catch (err) {
+    logger.warn(`[TAG][PIPELINE] Failed to cache sentinel for "${configKey}":`, err);
+  }
+  return false;
 }
 
 export class TagGenerationPipeline extends EventEmitter {
@@ -147,6 +210,11 @@ export class TagGenerationPipeline extends EventEmitter {
       throw new Error(`[TAG][PIPELINE] No context builder registered for sourceType "${data.sourceType}"`);
     }
 
+    if (!(await hasActiveConfig(data.configKey, data.sourceType))) {
+      logger.info(`[TAG][PIPELINE] Skipping job — no active config for "${data.configKey}"`);
+      return '';
+    }
+
     const jobId = `tag-gen-${data.sourceType}-${data.sourceId}-${data.configKey}`;
     await this.queue.add('generate-tags', { jobId, ...data }, { jobId, priority });
 
@@ -166,6 +234,14 @@ export class TagGenerationPipeline extends EventEmitter {
     }
     if (!this.queue) {
       throw new Error('[TAG][PIPELINE] Queue not initialized — call initialize() first');
+    }
+
+    // All items in a bulk call share the same channel/configKey — check once before
+    // building the job list to avoid enqueueing when the channel is opted out.
+    const firstItem = items[0];
+    if (firstItem && !(await hasActiveConfig(firstItem.configKey, firstItem.sourceType))) {
+      logger.info(`[TAG][PIPELINE] Skipping bulk jobs — no active config for "${firstItem.configKey}"`);
+      return 0;
     }
 
     const bulkJobs = items
@@ -263,6 +339,10 @@ export class TagGenerationPipeline extends EventEmitter {
 
     try {
       const cached = await redisService.get(cacheKey);
+      if (cached === 'null') {
+        // Sentinel: channel opted out or has no generatable config — skip immediately.
+        return { jobId, sourceId, sourceType, tags: [] };
+      }
       if (cached) {
         const parsed = TagsConfigShapeSchema.safeParse(JSON.parse(cached));
         if (parsed.success) {
@@ -276,24 +356,38 @@ export class TagGenerationPipeline extends EventEmitter {
 
     if (!configShape) {
       const configRow = await tagRepository.getActiveConfigByKey(configKey);
-      if (!configRow) {
-        throw new Error(`[TAG][PIPELINE] No active TagsConfig found for configKey "${configKey}"`);
+      if (configRow) {
+        const parsedConfig = TagsConfigShapeSchema.safeParse(configRow.config);
+        if (!parsedConfig.success) {
+          logger.warn(`[TAG][PIPELINE] Corrupted TagsConfig for configKey "${configKey}", skipping job`);
+          return { jobId, sourceId, sourceType, tags: [] };
+        }
+        configShape = parsedConfig.data;
+      } else {
+        const defaultConfig = getDefaultConfig(sourceType);
+        if (defaultConfig) {
+          // No DB row but source type has a default — use it.
+          configShape = defaultConfig;
+        }
       }
-      const parsedConfig = TagsConfigShapeSchema.safeParse(configRow.config);
-      if (!parsedConfig.success) {
-        throw new Error(`[TAG][PIPELINE] Invalid TagsConfig for configKey "${configKey}"`);
+      if (!configShape) {
+        logger.warn(`[TAG][PIPELINE] No active TagsConfig found for configKey "${configKey}", skipping job`);
+        return { jobId, sourceId, sourceType, tags: [] };
       }
-      configShape = parsedConfig.data;
 
       try {
         await redisService.set(cacheKey, JSON.stringify(configShape), CONFIG_CACHE_TTL_SECONDS);
       } catch (err) {
-        // Cache write failure is non-fatal — next job will just hit DB again.
         logger.warn(`[TAG][PIPELINE] Failed to cache config for "${configKey}":`, err);
       }
     }
 
     const { categories } = configShape;
+
+    // User opted out (saved empty categories) — nothing to generate.
+    if (Object.keys(categories).length === 0) {
+      return { jobId, sourceId, sourceType, tags: [] };
+    }
 
     const context = await buildContext(sourceId, sourceType);
     const byMethod = this.groupCategoriesByMethod(categories);
@@ -316,8 +410,11 @@ export class TagGenerationPipeline extends EventEmitter {
     // so future generations/UI dropdowns are aware of it.
     const { categories: mergedCategories, changed } = this.mergeNewTagsIntoCategories(categories, generated);
     if (changed) {
-      await tagService.updateConfig(
+      // upsertConfig handles both "no DB row yet" (default in use) and "existing row" cases.
+      await tagService.upsertConfig(
         configKey,
+        sourceType,
+        workspaceId,
         { ...configShape, categories: mergedCategories },
         undefined,
       );
