@@ -46,6 +46,7 @@ interface ChannelItemV2Props {
   isActive?: boolean;
   sections?: ChannelSection[];
   onMoveToSection?: (channelId: string, sectionId: string | null) => void;
+  hideDraftIndicator?: boolean;
 }
 
 const ChannelItemV2 = memo(
@@ -55,6 +56,7 @@ const ChannelItemV2 = memo(
     isActive = false,
     sections = [],
     onMoveToSection,
+    hideDraftIndicator = false,
   }: ChannelItemV2Props): ReactElement => {
     const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
     const zero = useZero();
@@ -201,7 +203,7 @@ const ChannelItemV2 = memo(
               <Headphones size={14} />
             </span>
           )}
-          {shouldShowDraft && (
+          {shouldShowDraft && !hideDraftIndicator && (
             <Tooltip content={draftTooltipContent} side='top' sideOffset={6}>
               <Pencil size={14} className='shrink-0' />
             </Tooltip>

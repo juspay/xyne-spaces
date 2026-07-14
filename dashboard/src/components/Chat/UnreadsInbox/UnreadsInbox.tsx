@@ -7,24 +7,12 @@ import { MessageSquareDot, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import ChannelItemV2 from '../ChatDirectory/ChannelItemV2';
 import { ChannelType, ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
-import { useEffect, useRef } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { getDraft } from '../../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import Button from '../../ui/Button';
-
-const ScrollToView = ({ isOpen }: { isOpen: boolean }) => {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => {
-        ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }, 50);
-    }
-  }, [isOpen]);
-  return <div ref={ref} className='absolute -top-[60px]' />;
-};
+import Tooltip from '../../ui/Tooltip';
 
 const UnreadsInbox = (): ReactElement => {
   const channelData = useAllVisibleChannels();
@@ -99,14 +87,14 @@ const UnreadsInbox = (): ReactElement => {
 
   return (
     <div className='flex-1 h-full w-full bg-background flex flex-col pt-14 [@media(min-width:500px)]:pt-0'>
-      <div className='px-6 py-4 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10 flex items-center justify-between'>
+      <div className='relative z-30 shrink-0 px-6 py-4 border-b border-border/50 bg-background flex items-center justify-between'>
         <div className='flex items-center gap-2 text-foreground'>
           <MessageSquareDot className='w-5 h-5 text-primary' />
           <h1 className='text-lg font-semibold tracking-tight'>Unreads</h1>
         </div>
       </div>
 
-      <div className='flex-1 overflow-y-auto overflow-x-hidden p-4 relative'>
+      <div className='relative z-0 flex-1 isolate overflow-y-auto overflow-x-hidden px-4 pb-4 pt-0'>
         {unreadItems.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full text-center'>
             <MessageSquareDot className='text-muted-foreground mb-4' size={64} />
@@ -116,7 +104,7 @@ const UnreadsInbox = (): ReactElement => {
             <p className='text-muted-foreground'>No unread channels or direct messages.</p>
           </div>
         ) : (
-          <div className='space-y-4'>
+          <div className='space-y-2'>
             {unreadItems.map(channel => {
               const isOpen = openChannelId === channel.id;
 
@@ -127,9 +115,8 @@ const UnreadsInbox = (): ReactElement => {
               return (
                 <div
                   key={channel.id}
-                  className={`border rounded-lg bg-card transition-colors shadow-sm overflow-hidden relative ${isOpen ? 'border-border/50 bg-accent/20' : 'border-border/30 hover:bg-accent'}`}
+                  className={`border rounded-lg bg-card transition-colors shadow-sm relative ${isOpen ? 'isolate overflow-visible border-border/50' : 'overflow-hidden border-border/30 hover:bg-accent'}`}
                 >
-                  {isOpen && <ScrollToView isOpen={isOpen} />}
                   <div
                     role='button'
                     tabIndex={0}
@@ -139,42 +126,46 @@ const UnreadsInbox = (): ReactElement => {
                         handleItemClick(e, channel.id);
                       }
                     }}
-                    className='p-1 cursor-pointer flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                    className={`p-1 cursor-pointer flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isOpen ? 'sticky top-0 z-20 rounded-t-lg bg-background border-b border-border/20' : ''}`}
                     data-track-category='UNREADS_INBOX'
                     data-track-name='TOGGLE_CHANNEL_ACCORDION'
                   >
                     <div className='flex-1 pointer-events-none'>
-                      <ChannelItemV2 channel={channel} unreadCount={0} />
+                      <ChannelItemV2 channel={channel} unreadCount={0} hideDraftIndicator />
                     </div>
                     <div className='pr-3 text-muted-foreground flex items-center gap-3'>
                       {isOpen && (
-                        <Button
-                          variant='secondary'
-                          size='sm'
-                          className='h-6 text-[11px] px-3 font-medium pointer-events-auto rounded-full gap-1.5 opacity-80 hover:opacity-100 shadow-sm'
-                          onClick={e => {
-                            e.stopPropagation();
-                            handleMarkAsRead(channel.id);
-                          }}
-                        >
-                          <Check className='w-3 h-3' />
-                          Mark as read
-                        </Button>
+                        <Tooltip content='Mark as read' side='top' sideOffset={6}>
+                          <Button
+                            variant='secondary'
+                            size='sm'
+                            className='h-7 w-7 p-0 pointer-events-auto rounded-md opacity-80 hover:opacity-100 shadow-sm'
+                            aria-label='Mark as read'
+                            onClick={e => {
+                              e.stopPropagation();
+                              handleMarkAsRead(channel.id);
+                            }}
+                          >
+                            <Check className='w-3.5 h-3.5' />
+                          </Button>
+                        </Tooltip>
                       )}
                       {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                     </div>
                   </div>
 
                   {isOpen && (
-                    <div className='animate-in slide-in-from-top-2 fade-in duration-200 border-t border-border/20 h-[calc(100vh-200px)] flex flex-col relative'>
-                      <ConversationPanelV2
-                        channelId={channel.id}
-                        previousChannelId={null}
-                        linkedItemCreatedAtOverride={status?.lastViewedAt ?? null}
-                        showHeader={false}
-                        hideComposer
-                        skipMarkAsRead={true}
-                      />
+                    <div className='overflow-hidden rounded-b-lg'>
+                      <div className='animate-in slide-in-from-top-2 fade-in duration-200 h-[calc(100vh-200px)] flex flex-col relative z-0'>
+                        <ConversationPanelV2
+                          channelId={channel.id}
+                          previousChannelId={null}
+                          linkedItemCreatedAtOverride={status?.lastViewedAt ?? null}
+                          showHeader={false}
+                          hideComposer
+                          skipMarkAsRead={true}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
