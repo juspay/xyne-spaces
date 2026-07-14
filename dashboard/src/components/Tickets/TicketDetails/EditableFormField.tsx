@@ -27,6 +27,35 @@ const jsonToString = (value: ReadonlyJSONValue): string => {
   return '';
 };
 
+const formatBooleanDisplay = (value: ReadonlyJSONValue): string => {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === 'yes') return 'Yes';
+    if (normalized === 'false' || normalized === 'no') return 'No';
+  }
+  return '—';
+};
+
+/** Strict boolean edit value: only true/false; unknown inputs clear the field. */
+const booleanToEditValue = (value: ReadonlyJSONValue): string => {
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === 'yes') return 'true';
+    if (normalized === 'false' || normalized === 'no') return 'false';
+  }
+  return '';
+};
+
+const normalizeBooleanSaveValue = (value: string): 'true' | 'false' | null => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === 'yes') return 'true';
+  if (normalized === 'false' || normalized === 'no') return 'false';
+  return null;
+};
+
 // Helper to extract array from JSON value for MULTI_SELECT
 const jsonToArray = (value: ReadonlyJSONValue): string[] => {
   if (Array.isArray(value)) {
@@ -56,7 +85,9 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   const [editValue, setEditValue] = useState(
     fieldType === FormFieldType.MULTI_SELECT
       ? jsonToArray(fieldValue).join(', ')
-      : jsonToString(fieldValue),
+      : fieldType === FormFieldType.BOOLEAN
+        ? booleanToEditValue(fieldValue)
+        : jsonToString(fieldValue),
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -66,7 +97,9 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     const newVal =
       fieldType === FormFieldType.MULTI_SELECT
         ? jsonToArray(fieldValue).join(', ')
-        : jsonToString(fieldValue);
+        : fieldType === FormFieldType.BOOLEAN
+          ? booleanToEditValue(fieldValue)
+          : jsonToString(fieldValue);
     setEditValue(newVal);
   }, [fieldValue, fieldType]);
 
@@ -84,6 +117,19 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
 
   const handleSave = (newValue?: string): void => {
     const valueToSave = newValue ?? editValue;
+
+    if (fieldType === FormFieldType.BOOLEAN) {
+      const normalized = normalizeBooleanSaveValue(valueToSave);
+      if (normalized === null) {
+        setIsEditing(false);
+        return;
+      }
+      if (booleanToEditValue(fieldValue) !== normalized) {
+        onSave([normalized]);
+      }
+      setIsEditing(false);
+      return;
+    }
 
     if (fieldType === FormFieldType.MULTI_SELECT && valueToSave) {
       // Split comma-separated values back to array
@@ -114,9 +160,11 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
 
   // Format display value for read mode
   const displayValue =
-    fieldType === FormFieldType.MULTI_SELECT
-      ? jsonToArray(fieldValue).join(', ')
-      : jsonToString(fieldValue);
+    fieldType === FormFieldType.BOOLEAN
+      ? formatBooleanDisplay(fieldValue)
+      : fieldType === FormFieldType.MULTI_SELECT
+        ? jsonToArray(fieldValue).join(', ')
+        : jsonToString(fieldValue);
 
   // For USER field, fetch user details for display
   const selectedUserIds = useMemo(() => {

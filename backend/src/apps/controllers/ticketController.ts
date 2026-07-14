@@ -1946,6 +1946,15 @@ export class TicketController {
         });
       }
 
+      await createTicketCustomFieldActivity({
+        ticketId,
+        fieldName: field.fieldName,
+        oldValue: existing?.actualFieldValue ?? existing?.fieldValue,
+        newValue: normalizedFieldValue.actualFieldValue,
+        updatedBy: req.user!.id,
+        timestamp,
+      });
+
       logger.info(`[TicketController] Form field "${fieldName}" updated to "${stringValue}" on ticket ${ticketId}`);
 
       // Emit ADDITIONAL_FORM_FIELD_UPDATED event to all apps in the workspace

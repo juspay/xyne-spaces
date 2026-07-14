@@ -125,6 +125,7 @@ export async function collectSideEffectJobs(
         entityId: entity.entityId,
         fieldId: entity.fieldId,
         entityType: entity.entityType,
+        fieldValue: entity.fieldValue,
         actualFieldValue: entity.actualFieldValue,
       };
     }

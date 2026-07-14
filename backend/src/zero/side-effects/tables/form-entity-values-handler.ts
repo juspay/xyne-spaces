@@ -15,6 +15,11 @@ import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger
 import { ActivityType } from '@prisma/client';
 import { FormFieldType } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
+import { resolveFieldDefinitionById } from '@/utils/fieldDefinition';
+
+const getPreviousFormEntityValue = (
+  previousValue: FormEntityValuePreviousValue | undefined,
+): unknown => previousValue?.actualFieldValue ?? previousValue?.fieldValue;
 
 /**
  * Side effect handler for form_entity_values table.
@@ -66,7 +71,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
     const previousSnapshot = this.buildPreviousCountsSnapshot(
       currentSnapshot,
       fieldId,
-      operation === 'insert' ? undefined : previousValue?.actualFieldValue,
+      operation === 'insert' ? undefined : getPreviousFormEntityValue(previousValue),
       operation,
     );
 
@@ -115,7 +120,8 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
   }
 
   private async emitFormFieldEvent(job: SideEffectJobConfig, operation: 'insert' | 'update'): Promise<void> {
-    const { entityId, previousValue } = job;
+    const { entityId } = job;
+    const previousValue = job.previousValue as FormEntityValuePreviousValue | undefined;
 
     try {
       // Get the form entity value
@@ -133,14 +139,10 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         return;
       }
 
-      // Get the field name from FormFields
-      const formField = await db.formFields.findUnique({
-        where: { id: formEntityValue.fieldId },
-        select: { fieldName: true },
-      });
+      const fieldDefinition = await resolveFieldDefinitionById(db, formEntityValue.fieldId);
 
       const ticketId = formEntityValue.entityId;
-      const fieldName = formField?.fieldName;
+      const fieldName = fieldDefinition?.fieldName;
       const fieldValue = formEntityValue.actualFieldValue ?? formEntityValue.fieldValue;
 
       if (!ticketId || !fieldName) {
@@ -192,8 +194,8 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         boardName: board?.name || '',
         fieldName,
         fieldValue: normalizeVespaFieldValue(fieldValue as any) || '',
-        previousValue: operation === 'update' && previousValue 
-          ? normalizeVespaFieldValue((previousValue as any).actualFieldValue ?? (previousValue as any).fieldValue) || ''
+        previousValue: operation === 'update' && previousValue
+          ? normalizeVespaFieldValue(getPreviousFormEntityValue(previousValue) as any) || ''
           : undefined,
         updatedBy: this.ctx.userID,
         workspaceId: ticket.workspaceId,
@@ -212,7 +214,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
       // Also emit TICKET_UPDATED so automation engine can match formFieldIds conditions
       const prevFormValue = operation === 'update' && previousValue
-        ? (previousValue as FormEntityValuePreviousValue).actualFieldValue
+        ? getPreviousFormEntityValue(previousValue)
         : null;
 
       // Skip emit if value didn't actually change (no-op re-save)
@@ -266,21 +268,31 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         return;
       }
 
-      const formField = await db.formFields.findUnique({
-        where: { id: formEntityValue.fieldId },
-        select: { fieldName: true, fieldType: true },
+      const ticket = await db.ticket.findUnique({
+        where: { id: formEntityValue.entityId },
+        select: { boardId: true },
       });
 
-      if (!formField?.fieldName) {
+      if (!ticket || formEntityValue.contextId !== ticket.boardId) {
         return;
       }
 
-      if (formField.fieldType === FormFieldType.DOC) {
+      const fieldDefinition = await resolveFieldDefinitionById(db, formEntityValue.fieldId);
+
+      if (!fieldDefinition?.fieldName) {
+        return;
+      }
+
+      const previousRawValue = operation === 'update'
+        ? getPreviousFormEntityValue(previousValue)
+        : null;
+
+      if (fieldDefinition.fieldType === FormFieldType.DOC) {
         await this.createFileFieldActivity(
           formEntityValue.entityId,
           formEntityValue.contextId,
-          formField.fieldName,
-          operation === 'update' ? stringFromFormValue(previousValue?.actualFieldValue) : null,
+          fieldDefinition.fieldName,
+          stringFromFormValue(previousRawValue),
           stringFromFormValue(formEntityValue.actualFieldValue),
         );
         return;
@@ -288,8 +300,8 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
       await createTicketCustomFieldActivity({
         ticketId: formEntityValue.entityId,
-        fieldName: formField.fieldName,
-        oldValue: operation === 'update' ? previousValue?.actualFieldValue : null,
+        fieldName: fieldDefinition.fieldName,
+        oldValue: previousRawValue,
         newValue: formEntityValue.actualFieldValue ?? formEntityValue.fieldValue,
         updatedBy: this.ctx.userID,
       });

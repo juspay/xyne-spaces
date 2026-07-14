@@ -39,6 +39,12 @@ export {
 } from './resolveDisplayFormFields';
 
 export {
+  resolveBoardAdditionalFields,
+  buildLatestEntityWideValueByField,
+  type ResolvedBoardAdditionalField,
+} from './boardFormEntityValues';
+
+export {
   MAX_FIELD_OPTIONS,
   parseBulkOptions,
   normalizeFieldOptions,

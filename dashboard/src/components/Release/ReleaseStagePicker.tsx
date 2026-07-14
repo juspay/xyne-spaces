@@ -59,9 +59,7 @@ export function ReleaseStagePicker({
         stageName={stageName}
         stageLabel={stageName ?? '—'}
         boardId={boardId}
-        onStageChange={(_id, nextStageName) => {
-          onAfterChange?.(nextStageName);
-        }}
+        onAfterStageChange={onAfterChange}
       />
     );
   }
