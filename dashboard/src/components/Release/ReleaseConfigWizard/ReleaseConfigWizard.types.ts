@@ -51,7 +51,6 @@ export type ReleaseConfigMode =
 
 export interface ReleaseConfigWizardProps {
   projectId: string;
-  projectName: string;
   boardNamesById: Readonly<Record<string, string>>;
   /**
    * The project's applications, already synced by the parent. Used to resolve the

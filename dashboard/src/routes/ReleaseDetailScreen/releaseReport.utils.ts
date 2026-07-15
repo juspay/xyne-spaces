@@ -12,6 +12,7 @@ interface ArtRowInput {
         readonly xyneId: string;
         readonly title: string;
         readonly assignedTo?: string | null | undefined;
+        readonly createdBy?: string | null | undefined;
         readonly ticketType?: string | null | undefined;
         readonly channelId: string;
         readonly conversationId: string;
@@ -67,6 +68,12 @@ export function buildReleaseDetailDevTicketRows(
   const usersById = new Map(
     (users ?? []).map(user => [user.id, user.name ?? user.email ?? user.id]),
   );
+  /**
+   * Resolve a user id to a display name, falling back to the raw id when the user isn't
+   * loaded. Returns null only when no id is set, so callers can chain fallbacks.
+   */
+  const resolveUser = (userId: string | null | undefined): string | null =>
+    userId ? (usersById.get(userId) ?? userId) : null;
   const seen = new Set<string>();
   const rows: ReleaseDetailDevTicketRow[] = [];
 
@@ -77,17 +84,19 @@ export function buildReleaseDetailDevTicketRows(
     const devTicket = artRow.devTicket;
     const ticketId = devTicket?.xyneId ?? artRow.ticketId;
     const changeCounts = changeCountsByDevTicket.get(ticketId);
+    // Dev owner precedence: assignee -> creator (reporter) -> 'Unknown'.
+    // Only 'Unknown' when neither the assignee nor the creator resolves to a user.
+    const assignedOwner = resolveUser(devTicket?.assignedTo);
+    const reportedOwner = resolveUser(devTicket?.createdBy);
     rows.push({
       internalTicketId: artRow.ticketId,
       ticketId,
       title: devTicket?.title ?? artRow.ticketId,
-      devOwner: devTicket?.assignedTo
-        ? (usersById.get(devTicket.assignedTo) ?? devTicket.assignedTo)
-        : 'Unknown',
+      devOwner: assignedOwner ?? reportedOwner ?? 'Unknown',
       type: devTicket?.ticketType ?? '',
       status: devTicket?.stageName ?? 'Unknown',
       changes: formatChanges(changeCounts),
-      qaOwner: artRow.testedBy ? (usersById.get(artRow.testedBy) ?? artRow.testedBy) : 'Unassigned',
+      qaOwner: resolveUser(artRow.testedBy) ?? 'Unassigned',
       prId: devTicket?.pullRequests?.[0]?.prId ?? null,
       prUrl: devTicket?.pullRequests?.[0]?.prUrl ?? null,
       channelId: devTicket?.channelId ?? null,

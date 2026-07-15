@@ -138,9 +138,14 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
         .map(v => v.trim())
         .filter(Boolean);
       onSave(arrayValue);
-    } else if (valueToSave && jsonToString(fieldValue) !== valueToSave) {
-      // Wrap single value in array for consistency
-      onSave([valueToSave]);
+    } else if (
+      fieldType !== FormFieldType.MULTI_SELECT &&
+      jsonToString(fieldValue) !== valueToSave
+    ) {
+      // Single-value field: send [] when cleared so the field can be unset, not just edited.
+      // The previous `valueToSave &&` guard treated an empty input as falsy and silently
+      // dropped the clear, so a set value (e.g. the release version) could never be removed.
+      onSave(valueToSave ? [valueToSave] : []);
     }
     setIsEditing(false);
   };

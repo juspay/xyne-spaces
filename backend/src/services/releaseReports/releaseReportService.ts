@@ -129,6 +129,7 @@ export class ReleaseReportService {
           in: [
             ...new Set([
               ...devTickets.map((devTicket) => devTicket.assignedTo).filter(Boolean),
+              ...devTickets.map((devTicket) => devTicket.createdBy).filter(Boolean),
               ...artRows.map((row) => row.testedBy).filter(Boolean),
             ] as string[]),
           ],
@@ -161,6 +162,12 @@ export class ReleaseReportService {
       applications.map((application) => [application.id, application])
     );
     const usersById = new Map(users.map((user) => [user.id, user.name ?? user.email ?? user.id]));
+    /**
+     * Resolve a user id to a display name, falling back to the raw id when the user row
+     * isn't loaded. Returns null only when no id is set, so callers can chain fallbacks.
+     */
+    const resolveUser = (userId: string | null | undefined): string | null =>
+      userId ? (usersById.get(userId) ?? userId) : null;
     const devTicketsById = new Map(devTickets.map((devTicket) => [devTicket.id, devTicket]));
 
     const mappedChanges: ReleaseReportChange[] = releaseChanges.map((change) => {
@@ -220,21 +227,21 @@ export class ReleaseReportService {
       const devTicket = devTicketsById.get(artRow.ticketId);
       const ticketXyneId = devTicket?.xyneId ?? artRow.ticketId;
       const counts = countsByDevTicket.get(ticketXyneId);
+      // Dev owner precedence: assignee -> creator (reporter) -> 'Unknown'.
+      // Only 'Unknown' when neither the assignee nor the creator resolves to a user.
+      const assignedOwner = resolveUser(devTicket?.assignedTo);
+      const reportedOwner = resolveUser(devTicket?.createdBy);
       reportDevTickets.push({
         ticketId: ticketXyneId,
         title: devTicket?.title ?? artRow.ticketId,
-        devOwner: devTicket?.assignedTo
-          ? (usersById.get(devTicket.assignedTo) ?? devTicket.assignedTo)
-          : 'Unknown',
+        devOwner: assignedOwner ?? reportedOwner ?? 'Unknown',
         type: devTicket?.ticketType ?? '',
         status: devTicket?.stageName ?? 'Unknown',
         changes: formatChanges(
           counts?.environmentVariables.size ?? 0,
           counts?.migrationFiles.size ?? 0
         ),
-        qaOwner: artRow.testedBy
-          ? (usersById.get(artRow.testedBy) ?? artRow.testedBy)
-          : 'Unassigned',
+        qaOwner: resolveUser(artRow.testedBy) ?? 'Unassigned',
         prUrl: prUrlByTicketId.get(artRow.ticketId) ?? null,
       });
     }

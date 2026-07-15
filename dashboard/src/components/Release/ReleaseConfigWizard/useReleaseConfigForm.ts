@@ -42,14 +42,12 @@ function initApplications(config: ExistingReleaseConfig | undefined): Applicatio
 
 interface UseReleaseConfigFormOptions {
   projectId: string;
-  projectName: string;
   existingConfig: ExistingReleaseConfig | undefined;
   onSave: (mainBoard: { id: string; name: string }) => void;
 }
 
 export function useReleaseConfigForm({
   projectId,
-  projectName,
   existingConfig,
   onSave,
 }: UseReleaseConfigFormOptions) {
@@ -103,14 +101,14 @@ export function useReleaseConfigForm({
   }, [existingConfig, channels, selectedChannel]);
 
   // Existing groups keep their persisted names; only new groups use the
-  // project-qualified naming convention.
+  // repository-based naming convention.
   useEffect(() => {
     if (existingConfig) {
       setMainBoardName(existingConfig.mainBoardName);
       return;
     }
-    setMainBoardName(buildMainReleaseBoardName(sharedRepoUrl, projectName));
-  }, [existingConfig, projectName, sharedRepoUrl]);
+    setMainBoardName(buildMainReleaseBoardName(sharedRepoUrl));
+  }, [existingConfig, sharedRepoUrl]);
 
   // ─── Step navigation ────────────────────────────────────────────────────────
 
@@ -178,7 +176,7 @@ export function useReleaseConfigForm({
       return;
     }
     if (!mainBoardName.trim()) {
-      toast.error('Repository and project names must produce a valid release board name');
+      toast.error('Repository name must produce a valid release board name');
       return;
     }
     if (validApps.some(app => !app.regex.trim())) {
@@ -198,7 +196,8 @@ export function useReleaseConfigForm({
       const applicationsData = validApps.map(app => ({
         id: app.id,
         boardId: app.boardId,
-        boardName: app.boardName.trim() || buildApplicationReleaseBoardName(app.name, projectName),
+        boardName:
+          app.boardName.trim() || buildApplicationReleaseBoardName(sharedRepoUrl, app.name),
         name: app.name,
         regex: app.regex,
         repoUrl: sharedRepoUrl,
@@ -207,7 +206,7 @@ export function useReleaseConfigForm({
         migrationPaths: csvToArray(app.migrationPaths),
       }));
       if (applicationsData.some(app => !app.boardName.trim())) {
-        throw new Error('Application and project names must produce valid release board names');
+        throw new Error('Repository and application names must produce valid release board names');
       }
 
       const result = zero.mutate(
@@ -239,7 +238,6 @@ export function useReleaseConfigForm({
     existingConfig,
     selectedChannel,
     projectId,
-    projectName,
     mainBoardId,
     mainBoardName,
     vcsProvider,

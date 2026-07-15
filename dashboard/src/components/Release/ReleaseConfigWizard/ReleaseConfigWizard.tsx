@@ -471,7 +471,6 @@ function buildExistingConfig(
 
 const ReleaseConfigWizardForm = ({
   projectId,
-  projectName,
   mode,
   isOpen,
   existingConfig,
@@ -488,7 +487,6 @@ const ReleaseConfigWizardForm = ({
 
   const form = useReleaseConfigForm({
     projectId,
-    projectName,
     existingConfig,
     onSave: mainBoard => {
       if (isApplicationEdit && selectedApplication) {
@@ -606,7 +604,6 @@ const ReleaseConfigWizardForm = ({
 
 export const ReleaseConfigWizard = ({
   projectId,
-  projectName,
   boardNamesById,
   applications,
   mode,
@@ -646,7 +643,6 @@ export const ReleaseConfigWizard = ({
     return (
       <ReleaseConfigWizardForm
         projectId={projectId}
-        projectName={projectName}
         boardNamesById={boardNamesById}
         mode={mode}
         isOpen={isOpen}
@@ -688,7 +684,6 @@ export const ReleaseConfigWizard = ({
   return (
     <ReleaseConfigWizardForm
       projectId={projectId}
-      projectName={projectName}
       boardNamesById={boardNamesById}
       mode={mode}
       isOpen={isOpen}

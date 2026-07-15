@@ -545,7 +545,6 @@ const ProjectDetailScreen = (): ReactElement => {
       {showReleaseConfigModal && projectId && releaseBoardFlow && (
         <ReleaseConfigWizard
           projectId={projectId}
-          projectName={project.name}
           boardNamesById={boardNamesById}
           applications={applications instanceof Error ? undefined : applications}
           mode={releaseBoardFlow}
