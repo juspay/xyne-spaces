@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-import type { RecordingState, TranscriptEntry } from '../stores/recordingStore';
+import type { RecordingLayout, RecordingState, TranscriptEntry } from '../stores/recordingStore';
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 import { recordingStore as _rawStore } from '../stores/recordingStore';
 
@@ -14,13 +14,18 @@ interface RecordingStoreSnapshot {
 export type RecordingStoreEvent =
   | { type: 'requestAutoStart' }
   | { type: 'requestStop' }
-  | { type: 'startRecording'; sttModel?: 'google' | 'azure' | 'deepgram' }
+  | {
+      type: 'startRecording';
+      sttModel?: 'google' | 'azure' | 'deepgram';
+      defaultLayout?: RecordingLayout;
+    }
   | {
       type: 'recordingStarted';
       room: unknown;
       externalId: string;
       channelId: string;
       startTime: number;
+      defaultLayout?: RecordingLayout;
     }
   | { type: 'pauseRecording' }
   | { type: 'resumeRecording' }
@@ -30,7 +35,10 @@ export type RecordingStoreEvent =
   | { type: 'reset' }
   | { type: 'addTranscript'; entry: RecordingState['transcripts'][number] }
   | { type: 'clearTranscripts' }
-  | { type: 'setNotesCanvas'; canvasId: string };
+  | { type: 'setNotesCanvas'; canvasId: string; title?: string }
+  | { type: 'setNotesCanvasTitle'; title: string }
+  | { type: 'setActiveLayout'; layout: RecordingLayout }
+  | { type: 'setTranscriptMinimized'; isMinimized: boolean };
 
 interface TypedRecordingStore {
   subscribe: (cb: () => void) => { unsubscribe: () => void };

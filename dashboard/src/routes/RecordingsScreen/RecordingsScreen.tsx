@@ -16,7 +16,7 @@ import { recordingService } from '../../services/Recording/recordingService';
 import { canvasService } from '../../services/Canvas/canvasService';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
-import { Mic, Clock, FileText, Loader2, AlertCircle, ChevronDown } from 'lucide-react';
+import { Mic, Clock, FileText, Loader2, AlertCircle, ChevronDown, Layers } from 'lucide-react';
 import { ConnectionState } from 'livekit-client';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -25,6 +25,7 @@ import {
   useTranscriptStream,
 } from '../../hooks/useRecordingStore';
 import { RecordingControlBar } from './components/RecordingControlBar';
+import { RecordingWorkspaceHeader } from './components/RecordingWorkspaceHeader';
 import { ActiveRecordingView } from './components/ActiveRecordingView';
 import { RecordingCanvasPane } from './components/RecordingCanvasPane';
 import { MinimizedTranscriptView } from './components/MinimizedTranscriptView';
@@ -52,6 +53,69 @@ import {
   RecordingReconnectingOverlay,
   RecordingConnectionWarningModal,
 } from './components/RecordingConnectionStatus';
+import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
+import { DEFAULT_NOTES_TITLE } from '../../stores/recordingStore';
+
+/** Loading skeleton that mimics RecordingCanvasPane structure */
+const CanvasPaneSkeleton = (): ReactElement => (
+  <div className='flex flex-col h-full overflow-hidden bg-secondary/50'>
+    {/* Skeleton header - matches RecordingCanvasPane header */}
+    <div className='flex-none flex items-center justify-between pt-3 pb-2 px-5'>
+      <div className='flex items-center gap-1.5 min-w-0'>
+        <div className='size-4 rounded bg-muted animate-pulse' />
+        <div className='h-4 w-28 rounded bg-muted animate-pulse' />
+        <div className='h-3 w-16 rounded bg-muted/60 animate-pulse' />
+      </div>
+    </div>
+    {/* Skeleton editor - matches RecordingCanvasPane editor wrapper */}
+    <div className='flex-1 min-h-0 overflow-hidden flex justify-center px-4'>
+      <div className='w-full max-w-5xl flex flex-col'>
+        <div className='flex-1 min-h-0 overflow-auto bg-card flex flex-col rounded-t-xl border border-border p-6 space-y-4'>
+          <div className='h-4 w-3/4 rounded bg-muted animate-pulse' />
+          <div className='h-4 w-full rounded bg-muted/80 animate-pulse' />
+          <div className='h-4 w-5/6 rounded bg-muted/60 animate-pulse' />
+          <div className='h-4 w-2/3 rounded bg-muted/40 animate-pulse' />
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+/** Fallback UI when canvas creation fails or hasn't started */
+const CanvasCreationFallback = ({
+  onRetry,
+  onSwitchToTranscript,
+}: {
+  onRetry: () => void;
+  onSwitchToTranscript: () => void;
+}): ReactElement => (
+  <div className='flex flex-col h-full overflow-hidden bg-secondary/50'>
+    <div className='flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center'>
+      <div className='flex flex-col items-center gap-2'>
+        <Layers className='size-10 text-muted-foreground/50' />
+        <p className='text-sm text-muted-foreground'>Unable to create notes canvas</p>
+      </div>
+      <div className='flex items-center gap-2'>
+        <button
+          onClick={onRetry}
+          className='px-4 py-2 text-sm font-medium rounded-lg bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 transition-colors'
+          data-track-category='RecordingsScreen'
+          data-track-name='retry_create_canvas'
+        >
+          Try Again
+        </button>
+        <button
+          onClick={onSwitchToTranscript}
+          className='px-4 py-2 text-sm font-medium rounded-lg border border-border bg-background text-foreground hover:bg-muted transition-colors'
+          data-track-category='RecordingsScreen'
+          data-track-name='switch_to_transcript_only'
+        >
+          Use Transcript Only
+        </button>
+      </div>
+    </div>
+  </div>
+);
 
 const MAX_ASK_AI_SELECTION = 5;
 
@@ -67,7 +131,6 @@ export default function RecordingsScreen(): ReactElement {
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isPreparingAskAI, setIsPreparingAskAI] = useState(false);
-  const [isTranscriptMinimized, setIsTranscriptMinimized] = useState(false);
 
   const navigate = useNavigate();
   const zero = useZero();
@@ -84,10 +147,13 @@ export default function RecordingsScreen(): ReactElement {
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
   const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
   const room = useRecordingStore(ctx => ctx.room);
+  const activeLayout = useRecordingStore(ctx => ctx.activeLayout);
+  const isTranscriptMinimized = useRecordingStore(ctx => ctx.isTranscriptMinimized);
 
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
-  const [isCanvasPaneOpen, setIsCanvasPaneOpen] = useState(true);
-  const [notesCanvasTitle, setNotesCanvasTitle] = useState('Recording Notes');
+  const [canvasCreationFailed, setCanvasCreationFailed] = useState(false);
+
+  const isCreatingCanvasRef = useRef(false);
 
   const hasCanvas = !!notesCanvasId;
 
@@ -96,10 +162,14 @@ export default function RecordingsScreen(): ReactElement {
     recordingStatus === 'paused' ||
     recordingStatus === 'starting';
 
-  // Reset to maximized transcript view whenever a new recording becomes active
+  // Reset to maximized transcript view only when a NEW recording becomes active
+  // (i.e., when isActive transitions from false to true), not on every mount
+  const prevIsActiveRef = useRef(isActive);
   useEffect(() => {
-    if (isActive) {
-      setIsTranscriptMinimized(false);
+    const wasActive = prevIsActiveRef.current;
+    prevIsActiveRef.current = isActive;
+    if (isActive && !wasActive) {
+      sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: false });
     }
   }, [isActive]);
 
@@ -120,8 +190,9 @@ export default function RecordingsScreen(): ReactElement {
   const generateAutoTitle = (): string => generateRecordingTitle(startTime);
 
   const handleStartRecording = (): void => {
+    const defaultLayout = getRecordingDefaultLayout();
     sendRecordingEvent({ type: 'clearTranscripts' });
-    sendRecordingEvent({ type: 'startRecording', sttModel });
+    sendRecordingEvent({ type: 'startRecording', sttModel, defaultLayout });
   };
 
   // Auto-start recording when triggered from the meeting popup
@@ -132,6 +203,18 @@ export default function RecordingsScreen(): ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAutoStart]);
 
+  // auto canvas creation while default tab is notes or split
+  const hasAttemptedAutoCanvasRef = useRef(false);
+
+  // Reset canvas creation flags when recording stops
+  useEffect(() => {
+    if (recordingStatus === 'idle') {
+      hasAttemptedAutoCanvasRef.current = false;
+      isCreatingCanvasRef.current = false;
+      setCanvasCreationFailed(false);
+    }
+  }, [recordingStatus]);
+
   const handlePauseRecording = (): void => {
     sendRecordingEvent({ type: 'pauseRecording' });
   };
@@ -140,19 +223,24 @@ export default function RecordingsScreen(): ReactElement {
     sendRecordingEvent({ type: 'resumeRecording' });
   };
 
-  // Create a collaborative notes canvas for the active recording and open the split view
-  const handleCreateCanvas = async (): Promise<void> => {
-    if (hasCanvas || isCreatingCanvas) return;
+  // Create a collaborative notes canvas for the active recording
+  const handleCreateCanvas = async (forceSplitView = false): Promise<void> => {
+    if (hasCanvas || isCreatingCanvasRef.current) return;
+    isCreatingCanvasRef.current = true;
     setIsCreatingCanvas(true);
+    setCanvasCreationFailed(false);
     try {
       const canvasId = uuidv4();
       await canvasService.createCollaborativeCanvas({
         id: canvasId,
-        title: notesCanvasTitle,
+        title: DEFAULT_NOTES_TITLE,
         ...(channelId ? { channelId } : {}),
       });
-      sendRecordingEvent({ type: 'setNotesCanvas', canvasId });
-      setIsCanvasPaneOpen(true);
+      sendRecordingEvent({ type: 'setNotesCanvas', canvasId, title: DEFAULT_NOTES_TITLE });
+      // Only force split view when user manually clicks "Create Notes" button
+      if (forceSplitView) {
+        sendRecordingEvent({ type: 'setActiveLayout', layout: 'split' });
+      }
       // Persist the link on the call now; the thread post happens in the summary pipeline
       if (externalId) {
         try {
@@ -176,15 +264,34 @@ export default function RecordingsScreen(): ReactElement {
         }
       }
     } catch (err) {
+      setCanvasCreationFailed(true);
       logger.error(LoggerEvent.API_CALL_FAILED, {
         message: 'Failed to create notes canvas',
         error: err instanceof Error ? err.message : String(err),
       });
       toast.error('Failed to create notes canvas. Please try again.');
     } finally {
+      isCreatingCanvasRef.current = false;
       setIsCreatingCanvas(false);
     }
   };
+
+  // Auto-create canvas when recording starts if this session's layout is split/notes
+  useEffect(() => {
+    // Only proceed when recording has just started
+    if (recordingStatus !== 'recording') return;
+    // Don't auto-create if we've already attempted for this session
+    if (hasAttemptedAutoCanvasRef.current) return;
+    // Don't auto-create if canvas already exists or is being created
+    if (hasCanvas || isCreatingCanvas) return;
+
+    if (activeLayout === 'split' || activeLayout === 'notes') {
+      hasAttemptedAutoCanvasRef.current = true;
+      // Set creating state early so skeleton shows immediately on next render
+      setIsCreatingCanvas(true);
+      void handleCreateCanvas();
+    }
+  }, [recordingStatus, activeLayout, hasCanvas, isCreatingCanvas]);
 
   const sttModelLabels = STT_MODEL_LABELS;
 
@@ -221,9 +328,14 @@ export default function RecordingsScreen(): ReactElement {
   const handleSaveTitle = async (title: string): Promise<void> => {
     setSavingTitle(true);
     try {
-      if (lastExternalIdRef.current) {
-        await recordingService.updateRecordingTitle(lastExternalIdRef.current, title);
+      if (!lastExternalIdRef.current) {
+        // No recording ID available - close modal and warn user
+        setShowTitleModal(false);
+        sendRecordingEvent({ type: 'clearTranscripts' });
+        toast.warning('Recording saved without title - no recording ID available');
+        return;
       }
+      await recordingService.updateRecordingTitle(lastExternalIdRef.current, title);
       setShowTitleModal(false);
       sendRecordingEvent({ type: 'clearTranscripts' });
       toast.success('Recording saved', { description: title });
@@ -346,8 +458,8 @@ export default function RecordingsScreen(): ReactElement {
       <div className='flex items-center justify-center h-full'>
         <div className='flex flex-col items-center gap-3 max-w-md text-center'>
           <AlertCircle className='w-12 h-12 text-red-500' />
-          <h3 className='text-lg font-semibold text-foreground dark:text-gray-100'>Error</h3>
-          <p className='text-sm text-muted-foreground dark:text-muted-foreground'>{error}</p>
+          <h3 className='text-lg font-semibold text-foreground '>Error</h3>
+          <p className='text-sm text-muted-foreground '>{error}</p>
           <button
             onClick={() => setError(null)}
             className='mt-4 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors'
@@ -378,23 +490,19 @@ export default function RecordingsScreen(): ReactElement {
             {/* Header */}
             <div className='mb-8'>
               <div className='flex items-center justify-between mb-2'>
-                <h1 className='text-2xl font-bold text-foreground dark:text-gray-100'>
-                  Recordings
-                </h1>
+                <h1 className='text-2xl font-bold text-foreground '>Recordings</h1>
 
                 {/* STT Model Picker */}
                 <div className='relative'>
                   <button
                     onClick={() => !isActive && setShowSttPicker(!showSttPicker)}
                     disabled={isActive}
-                    className='flex items-center gap-2 px-3 py-1.5 text-sm bg-background dark:bg-gray-800 border border-border dark:border-gray-700 rounded-lg hover:bg-muted dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                    className='flex items-center gap-2 px-3 py-1.5 text-sm bg-background border border-border rounded-lg hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                     data-track-category='RecordingsScreen'
                     data-track-name='open_stt_picker'
                   >
-                    <span className='text-muted-foreground dark:text-muted-foreground'>STT:</span>
-                    <span className='font-medium text-foreground dark:text-gray-100'>
-                      {sttModelLabels[sttModel]}
-                    </span>
+                    <span className='text-muted-foreground'>STT:</span>
+                    <span className='font-medium text-foreground'>{sttModelLabels[sttModel]}</span>
                     <ChevronDown className='w-4 h-4 text-muted-foreground' />
                   </button>
 
@@ -409,7 +517,7 @@ export default function RecordingsScreen(): ReactElement {
                         data-track-category='RecordingsScreen'
                         data-track-name='close_stt_picker'
                       />
-                      <div className='absolute right-0 top-full mt-1 w-40 bg-background dark:bg-gray-800 rounded-lg shadow-lg border border-border dark:border-gray-700 py-1 z-50'>
+                      <div className='absolute right-0 top-full mt-1 w-40 bg-background rounded-lg shadow-lg border border-border py-1 z-50'>
                         {(['google', 'azure', 'deepgram'] as const).map(model => (
                           <button
                             key={model}
@@ -417,22 +525,20 @@ export default function RecordingsScreen(): ReactElement {
                               setSttModel(model);
                               setShowSttPicker(false);
                             }}
-                            className='w-full px-4 py-2 text-left text-sm hover:bg-muted dark:hover:bg-gray-700 flex items-center justify-between'
+                            className='w-full px-4 py-2 text-left text-sm hover:bg-muted flex items-center justify-between'
                             data-track-category='RecordingsScreen'
                             data-track-name={`select_stt_model_${model}`}
                           >
                             <span
                               className={
                                 sttModel === model
-                                  ? 'font-medium text-blue-600 dark:text-blue-400'
-                                  : 'text-foreground dark:text-gray-100'
+                                  ? 'font-medium text-blue-600 '
+                                  : 'text-foreground '
                               }
                             >
                               {sttModelLabels[model]}
                             </span>
-                            {sttModel === model && (
-                              <span className='text-blue-600 dark:text-blue-400'>✓</span>
-                            )}
+                            {sttModel === model && <span className='text-blue-600'>✓</span>}
                           </button>
                         ))}
                       </div>
@@ -440,7 +546,7 @@ export default function RecordingsScreen(): ReactElement {
                   )}
                 </div>
               </div>
-              <p className='text-sm text-muted-foreground dark:text-muted-foreground'>
+              <p className='text-sm text-muted-foreground '>
                 Your audio recordings with automatic transcription
               </p>
             </div>
@@ -464,13 +570,11 @@ export default function RecordingsScreen(): ReactElement {
             {/* Empty State */}
             {recordings.length === 0 ? (
               <div className='flex flex-col items-center justify-center py-20 text-center'>
-                <div className='w-16 h-16 rounded-full bg-muted dark:bg-gray-800 flex items-center justify-center mb-4'>
+                <div className='w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4'>
                   <Mic className='w-8 h-8 text-muted-foreground' />
                 </div>
-                <h3 className='text-lg font-semibold text-foreground dark:text-gray-100 mb-2'>
-                  No recordings yet
-                </h3>
-                <p className='text-sm text-muted-foreground dark:text-muted-foreground max-w-sm'>
+                <h3 className='text-lg font-semibold text-foreground mb-2'>No recordings yet</h3>
+                <p className='text-sm text-muted-foreground max-w-sm'>
                   Tap the record button below to start your first recording with automatic
                   transcription.
                 </p>
@@ -496,7 +600,7 @@ export default function RecordingsScreen(): ReactElement {
                     }}
                     itemContent={(_, recording) => (
                       <div className='pb-3'>
-                        <div className='w-full bg-background dark:bg-gray-800 rounded-lg border border-border dark:border-gray-700 overflow-hidden hover:shadow-md transition-shadow group flex items-center'>
+                        <div className='w-full bg-background rounded-lg border border-border overflow-hidden hover:shadow-md transition-shadow group flex items-center'>
                           {/* Clickable header area → navigate to detail */}
                           <button
                             type='button'
@@ -507,17 +611,17 @@ export default function RecordingsScreen(): ReactElement {
                           >
                             <div className='flex items-start gap-4'>
                               {/* Icon */}
-                              <div className='flex-shrink-0 w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 transition-colors'>
-                                <Mic className='w-5 h-5 text-blue-600 dark:text-blue-400' />
+                              <div className='flex-shrink-0 w-10 h-10 rounded-full bg-blue-50  flex items-center justify-center group-hover:bg-blue-100  transition-colors'>
+                                <Mic className='w-5 h-5 text-blue-600 ' />
                               </div>
 
                               {/* Content */}
                               <div className='flex-1 min-w-0'>
-                                <h3 className='font-semibold text-foreground dark:text-gray-100 mb-1 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
+                                <h3 className='font-semibold text-foreground mb-1 truncate group-hover:text-blue-600  transition-colors'>
                                   {recording.title ?? 'Untitled Recording'}
                                 </h3>
 
-                                <div className='flex items-center gap-4 text-xs text-muted-foreground dark:text-muted-foreground mb-2'>
+                                <div className='flex items-center gap-4 text-xs text-muted-foreground  mb-2'>
                                   <div className='flex items-center gap-1'>
                                     <Clock className='w-3 h-3' />
                                     <span>
@@ -538,18 +642,18 @@ export default function RecordingsScreen(): ReactElement {
                                 {/* Metadata badges */}
                                 <div className='flex items-center gap-2 flex-wrap'>
                                   {!!recording.transcript && (
-                                    <span className='inline-flex items-center gap-1 px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-md text-xs'>
+                                    <span className='inline-flex items-center gap-1 px-2 py-1 bg-green-50  text-green-700  rounded-md text-xs'>
                                       <FileText className='w-3 h-3' />
                                       Transcript
                                     </span>
                                   )}
                                   {!!recording.aiSummary && (
-                                    <span className='inline-flex items-center gap-1 px-2 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 rounded-md text-xs'>
+                                    <span className='inline-flex items-center gap-1 px-2 py-1 bg-purple-50  text-purple-700  rounded-md text-xs'>
                                       AI Summary
                                     </span>
                                   )}
                                   {!recording.endedAt && (
-                                    <span className='inline-flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-md text-xs'>
+                                    <span className='inline-flex items-center gap-1 px-2 py-1 bg-blue-50  text-blue-700  rounded-md text-xs'>
                                       <div className='w-2 h-2 bg-blue-500 rounded-full animate-pulse' />
                                       Recording
                                     </span>
@@ -601,47 +705,119 @@ export default function RecordingsScreen(): ReactElement {
         {/* ─── Active Recording Workspace (overlay when active & not minimized) ───── */}
         {isActive && !isTranscriptMinimized && (
           <div className='absolute inset-0 z-10 bg-background flex flex-col'>
-            {notesCanvasId && isCanvasPaneOpen ? (
-              /* Split view — only after a notes canvas is created */
-              <PanelGroup direction='horizontal' autoSaveId='recording-split-view'>
-                <Panel defaultSize={50} minSize={30}>
-                  <ActiveRecordingView
-                    transcripts={transcripts}
+            {/* Shared header for all layouts */}
+            <RecordingWorkspaceHeader
+              startTime={startTime}
+              isPaused={recordingStatus === 'paused'}
+              hasCanvas={hasCanvas}
+              activeLayout={activeLayout}
+              isCreatingCanvas={isCreatingCanvas}
+              onCreateCanvas={() => void handleCreateCanvas(true)}
+              onLayoutChange={layout => sendRecordingEvent({ type: 'setActiveLayout', layout })}
+              onMinimize={() =>
+                sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: true })
+              }
+            />
+
+            {/* Layout: transcript | split | notes */}
+            <div className='flex-1 min-h-0 flex flex-col'>
+              {activeLayout === 'split' && notesCanvasId ? (
+                /* Split view — transcript + notes side-by-side */
+                <PanelGroup direction='horizontal' autoSaveId='recording-split-v3'>
+                  <Panel defaultSize={40} minSize={32}>
+                    <ActiveRecordingView
+                      transcripts={transcripts}
+                      startTime={startTime}
+                      isPaused={recordingStatus === 'paused'}
+                    />
+                  </Panel>
+                  <PanelResizeHandle className='group relative w-2 flex-shrink-0 bg-border/40 transition-colors hover:bg-border'>
+                    <div className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/50' />
+                    <div className='absolute left-1/2 top-1/2 h-8 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/30 opacity-80 transition-colors group-hover:bg-primary/50' />
+                  </PanelResizeHandle>
+                  <Panel defaultSize={60} minSize={40}>
+                    <RecordingCanvasPane channelId={channelId} notesCanvasId={notesCanvasId} />
+                  </Panel>
+                </PanelGroup>
+              ) : activeLayout === 'split' && !hasCanvas ? (
+                /* Split view loading — show transcript + skeleton/fallback for notes */
+                <PanelGroup direction='horizontal' autoSaveId='recording-split-v3'>
+                  <Panel defaultSize={40} minSize={25}>
+                    <ActiveRecordingView
+                      transcripts={transcripts}
+                      startTime={startTime}
+                      isPaused={recordingStatus === 'paused'}
+                    />
+                  </Panel>
+                  <PanelResizeHandle className='group relative w-2 flex-shrink-0 bg-border/40 transition-colors hover:bg-border'>
+                    <div className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/50' />
+                    <div className='absolute left-1/2 top-1/2 h-8 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/30 opacity-80 transition-colors group-hover:bg-primary/50' />
+                  </PanelResizeHandle>
+                  <Panel defaultSize={60} minSize={25}>
+                    {canvasCreationFailed ? (
+                      <CanvasCreationFallback
+                        onRetry={() => void handleCreateCanvas()}
+                        onSwitchToTranscript={() =>
+                          sendRecordingEvent({ type: 'setActiveLayout', layout: 'transcript' })
+                        }
+                      />
+                    ) : (
+                      <CanvasPaneSkeleton />
+                    )}
+                  </Panel>
+                </PanelGroup>
+              ) : activeLayout === 'notes' && notesCanvasId ? (
+                /* Notes-only view — canvas with transcript preview at bottom */
+                <div className='relative flex-1 flex flex-col min-h-0'>
+                  <div className='flex-1 min-h-0'>
+                    <RecordingCanvasPane channelId={channelId} notesCanvasId={notesCanvasId} />
+                  </div>
+                  {/* Transcript preview at bottom of notes view */}
+                  <MinimizedTranscriptView
+                    status={recordingStatus}
                     startTime={startTime}
-                    isPaused={recordingStatus === 'paused'}
-                    hasCanvas
-                    isCanvasPaneOpen
-                    onMinimize={() => setIsTranscriptMinimized(true)}
+                    transcripts={transcripts}
+                    onMaximize={() =>
+                      sendRecordingEvent({ type: 'setActiveLayout', layout: 'transcript' })
+                    }
+                    showScrim={false}
                   />
-                </Panel>
-                <PanelResizeHandle className='group relative w-3 flex-shrink-0 bg-muted/40 transition-colors hover:bg-muted dark:bg-gray-800/60 dark:hover:bg-gray-700'>
-                  <div className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-blue-400 dark:bg-gray-700 dark:group-hover:bg-blue-400' />
-                  <div className='absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/30 opacity-80 transition-colors group-hover:bg-blue-400 dark:bg-gray-500' />
-                </PanelResizeHandle>
-                <Panel defaultSize={50} minSize={25}>
-                  <RecordingCanvasPane
-                    channelId={channelId}
-                    notesCanvasId={notesCanvasId}
-                    title={notesCanvasTitle}
-                    onTitleChange={setNotesCanvasTitle}
-                    onClose={() => setIsCanvasPaneOpen(false)}
+                </div>
+              ) : activeLayout === 'notes' && !hasCanvas ? (
+                /* Notes view loading — show skeleton/fallback with transcript preview */
+                <div className='relative flex-1 flex flex-col min-h-0'>
+                  <div className='flex-1 min-h-0'>
+                    {canvasCreationFailed ? (
+                      <CanvasCreationFallback
+                        onRetry={() => void handleCreateCanvas()}
+                        onSwitchToTranscript={() =>
+                          sendRecordingEvent({ type: 'setActiveLayout', layout: 'transcript' })
+                        }
+                      />
+                    ) : (
+                      <CanvasPaneSkeleton />
+                    )}
+                  </div>
+                  {/* Transcript preview at bottom */}
+                  <MinimizedTranscriptView
+                    status={recordingStatus}
+                    startTime={startTime}
+                    transcripts={transcripts}
+                    onMaximize={() =>
+                      sendRecordingEvent({ type: 'setActiveLayout', layout: 'transcript' })
+                    }
+                    showScrim={false}
                   />
-                </Panel>
-              </PanelGroup>
-            ) : (
-              /* Default — full-width transcript with a "Create Canvas" button in the header */
-              <ActiveRecordingView
-                transcripts={transcripts}
-                startTime={startTime}
-                isPaused={recordingStatus === 'paused'}
-                hasCanvas={hasCanvas}
-                isCanvasPaneOpen={false}
-                isCreatingCanvas={isCreatingCanvas}
-                onCreateCanvas={() => void handleCreateCanvas()}
-                onOpenCanvas={() => setIsCanvasPaneOpen(true)}
-                onMinimize={() => setIsTranscriptMinimized(true)}
-              />
-            )}
+                </div>
+              ) : (
+                /* Transcript-only view — full-width transcript */
+                <ActiveRecordingView
+                  transcripts={transcripts}
+                  startTime={startTime}
+                  isPaused={recordingStatus === 'paused'}
+                />
+              )}
+            </div>
 
             {/* Reconnecting overlay — mirrors CallStateTransition style */}
             {roomConnectionState === ConnectionState.Reconnecting && (
@@ -657,7 +833,9 @@ export default function RecordingsScreen(): ReactElement {
               status={recordingStatus}
               startTime={startTime}
               transcripts={transcripts}
-              onMaximize={() => setIsTranscriptMinimized(false)}
+              onMaximize={() =>
+                sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: false })
+              }
             />
           </div>
         )}

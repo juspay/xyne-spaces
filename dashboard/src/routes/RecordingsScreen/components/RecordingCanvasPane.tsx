@@ -1,67 +1,65 @@
 /**
- * RecordingCanvasPane - Right pane of the recording split view.
+ * RecordingCanvasPane - Notes panel for the recording workspace.
  * Hosts a live collaborative canvas for notes taken during an active recording.
- * Only mounted after the user creates a canvas (see RecordingsScreen split layout).
+ * The main header (view switcher) is handled by RecordingWorkspaceHeader.
  */
 
 import { KeyboardEvent, ReactElement, useCallback, useEffect, useRef, useState } from 'react';
-import { FileText, Loader2, X } from 'lucide-react';
+import { Layers, Loader2 } from 'lucide-react';
 import { CollaborativeCanvasEditor } from '../../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { useRecordingStore, sendRecordingEvent } from '../../../hooks/useRecordingStore';
 import { logger, Event as LoggerEvent } from '../../../utils/logger';
 import { toast } from 'sonner';
+import { cn } from '../../../utils/classNames';
+import { DEFAULT_NOTES_TITLE } from '../../../stores/recordingStore';
 
 interface RecordingCanvasPaneProps {
   channelId: string | null;
   notesCanvasId: string;
-  title: string;
-  onTitleChange: (title: string) => void;
-  onClose?: () => void;
 }
 
 export function RecordingCanvasPane({
   channelId,
   notesCanvasId,
-  title,
-  onTitleChange,
-  onClose,
 }: RecordingCanvasPaneProps): ReactElement {
   const z = useZero();
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [draftTitle, setDraftTitle] = useState(title);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
-  const didCancelTitleEditRef = useRef(false);
+  // Track if Escape was pressed to skip save on blur
+  const skipBlurSaveRef = useRef(false);
+
+  const canvasTitle = useRecordingStore(ctx => ctx.notesCanvasTitle);
+
+  const [draftTitle, setDraftTitle] = useState(canvasTitle);
 
   const handleFileUpload = useCallback(
     (file: File): Promise<string> => canvasService.uploadCanvasFile(notesCanvasId, file),
     [notesCanvasId],
   );
 
+  // Sync draft title when store title changes
   useEffect(() => {
-    setDraftTitle(title);
-  }, [title]);
+    setDraftTitle(canvasTitle);
+  }, [canvasTitle]);
 
+  // Focus and select title input when editing starts
   useEffect(() => {
     if (isEditingTitle) {
-      didCancelTitleEditRef.current = false;
       titleInputRef.current?.focus();
       titleInputRef.current?.select();
     }
-
-    return () => {
-      didCancelTitleEditRef.current = false;
-    };
   }, [isEditingTitle]);
 
   const saveTitle = useCallback(async (): Promise<void> => {
     if (isSavingTitle) return;
 
-    const nextTitle = draftTitle.trim() || 'Untitled Notes';
-    if (nextTitle === title) {
-      setDraftTitle(title);
+    const nextTitle = draftTitle.trim() || DEFAULT_NOTES_TITLE;
+    if (nextTitle === canvasTitle) {
+      setDraftTitle(canvasTitle);
       setIsEditingTitle(false);
       return;
     }
@@ -80,7 +78,8 @@ export function RecordingCanvasPane({
         throw new Error(serverResult.error?.message ?? 'Failed to update notes canvas title');
       }
 
-      onTitleChange(nextTitle);
+      // Update app state in recording store
+      sendRecordingEvent({ type: 'setNotesCanvasTitle', title: nextTitle });
       setDraftTitle(nextTitle);
       setIsEditingTitle(false);
     } catch (error) {
@@ -89,18 +88,18 @@ export function RecordingCanvasPane({
         canvasId: notesCanvasId,
         error: error instanceof Error ? error.message : String(error),
       });
-      setDraftTitle(title);
+      setDraftTitle(canvasTitle);
       toast.error('Failed to update notes title. Please try again.');
     } finally {
       setIsSavingTitle(false);
     }
-  }, [draftTitle, isSavingTitle, notesCanvasId, onTitleChange, title, z]);
+  }, [draftTitle, canvasTitle, isSavingTitle, notesCanvasId, z]);
 
   const cancelTitleEdit = useCallback((): void => {
-    didCancelTitleEditRef.current = true;
-    setDraftTitle(title);
+    skipBlurSaveRef.current = true;
+    setDraftTitle(canvasTitle);
     setIsEditingTitle(false);
-  }, [title]);
+  }, [canvasTitle]);
 
   const handleTitleKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === 'Enter') {
@@ -113,76 +112,68 @@ export function RecordingCanvasPane({
   };
 
   return (
-    <div className='flex flex-col h-full overflow-hidden'>
-      {/* Header — mirrors ActiveRecordingView's header rhythm */}
-      <div className='h-[72px] px-6 border-b border-input dark:border-gray-700 flex items-center justify-between gap-3'>
-        <div className='flex items-center gap-2 min-w-0'>
-          <FileText className='w-4 h-4 text-muted-foreground flex-shrink-0' />
-          {isEditingTitle ? (
-            <>
-              <input
-                ref={titleInputRef}
-                value={draftTitle}
-                onChange={event => setDraftTitle(event.target.value)}
-                onKeyDown={handleTitleKeyDown}
-                onBlur={() => {
-                  if (didCancelTitleEditRef.current) {
-                    didCancelTitleEditRef.current = false;
-                    return;
-                  }
-                  void saveTitle();
-                }}
-                disabled={isSavingTitle}
-                className='h-8 min-w-0 max-w-full rounded-md border border-border bg-background px-2 pr-8 text-sm font-medium text-foreground outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 disabled:opacity-70 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100'
-                aria-label='Edit notes title'
-                data-track-category='RecordingsScreen'
-                data-track-name='edit_notes_canvas_title_input'
-              />
-              {isSavingTitle && (
-                <Loader2 className='-ml-7 h-4 w-4 flex-shrink-0 animate-spin text-muted-foreground' />
-              )}
-            </>
-          ) : (
-            <button
-              type='button'
-              onClick={() => {
-                didCancelTitleEditRef.current = false;
-                setIsEditingTitle(true);
+    <div className='flex flex-col h-full overflow-hidden bg-secondary/50'>
+      {/* Notes Sub-header */}
+      <div className='flex-none flex items-center justify-between pt-3 pb-2 px-5'>
+        <div className='flex items-center gap-1.5 min-w-0'>
+          <Layers className='size-4 text-muted-foreground flex-shrink-0' />
+          <div className='relative flex items-center gap-2'>
+            <input
+              ref={titleInputRef}
+              value={draftTitle}
+              onChange={event => setDraftTitle(event.target.value)}
+              onKeyDown={handleTitleKeyDown}
+              onFocus={() => setIsEditingTitle(true)}
+              onBlur={() => {
+                if (skipBlurSaveRef.current) {
+                  skipBlurSaveRef.current = false;
+                  return;
+                }
+                void saveTitle();
               }}
-              className='min-w-0 truncate rounded-md px-1 py-1 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted dark:text-gray-100 dark:hover:bg-gray-700'
-              title='Edit notes title'
+              disabled={isSavingTitle}
+              style={{
+                width: `calc(${draftTitle.length}ch * 0.75)`,
+                minWidth: '4ch',
+                maxWidth: '300px',
+              }}
+              className={cn(
+                'h-6 rounded text-sm font-semibold text-foreground',
+                'outline-none transition-colors duration-150',
+                isEditingTitle
+                  ? 'bg-accent text-foreground'
+                  : 'bg-transparent hover:bg-muted/50 cursor-pointer',
+                'disabled:opacity-70 disabled:cursor-not-allowed',
+              )}
+              aria-label='Edit notes title'
               data-track-category='RecordingsScreen'
-              data-track-name='edit_notes_canvas_title'
-            >
-              {title}
-            </button>
-          )}
+              data-track-name='edit_notes_canvas_title_input'
+            />
+            {isSavingTitle && (
+              <Loader2 className='size-3 flex-shrink-0 animate-spin text-muted-foreground' />
+            )}
+            <span className='text-xs text-muted-foreground whitespace-nowrap'>
+              {isSavingTitle ? 'Saving...' : canvasTitle !== DEFAULT_NOTES_TITLE ? 'Edited' : null}
+            </span>
+          </div>
         </div>
-        {onClose && (
-          <button
-            type='button'
-            onClick={onClose}
-            className='flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground dark:hover:bg-gray-700'
-            aria-label='Close canvas'
-            title='Close canvas'
-            data-track-category='RecordingsScreen'
-            data-track-name='close_notes_canvas'
-          >
-            <X className='h-4 w-4' />
-          </button>
-        )}
       </div>
 
-      {/* Collaborative editor — synced via Y-Sweet CRDT */}
-      <div className='flex-1 overflow-auto'>
-        <CollaborativeCanvasEditor
-          canvasId={notesCanvasId}
-          channelId={channelId ?? undefined}
-          editable
-          autoFocus
-          placeholder='Jot down notes while you record…'
-          onFileUpload={handleFileUpload}
-        />
+      {/* Collaborative editor — wrapped in a centered container */}
+      <div className='flex-1 min-h-0 overflow-hidden flex justify-center px-4'>
+        <div className='w-full max-w-5xl flex flex-col'>
+          {/* Card wrapper — no border/radius to feel like content continues */}
+          <div className='flex-1 min-h-0 overflow-auto bg-card flex flex-col rounded-t-xl border border-border'>
+            <CollaborativeCanvasEditor
+              canvasId={notesCanvasId}
+              channelId={channelId ?? undefined}
+              editable
+              autoFocus
+              placeholder="Type '/' for commands"
+              onFileUpload={handleFileUpload}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -179,7 +179,7 @@ export function RecordingOverlay(): React.ReactElement | null {
   // Title modal state — same pattern as RecordingsScreen
   const [showTitleModal, setShowTitleModal] = useState(false);
   const [savingTitle, setSavingTitle] = useState(false);
-  const [showTranscript, setShowTranscript] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(true);
   const lastExternalIdRef = useRef<string | null>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
 
@@ -389,7 +389,7 @@ export function RecordingOverlay(): React.ReactElement | null {
               {showTranscript ? 'Hide Live Transcript' : 'View Live Transcript'}
             </Button>
             <Button
-              className='w-8 bg-action-primary hover:bg-action-primary/80 text-action-primary-foreground hover:text-accent-foreground transition-colors rounded-lg'
+              className='w-8 bg-action-primary hover:bg-action-primary/80 text-primary-foreground hover:text-primary-foreground transition-colors rounded-lg'
               variant='outline'
               size='sm'
               onClick={() => void navigate('/recordings')}

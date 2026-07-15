@@ -61,6 +61,7 @@ import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationIt
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
 import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
+import { RecordingLayout } from '../../../stores/recordingStore';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const NAV_ITEMS: NavItem[] = [
@@ -463,8 +464,95 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
 );
 
 // ─── Calls ──────────────────────────────────────────────────────────────────
+
+// Visual preview for transcript layout - bullet points with lines
+const TranscriptPreview: FC = () => (
+  <div className='w-32 h-20 flex-shrink-0 rounded-lg bg-muted/60 border border-border p-3 flex flex-col justify-center gap-2'>
+    {/* Line with bullet */}
+    <div className='flex items-center gap-2'>
+      <div className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40 flex-shrink-0' />
+      <div className='h-1.5 w-[85%] rounded-full bg-border' />
+    </div>
+    <div className='flex items-center gap-2'>
+      <div className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40 flex-shrink-0' />
+      <div className='h-1.5 w-[70%] rounded-full bg-border' />
+    </div>
+    <div className='flex items-center gap-2'>
+      <div className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40 flex-shrink-0' />
+      <div className='h-1.5 w-[78%] rounded-full bg-border' />
+    </div>
+    <div className='flex items-center gap-2'>
+      <div className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40 flex-shrink-0' />
+      <div className='h-1.5 w-[60%] rounded-full bg-border' />
+    </div>
+  </div>
+);
+
+// Visual preview for split layout - two panels side by side
+const SplitPreview: FC = () => (
+  <div className='w-32 h-20 flex-shrink-0 rounded-lg bg-muted/60 border border-border p-1.5 flex gap-1.5'>
+    {/* Left panel - transcript lines */}
+    <div className='flex-1 rounded bg-background border border-border/50 p-2 flex flex-col justify-center gap-1.5'>
+      <div className='h-1 w-[90%] rounded-full bg-border' />
+      <div className='h-1 w-3/4 rounded-full bg-border' />
+      <div className='h-1 w-[85%] rounded-full bg-border' />
+      <div className='h-1 w-[65%] rounded-full bg-border' />
+    </div>
+    {/* Right panel - notes with colored header */}
+    <div className='flex-1 rounded bg-background border border-border/50 p-2 flex flex-col gap-1.5'>
+      <div className='h-1.5 w-4/5 rounded-full bg-action-primary' />
+      <div className='h-1 w-[90%] rounded-full bg-border mt-0.5' />
+      <div className='h-1 w-[70%] rounded-full bg-border' />
+      <div className='h-1 w-4/5 rounded-full bg-border' />
+    </div>
+  </div>
+);
+
+// Visual preview for notes layout - single notes panel
+const NotesPreview: FC = () => (
+  <div className='w-32 h-20 flex-shrink-0 rounded-lg bg-muted/60 border border-border p-2.5 flex items-center justify-center'>
+    <div className='w-full h-full rounded bg-background border border-border/50 p-2.5 flex flex-col gap-1.5'>
+      {/* Colored header bar */}
+      <div className='h-1.5 w-3/4 rounded-full bg-action-primary' />
+      {/* Content lines */}
+      <div className='h-1 w-[90%] rounded-full bg-border mt-1' />
+      <div className='h-1 w-[70%] rounded-full bg-border' />
+      <div className='h-1 w-4/5 rounded-full bg-border' />
+      <div className='h-1 w-3/5 rounded-full bg-border' />
+    </div>
+  </div>
+);
+
+interface LayoutOption {
+  value: RecordingLayout;
+  title: string;
+  description: string;
+  Preview: FC;
+}
+
+const LAYOUT_OPTIONS: LayoutOption[] = [
+  {
+    value: 'transcript',
+    title: 'Transcript',
+    description: 'Full-width live transcript',
+    Preview: TranscriptPreview,
+  },
+  {
+    value: 'split',
+    title: 'Split',
+    description: 'Transcript alongside your notes',
+    Preview: SplitPreview,
+  },
+  {
+    value: 'notes',
+    title: 'Notes',
+    description: 'Notes document only',
+    Preview: NotesPreview,
+  },
+];
+
 const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
-  <div className='space-y-4'>
+  <div className='space-y-6'>
     <SectionHeader title='Calls' subtitle='Configure your default call join settings' />
 
     <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
@@ -512,6 +600,55 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         value={state.callScreenShareQuality}
         onChange={state.setCallScreenShareQuality}
       />
+    </div>
+
+    {/* Recording section divider */}
+    <div className='pt-2'>
+      <p id='recording-tab-view-label' className='text-sm font-semibold text-foreground'>
+        Recording tab view
+      </p>
+      <p className='text-xs text-muted-foreground mt-0.5'>
+        Which view opens by default when notes are created during a recording
+      </p>
+    </div>
+
+    {/* Layout options */}
+    <div className='space-y-3' role='radiogroup' aria-labelledby='recording-tab-view-label'>
+      {LAYOUT_OPTIONS.map(option => {
+        const isSelected = state.recordingDefaultLayout === option.value;
+        return (
+          <button
+            key={option.value}
+            type='button'
+            role='radio'
+            aria-checked={isSelected}
+            onClick={() => state.setRecordingDefaultLayout(option.value)}
+            className={cn(
+              'w-full flex items-center gap-4 p-3 rounded-xl border transition-all duration-150',
+              isSelected
+                ? 'border-action-primary bg-action-primary/5'
+                : 'border-border bg-muted/30 hover:bg-muted/50',
+            )}
+            data-track-category='PREFERENCES'
+            data-track-name={`SelectRecordingLayout_${option.value}`}
+          >
+            <option.Preview />
+            <div className='flex-1 text-left min-w-0'>
+              <p className='text-sm font-medium text-foreground'>{option.title}</p>
+              <p className='text-xs text-muted-foreground mt-0.5'>{option.description}</p>
+            </div>
+            {/* Radio indicator */}
+            <div
+              className={cn(
+                'w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors duration-150',
+                isSelected ? 'border-action-primary' : 'border-border',
+              )}
+            >
+              {isSelected && <div className='w-2.5 h-2.5 rounded-full bg-action-primary' />}
+            </div>
+          </button>
+        );
+      })}
     </div>
   </div>
 );
