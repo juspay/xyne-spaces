@@ -10,6 +10,7 @@ export {
     TextStrategy,
     PdfJsStrategy,
     DocxStrategy,
+    SpreadsheetStrategy,
     DoclingStrategy,
 } from "./strategies"
 

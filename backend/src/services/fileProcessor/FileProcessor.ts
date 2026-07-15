@@ -6,6 +6,7 @@ import { BaseStrategy } from "./strategies/BaseStrategy"
 import { TextStrategy } from "./strategies/TextStrategy"
 import { PdfJsStrategy } from "./strategies/PdfJsStrategy"
 import { DocxStrategy } from "./strategies/DocxStrategy"
+import { SpreadsheetStrategy } from "./strategies/SpreadsheetStrategy"
 import { PdfFallbackProcessor } from "./PdfFallbackProcessor"
 import { DoclingService } from "./DoclingService"
 
@@ -77,7 +78,7 @@ export class FileProcessor {
      * Factory method: Load a file from GCS and process it
      * 
      * Auto-detects the parsing strategy based on the file extension.
-     * If Docling is enabled and healthy, tries Docling first before falling back to local strategies.
+     * Parses spreadsheets locally; other formats try Docling before local fallback strategies.
      * Falls back to TextStrategy for unknown extensions.
      * 
      * @param gcsPath - Path to the file in GCS (e.g., "uploads/org123/report.pdf")
@@ -92,6 +93,13 @@ export class FileProcessor {
     ): Promise<ProcessingResult> {
         const storage = getStorageService()
         const buffer = await storage.getFileBuffer(gcsPath)
+
+        // Spreadsheets are already structured data. Parse them locally first so
+        // sheet boundaries, cell coordinates, formulas, and links are stable.
+        if (FileProcessor.isSpreadsheet(gcsPath)) {
+            const processor = new FileProcessor(new SpreadsheetStrategy(strategyConfig))
+            return processor.processBuffer(buffer, vespaDocId)
+        }
 
         // Try Docling first if enabled
         const doclingResult = await FileProcessor.tryDocling(buffer, gcsPath, vespaDocId)
@@ -123,7 +131,7 @@ export class FileProcessor {
     /**
      * Process a buffer with automatic Docling fallback
      * 
-     * First tries Docling if enabled and healthy, then falls back to local strategies.
+     * Parses spreadsheets locally. Other non-PDF formats try Docling before local fallbacks.
      * 
      * @param buffer - File content as Buffer
      * @param vespaDocId - Document ID for Vespa ingestion
@@ -148,6 +156,12 @@ export class FileProcessor {
                 filename,
                 vespaDocId,
             )
+        }
+
+        // Prefer deterministic, coordinate-aware parsing over Docling for Excel.
+        if (FileProcessor.isSpreadsheet(filename, mimeType)) {
+            const processor = new FileProcessor(new SpreadsheetStrategy(config))
+            return processor.processBuffer(buffer, vespaDocId)
         }
 
         // Non-PDF: try Docling first if enabled, then the matching local strategy.
@@ -213,6 +227,9 @@ export class FileProcessor {
                 return new PdfJsStrategy(config)
             case "docx":
                 return new DocxStrategy(config)
+            case "xls":
+            case "xlsx":
+                return new SpreadsheetStrategy(config)
             case "txt":
             case "md":
             case "csv":
@@ -235,6 +252,9 @@ export class FileProcessor {
                 return new PdfJsStrategy(config)
             case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
                 return new DocxStrategy(config)
+            case "application/vnd.ms-excel":
+            case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+                return new SpreadsheetStrategy(config)
             case "text/plain":
             case "text/markdown":
             case "text/csv":
@@ -247,5 +267,15 @@ export class FileProcessor {
                 logger.warn(`[FileProcessor] Unknown MIME type "${mimeType}", defaulting to TextStrategy`)
                 return new TextStrategy(config)
         }
+    }
+
+    private static isSpreadsheet(filename: string, mimeType?: string): boolean {
+        const extension = filename.split(".").pop()?.toLowerCase()
+        return (
+            extension === "xls" ||
+            extension === "xlsx" ||
+            mimeType === "application/vnd.ms-excel" ||
+            mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     }
 }
