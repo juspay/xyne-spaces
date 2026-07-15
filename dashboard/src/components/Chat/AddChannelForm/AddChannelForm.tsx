@@ -10,9 +10,9 @@ import {
   AlertCircle,
   FolderKanban,
   Mail,
-  Users,
-  MessageSquare,
-  Boxes,
+  Mails,
+  MessageSquareMore,
+  Smartphone,
 } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
@@ -64,19 +64,19 @@ const DESK_SOURCES: ReadonlyArray<{
     value: 'DL',
     label: 'Distribution list',
     description: 'Route a DL through the shared mailbox',
-    icon: Users,
+    icon: Mails,
   },
   {
     value: 'SLACK',
     label: 'Slack channel',
     description: 'Connect a Slack channel to create tickets from messages',
-    icon: MessageSquare,
+    icon: MessageSquareMore,
   },
   {
     value: 'APP',
     label: 'Xyne App',
     description: 'Connect an external system through a Xyne App over APIs',
-    icon: Boxes,
+    icon: Smartphone,
   },
 ];
 

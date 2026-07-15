@@ -103,6 +103,7 @@ import { mutators } from '../../zero/mutators';
 import * as Tabs from '@radix-ui/react-tabs';
 import { TicketDetails } from '../../components/Tickets/TicketDetails/TicketDetails';
 import { Button } from '../../components/ui/Button/Button';
+import { Badge } from '../../components/ui/Badge/Badge';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
@@ -1514,6 +1515,23 @@ const SupportScreen = (): ReactElement => {
 
   const renderChannelRow = (c: (typeof sortedEmailChannels)[number]): ReactElement => {
     const isPrivate = c.visibility === ChannelVisibility.PRIVATE;
+    const deskSource =
+      c.type === ChannelType.SLACK
+        ? {
+            label: 'Slack',
+            className:
+              'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-500/20 dark:text-fuchsia-200',
+          }
+        : c.type === ChannelType.APP
+          ? {
+              label: 'App',
+              className:
+                'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
+            }
+          : {
+              label: 'Mailbox',
+              className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+            };
     const isJoined = joinedChannelIds.has(c.id);
     const isExpanded = isJoined && expandedDeskIds.has(c.id);
     const isActive = selectedChannelId === c.id && deskView === 'tickets';
@@ -1582,6 +1600,15 @@ const SupportScreen = (): ReactElement => {
           >
             {c.name?.trim() || 'Unnamed Channel'}
           </span>
+          <Badge
+            variant='secondary'
+            className={cn(
+              'flex-shrink-0 border-transparent px-1.5 py-0 text-[10px] font-medium leading-tight',
+              deskSource.className,
+            )}
+          >
+            {deskSource.label}
+          </Badge>
         </div>
         {isExpanded && (
           <div className='mt-0.5 ml-3 pl-2 border-l border-border/60 flex flex-col gap-1'>
