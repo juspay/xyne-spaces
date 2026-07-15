@@ -12,6 +12,7 @@ import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import { useCallJoinSettings } from './useCallJoinSettings';
 import { useClawDashboardVisibility } from './useClawDashboardVisibility';
 import { useCallMediaQualitySettings } from './useCallMediaQualitySettings';
+import { useRecordingDefaultLayout } from './useRecordingDefaultLayout';
 import {
   getLinkOpenExternalDefault,
   setLinkOpenExternalDefault,
@@ -57,6 +58,7 @@ export function usePreferencesState(enabled: boolean) {
     setVideoQuality: setCallVideoQuality,
     setScreenShareQuality: setCallScreenShareQuality,
   } = useCallMediaQualitySettings();
+  const { recordingDefaultLayout, setRecordingDefaultLayout } = useRecordingDefaultLayout();
   const linksOpenExternalByDefault = useSyncExternalStore(
     subscribeLinkOpenPref,
     getLinkOpenExternalDefault,
@@ -162,6 +164,8 @@ export function usePreferencesState(enabled: boolean) {
     callScreenShareQuality,
     setCallVideoQuality,
     setCallScreenShareQuality,
+    recordingDefaultLayout,
+    setRecordingDefaultLayout,
   };
 }
 

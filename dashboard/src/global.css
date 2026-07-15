@@ -3539,6 +3539,40 @@ img.inline-emoji,
   }
 }
 
+/* Recording header blink — REC badge dot blinking */
+@keyframes rec-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Listening waveform — empty transcript state animation */
+@keyframes listening-pulse {
+  from {
+    height: 8px;
+    opacity: 0.4;
+  }
+  to {
+    height: 24px;
+    opacity: 1;
+  }
+}
+
+/* Listening bar — Timeline rail empty state animation */
+@keyframes listening-bar {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
 /* ── PDF citation highlight ──────────────────────────────────────────────
    pdf.js renders a transparent text layer (textLayerMode: 2) over the canvas.
    When a citation snippet is fed to the find controller, matched glyphs get the

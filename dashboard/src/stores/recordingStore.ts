@@ -8,22 +8,10 @@ import { Room, RoomConnectOptions, RoomEvent, DataPacket_Kind } from 'livekit-cl
 import { recordingService } from '../services/Recording/recordingService';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
-import { formatDuration } from '../utils/dateUtils';
+import { formatDuration, normalizeTimestamp } from '../utils/dateUtils';
 
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
-
-/**
- * Normalize backend Unix timestamps to JS millisecond timestamps.
- * The Python agent sends seconds since epoch, while the rest of the
- * dashboard (and Date.now()) uses milliseconds.
- */
-const normalizeTimestamp = (value: unknown): number => {
-  if (typeof value !== 'number' || Number.isNaN(value)) return Date.now();
-  // Seconds-since-epoch values are roughly 1e9; JS ms values are 1e12+.
-  if (value < 1e12) return value * 1000;
-  return value;
-};
 
 export interface TranscriptEntry {
   id: number;
@@ -36,6 +24,10 @@ export interface TranscriptEntry {
 
 export type RecordingStatus = 'idle' | 'starting' | 'recording' | 'paused' | 'stopping' | 'error';
 export type SttModel = 'google' | 'azure' | 'deepgram';
+
+/** Layout state for the active recording workspace */
+export type RecordingLayout = 'transcript' | 'split' | 'notes';
+export const DEFAULT_NOTES_TITLE = 'Untitled Notes';
 
 export interface RecordingState {
   room: Room | null;
@@ -51,6 +43,14 @@ export interface RecordingState {
   pendingStop: boolean;
   /** Canvas (cuid/uuid) for notes taken during this recording — null until the user creates one */
   notesCanvasId: string | null;
+  /** Public view-access id used to build the canvas share link */
+  notesCanvasViewAccessId: string | null;
+  /** Title of the notes canvas */
+  notesCanvasTitle: string;
+  isCanvasPaneOpen: boolean;
+  /** Current layout of the recording workspace: transcript-only, split, or notes-only */
+  activeLayout: RecordingLayout;
+  isTranscriptMinimized: boolean;
 }
 
 const initialContext: RecordingState = {
@@ -66,6 +66,11 @@ const initialContext: RecordingState = {
   pendingAutoStart: false,
   pendingStop: false,
   notesCanvasId: null,
+  notesCanvasViewAccessId: null,
+  notesCanvasTitle: DEFAULT_NOTES_TITLE,
+  isCanvasPaneOpen: false,
+  activeLayout: 'transcript',
+  isTranscriptMinimized: false,
 };
 
 export const recordingStore = createStore({
@@ -82,8 +87,12 @@ export const recordingStore = createStore({
       pendingStop: true,
     }),
 
-    startRecording: (context, event: { sttModel?: SttModel }): RecordingState => {
+    startRecording: (
+      context,
+      event: { sttModel?: SttModel; defaultLayout?: RecordingLayout },
+    ): RecordingState => {
       const sttModel = event.sttModel || context.sttModel;
+      const defaultLayout = event.defaultLayout ?? 'transcript';
 
       // Set starting status
       recordingStore.send({ type: 'setStatus', status: 'starting' });
@@ -112,6 +121,7 @@ export const recordingStore = createStore({
             externalId: session.externalId,
             channelId: session.channelId,
             startTime: session.startTime,
+            defaultLayout,
           });
 
           toast.success('Recording started', {
@@ -139,6 +149,7 @@ export const recordingStore = createStore({
         sttModel,
         error: null,
         pendingAutoStart: false,
+        activeLayout: defaultLayout,
       };
     },
 
@@ -149,9 +160,10 @@ export const recordingStore = createStore({
         externalId: string;
         channelId: string;
         startTime: number;
+        defaultLayout?: RecordingLayout;
       },
     ): RecordingState => {
-      const { room } = event;
+      const { room, defaultLayout = 'transcript' } = event;
 
       // Clean up any existing subscription
       if (transcriptUnsubscribe) {
@@ -213,6 +225,7 @@ export const recordingStore = createStore({
         status: 'recording',
         isRecording: true,
         error: null,
+        activeLayout: defaultLayout,
       };
     },
 
@@ -279,6 +292,11 @@ export const recordingStore = createStore({
         pendingAutoStart: false,
         pendingStop: false,
         notesCanvasId: null,
+        notesCanvasViewAccessId: null,
+        notesCanvasTitle: DEFAULT_NOTES_TITLE,
+        isCanvasPaneOpen: false,
+        activeLayout: 'transcript',
+        isTranscriptMinimized: false,
       };
     },
 
@@ -321,6 +339,11 @@ export const recordingStore = createStore({
       pendingAutoStart: false,
       pendingStop: false,
       notesCanvasId: null,
+      notesCanvasViewAccessId: null,
+      notesCanvasTitle: DEFAULT_NOTES_TITLE,
+      isCanvasPaneOpen: false,
+      activeLayout: 'transcript',
+      isTranscriptMinimized: false,
     }),
 
     addTranscript: (context, event: { entry: TranscriptEntry }): RecordingState => ({
@@ -333,9 +356,26 @@ export const recordingStore = createStore({
       transcripts: [],
     }),
 
-    setNotesCanvas: (context, event: { canvasId: string }): RecordingState => ({
+    setNotesCanvas: (context, event: { canvasId: string; title?: string }): RecordingState => ({
       ...context,
       notesCanvasId: event.canvasId,
+      notesCanvasTitle: event.title ?? context.notesCanvasTitle,
+      isCanvasPaneOpen: true,
+    }),
+
+    setNotesCanvasTitle: (context, event: { title: string }): RecordingState => ({
+      ...context,
+      notesCanvasTitle: event.title,
+    }),
+
+    setActiveLayout: (context, event: { layout: RecordingLayout }): RecordingState => ({
+      ...context,
+      activeLayout: event.layout,
+    }),
+
+    setTranscriptMinimized: (context, event: { isMinimized: boolean }): RecordingState => ({
+      ...context,
+      isTranscriptMinimized: event.isMinimized,
     }),
   },
 });

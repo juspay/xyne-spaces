@@ -4,6 +4,13 @@
 
 import { isSameDay as dateFnsIsSameDay, isToday, isYesterday, format } from 'date-fns';
 
+/** Normalize Unix timestamps to JavaScript milliseconds. */
+export const normalizeTimestamp = (value: unknown): number => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return Date.now();
+  // Seconds-since-epoch values are roughly 1e9; JS millisecond values are 1e12+.
+  return value < 1e12 ? value * 1000 : value;
+};
+
 /**
  * Options for formatting dates
  */
