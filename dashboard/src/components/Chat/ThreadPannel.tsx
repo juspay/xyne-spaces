@@ -1514,7 +1514,7 @@ export const ThreadMessages = ({
               <div
                 className={cn(
                   'flex items-start self-stretch bg-background border-b border-border',
-                  isActivityRightPanel ? 'h-[107px]' : 'h-[88px]',
+                  isActivityRightPanel ? 'h-[107px]' : 'h-14',
                 )}
               >
                 <div ref={headerRowRef} className='h-14 p-4 flex items-center gap-2 w-full'>
