@@ -7,10 +7,12 @@ import { apiInstance } from '../clients/apiClient';
 import type {
   ConversationHistory as ConversationHistoryType,
   Message,
+  PendingAction,
   ToolInvocation,
   DebugArtifactBundle,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { registerClawIcons } from '../../components/Chat/XyneAISidebar/utils/clawCitationUrl';
+import { getPendingActionId, getStoredPendingActionResolution } from './XyneAIPendingActionStore';
 
 // ============================================================================
 // Claw API response types
@@ -42,6 +44,7 @@ interface ClawChatMessage {
    *  chronological order in that case. */
   parentId?: string | null;
   reasoning?: string;
+  pendingActions?: PendingAction[];
   attachments?: Array<{
     id: string;
     mimeType: string;
@@ -76,10 +79,8 @@ interface ClawMessagesResponse {
 export async function fetchV2Conversations(
   agentSlug?: string | null,
 ): Promise<ConversationHistoryType[]> {
-  const url =
-    agentSlug && agentSlug !== 'ask-ai'
-      ? `/xyne-ai/v2/conversations?agentSlug=${encodeURIComponent(agentSlug)}`
-      : '/xyne-ai/v2/conversations';
+  const effectiveAgentSlug = agentSlug ?? 'ask-ai';
+  const url = `/xyne-ai/v2/conversations?agentSlug=${encodeURIComponent(effectiveAgentSlug)}`;
   const response = await apiInstance.get<ClawConversationListResponse>(url);
 
   if (!response.data.success || !response.data.data) {
@@ -107,10 +108,8 @@ export async function fetchV2ConversationMessages(
   conversationId: string,
   agentSlug?: string | null,
 ): Promise<Message[]> {
-  const url =
-    agentSlug && agentSlug !== 'ask-ai'
-      ? `/xyne-ai/v2/conversations/${conversationId}/messages?agentSlug=${encodeURIComponent(agentSlug)}`
-      : `/xyne-ai/v2/conversations/${conversationId}/messages`;
+  const effectiveAgentSlug = agentSlug ?? 'ask-ai';
+  const url = `/xyne-ai/v2/conversations/${conversationId}/messages?agentSlug=${encodeURIComponent(effectiveAgentSlug)}`;
   const response = await apiInstance.get<ClawMessagesResponse>(url);
 
   if (!response.data.success || !response.data.data) {
@@ -229,6 +228,12 @@ export async function fetchV2ConversationMessages(
       }
     }
 
+    const pendingActions = (msg.pendingActions ?? []).map((action, actionIndex) => {
+      const actionId = getPendingActionId(conversationId, msg.id, action, actionIndex);
+      const resolution = action.resolution ?? getStoredPendingActionResolution(actionId);
+      return { ...action, id: actionId, ...(resolution && { resolution }) };
+    });
+
     const mappedMessage: Message = {
       id: msg.id,
       type: isUser ? ('user' as const) : ('bot' as const),
@@ -240,7 +245,7 @@ export async function fetchV2ConversationMessages(
       parentId,
       toolOutputs: [],
       toolInvocations: msgToolInvocations,
-      pendingActions: [],
+      pendingActions,
       ...(!isUser && runByMsgId?.[msg.id] ? { debugSessionId: runByMsgId[msg.id] } : {}),
     };
 
@@ -275,8 +280,7 @@ export async function deleteV2Conversation(
   conversationId: string,
   agentSlug?: string | null,
 ): Promise<void> {
-  const query =
-    agentSlug && agentSlug !== 'ask-ai' ? `?agentSlug=${encodeURIComponent(agentSlug)}` : '';
+  const query = `?agentSlug=${encodeURIComponent(agentSlug ?? 'ask-ai')}`;
   await apiInstance.delete(
     `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}${query}`,
   );

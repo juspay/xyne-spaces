@@ -68,6 +68,7 @@ import type {
 } from '../utils/XyneAITypes';
 import { ActivityBlock } from './ActivityBlock';
 import { PendingActionBlock } from './PendingActionBlock';
+import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendingActionService';
 import { Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -1556,92 +1557,10 @@ const MessageContent = ({
         <PendingActionBlock
           actions={message.pendingActions}
           onApprove={async (action, index) => {
-            // Handle approve action - call the backend API
-            try {
-              const { apiInstance } = await import('../../../../services/clients/apiClient');
-              // Find the stream state to get the sessionId
-              const { xyneAIStreamManager } =
-                await import('../../../../services/XyneAI/XyneAIStreamManager');
-              const activeStreams = xyneAIStreamManager.getAllActiveStreams();
-              let sessionId = message.sessionId;
-
-              // If message doesn't have sessionId, try to find it from active streams
-              if (!sessionId) {
-                for (const [, state] of activeStreams) {
-                  const hasMessage = state.messages.some(m => m.id === message.id);
-                  if (hasMessage) {
-                    sessionId = state.sessionId;
-                    break;
-                  }
-                }
-              }
-
-              if (!sessionId) {
-                throw new Error('Could not find sessionId for this message');
-              }
-
-              // Generate actionId if not present (use sessionId + tool + index for uniqueness)
-              const actionId = action.id || `${sessionId}-${action.tool}-${index}`;
-
-              // Send all required fields including signature and tool info
-              await apiInstance.post('/xyne-ai/v2/action', {
-                sessionId,
-                actionId,
-                approved: true,
-                params: action.params,
-                serverType: action.serverType,
-                tool: action.tool,
-                signature: action.signature,
-              });
-            } catch (err) {
-              console.error('Failed to approve action:', err);
-              throw err;
-            }
+            await respondToPendingAction(message, action, index, true);
           }}
-          onDecline={(action, index) => {
-            void (async () => {
-              // Handle decline action - call the backend API
-              try {
-                const { apiInstance } = await import('../../../../services/clients/apiClient');
-                // Find the stream state to get the sessionId
-                const { xyneAIStreamManager } =
-                  await import('../../../../services/XyneAI/XyneAIStreamManager');
-                const activeStreams = xyneAIStreamManager.getAllActiveStreams();
-                let sessionId = message.sessionId;
-
-                // If message doesn't have sessionId, try to find it from active streams
-                if (!sessionId) {
-                  for (const [, state] of activeStreams) {
-                    const hasMessage = state.messages.some(m => m.id === message.id);
-                    if (hasMessage) {
-                      sessionId = state.sessionId;
-                      break;
-                    }
-                  }
-                }
-
-                if (!sessionId) {
-                  console.error('Could not find sessionId for this message');
-                  return;
-                }
-
-                // Generate actionId if not present (use sessionId + tool + index for uniqueness)
-                const actionId = action.id || `${sessionId}-${action.tool}-${index}`;
-
-                // Send all required fields including signature and tool info
-                await apiInstance.post('/xyne-ai/v2/action', {
-                  sessionId,
-                  actionId,
-                  approved: false,
-                  params: action.params,
-                  serverType: action.serverType,
-                  tool: action.tool,
-                  signature: action.signature,
-                });
-              } catch (err) {
-                console.error('Failed to decline action:', err);
-              }
-            })();
+          onDecline={async (action, index) => {
+            await respondToPendingAction(message, action, index, false);
           }}
         />
       )}

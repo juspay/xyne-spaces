@@ -1969,6 +1969,7 @@ const XyneAISidebar = ({
         )}
         {showHistorySidebar ? (
           <ConversationHistory
+            onClose={() => xyneAIActor.send({ type: 'CLOSE' })}
             conversations={conversations}
             conversationId={conversationId}
             loadingSessionId={loadingHistorySessionId}

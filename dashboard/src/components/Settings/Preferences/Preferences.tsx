@@ -44,6 +44,7 @@ import { linkOpenPrefIsRelevant } from '../../../utils/openLink';
 import { logger } from '../../../utils/logger';
 
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
+import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
 import HuddleIcon from '../../icons/HuddleIcon';
@@ -587,6 +588,7 @@ const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onCheckedChange={state.setAiLandingDefault}
       />
     </div>
+    <ClawOverlayToggle />
   </div>
 );
 

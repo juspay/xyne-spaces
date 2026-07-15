@@ -3,7 +3,6 @@ import { ChevronDown, X, Search, ArrowLeft, MoreVertical, Loader2 } from 'lucide
 import { Popover } from '../../../ui/Popover';
 import { Drawer } from '../../../ui/Drawer/Drawer';
 import type { ConversationHistory as ConversationHistoryType } from '../utils/XyneAITypes';
-import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { XyneStarred, XyneUnstarred, XyneRename, XyneDelete } from '../../../icons/xyne-ai';
 import { formatRelativeTime } from '../../../../utils/dateUtils';
@@ -25,6 +24,8 @@ interface ConversationHistoryProps {
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
   selectedAgentColor?: string | null;
+  isLoading?: boolean;
+  onClose?: () => void;
 }
 
 // Helper function to group conversations by date
@@ -77,10 +78,12 @@ export const ConversationHistory = ({
   onDeleteConversation,
   onRenameConversation,
   showStarRenameActions = true,
+  onClose,
   selectedAgentSlug,
   agents,
   onSelectAgent,
   selectedAgentColor,
+  isLoading = false,
 }: ConversationHistoryProps): ReactElement => {
   const { isMobile } = usePlatform();
   const [searchQuery, setSearchQuery] = useState('');
@@ -90,8 +93,7 @@ export const ConversationHistory = ({
   const [renameValue, setRenameValue] = useState('');
 
   const handleClose = (): void => {
-    // Send close event to xstate machine
-    xyneAIActor.send({ type: 'CLOSE' });
+    onClose?.();
   };
 
   const handleStartRename = (conversation: ConversationHistoryType): void => {
@@ -224,7 +226,14 @@ export const ConversationHistory = ({
 
       {/* Conversations List */}
       <div className='flex-1 overflow-y-auto min-h-0'>
-        {isMobile ? (
+        {isLoading ? (
+          <div className='flex h-full items-center justify-center'>
+            <Loader2
+              aria-label='Loading conversations'
+              className='size-5 animate-spin text-muted-foreground'
+            />
+          </div>
+        ) : isMobile ? (
           // Mobile: Date-based grouping
           <>
             {/* Starred Section */}

@@ -169,12 +169,15 @@ export interface ToolInvocation {
 /**
  * Pending action for human-in-the-loop approval (v2)
  */
+export type PendingActionResolution = 'approved' | 'declined';
+
 export interface PendingAction {
   id: string;
   serverType: string;
   tool: string;
   params: Record<string, unknown>;
   signature: string;
+  resolution?: PendingActionResolution;
 }
 
 /**

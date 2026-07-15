@@ -19,6 +19,7 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { startVersionChecker, stopVersionChecker } from '../services/version-checker';
 import ElectronEvent from '../services/logger/electron-events';
 import { meetingDetectorService } from '../services/meeting-detector';
+import { initClawOverlayAuthGate } from '../services/claw-overlay-window';
 import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-protocol';
 import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
@@ -160,7 +161,7 @@ function setupApplicationMenu(): void {
           });
 
           app.relaunch();
-          app.quit();        
+          app.quit();
         },
       },
     ],
@@ -213,7 +214,8 @@ async function initializeApp(): Promise<void> {
   // Start meeting detector (macOS only, event-driven)
   startMeetingDetectorInBackground();
 
-  // setup app state listners 
+  initClawOverlayAuthGate();
+
   setupAppStateListeners();
 
   app.on('activate', async () => {
@@ -309,7 +311,7 @@ app.on('web-contents-created', (_event, webContents) => {
 
   // Handle new window requests from webviews
   if (webContents.getType() === 'webview') {
-    webContents.setWindowOpenHandler(({ url }) => {      
+    webContents.setWindowOpenHandler(({ url }) => {
       try {
         const urlObj = new URL(url);
         if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
