@@ -355,7 +355,7 @@ export const ThreadMessages = ({
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- skipInputAutoFocus intentionally not in deps; the param can be stripped from the URL without re-firing
-    if (isMobile || skipInputAutoFocus || !derivedConversationId) return;
+    if (previewCardMode || isMobile || skipInputAutoFocus || !derivedConversationId) return;
 
     const rafId = requestAnimationFrame(() => {
       const activeEl = document.activeElement;
@@ -364,7 +364,7 @@ export const ThreadMessages = ({
     });
 
     return () => cancelAnimationFrame(rafId);
-  }, [derivedConversationId, isMobile]);
+  }, [derivedConversationId, isMobile, previewCardMode]);
 
   const trackMessageLoadedPerformance = (startTime: number, messageType: string) => {
     const scopeType =
@@ -1855,7 +1855,7 @@ export const ThreadMessages = ({
                   <div className='px-4 pb-4 bg-background'>
                     <ChatInput
                       // eslint-disable-next-line jsx-a11y/no-autofocus
-                      autoFocus={skipInputAutoFocus ? null : 'end'}
+                      autoFocus={previewCardMode || skipInputAutoFocus ? null : 'end'}
                       ref={inputRef}
                       channelId={derivedChannelId}
                       conversation={conversation ?? undefined}
