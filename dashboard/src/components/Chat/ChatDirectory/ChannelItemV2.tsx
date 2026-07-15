@@ -184,7 +184,7 @@ const ChannelItemV2 = memo(
           )}
           style={shouldShowBold && !isActive ? { fontWeight: '700' } : undefined}
         >
-          <span className='flex items-center'>{getIcon()}</span>
+          <span className='flex h-4 w-4 shrink-0 items-center justify-center'>{getIcon()}</span>
           <span className='text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
             <span className='visual-regression-hide truncate'>{displayName}</span>
             {isSupportChannel && <SupportChannelBadge />}
