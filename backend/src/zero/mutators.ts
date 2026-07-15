@@ -7871,6 +7871,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           content: z.any().optional(),
           timestamp: z.number(),
           participantId: z.string(),
+          // Legacy fields (pre-XYNE-17290). Accepted so old clients don't get
+          // Zod validation errors during a rolling deploy; intentionally
+          // ignored — the canonical `id` is the only identity we write.
+          viewAccessId: z.string().optional(),
+          editAccessId: z.string().optional(),
         }),
         async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId } }) => {
           const now = timestamp;
@@ -8444,6 +8449,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           projectId: z.string().nullable().optional(),
           channelId: z.string().nullable().optional(),
           timestamp: z.number(),
+          // Legacy fields (pre-XYNE-17290). Accepted so old clients don't get
+          // Zod validation errors during a rolling deploy; intentionally
+          // ignored. Note: editAccessId no longer grants edit privileges —
+          // authorization flows through the participant checks below.
+          viewAccessId: z.string().optional(),
+          editAccessId: z.string().optional(),
         }),
         async ({ tx, args: params }) => {
           // Verify user has edit access

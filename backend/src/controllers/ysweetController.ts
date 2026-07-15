@@ -142,9 +142,16 @@ export class YSweetController {
         throw error;
       }
 
+      // Backward-compat: if the client sent a legacy viewAccessId/editAccessId
+      // as `docId`, `checkCanvasAccess` transparently resolved it to the
+      // canonical row. Use the canonical id for both canvas creation and the
+      // y-sweet doc key so we don't fork a duplicate row or a duplicate
+      // y-sweet document under the legacy string.
+      const canonicalDocId = authResult.canvas?.id ?? docId;
+
       if (!authResult.canvas) {
         try {
-          await canvasAuthService.createCanvasForUser(docId, userId, {
+          await canvasAuthService.createCanvasForUser(canonicalDocId, userId, {
             channelId: typeof channelId === 'string' ? channelId : undefined,
             projectId: typeof projectId === 'string' ? projectId : undefined,
             folderId: typeof folderId === 'string' ? folderId : undefined,
@@ -163,7 +170,7 @@ export class YSweetController {
           throw error;
         }
       } else if (!authResult.hasAccess) {
-        logger.warn(`[YSweet] Access denied for user ${userId} to canvas ${docId}`, {
+        logger.warn(`[YSweet] Access denied for user ${userId} to canvas ${canonicalDocId}`, {
           canEdit: authResult.canEdit,
           canView: authResult.canView,
           hasAccess: authResult.hasAccess,
@@ -175,7 +182,7 @@ export class YSweetController {
         return;
       }
 
-      logger.debug(`[YSweet] Generating token for canvas ${docId}`, {
+      logger.debug(`[YSweet] Generating token for canvas ${canonicalDocId}`, {
         userId,
         canEdit,
         hasAccess: authResult.hasAccess,
@@ -189,7 +196,7 @@ export class YSweetController {
       const manager = new DocumentManager(config.ysweet.url);
 
       const clientToken = await manager.getOrCreateDocAndToken(
-        docId,
+        canonicalDocId,
         {
           authorization,
           validForSeconds: TOKEN_VALID_SECONDS,
@@ -205,7 +212,7 @@ export class YSweetController {
       this.processClientTokenUrls(clientToken, req);
 
       logger.info('[YSweet] Returning processed client token', {
-        docId,
+        docId: canonicalDocId,
         baseUrl: clientToken.baseUrl,
         url: clientToken.url,
       });

@@ -33,12 +33,22 @@ const ResearchContextSchema = z.object({
   name: z.string().min(1),
 });
 
-// Selection context schema - selected text from canvas
+// Selection context schema - selected text from canvas.
+// `canvas_view_access_id` / `canvasViewAccessId` are legacy aliases for
+// canvas_id accepted for backward compatibility with clients that predate
+// XYNE-17290. At least one must be provided; the newer name wins if multiple
+// are set.
 const SelectionContextSchema = z.object({
-  canvas_id: z.string().min(1),
+  canvas_id: z.string().min(1).optional(),
+  canvasId: z.string().min(1).optional(),
+  canvas_view_access_id: z.string().min(1).optional(),
+  canvasViewAccessId: z.string().min(1).optional(),
   selected_text: z.string().min(1),
   canvas_title: z.string().optional(),
-});
+}).refine(
+  (ctx) => Boolean(ctx.canvas_id || ctx.canvasId || ctx.canvas_view_access_id || ctx.canvasViewAccessId),
+  { message: 'canvas_id is required', path: ['canvas_id'] },
+);
 
 // Attached context item schema - for Add Context feature.
 // `collection` and `file` are appended below from top-level `collection_ids`
@@ -70,6 +80,9 @@ const XyneAIRequestSchemaV2 = z.object({
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   canvasId: z.string().optional(),
   canvas_id: z.string().optional(),
+  // Legacy aliases for canvasId (pre-XYNE-17290). Merged into canvasId below.
+  canvasViewAccessId: z.string().optional(),
+  canvas_view_access_id: z.string().optional(),
   selectionContexts: z.array(SelectionContextSchema).optional(),
   createCanvasEnabled: z.boolean().optional().default(false),
   create_canvas_enabled: z.boolean().optional().default(false),
@@ -185,6 +198,8 @@ export class XyneAIControllerV2 {
       conversation_id,
       canvasId,
       canvas_id,
+      canvasViewAccessId,
+      canvas_view_access_id,
       selectionContexts: _selectionContexts,
       createCanvasEnabled: createCanvasEnabledCC,
       create_canvas_enabled: createCanvasEnabledSC,
@@ -229,7 +244,10 @@ export class XyneAIControllerV2 {
     const effectiveChannelIds = channelIds.length > 0 ? channelIds : channel_ids;
     const effectiveResearchContext = researchContext || research_context;
     const effectiveConversationId = conversationId || conversation_id;
-    const effectiveCanvasId = canvasId || canvas_id;
+    // Legacy pre-XYNE-17290 clients may still send canvasViewAccessId or
+    // canvas_view_access_id — coalesce them into effectiveCanvasId.
+    const effectiveCanvasId =
+      canvasId || canvas_id || canvasViewAccessId || canvas_view_access_id;
     const effectiveAttachedContext = attachedContext || attached_context;
     const createCanvasEnabled = createCanvasEnabledCC || createCanvasEnabledSC;
     const webSearchEnabled = webSearchEnabledCC || webSearchEnabledSC;

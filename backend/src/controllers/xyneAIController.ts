@@ -39,12 +39,19 @@ const ResearchContextSchema = z.object({
   name: z.string().min(1),
 });
 
-// Selection context schema - selected text from canvas
+// Selection context schema - selected text from canvas.
+// `canvas_view_access_id` is a legacy alias for `canvas_id` accepted for
+// backward compatibility with clients that predate XYNE-17290. At least one
+// of the two must be provided; the newer name wins if both are set.
 const SelectionContextSchema = z.object({
-  canvas_id: z.string().min(1),
+  canvas_id: z.string().min(1).optional(),
+  canvas_view_access_id: z.string().min(1).optional(),
   selected_text: z.string().min(1),
   canvas_title: z.string().optional(),
-});
+}).refine(
+  (ctx) => Boolean(ctx.canvas_id || ctx.canvas_view_access_id),
+  { message: 'canvas_id is required', path: ['canvas_id'] },
+);
 
 // Request validation schema
 // Note: channel_ids can be empty [] - agent will ask user to specify channel if needed
@@ -56,6 +63,7 @@ const XyneAIRequestSchema = z.object({
   file_ids: z.array(z.string().min(1)).optional(), // Scope KB search to specific file document(s)
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   canvas_id: z.string().optional(), // Canvas context when Ask AI is triggered from canvas
+  canvas_view_access_id: z.string().optional(), // Legacy alias for canvas_id (pre-XYNE-17290). Merged into canvas_id downstream.
   selection_contexts: z.array(SelectionContextSchema).optional(), // Selected text contexts from canvases
   create_canvas_enabled: z.boolean().optional().default(false), // Enable create canvas instruction
   web_search_enabled: z.boolean().optional().default(false), // Enable/disable web search tool, defaults to false
@@ -116,6 +124,7 @@ export class XyneAIController {
       channel_ids,
       collection_ids, file_ids, conversation_id,
       canvas_id,
+      canvas_view_access_id,
       selection_contexts,
       create_canvas_enabled,
       web_search_enabled, deep_research_enabled,
@@ -232,9 +241,10 @@ export class XyneAIController {
         });
       }
 
-      // Transform selection_contexts from snake_case to camelCase
+      // Transform selection_contexts from snake_case to camelCase. Legacy
+      // clients may send canvas_view_access_id instead of canvas_id — coalesce.
       const transformedSelectionContexts = selection_contexts?.map(ctx => ({
-        canvasId: ctx.canvas_id,
+        canvasId: (ctx.canvas_id ?? ctx.canvas_view_access_id) as string,
         selectedText: ctx.selected_text,
         ...(ctx.canvas_title && { canvasTitle: ctx.canvas_title }),
       }));
@@ -246,7 +256,7 @@ export class XyneAIController {
         collectionIds: collection_ids,
         fileIds: file_ids,
         conversationId: conversation_id,
-        canvasId: canvas_id,
+        canvasId: canvas_id ?? canvas_view_access_id,
         selectionContexts: transformedSelectionContexts,
         createCanvasEnabled: create_canvas_enabled,
         userId,

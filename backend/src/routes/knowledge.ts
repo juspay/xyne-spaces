@@ -3,6 +3,7 @@ import { DatabaseClient } from '@/database/client';
 import {
   approveKnowledgeCanvas,
   convertBlockNoteToMarkdown,
+  getCanvasById,
 } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 
@@ -14,10 +15,13 @@ const router = Router();
  *
  * Request body:
  * - canvasId: string (required) - The canonical canvas id
+ * - viewAccessId: string (optional, legacy) - Accepted for backward
+ *   compatibility with pre-XYNE-17290 clients. If provided (and canvasId
+ *   isn't), the canvas is looked up and the canonical id is used.
  */
 router.post('/approve', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { canvasId } = req.body;
+    const { canvasId, viewAccessId } = req.body;
     const userId = req.user?.id;
 
     if (!userId) {
@@ -25,12 +29,22 @@ router.post('/approve', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    if (!canvasId) {
+    if (!canvasId && !viewAccessId) {
       res.status(400).json({ error: 'canvasId is required' });
       return;
     }
 
-    const resolvedCanvasId = canvasId;
+    // Backward-compat resolution: if only the legacy viewAccessId was sent,
+    // look up the canvas so downstream logic always sees the canonical id.
+    let resolvedCanvasId: string = canvasId;
+    if (!resolvedCanvasId && viewAccessId) {
+      const canvas = await getCanvasById(viewAccessId);
+      if (!canvas) {
+        res.status(404).json({ error: 'Canvas not found' });
+        return;
+      }
+      resolvedCanvasId = canvas.id;
+    }
 
     const result = await approveKnowledgeCanvas(resolvedCanvasId, userId);
 
