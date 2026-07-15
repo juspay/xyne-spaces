@@ -3,6 +3,7 @@ import {
   TicketStatusV2,
   UserResponsibility,
 } from '@prisma/client';
+import { parseAssigneeFilter } from '@xyne/shared/zero/queries';
 
 const SUPPORT_TICKET_TYPE = 'Support';
 
@@ -159,6 +160,47 @@ const buildScopeFilter = (context: KanbanTicketQueryContext): Prisma.TicketWhere
   return {};
 };
 
+// Assignee filter with support for the "unassigned" sentinel and the invert
+// marker (see parseAssigneeFilter in @xyne/shared). Inverted mode matches the
+// exact complement of the normal selection.
+const buildAssigneeFilter = (
+  assignee: string[],
+): Prisma.TicketWhereInput | undefined => {
+  const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignee);
+  const prefixedIds = ids.flatMap(prefixedIdentityValues);
+  if (prefixedIds.length === 0 && !includeUnassigned) return undefined;
+
+  if (!inverted) {
+    return {
+      OR: compact<Prisma.TicketWhereInput>([
+        prefixedIds.length ? { assignedTo: { in: prefixedIds } } : undefined,
+        ...(includeUnassigned ? [{ assignedTo: null }, { assignedTo: '' }] : []),
+      ]),
+    };
+  }
+
+  if (includeUnassigned) {
+    // Must be assigned to someone outside the selected set.
+    return {
+      AND: compact<Prisma.TicketWhereInput>([
+        prefixedIds.length ? { assignedTo: { notIn: prefixedIds } } : undefined,
+        { NOT: { assignedTo: null } },
+        { assignedTo: { not: '' } },
+      ]),
+    };
+  }
+
+  // Complement of the selected users — unassigned tickets qualify too
+  // (SQL NOT IN drops NULL rows, so include them explicitly).
+  return {
+    OR: [
+      { assignedTo: { notIn: prefixedIds } },
+      { assignedTo: null },
+      { assignedTo: '' },
+    ],
+  };
+};
+
 export const buildKanbanTicketWhere = (
   context: KanbanTicketQueryContext,
 ): Prisma.TicketWhereInput => {
@@ -181,9 +223,7 @@ export const buildKanbanTicketWhere = (
         ? { channelId: { in: [...filters.sourceChannels] } }
         : undefined,
       hasItems(filters.priority) ? { priority: { in: [...filters.priority] } } : undefined,
-      hasItems(filters.assignee)
-        ? { assignedTo: { in: filters.assignee.flatMap(prefixedIdentityValues) } }
-        : undefined,
+      hasItems(filters.assignee) ? buildAssigneeFilter(filters.assignee) : undefined,
       hasItems(filters.createdBy) ? { createdBy: { in: [...filters.createdBy] } } : undefined,
       hasItems(filters.userGroups) ? { userGroupId: { in: [...filters.userGroups] } } : undefined,
       hasItems(filters.prReviewers)

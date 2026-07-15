@@ -10,6 +10,7 @@ import {
   type KanbanCountsViewMode,
 } from '../../services/ticketService';
 import { BaseTicketType } from '@xyne/shared';
+import { parseAssigneeFilter } from '../../zero/queries';
 import { websocketService } from '../../services/clients/socketClient';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 
@@ -182,6 +183,19 @@ const matchesFilterList = (
   return candidates.includes(normalizedValue);
 };
 
+// Assignee-specific: understands the "unassigned" sentinel and invert marker.
+const matchesAssigneeList = (
+  value: string | null | undefined,
+  candidates?: readonly string[],
+): boolean => {
+  if (!candidates || candidates.length === 0) return true;
+  const { inverted, includeUnassigned, ids } = parseAssigneeFilter(candidates);
+  if (!ids.length && !includeUnassigned) return true;
+  const normalizedValue = normalizeIdentity(value);
+  const matches = normalizedValue ? ids.includes(normalizedValue) : includeUnassigned;
+  return inverted ? !matches : matches;
+};
+
 const matchesIdentity = (
   value: string | null | undefined,
   expected: string | undefined,
@@ -239,7 +253,7 @@ const matchesRequest = (
     return false;
   if (filters.priority?.length && !filters.priority.includes(snapshot.priority as never))
     return false;
-  if (filters.assignee?.length && !matchesFilterList(snapshot.assignedTo, filters.assignee))
+  if (filters.assignee?.length && !matchesAssigneeList(snapshot.assignedTo, filters.assignee))
     return false;
   if (filters.createdBy?.length && !matchesFilterList(snapshot.createdBy, filters.createdBy))
     return false;
@@ -473,7 +487,7 @@ const normalizeDynamicFields = (
 
   if (entries.length === 0) return undefined;
 
-  return Object.fromEntries(entries) as KanbanCountsFilters['dynamicFields'];
+  return Object.fromEntries(entries);
 };
 
 const normalizeFilters = (filters?: TicketFilters): KanbanCountsFilters | undefined => {

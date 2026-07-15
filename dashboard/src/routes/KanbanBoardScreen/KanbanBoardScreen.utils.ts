@@ -8,6 +8,7 @@ import type {
   TicketTagMapping,
 } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
+import { parseAssigneeFilter } from '../../zero/queries';
 import type { Stage } from './KanbanBoardScreen.types';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { FormFieldType, type FormFields } from '@xyne/shared';
@@ -389,15 +390,18 @@ export const applyTicketFilters = (
       }
     }
 
-    // Assignee filter
+    // Assignee filter — supports the "unassigned" sentinel and invert marker.
     if (filters.assignee && filters.assignee.length > 0) {
-      if (!ticket.assignedTo) {
-        return false;
-      }
-      // Extract the ID from the prefixed format
-      const assigneeId = ticket.assignedTo.replace(/^(user:|group:|userGroup:)/, '');
-      if (!filters.assignee.includes(assigneeId)) {
-        return false;
+      const { inverted, includeUnassigned, ids } = parseAssigneeFilter(filters.assignee);
+      if (ids.length > 0 || includeUnassigned) {
+        // Extract the ID from the prefixed format
+        const assigneeId = ticket.assignedTo
+          ? ticket.assignedTo.replace(/^(user:|group:|userGroup:)/, '')
+          : '';
+        const matches = assigneeId ? ids.includes(assigneeId) : includeUnassigned;
+        if (inverted ? matches : !matches) {
+          return false;
+        }
       }
     }
 

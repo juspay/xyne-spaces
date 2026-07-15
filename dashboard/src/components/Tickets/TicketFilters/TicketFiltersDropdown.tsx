@@ -584,7 +584,8 @@ export const TicketFiltersDropdown = ({
             selectedUsers={filters.assignee || []}
             onChange={(users: string[]) => handleFilterChange('assignee', users)}
             label='Assignee'
-            availableUsers={availableUsers || []}
+            includeUnassigned
+            allowInvert
           />
         );
       case 'userGroups':
@@ -611,7 +612,6 @@ export const TicketFiltersDropdown = ({
             selectedUsers={filters.createdBy || []}
             onChange={(users: string[]) => handleFilterChange('createdBy', users)}
             label='Created by'
-            availableUsers={availableUsers || []}
           />
         );
       case 'dueDate': {
@@ -711,12 +711,7 @@ export const TicketFiltersDropdown = ({
                 fieldType={field.fieldType}
                 fieldEnum={field.fieldEnum ?? null}
                 selectedValue={currentValue}
-                onChange={value =>
-                  handleDynamicFieldChange(
-                    fieldId,
-                    value as string[] | { start?: number; end?: number },
-                  )
-                }
+                onChange={value => handleDynamicFieldChange(fieldId, value)}
                 onClose={() => setActiveSubmenu(null)}
               />
             );
@@ -749,21 +744,25 @@ export const TicketFiltersDropdown = ({
                   data-track-category='Tickets'
                   data-track-name='ToggleBoardDropdown'
                 >
-                  <span className='font-semibold text-base'>
-                    {isTicketsSyncing ? 'Loading tickets' : boardLabel}
-                  </span>
+                  {/* Keep the label stable while tickets sync — swapping it for
+                      "Loading tickets" resizes the button and shoves the filter
+                      buttons (and any open popover anchored to them) sideways. */}
+                  <span className='font-semibold text-base'>{boardLabel}</span>
                   {isNonLinearBoard && (
                     <span className='bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-medium ml-1.5'>
                       Non-Linear
                     </span>
                   )}
-                  {isTicketsSyncing && <Loader2 className='w-4 h-4 animate-spin' />}
-                  <ChevronDown
-                    className={cn(
-                      'w-5 h-5 transition-transform font-semibold',
-                      boardOpen && 'rotate-180',
-                    )}
-                  />
+                  {isTicketsSyncing ? (
+                    <Loader2 className='w-5 h-5 animate-spin' />
+                  ) : (
+                    <ChevronDown
+                      className={cn(
+                        'w-5 h-5 transition-transform font-semibold',
+                        boardOpen && 'rotate-180',
+                      )}
+                    />
+                  )}
                 </Button>
               </Popover.Trigger>
 
@@ -815,7 +814,8 @@ export const TicketFiltersDropdown = ({
                   selectedUsers={filters.assignee || []}
                   onChange={(users: string[]) => handleFilterChange('assignee', users)}
                   label='Assignee'
-                  availableUsers={availableUsers || []}
+                  includeUnassigned
+                  allowInvert
                 />
               </Popover.Content>
             </Popover.Root>

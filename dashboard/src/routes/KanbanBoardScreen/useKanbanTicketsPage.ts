@@ -6,7 +6,7 @@ import type {
   TicketStageEta,
   TicketTagMapping,
 } from '@xyne/shared';
-import { queries } from '../../zero/queries';
+import { queries, parseAssigneeFilter } from '../../zero/queries';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { FormFieldType } from '@xyne/shared';
 import { useVespaTicketSearch } from '../../hooks/useVespaTicketSearch';
@@ -266,6 +266,21 @@ const matchesIdentityFilter = (
   return filterValues.some(filterValue => normalizeIdentity(filterValue) === normalizedValue);
 };
 
+// Assignee-specific: understands the "unassigned" sentinel and invert marker.
+const matchesAssigneeFilter = (
+  value: string | null | undefined,
+  filterValues: string[] | undefined,
+): boolean => {
+  if (!filterValues?.length) return true;
+  const { inverted, includeUnassigned, ids } = parseAssigneeFilter(filterValues);
+  if (!ids.length && !includeUnassigned) return true;
+  const normalizedValue = normalizeIdentity(value);
+  const matches = normalizedValue
+    ? ids.some(id => normalizeIdentity(id) === normalizedValue)
+    : includeUnassigned;
+  return inverted ? !matches : matches;
+};
+
 const getTicketTagNames = (ticket: KanbanTicketsPageRow): Set<string> => {
   return new Set(
     (ticket.tagMappings ?? []).map(m => m.tagName).filter((name): name is string => Boolean(name)),
@@ -287,7 +302,7 @@ const getLocalVespaFilterRejectReasons = (
   if (filters?.sourceChannels?.length && !filters.sourceChannels.includes(ticket.channelId)) {
     reasons.push('sourceChannels');
   }
-  if (!matchesIdentityFilter(ticket.assignedTo, filters?.assignee)) {
+  if (!matchesAssigneeFilter(ticket.assignedTo, filters?.assignee)) {
     reasons.push('assignee');
   }
   if (!matchesIdentityFilter(ticket.createdBy, filters?.createdBy)) {

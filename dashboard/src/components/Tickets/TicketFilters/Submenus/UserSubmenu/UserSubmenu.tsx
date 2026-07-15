@@ -1,11 +1,14 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
-import { Search, Check } from 'lucide-react';
+import { Virtuoso } from 'react-virtuoso';
+import { Search, Check, User as UserIcon } from 'lucide-react';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
 import { useUsers } from '../../../../../hooks/useUsers';
 import type { User } from '../../../../../machines/stateMachine';
 import { getUserDisplayName, isUserDeactivated } from '../../../../../utils/userDisplayName';
 import { usePlatform } from '../../../../../hooks/usePlatform';
+import { Switch } from '../../../../ui/Switch';
+import { UNASSIGNED_FILTER_VALUE, ASSIGNEE_INVERT_MARKER } from '../../../../../zero/queries';
 
 interface UserSubmenuProps {
   selectedUsers: string[];
@@ -13,15 +16,36 @@ interface UserSubmenuProps {
   label: string;
   availableUsers?: string[];
   className?: string;
+  /** Offer an "Unassigned" option that filters tickets with no assignee. */
+  includeUnassigned?: boolean;
+  /** Offer an "Exclude selected" toggle that inverts the selection. */
+  allowInvert?: boolean;
 }
 
+// A row is either a user or the pinned "Unassigned" option.
+type RowItem = User | typeof UNASSIGNED_FILTER_VALUE;
+
+// Virtualize once the list is big enough to matter; below this a plain list
+// avoids the Virtuoso overhead. Height matches the previous max-h-80 cap.
+const VIRTUALIZE_THRESHOLD = 30;
+const LIST_HEIGHT = 320;
+
 export const UserSubmenu = ({
-  selectedUsers,
+  selectedUsers: selectedValues,
   onChange,
   label,
   availableUsers: availableUserIds,
   className = '',
+  includeUnassigned = false,
+  allowInvert = false,
 }: UserSubmenuProps): ReactElement => {
+  // The invert marker rides inside the selection array; strip it for all
+  // selection/ordering logic so it never behaves like a user id.
+  const isInverted = selectedValues.includes(ASSIGNEE_INVERT_MARKER);
+  const selectedUsers = useMemo(
+    () => selectedValues.filter(value => value !== ASSIGNEE_INVERT_MARKER),
+    [selectedValues],
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const { isMobile } = usePlatform();
@@ -48,8 +72,9 @@ export const UserSubmenu = ({
     return ids;
   }, [availableUserIds]);
 
-  const finalResults = useMemo(() => {
-    const selectedSet = new Set(selectedUsers);
+  // All users come from the local Zero cache, so there is no fetch cost to
+  // showing everyone — the list is virtualized below, so DOM size stays flat.
+  const rows = useMemo((): RowItem[] => {
     const searchLower = searchTerm.toLowerCase().trim();
 
     let baseUsers: User[] = [];
@@ -63,7 +88,8 @@ export const UserSubmenu = ({
           user.email?.toLowerCase().includes(searchLower)
         );
       });
-    } else {
+    } else if (normalizedAvailableUserIds) {
+      // Scope to the board's users, keeping any selected users visible.
       const idSet = new Set<string>();
       const list: User[] = [];
 
@@ -75,46 +101,128 @@ export const UserSubmenu = ({
           list.push(user);
         }
       }
-
-      if (normalizedAvailableUserIds) {
-        let addedCount = 0;
-        for (const rawId of normalizedAvailableUserIds) {
-          if (idSet.has(rawId)) continue;
-          const user = usersMap.get(rawId);
-          if (user) {
-            idSet.add(rawId);
-            list.push(user);
-            addedCount++;
-            if (addedCount >= 100) break;
-          }
-        }
-      } else {
-        let addedCount = 0;
-        for (const user of users) {
-          if (idSet.has(user.id)) continue;
-          idSet.add(user.id);
+      for (const rawId of normalizedAvailableUserIds) {
+        if (idSet.has(rawId)) continue;
+        const user = usersMap.get(rawId);
+        if (user) {
+          idSet.add(rawId);
           list.push(user);
-          addedCount++;
-          if (addedCount >= 20) break;
         }
       }
       baseUsers = list;
+    } else {
+      baseUsers = users;
     }
 
-    return baseUsers
-      .sort((a, b) => {
-        const aSel = selectedSet.has(a.id) ? 1 : 0;
-        const bSel = selectedSet.has(b.id) ? 1 : 0;
-        return bSel - aSel;
-      })
-      .slice(0, 40);
-  }, [users, usersMap, normalizedAvailableUserIds, selectedUsers, searchTerm]);
+    // Selected users first, then everyone else — both groups alphabetical.
+    const selectedSet = new Set(selectedUsers);
+    const sorted = [...baseUsers].sort((a, b) => {
+      const aSel = selectedSet.has(a.id) ? 1 : 0;
+      const bSel = selectedSet.has(b.id) ? 1 : 0;
+      if (aSel !== bSel) return bSel - aSel;
+      return getUserDisplayName(a).localeCompare(getUserDisplayName(b));
+    });
 
-  const availableUsersData = finalResults;
+    // "Unassigned" sits between the selected users and the rest (so it is the
+    // first option when nothing is selected). Hidden while searching for users.
+    if (!includeUnassigned || searchLower) return sorted;
+    const selectedCount = sorted.filter(user => selectedSet.has(user.id)).length;
+    return [
+      ...sorted.slice(0, selectedCount),
+      UNASSIGNED_FILTER_VALUE,
+      ...sorted.slice(selectedCount),
+    ];
+  }, [users, usersMap, normalizedAvailableUserIds, selectedUsers, searchTerm, includeUnassigned]);
+
+  // Re-attach the invert marker on every write; inverting an empty selection
+  // filters nothing, so the marker is dropped with the last deselection.
+  const emitChange = (nextSelected: string[], nextInverted: boolean): void => {
+    onChange(
+      nextInverted && nextSelected.length > 0
+        ? [...nextSelected, ASSIGNEE_INVERT_MARKER]
+        : nextSelected,
+    );
+  };
 
   const handleUserToggle = (userId: string) => {
     const isSelected = selectedUsers.includes(userId);
-    onChange(isSelected ? selectedUsers.filter(id => id !== userId) : [...selectedUsers, userId]);
+    emitChange(
+      isSelected ? selectedUsers.filter(id => id !== userId) : [...selectedUsers, userId],
+      isInverted,
+    );
+  };
+
+  const isVirtualized = rows.length > VIRTUALIZE_THRESHOLD;
+
+  const renderUnassignedRow = (): ReactElement => {
+    const isSelected = selectedUsers.includes(UNASSIGNED_FILTER_VALUE);
+    return (
+      <button
+        key='unassigned'
+        type='button'
+        onClick={() => handleUserToggle(UNASSIGNED_FILTER_VALUE)}
+        className={`
+          w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
+          ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
+          focus-visible:ring-2 focus-visible:ring-ring
+        `}
+        data-track-category='Tickets'
+        data-track-name='ToggleUnassignedFilter'
+      >
+        <span className='w-6 h-6 rounded-full border border-dashed border-muted-foreground flex items-center justify-center shrink-0'>
+          <UserIcon className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={1.5} />
+        </span>
+        <div className='flex-1 text-left min-w-0'>
+          <p className='text-sm font-medium truncate'>Unassigned</p>
+        </div>
+        {isSelected && <Check className='w-4 h-4 text-muted-foreground shrink-0' />}
+      </button>
+    );
+  };
+
+  const renderRow = (item: RowItem): ReactElement =>
+    item === UNASSIGNED_FILTER_VALUE ? renderUnassignedRow() : renderUserRow(item);
+
+  const renderUserRow = (user: User): ReactElement => {
+    const isSelected = selectedUsers.includes(user.id);
+    const displayName = getUserDisplayName(user);
+    const isDeactivated = isUserDeactivated(user);
+    return (
+      <button
+        key={user.id}
+        type='button'
+        onClick={() => handleUserToggle(user.id)}
+        className={`
+          w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
+          ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
+          focus-visible:ring-2 focus-visible:ring-ring
+        `}
+        data-track-category='Tickets'
+        data-track-name='ToggleUserFilter'
+        data-track-metadata={JSON.stringify({
+          userId: user.id,
+          userName: displayName,
+          selected: !isSelected,
+        })}
+      >
+        <Avatar userId={user.id} size='sm' className='shrink-0' />
+        <div className='flex-1 text-left min-w-0'>
+          <div className='flex items-center gap-2'>
+            <p
+              className={`text-sm font-medium truncate ${isDeactivated ? 'text-muted-foreground' : ''}`}
+            >
+              {displayName}
+            </p>
+            {isDeactivated && (
+              <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
+                Deactivated
+              </span>
+            )}
+          </div>
+        </div>
+        {isSelected && <Check className='w-4 h-4 text-muted-foreground shrink-0' />}
+      </button>
+    );
   };
 
   return (
@@ -133,60 +241,49 @@ export const UserSubmenu = ({
             className='pl-9 h-9'
           />
         </div>
-      </div>
-      <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
-        {!availableUsersData ? (
-          <div className='p-8 text-center text-sm text-muted-foreground'>Loading users...</div>
-        ) : finalResults.length > 0 ? (
-          <div className='space-y-0.5'>
-            {finalResults.map(user => {
-              const isSelected = selectedUsers.includes(user.id);
-              const displayName = getUserDisplayName(user);
-              const isDeactivated = isUserDeactivated(user);
-              return (
-                <button
-                  key={user.id}
-                  type='button'
-                  onClick={() => handleUserToggle(user.id)}
-                  className={`
-                    w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
-                    ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
-                    focus-visible:ring-2 focus-visible:ring-ring
-                  `}
-                  data-track-category='Tickets'
-                  data-track-name='ToggleUserFilter'
-                  data-track-metadata={JSON.stringify({
-                    userId: user.id,
-                    userName: displayName,
-                    selected: !isSelected,
-                  })}
-                >
-                  <Avatar userId={user.id} size='sm' className='shrink-0' />
-                  <div className='flex-1 text-left min-w-0'>
-                    <div className='flex items-center gap-2'>
-                      <p
-                        className={`text-sm font-medium truncate ${isDeactivated ? 'text-muted-foreground' : ''}`}
-                      >
-                        {displayName}
-                      </p>
-                      {isDeactivated && (
-                        <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
-                          Deactivated
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {isSelected && <Check className='w-4 h-4 text-muted-foreground shrink-0' />}
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className='p-8 text-center text-sm text-muted-foreground'>
-            {searchQuery ? 'No matches found' : 'No users available'}
+        {allowInvert && (
+          <div className='flex items-center justify-between mt-2.5 px-0.5'>
+            <span
+              className={`text-xs font-medium ${
+                selectedUsers.length === 0 ? 'text-muted-foreground/60' : 'text-muted-foreground'
+              }`}
+            >
+              Exclude selected
+            </span>
+            <Switch
+              checked={isInverted}
+              onCheckedChange={() => emitChange(selectedUsers, !isInverted)}
+              aria-label='Exclude selected'
+              disabled={selectedUsers.length === 0}
+            />
           </div>
         )}
       </div>
+      {rows.length > 0 ? (
+        isVirtualized ? (
+          <div role='listbox' aria-multiselectable='true'>
+            <Virtuoso
+              data={rows}
+              // Row-height estimate so the scroll range is right before rows measure.
+              defaultItemHeight={40}
+              // Padding lives on the rows — padding on the scroller itself
+              // produces a spurious horizontal scrollbar.
+              style={{ height: LIST_HEIGHT, overflowX: 'hidden' }}
+              itemContent={(_, item) => (
+                <div className='px-1 pb-0.5 first:pt-1'>{renderRow(item)}</div>
+              )}
+            />
+          </div>
+        ) : (
+          <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
+            <div className='space-y-0.5'>{rows.map(item => renderRow(item))}</div>
+          </div>
+        )
+      ) : (
+        <div className='p-8 text-center text-sm text-muted-foreground'>
+          {searchQuery ? 'No matches found' : 'No users available'}
+        </div>
+      )}
     </div>
   );
 };
