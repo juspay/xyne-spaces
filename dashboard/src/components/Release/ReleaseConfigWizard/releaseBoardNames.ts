@@ -21,21 +21,22 @@ export function repositoryNameFromUrl(url: string): string {
   return normalizeReleaseBoardNamePart(lastPathPart.replace(/\.git$/i, ''));
 }
 
-export function buildMainReleaseBoardName(repoUrl: string, projectName: string): string {
+// The board lives inside a project, so the project context is already implied.
+// One main release board represents one repository, so the name is keyed on the
+// repository alone.
+export function buildMainReleaseBoardName(repoUrl: string): string {
   const repositoryName = repositoryNameFromUrl(repoUrl);
-  const normalizedProjectName = normalizeReleaseBoardNamePart(projectName);
 
-  if (!repositoryName || !normalizedProjectName) return '';
-  return `${repositoryName}_${normalizedProjectName}_release`;
+  if (!repositoryName) return '';
+  return `${repositoryName}_release`;
 }
 
-export function buildApplicationReleaseBoardName(
-  applicationName: string,
-  projectName: string,
-): string {
+// Per-application release board, keyed on the repository + application so it stays
+// unique within a repository's release group.
+export function buildApplicationReleaseBoardName(repoUrl: string, applicationName: string): string {
+  const repositoryName = repositoryNameFromUrl(repoUrl);
   const normalizedApplicationName = normalizeReleaseBoardNamePart(applicationName);
-  const normalizedProjectName = normalizeReleaseBoardNamePart(projectName);
 
-  if (!normalizedApplicationName || !normalizedProjectName) return '';
-  return `${normalizedApplicationName}_${normalizedProjectName}_application_release`;
+  if (!repositoryName || !normalizedApplicationName) return '';
+  return `${repositoryName}_${normalizedApplicationName}_release`;
 }

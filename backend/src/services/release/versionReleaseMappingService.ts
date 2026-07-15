@@ -232,6 +232,21 @@ class VersionReleaseMappingService {
         boardApplications,
         diffContext.filePaths,
       );
+
+      // The diff had files but none matched any application regex on this board.
+      // Without this log the sync silently yields zero affected apps and no ART rows,
+      // which is very hard to diagnose. The usual cause is a misconfigured
+      // Application.regex (e.g. `^/`, which never matches repo-relative diff paths) or
+      // no Application scoped to the release board (empty regex list below).
+      if (apps.length === 0) {
+        logger.warn(
+          `[VersionReleaseMapping] PR ${pr.prUrl} diff had ${diffContext.filePaths.length} file(s) but ` +
+            `none matched any application regex on board ${mainReleaseBoardId}. ` +
+            `App regexes tried: [${boardApplications.map(a => `${a.name}=${a.regex}`).join(', ')}]. ` +
+            `Sample files: [${diffContext.filePaths.slice(0, 5).join(', ')}]`,
+        );
+      }
+
       for (const app of apps) {
         const existing = affectedByAppId.get(app.id);
         if (existing) {
