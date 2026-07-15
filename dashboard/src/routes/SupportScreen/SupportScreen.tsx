@@ -40,6 +40,7 @@ import {
   User,
   ListFilter,
   BarChart4Icon,
+  CalendarDays,
   Circle,
   UserPlus,
   Info as InfoIcon,
@@ -84,6 +85,11 @@ import {
   AICategorySubmenu,
   UserGroupSubmenu,
 } from '../../components/Tickets/TicketFilters/Submenus';
+import {
+  CalendarView,
+  PRESETS,
+  type DateRangeValue,
+} from '../../components/ui/DateRangeFilter/DateRangeFilter';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { Switch } from '../../components/ui/Switch';
 import {
@@ -617,6 +623,8 @@ const SupportScreen = (): ReactElement => {
       hasAiDraft: filters.hasAiDraft === true ? true : undefined,
       userGroups:
         filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
+      lastEmailAtStart: filters.lastEmailAtStart,
+      lastEmailAtEnd: filters.lastEmailAtEnd,
     }),
     [filters, userID],
   );
@@ -642,7 +650,9 @@ const SupportScreen = (): ReactElement => {
     (filters.priority && filters.priority.length > 0) ||
     (filters.stages && filters.stages.length > 0) ||
     (filters.aiCategory && filters.aiCategory.length > 0) ||
-    (filters.userGroups && filters.userGroups.length > 0)
+    (filters.userGroups && filters.userGroups.length > 0) ||
+    filters.lastEmailAtStart !== undefined ||
+    filters.lastEmailAtEnd !== undefined
   );
   const hasAnyFilterActive = hasAssigneeFilter || hasMoreFiltersActive;
 
@@ -650,6 +660,29 @@ const SupportScreen = (): ReactElement => {
     (key: keyof TicketFilters, value: unknown): void => {
       const newFilters = { ...filters, [key]: value };
       // Remove undefined/empty values
+      Object.keys(newFilters).forEach((filterKey: string) => {
+        const k = filterKey as keyof TicketFilters;
+        const filterValue = newFilters[k];
+        if (
+          filterValue === undefined ||
+          filterValue === null ||
+          (Array.isArray(filterValue) && filterValue.length === 0)
+        ) {
+          delete newFilters[k];
+        }
+      });
+      setFilters(newFilters);
+    },
+    [filters, setFilters],
+  );
+
+  const handleDateRangeChange = useCallback(
+    (range: DateRangeValue): void => {
+      const newFilters = {
+        ...filters,
+        lastEmailAtStart: range.startDate.getTime(),
+        lastEmailAtEnd: range.endDate.getTime(),
+      };
       Object.keys(newFilters).forEach((filterKey: string) => {
         const k = filterKey as keyof TicketFilters;
         const filterValue = newFilters[k];
@@ -675,6 +708,7 @@ const SupportScreen = (): ReactElement => {
     { id: 'stages', label: 'Stages', icon: Circle },
     { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
     { id: 'userGroups', label: 'User Groups', icon: Users },
+    { id: 'date', label: 'Date', icon: CalendarDays },
   ] as const;
 
   const renderSubmenu = useCallback((): ReactElement | null => {
@@ -712,10 +746,65 @@ const SupportScreen = (): ReactElement => {
             onClose={() => setActiveSubmenu(null)}
           />
         );
+      case 'date': {
+        const currentRange: DateRangeValue | null =
+          filters.lastEmailAtStart !== undefined && filters.lastEmailAtEnd !== undefined
+            ? {
+                startDate: new Date(filters.lastEmailAtStart),
+                endDate: new Date(filters.lastEmailAtEnd),
+              }
+            : null;
+        return (
+          <div className='w-[252px] bg-background border border-border rounded-lg shadow-lg overflow-hidden'>
+            <div className='p-1 border-b border-border'>
+              {PRESETS.map(preset => {
+                const v = preset.getValue();
+                const isActive =
+                  filters.lastEmailAtStart !== undefined &&
+                  filters.lastEmailAtEnd !== undefined &&
+                  Math.abs(filters.lastEmailAtStart - v.startDate.getTime()) < 1000 &&
+                  Math.abs(filters.lastEmailAtEnd - v.endDate.getTime()) < 1000;
+                return (
+                  <button
+                    key={preset.label}
+                    type='button'
+                    data-track-category='Support'
+                    data-track-name='SelectDatePreset'
+                    onClick={() => {
+                      handleDateRangeChange(v);
+                    }}
+                    className={cn(
+                      'flex w-full items-center rounded-sm px-2 py-1.5 text-sm select-none',
+                      isActive
+                        ? 'bg-accent text-foreground font-medium'
+                        : 'hover:bg-accent hover:text-accent-foreground',
+                    )}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+            <CalendarView
+              range={currentRange}
+              onSelect={(range: DateRangeValue) => {
+                handleDateRangeChange(range);
+              }}
+            />
+          </div>
+        );
+      }
       default:
         return null;
     }
-  }, [activeSubmenu, filters, handleFilterChange, availablePriorities, selectedChannelId]);
+  }, [
+    activeSubmenu,
+    filters,
+    handleFilterChange,
+    handleDateRangeChange,
+    availablePriorities,
+    selectedChannelId,
+  ]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () =>
@@ -2614,6 +2703,8 @@ type SupportTicketDetailProps = {
     aiCategory: string[] | undefined;
     hasAiDraft: boolean | undefined;
     userGroups: string[] | undefined;
+    lastEmailAtStart: number | undefined;
+    lastEmailAtEnd: number | undefined;
   };
   isMember: boolean;
   onMailtoClick: (email: string) => void;

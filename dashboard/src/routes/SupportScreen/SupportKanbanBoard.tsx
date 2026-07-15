@@ -54,6 +54,8 @@ export interface SupportKanbanBoardProps {
     aiCategory: string[] | undefined;
     hasAiDraft: boolean | undefined;
     userGroups: string[] | undefined;
+    lastEmailAtStart: number | undefined;
+    lastEmailAtEnd: number | undefined;
   };
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   onTicketsLoaded?: (tickets: Ticket[]) => void;
@@ -106,6 +108,8 @@ export const SupportKanbanBoard = ({
         ac: ticketFilter.aiCategory ?? null,
         ad: ticketFilter.hasAiDraft ?? null,
         g: ticketFilter.userGroups ?? null,
+        ds: ticketFilter.lastEmailAtStart ?? null,
+        de: ticketFilter.lastEmailAtEnd ?? null,
       }),
     [
       channelId,
@@ -115,6 +119,8 @@ export const SupportKanbanBoard = ({
       ticketFilter.aiCategory,
       ticketFilter.hasAiDraft,
       ticketFilter.userGroups,
+      ticketFilter.lastEmailAtStart,
+      ticketFilter.lastEmailAtEnd,
     ],
   );
   const loadStartTimeRef = useRef<number | null>(Date.now());

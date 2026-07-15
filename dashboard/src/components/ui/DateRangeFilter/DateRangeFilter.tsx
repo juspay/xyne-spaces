@@ -37,7 +37,7 @@ const isInRange = (d: Date, start: Date, end: Date): boolean => {
   return t >= startOfDay(start).getTime() && t <= startOfDay(end).getTime();
 };
 
-const formatShortDate = (d: Date): string => {
+export const formatShortDate = (d: Date): string => {
   const months = [
     'Jan',
     'Feb',
@@ -61,12 +61,12 @@ const getFirstDayOfMonth = (year: number, month: number): number =>
   new Date(year, month, 1).getDay();
 
 /* ── Presets ── */
-interface Preset {
+export interface Preset {
   label: string;
   getValue: () => DateRangeValue;
 }
 
-const PRESETS: Preset[] = [
+export const PRESETS: Preset[] = [
   {
     label: 'Today',
     getValue: () => ({ startDate: startOfDay(new Date()), endDate: endOfDay(new Date()) }),
@@ -108,7 +108,7 @@ const PRESETS: Preset[] = [
   },
 ];
 
-const matchPreset = (range: DateRangeValue | null): string | null => {
+export const matchPreset = (range: DateRangeValue | null): string | null => {
   if (!range) return null;
   for (const preset of PRESETS) {
     const v = preset.getValue();
@@ -122,7 +122,7 @@ const matchPreset = (range: DateRangeValue | null): string | null => {
 /* ── Calendar ── */
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
-const CalendarView: React.FC<{
+export const CalendarView: React.FC<{
   range: DateRangeValue | null;
   onSelect: (range: DateRangeValue) => void;
 }> = ({ range, onSelect }) => {

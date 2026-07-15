@@ -15,6 +15,8 @@ export interface TicketFilters {
   dueDateEnd?: number;
   createdDateStart?: number;
   createdDateEnd?: number;
+  lastEmailAtStart?: number;
+  lastEmailAtEnd?: number;
   boards?: string[];
   sourceChannels?: string[];
   tags?: string[];

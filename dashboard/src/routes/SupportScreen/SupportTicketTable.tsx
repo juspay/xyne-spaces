@@ -15,6 +15,8 @@ export interface SupportTicketTableProps {
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
     userGroups: string[] | undefined;
+    lastEmailAtStart: number | undefined;
+    lastEmailAtEnd: number | undefined;
   };
   onBoardIdResolved: (boardId: string) => void;
   onTicketClick: (ticket: Ticket) => void;
@@ -55,6 +57,8 @@ export const SupportTicketTable = ({
         p: ticketFilter.priority ?? null,
         s: ticketFilter.stageName ?? null,
         g: ticketFilter.userGroups ?? null,
+        ds: ticketFilter.lastEmailAtStart ?? null,
+        de: ticketFilter.lastEmailAtEnd ?? null,
       }),
     [
       channelId,
@@ -62,6 +66,8 @@ export const SupportTicketTable = ({
       ticketFilter.priority,
       ticketFilter.stageName,
       ticketFilter.userGroups,
+      ticketFilter.lastEmailAtStart,
+      ticketFilter.lastEmailAtEnd,
     ],
   );
   const loadStartTimeRef = useRef<number | null>(Date.now());

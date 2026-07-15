@@ -34,6 +34,8 @@ interface TicketListViewProps {
     aiCategory?: string[] | undefined;
     hasAiDraft?: boolean | undefined;
     userGroups?: string[] | undefined;
+    lastEmailAtStart?: number | undefined;
+    lastEmailAtEnd?: number | undefined;
   };
   onTicketClick: (ticket: SupportTicketRow) => void;
   isMember: boolean;
@@ -87,7 +89,17 @@ export const TicketListView = function TicketListView({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { userID } = useAuthContextValues();
 
-  const { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups } = filter;
+  const {
+    channelId,
+    assignedTo,
+    priority,
+    stageName,
+    aiCategory,
+    hasAiDraft,
+    userGroups,
+    lastEmailAtStart,
+    lastEmailAtEnd,
+  } = filter;
 
   const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>([null]);
   const [pageIndex, setPageIndex] = useState(0);
@@ -106,6 +118,8 @@ export const TicketListView = function TicketListView({
       stageName,
       aiCategory,
       hasAiDraft,
+      lastEmailAtStart,
+      lastEmailAtEnd,
       // Spam/Starred are filtered server-side (they need an overlay row) so pagination is
       // meaningful; Inbox/All Mail are filtered client-side in `filteredAll` below, over an
       // adaptive fetch window so their pages fill correctly after filtering.
@@ -131,8 +145,21 @@ export const TicketListView = function TicketListView({
         ad: hasAiDraft ?? null,
         mf: mailboxFolder ?? null,
         g: userGroups ?? null,
+        ds: lastEmailAtStart ?? null,
+        de: lastEmailAtEnd ?? null,
       }),
-    [channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups],
+    [
+      channelId,
+      assignedTo,
+      priority,
+      stageName,
+      aiCategory,
+      hasAiDraft,
+      mailboxFolder,
+      userGroups,
+      lastEmailAtStart,
+      lastEmailAtEnd,
+    ],
   );
 
   useEffect(() => {
