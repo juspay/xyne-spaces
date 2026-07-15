@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Search, Check, ChevronRight, X } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
-import type { EntitySelectorProps } from './EntitySelector.types';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import type { EntitySelectorProps, SelectorOption } from './EntitySelector.types';
 import { cn } from '../../../utils/classNames';
 
 /**
@@ -42,6 +43,10 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   showUnassignOption = false,
   unassignLabel = 'Unassign',
   headerAction,
+  virtualize = false,
+  // Only virtualize (opt-in) once the list is large enough to matter.
+  virtualizeThreshold = 30,
+  virtualizedHeight = 300,
 }) => {
   // ==================== STATE ====================
   const [internalOpen, setInternalOpen] = useState(false);
@@ -49,6 +54,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   const open = isOpen ?? internalOpen;
   // ==================== COMPUTED VALUES ====================
@@ -84,6 +90,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
     );
   }, [options, searchValue, disableClientFiltering]);
 
+  const isVirtualized = virtualize && !isLoading && filteredOptions.length > virtualizeThreshold;
+
   // ==================== EVENT HANDLERS ====================
 
   /**
@@ -118,12 +126,16 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
     setHighlightedIndex(-1);
   }, [filteredOptions]);
 
-  // Scroll highlighted item into view
+  // Keep the highlighted item visible during keyboard navigation.
   useEffect(() => {
-    if (highlightedIndex < 0 || !listRef.current) return;
-    const item = listRef.current.children[highlightedIndex] as HTMLElement;
+    if (highlightedIndex < 0) return;
+    if (isVirtualized) {
+      virtuosoRef.current?.scrollToIndex(highlightedIndex);
+      return;
+    }
+    const item = listRef.current?.children[highlightedIndex] as HTMLElement | undefined;
     item?.scrollIntoView({ block: 'nearest' });
-  }, [highlightedIndex]);
+  }, [highlightedIndex, isVirtualized]);
 
   // ==================== RENDER HELPER (DEFAULT) ====================
 
@@ -157,6 +169,71 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
     if (distanceToBottom <= 24) {
       onScrollEnd();
     }
+  };
+
+  const renderUnassignRow = () => (
+    <button
+      type='button'
+      className='relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left cursor-pointer text-foreground hover:bg-accent'
+      onClick={() => {
+        onSelect?.(null);
+        handleOpenChange(false);
+        setSearchValue('');
+      }}
+    >
+      <span className='flex h-5 w-5 flex-none items-center justify-center'>
+        <div className='w-5 h-5 rounded-full bg-border flex items-center justify-center'>
+          <X className='w-3 h-3 text-muted-foreground' />
+        </div>
+      </span>
+      <div className='flex-1 min-w-0'>
+        <div className='truncate font-medium text-foreground'>{unassignLabel}</div>
+        <div className='truncate text-xs text-muted-foreground'>Remove assignee</div>
+      </div>
+    </button>
+  );
+
+  const renderOptionRow = (option: SelectorOption, index: number) => {
+    const isSelected = selectedValue === option.value;
+    const isHighlighted = index === highlightedIndex;
+    return (
+      <button
+        type='button'
+        disabled={option.disabled}
+        className={`relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left ${
+          option.disabled
+            ? 'cursor-not-allowed opacity-50 text-muted-foreground'
+            : isHighlighted
+              ? 'cursor-pointer text-foreground bg-accent'
+              : 'cursor-pointer text-foreground hover:bg-accent'
+        }`}
+        onClick={() => !option.disabled && handleSelect(option.value)}
+        onKeyDown={(e): void => {
+          if ((e.key === 'Enter' || e.key === ' ') && !option.disabled) {
+            e.preventDefault();
+            handleSelect(option.value);
+          }
+        }}
+      >
+        {!isStatusSelector && option.icon && (
+          <span className='flex h-5 w-5 flex-none items-center justify-center'>{option.icon}</span>
+        )}
+        <div className='flex-1 min-w-0'>
+          <div className='truncate font-medium text-foreground'>{option.label}</div>
+          {option.subtitle && (
+            <div className='truncate text-xs text-muted-foreground'>{option.subtitle}</div>
+          )}
+        </div>
+        {option.badge && (
+          <span className='shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded-full border border-border bg-muted text-muted-foreground whitespace-nowrap'>
+            {option.badge}
+          </span>
+        )}
+        <Check
+          className={`w-4 h-4 text-action-primary flex-shrink-0 ${isSelected ? 'opacity-100' : 'opacity-0'}`}
+        />
+      </button>
+    );
   };
 
   const renderDefaultButtonTrigger = () => {
@@ -323,14 +400,18 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           side='bottom'
           align='start'
           sideOffset={4}
-          className='z-[100] w-auto max-w-96 max-h-96 overflow-auto rounded-lg border border-border bg-background shadow-lg'
+          className='z-[100] w-auto max-w-96 max-h-96 overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-background shadow-lg'
           style={{
             maxHeight: 360,
             overflowY: 'auto',
+            overflowX: 'hidden',
             WebkitOverflowScrolling: 'touch',
             touchAction: 'pan-y',
             overscrollBehavior: 'contain',
             pointerEvents: 'auto',
+            // Virtuoso rows are absolutely positioned and can't size the popover;
+            // lock it to the plain list's max width so widths stay consistent.
+            ...(isVirtualized && { width: '24rem' }),
           }}
           onWheel={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
@@ -396,111 +477,80 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           )}
 
           {/* ========== OPTIONS LIST ========== */}
-          <div
-            className='overflow-y-auto max-h-[320px]'
-            onScroll={handleOptionsScroll}
-            onWheel={e => e.stopPropagation()}
-            onTouchMove={e => e.stopPropagation()}
-          >
-            {isLoading ? (
-              // Loading state
-              <div className='p-4 text-center text-sm text-muted-foreground'>Loading...</div>
-            ) : filteredOptions.length > 0 ? (
-              // Options list
-              <ul
-                ref={listRef}
-                role='listbox'
-                data-testid={testId ? `${testId}-options` : undefined}
-                className='p-1 space-y-1'
-              >
-                {showUnassignOption && selectedValue && (
-                  <li>
-                    <button
-                      type='button'
-                      className='relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left cursor-pointer text-foreground hover:bg-accent'
-                      onClick={() => {
-                        onSelect?.(null);
-                        handleOpenChange(false);
-                        setSearchValue('');
-                      }}
-                    >
-                      <span className='flex h-5 w-5 flex-none items-center justify-center'>
-                        <div className='w-5 h-5 rounded-full bg-border flex items-center justify-center'>
-                          <X className='w-3 h-3 text-muted-foreground' />
-                        </div>
-                      </span>
-                      <div className='flex-1 min-w-0'>
-                        <div className='truncate font-medium text-foreground'>{unassignLabel}</div>
-                        <div className='truncate text-xs text-muted-foreground'>
-                          Remove assignee
-                        </div>
-                      </div>
-                    </button>
-                  </li>
+          {isVirtualized ? (
+            <div
+              role='listbox'
+              data-testid={testId ? `${testId}-options` : undefined}
+              onWheel={e => e.stopPropagation()}
+              onTouchMove={e => e.stopPropagation()}
+            >
+              {/* Unassign — pinned above the list, never virtualized */}
+              {showUnassignOption && selectedValue && (
+                <div className='p-1 pb-0'>{renderUnassignRow()}</div>
+              )}
+              <Virtuoso
+                ref={virtuosoRef}
+                data={filteredOptions}
+                overscan={200}
+                // Row-height estimate so the scroll range is right when Virtuoso
+                // mounts before the popover settles.
+                defaultItemHeight={44}
+                // No padding on the scroller (it adds a spurious horizontal bar);
+                // `- 48` leaves room for the pinned unassign row.
+                style={{
+                  height:
+                    showUnassignOption && selectedValue
+                      ? virtualizedHeight - 48
+                      : virtualizedHeight,
+                  width: '100%',
+                  overflowX: 'hidden',
+                }}
+                {...(hasMore && onScrollEnd ? { endReached: onScrollEnd } : {})}
+                itemContent={(index, option) => (
+                  <div
+                    role='option'
+                    aria-selected={selectedValue === option.value}
+                    className='px-1 pb-1 first:pt-1'
+                  >
+                    {renderOptionRow(option, index)}
+                  </div>
                 )}
-                {filteredOptions.map((option, index) => {
-                  const isSelected = selectedValue === option.value;
-                  const isHighlighted = index === highlightedIndex;
-                  return (
-                    <li role='option' aria-selected={isSelected} key={option.value}>
-                      <button
-                        type='button'
-                        disabled={option.disabled}
-                        className={`relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left ${
-                          option.disabled
-                            ? 'cursor-not-allowed opacity-50 text-muted-foreground'
-                            : isHighlighted
-                              ? 'cursor-pointer text-foreground bg-accent'
-                              : 'cursor-pointer text-foreground hover:bg-accent'
-                        }`}
-                        onClick={() => !option.disabled && handleSelect(option.value)}
-                        onKeyDown={(e): void => {
-                          if ((e.key === 'Enter' || e.key === ' ') && !option.disabled) {
-                            e.preventDefault();
-                            handleSelect(option.value);
-                          }
-                        }}
-                      >
-                        {/* Option icon */}
-                        {!isStatusSelector && option.icon && (
-                          <span className='flex h-5 w-5 flex-none items-center justify-center'>
-                            {option.icon}
-                          </span>
-                        )}
-                        {/* Option label and subtitle */}
-                        <div className='flex-1 min-w-0'>
-                          <div className='truncate font-medium text-foreground'>{option.label}</div>
-                          {option.subtitle && (
-                            <div className='truncate text-xs text-muted-foreground'>
-                              {option.subtitle}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Trailing badge (e.g. "Not in channel") */}
-                        {option.badge && (
-                          <span className='shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded-full border border-border bg-muted text-muted-foreground whitespace-nowrap'>
-                            {option.badge}
-                          </span>
-                        )}
-
-                        {/* Check mark if selected */}
-                        <Check
-                          className={`w-4 h-4 text-action-primary flex-shrink-0
-                            ${isSelected ? 'opacity-100' : 'opacity-0'}`}
-                        />
-                      </button>
+              />
+            </div>
+          ) : (
+            <div
+              className='overflow-y-auto max-h-[320px]'
+              onScroll={handleOptionsScroll}
+              onWheel={e => e.stopPropagation()}
+              onTouchMove={e => e.stopPropagation()}
+            >
+              {isLoading ? (
+                <div className='p-4 text-center text-sm text-muted-foreground'>Loading...</div>
+              ) : filteredOptions.length > 0 ? (
+                <ul
+                  ref={listRef}
+                  role='listbox'
+                  data-testid={testId ? `${testId}-options` : undefined}
+                  className='p-1 space-y-1'
+                >
+                  {showUnassignOption && selectedValue && <li>{renderUnassignRow()}</li>}
+                  {filteredOptions.map((option, index) => (
+                    <li
+                      role='option'
+                      aria-selected={selectedValue === option.value}
+                      key={option.value}
+                    >
+                      {renderOptionRow(option, index)}
                     </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              // Empty state (no results found)
-              <div className='p-2 text-center text-sm text-muted-foreground'>
-                {searchValue.trim() ? `No results found for "${searchValue}"` : null}
-              </div>
-            )}
-          </div>
+                  ))}
+                </ul>
+              ) : (
+                <div className='p-2 text-center text-sm text-muted-foreground'>
+                  {searchValue.trim() ? `No results found for "${searchValue}"` : null}
+                </div>
+              )}
+            </div>
+          )}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

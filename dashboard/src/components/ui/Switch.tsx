@@ -39,11 +39,11 @@ export const Switch: React.FC<SwitchProps> = ({
         disabled={disabled}
         className={cn(
           'relative inline-flex shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-          isDesk ? 'focus-visible:ring-desk-accent/40' : 'focus-visible:ring-blue-600/40',
+          isDesk ? 'focus-visible:ring-desk-accent/40' : 'focus-visible:ring-primary/40',
           disabled && 'opacity-50 cursor-not-allowed',
           isDesk
             ? cn('h-[18px] w-[28px] p-0.5', checked ? 'bg-desk-accent' : 'bg-desk-switch-off')
-            : cn('h-5 w-9', checked ? 'bg-blue-600' : 'bg-muted'),
+            : cn('h-5 w-9', checked ? 'bg-primary' : 'bg-muted'),
         )}
       >
         <span

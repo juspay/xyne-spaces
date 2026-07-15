@@ -119,4 +119,13 @@ export interface EntitySelectorProps {
     trackCategory?: string;
     trackName?: string;
   };
+
+  /** Opt in to virtualizing the options list (for large user/group lists). */
+  virtualize?: boolean;
+
+  /** Minimum option count before the virtualized path kicks in. Default: 30 */
+  virtualizeThreshold?: number;
+
+  /** Height (px) of the virtualized options list. Default: 300 */
+  virtualizedHeight?: number;
 }

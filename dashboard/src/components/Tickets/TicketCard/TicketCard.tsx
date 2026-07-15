@@ -158,6 +158,7 @@ const AssigneeEditor: React.FC<{
       placeholder='Select assignee'
       searchPlaceholder='Search...'
       variant='inline'
+      virtualize
       isOpen={true}
       onOpenChange={onOpenChange}
     />
@@ -214,8 +215,17 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   const showCreatedAt = isVisible('createdAt');
   const showCreatedBy = isVisible('createdBy');
 
-  const assigneeType = ticket.assignedTo?.startsWith('group:') ? 'group' : 'user';
-  const assigneeId = ticket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+  // A user assignee (assignedTo) wins over a group; groups live in
+  // userGroupId, with legacy rows still holding `group:<id>` in assignedTo.
+  const assigneeUserId =
+    ticket.assignedTo && !ticket.assignedTo.startsWith('group:')
+      ? ticket.assignedTo.replace(/^user:/, '')
+      : '';
+  const assigneeGroupId = assigneeUserId
+    ? ''
+    : ticket.assignedTo?.startsWith('group:')
+      ? ticket.assignedTo.slice('group:'.length)
+      : ticket.userGroupId || '';
   const shouldResolveAssignee = showAssignee || !isCompact;
   const shouldResolveCreator = showCreatedBy;
 
@@ -237,10 +247,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     : null;
 
   const creator = useUser(shouldResolveCreator ? ticket.createdBy || '' : '');
-  const assignedUser = useUser(shouldResolveAssignee && assigneeType === 'user' ? assigneeId : '');
-  const assignedGroup = useUserGroupById(
-    shouldResolveAssignee && assigneeType === 'group' ? assigneeId : '',
-  );
+  const assignedUser = useUser(shouldResolveAssignee ? assigneeUserId : '');
+  const assignedGroup = useUserGroupById(shouldResolveAssignee ? assigneeGroupId : '');
 
   const selectedTagNames = tags?.map(t => t.name) || [];
 
@@ -278,10 +286,23 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   };
 
   const handleAssigneeChange = (value: string | null) => {
+    // Users live in assignedTo (bare id), groups in userGroupId — the column
+    // ticket details and the group workflows read. Assigning a user leaves the
+    // group untouched (autoassignment boards keep team + agent together);
+    // unassign clears whichever one the card displays. null clears assignedTo;
+    // '' clears userGroupId (the mutator ignores null for it).
+    const updates =
+      value && value.startsWith('group:')
+        ? { assignedTo: null, userGroupId: value.slice('group:'.length) }
+        : value
+          ? { assignedTo: value.replace(/^user:/, '') }
+          : assigneeUserId
+            ? { assignedTo: null }
+            : { assignedTo: null, userGroupId: '' };
     zero.mutate(
       mutators.ticket.update({
         id: ticket.id,
-        assignedTo: value || undefined,
+        ...updates,
         updatedAt: Date.now(),
       }),
     );
@@ -338,7 +359,13 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           data-track-name='EditAssignee'
         >
           <AssigneeEditor
-            selectedValue={ticket.assignedTo || null}
+            selectedValue={
+              assigneeUserId
+                ? `user:${assigneeUserId}`
+                : assigneeGroupId
+                  ? `group:${assigneeGroupId}`
+                  : null
+            }
             onSelect={handleAssigneeChange}
             onOpenChange={handleAssigneeEditorOpenChange}
             channelId={ticket.channelId ?? undefined}
