@@ -168,9 +168,6 @@ export function MiniCallView({
   const clampMiniLeft = (left: number): number =>
     Math.max(20, Math.min(left, window.innerWidth - size.width - 20));
 
-  const clampLineLeft = (left: number): number =>
-    Math.max(dockedLineLeft, Math.min(left, window.innerWidth - lineViewWidth - 20));
-
   const HeaderActionButton = ({
     label,
     onClick,
@@ -218,8 +215,7 @@ export function MiniCallView({
   };
 
   const handleCollapseToLine = (): void => {
-    const renderedLeft = containerRef.current?.getBoundingClientRect().left ?? miniLeft;
-    setLineLeft(clampLineLeft(renderedLeft));
+    setLineLeft(dockedLineLeft);
     setOverlayMode('line');
   };
 
@@ -469,8 +465,8 @@ export function MiniCallView({
         dragElastic={0}
         dragConstraints={{
           top: -(window.innerHeight - size.height - (isChatOpen ? 410 : 0) - 20),
-          left: -20,
-          right: window.innerWidth - size.width - 20,
+          left: 20 - miniLeft,
+          right: window.innerWidth - size.width - 20 - miniLeft,
           bottom: 20,
         }}
         dragListener={!isResizing}
