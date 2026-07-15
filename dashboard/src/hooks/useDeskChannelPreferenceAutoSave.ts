@@ -12,6 +12,8 @@ export type ChannelPreferencePatch = {
   twoStepSendEnabled?: boolean;
   autoDraftMode?: AutoDraftMode;
   autoDraftAgentSlug?: string | null;
+  metricsEnabled?: boolean;
+  frtStageNames?: string | null;
 };
 
 /**

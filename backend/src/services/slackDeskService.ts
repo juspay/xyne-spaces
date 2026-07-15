@@ -1,4 +1,4 @@
-import { EmailType, Prisma, MessageDirection, ExternalEntityType } from '@prisma/client';
+import { EmailType, Prisma, MessageDirection, ExternalEntityType, ActivityType } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
@@ -174,6 +174,7 @@ class SlackDeskService {
             channelId: conversation.channelId,
             externalThreadId: threadTs,
             externalMessageId: messageTs,
+            sentByUserId: userId,
           } as Prisma.EmailUncheckedCreateInput,
         });
 
@@ -229,6 +230,31 @@ class SlackDeskService {
       });
     } catch (err) {
       logger.error(`${TAG} Failed to record first response time`, { conversationId, err });
+    }
+
+    // 7. Audit trail + desk metrics: manual agent reply
+    try {
+      const tickets = await this.prisma.ticket.findMany({
+        where: { conversationId },
+        select: { id: true, channelId: true },
+      });
+      await this.prisma.ticketActivity.createMany({
+        data: tickets.map(ticket => ({
+          ticketId: ticket.id,
+          updatedBy: userId,
+          timestamp: email.createdAt,
+          activityType: ActivityType.EMAIL_SENT,
+          channelId: ticket.channelId,
+          value: {
+            field: 'emailSent',
+            emailId: email.id,
+            emailType: EmailType.REPLY,
+          } as Prisma.InputJsonValue,
+        })),
+        skipDuplicates: true,
+      });
+    } catch (err) {
+      logger.error(`${TAG} Failed to record email sent activity`, { conversationId, err });
     }
 
     logger.info(`${TAG} Reply sent to Slack`, {

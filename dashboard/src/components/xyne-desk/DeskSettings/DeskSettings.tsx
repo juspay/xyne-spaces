@@ -10,7 +10,8 @@ import { AutomationTab } from './tabs/AutomationTab';
 import { AIFeaturesTab } from './tabs/AIFeaturesTab';
 import { AiSyncTab } from './tabs/AiSyncTab';
 import { TagsTab } from './tabs/TagsTab';
-import { Inbox, Route, Zap, Bot, RefreshCw, Tag, X } from 'lucide-react';
+import { MetricsTab } from './tabs/MetricsTab';
+import { Inbox, Route, Zap, Bot, RefreshCw, Tag, X, BarChart3 } from 'lucide-react';
 
 /** Props for the DeskSettings modal component */
 export interface DeskSettingsProps {
@@ -20,7 +21,14 @@ export interface DeskSettingsProps {
   userID: string | null | undefined;
 }
 
-export type TabId = 'inbox' | 'assignment' | 'automation' | 'ai-features' | 'ai-sync' | 'tags';
+export type TabId =
+  | 'inbox'
+  | 'assignment'
+  | 'automation'
+  | 'ai-features'
+  | 'ai-sync'
+  | 'tags'
+  | 'metrics';
 
 /** Configuration for a single settings tab */
 export interface TabConfig {
@@ -42,6 +50,7 @@ export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.Element
   { id: 'tags', label: 'Tag Generation', icon: Tag },
   { id: 'ai-features', label: 'AI Features', icon: Bot },
   { id: 'ai-sync', label: 'AI Sync', icon: RefreshCw },
+  { id: 'metrics', label: 'Metrics', icon: BarChart3 },
 ];
 
 /**
@@ -145,6 +154,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                   {activeTab === 'tags' && <TagsTab form={form} />}
                   {activeTab === 'ai-features' && <AIFeaturesTab form={form} />}
                   {activeTab === 'ai-sync' && <AiSyncTab channelId={channelId} form={form} />}
+                  {activeTab === 'metrics' && <MetricsTab form={form} />}
                 </div>
               </div>
             </div>

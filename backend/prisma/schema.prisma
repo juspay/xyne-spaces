@@ -193,6 +193,9 @@ enum ActivityType {
   UNMERGED
   RCA_CREATED
   RCA_UPDATED
+  EMAIL_SENT
+  TICKET_CREATED
+  CSAT_RECEIVED
   @@schema("public")
 }
 
@@ -662,6 +665,7 @@ model TicketActivity {
   timestamp    DateTime     @default(now())
   activityType ActivityType // Type of data stored in value (STRING, NUMBER, JSON, OBJECT)
   value        Json         // The value containing field info, old/new values, etc.
+  channelId    String?      // Denormalized from Ticket so desk metrics can query this table alone (no FK constraint)
 
   // Relations
   ticket        Ticket @relation(fields: [ticketId], references: [id])
@@ -669,6 +673,7 @@ model TicketActivity {
 
   @@index([ticketId])
   @@index([updatedBy])
+  @@index([channelId, timestamp])
   @@map("ticket_activities")
   @@schema("public")
 }
@@ -2522,6 +2527,8 @@ model EmailChannelPreference {
   deskType               DeskType @default(EMAIL)
   dlEmail                String?
   workspaceId            String?
+  metricsEnabled         Boolean? // Gates the desk metrics dashboard
+  frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])

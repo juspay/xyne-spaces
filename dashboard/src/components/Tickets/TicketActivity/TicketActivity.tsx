@@ -72,6 +72,9 @@ type ActivityValue = Partial<
       stageName?: string;
       oldFilename?: string;
       newFilename?: string;
+      emailType?: string;
+      rating?: string;
+      score?: number | null;
     }
 >;
 
@@ -441,6 +444,30 @@ const getActivityDescription = (
       return {
         description: 'archived the ticket',
         details: '',
+      };
+
+    case ActivityType.EMAIL_SENT:
+      return {
+        description: value?.emailType === 'COMPOSE' ? 'sent an email' : 'sent an email reply',
+        details: '',
+      };
+
+    case ActivityType.TICKET_CREATED:
+      return {
+        description: 'created the ticket',
+        details: '',
+      };
+
+    case ActivityType.CSAT_RECEIVED:
+      return {
+        description: 'CSAT received',
+        details: (
+          <>
+            <span className='font-semibold'>{String(value?.rating ?? '')}</span>
+            {typeof value?.score === 'number' ? <> ({value.score}/5)</> : null}
+          </>
+        ),
+        hideActorName: true,
       };
 
     case ActivityType.MERGED: {

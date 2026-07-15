@@ -48,6 +48,7 @@ interface TicketTableProps {
   onTitleClick?: (ticket: Ticket) => void;
   visibleColumns?: Set<string>;
   isComfortView?: boolean;
+  extraColumns?: ColDef<Ticket>[];
 }
 
 // Index header renderer component
@@ -153,6 +154,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   onTitleClick,
   isComfortView = false,
   visibleColumns = new Set(['assignee', 'dueDate', 'status', 'priority', 'stage', 'tags']),
+  extraColumns,
 }) => {
   const zero = useZero();
   const users = useUsers();
@@ -578,10 +580,13 @@ export const TicketTable: React.FC<TicketTableProps> = ({
       },
     ];
 
-    return allColumns.filter(
-      col => col.key === 'index' || col.key === 'title' || visibleColumns.has(col.key),
-    );
-  }, [ticketTags, zero, visibleColumns, users, availableTags, onTitleClick]);
+    return [
+      ...allColumns.filter(
+        col => col.key === 'index' || col.key === 'title' || visibleColumns.has(col.key),
+      ),
+      ...(extraColumns ?? []),
+    ];
+  }, [ticketTags, zero, visibleColumns, users, availableTags, onTitleClick, extraColumns]);
 
   const handleBulkUpdate = useCallback(
     (updates: Partial<Ticket> = {}) => {

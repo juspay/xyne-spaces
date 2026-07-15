@@ -41,6 +41,7 @@ import {
   ListFilter,
   BarChart4Icon,
   CalendarDays,
+  BarChart3,
   Circle,
   UserPlus,
   Info as InfoIcon,
@@ -177,6 +178,7 @@ import {
 } from '../../components/ui/TipTapExtensions/CitationMark';
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
+import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import {
   useChannelConnectedEmail,
   clearChannelConnectedEmailCache,
@@ -551,11 +553,13 @@ const SupportScreen = (): ReactElement => {
 
   const setSelectedChannelId = useCallback(
     (next: string | null): void => {
-      // Preserve non-routing query params (settings, openSettings, etc.) but drop filter
-      // params — filters are persisted per channel, so the target channel restores its own
-      // from sessionStorage instead of inheriting the previous channel's URL filters.
+      // Preserve non-routing query params but drop filter params and modal-open flags —
+      // filters are persisted per channel (restored from sessionStorage), and modals like
+      // ?metrics=open / ?settings=open should not carry over to a different channel.
       const params = new URLSearchParams(searchParams);
       clearTicketFilterParams(params);
+      params.delete('metrics');
+      params.delete('settings');
       const qs = params.toString();
       const path = next ? `${supportBase}/${next}` : supportBase;
       void navigate(qs ? `${path}?${qs}` : path, { replace: true });
@@ -810,6 +814,7 @@ const SupportScreen = (): ReactElement => {
     () =>
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
+  const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showRefetchDialog, setShowRefetchDialog] = useState(false);
   const [showDlMemberSyncDialog, setShowDlMemberSyncDialog] = useState(false);
@@ -1045,6 +1050,10 @@ const SupportScreen = (): ReactElement => {
       void navigate(`${base}?settings=open`, { replace: true });
     }
   }, [searchParams, navigate, selectedChannelId, supportBase]);
+
+  useEffect(() => {
+    setIsMetricsOpen(searchParams.get('metrics') === 'open');
+  }, [searchParams]);
 
   useEffect(() => {
     localStorage.setItem('support-view-mode', viewMode);
@@ -2006,6 +2015,35 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         ))}
+                      {isSelectedChannelJoined &&
+                        selectedChannelId !== ALL_CHANNELS_ID &&
+                        selectedChannelPref?.metricsEnabled && (
+                          <Tooltip content='Desk metrics' side='bottom'>
+                            <button
+                              onClick={() => {
+                                const base = selectedChannelId
+                                  ? `${supportBase}/${selectedChannelId}`
+                                  : supportBase;
+                                if (isMetricsOpen) {
+                                  void navigate(base, { replace: true });
+                                } else {
+                                  void navigate(`${base}?metrics=open`);
+                                }
+                              }}
+                              className={cn(
+                                'p-1.5 rounded transition-colors',
+                                isMetricsOpen
+                                  ? 'bg-muted text-foreground'
+                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='OpenDeskMetrics'
+                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            >
+                              <BarChart3 size={16} />
+                            </button>
+                          </Tooltip>
+                        )}
                       {isSelectedChannelJoined && (
                         <button
                           onClick={() => {
@@ -2405,6 +2443,19 @@ const SupportScreen = (): ReactElement => {
                   onClose={() => void navigate(-1)}
                   channelId={selectedChannelId}
                   userID={userID}
+                />
+              )}
+              {isMetricsOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+                <DeskMetricsDashboard
+                  open
+                  onClose={() => {
+                    const base = selectedChannelId
+                      ? `${supportBase}/${selectedChannelId}`
+                      : supportBase;
+                    void navigate(base, { replace: true });
+                  }}
+                  channelId={selectedChannelId}
+                  channelName={selectedChannelName ?? undefined}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>

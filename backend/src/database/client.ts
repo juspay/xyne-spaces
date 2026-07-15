@@ -4,6 +4,8 @@ import { config } from '@/config/env';
 import { setupUserSessionLogging } from './middleware/userSessionLogging';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { withWorkspaceStamp } from './tenant/stamp';
+import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
+import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
@@ -55,6 +57,8 @@ export class DatabaseClient {
       }
 
       setupMessageMetadataSync(DatabaseClient.instance);
+      setupTicketActivityChannelSync(DatabaseClient.instance);
+      setupTicketCreatedActivity(DatabaseClient.instance);
 
       (DatabaseClient.instance as any).$on('error', (e: any) => {
         logger.error('Database error:', e);

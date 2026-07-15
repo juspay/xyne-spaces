@@ -133,6 +133,8 @@ import emailDemergeRoutes from '@/routes/emailDemerge';
 import emailClassificationRoutes from '@/routes/emailClassification';
 import deskTagsConfigRoutes from '@/routes/deskTagsConfig';
 import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes';
+import deskMetricsRoutes from '@/routes/deskMetricsRoutes';
+import deskMetricsBackfillRoutes from '@/routes/deskMetricsBackfill';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
 import docsRoutes from '@/routes/docs';
 import testAuthRoutes from '@/routes/testAuth';
@@ -338,6 +340,7 @@ export class App {
     this.app.use('/api/channels/:channelId/classification', authMiddleware.authenticate, emailClassificationRoutes);
     this.app.use('/api/channels/:channelId/tags-config', authMiddleware.authenticate, deskTagsConfigRoutes);
     this.app.use('/api/channels/:channelId/priority-classification', authMiddleware.authenticate, priorityClassificationRoutes);
+    this.app.use('/api/channels/:channelId/metrics', authMiddleware.authenticate, deskMetricsRoutes);
     this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
@@ -430,6 +433,8 @@ export class App {
     this.app.use('/migrate/api/admin/queries-entity-type-backfill', queriesEntityTypeBackfillRoutes);
     // Ticket duplicate backfill route (always available, no vespa flag)
     this.app.use('/api/admin/ticket-duplicate-backfill', ticketDuplicateBackfillRoutes);
+    this.app.use('/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
+    this.app.use('/migrate/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
     this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
     this.app.use('/migrate/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
     this.app.use('/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
