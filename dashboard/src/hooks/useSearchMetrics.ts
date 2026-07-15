@@ -116,6 +116,7 @@ interface UseSearchMetricsOptions {
   allChannels?: Array<{ channel: Channel; category: ChannelCategory; searchableNames?: string[] }>;
   onSearchComplete?: (results: DisplaySearchResult[], query: string) => void;
   mentionSearchType?: MentionType | null;
+  isCallSearchPage?: boolean;
   // Initial value for the "Include my channels" toggle. Defaults to false so the
   // full-page search is unaffected; the Cmd-K modal opts in with `true`.
   defaultOnlyMyChannels?: boolean;
@@ -958,7 +959,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         try {
           if (shouldUseVespa) {
             const limit = BACKEND_RESULTS_LIMIT;
-            const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`;
+            const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL},${VespaApps.CALL}`;
             const searchFilters: VespaSearchFilters = {
               query: searchText,
               apps: apps,
@@ -987,9 +988,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             const mentionUserMentions = buckets.mentions;
             const inChannels = buckets.in;
             const mentionChannels = buckets.channelMentions;
-            // with: / bare-@user / bare-#channel filters only exist on chat messages.
+            // Bare @user/#channel filters only exist on chat messages. `with:` also
+            // filters call participants on the Call History search page.
             const hasMessageOnlyMention =
-              withMentions.length > 0 ||
+              (!options.isCallSearchPage && withMentions.length > 0) ||
               mentionUserMentions.length > 0 ||
               mentionChannels.length > 0;
 
@@ -1033,6 +1035,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 searchFilters.subApp = 'transcript';
               }
               // If both canvas and transcript are specified, let the backend handle it naturally
+            } else if (options.isCallSearchPage) {
+              searchFilters.apps = VespaApps.CALL;
+              searchFilters.type = VespaDocTypes.CALLS;
             } else if (activeTab === TabType.MESSAGES) {
               searchFilters.type = VespaDocTypes.MESSAGES;
             } else if (activeTab === TabType.ATTACHMENTS) {
@@ -1071,7 +1076,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             if (toMentions.length > 0) searchFilters.toEmail = toMentions.map(m => m.id).join(',');
 
             if (withMentions.length > 0) {
-              searchFilters.type = VespaDocTypes.MESSAGES;
+              if (!options.isCallSearchPage) {
+                searchFilters.type = VespaDocTypes.MESSAGES;
+              }
               searchFilters.with = withMentions.map(user => user.id).join(',');
             }
 
@@ -1283,6 +1290,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       searchSessionId,
       markSearchStart,
       resetSearchState,
+      options.isCallSearchPage,
       includeBotMessages,
       onlyMyChannels,
       rankProfile,
@@ -1430,7 +1438,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
         const searchFilters: VespaSearchFilters = {
           query: searchText,
-          apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
+          apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL},${VespaApps.CALL}`,
           offset: currentOffset,
           limit: currentOffset + pageSize,
           filterOnly: !searchText && !!hasFilters,
@@ -1456,9 +1464,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         const mentionUserMentions = buckets.mentions;
         const inChannels = buckets.in;
         const mentionChannels = buckets.channelMentions;
-        // with: / bare-@user / bare-#channel filters only exist on chat messages.
+        // Bare @user/#channel filters only exist on chat messages. `with:` also
+        // filters call participants on the Call History search page.
         const hasMessageOnlyMention =
-          withMentions.length > 0 || mentionUserMentions.length > 0 || mentionChannels.length > 0;
+          (!options.isCallSearchPage && withMentions.length > 0) ||
+          mentionUserMentions.length > 0 ||
+          mentionChannels.length > 0;
 
         // Assignee filter doesn't apply to Messages/Attachments - return empty
         if (
@@ -1482,6 +1493,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           if (backendTypes.length > 0) {
             searchFilters.type = backendTypes.join(',');
           }
+        } else if (options.isCallSearchPage) {
+          searchFilters.apps = VespaApps.CALL;
+          searchFilters.type = VespaDocTypes.CALLS;
         } else if (activeTab === TabType.MESSAGES) {
           searchFilters.type = VespaDocTypes.MESSAGES;
         } else if (activeTab === TabType.ATTACHMENTS) {
@@ -1506,7 +1520,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           searchFilters.toEmail = toMentionsMore.map(m => m.id).join(',');
 
         if (withMentions.length > 0) {
-          searchFilters.type = VespaDocTypes.MESSAGES;
+          if (!options.isCallSearchPage) {
+            searchFilters.type = VespaDocTypes.MESSAGES;
+          }
           searchFilters.with = withMentions.map(user => user.id).join(',');
         }
 
@@ -1628,6 +1644,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     onlyMyChannels,
     rankProfile,
     includeDebugInfo,
+    options.isCallSearchPage,
   ]);
 
   // Load more results wrapper for effect
@@ -1723,6 +1740,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setRankProfile,
     includeDebugInfo,
     setIncludeDebugInfo,
+    loadMore,
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,

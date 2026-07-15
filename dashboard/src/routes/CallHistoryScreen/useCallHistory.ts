@@ -18,7 +18,6 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { type User } from '../../machines/stateMachine';
 import {
   getCallStatus,
-  getParticipantUsers,
   isExternalCalendarEvent,
   isExternalCalendarEventForUser,
   shouldShowInCallLists,
@@ -27,7 +26,6 @@ import {
 import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { useUsers } from '../../hooks/useUsers';
 import { callService } from '../../services/Call/callService';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { blobToBase64 } from '../../services/clients/fileFetchService';
@@ -50,10 +48,6 @@ interface UseCallHistoryReturn {
   queryDetails: ReturnType<typeof useCachedQuery>[1];
   selectedCall: Call | null;
   isParticipantsModalOpen: boolean;
-  searchQuery: string;
-  setSearchQuery: (query: string) => void;
-  filteredUsers: User[];
-  filteredCalls: Call[];
   selectedUsers: User[];
   handleCallRowClick: (call: Call) => void;
   handleParticipantsClick: (call: Call) => void;
@@ -107,16 +101,8 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
   const [allScheduledCalls, scheduledQueryDetails] = useCachedQuery(queries.userScheduledCalls());
 
-  // Fetch all calls when user is searching, so search covers everything
-  const [searchQuery, setSearchQuery] = useState('');
-  const isSearching = searchQuery.trim().length > 0;
-
   // Toggle for showing channel calls (calls in channels the user is a member of but wasn't invited to)
   const [showChannelCalls, setShowChannelCalls] = useState(false);
-  const [allCallsForSearch] = useCachedQuery(
-    queries.userCallHistory({ limit: 9999, start: null }),
-    { enabled: isSearching },
-  );
 
   const calls = accumulatedCalls;
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
@@ -138,7 +124,6 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
   const { isMobile } = usePlatform();
 
-  const allUsers = useUsers();
   // Helper function to get channel by ID from state machine
   const channels = useAllChannels();
 
@@ -255,8 +240,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   }, [allScheduledCalls, activeCalls, userId]);
 
   const recentCalls = useMemo(() => {
-    // When searching, use the full dataset; otherwise use accumulated (paginated) calls
-    const baseCalls = searchQuery.trim() ? allCallsForSearch : calls;
+    const baseCalls = calls;
     if (!baseCalls) return undefined;
 
     const now = Date.now();
@@ -307,47 +291,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       const bTime = b.startsAt || b.startedAt || b.createdAt;
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
-  }, [
-    calls,
-    allCallsForSearch,
-    searchQuery,
-    allScheduledCalls,
-    activeCalls,
-    showChannelCalls,
-    userId,
-  ]);
-
-  // Filter users by search query (excluding current user)
-  const filteredUsers = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-
-    const lowerQuery = searchQuery.toLowerCase();
-    return allUsers.filter(user => {
-      if (user.id === userId) return false; // Exclude current user
-      const nameMatch = user.name?.toLowerCase().includes(lowerQuery);
-      const emailMatch = user.email?.toLowerCase().includes(lowerQuery);
-      return nameMatch || emailMatch;
-    });
-  }, [allUsers, searchQuery, userId]);
-
-  // Filter calls by search query (search in participant names/emails)
-  const filteredCalls = useMemo(() => {
-    if (!searchQuery.trim()) return calls || [];
-
-    const lowerQuery = searchQuery.toLowerCase();
-    return (recentCalls || []).filter(call => {
-      // Get all participants except current user
-      const participants = call.participants?.filter(p => p.userId !== userId) || [];
-      const users = getParticipantUsers(participants, allUsers);
-
-      // Check if any participant matches the search query
-      return users.some(user => {
-        const nameMatch = user.name?.toLowerCase().includes(lowerQuery);
-        const emailMatch = user.email?.toLowerCase().includes(lowerQuery);
-        return nameMatch || emailMatch;
-      });
-    });
-  }, [recentCalls, searchQuery, userId, allUsers]);
+  }, [calls, allScheduledCalls, activeCalls, showChannelCalls, userId]);
 
   const missedCalls = useMemo(() => {
     if (!recentCalls || !userId) return [];
@@ -794,10 +738,6 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     queryDetails,
     selectedCall,
     isParticipantsModalOpen,
-    searchQuery,
-    setSearchQuery,
-    filteredUsers,
-    filteredCalls,
     selectedUsers,
     handleCallRowClick,
     handleParticipantsClick,

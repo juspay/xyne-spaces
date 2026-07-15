@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponse } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { repositories } from '@/database/repositories';
 import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import {
   messageSchema,
@@ -11,6 +12,7 @@ import {
   mailSchema,
   fileSchema,
   appSchema,
+  callSchema,
   SubApp,
 } from '@/vespa/src/types';
 import { AttachmentEntityType, ChannelType, Prisma } from '@prisma/client';
@@ -211,6 +213,81 @@ export class AdminBackfillController {
     }
 
     logger.info(`✓ Transformed and queued ${totalQueued} channels for ingestion`);
+    return totalQueued;
+  }
+
+  /**
+   * Backfill calls to Vespa - Transform-at-queue-time approach.
+   * Only backfills calls updated within the specified time range.
+   * If no timeframe is provided, backfills all calls.
+   */
+  private static async backfillCalls(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let timeRange: string;
+    let whereClause: Prisma.CallWhereInput = {};
+
+    if (cutoffTime) {
+      if (fromTime) {
+        timeRange = `(updated between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        whereClause = {
+          updatedAt: {
+            gte: fromTime,
+            lte: cutoffTime,
+          },
+        };
+      } else {
+        timeRange = `(updated before ${cutoffTime.toISOString()})`;
+        whereClause = {
+          updatedAt: {
+            lte: cutoffTime,
+          },
+        };
+      }
+    } else {
+      timeRange = 'all calls (no timeframe limit)';
+      whereClause = {};
+    }
+
+    logger.info(`🔄 Backfilling calls ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      logger.debug(`[Backfill] Fetching calls batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
+
+      const calls = await repositories.calls.findBackfillBatch({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        orderByUpdatedAt: Boolean(cutoffTime),
+      });
+
+      if (calls.length === 0) {
+        logger.debug('[Backfill] No more calls found.');
+        break;
+      }
+
+      logger.debug(`[Backfill] Found ${calls.length} calls. Queueing...`);
+
+      for (const callRef of calls) {
+        try {
+          await vespaBackfillQueue.addJob({
+            schema: callSchema,
+            jobType: 'feed',
+            docId: callRef.id,
+            userId: undefined,
+          });
+          totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to queue call ${callRef.id}:`, error);
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Queued ${totalQueued} calls...`);
+    }
+
+    logger.info(`✓ Queued ${totalQueued} calls for ingestion`);
     return totalQueued;
   }
 
@@ -901,7 +978,7 @@ export class AdminBackfillController {
       // Determine which schemas to backfill
       const requestedSchemas = schemasParam
         ? schemasParam.split(',').map(s => s.trim().toLowerCase())
-        : ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail', 'app'];
+        : ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail', 'app', 'calls'];
 
       // Parse fromTimestamp if provided, otherwise start from the beginning
       let fromTime: Date | null = null;
@@ -925,7 +1002,7 @@ export class AdminBackfillController {
         logger.info(`📅 No fromTimestamp provided - will backfill from the beginning`);
       }
 
-      const validSchemas = ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail', 'app'];
+      const validSchemas = ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail', 'app', 'calls'];
       const schemasToBackfill = requestedSchemas.filter(s => validSchemas.includes(s));
 
       if (schemasToBackfill.length === 0) {
@@ -1091,6 +1168,10 @@ export class AdminBackfillController {
 
       if (schemasToBackfill.includes('app')) {
         stats.app = await AdminBackfillController.backfillApps(cutoffTime, fromTime);
+      }
+
+      if (schemasToBackfill.includes('calls')) {
+        stats.calls = await AdminBackfillController.backfillCalls(cutoffTime, fromTime);
       }
 
       const totalQueued = Object.values(stats).reduce((sum, count) => sum + count, 0);

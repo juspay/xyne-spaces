@@ -64,7 +64,29 @@ export const validateQuery = (schema: Joi.ObjectSchema) => {
  */
 export const validateSearchFilters = () => {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const { priority, offset = 0, limit = 20, projectId, in: inChannel, from, withUser, mentions, channelMentions, on, after, before, range, board, ticketId, assignee, type, tags } = req.query;
+    const {
+      priority,
+      offset = 0,
+      limit = 20,
+      projectId,
+      in: inChannel,
+      from,
+      withUser,
+      mentions,
+      channelMentions,
+      on,
+      after,
+      before,
+      range,
+      callStatus,
+      callStartsAt,
+      callEndsAt,
+      board,
+      ticketId,
+      assignee,
+      type,
+      tags,
+    } = req.query;
 
     // Validate 'on' filter (specific date)
     if (on) {
@@ -99,6 +121,36 @@ export const validateSearchFilters = () => {
       if (!isValid) {
         res.json({ success: true, data: { grouped: false, results: [], totalCount: 0, offset: Number(offset), limit: Number(limit) } });
         return;
+      }
+    }
+
+    if (callStatus !== undefined && typeof callStatus !== 'string') {
+      return next(new AppError('callStatus must be a comma-separated string', 400));
+    }
+
+    if (callStartsAt !== undefined) {
+      const timestamp = Number(callStartsAt);
+      if (!Number.isFinite(timestamp)) {
+        return next(new AppError('callStartsAt must be a timestamp', 400));
+      }
+      if (!Number.isInteger(timestamp)) {
+        return next(new AppError('callStartsAt must be an integer timestamp', 400));
+      }
+      if (timestamp < 0) {
+        return next(new AppError('callStartsAt cannot be negative', 400));
+      }
+    }
+
+    if (callEndsAt !== undefined) {
+      const timestamp = Number(callEndsAt);
+      if (!Number.isFinite(timestamp)) {
+        return next(new AppError('callEndsAt must be a timestamp', 400));
+      }
+      if (!Number.isInteger(timestamp)) {
+        return next(new AppError('callEndsAt must be an integer timestamp', 400));
+      }
+      if (timestamp < 0) {
+        return next(new AppError('callEndsAt cannot be negative', 400));
       }
     }
 

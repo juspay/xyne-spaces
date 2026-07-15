@@ -8,6 +8,7 @@ import { logger } from '@/utils/logger';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { addHHMMDuration } from '@/utils/dateUtils';
 import { DatabaseClient } from '@/database/client';
+import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -88,6 +89,8 @@ class RecurringCallService {
       ...(externalInvitees.length > 0 && { externalInvitees }),
       callUpdatesChannel: callUpdatesChannel ?? null,
     }, tx);
+
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.RecurringCallServiceCreateInstance });
 
     // Send immediate CALL_SCHEDULED notifications + activities for the first instance only
     if (notifyParticipants) {
@@ -387,6 +390,10 @@ class RecurringCallService {
       const newCallIds = await this.createInstancesForDateRange(series, effectiveFromDate, toDate, tx, series.callUpdatesChannel);
       callIds.push(...newCallIds);
     });
+
+    scheduledInstanceIds.forEach((callId) => queueCallVespaFeed(callId, {
+      source: CallVespaFeedSource.RecurringCallServiceRegenerateFutureInstancesCancelledInstance,
+    }));
 
     return callIds;
   }

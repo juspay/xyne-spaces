@@ -3,7 +3,7 @@ import type { Schema } from '@xyne/shared';
 import { BaseVespaHandler } from '../core/base-handler';
 import type { VespaQueueHandler } from '../core/types';
 import type { QueryContext } from '../../acl/core/types';
-import { fileSchema, SubApp } from '@/vespa/src/types';
+import { callSchema, fileSchema, SubApp } from '@/vespa/src/types';
 
 type TranscriptsSchema = Schema['tables']['calls'];
 
@@ -24,53 +24,88 @@ export class TranscriptsVespaHandler extends BaseVespaHandler<'calls'> {
   }
 
   onInsert(args: InsertValue<TranscriptsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
+    const jobs: VespaQueueHandler[] = [{
+      schema: callSchema,
+      jobType: 'feed',
+      docId: args.id,
+    }];
+
     if (!this.hasTranscript(args)) {
-      return [];
+      return jobs;
     }
 
-    return [{
+    jobs.push({
       schema: fileSchema,
       jobType: 'feed',
       data: args as any,
       docId: args.id,
       app: SubApp.TRANSCRIPT
-    }];
+    });
+    return jobs;
   }
 
   onUpdate(args: UpdateValue<TranscriptsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
-    if (!this.hasTranscript(args)) {
+    const docId = args.id;
+    if (!docId) {
       return [];
     }
 
-    return [{
+    const jobs: VespaQueueHandler[] = [{
+      schema: callSchema,
+      jobType: 'feed',
+      docId,
+    }];
+
+    if (!this.hasTranscript(args)) {
+      return jobs;
+    }
+
+    jobs.push({
       schema: fileSchema,
       jobType: 'feed',
       data: args as any,
-      docId: args.id,
+      docId,
       app: SubApp.TRANSCRIPT
-    }];
+    });
+
+    return jobs;
   }
 
   onUpsert(args: UpsertValue<TranscriptsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
+    const jobs: VespaQueueHandler[] = [{
+      schema: callSchema,
+      jobType: 'feed',
+      docId: args.id,
+    }];
+
     if (!this.hasTranscript(args)) {
-      return [];
+      return jobs;
     }
 
-    return [{
+    jobs.push({
       schema: fileSchema,
       jobType: 'feed',
       data: args as any,
       docId: args.id,
       app: SubApp.TRANSCRIPT
-    }];
+    });
+
+    return jobs;
   }
 
   onDelete(args: DeleteID<TranscriptsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
-    return [{
-      schema: fileSchema,
-      jobType: 'delete',
-      docId: args.id,
-      app: SubApp.TRANSCRIPT
-    }];
+    return [
+      {
+        schema: callSchema,
+        jobType: 'delete',
+        docId: args.id,
+      },
+      {
+        schema: fileSchema,
+        jobType: 'delete',
+        docId: args.id,
+        app: SubApp.TRANSCRIPT
+      }
+    ];
   }
 }

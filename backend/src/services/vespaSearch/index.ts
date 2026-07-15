@@ -170,6 +170,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       after,       // Created after date (multiple formats)
       on,          // Created on specific date (multiple formats)
       range,       // Time keyword filter (today, yesterday, etc.)
+      callStatus,  // Call status filter
+      callStartsAt,    // Call visible range start timestamp
+      callEndsAt,      // Call visible range end timestamp
       stage,       // Ticket stage
       assignee,    // Assigned user name
       filterOnly,  // Flag for filter-only search (no query text)
@@ -545,6 +548,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       ticket: {},
       file: {},
       mail: { userEmail },
+      call: {},
+      filterOnly: filterOnly === 'true',
       workspaceId,
     };
 
@@ -596,7 +601,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
       // Unified type mapping — includes subApp types (canvas, transcript, rca)
       // Types filtered locally (users, people, channels) have null app so they don't trigger a Vespa search
-      const typeMapping: Record<string, { app: 'chat' | 'ticket' | 'file' | 'mail' | null, optionsKey: 'slack' | 'ticket' | 'file' | 'mail', docType: string, subApp?: string }> = {
+      const typeMapping: Record<string, { app: 'chat' | 'ticket' | 'file' | 'mail' | 'call' | null, optionsKey: 'slack' | 'ticket' | 'file' | 'mail' | 'call', docType: string, subApp?: string }> = {
         'messages': { app: 'chat', optionsKey: 'slack', docType: VespaDocType.MESSAGE },
         'attachments': { app: 'chat', optionsKey: 'slack', docType: VespaDocType.ATTACHMENT },
         'channels': { app: 'chat', optionsKey: 'slack', docType: VespaDocType.CHANNEL },
@@ -608,9 +613,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
         'transcript': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: SubApp.TRANSCRIPT },
         'rca': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: SubApp.RCA },
         'emails': { app: 'mail', optionsKey: 'mail', docType: VespaDocType.MAIL },
+        'calls': { app: 'call', optionsKey: 'call', docType: VespaDocType.CALL },
       };
 
-      const mappedApps = new Set<'chat' | 'ticket' | 'file' | 'mail'>();
+      const mappedApps = new Set<'chat' | 'ticket' | 'file' | 'mail' | 'call'>();
       const subApps: string[] = [];
 
       types.forEach(t => {
@@ -657,7 +663,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
 
     if (withUser) {
-      options.slack.participants = toFilterValues(withUser, 'withUser');
+      const participantIds = toFilterValues(withUser, 'withUser');
+      options.slack.participants = participantIds;
+      options.call.userIds = participantIds;
     }
 
     // Map frontend 'in' filter to channelId
@@ -667,6 +675,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.ticket.channelId = inVals;
       options.mail.channelId = inVals;
       options.file.channelId = inVals;
+      options.call.channelId = inVals;
     }
 
     // Map mention filters (scoped search): bare @user -> mentions, bare #channel -> channelMentions.
@@ -681,6 +690,20 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     if (mentionHighlights) {
       options.mentionHighlights = mentionHighlights;
     }
+
+    if (callStatus) {
+      options.call.status = toFilterValues(callStatus, 'callStatus');
+    }
+
+    const callStartsAtTimestamp = Number(callStartsAt);
+    const callEndsAtTimestamp = Number(callEndsAt);
+    if (Number.isFinite(callStartsAtTimestamp)) {
+      options.call.timeFrom = callStartsAtTimestamp;
+    }
+    if (Number.isFinite(callEndsAtTimestamp)) {
+      options.call.timeTo = callEndsAtTimestamp;
+    }
+
     // Add unified filters (apply to both slack and ticket)
     if (projectId) {
       const projectIds = toFilterValues(projectId, 'projectId');
@@ -768,7 +791,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
 
     if (callType) {
-      options.file.callType = toFilterValues(callType, 'callType');
+      const callTypeValues = toFilterValues(callType, 'callType');
+      options.file.callType = callTypeValues;
+      options.call.callType = callTypeValues;
     }
 
     if (presentationSummary) {

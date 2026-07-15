@@ -155,6 +155,10 @@ const stripHighlightTags = (text: string): string => {
       newFields.title = ticket_title.highlighted;
       wasHighlighted = wasHighlighted || ticket_title.wasHighlighted;
 
+      const displayTitle = highlightField(newFields.displayTitle, query);
+      newFields.displayTitle = displayTitle.highlighted;
+      wasHighlighted = wasHighlighted || displayTitle.wasHighlighted;
+
       const description = highlightField(newFields.description, query);
       newFields.description = description.highlighted;
       wasHighlighted = wasHighlighted || description.wasHighlighted;
