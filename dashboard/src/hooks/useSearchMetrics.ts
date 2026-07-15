@@ -959,7 +959,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         try {
           if (shouldUseVespa) {
             const limit = BACKEND_RESULTS_LIMIT;
-            const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL},${VespaApps.CALL}`;
+            const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`;
             const searchFilters: VespaSearchFilters = {
               query: searchText,
               apps: apps,
@@ -1438,7 +1438,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
         const searchFilters: VespaSearchFilters = {
           query: searchText,
-          apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL},${VespaApps.CALL}`,
+          apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`,
           offset: currentOffset,
           limit: currentOffset + pageSize,
           filterOnly: !searchText && !!hasFilters,

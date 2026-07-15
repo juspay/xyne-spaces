@@ -1317,7 +1317,6 @@ const CallHistoryScreen = (): ReactElement => {
                   </div>
                 ) : hasCallSearch ? (
                   <NoFiltredCalls
-                    searchQuery={searchQuery}
                     isShortTitleSearch={titleSearchQuery.length > 0 && titleSearchQuery.length < 4}
                   />
                 ) : (
@@ -1454,19 +1453,11 @@ const EmptyState = ({ icon: Icon, title, description }: EmptyStateProps): ReactE
   );
 };
 
-const NoFiltredCalls = ({
-  searchQuery,
-  isShortTitleSearch,
-}: {
-  searchQuery: string;
-  isShortTitleSearch: boolean;
-}): ReactElement => {
+const NoFiltredCalls = ({ isShortTitleSearch }: { isShortTitleSearch: boolean }): ReactElement => {
   return (
     <div className='flex flex-col items-center justify-center h-full px-6 py-12'>
       <h2 className='text-lg text-foreground font-medium mb-1'>
-        {isShortTitleSearch
-          ? 'Type at least 4 letters to search call titles'
-          : `No calls found for ${searchQuery}`}
+        {isShortTitleSearch ? 'Type at least 4 letters to search call titles' : 'No calls found'}
       </h2>
     </div>
   );
