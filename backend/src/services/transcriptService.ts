@@ -20,6 +20,7 @@ import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics
 import { executeCallLlmWithRetry } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callDocumentService } from '@/services/callDocumentService';
+import { acquireLock, releaseLock } from '@/utils/distributedLock';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -28,6 +29,19 @@ interface TranscriptEntry {
   text: string;
   timestamp: number;
   participant_identity: string;
+}
+
+// Shape of the metadata stored on a transcript message attachment. Written in
+// postCallTranscript/processCallWithSummary and read back by the reconcile dedup guard.
+interface TranscriptAttachmentMetadata {
+  callId: string;
+  type: 'transcript' | 'identified_transcript';
+  duration: number;
+  participantCount: number;
+  version: number;
+  entryCount: number;
+  createdAt?: string;
+  lastUpdatedAt?: string;
 }
 
 // Consolidation gap: if same speaker speaks within this gap, merge into single entry
@@ -1429,11 +1443,101 @@ Output ONLY the processed transcript, nothing else.`;
      * 4. Saves summary to call record
      * 5. Posts summary to channel
      */
+  /**
+   * Fallback transcript processing, triggered from the LiveKit `room_finished` webhook
+   * after a short grace. It exists for the case where the agent's `transcript-ready`
+   * webhook never arrives — e.g. the transcription agent was OOM/SIGKILLed mid-call —
+   * so whatever it had already streamed to GCS still gets turned into the call summary.
+   *
+   * Deduped against the webhook via the transcript attachment's `entryCount`: we only
+   * (re)process when GCS holds MORE transcript lines than we last persisted. That skips
+   * the costly LLM work (summary/title/tickets) when the webhook already processed the
+   * same-or-newer content, while still guaranteeing no trailing events are dropped — a
+   * later webhook carrying a larger transcript will re-process and supersede a partial
+   * reconciliation (the webhook path is intentionally left unguarded for that reason).
+   */
+  async reconcileTranscriptFromGcs(callId: string): Promise<void> {
+    try {
+      // Locate the call system message (same lookup the transcript-ready webhook uses).
+      const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
+      if (!callMessage) {
+        logger.info(`[${callId}] transcript_reconcile_skipped`, { reason: 'no_call_message' });
+        return;
+      }
+
+      // What GCS currently holds (whatever the agent streamed before it stopped).
+      // Treat a missing/failed fetch as "nothing to reconcile" rather than an error.
+      let content: string | null = null;
+      try {
+        content = await this.retrieveTranscript(callId);
+      } catch (retrieveError) {
+        // A GCS fetch failure is not the same as "the agent never wrote a transcript":
+        // log it so a transient storage error is distinguishable from an empty transcript.
+        logger.error(`[${callId}] transcript_reconcile_retrieve_failed`, {
+          error: retrieveError instanceof Error ? retrieveError.message : String(retrieveError),
+          stack: retrieveError instanceof Error ? retrieveError.stack : undefined,
+        });
+        content = null;
+      }
+      if (!content) {
+        logger.info(`[${callId}] transcript_reconcile_skipped`, { reason: 'no_gcs_transcript' });
+        return;
+      }
+      const currentCount = this.parseTranscriptEntries(content).length;
+
+      // What we last processed, read from the existing attachment's entryCount metadata.
+      const existing = await repositories.messageAttachments.findTranscriptByCallId(callId);
+      const storedCount =
+        (existing?.metadata as TranscriptAttachmentMetadata | null)?.entryCount ?? -1;
+
+      if (currentCount <= storedCount) {
+        logger.info(`[${callId}] transcript_reconcile_skipped`, {
+          reason: 'already_processed',
+          gcs_entry_count: currentCount,
+          stored_entry_count: storedCount,
+        });
+        return;
+      }
+
+      logger.info(`[${callId}] transcript_reconcile_processing`, {
+        gcs_entry_count: currentCount,
+        stored_entry_count: storedCount,
+        message_id: callMessage.messageId,
+      });
+      await this.processCallWithSummary(callId, callMessage.messageId, true);
+    } catch (error) {
+      logger.error(`[${callId}] transcript_reconcile_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+    }
+  }
+
   async processCallWithSummary(
     callId: string,
     messageId: string,
     hasTranscript: boolean = true
   ): Promise<void> {
+    // Serialize processing per call. The room_finished reconcile (deferred ~30s) can still
+    // race the agent's transcript-ready webhook — itself fired twice (initial + post-STT-drain)
+    // — so up to three runs can hit the same callId at once. The summary/attachment/ticket writes
+    // are check-then-create; run concurrently they each see "nothing exists" and duplicate
+    // rows. Serialized sequential re-runs are idempotent (upsert-with-version-bump), so we
+    // WAIT for the lock rather than skip — a later, larger transcript still reprocesses in
+    // order without dropping content.
+    const lockHandle = await acquireLock(`lock:transcript-processing:${callId}`, {
+      ttlSeconds: 180,
+      waitTimeoutMs: 30_000,
+      retryDelayMs: 300,
+    });
+    if (!lockHandle) {
+      logger.warn(`[${callId}] process_call_with_summary_lock_timeout`, {
+        message_id: messageId,
+        reason: 'another worker held the processing lock beyond the wait window',
+      });
+      return;
+    }
+
     try {
       // Get call details for summary generation and notes posting.
       const call = await repositories.calls.findByExternalId(callId);
@@ -1713,6 +1817,8 @@ Output ONLY the processed transcript, nothing else.`;
     } catch (error) {
       logger.error(`[${callId}] process_call_with_summary_failed`, { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
       // Don't re-throw - the transcript was already processed successfully
+    } finally {
+      await releaseLock(lockHandle);
     }
   }
 

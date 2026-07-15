@@ -78,7 +78,7 @@ class RoomLifecycle:
 
             if self.tracker.is_empty():
                 logger.info(f"room_empty | trigger_reason=all_participants_left")
-                asyncio.create_task(self.cleanup_manager.run())
+                asyncio.create_task(self.cleanup_manager.run(reason="room_empty"))
 
         # Only register track_subscribed handler if using legacy EarModule
         # MultiUserTranscriber handles track subscription internally

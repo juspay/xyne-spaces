@@ -95,6 +95,22 @@ class Config:
     max_conversation_history: int = 50
     conversation_ttl: int = 86400  # 24 hours
     restore_last_n_messages: int = 30
+
+    # Transcript Incremental Flush
+    # Upload the in-memory transcript buffer to GCS every N transcription events so a
+    # crash / OOM / forced restart loses at most N events. Event-count based (no idle
+    # time-based writes). Set to 0 to disable (flush only on call end / cleanup).
+    transcript_flush_every_n: int = 5
+
+    # Transcript Base-Load Retry (rejoin data-loss guard)
+    # When a session rejoins a call, the prior transcript is downloaded once and every
+    # subsequent full-object upload re-includes it. A *failed* read (transient GCS blip)
+    # is NOT the same as "no prior transcript": treating it as empty would overwrite and
+    # destroy the earlier session's transcript. So a read that errors (or fails to
+    # connect) is retried up to this many times with exponential backoff (capped below).
+    # Only after all retries are exhausted do we accept the loss and start fresh.
+    transcript_base_load_max_retries: int = 5
+    transcript_base_load_backoff_cap_s: float = 5.0
     
     @classmethod
     def load(cls) -> 'Config':
@@ -188,6 +204,14 @@ class Config:
             redis_password=os.getenv("REDIS_PASSWORD"),  # None if not set
             redis_tls=os.getenv("REDIS_TLS", "false").lower() == "true",
             
+            # Transcript incremental flush cadence (events per GCS upload)
+            transcript_flush_every_n=int(os.getenv("TRANSCRIPT_FLUSH_EVERY_N_EVENTS", "5")),
+
+            # Rejoin base-load retry: how hard to retry reading the prior transcript
+            # before accepting data loss and overwriting it.
+            transcript_base_load_max_retries=int(os.getenv("TRANSCRIPT_BASE_LOAD_MAX_RETRIES", "5")),
+            transcript_base_load_backoff_cap_s=float(os.getenv("TRANSCRIPT_BASE_LOAD_BACKOFF_CAP_S", "5.0")),
+
             # Environment
             node_env=node_env,
             is_development=node_env == "development",

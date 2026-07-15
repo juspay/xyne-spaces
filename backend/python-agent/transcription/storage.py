@@ -247,15 +247,25 @@ class TranscriptionStorage:
         safe_call_id: str,
         bucket: Optional[StorageBucket] = None,
         use_buffer: bool = False,
+        flush_every_n: int = 5,
+        base_load_max_retries: int = 5,
+        base_load_backoff_cap_s: float = 5.0,
     ):
         """
         Initialize transcription storage.
-        
+
         Args:
             call_id: Original call/room ID
             safe_call_id: Sanitized call ID for filesystem
             bucket: StorageBucket instance (None = local only)
             use_buffer: True = buffer for cloud, False = stream to cloud
+            flush_every_n: In buffered mode, upload the buffer to GCS every N events
+                (event-count based, not time based). 0 disables incremental flush.
+            base_load_max_retries: On rejoin, how many times to retry reading the prior
+                transcript when the read errors (transient GCS failure) before accepting
+                data loss and overwriting it. A definitive "does not exist" never retries.
+            base_load_backoff_cap_s: Upper bound on the exponential backoff between
+                base-load retries.
         """
         self.call_id = call_id
         self.safe_call_id = safe_call_id
@@ -279,6 +289,28 @@ class TranscriptionStorage:
         # Track if any entries were uploaded to cloud storage
         self._has_uploaded = False
 
+        # Once flush() runs (cleanup/shutdown), the storage is closed and stops
+        # accepting new events so nothing is silently buffered but never flushed.
+        self._closed = False
+
+        # Incremental flush (buffered mode): upload the whole buffer to GCS every
+        # `flush_every_n` events as a complete, atomically-replaced object. This caps
+        # data loss on a crash / OOM / forced restart to at most N events, without any
+        # open resumable stream to leave unfinalized. Event-count based (not a timer)
+        # so idle calls make no GCS writes.
+        self._flush_every_n = flush_every_n
+        self._events_since_flush = 0
+        # Single-flight + coalescing: only one upload runs at a time; a trigger that
+        # arrives mid-upload marks the buffer dirty so the in-flight upload re-runs.
+        self._flush_lock = asyncio.Lock()
+        self._flush_dirty = False
+        self._flush_tasks: set[asyncio.Task] = set()
+        # Prior-session transcript, downloaded once, so repeated full re-uploads append
+        # to (rather than overwrite) content written before this session on rejoin.
+        self._base_content: Optional[str] = None
+        self._base_load_max_retries = max(1, base_load_max_retries)
+        self._base_load_backoff_cap_s = base_load_backoff_cap_s
+
         if use_buffer:
             logger.info(f"storage_buffering_enabled | mode=buffered, cloud_available=true")
         elif bucket:
@@ -293,6 +325,12 @@ class TranscriptionStorage:
         Args:
             event: Transcription event data
         """
+        # Storage has been closed by flush()/cleanup — drop late events instead of
+        # buffering them where they would never be flushed and would leak memory.
+        if self._closed:
+            logger.warning(f"transcription_write_after_close | call_id={self.call_id}, dropped=true")
+            return
+
         # Streaming mode: write directly to cloud via background thread
         if self.cloud_streamer is not None:
             self.cloud_streamer.write(event)
@@ -303,6 +341,17 @@ class TranscriptionStorage:
             json_line = json.dumps(event) + "\n"
             self.storage_buffer.append(json_line)
             logger.debug(f"transcription_buffered | entry_count={len(self.storage_buffer)}")
+
+            # Incremental durability: every N events, upload the buffer-so-far to GCS
+            # in the background (non-blocking so the transcription pipeline isn't
+            # stalled on a GCS round-trip).
+            if self._flush_every_n > 0 and self.bucket is not None:
+                self._events_since_flush += 1
+                if self._events_since_flush >= self._flush_every_n:
+                    self._events_since_flush = 0
+                    task = asyncio.create_task(self._incremental_flush())
+                    self._flush_tasks.add(task)
+                    task.add_done_callback(self._on_flush_task_done)
             return
 
         # Local storage fallback (only when cloud storage is not configured)
@@ -326,6 +375,11 @@ class TranscriptionStorage:
         
         Called during cleanup when all participants leave.
         """
+        # Stop accepting new events. Any transcription that arrives after this point
+        # (e.g. in-flight STT completing during shutdown) is dropped rather than left
+        # in a buffer that will never be uploaded.
+        self._closed = True
+
         # Streaming mode: stop the streamer (will drain queue and close stream)
         if self.cloud_streamer is not None:
             logger.info(f"storage_stream_closing")
@@ -334,49 +388,168 @@ class TranscriptionStorage:
             logger.info(f"Cloud streamer stopped, has_uploaded={self._has_uploaded}")
             return
         
-        # Buffered mode: upload all buffered entries (with append support)
+        # Buffered mode: final flush — upload the full buffer as one complete object,
+        # using the same atomic mechanism as the incremental flushes (idempotent with
+        # them). Serialized against any in-flight incremental upload via the lock.
         if self.storage_buffer is not None:
-            if len(self.storage_buffer) == 0:
-                logger.warning(f"buffer_flush_empty")
-                return
-            
             if self.bucket is None:
                 logger.warning(f"buffer_flush_failed | reason=no_bucket")
                 return
-            
-            try:
-                logger.info(f"storage_upload_started | file={self.storage_filename}, entries={len(self.storage_buffer)}")
-                # Check if existing transcript exists and append to it
-                existing_content = ""
-                if self.bucket.blob_exists(self.storage_filename):
-                    try:
-                        existing_content = self.bucket.download_as_bytes(self.storage_filename).decode('utf-8')
-                        line_count = len(existing_content.strip().split('\n')) if existing_content.strip() else 0
-                        logger.info(f"[STORAGE:APPEND] Found existing transcript | lines={line_count} | size={len(existing_content)} bytes")
-                        # Ensure existing content ends with newline
-                        if existing_content and not existing_content.endswith('\n'):
-                            existing_content += '\n'
-                    except Exception as e:
-                        logger.warning(f"[STORAGE:APPEND] Failed to load existing content, overwriting: {e}")
-                        existing_content = ""
-                
-                # Combine existing content with new buffered entries
-                transcript_content = existing_content + "".join(self.storage_buffer)
-                
-                # Run blocking upload in thread pool
-                await asyncio.to_thread(
-                    self.bucket.upload_from_string,
-                    self.storage_filename,
-                    transcript_content,
-                    "application/x-ndjson"
-                )
 
-                # Track that entries were uploaded
-                self._has_uploaded = True
-                logger.info(f"Successfully uploaded transcript: {self.storage_filename} (appended {len(self.storage_buffer)} new entries)")
+            async with self._flush_lock:
+                self._flush_dirty = False
+                try:
+                    await self._upload_current(stage="final")
+                    logger.info(f"transcript_flush_completed | file={self.storage_filename}")
+                except Exception as e:
+                    logger.error(f"Error uploading transcript: {e}")
+
+    async def _ensure_base_loaded(self):
+        """
+        Download any pre-existing transcript exactly once into self._base_content.
+
+        Re-uploads prepend this base so repeated full-object writes append to (rather
+        than overwrite) content from a prior session when rejoining a call.
+
+        Fail-closed on read errors: a transient GCS failure (can't connect / read error
+        on an object that DOES exist) is not "empty" — treating it as empty would make the
+        next full-object PUT overwrite and destroy the earlier session's transcript. So a
+        failed read is retried up to self._base_load_max_retries times with exponential
+        backoff. Only a definitive "object does not exist" starts fresh immediately; only
+        after all retries are exhausted do we accept the data loss and overwrite.
+        """
+        if self._base_content is not None:
+            return
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1, self._base_load_max_retries + 1):
+            try:
+                exists = await asyncio.to_thread(self.bucket.blob_exists, self.storage_filename)
+                if not exists:
+                    # Definitive: nothing to append to. Safe to start fresh.
+                    logger.info(f"[STORAGE:APPEND] No existing transcript found, starting fresh")
+                    self._base_content = ""
+                    return
+
+                raw = await asyncio.to_thread(self.bucket.download_as_bytes, self.storage_filename)
+                base = raw.decode("utf-8")
+                if base and not base.endswith("\n"):
+                    base += "\n"
+                line_count = len(base.strip().split("\n")) if base.strip() else 0
+                logger.info(
+                    f"[STORAGE:APPEND] Loaded base transcript | lines={line_count} | "
+                    f"size={len(base)} bytes | attempt={attempt}/{self._base_load_max_retries}"
+                )
+                self._base_content = base
+                return
             except Exception as e:
-                logger.error(f"Error uploading transcript: {e}")
+                # The object may well exist — we just couldn't read it. Retry rather than
+                # risk overwriting a prior session's transcript with an empty base.
+                last_error = e
+                if attempt < self._base_load_max_retries:
+                    backoff = min(2 ** (attempt - 1), self._base_load_backoff_cap_s)
+                    logger.warning(
+                        f"[STORAGE:APPEND] base_load_failed | attempt={attempt}/{self._base_load_max_retries}, "
+                        f"retry_in={backoff}s, error={e}"
+                    )
+                    await asyncio.sleep(backoff)
+
+        # All retries exhausted while the object may still exist. We cannot preserve what
+        # we cannot read, so — as an explicit, last-resort trade-off — accept the data loss
+        # and start fresh. This session's subsequent full-object PUT will overwrite the
+        # unreadable prior content.
+        logger.error(
+            f"[STORAGE:APPEND] base_load_giving_up | retries={self._base_load_max_retries}, "
+            f"accepting_data_loss=true, last_error={last_error}"
+        )
+        self._base_content = ""
+
+    async def _upload_current(self, stage: str):
+        """
+        Atomically upload base + the entire current buffer as one complete GCS object.
+
+        Uses upload_from_string (a single, atomic object PUT) — never an open resumable
+        stream — so the object is always fully finalized and readable; a crash simply
+        means the next PUT never happens, leaving the last complete object intact.
+        """
+        if self.bucket is None or self.storage_filename is None:
+            return
+
+        await self._ensure_base_loaded()
+
+        # Snapshot on the event loop before handing the string to the worker thread,
+        # so concurrent appends to the buffer can't be observed half-written.
+        content = (self._base_content or "") + "".join(self.storage_buffer or [])
+        if not content:
+            return
+
+        await asyncio.to_thread(
+            self.bucket.upload_from_string,
+            self.storage_filename,
+            content,
+            "application/x-ndjson",
+        )
+        self._has_uploaded = True
+        logger.info(
+            f"transcript_uploaded | stage={stage}, file={self.storage_filename}, "
+            f"buffered_entries={len(self.storage_buffer or [])}"
+        )
+
+    def _on_flush_task_done(self, task: "asyncio.Task") -> None:
+        """Done-callback for background incremental-flush tasks.
+
+        Drops the task from the tracking set AND retrieves its exception so a failed
+        flush doesn't surface as an unretrieved-task warning at GC time. `_incremental_flush`
+        already logs upload errors internally, so anything reaching here is unexpected
+        (e.g. cancellation on shutdown) — log it rather than swallow silently.
+        """
+        self._flush_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("flush_task_unexpected_exception", exc_info=exc)
+
+    async def _incremental_flush(self):
+        """
+        Upload the current buffer to GCS (single-flight + coalescing).
+
+        If an upload is already in flight, mark the buffer dirty and return; the running
+        upload re-runs to pick up the newly buffered events. This bounds GCS writes to
+        one at a time no matter how fast events arrive.
+        """
+        self._flush_dirty = True
+        if self._flush_lock.locked():
+            return
+        async with self._flush_lock:
+            while self._flush_dirty and not self._closed:
+                self._flush_dirty = False
+                try:
+                    await self._upload_current(stage="incremental")
+                except Exception:
+                    logger.error("incremental_flush_failed", exc_info=True)
 
     def has_uploaded_entries(self) -> bool:
         """Check if any transcript entries were successfully uploaded to cloud storage."""
         return self._has_uploaded
+
+    def release(self) -> None:
+        """
+        Release in-memory transcript buffers after the call has ended.
+
+        Called once at the end of the cleanup lifecycle (success, failure, or timeout)
+        so buffered transcript content is freed deterministically instead of lingering
+        until the per-call storage object is garbage-collected. Marks the storage closed
+        so any late write is dropped. Idempotent — safe to call multiple times.
+
+        Must run *after* all flushes: cleanup flushes twice (initial + post-STT drain),
+        and those must still see the buffer, so this is never called from flush().
+        """
+        self._closed = True
+        # Empty in place (not = None) so the buffered-mode invariant holds and a stray
+        # post-release flush() is a safe no-op (empty buffer → _upload_current returns early).
+        if self.storage_buffer is not None:
+            self.storage_buffer.clear()
+        self._base_content = None
+        # Drop the streamer ref so its thread-local existing-content copy can be freed.
+        self.cloud_streamer = None

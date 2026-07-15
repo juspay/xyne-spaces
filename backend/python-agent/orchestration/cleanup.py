@@ -37,9 +37,33 @@ class CleanupManager:
         self.conversation_store = conversation_store
         self.additional_storages: List[TranscriptionStorage] = additional_storages or []
 
-    async def run(self):
-        """Execute full cleanup sequence with hard deadline"""
-        logger.info("cleanup_started", extra={"timeout_s": 30})
+        # Idempotency: cleanup can be triggered from multiple paths (empty room,
+        # SIGTERM shutdown callback, entrypoint finally). Only run once; concurrent
+        # callers await the first run instead of flushing/notifying again.
+        self._cleanup_lock = asyncio.Lock()
+        self._has_run = False
+
+    async def run(self, reason: str = "unspecified"):
+        """
+        Execute full cleanup sequence with hard deadline.
+
+        Idempotent: safe to call from the empty-room handler, the LiveKit shutdown
+        callback, and the entrypoint finally block. Only the first call performs
+        the flush/notify/drain work; later callers return immediately once it is done.
+
+        Args:
+            reason: Why cleanup was triggered (e.g. "room_empty", "shutdown:sigterm").
+        """
+        async with self._cleanup_lock:
+            if self._has_run:
+                logger.info("cleanup_skipped_already_run", extra={"reason": reason})
+                return
+            self._has_run = True
+
+            await self._run_with_deadline(reason)
+
+    async def _run_with_deadline(self, reason: str):
+        logger.info("cleanup_started", extra={"timeout_s": 30, "reason": reason})
         # Track which steps completed so the timeout log is actionable.
         self._flush_completed = False
         self._notify_completed = False
@@ -60,6 +84,21 @@ class CleanupManager:
                 },
             )
             await self._force_disconnect()
+        finally:
+            # Drain in-memory transcript buffers for this call (ended or failed) so they
+            # don't linger until GC. Runs after flushes have uploaded, on every path.
+            self._release_storage_memory()
+
+    def _release_storage_memory(self):
+        """Release in-memory transcript buffers for this call (ended or failed) so they
+        don't linger until GC. Runs after cleanup regardless of success / timeout / exception."""
+        try:
+            self.storage.release()
+            for extra in self.additional_storages:
+                extra.release()
+            logger.info("storage_memory_released", extra={"call_id": self.call_id})
+        except Exception:
+            logger.error("storage_memory_release_failed", exc_info=True)
 
     async def _run_cleanup_steps(self):
         # 1. Upload transcript to GCS (what we have so far)

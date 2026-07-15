@@ -257,6 +257,35 @@ class LiveKitWebhookController {
         logger.info(`[LiveKit Webhook] Call ${callId} did not transition to ENDED`);
       }
 
+      // Transcript reconciliation fallback — scheduled on EVERY room_finished, regardless of
+      // whether participant_left already marked the call ENDED (so it must live outside
+      // the shouldEndCall branch above). It exists for when the agent's transcript-ready
+      // webhook never arrives (agent OOM/SIGKILLed mid-call): reconcile then processes
+      // whatever it had already streamed to GCS.
+      //
+      // Deferred ~30s on a detached timer (NOT awaited) rather than run inline. room_finished
+      // almost always beats transcript-ready, so reconciling immediately would make this
+      // fallback the primary processor and race the agent path. The grace lets transcript-ready
+      // (the intended primary) process first; reconcile then no-ops via its entryCount dedup
+      // when the agent path already handled the call, and only does real work when
+      // transcript-ready never arrived. Deduped by entryCount + serialized by a per-call lock,
+      // so a late reconcile neither repeats the LLM work nor duplicates rows.
+      //
+      // Trade-off (accepted): the timer lives only in this process, so a backend restart inside
+      // the 30s window drops the scheduled reconcile. Harmless in the normal case (transcript-ready
+      // already did the work); it only loses the fallback in the rare double-failure of the agent
+      // dying AND the backend restarting within the window. A durable queue-backed job / ENDED-calls
+      // sweeper is the fast-follow if that edge ever needs closing.
+      const RECONCILE_GRACE_MS = 30_000;
+      setTimeout(() => {
+        // reconcileTranscriptFromGcs catches its own errors today, but this timer runs
+        // detached from any request context — a future edit that lets a rejection escape
+        // would become an unhandled rejection and crash the process. Catch defensively.
+        transcriptService.reconcileTranscriptFromGcs(callId).catch((err) => {
+          logger.error(`[LiveKit Webhook] Deferred reconcile failed for ${callId}:`, err);
+        });
+      }, RECONCILE_GRACE_MS);
+
       if (result.messageUpdated) {
         logger.info(`[LiveKit Webhook] Updated system message for call ${callId}`);
       }
