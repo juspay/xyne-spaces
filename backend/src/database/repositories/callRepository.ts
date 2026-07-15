@@ -137,17 +137,18 @@ export class CallRepository {
   }
 
   /**
-   * Find the next upcoming SCHEDULED call instance for a recurring series.
-   * Returns the first SCHEDULED instance whose startsAt is >= now, ordered ascending.
-   * Used as a fallback when there is no active call — gives the participant
-   * credentials for the next occurrence they should join.
+   * Find the current or next SCHEDULED call instance for a recurring series.
+   * An occurrence remains eligible until its scheduled end time so a join request
+   * made after startsAt still resolves to that occurrence instead of the next one.
    */
-  async findLatestCallByRecurringSeriesId(recurringSeriesId: string): Promise<Call | null> {
+  async findCurrentOrNextScheduledCallByRecurringSeriesId(
+    recurringSeriesId: string
+  ): Promise<Call | null> {
     return await DatabaseClient.getInstance().call.findFirst({
       where: {
         recurringSeriesId,
         status: CallStatus.SCHEDULED,
-        startsAt: { gte: new Date() },
+        endsAt: { gt: new Date() },
       },
       orderBy: {
         startsAt: 'asc',
