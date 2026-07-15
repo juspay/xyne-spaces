@@ -56,6 +56,7 @@ import CanvasScreen from '../components/Canvas/CanvasScreen';
 import CanvasPanel from '../components/Canvas/CanvasPanel/CanvasPanel';
 import CallPage from './CallScreen/CallPage';
 import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
+import { ClawOverlay } from '../components/Claw/ClawOverlay';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
 import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
@@ -1494,6 +1495,15 @@ export const router = createBrowserRouter([
             </ZeroFallbackProvider>
           </ZeroProvider>
         ),
+      },
+      {
+        element: <ProtectedRoute />,
+        children: [
+          {
+            path: '/newWindow/claw',
+            element: <ClawOverlay />,
+          },
+        ],
       },
       {
         path: '/invite',

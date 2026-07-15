@@ -140,6 +140,17 @@ export interface ElectronAPI {
     stopRecording: () => void;
     cancelRecording: () => void;
   };
+  clawOverlay?: {
+    setIgnoreMouse: (ignore: boolean) => void;
+    setExpanded: (expanded: boolean) => void;
+    focus: () => void;
+    blur: () => void;
+    openInMain: (pathname: string) => void;
+    onVisibility: (callback: (visible: boolean) => void) => () => void;
+    getEnabled: () => Promise<boolean>;
+    setEnabled: (enabled: boolean) => void;
+    onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
+  };
   saveErrorReportFile?(
     fileName: string,
     buffer: ArrayBuffer | null,

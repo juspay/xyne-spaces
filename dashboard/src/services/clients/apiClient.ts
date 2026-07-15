@@ -102,10 +102,11 @@ apiConfig.interceptors.request.use(
       let workspaceId: string | undefined = firstPathSegment;
       if (firstPathSegment === 'newWindow') {
         const search = new URLSearchParams(window.location.search);
+        const userEmail = logger.emailId || localStorage.getItem('user_email');
         workspaceId =
           search.get('workspaceId') ||
-          (logger.emailId
-            ? localStorage.getItem(`lastActiveWorkspaceId_${logger.emailId}`) || undefined
+          (userEmail
+            ? localStorage.getItem(`lastActiveWorkspaceId_${userEmail}`) || undefined
             : undefined);
       }
       if (workspaceId && workspaceId !== 'auth') {

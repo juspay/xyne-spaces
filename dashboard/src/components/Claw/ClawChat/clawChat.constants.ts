@@ -1,0 +1,3 @@
+export const CLAW_STICK_TO_BOTTOM_THRESHOLD = 80;
+
+export const MAX_TEXTAREA_HEIGHT_PX = 128;

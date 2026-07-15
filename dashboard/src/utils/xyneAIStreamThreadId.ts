@@ -130,3 +130,10 @@ export function getChannelIdFromStreamThreadId(threadId: string): string | null 
       return parsed.channelId;
   }
 }
+
+export function newStreamSlotKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `draft-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}

@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Loader2, Check, X, Shield } from 'lucide-react';
 import type { PendingAction } from '../utils/XyneAITypes';
+import {
+  getStoredPendingActionResolution,
+  subscribeToPendingActionResolutions,
+} from '../../../../services/XyneAI/XyneAIPendingActionStore';
 
 interface PendingActionBlockProps {
   actions: PendingAction[];
   onApprove?: (action: PendingAction, index: number) => Promise<void> | void;
-  onDecline?: (action: PendingAction, index: number) => void;
+  onDecline?: (action: PendingAction, index: number) => Promise<void> | void;
 }
 
 /**
@@ -33,7 +37,7 @@ export function PendingActionBlock({
     <div className='space-y-2'>
       {actions.map((action, i) => (
         <PendingActionItem
-          key={`${action.serverType}-${action.tool}-${i}`}
+          key={action.id || `${action.serverType}-${action.tool}-${i}`}
           action={action}
           index={i}
           onApprove={onApprove}
@@ -48,7 +52,7 @@ interface PendingActionItemProps {
   action: PendingAction;
   index: number;
   onApprove?: ((action: PendingAction, index: number) => Promise<void> | void) | undefined;
-  onDecline?: ((action: PendingAction, index: number) => void) | undefined;
+  onDecline?: ((action: PendingAction, index: number) => Promise<void> | void) | undefined;
 }
 
 function PendingActionItem({
@@ -58,9 +62,18 @@ function PendingActionItem({
   onDecline,
 }: PendingActionItemProps): ReactElement {
   const [state, setState] = useState<'idle' | 'running' | 'approved' | 'declined' | 'error'>(
-    'idle',
+    action.resolution ?? 'idle',
   );
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const syncResolution = (): void => {
+      setState(action.resolution ?? getStoredPendingActionResolution(action.id) ?? 'idle');
+      setError(null);
+    };
+    syncResolution();
+    return subscribeToPendingActionResolutions(syncResolution);
+  }, [action.id, action.resolution]);
 
   const handleApprove = async (): Promise<void> => {
     if (!onApprove) return;
@@ -75,9 +88,17 @@ function PendingActionItem({
     }
   };
 
-  const handleDecline = (): void => {
-    setState('declined');
-    onDecline?.(action, index);
+  const handleDecline = async (): Promise<void> => {
+    if (!onDecline) return;
+    setState('running');
+    setError(null);
+    try {
+      await onDecline(action, index);
+      setState('declined');
+    } catch (err) {
+      setState('error');
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   if (state === 'approved') {
@@ -137,7 +158,7 @@ function PendingActionItem({
           Approve
         </button>
         <button
-          onClick={handleDecline}
+          onClick={() => void handleDecline()}
           disabled={state === 'running'}
           className='inline-flex items-center gap-1 rounded bg-secondary px-2.5 py-1 text-[10px] text-secondary-foreground transition hover:bg-secondary/80 disabled:opacity-50'
           type='button'

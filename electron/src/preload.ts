@@ -301,4 +301,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stopRecording: () => ipcRenderer.send('recording-pill:stop-recording'),
     cancelRecording: () => ipcRenderer.send('recording-pill:cancel-recording'),
   },
+
+  clawOverlay: {
+    setIgnoreMouse: (ignore: boolean) => ipcRenderer.send('claw:set-ignore-mouse', ignore),
+    setExpanded: (expanded: boolean) => ipcRenderer.send('claw:set-expanded', expanded),
+    focus: () => ipcRenderer.send('claw:focus'),
+    blur: () => ipcRenderer.send('claw:blur'),
+    onVisibility: (callback: (visible: boolean) => void) => {
+      const listener = (_event: unknown, visible: boolean) => callback(visible);
+      ipcRenderer.on('claw:visibility', listener);
+      return () => ipcRenderer.removeListener('claw:visibility', listener);
+    },
+    openInMain: (pathname: string) => ipcRenderer.send('claw:open-in-main', pathname),
+
+    getEnabled: (): Promise<boolean> => ipcRenderer.invoke('claw:get-enabled'),
+    setEnabled: (enabled: boolean) => ipcRenderer.send('claw:set-enabled', enabled),
+    onEnabledChanged: (callback: (enabled: boolean) => void) => {
+      const listener = (_event: unknown, enabled: boolean) => callback(enabled);
+      ipcRenderer.on('claw:enabled-changed', listener);
+      return () => ipcRenderer.removeListener('claw:enabled-changed', listener);
+    },
+  },
 });

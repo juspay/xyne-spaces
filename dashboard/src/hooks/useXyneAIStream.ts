@@ -140,7 +140,9 @@ export const useXyneAIStream = ({
   // React may still have the draft key in refs while the manager already updated streamSlotKey;
   // fall back to streamId (one POST == one streamId) so chunks are not dropped.
   useEffect(() => {
+    const expectedAgentSlug = agentSlug ?? 'ask-ai';
     const unsubscribe = xyneAIStreamManager.subscribe((state: StreamState) => {
+      if ((state.agentSlug ?? 'ask-ai') !== expectedAgentSlug) return;
       const slotRef = streamSessionKeyRef.current;
       const matchesSlot = state.streamSlotKey === slotRef;
       const matchesTrackedStream =
@@ -185,6 +187,7 @@ export const useXyneAIStream = ({
       // activeStreams TTL is 5min) and we want to adopt its messages.
       const sessionToMatch = conversationIdRef.current;
       for (const s of xyneAIStreamManager.getAllActiveStreams().values()) {
+        if ((s.agentSlug ?? 'ask-ai') !== expectedAgentSlug) continue;
         if (
           s.streamSlotKey === streamSessionKey ||
           (sessionToMatch && s.sessionId === sessionToMatch)
@@ -221,6 +224,7 @@ export const useXyneAIStream = ({
     setCurrentTraceId,
     setDebugEvents,
     setDebugArtifactsReadyVersion,
+    agentSlug,
   ]);
 
   // Store current messages ref for stream manager
@@ -435,13 +439,13 @@ export const useXyneAIStream = ({
     xyneAIStreamManager.abortStreamByThread(threadId);
     const convId = conversationIdRef.current;
     if (convId) {
-      const match = xyneAIStreamManager.findActiveStreamBySessionId(convId);
+      const match = xyneAIStreamManager.findActiveStreamBySessionId(convId, agentSlug ?? 'ask-ai');
       if (match && match.threadId !== threadId) {
         xyneAIStreamManager.abortStream(match.streamId);
       }
     }
     currentStreamIdRef.current = null;
-  }, [threadId]);
+  }, [threadId, agentSlug]);
 
   return {
     submitQuery,

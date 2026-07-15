@@ -258,7 +258,7 @@ export function ActivityBlock({
       >
         {/* Indicator: 8-bit cycle while live, chevron once done. Top-aligned
             with the first text line so the subtext below sits flush. */}
-        <span className='mt-[6px] inline-flex shrink-0'>
+        <span className='mt-[2px] inline-flex shrink-0'>
           {streaming ? (
             <EightBitLoader />
           ) : (

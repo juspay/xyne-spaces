@@ -21,6 +21,7 @@ import type {
   DraftSource,
   SummarizerOutput,
   DebugEventRecord,
+  PendingActionResolution,
   ToolInvocation,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
@@ -34,7 +35,6 @@ import {
   type StreamChunk,
 } from './XyneAIStreamStorage';
 import { toast } from 'sonner';
-import { xyneAIActor } from '../../machines/xyneAIMachine';
 import XyneAIStreamWorker from './xyneAIStream.worker?worker';
 import type { WorkerIncomingMessage, WorkerOutgoingMessage } from './xyneAIStream.worker';
 import { reactNativeBridge, NativeInboundMessageType } from '../../utils/reactNativeBridge';
@@ -48,6 +48,7 @@ import {
 } from '../../utils/xyneAIStreamThreadId';
 import { ASK_AI_VERSION_STORAGE_KEY } from '../../hooks/useAskAIVersion';
 import type { AskAIVersion } from '../../hooks/useAskAIVersion';
+import { resolveMessagePendingAction } from '../../components/Claw/claw.utils';
 
 function getStoredVersion(): AskAIVersion {
   const stored = localStorage.getItem(ASK_AI_VERSION_STORAGE_KEY);
@@ -186,6 +187,8 @@ class XyneAIStreamManager {
 
   // Track if sidebar is open for notification logic
   private isSidebarOpen: boolean = false;
+
+  private isClawOverlayOpen: boolean = false;
 
   /** Whether the user is currently viewing the /ai page */
   private isOnAIPage: boolean = false;
@@ -680,6 +683,10 @@ class XyneAIStreamManager {
     }
   }
 
+  public setClawOverlayOpen(isOpen: boolean): void {
+    this.isClawOverlayOpen = isOpen;
+  }
+
   /**
    * Set whether the user is currently on the /ai page
    */
@@ -730,8 +737,9 @@ class XyneAIStreamManager {
   /**
    * Active stream whose server session id matches (e.g. after switching history while a draft-keyed stream received an id).
    */
-  public findActiveStreamBySessionId(sessionId: string): StreamState | null {
+  public findActiveStreamBySessionId(sessionId: string, agentSlug?: string): StreamState | null {
     if (!sessionId) return null;
+    const expectedAgentSlug = agentSlug ?? null;
     // Match by sessionId or slot key, regardless of status. The TTL on
     // activeStreams (set in completeStream) is now 5 minutes, so completed
     // streams within that window are intentionally retained for switch-back.
@@ -743,10 +751,31 @@ class XyneAIStreamManager {
     let completed: StreamState | null = null;
     for (const state of this.activeStreams.values()) {
       if (state.sessionId !== sessionId && state.streamSlotKey !== sessionId) continue;
+      if (expectedAgentSlug && (state.agentSlug ?? 'ask-ai') !== expectedAgentSlug) continue;
       if (state.status === 'streaming') return state;
       if (!completed) completed = state;
     }
     return completed;
+  }
+
+  public resolvePendingAction(
+    messageId: string,
+    actionIndex: number,
+    resolution: PendingActionResolution,
+  ): void {
+    for (const state of this.activeStreams.values()) {
+      const messages = resolveMessagePendingAction(
+        state.messages,
+        messageId,
+        actionIndex,
+        resolution,
+      );
+      if (messages === state.messages) continue;
+      state.messages = messages;
+      this.notifySubscribers({ ...state });
+      void xyneAIStreamStorage.updateMessages(state.streamId, messages);
+      return;
+    }
   }
 
   /**
@@ -1566,9 +1595,9 @@ class XyneAIStreamManager {
     const currentState = this.activeStreams.get(threadId);
     if (!currentState) return;
 
-    // If the stream was already marked as errored (e.g. by a mid-stream error chunk),
-    // skip overwriting the error state.
-    if (currentState.status === 'error') {
+    // Foreground recovery can race the worker's first chunk and start a second
+    // request for the same stream. Only the first terminal event may complete it.
+    if (currentState.status === 'completed' || currentState.status === 'error') {
       return;
     }
 
@@ -1615,11 +1644,12 @@ class XyneAIStreamManager {
     const shouldNotify =
       !currentState.suppressCompletionToast &&
       (!this.isSidebarOpen || !viewingThis) &&
+      !this.isClawOverlayOpen &&
       !this.isOnAIPage;
 
     if (shouldNotify) {
       this.pendingCompletionNotifications.add(notifyKey);
-      this.showCompletionToast(notifyKey, finalResponse, currentState.sessionId || null);
+      this.showCompletionToast(notifyKey, finalResponse);
     }
 
     // Cleanup after a delay — only if this stream is still the active one for
@@ -2029,7 +2059,10 @@ class XyneAIStreamManager {
     }
 
     try {
-      const refreshedMessages = await fetchV2ConversationMessages(conversationId);
+      const refreshedMessages = await fetchV2ConversationMessages(
+        conversationId,
+        currentState.agentSlug ?? 'ask-ai',
+      );
 
       // Merge refreshed messages with current state, preserving streaming state
       // and ensuring we don't overwrite messages that are still being processed
@@ -2102,6 +2135,7 @@ class XyneAIStreamManager {
             streamingContent: finalStreamingContent || finalContent,
             // Preserve locally accumulated reasoning if backend didn't return it
             ...(mergedReasoning !== undefined && { reasoning: mergedReasoning }),
+            ...(localMsg.pendingActions?.length && { pendingActions: localMsg.pendingActions }),
             // Keep the local ID to avoid breaking React keys and parent references
             id: localMsg.id,
             // Tree topology is owned LOCALLY during a stream's lifetime.
@@ -2342,26 +2376,15 @@ class XyneAIStreamManager {
   /**
    * Show toast notification for completed stream
    */
-  private showCompletionToast(
-    notifyKey: string,
-    response: string,
-    focusSessionId: string | null,
-  ): void {
+  private showCompletionToast(notifyKey: string, response: string): void {
     const preview = response.length > 100 ? response.substring(0, 100) + '...' : response;
 
-    toast('XyneAI Response Ready', {
-      description: preview,
-      duration: 10000,
-      action: {
-        label: 'View',
-        onClick: () => {
-          xyneAIActor.send({
-            type: 'OPEN',
-            ...(focusSessionId ? { focusSessionId } : {}),
-          });
-          this.clearPendingCompletion(notifyKey);
-        },
-      },
+    toast(preview, {
+      id: `xyne-ai-completion-${notifyKey}`,
+      duration: 3000,
+      dismissible: false,
+      closeButton: false,
+      onAutoClose: () => this.pendingCompletionNotifications.delete(notifyKey),
     });
   }
 
