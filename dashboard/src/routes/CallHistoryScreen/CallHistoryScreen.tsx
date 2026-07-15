@@ -577,14 +577,8 @@ const CallHistoryScreen = (): ReactElement => {
       setTimeout(() => setSyncMessage(null), 3000);
     } catch (error) {
       setIsSyncing(false);
-      const responseError = axios.isAxiosError(error)
-        ? (error.response?.data as { error?: string } | undefined)?.error
-        : undefined;
       const shouldReauthorize =
-        !isRetry &&
-        axios.isAxiosError(error) &&
-        error.response?.status === 401 &&
-        responseError === 'calendar_reauth_required';
+        !isRetry && axios.isAxiosError(error) && error.response?.status === 500;
 
       if (shouldReauthorize) {
         const isElectron = typeof window.electronAPI?.openExternal === 'function';

@@ -6,7 +6,7 @@
  * GET  /api/calendar/sync/provider   — return which calendar provider the current user has
  */
 
-import express from 'express';
+import express, { type Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { syncGoogleCalendarManually } from '@/queues/googleCalendarSyncQueue';
@@ -26,6 +26,14 @@ function isCalendarAuthError(error: unknown): boolean {
 function hasCalendarRefreshToken(subscription: { credentials?: string } | null | undefined): boolean {
   if (!subscription?.credentials) return false;
   return !!parseCalendarCredentials(subscription.credentials)?.refreshToken;
+}
+
+function sendCalendarReauthorizationError(res: Response, provider: 'Google' | 'Microsoft') {
+  return res.status(500).json({
+    success: false,
+    error: 'calendar_reauth_required',
+    message: `${provider} Calendar access needs to be reauthorized`,
+  });
 }
 
 router.get('/provider', async (req, res) => {
@@ -64,11 +72,7 @@ router.post('/google', async (req, res) => {
       logger.warn(`[CALENDAR_SYNC] Google Calendar reauthorization required: missing calendar credentials`, {
         email: user.email,
       });
-      return res.status(401).json({
-        success: false,
-        error: 'calendar_reauth_required',
-        message: 'Google Calendar access needs to be reauthorized',
-      });
+      return sendCalendarReauthorizationError(res, 'Google');
     }
 
     const isWatchActive = subscription?.isActive === true && !!subscription.externalIdentifier;
@@ -91,11 +95,7 @@ router.post('/google', async (req, res) => {
             email: user.email,
             error: watchErr instanceof Error ? watchErr.message : String(watchErr),
           });
-          return res.status(401).json({
-            success: false,
-            error: 'calendar_reauth_required',
-            message: 'Google Calendar access needs to be reauthorized',
-          });
+          return sendCalendarReauthorizationError(res, 'Google');
         }
 
         logger.warn(`[CALENDAR_SYNC] Watch setup failed, continuing with manual sync only`, {
@@ -140,11 +140,7 @@ router.post('/microsoft', async (req, res) => {
       logger.warn(`[CALENDAR_SYNC] Microsoft Calendar reauthorization required: missing calendar credentials`, {
         email: user.email,
       });
-      return res.status(401).json({
-        success: false,
-        error: 'calendar_reauth_required',
-        message: 'Microsoft Calendar access needs to be reauthorized',
-      });
+      return sendCalendarReauthorizationError(res, 'Microsoft');
     }
 
     const isSubscriptionActive = subscription?.isActive === true && !!subscription.externalIdentifier;
@@ -167,11 +163,7 @@ router.post('/microsoft', async (req, res) => {
             email: user.email,
             error: subErr instanceof Error ? subErr.message : String(subErr),
           });
-          return res.status(401).json({
-            success: false,
-            error: 'calendar_reauth_required',
-            message: 'Microsoft Calendar access needs to be reauthorized',
-          });
+          return sendCalendarReauthorizationError(res, 'Microsoft');
         }
 
         logger.warn(`[CALENDAR_SYNC] Subscription creation failed, continuing with manual sync only`, {
