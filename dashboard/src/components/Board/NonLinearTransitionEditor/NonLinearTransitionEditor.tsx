@@ -30,6 +30,9 @@ import {
   GitBranch,
   Save,
   LayoutGrid,
+  Expand,
+  Merge,
+  Check,
 } from 'lucide-react';
 import {
   STATUS_OPTIONS,
@@ -68,8 +71,18 @@ export interface NonLinearTransitionEditorProps {
   onDeleteStage: (tempId: number) => void;
   onAddStage: () => void;
   formMap: Map<string, string>;
-  onOpenEdgeForm: (from: number, to: number, existingFormId?: string | null) => void;
-  onAttachExistingEdgeForm: (from: number, to: number, formId: string) => void;
+  onOpenEdgeForm: (
+    from: number,
+    to: number,
+    existingFormId?: string | null,
+    allPairs?: Array<{ fromTempId: number; toTempId: number }>,
+  ) => void;
+  onAttachExistingEdgeForm: (
+    from: number,
+    to: number,
+    formId: string,
+    allPairs?: Array<{ fromTempId: number; toTempId: number }>,
+  ) => void;
   stageForms: Array<{ id: string; formName: string }>;
   onAddConditionForEdge: (from: number, to: number) => void;
   isTransitionsLoading: boolean;
@@ -95,38 +108,16 @@ const NODE_HIGHLIGHT_CLASSES: Record<HighlightState, string> = {
 
 interface StageNodeData {
   stage: StageNode;
-  onUpdate: (patch: Partial<StageNode>) => void;
-  onDelete: () => void;
-  editingEtaId: number | null;
-  etaValue: string;
-  etaInputRef: React.RefObject<HTMLInputElement | null>;
-  onStartEditEta: (stage: StageNode) => void;
-  onSaveEta: (tempId: number) => void;
-  onCancelEta: () => void;
-  setEtaValue: (v: string) => void;
   highlightState?: HighlightState;
 }
 
+// Display-only card; all editing lives in StageActionsPanel, opened via onNodeClick.
 const StageNodeComponent: React.FC<NodeProps<StageNodeData>> = ({ data }) => {
-  const {
-    stage,
-    onUpdate,
-    onDelete,
-    editingEtaId,
-    etaValue,
-    etaInputRef,
-    onStartEditEta,
-    onSaveEta,
-    onCancelEta,
-    setEtaValue,
-    highlightState = 'normal',
-  } = data;
-  const statusOption = getStatusOption(stage.defaultTicketStatusV2);
-  const isEditingEta = editingEtaId === stage.tempId;
+  const { stage, highlightState = 'normal' } = data;
 
   return (
     <div
-      className={`w-[240px] bg-background rounded-[10px] border-2 shadow-[0px_2px_8px_0px_rgba(5,5,6,0.07)] transition-all ${NODE_HIGHLIGHT_CLASSES[highlightState]}`}
+      className={`w-[240px] bg-background rounded-[10px] border-2 shadow-[0px_2px_8px_0px_rgba(5,5,6,0.07)] transition-all cursor-pointer ${NODE_HIGHLIGHT_CLASSES[highlightState]}`}
     >
       {/* Handles */}
       <Handle
@@ -142,98 +133,11 @@ const StageNodeComponent: React.FC<NodeProps<StageNodeData>> = ({ data }) => {
         style={{ right: -7 }}
       />
 
-      {/* Card Header */}
-      <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
-        {/* Status dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className='flex items-center gap-[6px] outline-none nodrag'
-            onPointerDown={e => e.stopPropagation()}
-          >
-            <span className='text-[13px] font-medium text-muted-foreground'>
-              {statusOption.label}
-            </span>
-            <ChevronDown size={14} className='text-muted-foreground' />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align='start' className='z-[9999]'>
-            {STATUS_OPTIONS.map(opt => (
-              <DropdownMenuItem
-                key={opt.status}
-                onSelect={() => onUpdate({ defaultTicketStatusV2: opt.status })}
-                className='flex items-center gap-2'
-              >
-                {opt.icon}
-                <span>{opt.label}</span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* ETA + Delete */}
-        <div
-          className='flex items-center gap-1 relative nodrag'
-          onPointerDown={e => e.stopPropagation()}
-        >
-          <button
-            type='button'
-            onClick={() => onStartEditEta(stage)}
-            data-track-category='board_stage_config'
-            data-track-name='edit_stage_eta'
-            className='flex items-center gap-[4px] text-[12px] text-foreground hover:text-foreground/80 p-[4px] rounded-[6px] hover:bg-muted transition-colors'
-          >
-            <Timer size={12} />
-            <span className='font-[450]'>{stage.eta > 0 ? `${stage.eta}h` : 'ETA'}</span>
-          </button>
-          {isEditingEta && (
-            <div className='absolute top-full right-0 mt-1 z-50 bg-background border border-border rounded-[6px] shadow-md px-2.5 py-2 flex items-center gap-2 min-w-[80px]'>
-              <input
-                ref={etaInputRef}
-                type='text'
-                inputMode='numeric'
-                pattern='[0-9]*'
-                value={etaValue}
-                onChange={e => setEtaValue(e.target.value)}
-                onBlur={() => onSaveEta(stage.tempId)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') onSaveEta(stage.tempId);
-                  if (e.key === 'Escape') onCancelEta();
-                }}
-                placeholder='hrs'
-                data-track-category='board_stage_config'
-                data-track-name='input_stage_eta'
-                className='w-10 text-[13px] text-foreground bg-transparent border-none focus:outline-none p-0'
-              />
-              <span className='text-[13px] text-foreground'>h</span>
-            </div>
-          )}
-          <button
-            type='button'
-            onClick={onDelete}
-            data-track-category='board_stage_config'
-            data-track-name='delete_stage'
-            className='p-1 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
-            title='Delete stage'
-          >
-            <Trash2 size={12} />
-          </button>
-        </div>
-      </div>
-
-      {/* Card Body */}
-      <div className='px-3 py-3'>
-        <div className='flex items-center gap-2'>
-          <StatusIndicator status={stage.defaultTicketStatusV2} size={16} />
-          <input
-            type='text'
-            value={stage.name}
-            onChange={e => onUpdate({ name: e.target.value })}
-            placeholder='Stage name...'
-            data-track-category='board_stage_config'
-            data-track-name='input_stage_name'
-            className='nodrag flex-1 text-[12px] font-semibold text-foreground bg-transparent border-none focus:outline-none uppercase tracking-[0.72px] leading-[18px]'
-            onPointerDown={e => e.stopPropagation()}
-          />
-        </div>
+      <div className='px-3 py-3 flex items-center gap-2'>
+        <StatusIndicator status={stage.defaultTicketStatusV2} size={16} />
+        <span className='flex-1 text-[12px] font-semibold text-foreground leading-[18px] truncate'>
+          {stage.name || 'Stage name...'}
+        </span>
       </div>
     </div>
   );
@@ -250,7 +154,42 @@ interface TransitionEdgeData {
   isReciprocal?: boolean;
   curveOffset?: number;
   highlightState?: HighlightState;
+  isAllEdge?: boolean;
+  sourceTempIds?: number[];
 }
+
+// ─── Merged "All" Bubble Node ────────────────────────────────────────────────
+
+interface AllBubbleNodeData {
+  targetTempId: number;
+  formId: string | null;
+  highlightState?: HighlightState;
+}
+
+const AllBubbleNodeComponent: React.FC<NodeProps<AllBubbleNodeData>> = ({ data }) => {
+  const highlightState = data.highlightState ?? 'normal';
+  const isDulled = highlightState === 'dull';
+  const isHighlighted = highlightState === 'connected' || highlightState === 'selected';
+
+  return (
+    <div
+      className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm transition-opacity cursor-grab active:cursor-grabbing ${
+        isHighlighted
+          ? 'border-[#6276be] bg-[#6276be]/10 text-[#6276be]'
+          : 'border-[#6276be]/40 bg-[#6276be]/5 text-[#6276be]'
+      }`}
+      style={{ opacity: isDulled ? 0.35 : 1 }}
+    >
+      <Handle
+        type='source'
+        position={Position.Right}
+        className='!w-2 !h-2 !bg-[#6276be] !border-2 !border-background !rounded-full'
+        style={{ right: -5 }}
+      />
+      <span className='select-none'>All</span>
+    </div>
+  );
+};
 
 // ─── Graph Layout Helper ─────────────────────────────────────────────────────
 
@@ -332,6 +271,99 @@ function computeGraphLayout(
   });
 
   return positions;
+}
+
+// ─── Merged "All" Incoming Edge Detection ────────────────────────────────────
+
+export interface MergedIncomingTarget {
+  targetTempId: number;
+  sourceTempIds: number[];
+  formId: string | null;
+}
+
+/** Whether every other stage on the board already has an edge into `targetTempId`. */
+function hasAllIncomingSources(
+  targetTempId: number,
+  stages: StageNode[],
+  transitionsByTempId: Map<number, Set<number>>,
+): boolean {
+  return stages.every(
+    s => s.tempId === targetTempId || transitionsByTempId.get(s.tempId)?.has(targetTempId),
+  );
+}
+
+/** Serializes a transition's gating fields for equality comparison (approvers sorted). */
+function normalizeMetaForComparison(meta: TransitionMeta | undefined): string {
+  const approvers = [...(meta?.approvers ?? [])]
+    .map(a => `${a.approverType}:${a.approverId}`)
+    .sort();
+  return JSON.stringify({
+    formId: meta?.formId ?? null,
+    requiresApproval: meta?.requiresApproval ?? false,
+    approvers,
+    visitSlaMode: meta?.visitSlaMode ?? 'STAGE_DEFAULT',
+    fixedEtaHours: meta?.fixedEtaHours ?? null,
+    onReenter: meta?.onReenter ?? 'RESET',
+  });
+}
+
+/** Qualifies for the merged "All" bubble when every incoming edge's metadata matches. */
+function computeMergedTargets(
+  stages: StageNode[],
+  transitionsByTempId: Map<number, Set<number>>,
+  transitionsMeta: Map<string, TransitionMeta>,
+): Map<number, MergedIncomingTarget> {
+  const merged = new Map<number, MergedIncomingTarget>();
+  // Merging only makes sense with 3+ stages: with just 2 stages, "every
+  // other stage connects in" is trivially true for a single edge, which
+  // would hide a lone connection behind an "All" bubble for no reason.
+  if (stages.length < 3) return merged;
+
+  const incomingSources = new Map<number, number[]>();
+  transitionsByTempId.forEach((targets, from) => {
+    targets.forEach(to => {
+      if (!incomingSources.has(to)) incomingSources.set(to, []);
+      incomingSources.get(to)!.push(from);
+    });
+  });
+
+  const requiredSourceCount = stages.length - 1;
+
+  stages.forEach(target => {
+    const sources = (incomingSources.get(target.tempId) ?? []).filter(s => s !== target.tempId);
+    // Require at least 2 sources — a single incoming edge is never "clutter"
+    // and should always render as a normal, directly-editable edge.
+    if (sources.length < 2 || sources.length !== requiredSourceCount) return;
+
+    const otherTempIds = stages.filter(s => s.tempId !== target.tempId).map(s => s.tempId);
+    const sourceSet = new Set(sources);
+    const hasAllSources = otherTempIds.every(id => sourceSet.has(id));
+    if (!hasAllSources) return;
+
+    let sharedFormId: string | null | undefined;
+    let sharedMetaKey: string | undefined;
+    let allSame = true;
+    for (const from of sources) {
+      const meta = transitionsMeta.get(`${from}->${target.tempId}`);
+      const metaKey = normalizeMetaForComparison(meta);
+      if (sharedMetaKey === undefined) {
+        sharedFormId = meta?.formId ?? null;
+        sharedMetaKey = metaKey;
+      } else if (sharedMetaKey !== metaKey) {
+        allSame = false;
+        break;
+      }
+    }
+    if (!allSame || sharedMetaKey === undefined) return;
+
+    merged.set(target.tempId, {
+      targetTempId: target.tempId,
+      sourceTempIds: sources,
+      formId: sharedFormId ?? null,
+    });
+  });
+
+  return merged;
 }
 
 const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
@@ -439,6 +471,194 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
   );
 };
 
+// ─── Stage Actions Panel ─────────────────────────────────────────────────────
+interface StageActionsPanelProps {
+  stage: StageNode;
+  hasAllIncoming: boolean;
+  onAllowAllIncoming: () => void;
+  onDisallowAllIncoming: () => void;
+  onUpdate: (patch: Partial<StageNode>) => void;
+  onDelete: () => void;
+  isEditingEta: boolean;
+  etaValue: string;
+  etaInputRef: React.RefObject<HTMLInputElement | null>;
+  onStartEditEta: () => void;
+  onSaveEta: () => void;
+  onCancelEta: () => void;
+  setEtaValue: (v: string) => void;
+  onClose: () => void;
+}
+
+const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
+  stage,
+  hasAllIncoming,
+  onAllowAllIncoming,
+  onDisallowAllIncoming,
+  onUpdate,
+  onDelete,
+  isEditingEta,
+  etaValue,
+  etaInputRef,
+  onStartEditEta,
+  onSaveEta,
+  onCancelEta,
+  setEtaValue,
+  onClose,
+}) => {
+  const statusOption = getStatusOption(stage.defaultTicketStatusV2);
+
+  return (
+    <div className='w-[300px] bg-background border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col'>
+      <div className='flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30'>
+        <div className='flex items-center gap-2 min-w-0'>
+          <StatusIndicator status={stage.defaultTicketStatusV2} size={14} />
+          <span className='text-[12px] font-semibold text-foreground truncate max-w-[190px]'>
+            {stage.name || 'Stage'}
+          </span>
+        </div>
+        <button
+          type='button'
+          onClick={onClose}
+          data-track-category='board_stage_config'
+          data-track-name='close_stage_actions'
+          className='p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors shrink-0'
+        >
+          <X size={13} />
+        </button>
+      </div>
+
+      <div className='flex flex-col gap-4 px-4 py-4'>
+        {/* Name */}
+        <div>
+          <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
+            Name
+          </p>
+          <input
+            type='text'
+            value={stage.name}
+            onChange={e => onUpdate({ name: e.target.value })}
+            placeholder='Stage name...'
+            data-track-category='board_stage_config'
+            data-track-name='input_stage_name'
+            className='w-full text-[12px] font-medium text-foreground bg-background border border-border rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#6276be]'
+          />
+        </div>
+
+        {/* Status */}
+        <div>
+          <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
+            Status
+          </p>
+          <DropdownMenu>
+            <DropdownMenuTrigger className='w-full flex items-center justify-between gap-2 text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground hover:border-[#6276be] transition-colors outline-none'>
+              <span className='flex items-center gap-2'>
+                {statusOption.icon}
+                {statusOption.label}
+              </span>
+              <ChevronDown size={14} className='text-muted-foreground' />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='start' className='w-[240px] z-[9999]'>
+              {STATUS_OPTIONS.map(opt => (
+                <DropdownMenuItem
+                  key={opt.status}
+                  onSelect={() => onUpdate({ defaultTicketStatusV2: opt.status })}
+                  className='flex items-center gap-2'
+                >
+                  {opt.icon}
+                  <span>{opt.label}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* ETA */}
+        <div>
+          <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
+            ETA
+          </p>
+          {isEditingEta ? (
+            <div className='flex items-center gap-2 bg-background border border-[#6276be] rounded-lg px-2.5 py-1.5'>
+              <Timer size={13} className='text-muted-foreground shrink-0' />
+              <input
+                ref={etaInputRef}
+                type='text'
+                inputMode='numeric'
+                pattern='[0-9]*'
+                value={etaValue}
+                onChange={e => setEtaValue(e.target.value)}
+                onBlur={onSaveEta}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') onSaveEta();
+                  if (e.key === 'Escape') onCancelEta();
+                }}
+                placeholder='Hours'
+                data-track-category='board_stage_config'
+                data-track-name='input_stage_eta'
+                className='flex-1 text-[12px] text-foreground bg-transparent border-none focus:outline-none p-0'
+              />
+              <span className='text-[12px] text-muted-foreground'>hrs</span>
+            </div>
+          ) : (
+            <button
+              type='button'
+              onClick={onStartEditEta}
+              data-track-category='board_stage_config'
+              data-track-name='edit_stage_eta'
+              className='w-full flex items-center gap-2 text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground hover:border-[#6276be] transition-colors text-left'
+            >
+              <Timer size={13} className='text-muted-foreground shrink-0' />
+              <span>{stage.eta > 0 ? `${stage.eta} hours` : 'Set ETA'}</span>
+            </button>
+          )}
+        </div>
+
+        {/* Incoming transitions */}
+        <div>
+          <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
+            Incoming transitions
+          </p>
+          <button
+            type='button'
+            role='checkbox'
+            aria-checked={hasAllIncoming}
+            onClick={() => (hasAllIncoming ? onDisallowAllIncoming() : onAllowAllIncoming())}
+            data-track-category='board_stage_config'
+            data-track-name='toggle_allow_all_incoming'
+            className='flex items-start gap-2.5 cursor-pointer select-none group text-left w-full'
+          >
+            <span
+              className={`mt-0.5 flex items-center justify-center w-[16px] h-[16px] rounded-[4px] border transition-colors shrink-0 ${
+                hasAllIncoming
+                  ? 'bg-[#6276be] border-[#6276be]'
+                  : 'bg-background border-border group-hover:border-[#6276be]'
+              }`}
+            >
+              {hasAllIncoming && <Check size={11} strokeWidth={3} className='text-white' />}
+            </span>
+            <span className='text-[12px] text-foreground leading-[16px]'>
+              Allow all stages to transition to this one
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div className='px-4 py-3 border-t border-border'>
+        <button
+          type='button'
+          onClick={onDelete}
+          data-track-category='board_stage_config'
+          data-track-name='delete_stage'
+          className='w-full flex items-center justify-center gap-[6px] text-[12px] font-medium text-red-500 hover:bg-red-50 rounded-lg py-1.5 transition-colors'
+        >
+          <Trash2 size={13} />
+          <span>Delete stage</span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // ─── Edge Settings Panel ──────────────────────────────────────────────────────
 
 const SLA_OPTIONS = [
@@ -447,222 +667,309 @@ const SLA_OPTIONS = [
   { value: 'NONE', label: 'None' },
 ];
 
-interface EdgeSettingsPanelProps {
-  fromStage: StageNode;
+type EdgeSettingsPanelProps = {
   toStage: StageNode;
   meta: TransitionMeta;
   formMap: Map<string, string>;
   onUpdateMeta: (patch: Partial<TransitionMeta>) => void;
-  onRemoveEdge: () => void;
   onClose: () => void;
   onOpenEdgeForm: () => void;
   onAttachExistingForm: (formId: string) => void;
   stageForms: Array<{ id: string; formName: string }>;
-  onAddCondition: () => void;
-}
+} & (
+  | {
+      isAllEdge: false;
+      fromStage: StageNode;
+      onRemoveEdge: () => void;
+      onAddCondition: () => void;
+    }
+  | {
+      isAllEdge: true;
+      sourceStages: StageNode[];
+      onRemoveSources: (tempIds: number[]) => void;
+    }
+);
 
-const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = ({
-  fromStage,
-  toStage,
-  meta,
-  formMap,
-  onUpdateMeta,
-  onRemoveEdge,
-  onClose,
-  onOpenEdgeForm,
-  onAttachExistingForm,
-  stageForms,
-  onAddCondition,
-}) => (
-  <div className='w-[280px] bg-background border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col'>
-    <div className='flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30'>
-      <div className='flex items-center gap-1.5 min-w-0'>
-        <span className='text-[11px] font-semibold text-foreground uppercase tracking-wide truncate max-w-[85px]'>
-          {fromStage.name}
-        </span>
-        <span className='text-muted-foreground text-[10px] shrink-0'>→</span>
-        <span className='text-[11px] font-semibold text-[#6276be] uppercase tracking-wide truncate max-w-[85px]'>
-          {toStage.name}
-        </span>
-      </div>
-      <div className='flex items-center gap-1 shrink-0'>
-        <button
-          type='button'
-          onClick={onRemoveEdge}
-          data-track-category='board_stage_config'
-          data-track-name='remove_transition'
-          className='p-1.5 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
-          title='Remove'
-        >
-          <Trash2 size={13} />
-        </button>
-        <button
-          type='button'
-          onClick={onClose}
-          data-track-category='board_stage_config'
-          data-track-name='close_transition_config'
-          className='p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors'
-        >
-          <Save size={13} />
-        </button>
-      </div>
-    </div>
+const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
+  const {
+    toStage,
+    meta,
+    formMap,
+    onUpdateMeta,
+    onClose,
+    onOpenEdgeForm,
+    onAttachExistingForm,
+    stageForms,
+  } = props;
+  const [showDeleteChecklist, setShowDeleteChecklist] = useState(false);
+  const [checkedSources, setCheckedSources] = useState<Set<number>>(
+    () => new Set(props.isAllEdge ? props.sourceStages.map(s => s.tempId) : []),
+  );
 
-    <div className='flex flex-col gap-4 px-4 py-4 overflow-y-auto max-h-[420px]'>
-      {/* Form */}
-      <div>
-        <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
-          Transition Form
-        </p>
-        {meta.formId ? (
-          <div className='flex items-center justify-between bg-muted/50 rounded-lg border border-border px-3 py-2'>
-            <span className='text-[12px] text-foreground truncate'>
-              {formMap.get(meta.formId) || 'Form'}
-            </span>
-            <div className='flex items-center gap-1'>
-              <button
-                type='button'
-                onClick={onOpenEdgeForm}
-                data-track-category='board_stage_config'
-                data-track-name='edit_transition_form'
-                className='p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
-              >
-                <Pencil size={11} />
-              </button>
-              <button
-                type='button'
-                onClick={() => onUpdateMeta({ formId: null })}
-                data-track-category='board_stage_config'
-                data-track-name='remove_transition_form'
-                className='p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
-              >
-                <X size={11} />
-              </button>
-            </div>
-          </div>
-        ) : (
-          <TransitionFormPicker
-            allForms={stageForms}
-            onCreateForm={onOpenEdgeForm}
-            onSelectForm={onAttachExistingForm}
-            variant='dashed-button'
-            triggerLabel='Attach form'
-          />
-        )}
-      </div>
+  const headerLabel = props.isAllEdge ? (
+    <>
+      <span className='text-[11px] font-semibold text-[#6276be] uppercase tracking-wide shrink-0'>
+        All
+      </span>
+      <span className='text-muted-foreground text-[10px] shrink-0'>→</span>
+      <span className='text-[11px] font-semibold text-foreground uppercase tracking-wide truncate max-w-[120px]'>
+        {toStage.name}
+      </span>
+    </>
+  ) : (
+    <>
+      <span className='text-[11px] font-semibold text-foreground uppercase tracking-wide truncate max-w-[85px]'>
+        {props.fromStage.name}
+      </span>
+      <span className='text-muted-foreground text-[10px] shrink-0'>→</span>
+      <span className='text-[11px] font-semibold text-[#6276be] uppercase tracking-wide truncate max-w-[85px]'>
+        {toStage.name}
+      </span>
+    </>
+  );
 
-      {/* Approval */}
-      <div>
-        <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
-          Approval
-        </p>
-        <div className='flex items-center gap-2.5 select-none'>
+  return (
+    <div className='w-[280px] bg-background border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col'>
+      <div className='flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30'>
+        <div className='flex items-center gap-1.5 min-w-0'>{headerLabel}</div>
+        <div className='flex items-center gap-1 shrink-0'>
           <button
             type='button'
-            role='switch'
-            aria-checked={meta.requiresApproval}
-            onClick={() =>
-              onUpdateMeta({
-                requiresApproval: !meta.requiresApproval,
-                approvers: !meta.requiresApproval ? (meta.approvers ?? []) : [],
-              })
-            }
-            data-track-category='transition_config'
-            data-track-name='toggle_requires_approval'
-            className={`relative w-8 h-4 rounded-full transition-colors cursor-pointer border-none p-0 ${meta.requiresApproval ? 'bg-[#6276be]' : 'bg-muted-foreground/30'}`}
+            onClick={() => (props.isAllEdge ? setShowDeleteChecklist(true) : props.onRemoveEdge())}
+            data-track-category='board_stage_config'
+            data-track-name='remove_transition'
+            className='p-1.5 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
+            title='Remove'
           >
-            <div
-              className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${meta.requiresApproval ? 'translate-x-4' : 'translate-x-0.5'}`}
-            />
+            <Trash2 size={13} />
           </button>
-          <span className='text-[12px] text-foreground'>Requires approval</span>
+          <button
+            type='button'
+            onClick={onClose}
+            data-track-category='board_stage_config'
+            data-track-name='close_transition_config'
+            className='p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors'
+          >
+            <Save size={13} />
+          </button>
         </div>
-        {meta.requiresApproval && (
-          <div className='mt-2'>
-            <ApproverSelector
-              selectedApprovers={meta.approvers ?? []}
-              onApproversChange={approvers => onUpdateMeta({ approvers })}
-            />
+      </div>
+
+      {props.isAllEdge && showDeleteChecklist ? (
+        <div className='flex flex-col gap-3 px-4 py-4'>
+          <p className='text-[11px] text-muted-foreground'>Remove the incoming transition from:</p>
+          <div className='flex flex-col gap-1.5 max-h-[220px] overflow-y-auto'>
+            {props.sourceStages.map(source => (
+              <label
+                key={source.tempId}
+                className='flex items-center gap-2 text-[12px] text-foreground'
+              >
+                <input
+                  type='checkbox'
+                  checked={checkedSources.has(source.tempId)}
+                  onChange={e => {
+                    setCheckedSources(prev => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(source.tempId);
+                      else next.delete(source.tempId);
+                      return next;
+                    });
+                  }}
+                  data-track-category='board_stage_config'
+                  data-track-name='toggle_all_edge_delete_source'
+                />
+                {source.name}
+              </label>
+            ))}
           </div>
-        )}
-      </div>
-
-      {/* Add Condition */}
-      <button
-        type='button'
-        onClick={onAddCondition}
-        data-track-category='board_stage_config'
-        data-track-name='add_condition_for_edge'
-        className='flex items-center gap-[6px] text-[13px] font-medium text-[#6276be] hover:text-[#5060a0] p-[4px] rounded-[6px] w-full'
-      >
-        <GitBranch size={13} className='text-[#6276be]' />
-        <span>Add Condition</span>
-      </button>
-
-      {/* SLA */}
-      <div>
-        <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
-          Visit SLA
-        </p>
-        <select
-          className='w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-[#6276be]'
-          data-track-category='transition_config'
-          data-track-name='select_visit_sla'
-          value={meta.visitSlaMode}
-          onChange={e => onUpdateMeta({ visitSlaMode: e.target.value })}
-        >
-          {SLA_OPTIONS.map(opt => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        {meta.visitSlaMode === 'FIXED_HOURS' && (
-          <input
-            type='number'
-            min='1'
-            placeholder='Hours'
-            data-track-category='transition_config'
-            data-track-name='input_fixed_eta_hours'
-            className='mt-2 w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-[#6276be]'
-            value={meta.fixedEtaHours ?? ''}
-            onChange={e =>
-              onUpdateMeta({ fixedEtaHours: e.target.value ? Number(e.target.value) : null })
-            }
-          />
-        )}
-      </div>
-
-      {/* On Revisit */}
-      <div>
-        <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
-          On Revisit
-        </p>
-        <div className='grid grid-cols-2 gap-1.5'>
-          {[
-            { value: 'RESET', label: 'New visit' },
-            { value: 'CONTINUE', label: 'Continue' },
-          ].map(opt => (
+          <div className='flex items-center gap-2'>
             <button
-              key={opt.value}
               type='button'
-              onClick={() => onUpdateMeta({ onReenter: opt.value })}
-              data-track-category='transition_config'
-              data-track-name={`select_on_reenter_${opt.value.toLowerCase()}`}
-              className={`py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${meta.onReenter === opt.value ? 'bg-[#6276be] border-[#6276be] text-white' : 'bg-background border-border text-muted-foreground hover:bg-muted'}`}
+              onClick={() => setShowDeleteChecklist(false)}
+              data-track-category='board_stage_config'
+              data-track-name='cancel_all_edge_delete'
+              className='flex-1 py-1.5 rounded-lg border border-border text-[12px] text-muted-foreground hover:bg-muted transition-colors'
             >
-              {opt.label}
+              Cancel
             </button>
-          ))}
+            <button
+              type='button'
+              onClick={() => {
+                if (props.isAllEdge) props.onRemoveSources(Array.from(checkedSources));
+              }}
+              disabled={checkedSources.size === 0}
+              data-track-category='board_stage_config'
+              data-track-name='confirm_all_edge_delete'
+              className='flex-1 py-1.5 rounded-lg bg-red-500 text-white text-[12px] font-medium hover:bg-red-600 disabled:opacity-50 transition-colors'
+            >
+              Remove selected
+            </button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className='flex flex-col gap-4 px-4 py-4 overflow-y-auto max-h-[420px]'>
+          {/* Form */}
+          <div>
+            <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
+              Transition Form
+            </p>
+            {meta.formId ? (
+              <div className='flex items-center justify-between bg-muted/50 rounded-lg border border-border px-3 py-2'>
+                <span className='text-[12px] text-foreground truncate'>
+                  {formMap.get(meta.formId) || 'Form'}
+                </span>
+                <div className='flex items-center gap-1'>
+                  <button
+                    type='button'
+                    onClick={onOpenEdgeForm}
+                    data-track-category='board_stage_config'
+                    data-track-name='edit_transition_form'
+                    className='p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
+                  >
+                    <Pencil size={11} />
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => onUpdateMeta({ formId: null })}
+                    data-track-category='board_stage_config'
+                    data-track-name='remove_transition_form'
+                    className='p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <TransitionFormPicker
+                allForms={stageForms}
+                onCreateForm={onOpenEdgeForm}
+                onSelectForm={onAttachExistingForm}
+                variant='dashed-button'
+                triggerLabel='Attach form'
+              />
+            )}
+          </div>
+
+          {!props.isAllEdge && (
+            <>
+              {/* Approval */}
+              <div>
+                <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
+                  Approval
+                </p>
+                <div className='flex items-center gap-2.5 select-none'>
+                  <button
+                    type='button'
+                    role='switch'
+                    aria-checked={meta.requiresApproval}
+                    onClick={() =>
+                      onUpdateMeta({
+                        requiresApproval: !meta.requiresApproval,
+                        approvers: !meta.requiresApproval ? (meta.approvers ?? []) : [],
+                      })
+                    }
+                    data-track-category='transition_config'
+                    data-track-name='toggle_requires_approval'
+                    className={`relative w-8 h-4 rounded-full transition-colors cursor-pointer border-none p-0 ${meta.requiresApproval ? 'bg-[#6276be]' : 'bg-muted-foreground/30'}`}
+                  >
+                    <div
+                      className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${meta.requiresApproval ? 'translate-x-4' : 'translate-x-0.5'}`}
+                    />
+                  </button>
+                  <span className='text-[12px] text-foreground'>Requires approval</span>
+                </div>
+                {meta.requiresApproval && (
+                  <div className='mt-2'>
+                    <ApproverSelector
+                      selectedApprovers={meta.approvers ?? []}
+                      onApproversChange={approvers => onUpdateMeta({ approvers })}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Add Condition */}
+              <button
+                type='button'
+                onClick={props.onAddCondition}
+                data-track-category='board_stage_config'
+                data-track-name='add_condition_for_edge'
+                className='flex items-center gap-[6px] text-[13px] font-medium text-[#6276be] hover:text-[#5060a0] p-[4px] rounded-[6px] w-full'
+              >
+                <GitBranch size={13} className='text-[#6276be]' />
+                <span>Add Condition</span>
+              </button>
+
+              {/* SLA */}
+              <div>
+                <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
+                  Visit SLA
+                </p>
+                <select
+                  className='w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-[#6276be]'
+                  data-track-category='transition_config'
+                  data-track-name='select_visit_sla'
+                  value={meta.visitSlaMode}
+                  onChange={e => onUpdateMeta({ visitSlaMode: e.target.value })}
+                >
+                  {SLA_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                {meta.visitSlaMode === 'FIXED_HOURS' && (
+                  <input
+                    type='number'
+                    min='1'
+                    placeholder='Hours'
+                    data-track-category='transition_config'
+                    data-track-name='input_fixed_eta_hours'
+                    className='mt-2 w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-[#6276be]'
+                    value={meta.fixedEtaHours ?? ''}
+                    onChange={e =>
+                      onUpdateMeta({
+                        fixedEtaHours: e.target.value ? Number(e.target.value) : null,
+                      })
+                    }
+                  />
+                )}
+              </div>
+
+              {/* On Revisit */}
+              <div>
+                <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px] mb-2'>
+                  On Revisit
+                </p>
+                <div className='grid grid-cols-2 gap-1.5'>
+                  {[
+                    { value: 'RESET', label: 'New visit' },
+                    { value: 'CONTINUE', label: 'Continue' },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      type='button'
+                      onClick={() => onUpdateMeta({ onReenter: opt.value })}
+                      data-track-category='transition_config'
+                      data-track-name={`select_on_reenter_${opt.value.toLowerCase()}`}
+                      className={`py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${meta.onReenter === opt.value ? 'bg-[#6276be] border-[#6276be] text-white' : 'bg-background border-border text-muted-foreground hover:bg-muted'}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 // ─── Stable node/edge type maps (outside component to avoid re-registration) ─
 
-const NODE_TYPES = { stage: StageNodeComponent };
+const NODE_TYPES = { stage: StageNodeComponent, allBubble: AllBubbleNodeComponent };
 const EDGE_TYPES = { transition: TransitionEdge };
 
 // ─── Main Editor ──────────────────────────────────────────────────────────────
@@ -692,6 +999,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
 }) => {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [expandedTargets, setExpandedTargets] = useState<Set<number>>(new Set());
 
   const handleSelectEdge = useCallback((edgeId: string) => {
     setSelectedEdgeId(edgeId);
@@ -699,6 +1007,10 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
   }, []);
 
   const handleNodeClick = (_event: React.MouseEvent, node: Node) => {
+    if (node.id.startsWith('all-')) {
+      handleSelectEdge(`eAll-${node.id.slice(4)}`);
+      return;
+    }
     setSelectedNodeId(node.id);
     setSelectedEdgeId(null);
   };
@@ -707,6 +1019,32 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     setSelectedEdgeId(null);
     setSelectedNodeId(null);
   };
+
+  // Wires up an incoming edge from every other stage not already connected to targetTempId.
+  const handleAllowAllIncoming = useCallback(
+    (targetTempId: number) => {
+      stages.forEach(s => {
+        if (s.tempId === targetTempId) return;
+        if (!transitionsByTempId.get(s.tempId)?.has(targetTempId)) {
+          toggleTransition(s.tempId, targetTempId, true);
+        }
+      });
+    },
+    [stages, transitionsByTempId, toggleTransition],
+  );
+
+  // Inverse of handleAllowAllIncoming — removes every incoming edge from this stage.
+  const handleDisallowAllIncoming = useCallback(
+    (targetTempId: number) => {
+      stages.forEach(s => {
+        if (s.tempId === targetTempId) return;
+        if (transitionsByTempId.get(s.tempId)?.has(targetTempId)) {
+          toggleTransition(s.tempId, targetTempId, false);
+        }
+      });
+    },
+    [stages, transitionsByTempId, toggleTransition],
+  );
 
   // Track whether the user has manually dragged any node — if so, we
   // preserve their custom positions and don't auto-relayout on transition changes.
@@ -720,36 +1058,23 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         id: String(s.tempId),
         type: 'stage',
         position: layout.get(s.tempId) ?? { x: 60, y: 60 },
-        data: {
-          stage: s,
-          onUpdate: (patch: Partial<StageNode>) => onUpdateStage(s.tempId, patch),
-          onDelete: () => onDeleteStage(s.tempId),
-          editingEtaId,
-          etaValue,
-          etaInputRef,
-          onStartEditEta,
-          onSaveEta,
-          onCancelEta,
-          setEtaValue,
-        },
+        data: { stage: s },
       }));
     },
-    [
-      transitionsByTempId,
-      onUpdateStage,
-      onDeleteStage,
-      editingEtaId,
-      etaValue,
-      etaInputRef,
-      onStartEditEta,
-      onSaveEta,
-      onCancelEta,
-      setEtaValue,
-    ],
+    [transitionsByTempId],
   );
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<StageNodeData>(makeNodes(stages));
+  const [nodes, setNodes, onNodesChange] = useNodesState<StageNodeData | AllBubbleNodeData>(
+    makeNodes(stages),
+  );
   const [edges, setEdges, onEdgesChange] = useEdgesState<TransitionEdgeData>([]);
+
+  // Mirror `nodes` into a ref so the bubble-sync effect below can read the
+  // latest node positions (for anchoring bubbles) without adding `nodes` to
+  // its dependency array (which would re-run on every dimension change and
+  // fight ReactFlow's own node-state updates).
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
 
   // Detect user-initiated node drags so we can preserve custom positions.
   // A position change with `dragging === false` indicates the drag just ended.
@@ -782,8 +1107,12 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     );
   }, [transitionsByTempId, isTransitionsLoading, setNodes]);
 
-  // Sync node count when stages added/removed; update data when stages change
-  const prevStageTempIds = useRef<number[]>([]);
+  // Sync node count when stages added/removed; update data when stages change.
+  // Seeded with the SAME stages used by useNodesState(makeNodes(stages)) above
+  // — otherwise this ref starts empty while `nodes` already has every stage,
+  // so the first run of this effect treats all of them as "added" and
+  // appends a duplicate copy of every stage node on top of the real ones.
+  const prevStageTempIds = useRef<number[]>(stages.map(s => s.tempId));
   useEffect(() => {
     const prevIds = prevStageTempIds.current;
     const currIds = stages.map(s => s.tempId);
@@ -804,18 +1133,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
             id: String(tempId),
             type: 'stage',
             position: layout.get(tempId) ?? { x: 60, y: 60 },
-            data: {
-              stage: s,
-              onUpdate: (patch: Partial<StageNode>) => onUpdateStage(s.tempId, patch),
-              onDelete: () => onDeleteStage(s.tempId),
-              editingEtaId,
-              etaValue,
-              etaInputRef,
-              onStartEditEta,
-              onSaveEta,
-              onCancelEta,
-              setEtaValue,
-            },
+            data: { stage: s },
           },
         ];
       });
@@ -825,36 +1143,11 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         if (!s) return n;
         return {
           ...n,
-          data: {
-            ...n.data,
-            stage: s,
-            onUpdate: (patch: Partial<StageNode>) => onUpdateStage(s.tempId, patch),
-            onDelete: () => onDeleteStage(s.tempId),
-            editingEtaId,
-            etaValue,
-            etaInputRef,
-            onStartEditEta,
-            onSaveEta,
-            onCancelEta,
-            setEtaValue,
-          },
+          data: { ...n.data, stage: s },
         };
       });
     });
-  }, [
-    stages,
-    transitionsByTempId,
-    onUpdateStage,
-    onDeleteStage,
-    editingEtaId,
-    etaValue,
-    etaInputRef,
-    onStartEditEta,
-    onSaveEta,
-    onCancelEta,
-    setEtaValue,
-    setNodes,
-  ]);
+  }, [stages, transitionsByTempId, setNodes]);
 
   // Sync edges from transition state
   useEffect(() => {
@@ -903,11 +1196,99 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     setEdges(newEdges);
   }, [transitionsByTempId, transitionsMeta, selectedEdgeId, setEdges, handleSelectEdge]);
 
+  // Commit merged "All" bubble nodes/edges into the real ReactFlow
+  // node/edge state (mirroring the edge-sync effect above), so ReactFlow's
+  // internal store actually owns them. When they were only injected into the
+  // derived `displayNodes`/`displayEdges` memo, ReactFlow received a node/edge
+  // whose source node ('all-<id>') had no backing in its tracked store — so it
+  // silently dropped the edge and never painted the bubble, even though the
+  // id appeared in the logged `displayNodes` array.
+  useEffect(() => {
+    const merged = computeMergedTargets(stages, transitionsByTempId, transitionsMeta);
+    const active = new Map(merged);
+    expandedTargets.forEach(tempId => active.delete(tempId));
+
+    const layout = computeGraphLayout(stages, transitionsByTempId);
+
+    const bubbleNodes: Node<AllBubbleNodeData>[] = [];
+    const bubbleEdges: Edge<TransitionEdgeData>[] = [];
+
+    active.forEach(m => {
+      // Use the deterministic graph-layout position for the target (matches
+      // what the stage-position-sync effect places the stage at), so a
+      // newly-created bubble aligns with where its target lands — not a
+      // pre-layout position that may still be in `nodes` at effect-run time.
+      const targetPosition = layout.get(m.targetTempId) ?? { x: 60, y: 60 };
+      const bId = `all-${m.targetTempId}`;
+      const eId = `eAll-${m.targetTempId}`;
+      // Preserve a bubble's existing position across re-runs (e.g. when the
+      // user selects an edge and this effect re-runs) — otherwise it snaps
+      // back to the computed spot every time. Only newly-created bubbles use
+      // the computed position next to their target.
+      const existingBubble = nodesRef.current.find(n => n.id === bId);
+
+      bubbleNodes.push({
+        id: bId,
+        type: 'allBubble',
+        position: existingBubble?.position ?? {
+          x: targetPosition.x - 70,
+          y: targetPosition.y + 35,
+        },
+        draggable: true,
+        selectable: false,
+        data: {
+          targetTempId: m.targetTempId,
+          formId: m.formId,
+        },
+      });
+
+      bubbleEdges.push({
+        id: eId,
+        source: bId,
+        target: String(m.targetTempId),
+        type: 'transition',
+        deletable: false,
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#6276be', width: 18, height: 18 },
+        data: {
+          fromTempId: m.sourceTempIds[0] ?? m.targetTempId,
+          toTempId: m.targetTempId,
+          meta: {
+            formId: m.formId,
+            requiresApproval: false,
+            approvers: [],
+            visitSlaMode: 'STAGE_DEFAULT',
+            onReenter: 'RESET',
+          },
+          onSelectEdge: handleSelectEdge,
+          selectedEdgeId,
+          isAllEdge: true,
+          sourceTempIds: m.sourceTempIds,
+        },
+      });
+    });
+
+    // Merge bubble nodes/edges into state alongside the real stage nodes/edges.
+    // Stage nodes are kept as-is (preserving user-dragged positions); bubble
+    // nodes keep their existing position via the existingBubble lookup above.
+    setNodes(prev => [...prev.filter(n => !n.id.startsWith('all-')), ...bubbleNodes]);
+    setEdges(prev => [...prev.filter(e => !e.id.startsWith('eAll-')), ...bubbleEdges]);
+  }, [
+    stages,
+    transitionsByTempId,
+    transitionsMeta,
+    expandedTargets,
+    selectedEdgeId,
+    handleSelectEdge,
+    setNodes,
+    setEdges,
+  ]);
+
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
       const from = Number(connection.source);
       const to = Number(connection.target);
+      if (Number.isNaN(from) || Number.isNaN(to)) return;
       if (from !== to) toggleTransition(from, to, true);
     },
     [toggleTransition],
@@ -926,9 +1307,42 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     [toggleTransition, selectedEdgeId],
   );
 
+  const mergedTargets = useMemo(
+    () => computeMergedTargets(stages, transitionsByTempId, transitionsMeta),
+    [stages, transitionsByTempId, transitionsMeta],
+  );
+
+  const activeMergedTargets = useMemo(() => {
+    const active = new Map(mergedTargets);
+    expandedTargets.forEach(tempId => active.delete(tempId));
+    return active;
+  }, [mergedTargets, expandedTargets]);
+
   // Selected edge info for the settings panel
   const selectedEdge = useMemo(() => {
     if (!selectedEdgeId) return null;
+
+    if (selectedEdgeId.startsWith('eAll-')) {
+      const targetTempId = Number(selectedEdgeId.slice('eAll-'.length));
+      const merged = activeMergedTargets.get(targetTempId);
+      const toStage = stages.find(s => s.tempId === targetTempId);
+      if (!merged || !toStage) return null;
+      const meta: TransitionMeta = {
+        formId: merged.formId,
+        requiresApproval: false,
+        approvers: [],
+        visitSlaMode: 'STAGE_DEFAULT',
+        onReenter: 'RESET',
+      };
+      return {
+        edgeId: selectedEdgeId,
+        isAllEdge: true as const,
+        toStage,
+        sourceTempIds: merged.sourceTempIds,
+        meta,
+      };
+    }
+
     const edge = edges.find(e => e.id === selectedEdgeId);
     if (!edge?.data) return null;
     const { fromTempId, toTempId } = edge.data;
@@ -941,52 +1355,135 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
       visitSlaMode: 'STAGE_DEFAULT',
       onReenter: 'RESET',
     };
-    return { edgeId: selectedEdgeId, fromStage, toStage, fromTempId, toTempId, meta };
-  }, [selectedEdgeId, edges, stages, transitionsMeta]);
+    return {
+      edgeId: selectedEdgeId,
+      isAllEdge: false as const,
+      fromStage,
+      toStage,
+      fromTempId,
+      toTempId,
+      meta,
+    };
+  }, [selectedEdgeId, edges, stages, transitionsMeta, activeMergedTargets]);
+
+  // Selected stage info for the stage actions panel (opened by clicking a stage node).
+  const selectedStage = useMemo(() => {
+    if (!selectedNodeId) return null;
+    const targetTempId = Number(selectedNodeId);
+    const stage = stages.find(s => s.tempId === targetTempId);
+    if (!stage) return null;
+    return {
+      stage,
+      hasAllIncoming: hasAllIncomingSources(targetTempId, stages, transitionsByTempId),
+    };
+  }, [selectedNodeId, stages, transitionsByTempId]);
+
+  // Re-merges every manually expanded "All" group back into its bubble. Also
+  // clears the selection — a selected individual edge may be one of the ones
+  // folding back into a bubble, and its line would disappear while a stale
+  // selectedEdgeId kept the (now hidden) edge and its endpoints highlighted.
+  const handleCondenseEdges = useCallback(() => {
+    setExpandedTargets(new Set());
+    setSelectedEdgeId(null);
+    setSelectedNodeId(null);
+  }, []);
+
+  // Expands the currently-selected "All" edge only. Also clears the
+  // selection — the bubble/edge just expanded no longer exists, and leaving
+  // a stale selectedEdgeId around dulls everything except the lone target
+  // node. Clearing it reproduces a pane click instead.
+  const handleExpandSelected = useCallback(() => {
+    if (!selectedEdge?.isAllEdge) return;
+    const targetTempId = selectedEdge.toStage.tempId;
+    setExpandedTargets(prev => {
+      const next = new Set(prev);
+      next.add(targetTempId);
+      return next;
+    });
+    setSelectedEdgeId(null);
+    setSelectedNodeId(null);
+  }, [selectedEdge]);
 
   // Highlight the selected node/edge and its direct connections; dull the rest.
   const { displayNodes, displayEdges } = useMemo(() => {
     const nodeState = new Map<string, HighlightState>();
     const edgeState = new Map<string, HighlightState>();
 
+    const bubbleNodeId = (targetTempId: number) => `all-${targetTempId}`;
+    const bubbleEdgeId = (targetTempId: number) => `eAll-${targetTempId}`;
+
+    const hiddenEdgeIds = new Set<string>();
+    activeMergedTargets.forEach(merged => {
+      merged.sourceTempIds.forEach(from => {
+        hiddenEdgeIds.add(`e${from}-${merged.targetTempId}`);
+      });
+    });
+
     if (selectedNodeId) {
       nodeState.set(selectedNodeId, 'selected');
       edges.forEach(e => {
+        if (hiddenEdgeIds.has(e.id)) return;
         if (e.source === selectedNodeId || e.target === selectedNodeId) {
           edgeState.set(e.id, 'connected');
           const other = e.source === selectedNodeId ? e.target : e.source;
           if (!nodeState.has(other)) nodeState.set(other, 'connected');
         }
       });
+      const mergedForSelected = activeMergedTargets.get(Number(selectedNodeId));
+      if (mergedForSelected) {
+        nodeState.set(bubbleNodeId(mergedForSelected.targetTempId), 'connected');
+        edgeState.set(bubbleEdgeId(mergedForSelected.targetTempId), 'connected');
+      }
     } else if (selectedEdgeId) {
-      const edge = edges.find(e => e.id === selectedEdgeId);
-      if (edge) {
-        nodeState.set(edge.source, 'connected');
-        nodeState.set(edge.target, 'connected');
-        edgeState.set(edge.id, 'connected');
+      if (selectedEdgeId.startsWith('eAll-')) {
+        const targetTempId = Number(selectedEdgeId.slice('eAll-'.length));
+        nodeState.set(bubbleNodeId(targetTempId), 'connected');
+        nodeState.set(String(targetTempId), 'connected');
+        edgeState.set(selectedEdgeId, 'connected');
+      } else {
+        const edge = edges.find(e => e.id === selectedEdgeId);
+        if (edge) {
+          nodeState.set(edge.source, 'connected');
+          nodeState.set(edge.target, 'connected');
+          edgeState.set(edge.id, 'connected');
+        }
       }
     }
 
-    if (nodeState.size > 0) {
+    const hasSelection = nodeState.size > 0;
+    if (hasSelection) {
       nodes.forEach(n => {
         if (!nodeState.has(n.id)) nodeState.set(n.id, 'dull');
       });
       edges.forEach(e => {
+        if (hiddenEdgeIds.has(e.id)) return;
         if (!edgeState.has(e.id)) edgeState.set(e.id, 'dull');
+      });
+      activeMergedTargets.forEach(merged => {
+        const bId = bubbleNodeId(merged.targetTempId);
+        const eId = bubbleEdgeId(merged.targetTempId);
+        if (!nodeState.has(bId)) nodeState.set(bId, 'dull');
+        if (!edgeState.has(eId)) edgeState.set(eId, 'dull');
       });
     }
 
-    return {
-      displayNodes: nodes.map(n => ({
-        ...n,
-        data: { ...n.data, highlightState: nodeState.get(n.id) ?? 'normal' },
-      })),
-      displayEdges: edges.map(e => ({
+    // Bubble nodes/edges now live in the real `nodes`/`edges` state (synced by
+    // the bubble-sync effect above), so the memo only needs to layer on
+    // highlight state and drop the individually-merged edges.
+    const displayNodesOut = nodes.map(n => ({
+      ...n,
+      data: { ...n.data, highlightState: nodeState.get(n.id) ?? 'normal' },
+    }));
+
+    const displayEdgesOut = edges
+      .filter(e => !hiddenEdgeIds.has(e.id))
+      .map(e => ({
         ...e,
         data: { ...e.data, highlightState: edgeState.get(e.id) ?? 'normal' },
-      })),
-    };
-  }, [selectedNodeId, selectedEdgeId, nodes, edges]);
+      }));
+
+    return { displayNodes: displayNodesOut, displayEdges: displayEdgesOut };
+  }, [selectedNodeId, selectedEdgeId, nodes, edges, activeMergedTargets]);
 
   return (
     <div className='relative w-full h-full' style={{ minHeight: 480 }}>
@@ -1021,30 +1518,47 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color='hsl(var(--border))' />
         <Controls showInteractive={false} className='!bg-background !border-border !shadow-md' />
 
-        {/* Rearrange button */}
+        {/* Toolbar: Rearrange + Condense/Expand */}
         <Panel position='top-left'>
-          <button
-            type='button'
-            onClick={() => {
-              const layout = computeGraphLayout(stages, transitionsByTempId);
-              setNodes(prev =>
-                prev.map(n => {
-                  const pos = layout.get(Number(n.id));
-                  return pos ? { ...n, position: pos } : n;
-                }),
-              );
-              // Reset the flag so future transition changes can auto-layout again
-              // until the user drags once more.
-              hasUserDraggedRef.current = false;
-            }}
-            data-track-category='board_stage_config'
-            data-track-name='rearrange_stages'
-            className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
-            title='Auto-arrange stages'
-          >
-            <LayoutGrid size={13} />
-            <span className='font-medium'>Rearrange</span>
-          </button>
+          <div className='flex items-center gap-2'>
+            <button
+              type='button'
+              onClick={() => {
+                const layout = computeGraphLayout(stages, transitionsByTempId);
+                setNodes(prev =>
+                  prev.map(n => {
+                    const pos = layout.get(Number(n.id));
+                    return pos ? { ...n, position: pos } : n;
+                  }),
+                );
+                // Reset the flag so future transition changes can auto-layout again
+                // until the user drags once more.
+                hasUserDraggedRef.current = false;
+              }}
+              data-track-category='board_stage_config'
+              data-track-name='rearrange_stages'
+              className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
+              title='Auto-arrange stages'
+            >
+              <LayoutGrid size={13} />
+              <span className='font-medium'>Rearrange</span>
+            </button>
+            <button
+              type='button'
+              onClick={selectedEdge?.isAllEdge ? handleExpandSelected : handleCondenseEdges}
+              data-track-category='board_stage_config'
+              data-track-name={selectedEdge?.isAllEdge ? 'expand_all_edge' : 'condense_edges'}
+              className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
+              title={
+                selectedEdge?.isAllEdge
+                  ? 'Show individual transitions for this "All" group'
+                  : 'Re-merge any manually expanded "All" groups'
+              }
+            >
+              {selectedEdge?.isAllEdge ? <Expand size={13} /> : <Merge size={13} />}
+              <span className='font-medium'>{selectedEdge?.isAllEdge ? 'Expand' : 'Condense'}</span>
+            </button>
+          </div>
         </Panel>
 
         {/* Hint + Add Stage */}
@@ -1069,35 +1583,112 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         </Panel>
 
         {/* Edge settings panel */}
-        {selectedEdge && (
+        {selectedEdge &&
+          (selectedEdge.isAllEdge ? (
+            <Panel position='top-right'>
+              <EdgeSettingsPanel
+                key={selectedEdge.edgeId}
+                isAllEdge
+                toStage={selectedEdge.toStage}
+                sourceStages={selectedEdge.sourceTempIds
+                  .map(id => stages.find(s => s.tempId === id))
+                  .filter((s): s is StageNode => !!s)}
+                meta={selectedEdge.meta}
+                formMap={formMap}
+                onUpdateMeta={patch =>
+                  selectedEdge.sourceTempIds.forEach(from =>
+                    updateTransitionMeta(from, selectedEdge.toStage.tempId, patch),
+                  )
+                }
+                onRemoveSources={tempIds => {
+                  tempIds.forEach(from =>
+                    toggleTransition(from, selectedEdge.toStage.tempId, false),
+                  );
+                  setSelectedEdgeId(null);
+                }}
+                onClose={() => setSelectedEdgeId(null)}
+                onOpenEdgeForm={() =>
+                  onOpenEdgeForm(
+                    selectedEdge.sourceTempIds[0] ?? selectedEdge.toStage.tempId,
+                    selectedEdge.toStage.tempId,
+                    selectedEdge.meta.formId,
+                    selectedEdge.sourceTempIds.map(from => ({
+                      fromTempId: from,
+                      toTempId: selectedEdge.toStage.tempId,
+                    })),
+                  )
+                }
+                onAttachExistingForm={formId =>
+                  onAttachExistingEdgeForm(
+                    selectedEdge.sourceTempIds[0] ?? selectedEdge.toStage.tempId,
+                    selectedEdge.toStage.tempId,
+                    formId,
+                    selectedEdge.sourceTempIds.map(from => ({
+                      fromTempId: from,
+                      toTempId: selectedEdge.toStage.tempId,
+                    })),
+                  )
+                }
+                stageForms={stageForms}
+              />
+            </Panel>
+          ) : (
+            <Panel position='top-right'>
+              <EdgeSettingsPanel
+                key={selectedEdge.edgeId}
+                isAllEdge={false}
+                fromStage={selectedEdge.fromStage}
+                toStage={selectedEdge.toStage}
+                meta={selectedEdge.meta}
+                formMap={formMap}
+                onUpdateMeta={patch =>
+                  updateTransitionMeta(selectedEdge.fromTempId, selectedEdge.toTempId, patch)
+                }
+                onRemoveEdge={() => {
+                  toggleTransition(selectedEdge.fromTempId, selectedEdge.toTempId, false);
+                  setSelectedEdgeId(null);
+                }}
+                onClose={() => setSelectedEdgeId(null)}
+                onOpenEdgeForm={() =>
+                  onOpenEdgeForm(
+                    selectedEdge.fromTempId,
+                    selectedEdge.toTempId,
+                    selectedEdge.meta.formId,
+                  )
+                }
+                onAttachExistingForm={formId =>
+                  onAttachExistingEdgeForm(selectedEdge.fromTempId, selectedEdge.toTempId, formId)
+                }
+                stageForms={stageForms}
+                onAddCondition={() =>
+                  onAddConditionForEdge(selectedEdge.fromTempId, selectedEdge.toTempId)
+                }
+              />
+            </Panel>
+          ))}
+
+        {/* Stage actions panel */}
+        {!selectedEdge && selectedStage && (
           <Panel position='top-right'>
-            <EdgeSettingsPanel
-              fromStage={selectedEdge.fromStage}
-              toStage={selectedEdge.toStage}
-              meta={selectedEdge.meta}
-              formMap={formMap}
-              onUpdateMeta={patch =>
-                updateTransitionMeta(selectedEdge.fromTempId, selectedEdge.toTempId, patch)
-              }
-              onRemoveEdge={() => {
-                toggleTransition(selectedEdge.fromTempId, selectedEdge.toTempId, false);
-                setSelectedEdgeId(null);
+            <StageActionsPanel
+              key={selectedStage.stage.tempId}
+              stage={selectedStage.stage}
+              hasAllIncoming={selectedStage.hasAllIncoming}
+              onAllowAllIncoming={() => handleAllowAllIncoming(selectedStage.stage.tempId)}
+              onDisallowAllIncoming={() => handleDisallowAllIncoming(selectedStage.stage.tempId)}
+              onUpdate={patch => onUpdateStage(selectedStage.stage.tempId, patch)}
+              onDelete={() => {
+                onDeleteStage(selectedStage.stage.tempId);
+                setSelectedNodeId(null);
               }}
-              onClose={() => setSelectedEdgeId(null)}
-              onOpenEdgeForm={() =>
-                onOpenEdgeForm(
-                  selectedEdge.fromTempId,
-                  selectedEdge.toTempId,
-                  selectedEdge.meta.formId,
-                )
-              }
-              onAttachExistingForm={formId =>
-                onAttachExistingEdgeForm(selectedEdge.fromTempId, selectedEdge.toTempId, formId)
-              }
-              stageForms={stageForms}
-              onAddCondition={() =>
-                onAddConditionForEdge(selectedEdge.fromTempId, selectedEdge.toTempId)
-              }
+              isEditingEta={editingEtaId === selectedStage.stage.tempId}
+              etaValue={etaValue}
+              etaInputRef={etaInputRef}
+              onStartEditEta={() => onStartEditEta(selectedStage.stage)}
+              onSaveEta={() => onSaveEta(selectedStage.stage.tempId)}
+              onCancelEta={onCancelEta}
+              setEtaValue={setEtaValue}
+              onClose={() => setSelectedNodeId(null)}
             />
           </Panel>
         )}

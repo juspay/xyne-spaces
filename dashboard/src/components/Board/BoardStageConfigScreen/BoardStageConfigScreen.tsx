@@ -656,6 +656,10 @@ const BoardStageConfigScreen = ({
     fromTempId: number;
     toTempId: number;
   } | null>(null);
+  const [edgeFormAllPairs, setEdgeFormAllPairs] = useState<Array<{
+    fromTempId: number;
+    toTempId: number;
+  }> | null>(null);
   const [isEdgeFormOpen, setIsEdgeFormOpen] = useState(false);
   const [edgeEditFormId, setEdgeEditFormId] = useState<string | null>(null);
   const [edgeEditFormData, setEdgeEditFormData] = useState<{
@@ -1844,8 +1848,14 @@ const BoardStageConfigScreen = ({
 
   // ── Edge Form Handlers (NON_LINEAR per-edge forms) ───────────────────────────
   const handleOpenEdgeForm = useCallback(
-    (fromTempId: number, toTempId: number, existingFormId?: string | null) => {
+    (
+      fromTempId: number,
+      toTempId: number,
+      existingFormId?: string | null,
+      allPairs?: Array<{ fromTempId: number; toTempId: number }>,
+    ) => {
       setEdgeFormTarget({ fromTempId, toTempId });
+      setEdgeFormAllPairs(allPairs && allPairs.length > 1 ? allPairs : null);
       if (existingFormId) {
         void formService
           .getFormById(existingFormId)
@@ -1869,16 +1879,58 @@ const BoardStageConfigScreen = ({
   );
 
   const handleAttachExistingEdgeForm = useCallback(
-    (fromTempId: number, toTempId: number, formId: string) => {
-      updateTransitionMeta(fromTempId, toTempId, { formId });
-      toast.success(`Form "${formMap.get(formId) ?? 'Form'}" attached`);
+    (
+      fromTempId: number,
+      toTempId: number,
+      formId: string,
+      allPairs?: Array<{ fromTempId: number; toTempId: number }>,
+    ) => {
+      const pairs = allPairs && allPairs.length > 0 ? allPairs : [{ fromTempId, toTempId }];
+      const metaOverrides = new Map<string, Partial<TransitionMeta>>();
+      pairs.forEach(pair => {
+        updateTransitionMeta(pair.fromTempId, pair.toTempId, { formId });
+        metaOverrides.set(`${pair.fromTempId}->${pair.toTempId}`, { formId });
+      });
+      const allSaved = pairs.every(pair => {
+        const fromStage = stages.find(s => s.tempId === pair.fromTempId);
+        const toStage = stages.find(s => s.tempId === pair.toTempId);
+        return !!fromStage?.id && !!toStage?.id;
+      });
+      if (!allSaved) {
+        toast.info(
+          'Form saved. Click Save on the board configuration to link it to this transition.',
+        );
+        return;
+      }
+
+      const allEdgeTransitions = new Map(transitionsByTempId);
+      pairs.forEach(pair => {
+        const targets = new Set(allEdgeTransitions.get(pair.fromTempId) ?? []);
+        targets.add(pair.toTempId);
+        allEdgeTransitions.set(pair.fromTempId, targets);
+      });
+      void syncStageTransitions({}, metaOverrides, allEdgeTransitions)
+        .then(async () => {
+          hasLoadedTransitions.current = false;
+          await reloadTransitionsFromServer();
+          toast.success(`Form "${formMap.get(formId) ?? 'Form'}" attached`);
+        })
+        .catch(() => toast.error('Failed to attach form'));
     },
-    [updateTransitionMeta, formMap],
+    [
+      updateTransitionMeta,
+      formMap,
+      syncStageTransitions,
+      transitionsByTempId,
+      reloadTransitionsFromServer,
+      stages,
+    ],
   );
 
   const handleCloseEdgeForm = useCallback(() => {
     setIsEdgeFormOpen(false);
     setEdgeFormTarget(null);
+    setEdgeFormAllPairs(null);
     setEdgeEditFormId(null);
     setEdgeEditFormData(null);
   }, []);
@@ -1901,9 +1953,43 @@ const BoardStageConfigScreen = ({
           formId = created.id;
           toast.success(`Form "${formData.formName}" added`);
         }
-        await persistEdgeTransitionForm(fromTempId, toTempId, formId);
+        const pairs = edgeFormAllPairs ?? [{ fromTempId, toTempId }];
+        // One sync for ALL pairs: a per-pair syncStageTransitions loop wipes
+        // earlier pairs' formIds (each full-replace reload leaves only the last).
+        const metaOverrides = new Map<string, Partial<TransitionMeta>>();
+        pairs.forEach(pair => {
+          updateTransitionMeta(pair.fromTempId, pair.toTempId, { formId });
+          metaOverrides.set(`${pair.fromTempId}->${pair.toTempId}`, { formId });
+        });
+        const allSaved = pairs.every(pair => {
+          const fromStage = stages.find(s => s.tempId === pair.fromTempId);
+          const toStage = stages.find(s => s.tempId === pair.toTempId);
+          return !!fromStage?.id && !!toStage?.id;
+        });
+        if (!allSaved) {
+          toast.info(
+            'Form saved. Click Save on the board configuration to link it to this transition.',
+          );
+          setIsEdgeFormOpen(false);
+          setEdgeFormTarget(null);
+          setEdgeFormAllPairs(null);
+          setEdgeEditFormId(null);
+          setEdgeEditFormData(null);
+          return;
+        }
+
+        const allEdgeTransitions = new Map(transitionsByTempId);
+        pairs.forEach(pair => {
+          const targets = new Set(allEdgeTransitions.get(pair.fromTempId) ?? []);
+          targets.add(pair.toTempId);
+          allEdgeTransitions.set(pair.fromTempId, targets);
+        });
+        await syncStageTransitions({}, metaOverrides, allEdgeTransitions);
+        hasLoadedTransitions.current = false;
+        await reloadTransitionsFromServer();
         setIsEdgeFormOpen(false);
         setEdgeFormTarget(null);
+        setEdgeFormAllPairs(null);
         setEdgeEditFormId(null);
         setEdgeEditFormData(null);
       } catch (error) {
@@ -1912,7 +1998,18 @@ const BoardStageConfigScreen = ({
         });
       }
     },
-    [boardId, edgeFormTarget, edgeEditFormId, buildStageFormRequest, persistEdgeTransitionForm],
+    [
+      boardId,
+      edgeFormTarget,
+      edgeFormAllPairs,
+      edgeEditFormId,
+      buildStageFormRequest,
+      updateTransitionMeta,
+      syncStageTransitions,
+      transitionsByTempId,
+      reloadTransitionsFromServer,
+      stages,
+    ],
   );
 
   // ── Save ───────────────────────────────────────────────────────────────────
