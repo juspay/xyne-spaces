@@ -490,6 +490,7 @@ async function assignFullRoles(
     timestamp,
     projectId,
     workspaceId,
+    channelId,
   }: {
     ticketId: string;
     userGroupId: string;
@@ -503,6 +504,7 @@ async function assignFullRoles(
     timestamp: number;
     projectId?: string;
     workspaceId?: string;
+    channelId?: string | null;
   }
 ): Promise<void> {
   logger.info(`[AUTO-ASSIGN] Board ${boardId} has auto-assignment enabled for ticket ${ticketId}`);
@@ -532,6 +534,7 @@ async function assignFullRoles(
         timestamp,
         activityType: ActivityType.ASSIGNED_TO,
         value: { oldValue: oldAssignedTo, newValue: primaryUserId },
+        channelId: channelId ?? null,
       });
     }
 
@@ -5481,6 +5484,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       timestamp: Date.now(),
                       projectId: ticket.projectId,
                       workspaceId: authData.workspaceId,
+                      channelId: ticket.channelId,
                     });
                   } else {
                     const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId);
@@ -5830,6 +5834,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       timestamp,
                       projectId: ticket.projectId,
                       workspaceId: authData.workspaceId,
+                      channelId: ticket.channelId,
                     });
                   } else {
                 const assignmentResult = await evaluateAssignmentRule(
@@ -5856,6 +5861,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       timestamp: timestamp,
                       activityType: ActivityType.ASSIGNED_TO,
                       value: { oldValue: ticket.assignedTo, newValue: assignmentResult.assignedUserId },
+                      channelId: ticket.channelId,
                     });
 
                   // Create system message if conversation exists
@@ -5904,6 +5910,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               timestamp: Date.now(),
               activityType: activity.activityType as any,
               value: activity.value,
+              channelId: ticket.channelId,
             });
 
             const user = await tx.run(zql.users.where('id', authData.sub).one());
@@ -6021,6 +6028,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             timestamp: updatedAt,
             activityType: ActivityType.IS_ARCHIVED,
             value: { oldValue: false, newValue: true },
+            channelId: ticket.channelId,
           });
 
           if (ticket.conversationId) {
@@ -6224,6 +6232,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               oldValue: oldStageEta,
               newValue: newStageEta,
             },
+            channelId: ticket.channelId,
           });
 
           // 12. Create system message in ticket conversation
@@ -6309,6 +6318,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Log activity and create system message
           const activityId = uuidv4();
+          const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
           await tx.mutate.ticket_activities.insert({
             id: activityId,
             ticketId,
@@ -6320,6 +6330,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               subTicketTitle: title,
               subTicketXyneId,
             },
+            channelId: parentTicket?.channelId ?? null,
           });
 
           // Create system message in conversation
@@ -7687,6 +7698,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               targetTicketTitle: targetTicket?.title ?? null,
               targetTicketXyneId: targetTicket?.xyneId ?? null,
             },
+            channelId: sourceTicket?.channelId ?? null,
           });
 
           const user = await tx.run(zql.users.where('id', ctx.userID).one());
@@ -7759,6 +7771,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               targetTicketTitle: targetTicket?.title ?? null,
               targetTicketXyneId: targetTicket?.xyneId ?? null,
             },
+            channelId: sourceTicket?.channelId ?? null,
           });
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
@@ -7825,6 +7838,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               targetTicketTitle: targetTicket?.title ?? null,
               targetTicketXyneId: targetTicket?.xyneId ?? null,
             },
+            channelId: sourceTicket?.channelId ?? null,
           });
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
@@ -13454,6 +13468,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           twoStepSendEnabled: z.boolean().optional(),
           autoDraftMode: z.nativeEnum(AutoDraftMode).optional(),
           autoDraftAgentSlug: z.string().optional().nullable(),
+          metricsEnabled: z.boolean().optional(),
+          frtStageNames: z.string().optional().nullable(),
         }),
         async ({
           tx,
@@ -13467,6 +13483,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             twoStepSendEnabled,
             autoDraftMode,
             autoDraftAgentSlug,
+            metricsEnabled,
+            frtStageNames,
           },
         }) => {
           const existing = await tx.run(
@@ -13483,6 +13501,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ...(twoStepSendEnabled !== undefined ? { twoStepSendEnabled } : {}),
               ...(autoDraftMode !== undefined ? { autoDraftMode } : {}),
               ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
+              ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
+              ...(frtStageNames !== undefined ? { frtStageNames } : {}),
             });
           } else {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -13506,6 +13526,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               priorityClassificationEnabled: false,
               priorityClassificationPrompt: null,
               priorityClassificationThreshold: 0.5,
+              metricsEnabled: metricsEnabled ?? false,
+              frtStageNames: frtStageNames ?? null,
             });
           }
         },
@@ -15270,6 +15292,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               timestamp: now,
               activityType: ActivityType.STATUS,
               value: { field: 'stageName', oldValue: fromStageName, newValue: toStageName },
+              channelId: ticket.channelId,
             });
 
             if (conversationId) {

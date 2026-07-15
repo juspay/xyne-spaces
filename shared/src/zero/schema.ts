@@ -261,6 +261,9 @@ export enum ActivityType {
   UNMERGED = 'UNMERGED',
   RCA_CREATED = 'RCA_CREATED',
   RCA_UPDATED = 'RCA_UPDATED',
+  EMAIL_SENT = 'EMAIL_SENT',
+  TICKET_CREATED = 'TICKET_CREATED',
+  CSAT_RECEIVED = 'CSAT_RECEIVED',
 }
 
 // @ts-ignore TS1294
@@ -1014,6 +1017,7 @@ export const ticketActivityTable = table('ticket_activities')
     timestamp: number(),
     activityType: enumeration<ActivityType>(),
     value: json(),
+    channelId: string().optional(),
   })
   .primaryKey('id');
 
@@ -2197,6 +2201,8 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     dlEmail: string().optional(),
     workspaceId: string().optional(),
     autoDraftAgentSlug: string().optional(),
+    metricsEnabled: boolean().optional(),
+    frtStageNames: string().optional(),
   })
   .primaryKey('channelId');
 

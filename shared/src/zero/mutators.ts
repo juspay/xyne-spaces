@@ -8517,6 +8517,8 @@ export const mutators = defineMutators({
         twoStepSendEnabled: z.boolean().optional(),
         autoDraftMode: z.nativeEnum(AutoDraftMode).optional(),
         autoDraftAgentSlug: z.string().optional().nullable(),
+        metricsEnabled: z.boolean().optional(),
+        frtStageNames: z.string().optional().nullable(),
       }),
       async ({
         tx,
@@ -8531,6 +8533,8 @@ export const mutators = defineMutators({
           twoStepSendEnabled,
           autoDraftMode,
           autoDraftAgentSlug,
+          metricsEnabled,
+          frtStageNames,
         },
       }) => {
         const existing = await tx.run(
@@ -8547,6 +8551,8 @@ export const mutators = defineMutators({
             ...(twoStepSendEnabled !== undefined ? { twoStepSendEnabled } : {}),
             ...(autoDraftMode !== undefined ? { autoDraftMode } : {}),
             ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
+            ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
+            ...(frtStageNames !== undefined ? { frtStageNames } : {}),
           });
         } else {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -8569,6 +8575,8 @@ export const mutators = defineMutators({
             priorityClassificationEnabled: false,
             priorityClassificationPrompt: null,
             priorityClassificationThreshold: 0.5,
+            metricsEnabled: metricsEnabled ?? false,
+            frtStageNames: frtStageNames ?? null,
           });
         }
       },

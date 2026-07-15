@@ -261,6 +261,7 @@ export class TicketRepository {
         boardId: true,
         statusV2: true,
         conversationId: true,
+        channelId: true,
         priority: true,
         assignedTo: true,
         createdBy: true,
@@ -507,7 +508,8 @@ export class TicketRepository {
           ticketId: ticketId,
           updatedBy: updatedBy,
           activityType: ActivityType.PR,
-          value: activityValue as Prisma.InputJsonValue
+          value: activityValue as Prisma.InputJsonValue,
+          channelId: currentTicket.channelId
         }
       });
 
@@ -527,7 +529,8 @@ export class TicketRepository {
             oldValue: oldStageName,
             newValue: newStageName,
             source: source  // Store source for audit trail
-          } as Prisma.InputJsonValue
+          } as Prisma.InputJsonValue,
+          channelId: currentTicket.channelId
         }
       });
 
@@ -548,7 +551,8 @@ export class TicketRepository {
             oldValue: oldStatusV2,
             newValue: newStatusV2,
             source: source
-          } as Prisma.InputJsonValue
+          } as Prisma.InputJsonValue,
+          channelId: currentTicket.channelId
         }
       });
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { Prisma } from '@prisma/client';
+import { ActivityType, Prisma } from '@prisma/client';
 import { FormFieldType, FormContextType, FormEntityType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -145,7 +145,7 @@ export async function recordCsatRating(
 ): Promise<{ success: boolean; alreadyResponded?: boolean; notFound?: boolean; submission?: CsatSubmission }> {
   const ticket = await db.ticket.findUnique({
     where: { id: ticketId },
-    select: { boardId: true, workspaceId: true, createdBy: true },
+    select: { boardId: true, workspaceId: true, createdBy: true, channelId: true },
   });
   if (!ticket) {
     return { success: false, notFound: true };
@@ -182,6 +182,28 @@ export async function recordCsatRating(
   logger.info(
     `[csat] rating recorded | ticketId=${ticketId} rating=${rating} score=${normalizedScore ?? 'none'}/${CSAT_MAX_SCORE}`,
   );
+
+  // Audit trail + desk metrics. The customer isn't a workspace user, so the
+  // activity is attributed to the ticket creator (updatedBy is a required FK).
+  // Must never fail the public submission itself.
+  try {
+    await db.ticketActivity.create({
+      data: {
+        ticketId,
+        updatedBy: ticket.createdBy,
+        timestamp: new Date(),
+        activityType: ActivityType.CSAT_RECEIVED,
+        channelId: ticket.channelId,
+        value: {
+          field: 'csat',
+          rating,
+          score: normalizedScore ?? null,
+        } as Prisma.InputJsonValue,
+      },
+    });
+  } catch (err) {
+    logger.error(`[csat] failed to record CSAT_RECEIVED activity | ticketId=${ticketId} error=${err}`);
+  }
 
   return {
     success: true,

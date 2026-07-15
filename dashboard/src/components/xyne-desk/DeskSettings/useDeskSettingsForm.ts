@@ -24,6 +24,16 @@ export const parseDefaultCc = (val: string | undefined | null): string[] =>
         .filter(Boolean)
     : [];
 
+const parseFrtStageNames = (val: string | undefined | null): string[] => {
+  if (!val) return [];
+  try {
+    const parsed: unknown = JSON.parse(val);
+    return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
 type DraftShape = Record<string, string | number | boolean | null>;
 
 function useDraft<T extends DraftShape>(server: T) {
@@ -186,6 +196,8 @@ export function useDeskSettingsForm(
     twoStepSendEnabled: emailChannelPreference?.twoStepSendEnabled ?? false,
     autoAIDraft: emailChannelPreference?.autoDraftMode === AutoDraftMode.DRAFT,
     autoDraftAgentSlug: emailChannelPreference?.autoDraftAgentSlug ?? null,
+    metricsEnabled: emailChannelPreference?.metricsEnabled ?? false,
+    frtStageNames: emailChannelPreference?.frtStageNames ?? '[]',
   });
   const cls = useDraft({
     enabled: classificationConfig?.enabled ?? false,
@@ -212,6 +224,9 @@ export function useDeskSettingsForm(
   const autoAIDraft = pref.draft.autoAIDraft;
   const autoAIDraftSaved = emailChannelPreference?.autoDraftMode === AutoDraftMode.DRAFT;
   const autoDraftAgentSlug = pref.draft.autoDraftAgentSlug;
+  const metricsEnabled = pref.draft.metricsEnabled;
+  const frtStageNames = parseFrtStageNames(pref.draft.frtStageNames);
+  const boardId = emailChannelPreference?.boardId ?? null;
   const classificationEnabledDraft = cls.draft.enabled;
   const classificationEnabledSaved = classificationConfig?.enabled ?? false;
   const classificationPromptDraft = cls.draft.classificationPrompt;
@@ -240,6 +255,18 @@ export function useDeskSettingsForm(
   const setTwoStepSend = (checked: boolean) => pref.setField('twoStepSendEnabled', checked);
   const setAutoAIDraft = (checked: boolean) => pref.setField('autoAIDraft', checked);
   const setAutoDraftAgentSlug = (slug: string | null) => pref.setField('autoDraftAgentSlug', slug);
+  const setMetricsEnabled = (checked: boolean) => {
+    if (!canManage) return;
+    pref.setField('metricsEnabled', checked);
+  };
+  const setFrtStageNames = (updater: string[] | ((prev: string[]) => string[])) => {
+    if (!canManage) return;
+    pref.setField('frtStageNames', prevStr => {
+      const prevArr = parseFrtStageNames(prevStr);
+      const nextArr = typeof updater === 'function' ? updater(prevArr) : updater;
+      return JSON.stringify(nextArr);
+    });
+  };
 
   const setClassificationEnabled = (checked: boolean) => {
     if (!canManage) return;
@@ -307,6 +334,13 @@ export function useDeskSettingsForm(
       }
       if (d.autoDraftAgentSlug !== s.autoDraftAgentSlug) {
         patch.autoDraftAgentSlug = d.autoDraftAgentSlug;
+      }
+      if (d.metricsEnabled !== s.metricsEnabled) {
+        patch.metricsEnabled = d.metricsEnabled;
+      }
+      if (d.frtStageNames !== s.frtStageNames) {
+        const names = parseFrtStageNames(d.frtStageNames);
+        patch.frtStageNames = names.length > 0 ? JSON.stringify(names) : null;
       }
 
       if (cls.dirty) {
@@ -411,6 +445,11 @@ export function useDeskSettingsForm(
     setAutoAIDraft,
     autoDraftAgentSlug,
     setAutoDraftAgentSlug,
+    metricsEnabled,
+    setMetricsEnabled,
+    frtStageNames,
+    setFrtStageNames,
+    boardId,
     clawAgents,
     classificationEnabledDraft,
     classificationEnabledSaved,

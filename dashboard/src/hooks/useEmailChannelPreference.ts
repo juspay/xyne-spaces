@@ -34,6 +34,8 @@ export function useUpdateEmailChannelPreference() {
       twoStepSendEnabled,
       autoDraftMode,
       autoDraftAgentSlug,
+      metricsEnabled,
+      frtStageNames,
     }: {
       channelId: string;
       ownerUserId?: string;
@@ -44,6 +46,8 @@ export function useUpdateEmailChannelPreference() {
       twoStepSendEnabled?: boolean;
       autoDraftMode?: AutoDraftMode;
       autoDraftAgentSlug?: string | null;
+      metricsEnabled?: boolean;
+      frtStageNames?: string | null;
     }): Promise<void> => {
       zero.mutate(
         mutators.emailChannelPreference.upsert({
@@ -58,6 +62,8 @@ export function useUpdateEmailChannelPreference() {
           ...(autoDraftAgentSlug !== undefined
             ? { autoDraftAgentSlug: autoDraftAgentSlug || null }
             : {}),
+          ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
+          ...(frtStageNames !== undefined ? { frtStageNames } : {}),
         }),
       );
       return Promise.resolve();

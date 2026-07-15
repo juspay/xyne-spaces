@@ -31,6 +31,7 @@ import {
   MessageDirection,
   ExternalEntityType,
   TicketPriority,
+  ActivityType,
 } from '@prisma/client';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
@@ -1698,6 +1699,52 @@ export class EmailService {
       logger.error('[EmailService.recordFirstResponse] Failed to record first response time', {
         conversationId,
         respondedAt,
+        err,
+      });
+    }
+  }
+
+  /**
+   * Records an EMAIL_SENT activity on every ticket linked to `conversationId`
+   * for a MANUAL agent send (reply / reply-all / compose). Automation sends
+   * (sendReplyOnConversation) have no acting user and must not call this —
+   * desk metrics and the audit trail count manual replies only.
+   *
+   * Like recordFirstResponse, this is independent of any caller transaction:
+   * an audit-trail failure must never roll back or block the send itself.
+   * Errors are logged and swallowed.
+   */
+  async recordEmailSentActivity(
+    conversationId: string,
+    emailId: string,
+    emailType: EmailType,
+    userId: string,
+    sentAt: Date,
+  ): Promise<void> {
+    try {
+      const tickets = await this.prisma.ticket.findMany({
+        where: { conversationId },
+        select: { id: true, channelId: true },
+      });
+      await this.prisma.ticketActivity.createMany({
+        data: tickets.map(ticket => ({
+          ticketId: ticket.id,
+          updatedBy: userId,
+          timestamp: sentAt,
+          activityType: ActivityType.EMAIL_SENT,
+          channelId: ticket.channelId,
+          value: {
+            field: 'emailSent',
+            emailId,
+            emailType,
+          } as Prisma.InputJsonValue,
+        })),
+        skipDuplicates: true,
+      });
+    } catch (err) {
+      logger.error('[EmailService.recordEmailSentActivity] Failed to record email sent activity', {
+        conversationId,
+        emailId,
         err,
       });
     }

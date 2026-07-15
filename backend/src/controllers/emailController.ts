@@ -400,6 +400,15 @@ export class EmailController {
       // Uses newEmail.createdAt so the timestamp matches the persisted email record.
       await emailService.recordFirstResponse(conversationId, newEmail.createdAt);
 
+      // Audit trail + desk metrics: manual agent reply.
+      await emailService.recordEmailSentActivity(
+        conversationId,
+        newEmail.id,
+        emailType,
+        userId,
+        newEmail.createdAt,
+      );
+
       if (appConfig.enableTagGenerationPipeline && channel.workspaceId) {
         void tagGenerationPipeline.addGenerationJob({
           sourceId: newEmail.id,
@@ -919,6 +928,15 @@ export class EmailController {
         }
 
         const { conversation, ticket, email: newEmail } = created;
+
+        // Audit trail + desk metrics: manual compose counts as an agent send.
+        await emailService.recordEmailSentActivity(
+          conversation.conversationId,
+          newEmail.id,
+          EmailType.COMPOSE,
+          userId,
+          newEmail.createdAt,
+        );
 
         // Compose-only: the agent who composes a new email owns the resulting
         // ticket — assign it to them so it doesn't sit unassigned. Reply/Reply-all

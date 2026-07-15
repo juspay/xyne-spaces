@@ -2419,6 +2419,15 @@ export class TicketController {
 
       const { ticket, conversation, email: initialEmail } = result as { ticket: any; conversation: any; email: any };
 
+      // Audit trail + desk metrics: outbound compose counts as an agent send.
+      await emailService.recordEmailSentActivity(
+        conversation.conversationId,
+        initialEmail.id,
+        EmailType.COMPOSE,
+        userId,
+        initialEmail.createdAt,
+      );
+
       if (claimedExternalMessageId) {
         await prismaClient.externalMessage.update({
           where: { id: claimedExternalMessageId },
