@@ -243,7 +243,7 @@ export class GoogleService {
       throw new Error('Invalid startDate or endDate');
     }
 
-    const baseQuery = `after:${afterUnix} before:${beforeUnix}`;
+    const baseQuery = `after:${afterUnix} before:${beforeUnix} -in:drafts`;
     const q = extraQuery ? `${baseQuery} ${extraQuery}` : baseQuery;
 
     const messages: Array<{ id: string; threadId: string }> = [];
@@ -280,7 +280,7 @@ export class GoogleService {
     opts: { mode?: 'messages' | 'threads' } = {},
   ): Promise<string[]> {
     const mode = opts.mode ?? 'messages';
-    const labelQuery = '(in:inbox OR in:sent)';
+    const labelQuery = '(in:inbox OR in:sent) -in:drafts';
     try {
       if (mode === 'threads') {
         const threadList = await this.gmail.users.threads.list({

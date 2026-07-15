@@ -104,10 +104,19 @@ export class GoogleRefetch extends BaseRefetch {
       messageIds: string[],
     ): Promise<void> => {
       try {
+        let skippedDrafts = 0;
         const fetched = await Promise.all(
           messageIds.map(async id => {
             const messageData = await google.getMessageById(id);
             if (!messageData) return null;
+            if ((messageData.labelIds ?? []).includes('DRAFT')) {
+              skippedDrafts += 1;
+              logger.info(`${TAG} skipping Gmail draft message ${id}`, {
+                threadId,
+                labelIds: messageData.labelIds,
+              });
+              return null;
+            }
 
             const parsedEmail = google.parseEmailData(messageData);
             const preDownloadedAttachments = await preDownloadGmailAttachments({
@@ -129,6 +138,7 @@ export class GoogleRefetch extends BaseRefetch {
             };
           }),
         );
+        skipped += skippedDrafts;
 
         const validParsed = fetched.filter(
           (d): d is NonNullable<typeof d> =>
