@@ -246,6 +246,7 @@ export class NudgeEvaluationEngine {
   private toUserActivityEvent(event: ActivityEventNudgePayload): UserActivityEvent {
     return {
       id: '',
+      workspaceId: null,
       userId: event.userId,
       sessionId: event.sessionId,
       eventCategory: event.eventCategory,

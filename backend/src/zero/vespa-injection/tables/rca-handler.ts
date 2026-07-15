@@ -16,7 +16,7 @@ export class RCAVespaHandler extends BaseVespaHandler<'rcas'> {
 		return [{
 			schema: fileSchema,
 			jobType: 'feed',
-			data: args,
+			data: { ...args, workspaceId: args.workspaceId ?? undefined },
 			docId: args.id,
 			app: SubApp.RCA
 		}];
@@ -26,7 +26,7 @@ export class RCAVespaHandler extends BaseVespaHandler<'rcas'> {
 		return [{
 			schema: fileSchema,
 			jobType: 'feed',
-			data: args,
+			data: { ...args, workspaceId: args.workspaceId ?? undefined },
 			docId: args.id,
 			app: SubApp.RCA
 		}];
@@ -36,7 +36,7 @@ export class RCAVespaHandler extends BaseVespaHandler<'rcas'> {
 		return [{
 			schema: fileSchema,
 			jobType: 'feed',
-			data: args,
+			data: { ...args, workspaceId: args.workspaceId ?? undefined },
 			docId: args.id,
 			app: SubApp.RCA
 		}];

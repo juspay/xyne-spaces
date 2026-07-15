@@ -1180,8 +1180,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       formEntityValues: formEntityValues as FormEntityValueWithField[] | undefined,
       boardId: ticket?.boardId,
       ticketId,
+      workspaceId: ticket?.workspaceId,
     });
-  }, [formMapping, formEntityValues, ticketId, ticket?.boardId]);
+  }, [formMapping, formEntityValues, ticketId, ticket?.boardId, ticket?.workspaceId]);
 
   // Group form values by stage+version — no ETA join needed
   const stageVisitFormValues = useMemo(() => {

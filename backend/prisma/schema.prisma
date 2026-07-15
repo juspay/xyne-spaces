@@ -472,6 +472,7 @@ model Tool {
 }
 
 model AgentToolsMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                 String   @id @default(cuid())
   agentId            String
   toolId             String
@@ -613,6 +614,7 @@ model SubTicket {
 }
 
 model TicketSubTicketMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String @id @default(cuid())
   ticketId    String // Parent ticket ID
   subTicketId String // Sub ticket ID
@@ -630,6 +632,7 @@ model TicketSubTicketMapping {
 }
 
 model TicketAssignment {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                 String             @id @default(cuid())
   ticketId           String             // Foreign key to Ticket
   userId             String?             // User ID assigned to this responsibility
@@ -652,6 +655,7 @@ model TicketAssignment {
 }
 
 model TicketActivity {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String       @id @default(cuid())
   ticketId     String       // Ticket reference
   updatedBy    String       // User who made the change
@@ -670,6 +674,7 @@ model TicketActivity {
 }
 
 model TicketEntityMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String     @id @default(cuid())
   ticketId   String     // Ticket reference
   entityType EntityType // MERCHANT or GATEWAY
@@ -684,6 +689,7 @@ model TicketEntityMapping {
 }
 
 model TicketTag {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id       String @id @default(cuid())
   name     String // Tag provided by user
   ticketId String // Ticket reference
@@ -697,6 +703,7 @@ model TicketTag {
 }
 
 model ProjectTag {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String   @id @default(cuid())
   name      String
   projectId String
@@ -709,6 +716,7 @@ model ProjectTag {
 }
 
 model TicketTagMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String   @id @default(cuid())
   ticketId  String
   tagId     String
@@ -723,6 +731,7 @@ model TicketTagMapping {
 }
 
 model TicketReferenceMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id             String                   @id @default(cuid())
   sourceTicketId String                   // Ticket owning the reference
   targetTicketId String                   // Referenced ticket
@@ -742,6 +751,7 @@ model TicketReferenceMapping {
 }
 
 model TicketStageEta {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id             String    @id @default(cuid())
   ticketId       String
   stageId        String
@@ -817,6 +827,7 @@ model Workflow {
 }
 
 model WorkflowExecution {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                        String   @id @default(cuid())
   workflowId                String
   workflowType              String? // For child executions - type of workflow being executed
@@ -851,6 +862,7 @@ model WorkflowExecution {
 }
 
 model WorkflowExecutionState {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                  String  @id @default(cuid())
   workflowExecutionId String  @unique
   context             String? // For child executions - initial context (JSON)
@@ -890,6 +902,7 @@ model WorkflowMapping {
 /// Workflow poller uses FOR UPDATE SKIP LOCKED on workflow_executions to claim rows atomically.
 /// This table is retained for reference and will be dropped in a future migration.
 model WorkflowExecutionLock {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                  String   @id @default(cuid())
   workflowExecutionId String   @unique
   workerId            String
@@ -902,11 +915,11 @@ model WorkflowExecutionLock {
 
   @@map("workflow_execution_locks")
   @@schema("workflow")
-
 }
 
 // Workflow Execution Users - Maps users to workflow executions
 model WorkflowExecutionUsers {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                  String   @id @default(cuid())
   userId              String
   workflowExecutionId String
@@ -923,6 +936,7 @@ model WorkflowExecutionUsers {
 }
 
 model WorkflowStep {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                  String   @id @default(cuid())
   workflowExecutionId String
   stepExecutorType    String // deterministic/parallel/agent/loops/conditional
@@ -949,6 +963,7 @@ model WorkflowStep {
 }
 
 model WorkflowKnowledge {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                  String   @id @default(cuid())
   workflowExecutionId String
   checkpointId        String
@@ -965,6 +980,7 @@ model WorkflowKnowledge {
 
 // Knowledge Documents - approved learnings as simple docs for AI and users
 model KnowledgeDocument {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                  String    @id @default(cuid())
   projectId           String    // Project scope (from channel)
   repositoryUrl       String?   // Optional: specific repo scope
@@ -991,6 +1007,7 @@ model KnowledgeDocument {
 }
 
 model AgentStep {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id            String   @id @default(cuid())
   stepsId       String?
   toolCallId         String?
@@ -1015,6 +1032,7 @@ model AgentStep {
 
 
 model ExternalStepResponse {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                  String   @id @default(cuid())
   workflowExecutionId String
   workflowStepId      String   @unique // Make this unique for one-to-one relation
@@ -1069,6 +1087,7 @@ enum AccessType {
 
 // API Key Management
 model ApiKey {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String    @id @default(cuid())
   name        String    // Human readable name
   description String?
@@ -1147,6 +1166,7 @@ model Role {
 }
 
 model UserRoleMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String   @id @default(cuid())
   userId    String
   roleId    String
@@ -1186,6 +1206,7 @@ enum WorkspaceRole {
 } 
 
 model UserSession {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                  String        @id @default(cuid())
   userId              String
   refreshToken        String        @unique
@@ -1288,6 +1309,7 @@ model User {
 
 // User Preferences
 model UserPreference {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                      String   @id @default(cuid())
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
@@ -1310,6 +1332,7 @@ model UserPreference {
 
 // User Skills - standalone table for better querying via API
 model UserSkill {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   userId            String   // User ID (no FK constraint for flexibility)
   name              String   // Skill name
   description       String?  // Skill description
@@ -1323,6 +1346,7 @@ model UserSkill {
 
 // Scheduled Messages – recurring messages posted to channels via Bull cron jobs
 model ScheduledMessage {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id             String   @id @default(cuid())
   title          String
   messageContent String   @db.Text
@@ -1342,6 +1366,7 @@ model ScheduledMessage {
 
 // Call messages — in-call chat for both internal and external users
 model CallMessage {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id            String   @id @default(cuid())
   callId        String
   participantId String
@@ -1355,6 +1380,7 @@ model CallMessage {
 
 // User-Team membership (many-to-many, no FK constraints)
 model UserGroupMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id             String              @id @default(cuid())
   userId         String              // No FK constraint
   userGroupId    String              // No FK constraint
@@ -1383,6 +1409,7 @@ model UserGroupMapping {
 
 // User Assignment State - tracks on-call status and active status for assignment
 model UserAssignmentState {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                    String   @id @default(cuid())
   userId                String
   userGroupId           String
@@ -1405,6 +1432,7 @@ model UserAssignmentState {
 
 // Board Complexity Score - board weight and assignment strategy
 model BoardComplexityScore {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String   @id @default(cuid())
   userGroupId     String
   boardId         String
@@ -1427,6 +1455,7 @@ model BoardComplexityScore {
 
 // User Workload Mapping - per-user, per-board workload
 model UserWorkloadMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String   @id @default(cuid())
   userId      String
   userGroupId String
@@ -1452,6 +1481,7 @@ model UserWorkloadMapping {
 
 // User Expertise Mapping - skill-based routing and assignment configuration
 model UserExpertiseMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id            String   @id @default(cuid())
   userId        String
   userGroupId   String
@@ -1478,6 +1508,7 @@ model UserExpertiseMapping {
 
 // User Presence Status Model
 model UserPresence {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id            String            @id @default(cuid())
   userId        String            @unique // One-to-one with User
   status        UserPresenceStatus @default(OFFLINE)
@@ -1504,6 +1535,7 @@ model UserPresence {
 
 // User Profile Model
 model UserProfile {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                       String    @id @default(cuid())
   userId                   String    @unique // One-to-one with User
   dob                      DateTime? // Date of birth (optional)
@@ -1541,6 +1573,7 @@ model Resource {
 }
 
 model ResourceAccess {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String     @id @default(cuid())
   groupId    String?
   userId     String?
@@ -1590,6 +1623,7 @@ enum ACLAuditTargetType {
 }
 
 model ACLAuditLog {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String               @id @default(cuid())
   timestamp   DateTime             @default(now())
   actorUserId String?
@@ -1630,6 +1664,7 @@ enum PRStatusEvent {
 
 // PR Analytics models
 model PullRequests {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                      String    @id @default(cuid())
   prId                    Int       // ID of PR
   workflowExecutionId     String?   // Links to workflow execution (and through it to ticket) - handled in code, no FK
@@ -1720,6 +1755,7 @@ model TeamIntelligenceIngestionBatchV2 {
 }
 
 model TeamIntelligenceUserIngestionV2 {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id               String                                @id @default(cuid())
   batchId          String
   reportDate       DateTime
@@ -1753,6 +1789,7 @@ model TeamIntelligenceUserIngestionV2 {
 }
 
 model TeamIntelligenceTeamSummaryV2 {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String                        @id @default(cuid())
   batchId         String
   reportDate      DateTime
@@ -1787,6 +1824,7 @@ model TeamIntelligenceTeamSummaryV2 {
 }
 
 model TeamIntelligenceOrgSummaryV2 {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String                        @id @default(cuid())
   batchId         String                        @unique
   reportDate      DateTime
@@ -2008,6 +2046,7 @@ model Board {
 }
 
 model Stage {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                   String       @id @default(cuid())
   name                 String
   eta                  Int?
@@ -2032,6 +2071,7 @@ model Stage {
 
 // Stage to PR Status mapping table - maps which PR statuses trigger stage transitions
 model StagePRStatusMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String        @id @default(cuid())
   stageId   String        // Stage ID (no FK constraint)
   prStatus  PRStatusEvent
@@ -2044,6 +2084,7 @@ model StagePRStatusMapping {
 
 // Stage transition table — defines allowed movements and gates for NON_LINEAR boards
 model StageTransition {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                          String       @id @default(cuid())
   boardId                     String
   fromStageId                 String?      // null = global transition (from any)
@@ -2122,6 +2163,7 @@ model Channel {
 }
 
 model ChannelStats {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   channelId        String                @id
   lastActivityAt   DateTime              
   participantCount Int                   @default(0)
@@ -2137,6 +2179,7 @@ model ChannelStats {
 }
 
 model ChannelParticipant {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                        String      @id @default(cuid())
   channelId                 String      // Channel ID (no FK constraint)
   userId                    String      // User ID (no FK constraint)
@@ -2167,6 +2210,7 @@ model ChannelParticipant {
 }
 
 model ChannelUserStatus {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                        String      @id @default(cuid())
   channelId                 String      // Channel ID (no FK constraint)
   userId                    String      // User ID (no FK constraint)
@@ -2272,6 +2316,7 @@ model Conversation {
 
 // Conversation Participant Models (track who participated in threads)
 model ConversationParticipant {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                String                        @id @default(cuid())
   conversationId    String                        // Conversation ID (no FK constraint)
   userId            String                        // User ID (no FK constraint)
@@ -2307,6 +2352,7 @@ enum EmailType {
 }
 
 model Email {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id String @id @default(cuid())
   type EmailType
   subject String
@@ -2338,6 +2384,7 @@ model Email {
 }
 
 model EmailDraft {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id String @id @default(cuid())
   conversationId String? // null = a brand-new compose draft (no thread yet); set = a reply draft
   userId String?
@@ -2362,6 +2409,7 @@ model EmailDraft {
 }
 
 model EmailRead {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String   @id @default(cuid())
   ticketId        String
   userId          String
@@ -2439,6 +2487,7 @@ model TicketUserMailbox {
 }
 
 model EmailSignature {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String   @id @default(cuid())
   userId    String
   name      String
@@ -2482,6 +2531,7 @@ model EmailChannelPreference {
 }
 
 model ClassificationMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String   @id @default(cuid())
   channelId  String
   category   String
@@ -2501,6 +2551,7 @@ model ClassificationMapping {
 // responseHours and resolutionHours can be calendar hours (businessHoursOnly=false)
 // or business hours (businessHoursOnly=true, Mon-Fri workdayStart–workdayEnd in timezone).
 model BoardSlaPolicy {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String         @id @default(cuid())
   boardId         String
   priority        TicketPriority
@@ -2564,6 +2615,7 @@ model Message {
 }
 //Message Search Model
 model MessageSearch {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   messageId        String      @id
   plaintextContent String
   searchVector     Unsupported("tsvector")
@@ -2612,6 +2664,7 @@ model MessageAttachment {
 
 // Reaction Models
 model Reaction {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   reactionId  String   @id @default(cuid())
   messageId   String   // Message being reacted to (no FK constraint)
   userId      String   // User who reacted (no FK constraint)
@@ -2629,6 +2682,7 @@ model Reaction {
 }
 
 model ReactionCount {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   countId     String   @id @default(cuid())
   messageId   String   // Message being counted (no FK constraint)
   emojiName   String   // The emoji being counted
@@ -2643,11 +2697,11 @@ model ReactionCount {
   @@index([messageId, countId])
   @@map("reaction_counts")
   @@schema("public")
-
 }
 
 // Custom Emoji Models
 model CustomEmoji {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String   @id @default(cuid())
   name      String   // Shortcode without colons, e.g. "party_parrot"
   url       String   // GCS path to the emoji image
@@ -2723,6 +2777,7 @@ model Activity {
 
 // Per-user OAuth tokens for external providers (Slack send-as-user, etc.)
 model UserExternalToken {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String    @id @default(cuid())
   userId          String
   provider        String                    // "slack", "google", "microsoft", etc.
@@ -2780,6 +2835,7 @@ enum ExternalEntityType {
 }
 
 model ExternalMessage {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                 String   @id @default(cuid())
   externalSourceId   String                // External source ID (no FK constraint)
   externalId         String                // Message ID in external system (for deduplication)
@@ -2854,6 +2910,7 @@ enum NudgeState {
 }
 
 model ProactiveNudge {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                      String             @id @default(cuid())
   messageId               String
 
@@ -2878,6 +2935,7 @@ model ProactiveNudge {
 }
 
 model SurfaceNudge {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String            @id @default(cuid())
   nudgeKind   NudgeKind
   sourceId    String
@@ -2901,6 +2959,7 @@ model SurfaceNudge {
 }
 
 model SurfaceNudgeCount {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id             String   @id
   nudgeCount     Int
   userId         String?
@@ -3004,6 +3063,7 @@ enum NotificationLevel {
 
 // Notification System Models
 model Notification {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                String                      @id @default(cuid())
   userId            String                      // User receiving the notification (no FK constraint)
   type              NotificationType
@@ -3030,6 +3090,7 @@ model Notification {
 }
 
 model NotificationPreference {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id               String           @id @default(cuid())
   userId           String           // User ID (no FK constraint)
   notificationType NotificationType
@@ -3045,6 +3106,7 @@ model NotificationPreference {
 }
 
 model BrowserNotificationSubscription {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String    @id @default(cuid())
   userId     String    // User ID (no FK constraint)
   endpoint   String    @unique // Push service endpoint
@@ -3063,6 +3125,7 @@ model BrowserNotificationSubscription {
 
 // Call Models
 model Call {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id               String      @id @default(cuid())
   externalId       String      @unique // Public ID for linking/sharing
   title            String?     // Meeting/call title
@@ -3118,6 +3181,7 @@ model Call {
 }
 
 model CallParticipant {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String              @id @default(cuid())
   callId       String              // Call ID (no FK constraint)
   userId       String              // User ID (no FK constraint)
@@ -3153,6 +3217,7 @@ model CallParticipant {
 // WHERE status = 'RECORDING_ACTIVE'` is added via raw SQL in the migration (Prisma can't
 // express it) — it is the single-active concurrency lock.
 model CallRecording {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id            String          @id @default(cuid())
   callId        String
   egressId      String?         @unique          // webhook correlation key
@@ -3177,6 +3242,7 @@ model CallRecording {
 }
 
 model RecurringCallSeries {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id             String                    @id @default(cuid())
   title          String                    // Series title
   description    String?                   // Series description/agenda
@@ -3206,6 +3272,7 @@ model RecurringCallSeries {
 }
 
 model RecurringCallParticipant {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                String              @id @default(cuid())
   recurringSeriesId String              // RecurringCallSeries ID
   userId            String              // User ID for internal participants; synthetic ID for external invitees
@@ -3256,6 +3323,7 @@ enum DocType {
 // Canvas folders for manual canvas organization within a project, a specific
 // channel, or a user's personal "My Canvases" scope.
 model CanvasFolder {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String   @id @default(cuid())
   projectId String?
   channelId String?
@@ -3280,6 +3348,7 @@ model CanvasFolder {
 }
 
 model Canvas {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String           @id @default(cuid())
   title        String
   content      Json // BlockNote JSON block array
@@ -3334,6 +3403,7 @@ model Canvas {
 }
 
 model CanvasVersion {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String   @id @default(cuid())
   canvasId    String
   name        String
@@ -3354,6 +3424,7 @@ model CanvasVersion {
 }
 
 model CanvasParticipant {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String     @id @default(cuid())
   canvasId    String // Canvas ID (no FK constraint)
   userId      String? // User ID (no FK constraint)
@@ -3378,6 +3449,7 @@ model CanvasParticipant {
 }
 
 model CanvasUserStatus {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String    @id @default(cuid())
   canvasId   String
   userId     String
@@ -3406,6 +3478,7 @@ enum BookmarkEntityType {
 }
 
 model Bookmark {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String             @id @default(cuid())
   userId     String             // User who bookmarked (no FK constraint)
   entityId   String             // ID of the bookmarked entity
@@ -3434,6 +3507,7 @@ enum LinkVisibility {
 }
 
 model Link {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String         @id @default(cuid())
   url         String
   title       String
@@ -3453,6 +3527,7 @@ model Link {
 }
 
 model LinkAccess {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String   @id @default(cuid())
   linkId    String   // Link ID (no FK constraint)
   userId    String   // User ID (no FK constraint)
@@ -3482,6 +3557,7 @@ enum VespaOperationType {
 }
 
 model VespaInsertionLogs {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String                @id @default(cuid())
   entityId     String
   entityType   String
@@ -3508,6 +3584,7 @@ model VespaInsertionLogs {
 
 // Repository Configuration for IDE Integration
 model Repo {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String @id @default(cuid())
   name       String         // e.g., "xyne-spaces"
   url        String         // SSH or HTTPS URL
@@ -3628,6 +3705,7 @@ model Form {
 }
 
 model FormContextMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String         @id @default(cuid())
   formId      String
   contextId   String
@@ -3644,6 +3722,7 @@ model FormContextMapping {
 // Project-scoped reusable field definitions.
 // All newly created field definitions live here (unique per project by name + type).
 model GlobalField {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String        @id @default(cuid())
   projectId   String        // Project scope for reuse + ACL
   fieldName   String        // Name of the field
@@ -3666,6 +3745,7 @@ model GlobalField {
 // New rows point at a global_fields definition via globalFieldId.
 // Legacy (deployed) rows carry their own definition columns (globalFieldId = null).
 model FormFields {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id             String         @id @default(cuid())
   formId         String         // Form this membership row belongs to
   globalFieldId  String?        // Definition in global_fields (null for legacy rows)
@@ -3690,6 +3770,7 @@ model FormFields {
 }
 
 model FormEntityValues {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String   @id @default(cuid())
   entityId        String   // ID of the entity (e.g., ticketId, userId, etc.)
   entityType      String   // Type of entity (e.g., "TICKET", "USER", etc.)
@@ -3713,6 +3794,7 @@ model FormEntityValues {
 }
 
 model Dashboard {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String    @id @default(cuid())
   name         String
   description  String?
@@ -3725,6 +3807,7 @@ model Dashboard {
 }
 
 model Query {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id             String          @id @default(cuid())
   title          String
   queryJson      Json
@@ -3741,6 +3824,7 @@ model Query {
 }
 
 model dashboardQueryMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String    @id @default(cuid())
   dashboardId String
   queryId     String
@@ -3765,6 +3849,7 @@ model Merchant {
 }
 
 model DraftMessage {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String      @id @default(cuid())
   channelId       String      // Channel this draft belongs to (no FK constraint)
   conversationId  String?     // Conversation this draft belongs to (no FK constraint)
@@ -3790,6 +3875,7 @@ enum Platform {
 }
 
 model UserActivityEvent {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String    @id @default(cuid())
   userId          String    
   sessionId       String
@@ -3852,6 +3938,7 @@ enum CollectionRole {
 // require no schema changes — just a new scopeType value.
 // Current scope: scopeType = 'CHANNEL', scopeId = <channelId>
 model Collection {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String    @id @default(cuid())
   parentId        String?                        // null = root; non-null = sub-folder
   ownerId         String
@@ -3888,6 +3975,7 @@ model Collection {
 // isLatest = true  →  current version, visible in folder listings
 // isLatest = false →  historical version, hidden from normal listings
 model CollectionItem {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id               String       @id @default(cuid())
   rootCollectionId String                    // root Collection.id — for O(1) collection-scope queries
   collectionId     String                    // immediate parent folder Collection.id
@@ -3914,6 +4002,7 @@ model CollectionItem {
 }
 
 model CollectionPermission {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String         @id @default(cuid())
   collectionId String
   userId       String?
@@ -3937,6 +4026,7 @@ model CollectionPermission {
 }
 
 model StageApprovers {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                   String       @id @default(cuid())
   userId               String?      // set when approverType = USER
   roleId               String?      // set when approverType = ROLE
@@ -3984,6 +4074,7 @@ enum RCAStatus {
 
 // Services that can be released
 model Application {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                 String    @id @default(cuid())
   name               String
   projectId          String    // Project ID (no FK constraint)
@@ -4016,6 +4107,7 @@ model Application {
 // Ticket details (type, assignee, title) are fetched via the Zero `devTicket`
 // relation (ticketId → ticket.id) — no snapshots needed.
 model ApplicationReleaseTicket {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                    String                          @id @default(cuid())
   applicationReleaseId  String                          // SubTicket ID from ApplicationRelease
   ticketId              String                          // Dev ticket UUID (FK to tickets.id via Zero relation)
@@ -4038,6 +4130,7 @@ model ApplicationReleaseTicket {
 
 // Captures all events tied to the release for audit trail
 model ReleaseEvent {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                    String            @id @default(cuid())
   releaseId             String            // Always present - Release ticket ID
   applicationReleaseId  String?           // App-specific events (SubTicket ID)
@@ -4061,6 +4154,7 @@ model ReleaseEvent {
 }
 
 model ReleaseChange {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                    String         @id @default(cuid())
   releaseId             String         // Release ticket ID
   applicationReleaseId  String?        // Application release ID (SubTicket ID)
@@ -4084,6 +4178,7 @@ model ReleaseChange {
 /// all linkage columns NULL — release-scoped reads filter on
 /// `releaseId IS NOT NULL` so they don't bleed into v2 surfaces.
 model ReleaseChangeType {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String   @id @default(cuid())
   applicationId   String   // Application ID
   changeType      String   // e.g., "env", "migrations", "database", etc.
@@ -4117,6 +4212,7 @@ enum TicketStageRequestStatus {
 }
 
 model TicketStageRequest {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                        String                    @id @default(cuid())
   ticketId                  String
   stageId                   String
@@ -4153,6 +4249,7 @@ enum SEVERITY {
 
 // Root cause analysis for issues
 model RCA {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                    String     @id @default(cuid())
   title                 String
   ticketId              String     // Ticket ID
@@ -4177,6 +4274,7 @@ model RCA {
 
 // Impact caused by an issue
 model Impact {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                    String      @id @default(cuid())
   ticketId              String      // Ticket ID
   rcaId                 String?     // RCA ID
@@ -4193,6 +4291,7 @@ model Impact {
 
 // Actions to fix issues identified in RCA
 model COE {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String        @id @default(cuid())
   rcaId           String        // RCA ID
   ownerId         String        // User ID (no FK constraint)
@@ -4219,6 +4318,7 @@ enum AttributionConfidence {
 }
 
 model ReleaseAttribution {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                      String                 @id @default(cuid())
   ticketId                String                 // Ticket ID of the newly reported issue
   releaseId               String                 // Release ticket ID
@@ -4240,6 +4340,7 @@ model ReleaseAttribution {
 // ============================================================================
 
 model Recap {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String         @id @default(cuid())
   entityType  RecapEntityType
   entityId    String
@@ -4260,6 +4361,7 @@ model Recap {
 // Stores daily AI-generated summaries for each channel
 // userId = "" for base recaps, userId = actual user ID for custom recaps
 model ChannelDailyRecap {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String   @id @default(cuid())
   channelId String
   recapDate DateTime @db.Date
@@ -4274,6 +4376,7 @@ model ChannelDailyRecap {
 
 // Stores AI-generated summaries for each channel (replacement for ChannelDailyRecap)
 model ChannelRecap {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String   @id @default(cuid())
   channelId String
   recapDate DateTime @db.Date
@@ -4315,6 +4418,7 @@ enum SessionRecordingProcessStatus {
 
 // GCS Path format: sessions/${userId}/${sessionId}/recording.json
 model SessionRecordingFile {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                String   @id @default(cuid())
   sessionId         String   @unique
   userId            String
@@ -4329,6 +4433,7 @@ model SessionRecordingFile {
 }
 
 model SurfaceLink {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String          @id @default(cuid())
 
   sourceType  SurfaceAreaType
@@ -4352,6 +4457,7 @@ model SurfaceLink {
 
 
 model Apps {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id String @id @default(cuid())
   name String
   description String?
@@ -4379,6 +4485,7 @@ model Apps {
 }
 
 model InstalledApps {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id String @id @default(cuid())
   appId String
   userId String
@@ -4403,6 +4510,7 @@ model InstalledApps {
 }
 
 model InstalledAppCommand {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String   @id @default(cuid())
   installedAppId  String
   sourceCommandId String
@@ -4421,6 +4529,7 @@ model InstalledAppCommand {
 }
 
 model AppIncomingWebhook {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id             String    @id @default(cuid())
   installedAppId String
   channelId      String
@@ -4467,6 +4576,7 @@ enum CommandAccessibility {
 }
 
 model AppCommand {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                    String               @id @default(cuid())
   appId                 String
   commandName           String               // e.g. "sell" for commands, "create_task" (callbackId) for shortcuts
@@ -4511,6 +4621,7 @@ enum SavedConfigEntityName {
 
 // Saved Views Models
 model SavedUserConfiguration {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String                  @id @default(cuid())
   userId      String
   name        String
@@ -4531,6 +4642,7 @@ model SavedUserConfiguration {
 }
 
 model SavedUserConfigurationValue {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String                  @id @default(cuid())
   configId   String
   entityName SavedConfigEntityName
@@ -4558,6 +4670,7 @@ enum DelayedMessageStatus {
 }
 
 model DelayedMessage {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String                 @id @default(cuid())
   channelId       String                 // Target channel (no FK constraint)
   conversationId  String?                // Target conversation (for thread replies, no FK constraint)
@@ -4603,6 +4716,7 @@ model DataSource {
 }
 
 model DataSourceTable {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                   String    @id @default(cuid())
   dataSourceId         String
   schemaName           String
@@ -4623,6 +4737,7 @@ model DataSourceTable {
 }
 
 model DataSourceColumn {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                   String    @id @default(cuid())
   tableId              String
   columnName           String
@@ -4650,6 +4765,7 @@ model DataSourceColumn {
 }
 
 model DataSourceRelationship {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String    @id @default(cuid())
   dataSourceId String
   fromColumnId String
@@ -4708,6 +4824,7 @@ model DynamicDashboard {
 }
 
 model DashboardParticipant {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String        @id @default(cuid())
   dashboardId String
   userId      String
@@ -4726,6 +4843,7 @@ model DashboardParticipant {
 
 
 model DashboardActivity {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String    @id @default(cuid())
   entityType  String
   entityId    String
@@ -4750,6 +4868,7 @@ enum QueryType {
 }
 
 model DynamicDashboardQuery {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String                  @id @default(cuid())
   title        String?
   queryType    QueryType               @default(internal)
@@ -4771,6 +4890,7 @@ model DynamicDashboardQuery {
 }
 
 model DynamicDashboardQueryMapping {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String    @id @default(cuid())
   dashboardId String
   queryId     String
@@ -4827,6 +4947,7 @@ model AvailableAppPermission {
 
 /// Permissions an app has requested (selected by the creator before install)
 model AppPermission {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String   @id @default(cuid())
   appId        String
   permissionId String
@@ -4845,6 +4966,7 @@ model AppPermission {
 
 /// Permissions granted to a specific installation (copied from AppPermissionGrant at install time)
 model InstalledAppPermission {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id             String                @id @default(cuid())
   installedAppId String
   permissionId   String
@@ -4923,6 +5045,7 @@ model TagsConfig {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model DoclingAsyncFile {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   fileId           String    @id @map("file_id")
   collectionId     String    @map("collection_id")
   sourcePath       String    @map("source_path")
@@ -4958,6 +5081,7 @@ model DoclingAsyncFile {
 }
 
 model DoclingAsyncPart {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   fileId         String    @map("file_id")
   partIndex      Int       @map("part_index")
   docId          String    @map("doc_id")
