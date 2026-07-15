@@ -303,7 +303,7 @@ const envSchema = Joi.object({
     .uri()
     .default(''),
   XYNE_CLAW_CALLBACK_URL: Joi.string().allow('').default(''),
-  ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v1'),
+  ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
   // Email fetch
