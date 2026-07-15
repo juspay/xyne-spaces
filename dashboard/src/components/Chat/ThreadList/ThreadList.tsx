@@ -392,7 +392,7 @@ const ThreadList = ({
         <div
           data-component='ThreadList'
           ref={scrollContainerRef}
-          className='h-full overflow-auto no-scrollbar py-6'
+          className='h-full overflow-auto no-scrollbar pt-4'
         >
           <div ref={scrollContentRef}>
             {messagesWithSeparators.map((item, index) => {
@@ -517,7 +517,7 @@ const ThreadList = ({
       <div
         data-component='ThreadList'
         ref={scrollContainerRef}
-        className='h-full overflow-auto no-scrollbar py-6'
+        className='h-full overflow-auto no-scrollbar pt-4'
       >
         <div ref={scrollContentRef}>
           {visibleMessages.map((threadMessage, index) => {

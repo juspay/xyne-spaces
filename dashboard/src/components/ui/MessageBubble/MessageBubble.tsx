@@ -1042,7 +1042,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <Button
                           variant='ghost'
                           onClick={() => handleUserClick(sender.id)}
-                          className={`text-sm font-medium text-foreground hover:underline p-0 h-auto min-w-0`}
+                          className='text-sm font-semibold text-foreground hover:underline p-0 h-auto min-w-0'
                           aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                         >
                           <span className='flex items-center gap-1'>
