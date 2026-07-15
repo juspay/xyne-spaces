@@ -48,6 +48,12 @@ export class GoogleFlow extends BaseFlow {
         logger.warn(`${TAG} skipping vanished message ${messageId}`);
         return { __skipIngestion: true, __skipReason: `message-not-found:${messageId}` };
       }
+      if ((messageData.labelIds ?? []).includes('DRAFT')) {
+        logger.info(`${TAG} skipping Gmail draft message ${messageId}`, {
+          labelIds: messageData.labelIds,
+        });
+        return { __skipIngestion: true, __skipReason: `gmail-draft:${messageId}` };
+      }
 
       const parsedEmail = googleService.parseEmailData(messageData);
 
