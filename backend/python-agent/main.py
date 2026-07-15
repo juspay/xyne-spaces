@@ -235,6 +235,9 @@ async def entrypoint(ctx: JobContext):
         safe_call_id=safe_call_id,
         bucket=bucket,
         use_buffer=use_buffer,
+        flush_every_n=config.transcript_flush_every_n,
+        base_load_max_retries=config.transcript_base_load_max_retries,
+        base_load_backoff_cap_s=config.transcript_base_load_backoff_cap_s,
     )
 
     # Initialize identified transcript storage (parallel to primary, written with real names)
@@ -243,6 +246,9 @@ async def entrypoint(ctx: JobContext):
         safe_call_id=f"{safe_call_id}_identified",
         bucket=bucket,
         use_buffer=use_buffer,
+        flush_every_n=config.transcript_flush_every_n,
+        base_load_max_retries=config.transcript_base_load_max_retries,
+        base_load_backoff_cap_s=config.transcript_base_load_backoff_cap_s,
     )
 
     # Initialize AI Session Manager
@@ -486,7 +492,7 @@ async def entrypoint(ctx: JobContext):
     
     # Update cleanup manager with stt_tasks reference (empty for MultiUserTranscriber)
     cleanup_manager.stt_tasks = room_lifecycle.get_stt_tasks()
-    
+
     # Register all room event handlers
     room_lifecycle.register_handlers()
     
@@ -502,12 +508,27 @@ async def entrypoint(ctx: JobContext):
     multi_user_transcriber.handle_existing_participants()
     logger.info(f"event_handlers_registered | timing=after_agent_ready")
 
-    # Simple wait - let the agent run until LiveKit disconnects it
-    # Cleanup happens in participant_disconnected handler before disconnect
+    # Simple wait - let the agent run until LiveKit disconnects it.
+    # Durability of the transcript does NOT depend on this exit path: the buffer is
+    # streamed to GCS incrementally every N events (see TranscriptionStorage), and the
+    # final flush + backend notify run via the empty-room CleanupManager path as the
+    # call ends. So a forced/ungraceful exit here loses at most the last N events.
     try:
         await asyncio.Future()  # Wait forever until cancelled
     except asyncio.CancelledError:
         logger.info("Agent cancelled, exiting gracefully")
+        raise
+    finally:
+        # Shield so an in-flight cancellation cannot abort the flush midway.
+        # run() is idempotent, so if the shutdown callback already cleaned up this
+        # returns immediately.
+        try:
+            await asyncio.shield(cleanup_manager.run(reason="entrypoint_finally"))
+        except asyncio.CancelledError:
+            logger.warning("cleanup_interrupted_during_finally | transcript_may_be_incomplete")
+            raise
+        except Exception:
+            logger.error("cleanup_failed_in_finally", exc_info=True)
 
 
 def start_health_server_background():
