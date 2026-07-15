@@ -11,6 +11,7 @@ export const memorySchema = 'memory';
 export const samTranscriptSchema = 'sam_transcript';
 export const mailSchema = 'mail';
 export const appSchema = 'app';
+export const callSchema = 'call';
 export type VespaSchema =
   | typeof ticketSchema
   | typeof messageSchema
@@ -23,6 +24,7 @@ export type VespaSchema =
   | typeof samTranscriptSchema
   | typeof mailSchema
   | typeof appSchema
+  | typeof callSchema
 
 export const VESPA_SCHEMAS: VespaSchema[] = [
   ticketSchema,
@@ -35,7 +37,8 @@ export const VESPA_SCHEMAS: VespaSchema[] = [
   memorySchema,
   samTranscriptSchema,
   mailSchema,
-  appSchema
+  appSchema,
+  callSchema
 ];
 
 export const MemoryScope = {
@@ -106,7 +109,8 @@ export enum VespaDocType {
   SOP = 'sop',
   SAM_TRANSCRIPT = 'sam_transcript',
   MAIL = 'mail',
-  APP = 'app'
+  APP = 'app',
+  CALL = 'call'
 }
 
 export enum SubApp {
@@ -469,6 +473,31 @@ export interface VespaMailDocument extends VespaDocument {
   generatedTags: string[];
 }
 
+export interface VespaCallDocument extends VespaDocument {
+  callId: string;
+  externalId: string;
+  channelId: string;
+  channelRef: string;
+  createdByUserId: string;
+  roomLink: string;
+  callType: string;
+  userIds: string[];
+  participantResponses: string[];
+  title: string;
+  displayTitle: string;
+  channelName: string;
+  participantNames: string[];
+  participantEmails: string[];
+  callOrigin: string;
+  status: string;
+  startsAtTimestamp: number;
+  endsAtTimestamp: number;
+  startedAtTimestamp: number;
+  endedAtTimestamp: number;
+  recurringSeriesId: string;
+  hasTranscript: boolean;
+}
+
 /**
  * Vespa document for the `app` schema (xyne-apps catalog search).
  * `workspaceId` is stamped at feed time from the creator's workspace until the
@@ -503,6 +532,7 @@ export type VespaSearchResult =
   | VespaMemoryDocument
   | VespaSamTranscriptDocument
   | VespaMailDocument
+  | VespaCallDocument
 
 export interface VespaSearchHit {
   id: string;
@@ -550,6 +580,7 @@ export type InsertDocument =
   | VespaMemoryDocument
   | VespaSamTranscriptDocument
   | VespaMailDocument
+  | VespaCallDocument
   | VespaAppDocument
 
 export type SchemaDataMap = {
@@ -564,6 +595,7 @@ export type SchemaDataMap = {
   [samTranscriptSchema]: VespaSamTranscriptDocument;
   [mailSchema]: VespaMailDocument;
   [appSchema]: VespaAppDocument;
+  [callSchema]: VespaCallDocument;
 };
 
 export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
@@ -577,6 +609,7 @@ export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
   [samTranscriptSchema]: VespaDocType.SAM_TRANSCRIPT,
   [mailSchema]: VespaDocType.MAIL,
   [appSchema]: VespaDocType.APP,
+  [callSchema]: VespaDocType.CALL,
 };
 
 export interface MatchFeatures {

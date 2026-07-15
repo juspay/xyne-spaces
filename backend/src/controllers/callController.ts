@@ -42,6 +42,7 @@ import {
   SUMMARY_PROMPT_MAX_LENGTH,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
+import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 
 export class CallController {
   private async cancelOtherActiveJoinRequests(
@@ -58,6 +59,7 @@ export class CallController {
       },
       select: {
         id: true,
+        callId: true,
         metadata: true,
       },
     });
@@ -100,6 +102,11 @@ export class CallController {
           ]
         : []),
     ]);
+
+    [...new Set(activeRequests.map((request) => request.callId))]
+      .forEach((callId) => queueCallVespaFeed(callId, {
+        source: CallVespaFeedSource.CallControllerCancelOtherActiveJoinRequests,
+      }));
   }
 
   updateMeetingStatus = async (req: Request, res: Response): Promise<void> => {
@@ -457,6 +464,7 @@ export class CallController {
                 leftAt: null,
               },
             });
+            queueCallVespaFeed(existingCall.id, { source: CallVespaFeedSource.CallControllerInitiateCallRemovedUserExistingRoom });
             logger.info(`[${existingCall.externalId}] removed user initiated existing call, set REQUESTED | user_id=${userId}, correlation_id=${correlationId}`);
             res.json({ success: true, pending: true });
             return;
@@ -468,6 +476,7 @@ export class CallController {
               where: { id: participant.id },
               data: { metadata: restMeta as Prisma.InputJsonValue },
             });
+            queueCallVespaFeed(existingCall.id, { source: CallVespaFeedSource.CallControllerInitiateCallClearRemovedByHostExistingRoom });
           }
 
           // Room exists, generate token to join the existing call
@@ -733,6 +742,7 @@ export class CallController {
               leftAt: null,
             },
           });
+          queueCallVespaFeed(call.id, { source: CallVespaFeedSource.CallControllerJoinCallRemovedUserReknock });
           logger.info(`[CallController] removed user re-knocked, set REQUESTED | callId=${callId}, userId=${user.id}`);
           res.json({ success: true, pending: true });
           return;
@@ -744,6 +754,7 @@ export class CallController {
             where: { id: participant.id },
             data: { metadata: restMeta as Prisma.InputJsonValue },
           });
+          queueCallVespaFeed(call.id, { source: CallVespaFeedSource.CallControllerJoinCallClearRemovedByHost });
         }
       }
 
@@ -1588,6 +1599,7 @@ export class CallController {
                 leftAt: null,
               },
             });
+            queueCallVespaFeed(call.id, { source: CallVespaFeedSource.CallControllerInviteParticipantsReinvite });
             invitedUserIds.push(targetUserId);
           }
           // Already accepted and in call - skip
@@ -1670,6 +1682,7 @@ export class CallController {
             respondedAt: new Date(),
           }
         });
+        queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallControllerDeclineCallInvitation });
 
         // Trigger side effects manually as Zero mutator won't catch this API update in time/context
         // This ensures notifications are cancelled and other participants are updated if needed

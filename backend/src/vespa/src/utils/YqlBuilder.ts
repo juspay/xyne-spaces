@@ -10,10 +10,11 @@ import {
   samTranscriptSchema,
   mailSchema,
   appSchema,
+  callSchema,
 } from '../types';
 import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
-type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail' | 'xyneapp';
+type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail' | 'xyneapp' | 'call';
 
 const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
 
@@ -119,6 +120,18 @@ export interface MailFilters {
   createdRange?: string;
 }
 
+export interface CallFilters {
+  docType?: string[];
+  channelId?: string[];
+  userIds?: string[];
+  callId?: string[];
+  externalId?: string[];
+  callType?: string[];
+  status?: string[];
+  timeFrom?: number;
+  timeTo?: number;
+}
+
 /**
  * Collects filter values for Vespa parameter substitution (the prepared-statement pattern):
  * `bind()` returns an `@placeholder` and the value rides as a separate request property, so it
@@ -180,6 +193,7 @@ export class YqlBuilder {
     meetingFilters: MeetingFilters,
     userId: string,
     mailFilters: MailFilters = {},
+    callFilters: CallFilters = {},
     useFuzzy: boolean = false,
     useSemanticAnyway: boolean = true,
     workspaceId?: string,
@@ -241,7 +255,7 @@ export class YqlBuilder {
       }
     }
     // Build app-specific conditions.
-    // Guarded apps (chat, ticket, file, mail) accept user-supplied filter inputs and
+    // Guarded apps (chat, ticket, file, mail, call) accept user-supplied filter inputs and
     // enforce per-document permissions. Each app's conditions are wrapped with a
     // mandatory permission guard so that any injected OR branch cannot bypass access
     // control. The guard is built PER APP because the access-control fields differ
@@ -284,6 +298,13 @@ export class YqlBuilder {
       const mailSchemas = selectedFor([mailSchema]);
       guardedParts.push(
         `(${this.buildMailConditions(mailFilters, userId, params)}) and ${this.buildPermGuard(mailSchemas, userId, params, workspaceId)}`
+      );
+    }
+
+    if (apps.some((a) => a.toLowerCase() === 'call')) {
+      const callSchemas = selectedFor([callSchema]);
+      guardedParts.push(
+        `(${this.buildCallConditions(callFilters, params)}) and ${this.buildPermGuard(callSchemas, userId, params, workspaceId)}`
       );
     }
 
@@ -370,40 +391,73 @@ export class YqlBuilder {
    * - ticket:          permissions, workspaceId                          (imported from channelRef)
    * - file:            permissions, ownerId, channelPermissions, isPrivate, workspaceId
    * - mail:            permissions, workspaceId                          (permissions imported from channelRef)
+   * - call:            permissions, userIds, createdByUserId, workspaceId
    * `permissions` exists in every schema, so the minimum guard is always non-empty.
    */
   private static readonly SCHEMA_FIELDS: Record<
     string,
-    { ownerId: boolean; channelPermissions: boolean; isPrivate: boolean; messageType: boolean }
+    {
+      ownerId: boolean;
+      channelPermissions: boolean;
+      userIds: boolean;
+      createdByUserId: boolean;
+      isPrivate: boolean;
+      messageType: boolean;
+    }
   > = {
     [messageSchema]: {
       ownerId: false,
       channelPermissions: false,
+      userIds: false,
+      createdByUserId: false,
       isPrivate: true,
       messageType: true,
     },
     [channelSchema]: {
       ownerId: true,
       channelPermissions: false,
+      userIds: false,
+      createdByUserId: false,
       isPrivate: true,
       messageType: false,
     },
     [attachmentSchema]: {
       ownerId: false,
       channelPermissions: false,
+      userIds: false,
+      createdByUserId: false,
       isPrivate: false,
       messageType: false,
     },
     [ticketSchema]: {
       ownerId: false,
       channelPermissions: false,
+      userIds: false,
+      createdByUserId: false,
       isPrivate: false,
       messageType: false,
     },
-    [fileSchema]: { ownerId: true, channelPermissions: true, isPrivate: true, messageType: false },
+    [fileSchema]: {
+      ownerId: true,
+      channelPermissions: true,
+      userIds: false,
+      createdByUserId: false,
+      isPrivate: true,
+      messageType: false,
+    },
     [mailSchema]: {
       ownerId: false,
       channelPermissions: false,
+      userIds: false,
+      createdByUserId: false,
+      isPrivate: false,
+      messageType: false,
+    },
+    [callSchema]: {
+      ownerId: false,
+      channelPermissions: false,
+      userIds: true,
+      createdByUserId: true,
       isPrivate: false,
       messageType: false,
     },
@@ -441,8 +495,8 @@ export class YqlBuilder {
     params: VespaQueryParams,
     workspaceId?: string
   ): string {
-    // The same user id is checked against permissions/ownerId/channelPermissions, so bind
-    // it once and reuse the placeholder across all three clauses.
+    // The same user id is checked against permissions/ownerId/channelPermissions/userIds/
+    // createdByUserId, so bind it once and reuse the placeholder across all clauses.
     const accessUser = params.bind('permissions', userId);
     const accessConditions: string[] = [`permissions contains ${accessUser}`];
     if (this.schemasHaveField(selectedSchemas, (f) => f.ownerId)) {
@@ -450,6 +504,12 @@ export class YqlBuilder {
     }
     if (this.schemasHaveField(selectedSchemas, (f) => f.channelPermissions)) {
       accessConditions.push(`channelPermissions contains ${accessUser}`);
+    }
+    if (this.schemasHaveField(selectedSchemas, (f) => f.userIds)) {
+      accessConditions.push(`userIds contains ${accessUser}`);
+    }
+    if (this.schemasHaveField(selectedSchemas, (f) => f.createdByUserId)) {
+      accessConditions.push(`createdByUserId contains ${accessUser}`);
     }
     if (this.schemasHaveField(selectedSchemas, (f) => f.isPrivate)) {
       accessConditions.push(`isPrivate contains "false"`);
@@ -1080,6 +1140,7 @@ export class YqlBuilder {
       transcript: [samTranscriptSchema],
       mail: [mailSchema],
       xyneapp: [appSchema],
+      call: [callSchema],
     };
 
     const result: Record<string, VespaSchema[]> = {};
@@ -1092,6 +1153,74 @@ export class YqlBuilder {
     }
 
     return result as Record<AppName, VespaSchema[]>;
+  }
+
+  private buildCallConditions(
+    filters: CallFilters,
+    params: VespaQueryParams,
+  ): string {
+    const conditions: string[] = [
+      `docType contains "call"`,
+    ];
+
+    if (filters.callType && filters.callType.length > 0) {
+      const callTypes = filters.callType
+        .map((callType) => `callType contains ${params.bind('callType', callType.trim())}`)
+        .join(' or ');
+      conditions.push(`(${callTypes})`);
+    } else {
+      conditions.push(`!(callType contains ${params.bind('callTypeExcluded', 'HEADLESS')})`);
+    }
+
+    if (filters.channelId && filters.channelId.length > 0) {
+      const channels = filters.channelId
+        .map((channelId) => `channelId contains ${params.bind('channelId', channelId.trim())}`)
+        .join(' or ');
+      conditions.push(`(${channels})`);
+    }
+
+    if (filters.userIds && filters.userIds.length > 0) {
+      const users = filters.userIds
+        .map((filterUserId) => `userIds contains ${params.bind('filterUserIds', filterUserId.trim())}`)
+        .join(' or ');
+      conditions.push(`(${users})`);
+    }
+
+    if (filters.callId && filters.callId.length > 0) {
+      const calls = filters.callId
+        .map((callId) => `callId contains ${params.bind('callId', callId.trim())}`)
+        .join(' or ');
+      conditions.push(`(${calls})`);
+    }
+
+    if (filters.externalId && filters.externalId.length > 0) {
+      const externalIds = filters.externalId
+        .map((externalId) => `externalId contains ${params.bind('externalId', externalId.trim())}`)
+        .join(' or ');
+      conditions.push(`(${externalIds})`);
+    }
+
+    if (filters.status && filters.status.length > 0) {
+      const statuses = filters.status
+        .map((status) => `status contains ${params.bind('callStatus', status.trim())}`)
+        .join(' or ');
+      conditions.push(`(${statuses})`);
+    } else {
+      conditions.push(`!(status contains ${params.bind('callStatusExcluded', 'CANCELLED')})`);
+    }
+
+    if (Number.isFinite(filters.timeFrom) || Number.isFinite(filters.timeTo)) {
+      const timeConditions: string[] = [];
+      if (Number.isFinite(filters.timeTo)) {
+        timeConditions.push(`startsAtTimestamp < ${Math.trunc(filters.timeTo!)}`);
+      }
+      if (Number.isFinite(filters.timeFrom)) {
+        timeConditions.push(`endsAtTimestamp > ${Math.trunc(filters.timeFrom!)}`);
+      }
+      conditions.push(`(${timeConditions.join(' and ')})`);
+    }
+
+    return conditions.join(' and ');
   }
 
   /**

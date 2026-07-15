@@ -17,10 +17,10 @@ export const vespaSearchQuerySchema = Joi.object({
 
   // Apps to search (comma-separated)
   apps: Joi.string()
-    .pattern(/^(chat|ticket|user|file|collection|mail|xyneapp)(,(chat|ticket|user|file|collection|mail|xyneapp))*$/)
+    .pattern(/^(chat|ticket|user|file|collection|mail|xyneapp|call)(,(chat|ticket|user|file|collection|mail|xyneapp|call))*$/)
     .default('chat,ticket,user,file,mail')
     .messages({
-      'string.pattern.base': 'Apps must be comma-separated values from: chat, ticket, user, file, collection, mail, xyneapp'
+      'string.pattern.base': 'Apps must be comma-separated values from: chat, ticket, user, file, collection, mail, xyneapp, call'
     }),
 
   // Pagination
@@ -46,10 +46,10 @@ export const vespaSearchQuerySchema = Joi.object({
   // Frontend-compatible filters (includes subApp types: canvas, transcript, rca)
   // Supports comma-separated values: messages,files or canvas,transcript
   type: Joi.string()
-    .pattern(/^(messages|attachments|channels|tickets|users|files|canvas|transcript|rca|people|emails)(,(messages|attachments|channels|tickets|users|files|canvas|transcript|rca|people|emails))*$/)
+    .pattern(/^(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails)(,(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails))*$/)
     .optional()
     .messages({
-      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, channels, tickets, users, files, canvas, transcript, rca, people, emails'
+      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, calls, channels, tickets, users, files, canvas, transcript, rca, people, emails, calls'
     }),
 
   from: Joi.alternatives()
@@ -241,6 +241,22 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'Range must be a string (time keyword)'
   }),
 
+  callStatus: Joi.string().optional().messages({
+    'string.base': 'callStatus must be a comma-separated string'
+  }),
+
+  callStartsAt: Joi.number().integer().min(0).optional().messages({
+    'number.base': 'callStartsAt must be a timestamp',
+    'number.integer': 'callStartsAt must be an integer timestamp',
+    'number.min': 'callStartsAt cannot be negative'
+  }),
+
+  callEndsAt: Joi.number().integer().min(0).optional().messages({
+    'number.base': 'callEndsAt must be a timestamp',
+    'number.integer': 'callEndsAt must be an integer timestamp',
+    'number.min': 'callEndsAt cannot be negative'
+  }),
+
   stage: Joi.string().optional().messages({
     'string.base': 'Stage must be a string'
   }),
@@ -357,11 +373,11 @@ export const vespaSchemaQuerySchema = Joi.object({
     .valid(
       'chat_message', 'chat_attachment', 'chat_container',
       'ticket', 'user', 'file', 'sam_transcript',
-      'mail', 'mail_attachment', 'project', 'memory',
+      'mail', 'mail_attachment', 'project', 'memory', 'call',
     )
     .required()
     .messages({
-      'any.only': 'schema must be one of: chat_message, chat_attachment, chat_container, ticket, user, file, sam_transcript, mail, mail_attachment, project, memory',
+      'any.only': 'schema must be one of: chat_message, chat_attachment, chat_container, ticket, user, file, sam_transcript, mail, mail_attachment, project, memory, call',
       'any.required': 'Query parameter "schema" is required',
     }),
 }).messages({

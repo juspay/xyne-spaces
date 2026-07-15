@@ -10,7 +10,8 @@ import { PrismaClient } from '@prisma/client';
      Channel,
      importedTicketFields,
      VespaFileDocument,
-     VespaMailDocument
+     VespaMailDocument,
+     VespaCallDocument
    } from '@/vespa/src/types';
    import { logger } from '@/utils/logger';
    
@@ -19,7 +20,7 @@ import { PrismaClient } from '@prisma/client';
    
    export interface TransformedSearchResult {
      id: string;
-     type: 'user' | 'conversation' | 'channel' | 'ticket' | 'attachment' | 'collection';
+     type: 'user' | 'conversation' | 'channel' | 'ticket' | 'attachment' | 'collection' | 'call';
      title: string; // Channel name for messages, document title for others
      subtitle: string;
      context?: string; // Message content for display (used by SearchResultItem)
@@ -74,6 +75,22 @@ import { PrismaClient } from '@prisma/client';
        ticketType?: string;
        userGroupId?: string;
        tags?: string[];
+       callId?: string;
+       externalId?: string;
+       userIds?: string[];
+       participantResponses?: string[];
+       participantNames?: string[];
+       participantEmails?: string[];
+       title?: string;
+       createdByUserId?: string;
+       roomLink?: string;
+       callOrigin?: string;
+       startsAt?: number;
+       endsAt?: number;
+       startedAt?: number;
+       endedAt?: number;
+       recurringSeriesId?: string;
+       hasTranscript?: boolean;
        // Knowledge base / collection specific fields
     collectionId?: string;
     docId?: string;
@@ -357,6 +374,10 @@ import { PrismaClient } from '@prisma/client';
          result = transformMail(hit, doc as VespaMailDocument, mailMap);
          break;
 
+       case 'call':
+         result = transformCall(hit, doc as VespaCallDocument);
+         break;
+
        case 'user':
          result = transformUser(hit, doc as unknown as VespaUserDocument);
          break;
@@ -605,6 +626,51 @@ function transformCollection(
     },
   };
 }
+
+   function transformCall(
+     hit: VespaSearchHit,
+     doc: VespaCallDocument,
+   ): TransformedSearchResult {
+     return {
+       id: doc.callId || doc.docId,
+       type: 'call',
+       title: doc.title || 'Untitled Call',
+       subtitle: doc.channelName || 'Call',
+       context: [...(doc.participantNames || []), ...(doc.participantEmails || [])]
+         .filter(Boolean)
+         .join(' '),
+       relevanceScore: hit.relevance,
+       metadata: {
+         timestamp: String(
+           doc.startsAtTimestamp || doc.startedAtTimestamp || doc.endedAtTimestamp || 0,
+         ),
+         channelName: doc.channelName,
+       },
+       searchContext: {
+         callId: doc.callId,
+         externalId: doc.externalId,
+         callType: doc.callType,
+         channelId: doc.channelId,
+         channelTitle: doc.channelName,
+         userIds: doc.userIds,
+         participantResponses: doc.participantResponses,
+         title: doc.title,
+         createdByUserId: doc.createdByUserId,
+         roomLink: doc.roomLink,
+         callOrigin: doc.callOrigin,
+         status: doc.status,
+         startsAt: doc.startsAtTimestamp,
+         endsAt: doc.endsAtTimestamp,
+         startedAt: doc.startedAtTimestamp,
+         endedAt: doc.endedAtTimestamp,
+         recurringSeriesId: doc.recurringSeriesId,
+         hasTranscript: doc.hasTranscript,
+         participantNames: doc.participantNames,
+         participantEmails: doc.participantEmails,
+         docId: doc.docId,
+       },
+     };
+   }
 
    /**
     * Transform ticket document

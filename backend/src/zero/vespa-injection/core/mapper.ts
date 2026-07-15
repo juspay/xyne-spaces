@@ -1,6 +1,6 @@
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions } from '@/utils/mentionParser';
-import { appSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaAppDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
+import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import { CanvasVisibility, ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
@@ -979,6 +979,92 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
   };
 };
 
+export const mapCall = async (args: Call, workspaceId?: string, orgId?: string): Promise<VespaCallDocument> => {
+  const channel = args.channelId
+    ? await db.channel.findUnique({
+        where: { id: args.channelId },
+        select: { id: true, name: true, workspaceId: true },
+      })
+    : null;
+
+  const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
+    workspaceId,
+    () => Promise.resolve(channel?.workspaceId),
+    orgId,
+  );
+
+  const participants = await db.callParticipant.findMany({
+    where: { callId: args.id },
+    select: {
+      userId: true,
+      displayName: true,
+      isExternal: true,
+      response: true,
+    },
+  });
+
+  const internalUserIds = participants
+    .filter(participant => !participant.isExternal && participant.userId)
+    .map(participant => participant.userId);
+
+  const users = internalUserIds.length > 0
+    ? await db.user.findMany({
+        where: { id: { in: internalUserIds } },
+        select: { id: true, name: true, email: true },
+      })
+    : [];
+  const usersById = new Map(users.map(user => [user.id, user]));
+
+  const participantNames = participants.map(participant => {
+    if (participant.isExternal) return (participant.displayName || '').trim();
+    return (usersById.get(participant.userId)?.name || '').trim();
+  });
+
+  const participantEmails = participants.map(participant => {
+    if (participant.isExternal) return '';
+    return (usersById.get(participant.userId)?.email || '').trim();
+  });
+
+  const searchableParticipantNames = participantNames.filter(Boolean);
+  const searchableParticipantEmails = participantEmails.filter(Boolean);
+
+  const displayTitle =
+    args.title?.trim() ||
+    channel?.name?.trim() ||
+    searchableParticipantNames.slice(0, 2).join(', ') ||
+    searchableParticipantEmails.slice(0, 2).join(', ') ||
+    '';
+
+  return {
+    docId: args.id,
+    docType: VespaDocType.CALL,
+    callId: args.id,
+    externalId: args.externalId,
+    channelId: args.channelId || '',
+    channelRef: getRef(channelSchema, args.channelId || ''),
+    createdByUserId: args.createdByUserId,
+    roomLink: args.roomLink || '',
+    callType: args.callType,
+    userIds: participants.map(participant => participant.userId || ''),
+    participantResponses: participants.map(participant => String(participant.response || '')),
+    title: args.title || '',
+    displayTitle,
+    channelName: channel?.name || '',
+    participantNames,
+    participantEmails,
+    callOrigin: args.callOrigin,
+    status: args.status,
+    startsAtTimestamp: toTimestamp(args.startsAt),
+    endsAtTimestamp: toTimestamp(args.endsAt),
+    startedAtTimestamp: toTimestamp(args.startedAt),
+    endedAtTimestamp: toTimestamp(args.endedAt),
+    recurringSeriesId: args.recurringSeriesId || '',
+    hasTranscript: Boolean(args.transcript),
+    workspaceId: effectiveWorkspaceId,
+    orgId: effectiveOrgId,
+  };
+};
+
 export const mapRCA = async (args: RCAWithRelations, workspaceId?: string, orgId?: string): Promise<VespaFileDocument> => {
   const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(workspaceId, undefined, orgId);
   const chunks: string[] = [];
@@ -1331,6 +1417,8 @@ export const mapBySchema = async (
         return mapProject(args as InsertValue<ProjectsSchema>, workspaceId, orgId);
       case ticketSchema:
         return mapTicket(args as InsertValue<TicketsSchema>);
+      case callSchema:
+        return mapCall(args as Call, workspaceId, orgId);
       case fileSchema:
         if (!app) {
           throw new Error(`${schemaName}: fileSchema requires 'app' parameter to determine mapper (CANVAS, TRANSCRIPT, RCA, or FILE)`);
@@ -1400,6 +1488,11 @@ export const fetchDataBySchema = async (
 
     case ticketSchema:
       return await db.ticket.findUnique({
+        where: { id: docId }
+      });
+
+    case callSchema:
+      return await db.call.findUnique({
         where: { id: docId }
       });
 

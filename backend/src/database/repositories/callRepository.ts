@@ -16,6 +16,7 @@ import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
+import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
 
 export type { Call, CallParticipant };
 
@@ -79,6 +80,7 @@ export class CallRepository {
       where: { id },
       data: { recordingUrl },
     });
+    queueCallVespaFeed(id, { source: CallVespaFeedSource.CallRepositorySetRecordingUrl });
   }
 
   async findActiveCallByChannelId(channelId: string): Promise<Call | null> {
@@ -164,6 +166,28 @@ export class CallRepository {
   }
 
   /**
+   * Fetch call IDs for Vespa backfill in a stable paginated order.
+   * The controller only needs the primary key, so keep this query centralized
+   * here instead of duplicating Prisma pagination logic.
+   */
+  async findBackfillBatch(options: {
+    where: Prisma.CallWhereInput;
+    skip: number;
+    take: number;
+    orderByUpdatedAt: boolean;
+  }): Promise<Array<Pick<Call, 'id'>>> {
+    const { where, skip, take, orderByUpdatedAt } = options;
+
+    return await DatabaseClient.getInstance().call.findMany({
+      where,
+      skip,
+      take,
+      orderBy: orderByUpdatedAt ? { updatedAt: 'asc' } : { createdAt: 'asc' },
+      select: { id: true },
+    });
+  }
+
+  /**
    * Find SCHEDULED calls whose endsAt has passed (stale scheduled calls).
    * These are calls that were never started and whose window has expired —
    * the Bull auto-end job may have been missed or lost.
@@ -187,6 +211,7 @@ export class CallRepository {
       where: { id },
       data
     });
+    queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
     return result;
   }
 
@@ -248,6 +273,7 @@ export class CallRepository {
     await DatabaseClient.getInstance().call.delete({
       where: { id }
     });
+    queueCallVespaDelete(id, { source: 'CallRepository.delete' });
   }
 
   async getScheduledCallsForUser(userId: string, from: Date, to: Date) {
@@ -285,6 +311,7 @@ export class CallRepository {
         meetingStatus: data.meetingStatus ?? MeetingStatus.PENDING,
       },
     });
+    queueCallVespaFeed(result.callId, { source: CallVespaFeedSource.CallRepositoryCreateParticipant });
     return result;
   }
 
@@ -294,13 +321,15 @@ export class CallRepository {
     respondedAt: Date,
     tx: Prisma.TransactionClient,
   ): Promise<CallParticipant> {
-    return await tx.callParticipant.update({
+    const participant = await tx.callParticipant.update({
       where: { id: participantId },
       data: {
         meetingStatus,
         respondedAt,
       },
     });
+    queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryUpdateParticipantMeetingStatus });
+    return participant;
   }
 
   async updateRecurringSeriesMeetingStatus(params: {
@@ -312,6 +341,20 @@ export class CallRepository {
   }): Promise<number> {
     const { recurringSeriesId, userId, meetingStatus, respondedAt, tx } = params;
     const client = tx || DatabaseClient.getInstance();
+
+    const callIds = await client.call.findMany({
+      where: {
+        recurringSeriesId,
+        status: CallStatus.SCHEDULED,
+        startsAt: {
+          gt: respondedAt,
+        },
+        participants: {
+          some: { userId },
+        },
+      },
+      select: { id: true },
+    });
 
     const result = await client.callParticipant.updateMany({
       where: {
@@ -329,6 +372,10 @@ export class CallRepository {
         respondedAt,
       },
     });
+
+    callIds.forEach((call) => queueCallVespaFeed(call.id, {
+      source: CallVespaFeedSource.CallRepositoryUpdateRecurringSeriesMeetingStatus,
+    }));
 
     return result.count;
   }
@@ -572,6 +619,7 @@ export class CallRepository {
         leftAt,
       },
     });
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryMarkAllParticipantsAsLeft });
   }
 
   /**
@@ -584,13 +632,15 @@ export class CallRepository {
     joinedAt: Date,
     tx: Prisma.TransactionClient
   ): Promise<CallParticipant> {
-    return await tx.callParticipant.update({
+    const participant = await tx.callParticipant.update({
       where: { id: participantId },
       data: {
         response,
         joinedAt
       }
     });
+    queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryUpdateParticipantResponse });
+    return participant;
   }
 
   /**
@@ -602,13 +652,15 @@ export class CallRepository {
     leftAt: Date,
     tx: Prisma.TransactionClient
   ): Promise<CallParticipant> {
-    return await tx.callParticipant.update({
+    const participant = await tx.callParticipant.update({
       where: { id: participantId },
       data: {
         response: InvitationResponse.LEFT,
         leftAt
       }
     });
+    queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryMarkParticipantAsLeft });
+    return participant;
   }
 
   /**
@@ -685,6 +737,7 @@ export class CallRepository {
         endedAt,
       }
     });
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryEndCall });
   }
 
   /**
@@ -702,7 +755,7 @@ export class CallRepository {
   ): Promise<{ shouldEndCall: boolean; messageUpdated: boolean; call: Call | null }> {
     const { callExternalId, userId, leftAt } = params;
 
-    return await DatabaseClient.getInstance().$transaction(async (tx) => {
+    const result = await DatabaseClient.getInstance().$transaction(async (tx) => {
       // Find call inside transaction
       const call = await tx.call.findUnique({
         where: { externalId: callExternalId }
@@ -764,6 +817,8 @@ export class CallRepository {
 
       return { shouldEndCall, messageUpdated, call };
     });
+    queueCallVespaFeed(result.call?.id, { source: CallVespaFeedSource.CallRepositoryHandleParticipantLeaving });
+    return result;
   }
 
   /**
@@ -778,7 +833,7 @@ export class CallRepository {
   ): Promise<{ shouldEndCall: boolean; messageUpdated: boolean; call: Call | null }> {
     const { callExternalId, endedAt } = params;
 
-    return await DatabaseClient.getInstance().$transaction(async (tx) => {
+    const result = await DatabaseClient.getInstance().$transaction(async (tx) => {
       // Find call inside transaction
       const call = await tx.call.findUnique({
         where: { externalId: callExternalId }
@@ -838,6 +893,8 @@ export class CallRepository {
 
       return { shouldEndCall, messageUpdated, call };
     });
+    queueCallVespaFeed(result.call?.id, { source: CallVespaFeedSource.CallRepositoryHandleRoomFinished });
+    return result;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1047,6 +1104,7 @@ export class CallRepository {
     if (activatedCallMeta?.conversationId) {
       await messageMetadataService.syncInitialMessageMd(activatedCallMeta.conversationId);
     }
+    queueCallVespaFeed(callParam.id, { source: CallVespaFeedSource.CallRepositoryActivateScheduledCall });
   }
 
   /**
@@ -1211,6 +1269,7 @@ export class CallRepository {
 
     await messageMetadataService.syncInitialMessageMd(conversationId);
 
+    queueCallVespaFeed(result.call.id, { source: CallVespaFeedSource.CallRepositoryCreateCallWithParticipantsAndMessage });
     return result;
   }
 
@@ -1352,7 +1411,7 @@ export class CallRepository {
     const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, metadata, callUpdatesChannel, externalInvitees } = params;
     const db = DatabaseClient.getInstance();
 
-    return await db.$transaction(async (tx) => {
+    const updatedCall = await db.$transaction(async (tx) => {
       const updateData: Record<string, unknown> = { updatedAt: new Date() };
       if (title !== undefined) updateData.title = title;
       if (startsAt !== undefined) updateData.startsAt = startsAt;
@@ -1433,6 +1492,9 @@ export class CallRepository {
 
       return updatedCall;
     });
+
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdateScheduledCall });
+    return updatedCall;
   }
 
   // ---------------------------------------------------------------------------
@@ -1483,7 +1545,7 @@ export class CallRepository {
   }): Promise<CallParticipant> {
     const { callId, displayName } = params;
     const id = uuidv4();
-    return await DatabaseClient.getInstance().callParticipant.create({
+    const participant = await DatabaseClient.getInstance().callParticipant.create({
       data: {
         id,
         callId,
@@ -1496,6 +1558,8 @@ export class CallRepository {
         meetingStatus: MeetingStatus.PENDING,
       },
     });
+    queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryCreateLobbyRequest });
+    return participant;
   }
 
   /**
@@ -1534,7 +1598,7 @@ export class CallRepository {
     displayName?: string;
     respondedAt: Date;
   }): Promise<CallParticipant> {
-    return await DatabaseClient.getInstance().callParticipant.update({
+    const participant = await DatabaseClient.getInstance().callParticipant.update({
       where: { id: params.participantId },
       data: {
         ...(params.displayName && { displayName: params.displayName }),
@@ -1544,13 +1608,15 @@ export class CallRepository {
         leftAt: null,
       },
     });
+    queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryMarkExternalParticipantRequested });
+    return participant;
   }
 
   async acceptExternalParticipantSession(params: {
     participantId: string;
     displayName?: string;
   }): Promise<CallParticipant> {
-    return await DatabaseClient.getInstance().callParticipant.update({
+    const participant = await DatabaseClient.getInstance().callParticipant.update({
       where: { id: params.participantId },
       data: {
         ...(params.displayName && { displayName: params.displayName }),
@@ -1558,6 +1624,8 @@ export class CallRepository {
         joinedAt: null,
       },
     });
+    queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryAcceptExternalParticipantSession });
+    return participant;
   }
 
   /**
@@ -1579,20 +1647,24 @@ export class CallRepository {
     });
     if (!participant) return null;
 
-    return await DatabaseClient.getInstance().callParticipant.update({
+    const updatedParticipant = await DatabaseClient.getInstance().callParticipant.update({
       where: { id: participantId },
       data: { joinedAt: new Date() },
     });
+    queueCallVespaFeed(updatedParticipant.callId, { source: CallVespaFeedSource.CallRepositoryExternalJoin });
+    return updatedParticipant;
   }
 
   async updateParticipantMetadata(
     participantId: string,
     metadata: Prisma.InputJsonValue,
   ): Promise<CallParticipant> {
-    return await DatabaseClient.getInstance().callParticipant.update({
+    const participant = await DatabaseClient.getInstance().callParticipant.update({
       where: { id: participantId },
       data: { metadata },
     });
+    queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryUpdateParticipantMetadata });
+    return participant;
   }
 
   async markParticipantRemovedByHost(params: {
@@ -1617,11 +1689,12 @@ export class CallRepository {
       },
     });
 
+    queueCallVespaFeed(params.callId, { source: CallVespaFeedSource.CallRepositoryMarkParticipantRemovedByHost });
     return participant;
   }
 
   async restoreParticipantState(participant: CallParticipant): Promise<CallParticipant> {
-    return await DatabaseClient.getInstance().callParticipant.update({
+    const restoredParticipant = await DatabaseClient.getInstance().callParticipant.update({
       where: { id: participant.id },
       data: {
         response: participant.response,
@@ -1632,6 +1705,8 @@ export class CallRepository {
             : (participant.metadata as Prisma.InputJsonValue),
       },
     });
+    queueCallVespaFeed(restoredParticipant.callId, { source: CallVespaFeedSource.CallRepositoryRestoreParticipantState });
+    return restoredParticipant;
   }
 
   /**
@@ -1653,7 +1728,7 @@ export class CallRepository {
     });
     if (!participant) return null;
 
-    return await DatabaseClient.getInstance().callParticipant.update({
+    const updatedParticipant = await DatabaseClient.getInstance().callParticipant.update({
       where: { id: participantId },
       data: {
         response: InvitationResponse.REQUESTED,
@@ -1661,6 +1736,8 @@ export class CallRepository {
         joinedAt: null,
       },
     });
+    queueCallVespaFeed(updatedParticipant.callId, { source: CallVespaFeedSource.CallRepositoryRejoinLobby });
+    return updatedParticipant;
   }
 
   /**
@@ -1757,6 +1834,7 @@ export class CallRepository {
       where: { id: { in: ids } },
       data: { status: CallStatus.CANCELLED, updatedAt: new Date() },
     });
+    ids.forEach((id) => queueCallVespaFeed(id, { source: CallVespaFeedSource.CallRepositoryCancelByIds }));
     return result.count;
   }
 
@@ -1796,12 +1874,13 @@ export class CallRepository {
 
     if (!existing) {
       await DatabaseClient.getInstance().call.create({ data });
+      queueCallVespaFeed(data.id, { source: CallVespaFeedSource.CallRepositoryUpsertExternalCalendarCallCreate });
       return;
     }
 
     if (!hasExternalCallChanged(existing as unknown as ExistingCallRow, data)) return;
 
-    await DatabaseClient.getInstance().call.update({
+    const updated = await DatabaseClient.getInstance().call.update({
       where: { externalId: data.externalId },
       data: {
         title: data.title,
@@ -1817,13 +1896,23 @@ export class CallRepository {
       },
       select: { id: true },
     });
+    queueCallVespaFeed(updated.id, { source: CallVespaFeedSource.CallRepositoryUpsertExternalCalendarCallUpdate });
   }
 
   async cancelByExternalId(externalId: string): Promise<void> {
+    const affectedCalls = await DatabaseClient.getInstance().call.findMany({
+      where: { externalId, status: { not: CallStatus.CANCELLED } },
+      select: { id: true },
+    });
+
     await DatabaseClient.getInstance().call.updateMany({
       where: { externalId, status: { not: CallStatus.CANCELLED } },
       data: { status: CallStatus.CANCELLED, updatedAt: new Date() },
     });
+
+    affectedCalls.forEach(call =>
+      queueCallVespaFeed(call.id, { source: CallVespaFeedSource.CallRepositoryCancelByExternalId }),
+    );
   }
 }
 

@@ -17,6 +17,7 @@ import {
   sendCallInvitationEmail,
   sendCallInvitationReply,
 } from '@/services/callInvitationEmailService';
+import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -372,6 +373,8 @@ export class ScheduleCallController {
           },
         });
       }
+
+      queueCallVespaFeed(callId, { source: CallVespaFeedSource.ScheduleCallControllerCreateScheduledCall });
 
       // Send immediate notifications + create activities for all participants (excluding organizer)
       try {
@@ -868,6 +871,7 @@ export class ScheduleCallController {
               startsAt: newStartsAt,
               endsAt: newEndsAt,
             });
+            queueCallVespaFeed(instance.id, { source: CallVespaFeedSource.ScheduleCallControllerUpdateRecurringSeriesTimeChanged });
 
             instancesNeedingTimeUpdate.push({
               id: instance.id,
@@ -891,6 +895,9 @@ export class ScheduleCallController {
             channelId: resolvedChannelId,
             callUpdatesChannel: newCallUpdatesChannel,
           });
+          allScheduledInstances.forEach((instance) => queueCallVespaFeed(instance.id, {
+            source: CallVespaFeedSource.ScheduleCallControllerUpdateRecurringSeriesCascade,
+          }));
         }
 
         // Reschedule Bull jobs for instances with time changes

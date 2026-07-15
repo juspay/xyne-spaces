@@ -10,6 +10,7 @@ import { ProjectsVespaHandler } from '../tables/projects-handler';
 import { RCAVespaHandler } from '../tables/rca-handler';
 import { CanvasesVespaHandler } from '../tables/canvases-handler';
 import { TranscriptsVespaHandler } from '../tables/transcripts-handler';
+import { CallParticipantsVespaHandler } from '../tables/call-participants-handler';
 import { MessageAttachmentsVespaHandler } from '../tables/message-attachments-handler';
 import { ChannelStatsVespaHandler } from '../tables/channel-stats-handler';
 import { FormEntityValuesVespaHandler } from '../tables/form-entity-values-handler';
@@ -58,9 +59,11 @@ export class VespaHandlerFactory {
       case 'canvases':
         return new CanvasesVespaHandler(ctx);
 
-      // Call tables (for transcripts)
+      // Call tables
       case 'calls':
         return new TranscriptsVespaHandler(ctx);
+      case 'call_participants':
+        return new CallParticipantsVespaHandler(ctx);
 
       // File attachments
       case 'message_attachments':

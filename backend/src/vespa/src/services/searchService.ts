@@ -15,11 +15,12 @@ import {
   ticketSchema,
   fileSchema,
   mailSchema,
+  callSchema,
 } from '../types';
 import VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
 import config from '../config';
-import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type MailFilters } from '../utils/YqlBuilder';
+import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type MailFilters, type CallFilters } from '../utils/YqlBuilder';
 import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
@@ -88,6 +89,7 @@ interface SearchOptions {
   file?: FileFilters;
   meeting?: MeetingFilters;
   mail?: MailFilters;
+  call?: CallFilters;
   prefixBoostWeight?: number;
   presentationSummary?: string;
   captureDebug?: (info: VespaSearchDebugInfo) => void;
@@ -287,6 +289,7 @@ export class SearchService {
         file = {},
         meeting = {},
         mail = {},
+        call = {},
         prefixBoostWeight = 0.2,
         presentationSummary,
         mentionHighlights = [],
@@ -336,6 +339,7 @@ export class SearchService {
         [VespaDocType.FILE]: fileSchema,
         [VespaDocType.USER]: userSchema,
         [VespaDocType.MAIL]: mailSchema,
+        [VespaDocType.CALL]: callSchema,
       };
       const docTypesOf = (f: { docType?: string[] }): string[] => f?.docType ?? [];
       const requestedDocTypes = [
@@ -343,6 +347,7 @@ export class SearchService {
         ...docTypesOf(ticket as { docType?: string[] }),
         ...docTypesOf(file as { docType?: string[] }),
         ...docTypesOf(mail as { docType?: string[] }),
+        ...docTypesOf(call as { docType?: string[] }),
       ];
       if (requestedDocTypes.length > 0) {
         const wantedSchemas = new Set(
@@ -390,6 +395,7 @@ export class SearchService {
           meeting,
           userId,
           mail,
+          call,
           useFuzzy,
           useSemanticAnyway,
           wsId,
@@ -398,7 +404,7 @@ export class SearchService {
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
         const queryLength = searchQuery?.trim().length || 0;
-        const shouldEmbed = hasQuery &&  queryLength > 3 &&(useSemanticAnyway || useFuzzy);
+        const shouldEmbed = hasQuery && queryLength > 3 && (useSemanticAnyway || useFuzzy);
 
         return {
           yql,
@@ -474,7 +480,6 @@ export class SearchService {
       this.logger.info(`Exact search returned ${exactResultCount} results, expected ${expectedCount}`);
       
       const isTranscriptOnly = app.length === 1 && app[0].toLowerCase() === 'transcript';
-
       const isFileSearch = app.some(a => a.toLowerCase() === 'file');
       const oldFallback = exactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
 
