@@ -756,11 +756,11 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
 
         {!isMobile && (
           <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-            <p className='text-sm font-medium text-foreground'>Use Ask AI v2</p>
+            <p className='text-sm font-medium text-foreground'>Use Ask AI v1</p>
             <Switch
               id='ask-ai-version'
-              checked={state.askAIVersion === 'v2'}
-              onCheckedChange={checked => state.setAskAIVersion(checked ? 'v2' : 'v1')}
+              checked={state.askAIVersion === 'v1'}
+              onCheckedChange={checked => state.setAskAIVersion(checked ? 'v1' : 'v2')}
             />
           </div>
         )}
