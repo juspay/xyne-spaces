@@ -173,6 +173,7 @@ const VirtualizedStageList: React.FC<{
               <SortableTicketCard
                 ticket={ticket}
                 tags={((ticket as TicketWithTags).tagMappings ?? []).map(m => ({
+                  workspaceId: m.workspaceId,
                   id: m.tagId,
                   name: m.tagName,
                   ticketId: m.ticketId,

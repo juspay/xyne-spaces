@@ -86,11 +86,13 @@ export const resolveBoardAdditionalFields = ({
   formEntityValues,
   boardId,
   ticketId,
+  workspaceId,
 }: {
   formMapping: FormMappingLike | null | undefined;
   formEntityValues: readonly FormEntityValueRow[] | undefined;
   boardId: string | null | undefined;
   ticketId: string;
+  workspaceId: string | null | undefined;
 }): ResolvedBoardAdditionalField[] => {
   const boardFormId = formMapping?.formId;
   const membershipRows = formMapping?.formFields;
@@ -134,6 +136,7 @@ export const resolveBoardAdditionalFields = ({
     }
 
     return {
+      workspaceId: workspaceId ?? null,
       id: `placeholder-${resolvedFieldId}`,
       formId: boardFormId,
       fieldId: resolvedFieldId,

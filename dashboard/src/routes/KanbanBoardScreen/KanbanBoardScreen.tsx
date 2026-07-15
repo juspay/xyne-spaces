@@ -1444,12 +1444,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [stages, isNonLinearBoard, boardStageTransitions]);
 
   const tagsByTicketId = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; ticketId: string }[]>();
+    const map = new Map<
+      string,
+      { workspaceId: string | null; id: string; name: string; ticketId: string }[]
+    >();
     if (!kanbanSourceTickets) return map;
     for (const ticket of kanbanSourceTickets as KanbanLocalTicket[]) {
       const ticketTags =
         ticket.tagMappings && ticket.tagMappings.length > 0
           ? ticket.tagMappings.map((m: { tagId: string; tagName: string; ticketId: string }) => ({
+              workspaceId: ticket.workspaceId ?? null,
               id: m.tagId,
               name: m.tagName,
               ticketId: m.ticketId,
@@ -1457,6 +1461,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           : Array.isArray(ticket.tags)
             ? ticket.tags
                 .map((tag: { id: string; name: string; ticketId?: string }) => ({
+                  workspaceId: ticket.workspaceId ?? null,
                   id: tag.id,
                   name: tag.name,
                   ticketId: ticket.id,

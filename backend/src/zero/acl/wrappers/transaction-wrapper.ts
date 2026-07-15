@@ -1,7 +1,7 @@
 import type { Transaction } from '@rocicorp/zero';
 import type { QueryContext, TableName } from '../core/types';
 import { ACLFactory } from '../core/acl-factory';
-import { Schema } from '@xyne/shared';
+import { Schema, schema } from '@xyne/shared';
 import {
   collectVespaJobs,
   type VespaJobsAccumulator,
@@ -15,6 +15,32 @@ import {
 import { mutationSyncProcessor } from '../../mutation-sync/processor';
 import { collectMutationSyncPreviousValue } from '../../mutation-sync/config';
 import type { MutationSyncOperation } from '../../mutation-sync/types';
+
+// Zero mutations bypass the Prisma stamp extension (stamp.ts), so fill workspaceId here.
+// Stampable set = schema tables declaring a workspaceId column (structural, not hand-kept).
+const STAMPABLE_TABLES: ReadonlySet<string> = new Set(
+  Object.entries(schema.tables)
+    .filter(([, t]) => 'workspaceId' in (t as { columns: Record<string, unknown> }).columns)
+    .map(([name]) => name),
+);
+
+// Stamp workspaceId onto new rows (copy, never mutate). No-op unless the table has the column,
+// ctx has a workspaceId, and the caller hasn't set one. Only insert/upsert; never update/delete.
+function stampWorkspaceId(
+  tableName: string,
+  operation: string,
+  args: unknown,
+  ctx: QueryContext,
+): unknown {
+  if (operation !== 'insert' && operation !== 'upsert') return args;
+  if (!STAMPABLE_TABLES.has(tableName)) return args;
+  const ws = ctx.workspaceId;
+  if (!ws) return args; // system/bot context — leave NULL rather than stamp an empty string
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return args;
+  const row = args as Record<string, unknown>;
+  if (row.workspaceId !== undefined) return args; // respect caller-provided (incl. explicit cross-workspace)
+  return { ...row, workspaceId: ws };
+}
 
 /**
  * Wraps a Zero transaction with ACL checks and Vespa/side-effect job collection.
@@ -88,8 +114,10 @@ function wrapMutateWithACL(
             return originalOp;
           }
 
-          return async function (this: unknown, args: unknown) {
+          return async function (this: unknown, rawArgs: unknown) {
             let previousValue: unknown = undefined;
+
+            const args = stampWorkspaceId(tableName, operation, rawArgs, ctx);
 
             // 1. ACL Check (throws if unauthorized)
             const acl = await ACLFactory.getACL(tableName as TableName, ctx);

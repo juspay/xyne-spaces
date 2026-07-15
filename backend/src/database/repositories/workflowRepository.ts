@@ -148,7 +148,7 @@ export class WorkflowRepository {
   }
 
   // POST: Create new workflow execution
-  async createWorkflowExecution(data: Omit<WorkflowExecution, 'id' | 'createdAt' | 'updatedAt'>) {
+  async createWorkflowExecution(data: Omit<WorkflowExecution, 'id' | 'createdAt' | 'updatedAt' | 'workspaceId'>) {
     return await prisma.workflowExecution.create({
       data
     });
@@ -187,7 +187,7 @@ export class WorkflowRepository {
   }
 
   // POST: Create new workflow step
-  async createWorkflowStep(data: Omit<WorkflowStep, 'id' | 'createdAt' | 'updatedAt'>) {
+  async createWorkflowStep(data: Omit<WorkflowStep, 'id' | 'createdAt' | 'updatedAt' | 'workspaceId'>) {
     return await prisma.workflowStep.create({
       data
     });

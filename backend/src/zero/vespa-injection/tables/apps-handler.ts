@@ -19,15 +19,15 @@ export class AppsVespaHandler extends BaseVespaHandler<'apps'> {
   }
 
   onInsert(args: InsertValue<AppsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
-    return [{ schema: appSchema, jobType: 'feed', data: args, docId: args.id }];
+    return [{ schema: appSchema, jobType: 'feed', data: { ...args, workspaceId: args.workspaceId ?? undefined }, docId: args.id }];
   }
 
   onUpdate(args: UpdateValue<AppsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
-    return [{ schema: appSchema, jobType: 'feed', data: args, docId: args.id }];
+    return [{ schema: appSchema, jobType: 'feed', data: { ...args, workspaceId: args.workspaceId ?? undefined }, docId: args.id }];
   }
 
   onUpsert(args: UpsertValue<AppsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
-    return [{ schema: appSchema, jobType: 'feed', data: args, docId: args.id }];
+    return [{ schema: appSchema, jobType: 'feed', data: { ...args, workspaceId: args.workspaceId ?? undefined }, docId: args.id }];
   }
 
   onDelete(args: DeleteID<AppsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
