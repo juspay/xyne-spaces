@@ -158,6 +158,12 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
   const createdDateEnd = params.get('createdDateEnd');
   if (createdDateEnd) filters.createdDateEnd = Number(createdDateEnd);
 
+  const lastEmailAtStart = params.get('lastEmailAtStart');
+  if (lastEmailAtStart) filters.lastEmailAtStart = Number(lastEmailAtStart);
+
+  const lastEmailAtEnd = params.get('lastEmailAtEnd');
+  if (lastEmailAtEnd) filters.lastEmailAtEnd = Number(lastEmailAtEnd);
+
   // My tickets filter toggles (assigned to me / created by me)
   const assigned = params.get('assigned');
   if (assigned === '1') filters.assigned = true;
@@ -217,6 +223,8 @@ const FILTER_PARAM_KEYS = [
   'dueDateEnd',
   'createdDateStart',
   'createdDateEnd',
+  'lastEmailAtStart',
+  'lastEmailAtEnd',
   'assigned',
   'created',
 ] as const;
@@ -268,6 +276,12 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   }
   if (filters.createdDateEnd !== undefined) {
     params.set('createdDateEnd', filters.createdDateEnd.toString());
+  }
+  if (filters.lastEmailAtStart !== undefined) {
+    params.set('lastEmailAtStart', filters.lastEmailAtStart.toString());
+  }
+  if (filters.lastEmailAtEnd !== undefined) {
+    params.set('lastEmailAtEnd', filters.lastEmailAtEnd.toString());
   }
 
   // My tickets filter toggles (assigned to me / created by me)

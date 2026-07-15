@@ -55,6 +55,13 @@ const formatDateTime = (date: Date): string =>
     hour12: true,
   });
 
+const formatTime = (date: Date): string =>
+  date.toLocaleString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+
 const extractSenderEmail = (fromEmailAddress: string | null | undefined): string | null => {
   if (!fromEmailAddress) return null;
   const bracketMatch = fromEmailAddress.match(/<([^>]+)>/);
@@ -285,6 +292,14 @@ export const TicketListRow = ({
             {formatDate(dueDate)}
           </span>
         </Tooltip>
+        <span
+          className={cn(
+            'text-xs whitespace-nowrap w-[64px] text-right tabular-nums',
+            hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
+          )}
+        >
+          {formatTime(dueDate)}
+        </span>
       </div>
     </div>
   );

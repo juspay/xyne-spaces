@@ -981,8 +981,10 @@ export const queries = defineQueries({
       aiCategory: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
       userGroups: z.array(z.string()).optional(),
+      lastEmailAtStart: z.number().optional(),
+      lastEmailAtEnd: z.number().optional(),
     }),
-    ({ args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups } }) => {
+    ({ args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1014,6 +1016,14 @@ export const queries = defineQueries({
 
       if (userGroups && userGroups.length > 0) {
         query = query.where('userGroupId', 'IN', userGroups);
+      }
+
+      if (lastEmailAtStart !== undefined) {
+        query = query.where('lastEmailAt', '>=', lastEmailAtStart);
+      }
+
+      if (lastEmailAtEnd !== undefined) {
+        query = query.where('lastEmailAt', '<=', lastEmailAtEnd);
       }
 
       return query
@@ -1108,11 +1118,13 @@ export const queries = defineQueries({
       hasAiDraft: z.boolean().optional(),
       mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam']).optional(),
       userGroups: z.array(z.string()).optional(),
+      lastEmailAtStart: z.number().optional(),
+      lastEmailAtEnd: z.number().optional(),
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1163,6 +1175,14 @@ export const queries = defineQueries({
 
       if (userGroups && userGroups.length > 0) {
         query = query.where('userGroupId', 'IN', userGroups);
+      }
+
+      if (lastEmailAtStart !== undefined) {
+        query = query.where('lastEmailAt', '>=', lastEmailAtStart);
+      }
+
+      if (lastEmailAtEnd !== undefined) {
+        query = query.where('lastEmailAt', '<=', lastEmailAtEnd);
       }
 
       const orderDirection = dir === 'forward' ? 'desc' : 'asc';

@@ -131,6 +131,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult): Call {
   );
 
   return {
+    workspaceId: null,
     id: callId,
     externalId: context?.externalId || callId,
     title: stripSearchHighlight(context?.title || result.title) || null,
@@ -168,6 +169,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult): Call {
       const isExternal = !userId;
 
       return {
+        workspaceId: null,
         id: `${callId}:${userId || `external-${index}`}`,
         callId,
         userId,

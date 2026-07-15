@@ -14,6 +14,8 @@ const EMPTY_TICKET_FILTER = {
   aiCategory: undefined,
   hasAiDraft: undefined,
   userGroups: undefined,
+  lastEmailAtStart: undefined,
+  lastEmailAtEnd: undefined,
 } as const;
 
 /**
