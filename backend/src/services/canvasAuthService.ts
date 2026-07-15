@@ -23,7 +23,7 @@ class CanvasAuthService {
     userId: string
   ): Promise<CanvasAuthResult> {
     try {
-      const canvas = await db.canvas.findUnique({
+      let canvas = await db.canvas.findUnique({
         where: { id: canvasId },
         select: {
           id: true,
@@ -34,6 +34,31 @@ class CanvasAuthService {
           projectId: true,
         },
       });
+
+      // Backward-compat: pre-XYNE-17290 callers may pass a legacy
+      // viewAccessId or editAccessId instead of the canonical id (stored in
+      // old chat message URLs, y-sweet client cache, etc.). If the id lookup
+      // misses, try to resolve as a legacy access id and use the canonical
+      // row. Note: this does NOT reintroduce the capability-URL edit gate —
+      // edit privileges still flow through participant checks below.
+      if (!canvas) {
+        canvas = await db.canvas.findFirst({
+          where: {
+            OR: [
+              { viewAccessId: canvasId },
+              { editAccessId: canvasId },
+            ],
+          },
+          select: {
+            id: true,
+            createdBy: true,
+            visibility: true,
+            channelId: true,
+            folderId: true,
+            projectId: true,
+          },
+        });
+      }
 
       if (!canvas) {
         logger.warn(`[CanvasAuth] Canvas not found: ${canvasId}`);

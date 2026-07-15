@@ -1083,8 +1083,12 @@ export class CallController {
       }
 
       const recordingAttachment = await repositories.messageAttachments.findRecordingByCallId(callId).catch(() => null);
-      const notesCanvasId = (call.metadata as Record<string, unknown> | null)
-        ?.notesCanvasId;
+      // Backward-compat: historical call rows stored the notes canvas link as
+      // `notesCanvasViewAccessId`. Fall back to that key if the new one isn't
+      // present so the notes tab keeps rendering for pre-migration calls.
+      const callMetadata = call.metadata as Record<string, unknown> | null;
+      const notesCanvasId =
+        callMetadata?.notesCanvasId ?? callMetadata?.notesCanvasViewAccessId;
 
       res.json({
         success: true,

@@ -453,19 +453,34 @@ export async function approveKnowledgeCanvas(
 
 /**
  * Get canvas by canonical id.
+ *
+ * Backward-compat: pre-XYNE-17290 callers stored the viewAccessId or
+ * editAccessId in URLs and JSON metadata blobs, and some in-flight clients
+ * may still pass those. If the canonical id lookup misses, fall back to
+ * matching the legacy capability-id columns and return the canonical row.
+ * This does NOT reintroduce the capability-URL edit gate — resolving via
+ * editAccessId here only affects lookup, not authorization.
  */
 export async function getCanvasById(canvasId: string) {
   const prisma = DatabaseClient.getInstance();
-  return prisma.canvas.findUnique({
+  const select = {
+    id: true,
+    title: true,
+    content: true,
+    metadata: true,
+    createdBy: true,
+    createdAt: true,
+  } as const;
+  const canvas = await prisma.canvas.findUnique({
     where: { id: canvasId },
-    select: {
-      id: true,
-      title: true,
-      content: true,
-      metadata: true,
-      createdBy: true,
-      createdAt: true,
+    select,
+  });
+  if (canvas) return canvas;
+  return prisma.canvas.findFirst({
+    where: {
+      OR: [{ viewAccessId: canvasId }, { editAccessId: canvasId }],
     },
+    select,
   });
 }
 

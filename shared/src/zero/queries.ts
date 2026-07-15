@@ -2237,12 +2237,20 @@ export const queries = defineQueries({
     return zql.ticket_activities.where('ticketId', ticketId).orderBy('timestamp', 'desc');
   }),
   getCanvas: defineQuery(z.object({ canvasId: z.string() }), ({ ctx, args: { canvasId } }) => {
+    // Backward-compat lookup: match by canonical id, userRepo (Quarto), and
+    // the legacy viewAccessId/editAccessId columns so historical chat URLs
+    // and stored message metadata that carry those IDs still resolve.
+    // Visibility is still gated by applyCanvasVisibilityQueryFilter, and edit
+    // privileges still flow through participant checks in the canvas.update
+    // mutator — matching editAccessId here does NOT grant edit access.
     return applyCanvasVisibilityQueryFilter(
       zql.canvases
       .where(helpers => {
         return helpers.or(
           helpers.cmp('id', canvasId),
-          helpers.cmp('userRepo', canvasId), // Also allow lookup by userRepo (Quarto docs)
+          helpers.cmp('userRepo', canvasId),
+          helpers.cmp('viewAccessId', canvasId),
+          helpers.cmp('editAccessId', canvasId),
         );
       })
       .related('participants')
