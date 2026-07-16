@@ -2089,6 +2089,7 @@ export class EmailService {
               ...(firstEmail.receivedAt && { createdAt: firstEmail.receivedAt }),
             },
           });
+
           await syncConversationTicketMdFromPrismaTicket(tx, createdTicket);
 
           // Seed the conversation's initial message inside the same tx so we

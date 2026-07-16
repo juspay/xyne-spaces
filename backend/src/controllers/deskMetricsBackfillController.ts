@@ -20,16 +20,19 @@ export class DeskMetricsBackfillController {
     return payload.batchSize && payload.batchSize > 0 ? payload.batchSize : 50;
   }
 
-  private static async runBackfill(batchSize: number): Promise<void> {
+  private static buildDaysBack(query: unknown): number {
+    const q = (query ?? {}) as Partial<{ daysBack: string }>;
+    const parsed = parseInt(q.daysBack ?? '', 10);
+    return parsed > 0 ? Math.min(parsed, 90) : 7;
+  }
+
+  private static async runChannelIdBackfill(batchSize: number): Promise<BackfillSummary> {
     const summary: BackfillSummary = { totalUpdated: 0, batches: 0, errors: 0 };
-    const startTime = Date.now();
 
     logger.info('[DeskMetricsBackfill] Starting channelId backfill', { batchSize });
 
     while (true) {
       try {
-        // CTE scopes the batch to desk-channel tickets only so non-desk rows
-        // (channelId stays NULL intentionally) never enter the loop.
         const updated = await db.$executeRaw`
           WITH batch AS (
             SELECT ta.id, t."channelId" AS channel_id
@@ -50,7 +53,7 @@ export class DeskMetricsBackfillController {
         summary.batches += 1;
         summary.totalUpdated += Number(updated);
 
-        logger.info('[DeskMetricsBackfill] Batch complete', {
+        logger.info('[DeskMetricsBackfill] channelId batch complete', {
           batchNum: summary.batches,
           batchUpdated: Number(updated),
           totalUpdated: summary.totalUpdated,
@@ -61,7 +64,7 @@ export class DeskMetricsBackfillController {
         await DeskMetricsBackfillController.sleep(SLEEP_BETWEEN_BATCHES_MS);
       } catch (error) {
         summary.errors += 1;
-        logger.error('[DeskMetricsBackfill] Batch failed', {
+        logger.error('[DeskMetricsBackfill] channelId batch failed', {
           batchNum: summary.batches,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -69,25 +72,96 @@ export class DeskMetricsBackfillController {
       }
     }
 
+    return summary;
+  }
+
+  private static async runTicketCreatedActivityBackfill(batchSize: number, daysBack: number): Promise<BackfillSummary> {
+    const summary: BackfillSummary = { totalUpdated: 0, batches: 0, errors: 0 };
+
+    logger.info('[DeskMetricsBackfill] Starting TICKET_CREATED activity backfill', { batchSize, daysBack });
+
+    const cutoff = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+
+    while (true) {
+      try {
+        const inserted = await db.$executeRaw`
+          WITH batch AS (
+            SELECT t.id, t."createdBy", t."createdAt", t."channelId", t."priority", t."stageName", t."statusV2"
+            FROM "public"."tickets" t
+            WHERE t."channelId" IN (
+                SELECT "channelId" FROM "public"."email_channel_preferences"
+              )
+              AND t."createdAt" >= ${cutoff}
+              AND NOT EXISTS (
+                SELECT 1 FROM "public"."ticket_activities" ta
+                WHERE ta."ticketId" = t.id AND ta."activityType" = 'TICKET_CREATED'
+              )
+            LIMIT ${batchSize}
+          )
+          INSERT INTO "public"."ticket_activities" (id, "ticketId", "updatedBy", timestamp, "activityType", "channelId", value)
+          SELECT
+            gen_random_uuid()::text,
+            b.id,
+            b."createdBy",
+            b."createdAt",
+            'TICKET_CREATED',
+            b."channelId",
+            jsonb_build_object('field', 'ticketCreated', 'priority', b."priority"::text, 'stageName', b."stageName", 'statusV2', b."statusV2"::text)
+          FROM batch b
+        `;
+
+        summary.batches += 1;
+        summary.totalUpdated += Number(inserted);
+
+        logger.info('[DeskMetricsBackfill] TICKET_CREATED batch complete', {
+          batchNum: summary.batches,
+          batchInserted: Number(inserted),
+          totalInserted: summary.totalUpdated,
+        });
+
+        if (Number(inserted) === 0) break;
+
+        await DeskMetricsBackfillController.sleep(SLEEP_BETWEEN_BATCHES_MS);
+      } catch (error) {
+        summary.errors += 1;
+        logger.error('[DeskMetricsBackfill] TICKET_CREATED batch failed', {
+          batchNum: summary.batches,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        break;
+      }
+    }
+
+    return summary;
+  }
+
+  private static async runBackfill(batchSize: number, daysBack: number): Promise<void> {
+    const startTime = Date.now();
+
+    const channelIdSummary = await DeskMetricsBackfillController.runChannelIdBackfill(batchSize);
+    const ticketCreatedSummary = await DeskMetricsBackfillController.runTicketCreatedActivityBackfill(batchSize, daysBack);
+
     logger.info('[DeskMetricsBackfill] Done', {
-      ...summary,
+      channelIdBackfill: channelIdSummary,
+      ticketCreatedBackfill: ticketCreatedSummary,
       durationMs: Date.now() - startTime,
     });
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>): Promise<Response> {
     const batchSize = DeskMetricsBackfillController.buildBatchSize(req.body);
+    const daysBack = DeskMetricsBackfillController.buildDaysBack(req.query);
 
     res.status(202).json({
       success: true,
-      message: 'Desk metrics channelId backfill started in background',
-      data: { batchSize },
+      message: 'Desk metrics backfill started in background (channelId + TICKET_CREATED activities)',
+      data: { batchSize, daysBack },
       timestamp: new Date().toISOString(),
     });
 
     void (async (): Promise<void> => {
       try {
-        await DeskMetricsBackfillController.runBackfill(batchSize);
+        await DeskMetricsBackfillController.runBackfill(batchSize, daysBack);
       } catch (error) {
         logger.error('[DeskMetricsBackfill] Background run failed', error);
       }
