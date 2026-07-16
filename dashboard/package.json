@@ -146,6 +146,7 @@
     "lottie-react": "^2.4.1",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.544.0",
+    "marked": "^15.0.12",
     "mermaid": "^11.12.2",
     "mixpanel-browser": "^2.72.0",
     "openai-partial-stream": "^0.3.9",

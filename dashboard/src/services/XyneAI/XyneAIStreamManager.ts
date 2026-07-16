@@ -709,6 +709,32 @@ class XyneAIStreamManager {
   }
 
   /**
+   * Patch the persisted 👍/👎 (+ comment) for a single message across any cached
+   * stream that holds it, keeping the in-memory + IndexedDB copies in sync with
+   * a rating the user just submitted. Without this, switching away and back
+   * WITHIN the stream TTL adopts the pre-rating snapshot from `activeStreams`
+   * and the thumb shows unlit (a full reload works because it refetches from the
+   * server). A message id is unique to one stream, so we stop after the match.
+   * No-op when the message isn't in any cached stream.
+   */
+  public patchMessageFeedback(
+    messageId: string,
+    feedback: 0 | 1 | 2,
+    ratingComment?: string | null,
+  ): void {
+    for (const state of this.activeStreams.values()) {
+      const idx = state.messages.findIndex(m => m.id === messageId);
+      if (idx < 0) continue;
+      const existing = state.messages[idx]!;
+      const updated: Message = { ...existing, feedback, ratingComment: ratingComment ?? null };
+      state.messages = [...state.messages.slice(0, idx), updated, ...state.messages.slice(idx + 1)];
+      this.notifySubscribers({ ...state });
+      void xyneAIStreamStorage.updateMessages(state.streamId, state.messages);
+      return;
+    }
+  }
+
+  /**
    * Get all active streams
    */
   public getAllActiveStreams(): Map<string, StreamState> {
@@ -1167,6 +1193,10 @@ class XyneAIStreamManager {
                 ticketId?: string;
                 url?: string;
               }>;
+              // Background (run_in_background) subagent lifecycle — see ToolInvocation.
+              background?: boolean;
+              backgroundState?: 'running' | 'completed' | 'error';
+              backgroundTaskId?: string;
             }
           | undefined;
 
@@ -2130,6 +2160,9 @@ class XyneAIStreamManager {
             ...finalRefreshed,
             // Keep local traceId if it was set during streaming
             ...(localMsg.traceId && { traceId: localMsg.traceId }),
+            // Preserve the stable render key so the bubble doesn't remount when a
+            // post-completion refresh replaces content (server rows carry none).
+            ...(localMsg.stableKey && { stableKey: localMsg.stableKey }),
             // Preserve locally accumulated content over potentially incomplete backend content
             content: finalContent,
             streamingContent: finalStreamingContent || finalContent,

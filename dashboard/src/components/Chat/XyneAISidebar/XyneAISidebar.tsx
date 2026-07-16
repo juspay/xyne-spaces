@@ -1518,6 +1518,22 @@ const XyneAISidebar = ({
     [feedbackMap, currentTraceId],
   );
 
+  // v2 (claw) rating change — AskAiRatingButtons already persisted to
+  // agent_runs; reflect the new feedback in local message state AND in the
+  // stream manager's cache so the thumb survives a soft nav-away-and-back within
+  // the stream TTL (which adopts the cached snapshot instead of refetching).
+  const handleRatingChange = useCallback(
+    (messageId: string, feedback: 0 | 1 | 2, comment?: string | null): void => {
+      setMessages(prevMessages =>
+        prevMessages.map(msg =>
+          msg.id === messageId ? { ...msg, feedback, ratingComment: comment ?? null } : msg,
+        ),
+      );
+      xyneAIStreamManager.patchMessageFeedback(messageId, feedback, comment ?? null);
+    },
+    [],
+  );
+
   const handleCitationClick = useCallback(
     (
       messageNumber: number,
@@ -2195,12 +2211,17 @@ const XyneAISidebar = ({
                                   : -1;
                               return (
                                 <MessageItem
-                                  key={message.id}
+                                  // Stable key so the bubble doesn't remount when
+                                  // the id swaps temp→server at completion (which
+                                  // would kill the activity block's transition).
+                                  key={message.stableKey ?? message.id}
                                   message={message}
                                   onFeedback={(id, type) => void handleFeedback(id, type)}
                                   onCitationClick={handleCitationClick}
                                   onSummarizerCitationClick={handleSummarizerCitationClick}
                                   feedbackValue={feedbackMap[message.id] || null}
+                                  isV2={isV2}
+                                  onRatingChange={handleRatingChange}
                                   onRegenerate={
                                     !isLegacyConversation && isLatestBotMessage
                                       ? () => void handleRegenerate()

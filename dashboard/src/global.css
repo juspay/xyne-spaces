@@ -3655,6 +3655,64 @@ img.inline-emoji,
   opacity: var(--rec-wave-opacity, 0.4);
 }
 
+/* Live reasoning streaming: fade in each newly-arrived chunk at the writing edge
+   (Claude-style). Opacity-only → GPU-composited, no layout, no per-frame JS.
+   Starts at 0.25 (not 0) so fast deltas never "pop" from invisible. */
+@keyframes tokenFade {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.token-fade {
+  animation: tokenFade 420ms ease-out both;
+}
+
+/* Streaming ANSWER (markdown): fade in each top-level BLOCK as it first appears
+   (per-block, Gemini-style). CSS-only — the animation fires once when a block
+   element MOUNTS. StreamingMarkdownBlocks memoizes settled blocks (and the
+   consumers keep the markdown `components` overrides referentially stable),
+   so existing block DOM is never rebuilt and the fade can't re-fire (no
+   blink). Streaming-only class. Long, soft ease-out for a gentle entry. */
+@keyframes blockFade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.streaming-answer-fade > * {
+  animation: blockFade 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Streaming ANSWER per-word fade (Claude-style type-in): rehypeStreamWordFade
+   wraps each visible word of a live-streamed answer in a .stream-word span.
+   Text is append-only within the live block, so existing spans reconcile in
+   place — only the genuinely NEW words at the writing edge mount, and each
+   fades in exactly once. Scoped under .streaming-answer-fade so the spans go
+   inert the moment streaming ends (container class removed) and never animate
+   for completed or reloaded messages. */
+@keyframes wordFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* Links and citation chips are SKIP_TAGS in the word-wrapper (their content
+   must stay whole), so they'd pop in without this — fade them as single units
+   when they mount, including chips finalized at stream completion. */
+.streaming-answer-fade .stream-word,
+.streaming-answer-fade a {
+  animation: wordFade 500ms ease-out both;
+}
+
 /* Automation schema JSON editor: CodeMirror ships stable structural classes.
    Keep the React component theme-agnostic and scope dark overrides to the
    app's midnight theme, matching the repo's data-theme CSS convention. */

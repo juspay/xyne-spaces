@@ -164,6 +164,14 @@ export interface ToolInvocation {
   subagentName?: string;
   parentToolCallId?: string;
   citations?: ClawCitation[];
+  /** Background (run_in_background) subagent lifecycle. `background` marks a
+   *  wrapper invocation whose subagent runs DETACHED; the spawning tool call
+   *  returns immediately (so `status` becomes 'completed' right away), and the
+   *  real progress is tracked by `backgroundState`. Rendered as a non-blocking
+   *  chip and excluded from the "currently running tool" header. */
+  background?: boolean;
+  backgroundState?: 'running' | 'completed' | 'error';
+  backgroundTaskId?: string;
 }
 
 /**
@@ -391,11 +399,21 @@ export interface Message {
   participants?: Participant[]; // List of participants for Summarizer responses
   selectionContexts?: SelectionContext[]; // Canvas selection contexts
   parentId?: string | null; // Parent message ID for tree branching
+  /**
+   * Stable React key that does NOT change when the message's `id` is swapped
+   * from a client temp id (`bot-<ts>`) to the server id at completion. Keying
+   * the rendered bubble by this (falling back to `id`) prevents the whole
+   * bubble from remounting on completion — which is what let the live→done
+   * activity block animate its transition instead of hard-swapping.
+   */
+  stableKey?: string;
   sessionId?: string; // Session ID for v2 streaming
   /** AgentRun.sessionId for the run that produced this assistant message.
    *  Drives branching-safe "Debug this response" selection — chronological
    *  turn index doesn't survive sibling branches. */
   debugSessionId?: string;
+  /** Optional comment attached to a 👎 rating (persisted to agent_runs.ratingComment). */
+  ratingComment?: string | null;
   sources?: DraftSource[];
 
   // ============================================================================
