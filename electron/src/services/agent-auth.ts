@@ -39,6 +39,7 @@ class AgentAuthService {
   private port: number = DEFAULT_PORT;
   private sessions: Map<string, AuthSession> = new Map();
   private cleanupInterval: NodeJS.Timeout | null = null;
+  private consentDialogOpen = false;
 
   private getMcpBackendBaseUrl(): string {
     return config.BACKEND_URL.replace(/\/+$/, '');
@@ -196,43 +197,52 @@ class AgentAuthService {
       return;
     }
 
-    Logger.info(ElectronEvent.AGENT_AUTH_REQUEST, { agentName: authRequest.agentName, agentType: authRequest.agentType }, 'AgentAuth');
-
-    // Show consent dialog to user
-    const approval = await this.showConsentDialog(authRequest);
-
-    if (!approval.approved) {
-      const response: AuthResponse = {
-        status: 'denied',
-        reason: 'User rejected the request'
-      };
-      Logger.info(ElectronEvent.AGENT_AUTH_DENIED, { agentName: authRequest.agentName }, 'AgentAuth');
-      this.sendJson(res, 403, response);
+    if (this.consentDialogOpen) {
+      this.sendJson(res, 429, { error: 'A consent request is already pending' });
       return;
     }
+    this.consentDialogOpen = true;
+    try {
+      Logger.info(ElectronEvent.AGENT_AUTH_REQUEST, { agentName: authRequest.agentName, agentType: authRequest.agentType }, 'AgentAuth');
 
-    // Generate access token
-    const token = this.generateToken();
-    const expiresAt = this.calculateExpiration(approval.duration);
+      // Show consent dialog to user
+      const approval = await this.showConsentDialog(authRequest);
 
-    const session: AuthSession = {
-      token,
-      agentName: authRequest.agentName,
-      description: authRequest.description,
-      expiresAt,
-      createdAt: Date.now()
-    };
+      if (!approval.approved) {
+        const response: AuthResponse = {
+          status: 'denied',
+          reason: 'User rejected the request'
+        };
+        Logger.info(ElectronEvent.AGENT_AUTH_DENIED, { agentName: authRequest.agentName }, 'AgentAuth');
+        this.sendJson(res, 403, response);
+        return;
+      }
 
-    this.sessions.set(token, session);
+      // Generate access token
+      const token = this.generateToken();
+      const expiresAt = this.calculateExpiration(approval.duration);
 
-    const response: AuthResponse = {
-      status: 'approved',
-      accessToken: token,
-      expiresAt
-    };
+      const session: AuthSession = {
+        token,
+        agentName: authRequest.agentName,
+        description: authRequest.description,
+        expiresAt,
+        createdAt: Date.now()
+      };
 
-    Logger.info(ElectronEvent.AGENT_AUTH_GRANTED, { agentName: authRequest.agentName, expiresAt, duration: approval.duration }, 'AgentAuth');
-    this.sendJson(res, 200, response);
+      this.sessions.set(token, session);
+
+      const response: AuthResponse = {
+        status: 'approved',
+        accessToken: token,
+        expiresAt
+      };
+
+      Logger.info(ElectronEvent.AGENT_AUTH_GRANTED, { agentName: authRequest.agentName, expiresAt, duration: approval.duration }, 'AgentAuth');
+      this.sendJson(res, 200, response);
+    } finally {
+      this.consentDialogOpen = false;
+    }
   }
 
   /**
@@ -615,7 +625,8 @@ class AgentAuthService {
    * Handle POST /memory/search - Search documents
    */
   private async handleMemorySearch(req: IncomingMessage, res: ServerResponse): Promise<void> {
-   
+    if (!this.guardProxyRequest(req, res)) return;
+
     const body = await this.parseBody(req);
     log.info(`[AgentAuth] Memory search request: ${JSON.stringify(body)}`);
     
@@ -663,6 +674,7 @@ class AgentAuthService {
     * }
    */
   private async handleMemoryUpload(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!this.guardProxyRequest(req, res)) return;
 
     const body = await this.parseBody(req);
     if (!body || typeof body !== 'object') {
@@ -707,6 +719,8 @@ class AgentAuthService {
    * }
    */
   private async handleSessionHistory(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    if (!this.guardProxyRequest(req, res)) return;
+
     const sessionId = url.searchParams.get('sessionId');
     if (!sessionId) {
       this.sendJson(res, 400, { error: 'sessionId query parameter is required' });
@@ -753,6 +767,8 @@ class AgentAuthService {
    * }
    */
   private async handleMemoryUpdate(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    if (!this.guardProxyRequest(req, res)) return;
+
     const docId = url.pathname.replace('/memory/', '');
     if (!docId) {
       this.sendJson(res, 400, { error: 'docId is required' });
@@ -807,6 +823,8 @@ class AgentAuthService {
    * }
    */
   private async handleMemoryReplaceSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!this.guardProxyRequest(req, res)) return;
+
     const body = await this.parseBody(req);
     if (!body || typeof body !== 'object') {
       this.sendJson(res, 400, { error: 'Invalid request body' });
@@ -1393,6 +1411,12 @@ class AgentAuthService {
     return true;
   }
 
+  private sanitizeDialogText(value: string | undefined, maxLen: number): string {
+    if (typeof value !== 'string') return '';
+    const cleaned = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+    return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}…` : cleaned;
+  }
+
   /**
    * Show consent dialog to user
    */
@@ -1404,6 +1428,10 @@ class AgentAuthService {
       return { approved: false, duration: '5min' };
     }
 
+    const name = this.sanitizeDialogText(authRequest.agentName, 64);
+    const type = this.sanitizeDialogText(authRequest.agentType, 32);
+    const description = this.sanitizeDialogText(authRequest.description, 256);
+
     const result = await dialog.showMessageBox(mainWindow, {
       type: 'question',
       buttons: ['Deny', 'Allow (5 min)', 'Allow (1 hour)', 'Allow (Session)'],
@@ -1411,9 +1439,9 @@ class AgentAuthService {
       cancelId: 0,
       title: 'Agent Authorization Request',
       message: `A local agent wants to connect`,
-      detail: `Name: ${authRequest.agentName}\n` +
-              `${authRequest.agentType ? `Type: ${authRequest.agentType}\n` : ''}` +
-              `Description: ${authRequest.description}\n\n` +
+      detail: `Name: ${name}\n` +
+              `${type ? `Type: ${type}\n` : ''}` +
+              `Description: ${description}\n\n` +
               `Do you want to allow this agent to access your application?`,
       normalizeAccessKeys: true
     });
@@ -1462,6 +1490,43 @@ class AgentAuthService {
       return null;
     }
     return authHeader.substring(7);
+  }
+
+  // XYNE-17386 Issues 123/157: the loopback server is reachable by any web page
+  // the user visits. Reject cross-site browser fetch-metadata (Origin /
+  // Sec-Fetch-Site) — real local agents are non-browser and send neither.
+  private isCrossSiteBrowserRequest(req: IncomingMessage): boolean {
+    const loopbackHosts = new Set([`127.0.0.1:${this.port}`, `localhost:${this.port}`]);
+    const origin = req.headers['origin'];
+    if (typeof origin === 'string' && origin.length > 0) {
+      try {
+        if (!loopbackHosts.has(new URL(origin).host)) return true;
+      } catch {
+        return true; // malformed Origin → treat as hostile
+      }
+    }
+    const secFetchSite = req.headers['sec-fetch-site'];
+    if (typeof secFetchSite === 'string' && secFetchSite !== 'none' && secFetchSite !== 'same-origin') {
+      return true;
+    }
+    return false;
+  }
+
+  private guardProxyRequest(req: IncomingMessage, res: ServerResponse): boolean {
+    if (this.isCrossSiteBrowserRequest(req)) {
+      log.warn('[AgentAuth] Rejected cross-site request to credential-forwarding endpoint');
+      this.sendJson(res, 403, { error: 'Forbidden', message: 'Cross-site request rejected' });
+      return false;
+    }
+    const agentToken = this.extractToken(req);
+    if (!agentToken || !this.validateToken(agentToken)) {
+      this.sendJson(res, 401, {
+        error: 'Unauthorized',
+        message: 'Invalid or missing agent authorization token',
+      });
+      return false;
+    }
+    return true;
   }
 
   /**

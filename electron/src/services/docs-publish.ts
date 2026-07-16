@@ -54,18 +54,36 @@ class DocsPublishService {
 
     private async getGitInfo(projectPath: string): Promise<{ repoName: string; branchName: string; remoteUrl: string } | null> {
         try {
-            const { execSync } = require('child_process');
-            
-            let remoteUrl: string;
-            try {
-                remoteUrl = execSync('git remote get-url origin', { cwd: projectPath, encoding: 'utf-8' }).trim();
-            } catch {
-                log.warn('[DocsPublish] No git remote found');
+            const gitDir = path.join(projectPath, '.git');
+            if (!fs.existsSync(gitDir) || !fs.statSync(gitDir).isDirectory()) {
+                log.warn('[DocsPublish] No standard .git directory found');
                 return null;
             }
 
+            const headRaw = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf-8').trim();
+            const refMatch = headRaw.match(/^ref:\s*refs\/heads\/(.+)$/);
+            const branchName = refMatch ? refMatch[1] : headRaw.slice(0, 8); // detached HEAD → short sha
+
+            let remoteUrl = '';
+            try {
+                const configRaw = fs.readFileSync(path.join(gitDir, 'config'), 'utf-8');
+                let inOrigin = false;
+                for (const line of configRaw.split(/\r?\n/)) {
+                    const section = line.match(/^\s*\[(.+?)\]\s*$/);
+                    if (section) {
+                        inOrigin = /^remote\s+"origin"$/.test(section[1].trim());
+                        continue;
+                    }
+                    if (inOrigin) {
+                        const m = line.match(/^\s*url\s*=\s*(.+?)\s*$/);
+                        if (m) { remoteUrl = m[1]; break; }
+                    }
+                }
+            } catch {
+                // No config / unreadable → leave remoteUrl empty, repoName falls back to basename.
+            }
+
             let repoName: string;
-            
             let match = remoteUrl.match(/:([^/]+\/[^/.]+)(?:\.git)?$/);
             if (match) {
                 repoName = match[1];
@@ -78,12 +96,10 @@ class DocsPublishService {
                 }
             }
 
-            const branchName = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectPath, encoding: 'utf-8' }).trim();
-
-            log.info(`[DocsPublish] Git info: repo=${repoName}, branch=${branchName}, remoteUrl=${remoteUrl}`);
+            log.info(`[DocsPublish] Git info: repo=${repoName}, branch=${branchName}, remoteUrl=${remoteUrl || 'none'}`);
             return { repoName, branchName, remoteUrl };
         } catch (error) {
-            log.error('[DocsPublish] Failed to get git info:', error);
+            log.error('[DocsPublish] Failed to read git info:', error);
             return null;
         }
     }
@@ -652,13 +668,29 @@ class DocsPublishService {
     /**
      * Try to start server on a specific port
      */
+    private isCrossSiteBrowserRequest(req: http.IncomingMessage): boolean {
+        const origin = req.headers['origin'];
+        if (typeof origin === 'string' && origin.length > 0) {
+            try {
+                const host = new URL(origin).hostname.toLowerCase();
+                if (host !== '127.0.0.1' && host !== 'localhost') return true;
+            } catch {
+                return true; // malformed Origin → treat as hostile
+            }
+        }
+        const secFetchSite = req.headers['sec-fetch-site'];
+        if (typeof secFetchSite === 'string' && secFetchSite !== 'none' && secFetchSite !== 'same-origin') {
+            return true;
+        }
+        return false;
+    }
+
     private tryStartOnPort(port: number): Promise<void> {
         return new Promise((resolve, reject) => {
             const server = http.createServer(async (req, res) => {
                 log.info(`[DocsPublish] Received request: ${req.method} ${req.url}`);
                 
-                // Set CORS headers
-                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.setHeader('Access-Control-Allow-Origin', `http://127.0.0.1:${port}`);
                 res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
                 res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -672,6 +704,17 @@ class DocsPublishService {
                 const parsedUrl = new URL(req.url || '', `http://127.0.0.1:${port}`);
                 const pathname = parsedUrl.pathname;
                 log.info(`[DocsPublish] Parsed pathname: ${pathname}, query: ${parsedUrl.search}`);
+
+                // XYNE-17387 Issue 142: reject drive-by cross-site browser requests to
+                // the credential-forwarding routes. The legitimate local publish CLI is
+                // a non-browser client and sends no Origin/Sec-Fetch-Site. /api/ping is
+                // left open for local app-detection.
+                if (pathname !== '/api/ping' && this.isCrossSiteBrowserRequest(req)) {
+                    log.warn(`[DocsPublish] Rejected cross-site request to ${pathname}`);
+                    res.writeHead(403);
+                    res.end(JSON.stringify({ error: 'Cross-site request rejected' }));
+                    return;
+                }
 
                 if (req.method === 'POST' && pathname === '/api/publish') {
                     await this.handlePublishRequest(req, res);
@@ -721,9 +764,10 @@ class DocsPublishService {
         req.on('end', async () => {
             try {
                 const request: PublishRequest = JSON.parse(body);
-                const { outputPath, projectPath } = request;
+                const outputPath = request.outputPath ? path.resolve(request.outputPath) : '';
+                const projectPath = request.projectPath ? path.resolve(request.projectPath) : undefined;
 
-                if (!outputPath || !fs.existsSync(outputPath)) {
+                if (!outputPath || !fs.existsSync(outputPath) || !fs.statSync(outputPath).isDirectory()) {
                     Logger.warn(ElectronEvent.DOCS_PUBLISH_REQUEST_RECEIVED, { error: 'Invalid output path', outputPath }, 'DocsPublish');
                     res.writeHead(400);
                     res.end(JSON.stringify({ success: false, error: 'Invalid output path' }));
