@@ -3,7 +3,8 @@ import { logger } from '@/utils/logger';
 import { VespaJob } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { registerVespaBackfillQueueMetrics } from '@/services/otel/vespaMetrics';
-import { fileSchema } from '@/vespa/src/types';
+import { fileSchema, SubApp } from '@/vespa/src/types';
+import { config } from '@/config/env';
 
 class VespaQueue {
 	private queues: Map<string, Bull.Queue<VespaJob>> = new Map();
@@ -132,7 +133,16 @@ class VespaQueue {
 		
 		try {
 			const jobData: VespaJob = vespaJob;
-			const jobOpts = { priority: jobType === 'delete' ? 1 : 5 };
+			// KB (collection) feed jobs get top priority among feeds so they ingest
+			// ahead of every other source. Lower number = higher priority in BullMQ.
+			const isKbFeed = jobType === 'feed' && vespaJob.app === SubApp.COLLECTIONS;
+			const feedPriority = isKbFeed ? config.kbIngestion.queuePriority : 5;
+			const jobOpts = { priority: jobType === 'delete' ? 1 : feedPriority };
+			if (isKbFeed) {
+				logger.info(
+					`[KB_PRIORITY] Prioritizing KB file feed ${schema}/${docId} with queue priority ${jobOpts.priority} (lower = higher)`
+				);
+			}
 			
 			let targetQueues: Bull.Queue<VespaJob>[];
 

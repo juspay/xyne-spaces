@@ -351,6 +351,11 @@ const envSchema = Joi.object({
   DOCLING_SCHEDULER_VESPA_WRITE_TIMEOUT_MS: Joi.number().default(300000),
   DOCLING_SCHEDULER_MAX_VESPA_PAYLOAD_BYTES: Joi.number().default(9437184),
   DOCLING_PAGE_CHUNK_SIZE: Joi.number().default(25),
+  // KB (collection) ingestion gets top priority. BullMQ: lower = higher priority
+  // (delete=1). Docling OCR scheduler: higher = processed first (attachments=100).
+  KB_INGESTION_QUEUE_PRIORITY: Joi.number().default(2),
+  KB_INGESTION_OCR_PRIORITY: Joi.number().default(200),
+  ATTACHMENT_OCR_PRIORITY: Joi.number().default(100),
   // Staging on the LOCAL filesystem (a tmp folder in the container). Single-pod only.
   DOCLING_ASYNC_STORAGE_ROOT: Joi.string().default(''),
   DOCLING_KEEP_TEMP_RESULTS: Joi.boolean().default(false),
@@ -771,6 +776,11 @@ export const config = {
     timeoutMs: envVars.DOCLING_TIMEOUT_MS as number,
     healthCacheTtlMs: envVars.DOCLING_HEALTH_CACHE_TTL_MS as number,
     doOcr: envVars.DOCLING_DO_OCR as boolean,
+  },
+  kbIngestion: {
+    queuePriority: envVars.KB_INGESTION_QUEUE_PRIORITY as number,
+    ocrPriority: envVars.KB_INGESTION_OCR_PRIORITY as number,
+    attachmentOcrPriority: envVars.ATTACHMENT_OCR_PRIORITY as number,
   },
   doclingScheduler: {
     enabled: envVars.DOCLING_ASYNC_SCHEDULER_ENABLED as boolean,
