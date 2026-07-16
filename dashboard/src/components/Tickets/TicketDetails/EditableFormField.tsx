@@ -245,7 +245,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               onChange={e => setEditValue(e.target.value)}
               onBlur={() => handleSave()}
               onKeyDown={handleKeyDown}
-              className='w-full text-sm text-foreground border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
+              className='w-full text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
               data-track-category='Tickets'
               data-track-name='EditDateField'
               data-track-metadata={JSON.stringify({ fieldName })}
@@ -326,7 +326,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
           >
             {fieldName}
           </span>
-          <div className='flex-1 border border-input rounded outline-none focus:border-blue-500 focus-within:border-blue-500'>
+          <div className='flex-1 bg-background border border-input rounded outline-none focus:border-blue-500 focus-within:border-blue-500'>
             <SearchUserV2
               options={usersSearchResults || []}
               selectedUsers={selectedUsers}
@@ -360,7 +360,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             onChange={e => setEditValue(e.target.value)}
             onBlur={() => handleSave()}
             onKeyDown={handleKeyDown}
-            className='w-full text-sm text-foreground border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
+            className='w-full text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
             data-track-category='Tickets'
             data-track-name='EditTextField'
             data-track-metadata={JSON.stringify({ fieldName, fieldType })}
