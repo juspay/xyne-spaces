@@ -12,9 +12,10 @@
  * No context / no column / caller-provided value → left untouched, never throws.
  * There is no read filtering and no NOT NULL here — those are later ("tighten").
  *
- * Scope (intentional): covers all top-level `create*` ops. `upsert` (its create
- * branch), nested relation creates, and raw-SQL inserts are NOT stamped yet —
- * deferred to a follow-up PR (nested/upsert) or a DB-level default (raw SQL).
+ * Scope (intentional): covers all top-level `create*` ops and the `upsert` insert
+ * branch (its `args.create` — the update branch is left untouched, never rewriting
+ * an existing row's tenant key). Nested relation creates and raw-SQL inserts are
+ * NOT stamped yet — deferred to a follow-up PR (nested) or a DB-level default (raw SQL).
  */
 import { PrismaClient, Prisma } from '@prisma/client';
 import { getContextOrNull } from './context';
@@ -65,20 +66,35 @@ export function withWorkspaceStamp<T extends PrismaClient>(prisma: T): T {
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          // Structural classification, not an operation allowlist: every insert in
-          // Prisma is a `create*` op (create, createMany, createManyAndReturn, and
-          // any future variant), all carrying new-row data in `args.data` (object
-          // for create, array for the *Many forms). Matching the prefix covers new
-          // create ops automatically — nothing to remember to add. `upsert` carries
-          // its insert in `args.create`, so it is intentionally out of this rule
-          // (deferred; see header). Update/delete ops never match.
-          if (operation.startsWith('create') && STAMPABLE.has(model)) {
+          if (STAMPABLE.has(model)) {
             const ws = ctxWorkspaceId();
             if (ws) {
+              // Widen to string: Prisma types the extension `operation` union without
+              // the write-creating ops, so equality checks against them would narrow
+              // to `never`. Classify structurally off the op name instead.
+              const op: string = operation;
+              // Structural classification, not an operation allowlist: every insert in
+              // Prisma is a `create*` op (create, createMany, createManyAndReturn, and
+              // any future variant), all carrying new-row data in `args.data` (object
+              // for create, array for the *Many forms). Matching the prefix covers new
+              // create ops automatically — nothing to remember to add.
               // Pass FRESH args to query — never mutate the caller's args or data
               // objects (see withWorkspaceId: prevents cross-request leakage).
-              const data = stampData((args as CreateArgs).data, ws);
-              return query({ ...(args as Record<string, unknown>), data } as typeof args);
+              if (op.startsWith('create')) {
+                const data = stampData((args as CreateArgs).data, ws);
+                return query({ ...(args as Record<string, unknown>), data } as typeof args);
+              }
+              // `upsert` carries its INSERT in `args.create` (a single row); the
+              // `args.update` branch is an existing row and is left untouched so we
+              // never rewrite a live row's tenant key. Guard on create presence so a
+              // malformed upsert passes through rather than gaining a bogus payload.
+              if (op === 'upsert') {
+                const a = args as { create?: CreateRow };
+                if (a.create) {
+                  const create = withWorkspaceId(a.create, ws);
+                  return query({ ...(args as Record<string, unknown>), create } as typeof args);
+                }
+              }
             }
           }
           return query(args);
