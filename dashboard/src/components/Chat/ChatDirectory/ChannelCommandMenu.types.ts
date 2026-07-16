@@ -109,7 +109,6 @@ export const VespaApps = {
   TICKET: 'ticket',
   FILE: 'file',
   MAIL: 'mail',
-  CALL: 'call',
 } as const;
 
 export type VespaApps = (typeof VespaApps)[keyof typeof VespaApps];
@@ -120,7 +119,6 @@ export const VespaDocTypes = {
   ATTACHMENTS: 'attachments',
   TICKETS: 'tickets',
   FILES: 'files',
-  CALLS: 'calls',
 } as const;
 
 export type VespaDocTypes = (typeof VespaDocTypes)[keyof typeof VespaDocTypes];

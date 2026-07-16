@@ -472,18 +472,6 @@ export class SearchService {
       params['callType'] = filters.callType;
     }
 
-    if (filters.callStatus) {
-      params['callStatus'] = filters.callStatus;
-    }
-
-    if (filters.callStartsAt !== undefined) {
-      params['callStartsAt'] = filters.callStartsAt.toString();
-    }
-
-    if (filters.callEndsAt !== undefined) {
-      params['callEndsAt'] = filters.callEndsAt.toString();
-    }
-
     if (filters.presentationSummary) {
       params['presentationSummary'] = filters.presentationSummary;
     }
