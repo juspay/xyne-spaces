@@ -1426,8 +1426,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           groupDMThreadMentionedUserIds = groupDMThreadMentionedUsers.map(u => u.userId);
 
           // Digital Twin: deliver USER_MENTIONED for group-DM thread @mentions.
-          // Group DMs never had channel-scoped app delivery, so this only adds
-          // the twin (no de-dupe set needed).
+          // Installed-app APP_MENTION delivery for group DMs is handled just
+          // below (XYNE-17556); the twin is a separate workspace-scoped observer.
           void this.emitUserMentionedToTwin(this.ctx.workspaceId, {
             conversationId,
             messageId,
@@ -1440,6 +1440,38 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             channelName,
             mentionedUserIds: groupDMThreadMentionedUserIds,
           });
+
+          // XYNE-17556: deliver APP_MENTION to @mentioned installed apps that are
+          // members of this group DM. Mirrors the channel path. The sender is
+          // excluded here (and again in handleEventSubscriptionsForUsers) so an
+          // app can never re-trigger itself in a small group DM.
+          const threadMentionedAppUserIds = groupDMThreadMentionedUserIds
+            .filter(id => appUserIds.includes(id) && id !== senderId);
+          if (threadMentionedAppUserIds.length > 0) {
+            const appMentionAttachments = hasAttachment
+              ? await messageAttachmentRepository.findByMessageId(messageId)
+              : [];
+            void this.handlleMessageAppEvents(AppEventType.APP_MENTION, {
+              conversationId,
+              messageId,
+              content: htmlContent,
+              cleanContent,
+              createdAt,
+              userId: senderId,
+              senderName,
+              channelId,
+              channelName,
+              ...(appMentionAttachments.length > 0 && {
+                attachments: appMentionAttachments.map(att => ({
+                  attachmentId: att.id,
+                  fileName: att.originalFilename,
+                  fileSize: att.size,
+                  mimeType: att.mimetype,
+                  fileUrl: att.url,
+                })),
+              }),
+            }, threadMentionedAppUserIds);
+          }
 
           if (groupDMThreadMentionedUserIds.length > 0) {
             try {
@@ -1559,9 +1591,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             .map(u => ({ userId: u.userId, mentionSource: u.mentionSource as 'direct' | 'group' }));
           groupDMMentionedUserIds = groupDMMentionedUsers.map(u => u.userId);
 
-          // Digital Twin: deliver USER_MENTIONED for group-DM @mentions. Group
-          // DMs never had channel-scoped app delivery, so this only adds the
-          // twin (no de-dupe set needed).
+          // Digital Twin: deliver USER_MENTIONED for group-DM @mentions.
+          // Installed-app APP_MENTION delivery for group DMs is handled just
+          // below (XYNE-17556); the twin is a separate workspace-scoped observer.
           void this.emitUserMentionedToTwin(this.ctx.workspaceId, {
             conversationId,
             messageId,
@@ -1574,6 +1606,38 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             channelName,
             mentionedUserIds: groupDMMentionedUserIds,
           });
+
+          // XYNE-17556: deliver APP_MENTION to @mentioned installed apps that are
+          // members of this group DM. Mirrors the channel path. The sender is
+          // excluded here (and again in handleEventSubscriptionsForUsers) so an
+          // app can never re-trigger itself in a small group DM.
+          const parentMentionedAppUserIds = groupDMMentionedUserIds
+            .filter(id => appUserIds.includes(id) && id !== senderId);
+          if (parentMentionedAppUserIds.length > 0) {
+            const appMentionAttachments = hasAttachment
+              ? await messageAttachmentRepository.findByMessageId(messageId)
+              : [];
+            void this.handlleMessageAppEvents(AppEventType.APP_MENTION, {
+              conversationId,
+              messageId,
+              content: htmlContent,
+              cleanContent,
+              createdAt,
+              userId: senderId,
+              senderName,
+              channelId,
+              channelName,
+              ...(appMentionAttachments.length > 0 && {
+                attachments: appMentionAttachments.map(att => ({
+                  attachmentId: att.id,
+                  fileName: att.originalFilename,
+                  fileSize: att.size,
+                  mimeType: att.mimetype,
+                  fileUrl: att.url,
+                })),
+              }),
+            }, parentMentionedAppUserIds);
+          }
         }
 
         // Mention notifications for explicitly @mentioned users.
