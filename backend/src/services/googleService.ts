@@ -529,7 +529,20 @@ export class GoogleService {
     const subscriptionName = await GoogleService.setupPubSubSubscription();
 
     const repo = new ExternalSourceRepository();
-    const existing = await repo.findByName(sourceName);
+    const legacySourceName = `${SOURCE_NAME_PREFIX}${emailAddress.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    const [newMatch, legacyMatch] = await Promise.all([
+      repo.findByName(sourceName),
+      repo.findByName(legacySourceName),
+    ]);
+    const emailLower = emailAddress.toLowerCase();
+    if (newMatch && newMatch.displayName?.toLowerCase() !== emailLower) {
+      throw new Error(
+        `Source name ${sourceName} is already taken by a different account (${newMatch.displayName})`,
+      );
+    }
+    const existing =
+      (newMatch?.displayName?.toLowerCase() === emailLower ? newMatch : null) ??
+      (legacyMatch?.displayName?.toLowerCase() === emailLower ? legacyMatch : null);
 
     if (existing) {
       await repo.update(existing.id, {
@@ -740,7 +753,7 @@ export class GoogleService {
   }
 
   static getSourceName(emailAddress: string): string {
-    const username = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '-');
+    const username = emailAddress.replace('@', '--').replace(/[^a-zA-Z0-9_-]/g, '-');
     return `${SOURCE_NAME_PREFIX}${username}`;
   }
 

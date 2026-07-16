@@ -504,9 +504,14 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
 
     // If this Google account is already connected to another channel, block before
     // creating anything new (mirrors microsoftDeskService.createChannelAndSource)
-    const username = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9-_]/g, '-');
+    const username = emailAddress.replace('@', '--').replace(/[^a-zA-Z0-9_-]/g, '-');
     const sourceName = `google-${username}`;
-    const existingSource = await db.externalSource.findUnique({ where: { name: sourceName } });
+    const legacyUsername = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '-');
+    const legacySourceName = `google-${legacyUsername}`;
+    const legacyMatch = await db.externalSource.findUnique({ where: { name: legacySourceName } });
+    const existingSource =
+      (await db.externalSource.findUnique({ where: { name: sourceName } })) ??
+      (legacyMatch?.displayName?.toLowerCase() === emailAddress.toLowerCase() ? legacyMatch : null);
     if (existingSource && stateData.mode !== 'dl-member-sync') {
       const isConnectFlow = !!stateData.channelData;
       const isDifferentChannel =
@@ -549,11 +554,17 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         return;
       }
 
-      const sourceRow = await db.externalSource.findFirst({
-        where: { channelId: stateData.channelId },
-        select: { id: true },
-        orderBy: { createdAt: 'desc' },
-      });
+      const sourceRow =
+        existingSource ??
+        (await db.externalSource.findFirst({
+          where: {
+            channelId: stateData.channelId,
+            sourceType: ExternalSourcePlatform.GOOGLE,
+            NOT: { name: { startsWith: 'google-dl-sync' } },
+          },
+          select: { id: true },
+          orderBy: { createdAt: 'desc' },
+        }));
       if (!sourceRow) {
         const params = new URLSearchParams({ emailError: 'no_source_to_reconnect' });
         res.redirect(
@@ -573,7 +584,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       });
       await db.externalSource.update({
         where: { id: sourceRow.id },
-        data: { credentials: reEncrypted.encryptedCredentials, isActive: true },
+        data: { name: sourceName, credentials: reEncrypted.encryptedCredentials, isActive: true },
       });
 
       logger.info(`${TAG} Reconnected Gmail integration`, {
@@ -752,9 +763,14 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
 
     if (stateData.mode === 'channel-email-workspace' && stateData.workspaceId) {
       const workspaceId = stateData.workspaceId;
-      const username = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '-');
+      const username = emailAddress.replace('@', '--').replace(/[^a-zA-Z0-9_-]/g, '-');
       const sourceName = `google-channel-email-${username}`;
-      const existingByName = await db.externalSource.findUnique({ where: { name: sourceName } });
+      const legacyUsername = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '-');
+      const legacySourceName = `google-channel-email-${legacyUsername}`;
+      const legacyByName = await db.externalSource.findUnique({ where: { name: legacySourceName } });
+      const existingByName =
+        (await db.externalSource.findUnique({ where: { name: sourceName } })) ??
+        (legacyByName?.displayName?.toLowerCase() === emailAddress.toLowerCase() ? legacyByName : null);
       if (existingByName?.isActive && existingByName.workspaceId !== workspaceId) {
         const params = new URLSearchParams({
           emailError: 'channel_email_mailbox_already_connected_elsewhere',
