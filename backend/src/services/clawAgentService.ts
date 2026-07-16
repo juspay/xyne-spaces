@@ -139,6 +139,9 @@ export interface ClawMessagesResponse {
    *  the clicked message instead of routing by chronological turn index
    *  (which doesn't survive sibling branches). */
   runByMsgId?: Record<string, string>;
+  /** assistantMessageId → { rating, comment } for the run that produced it.
+   *  Lets the ask-ai v2 surfaces seed 👍/👎 thumb state on reload. */
+  ratingByMsgId?: Record<string, { rating: 'up' | 'down' | null; comment: string | null }>;
 }
 
 export interface ClawDebugArtifactBundle {
@@ -878,6 +881,41 @@ export async function getClawConversationMessages(
   }
 
   return (await response.json()) as ClawMessagesResponse;
+}
+
+/**
+ * Rate the claw AgentRun that produced an assistant message (👍/👎 + optional
+ * comment) by proxying to claw-auth's POST /runs/by-message/:chatMessageId/rate.
+ * Persists to agent_runs.rating so ask-ai v2 feedback shows in the claw metrics
+ * SentimentPanel and survives reload. `chatMessageId` is the assistant message
+ * id — known the instant a turn completes (no dependency on the later /messages
+ * refetch that carries the run sessionId). Ownership is enforced on claw-auth.
+ */
+export async function rateClawRun(
+  req: { headers?: { cookie?: string }; userId: string },
+  chatMessageId: string,
+  rating: 'up' | 'down',
+  comment?: string | null
+): Promise<{ success: boolean }> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/runs/by-message/${encodeURIComponent(chatMessageId)}/rate`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify({ rating, ...(comment != null ? { comment } : {}) }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] rateRun failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to rate run');
+  }
+
+  return (await response.json()) as { success: boolean };
 }
 
 /**

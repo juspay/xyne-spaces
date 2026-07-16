@@ -24,7 +24,7 @@ import {
   Pencil,
   RefreshCw,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { Link } from 'react-router-dom';
@@ -41,6 +41,7 @@ import type {
 } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
+import { AskAiRatingButtons } from './AskAiRatingButtons';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
@@ -48,6 +49,7 @@ import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { BrailleLoader, AnimatedLabel, useStableLabel } from './ReasoningLoader';
 import { createMarkdownComponents } from '../../utils/markdownComponents';
+import { StreamingMarkdownBlocks, rehypeStreamWordFade } from '../utils/StreamingMarkdownBlocks';
 import {
   stripCitationMarks,
   extractInlineCitations,
@@ -74,6 +76,14 @@ import {
   processNodeForUserTags,
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
+import {
+  ActivityStatusChip,
+  LiveReasoning,
+  formatDuration,
+  formatCount,
+  useElapsedMs,
+  useSmoothCount,
+} from '../Chat/XyneAISidebar/components/activityShared';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
 import {
   normalizeLoadedMessagesForDisplay,
@@ -248,71 +258,155 @@ function ReasoningSection({
   const hasReasoning = reasoning.trim().length > 0;
   const hasTools = !!toolInvocations && toolInvocations.length > 0;
   const canExpand = hasReasoning || hasTools;
+  // Anything to show? When this flips false on completion (pure text answer) the
+  // grid-rows collapse eases the section out. No remount now (stable key), so the
+  // transition actually animates.
+  const shouldShow = !!isStreaming || hasReasoning || hasTools;
 
   // Throttled so the chip doesn't strobe through phases.
   const stablePhase = useStableLabel(phaseLabelFor(reasoning.length));
-  const liveText = isStreaming ? `${stablePhase}…` : 'Reasoning';
+  const elapsedMs = useElapsedMs(!!isStreaming);
+  const completedToolCount = (toolInvocations ?? []).filter(t => !t.parentToolCallId).length;
+  const toolDurationSumMs = (toolInvocations ?? []).reduce((a, t) => a + (t.durationMs || 0), 0);
+  const displayedDurationMs = elapsedMs ?? toolDurationSumMs;
+  // Tool count tweens on the rare +1; the char count updates per delta (no
+  // per-frame tween) — keeps streaming cheap.
+  const smoothTools = useSmoothCount(completedToolCount);
+  // Done label mirrors the sidebar: "Thought for Ns · N tools".
+  const doneLabel =
+    displayedDurationMs > 0
+      ? `Thought for ${formatDuration(displayedDurationMs)}${hasTools ? ` · ${smoothTools} tool${smoothTools === 1 ? '' : 's'}` : ''}`
+      : hasReasoning
+        ? 'Thought process'
+        : 'Reasoning';
+  const liveText = isStreaming ? `${stablePhase}…` : doneLabel;
+  // Streaming right-side metadata: live char counter + elapsed (tweened digits).
+  const streamingBits = isStreaming
+    ? [
+        reasoning.length > 0 ? `${formatCount(reasoning.length)} chars` : null,
+        displayedDurationMs > 0 ? formatDuration(displayedDurationMs) : null,
+      ].filter(Boolean)
+    : [];
 
   return (
-    <div className='my-1 text-[12.5px]'>
-      <button
-        type='button'
-        onClick={() => {
-          if (canExpand) setExpanded(!expanded);
-        }}
-        disabled={!canExpand}
-        aria-expanded={expanded}
-        aria-label={isStreaming ? liveText : 'Show reasoning'}
-        className={cn(
-          '-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
-          canExpand ? 'hover:bg-secondary/70 hover:text-foreground' : 'cursor-default',
-        )}
-        data-track-category='XyneAI'
-        data-track-name='TOGGLE_REASONING'
-      >
-        <ChevronRight
-          className={cn(
-            'h-3 w-3 flex-shrink-0 transition-transform duration-200',
-            expanded && 'rotate-90',
-            !canExpand && 'opacity-50',
-          )}
-          aria-hidden
-          strokeWidth={2}
-        />
-        {isStreaming && <BrailleLoader />}
-        <span className='select-none'>
-          <AnimatedLabel text={liveText} />
-        </span>
-      </button>
-
-      {expanded && canExpand && (
-        <div
-          className='mt-1.5 max-h-[28rem] overflow-y-auto pl-5 pr-0.5 py-2 space-y-3'
-          style={REASONING_FADE_MASK_STYLE}
-        >
-          {hasReasoning && (
-            <div>
-              <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
-                Reasoning
-              </div>
-              <pre className='whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground'>
-                {reasoning}
-              </pre>
-            </div>
-          )}
-
-          {hasTools && (
-            <div>
-              {hasReasoning && (
-                <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
-                  Tool calls
-                </div>
+    // Whole-section collapse: grid-rows(1fr↔0fr)+opacity eases the section out on
+    // completion when nothing's left to show. Kept mounted (collapsed) so the exit
+    // transitions; CSS only animates on change, so a message that starts hidden
+    // (history) renders collapsed with no motion. Margin is on the inner div so it
+    // collapses with the height.
+    <div
+      className={cn(
+        'grid',
+        shouldShow ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
+      )}
+      style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
+    >
+      <div className='overflow-hidden'>
+        <div className='my-1 text-[12.5px]'>
+          <button
+            type='button'
+            onClick={() => {
+              if (canExpand) setExpanded(!expanded);
+            }}
+            disabled={!canExpand}
+            aria-expanded={expanded}
+            aria-label={isStreaming ? liveText : 'Show reasoning'}
+            className={cn(
+              '-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+              canExpand ? 'hover:bg-secondary/70 hover:text-foreground' : 'cursor-default',
+            )}
+            data-track-category='XyneAI'
+            data-track-name='TOGGLE_REASONING'
+          >
+            <ChevronRight
+              className={cn(
+                'h-3 w-3 flex-shrink-0 transition-transform duration-200',
+                expanded && 'rotate-90',
+                !canExpand && 'opacity-50',
               )}
-              <ToolInvocationList invocations={toolInvocations} messageAborted={messageAborted} />
+              aria-hidden
+              strokeWidth={2}
+            />
+            {isStreaming && <BrailleLoader />}
+            <span className='select-none'>
+              <AnimatedLabel text={liveText} />
+            </span>
+            {streamingBits.length > 0 && (
+              <span className='text-[10px] tabular-nums text-muted-foreground/60'>
+                · {streamingBits.join(' · ')}
+              </span>
+            )}
+            {/* ONE consolidated status chip ("⟳ 2 running · ⧗ 5 bg") — fixed
+            footprint, tweened counts, so the header never grows or jumps as
+            parallel calls come and go. Renders after completion too while
+            detached background work is still running. */}
+            <ActivityStatusChip toolInvocations={toolInvocations} />
+          </button>
+
+          {/* Live streaming surface: streams the model's reasoning live in a bounded
+          auto-scroll window. Collapses out (grid-rows + opacity) when streaming
+          ends instead of unmounting abruptly; kept mounted while collapsed so the
+          exit transitions. */}
+          <div
+            className={cn(
+              'grid',
+              isStreaming && hasReasoning
+                ? 'grid-rows-[1fr] opacity-100'
+                : 'grid-rows-[0fr] opacity-0',
+            )}
+            style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
+          >
+            <div className='overflow-hidden'>
+              <div className='mt-1 pl-5'>
+                <LiveReasoning reasoning={reasoning} streaming={!!isStreaming} lines={5} />
+              </div>
+            </div>
+          </div>
+
+          {/* Smooth expand/collapse via the grid-rows 0fr→1fr trick — quick, never
+          snaps. Content stays mounted. */}
+          {canExpand && (
+            <div
+              className={cn(
+                'grid transition-[grid-template-rows] duration-200 ease-out',
+                expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+              )}
+            >
+              <div className='overflow-hidden'>
+                <div
+                  className='mt-1.5 max-h-[28rem] overflow-y-auto pl-5 pr-0.5 py-2 space-y-3'
+                  style={REASONING_FADE_MASK_STYLE}
+                >
+                  {hasReasoning && (
+                    <div>
+                      <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
+                        Reasoning
+                      </div>
+                      <pre className='whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground'>
+                        {reasoning}
+                      </pre>
+                    </div>
+                  )}
+
+                  {hasTools && (
+                    <div>
+                      {hasReasoning && (
+                        <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
+                          Tool calls
+                        </div>
+                      )}
+                      <ToolInvocationList
+                        invocations={toolInvocations}
+                        messageAborted={messageAborted}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -554,6 +648,20 @@ function BranchNavigator({
 // Message Bubble (xyne-search style matching reference image)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Stable identities for the streaming answer's markdown render. React matches
+// JSX elements by component-type REFERENCE — if these were fresh inline values
+// on every render, React would treat each streaming delta as all-new element
+// types, discard the real DOM nodes and rebuild them (re-firing the mount fade
+// = the blink). Hoisted to module scope so identity can never change.
+const ANSWER_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+// Word-fade spans for live-streamed answers (see rehypeStreamWordFade). Only
+// applied on the everStreamed path so history messages carry no extra spans.
+const ANSWER_REHYPE_PLUGINS = [rehypeStreamWordFade];
+// Preserve `cite:clf-…` hrefs — react-markdown's default sanitizer strips
+// non-http(s) schemes, which would erase the href before the `a` override can
+// intercept it.
+const preserveUrlTransform = (url: string): string => url;
+
 function ChatMessageBubble({
   message,
   onCopy,
@@ -565,11 +673,17 @@ function ChatMessageBubble({
   onRegenerate,
   branchInfo,
   onBranchNavigate,
+  isV2,
+  onRatingChange,
 }: {
   message: Message;
   onCopy?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   feedbackValue?: FeedbackValue;
+  /** v2 (claw-backed) surface: route 👍/👎 to agent_runs.rating instead of Langfuse. */
+  isV2?: boolean;
+  /** v2 rating change — lets the parent reflect the new feedback in message state. */
+  onRatingChange?: (messageId: string, feedback: 0 | 1 | 2, comment?: string | null) => void;
   onDebug?: (() => void) | undefined;
   /** Open the debug panel focused on a specific tool call — for clicking a
    *  generic auto-citation chip (which has no link target). */
@@ -587,16 +701,34 @@ function ChatMessageBubble({
   const [editText, setEditText] = useState('');
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Once this message has streamed live, KEEP the per-block render after
+  // completion: the subtree keeps the same component type, unchanged blocks
+  // memo-bail, and the streaming→done transition reuses the existing DOM in
+  // place instead of tearing down and rebuilding the whole answer (a visibly
+  // harsh repaint, and async blocks like mermaid would flash through their
+  // loading state). History messages that never streamed here keep the plain
+  // single-parse render, so cross-block markdown (reference links, footnotes)
+  // renders exactly as before for them.
+  const everStreamedRef = useRef(message.isStreaming);
+  if (message.isStreaming) everStreamedRef.current = true;
+
   // Session-wide tool-invocation pool (flat union of every turn's invocations),
   // matching what ClawCitationChip uses to resolve citations. Citation validity
   // must be checked against the whole session — a later turn frequently cites a
   // chunk produced by a tool call in an earlier turn — not just this message's
   // own invocations. Fall back to the per-message list if the provider is absent.
   const conversationTools = useContext(ConversationToolInvocationsContext);
-  const lookupTools =
-    conversationTools && conversationTools.length > 0
-      ? conversationTools
-      : (message.toolInvocations ?? []);
+  // Memoized so downstream useMemo/useCallback (knownToolCallIds,
+  // validCitationKeys, renderAnswerBlock) keep a stable identity across text
+  // deltas — the `?? []` fallback would otherwise mint a fresh array every
+  // render and defeat StreamingMarkdownBlocks' settled-block memo bail-out.
+  const lookupTools = useMemo(
+    () =>
+      conversationTools && conversationTools.length > 0
+        ? conversationTools
+        : (message.toolInvocations ?? []),
+    [conversationTools, message.toolInvocations],
+  );
 
   // Set of every toolCallId AND toolName that actually ran across the session,
   // including nested tools (subagent calls). The invocation list is a flat array
@@ -715,6 +847,160 @@ function ChatMessageBubble({
   // tagging looks identical on the AIScreen. Only names that map to exactly one
   // real workspace user become chips; everything else stays plain text.
   const resolveMention = useMentionResolver(message.userTags);
+
+  // Volatile inputs of the markdown overrides, read through a ref so the
+  // component identities below never depend on them. Updated every render —
+  // the overrides always see current data without changing type reference.
+  const latestAnswerDeps = useRef({
+    resolveMention,
+    lookupTools,
+    validCitationKeys,
+    clawCitationToolNumbers,
+    onOpenToolDebug,
+  });
+  latestAnswerDeps.current = {
+    resolveMention,
+    lookupTools,
+    validCitationKeys,
+    clawCitationToolNumbers,
+    onOpenToolDebug,
+  };
+
+  // THE anti-blink invariant (found via stream_debug logs): these override
+  // components are memoized once per message. A fresh inline `p:`/`a:` arrow
+  // per render is a NEW element type to React, which then rebuilds the real
+  // <p>/<a> DOM nodes on every streaming delta — re-firing the mount fade on
+  // text already on screen (the blink). With stable types React reconciles
+  // the existing DOM in place, so the fade physically cannot re-fire.
+  const answerComponents = useMemo<Components>(() => {
+    const deps = latestAnswerDeps;
+    return {
+      ...markdownComponents,
+      p: ({ children }) => <p>{processNodeForUserTags(children, deps.current.resolveMention)}</p>,
+      li: ({ children, ...props }) => (
+        <li {...props}>{processNodeForUserTags(children, deps.current.resolveMention)}</li>
+      ),
+      td: ({ children, ...props }) => (
+        <td {...props}>{processNodeForUserTags(children, deps.current.resolveMention)}</td>
+      ),
+      th: ({ children, ...props }) => (
+        <th {...props}>{processNodeForUserTags(children, deps.current.resolveMention)}</th>
+      ),
+      a: ({ href, children, ...props }) => {
+        const {
+          lookupTools: tools,
+          validCitationKeys: validKeys,
+          clawCitationToolNumbers: toolNumbers,
+          onOpenToolDebug: openToolDebug,
+        } = deps.current;
+        // Grouped run of adjacent citations → one stacked cluster chip.
+        if (href && href.startsWith('cite-group:')) {
+          const groupRefs = parseCiteGroupHref(href);
+          if (groupRefs.length >= 2) {
+            return (
+              <ClawCitationGroup
+                refs={groupRefs}
+                toolInvocations={tools}
+                onOpenToolDebug={openToolDebug}
+              />
+            );
+          }
+        }
+        if (href && href.startsWith('cite:clf-')) {
+          const body = href.slice('cite:clf-'.length);
+          const hashIdx = body.lastIndexOf('#');
+          if (hashIdx > 0) {
+            const citedId = body.slice(0, hashIdx);
+            const chunkRaw = body.slice(hashIdx + 1);
+            const chunkIndex = Number(chunkRaw);
+            const toolNumber = toolNumbers.get(citedId) ?? 0;
+            // Defense in depth — stripUnknownCiteLinks should have
+            // removed any link without a backing citation, but
+            // gate render here too so a survivor still falls
+            // through to plain `<a>`/text rather than a fake chip.
+            const hasBackingCitation =
+              validKeys.has(`${citedId}#${chunkRaw}`) ||
+              validKeys.has(`${normalizeCitedToolId(citedId)}#${chunkRaw}`);
+            if (toolNumber > 0 && Number.isFinite(chunkIndex) && hasBackingCitation) {
+              // Resolve the cited id to a real invocation. Prefer an
+              // EXACT toolCallId match first: the model cites repeated
+              // calls to the same tool as `functions.<name>:13` vs
+              // `:14`, and that trailing index is the ONLY thing that
+              // tells them apart. Normalizing to the bare toolName (and
+              // taking the first match) collapses both onto the same
+              // invocation → every same-tool citation resolves to one
+              // file. So only fall back to toolName matching when no
+              // invocation carries this exact id. (Mirrors the sidebar,
+              // which matches on the raw cited id.)
+              const stripClf = (id: string): string => (id.startsWith('clf-') ? id.slice(4) : id);
+              const exactMatch = tools.find(
+                inv => inv.toolCallId && stripClf(inv.toolCallId) === citedId,
+              );
+              const normalized = normalizeCitedToolId(citedId);
+              const matchByName = exactMatch ?? tools.find(inv => inv.toolName === normalized);
+              const resolvedToolCallId = matchByName?.toolCallId
+                ? stripClf(matchByName.toolCallId)
+                : citedId;
+              return (
+                <ClawCitationChip
+                  toolCallId={resolvedToolCallId}
+                  chunkIndex={chunkIndex}
+                  toolNumber={toolNumber}
+                  toolInvocations={tools}
+                  onOpenToolDebug={openToolDebug}
+                />
+              );
+            }
+          }
+        }
+
+        const isExternal = (() => {
+          if (!href) return false;
+          try {
+            const urlObj = new URL(href, window.location.origin);
+            return urlObj.origin !== window.location.origin;
+          } catch {
+            return true;
+          }
+        })();
+
+        if (isExternal) {
+          return (
+            <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+              {children}
+            </a>
+          );
+        }
+        return (
+          <a href={href} {...props}>
+            {children}
+          </a>
+        );
+      },
+    };
+  }, [markdownComponents]);
+
+  // One definition of the answer's markdown render, shared verbatim by the
+  // streaming per-block path and the completed single-parse path so both
+  // produce identical output. Every prop has stable identity across streaming
+  // deltas, so settled StreamingMarkdownBlocks blocks memo-bail entirely.
+  // `wordFade` is constant for a given message's lifetime (true from the
+  // first streaming render, false for history), so it never churns the
+  // callback identity mid-stream.
+  const wordFade = everStreamedRef.current;
+  const renderAnswerBlock = useCallback(
+    (markdown: string): ReactElement => (
+      <ReactMarkdown
+        remarkPlugins={ANSWER_REMARK_PLUGINS}
+        rehypePlugins={wordFade ? ANSWER_REHYPE_PLUGINS : undefined}
+        urlTransform={preserveUrlTransform}
+        components={answerComponents}
+      >
+        {markdown}
+      </ReactMarkdown>
+    ),
+    [answerComponents, wordFade],
+  );
 
   const hasUserContent = isUser && message.content.trim().length > 0;
   const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
@@ -849,129 +1135,33 @@ function ChatMessageBubble({
           {/* Reasoning section — also acts as the initial loading placeholder
               so the user sees "Reasoning" with bouncing dots from the moment
               streaming starts. When expanded, also reveals the tool-call tree
-              inside (matching the sidebar's ActivityBlock layout). */}
-          {(message.isStreaming ||
-            (message.reasoning && message.reasoning.trim().length > 0) ||
-            (message.toolInvocations && message.toolInvocations.length > 0)) && (
-            <ReasoningSection
-              reasoning={message.reasoning ?? ''}
-              isStreaming={message.isStreaming}
-              toolInvocations={message.toolInvocations}
-              messageAborted={!!message.isAborted}
-            />
-          )}
+              inside (matching the sidebar's ActivityBlock layout). Always
+              mounted so its grid-rows collapse can animate the exit on
+              completion; it self-hides (collapsed) when there's nothing to show. */}
+          <ReasoningSection
+            reasoning={message.reasoning ?? ''}
+            isStreaming={message.isStreaming}
+            toolInvocations={message.toolInvocations}
+            messageAborted={!!message.isAborted}
+          />
 
           {displayContent && displayContent.length > 0 && (
-            <div className='bot-markdown-content xyne-ai-markdown text-[15px] font-normal leading-7 text-foreground'>
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkBreaks]}
-                // Preserve `cite:clf-…` hrefs — react-markdown's default
-                // sanitizer strips non-http(s) schemes, which would erase the
-                // href before our `a` override can intercept it.
-                urlTransform={url => url}
-                components={{
-                  ...markdownComponents,
-                  p: ({ children }) => <p>{processNodeForUserTags(children, resolveMention)}</p>,
-                  li: ({ children, ...props }) => (
-                    <li {...props}>{processNodeForUserTags(children, resolveMention)}</li>
-                  ),
-                  td: ({ children, ...props }) => (
-                    <td {...props}>{processNodeForUserTags(children, resolveMention)}</td>
-                  ),
-                  th: ({ children, ...props }) => (
-                    <th {...props}>{processNodeForUserTags(children, resolveMention)}</th>
-                  ),
-                  a: ({ href, children, ...props }) => {
-                    // Grouped run of adjacent citations → one stacked cluster chip.
-                    if (href && href.startsWith('cite-group:')) {
-                      const groupRefs = parseCiteGroupHref(href);
-                      if (groupRefs.length >= 2) {
-                        return (
-                          <ClawCitationGroup
-                            refs={groupRefs}
-                            toolInvocations={lookupTools}
-                            onOpenToolDebug={onOpenToolDebug}
-                          />
-                        );
-                      }
-                    }
-                    if (href && href.startsWith('cite:clf-')) {
-                      const body = href.slice('cite:clf-'.length);
-                      const hashIdx = body.lastIndexOf('#');
-                      if (hashIdx > 0) {
-                        const citedId = body.slice(0, hashIdx);
-                        const chunkRaw = body.slice(hashIdx + 1);
-                        const chunkIndex = Number(chunkRaw);
-                        const toolNumber = clawCitationToolNumbers.get(citedId) ?? 0;
-                        // Defense in depth — stripUnknownCiteLinks should have
-                        // removed any link without a backing citation, but
-                        // gate render here too so a survivor still falls
-                        // through to plain `<a>`/text rather than a fake chip.
-                        const hasBackingCitation =
-                          validCitationKeys.has(`${citedId}#${chunkRaw}`) ||
-                          validCitationKeys.has(`${normalizeCitedToolId(citedId)}#${chunkRaw}`);
-                        if (toolNumber > 0 && Number.isFinite(chunkIndex) && hasBackingCitation) {
-                          // Resolve the cited id to a real invocation. Prefer an
-                          // EXACT toolCallId match first: the model cites repeated
-                          // calls to the same tool as `functions.<name>:13` vs
-                          // `:14`, and that trailing index is the ONLY thing that
-                          // tells them apart. Normalizing to the bare toolName (and
-                          // taking the first match) collapses both onto the same
-                          // invocation → every same-tool citation resolves to one
-                          // file. So only fall back to toolName matching when no
-                          // invocation carries this exact id. (Mirrors the sidebar,
-                          // which matches on the raw cited id.)
-                          const stripClf = (id: string): string =>
-                            id.startsWith('clf-') ? id.slice(4) : id;
-                          const exactMatch = lookupTools.find(
-                            inv => inv.toolCallId && stripClf(inv.toolCallId) === citedId,
-                          );
-                          const normalized = normalizeCitedToolId(citedId);
-                          const matchByName =
-                            exactMatch ?? lookupTools.find(inv => inv.toolName === normalized);
-                          const resolvedToolCallId = matchByName?.toolCallId
-                            ? stripClf(matchByName.toolCallId)
-                            : citedId;
-                          return (
-                            <ClawCitationChip
-                              toolCallId={resolvedToolCallId}
-                              chunkIndex={chunkIndex}
-                              toolNumber={toolNumber}
-                              toolInvocations={lookupTools}
-                              onOpenToolDebug={onOpenToolDebug}
-                            />
-                          );
-                        }
-                      }
-                    }
-
-                    const isExternal = (() => {
-                      if (!href) return false;
-                      try {
-                        const urlObj = new URL(href, window.location.origin);
-                        return urlObj.origin !== window.location.origin;
-                      } catch {
-                        return true;
-                      }
-                    })();
-
-                    if (isExternal) {
-                      return (
-                        <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
-                          {children}
-                        </a>
-                      );
-                    }
-                    return (
-                      <a href={href} {...props}>
-                        {children}
-                      </a>
-                    );
-                  },
-                }}
-              >
-                {displayContent}
-              </ReactMarkdown>
+            <div
+              className={`bot-markdown-content xyne-ai-markdown text-[15px] font-normal leading-7 text-foreground${
+                // Keyed off everStreamed (not isStreaming) so content that
+                // lands AT completion — the final tail words, finalized
+                // citation chips — still fades in instead of popping the
+                // instant isStreaming flips false. Mount-only animations +
+                // the no-remount architecture make the class harmless to
+                // keep: settled DOM never re-animates.
+                everStreamedRef.current ? ' streaming-answer-fade' : ''
+              }`}
+            >
+              {everStreamedRef.current ? (
+                <StreamingMarkdownBlocks content={displayContent} render={renderAnswerBlock} />
+              ) : (
+                renderAnswerBlock(displayContent)
+              )}
             </div>
           )}
 
@@ -1003,44 +1193,57 @@ function ChatMessageBubble({
               >
                 <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
               </button>
-              <button
-                type='button'
-                onClick={(): void => onFeedback?.(message.id, 'LIKE')}
-                title='Helpful'
-                className={cn(
-                  'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground',
-                  feedbackValue === 'LIKE' ? 'text-foreground' : 'text-muted-foreground',
-                )}
-                data-track-category='XyneAI'
-                data-track-name='LIKE_MESSAGE'
-              >
-                <ThumbsUp
-                  className='h-3.5 w-3.5'
-                  aria-hidden
-                  strokeWidth={1.75}
-                  fill={feedbackValue === 'LIKE' ? 'currentColor' : 'none'}
-                  fillOpacity={feedbackValue === 'LIKE' ? 0.3 : 1}
+              {isV2 ? (
+                // v2 (claw): persist to agent_runs.rating (metrics + reload) with
+                // an optional comment on 👎.
+                <AskAiRatingButtons
+                  messageId={message.id}
+                  feedback={message.feedback}
+                  comment={message.ratingComment}
+                  onChange={(fb, c): void => onRatingChange?.(message.id, fb, c)}
                 />
-              </button>
-              <button
-                type='button'
-                onClick={(): void => onFeedback?.(message.id, 'DISLIKE')}
-                title='Not helpful'
-                className={cn(
-                  'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground',
-                  feedbackValue === 'DISLIKE' ? 'text-foreground' : 'text-muted-foreground',
-                )}
-                data-track-category='XyneAI'
-                data-track-name='DISLIKE_MESSAGE'
-              >
-                <ThumbsDown
-                  className='h-3.5 w-3.5'
-                  aria-hidden
-                  strokeWidth={1.75}
-                  fill={feedbackValue === 'DISLIKE' ? 'currentColor' : 'none'}
-                  fillOpacity={feedbackValue === 'DISLIKE' ? 0.3 : 1}
-                />
-              </button>
+              ) : (
+                <>
+                  <button
+                    type='button'
+                    onClick={(): void => onFeedback?.(message.id, 'LIKE')}
+                    title='Helpful'
+                    className={cn(
+                      'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground',
+                      feedbackValue === 'LIKE' ? 'text-foreground' : 'text-muted-foreground',
+                    )}
+                    data-track-category='XyneAI'
+                    data-track-name='LIKE_MESSAGE'
+                  >
+                    <ThumbsUp
+                      className='h-3.5 w-3.5'
+                      aria-hidden
+                      strokeWidth={1.75}
+                      fill={feedbackValue === 'LIKE' ? 'currentColor' : 'none'}
+                      fillOpacity={feedbackValue === 'LIKE' ? 0.3 : 1}
+                    />
+                  </button>
+                  <button
+                    type='button'
+                    onClick={(): void => onFeedback?.(message.id, 'DISLIKE')}
+                    title='Not helpful'
+                    className={cn(
+                      'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground',
+                      feedbackValue === 'DISLIKE' ? 'text-foreground' : 'text-muted-foreground',
+                    )}
+                    data-track-category='XyneAI'
+                    data-track-name='DISLIKE_MESSAGE'
+                  >
+                    <ThumbsDown
+                      className='h-3.5 w-3.5'
+                      aria-hidden
+                      strokeWidth={1.75}
+                      fill={feedbackValue === 'DISLIKE' ? 'currentColor' : 'none'}
+                      fillOpacity={feedbackValue === 'DISLIKE' ? 0.3 : 1}
+                    />
+                  </button>
+                </>
+              )}
               {/* Regenerate — re-runs the last user query as a new bot sibling.
                   Only wired on the latest bot message. */}
               {onRegenerate && (
@@ -1744,6 +1947,23 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     [],
   );
 
+  // v2 (claw) rating change — the AskAiRatingButtons already persisted to
+  // agent_runs; here we reflect the new feedback in local message state AND in
+  // the stream manager's cache so the thumb survives a soft nav-away-and-back
+  // within the stream TTL (which adopts the cached snapshot instead of
+  // refetching).
+  const handleRatingChange = useCallback(
+    (messageId: string, feedback: 0 | 1 | 2, comment?: string | null): void => {
+      setMessages(prevMessages =>
+        prevMessages.map(msg =>
+          msg.id === messageId ? { ...msg, feedback, ratingComment: comment ?? null } : msg,
+        ),
+      );
+      xyneAIStreamManager.patchMessageFeedback(messageId, feedback, comment ?? null);
+    },
+    [setMessages],
+  );
+
   const isAnyMessageStreaming = messages.some(m => m.isStreaming);
 
   const streamingBotTurnIndex = useMemo(() => {
@@ -1831,7 +2051,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                     : undefined;
                 return (
                   <ChatMessageBubble
-                    key={message.id}
+                    // Stable key so the bubble doesn't remount when the id swaps
+                    // temp→server at completion (which would kill the reasoning
+                    // section's transitions).
+                    key={message.stableKey ?? message.id}
                     message={message}
                     onCopy={() => {
                       void navigator.clipboard.writeText(
@@ -1842,6 +2065,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                       void handleFeedback(id, type);
                     }}
                     feedbackValue={feedbackValue}
+                    isV2={isV2}
+                    onRatingChange={handleRatingChange}
                     onDebug={
                       isV2 && message.type === 'bot'
                         ? () => {

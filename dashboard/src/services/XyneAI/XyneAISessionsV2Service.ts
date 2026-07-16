@@ -65,6 +65,9 @@ interface ClawMessagesResponse {
   icons?: Record<string, string>;
   /** assistantMsgId → AgentRun.sessionId, for branching-safe debugger pairing. */
   runByMsgId?: Record<string, string>;
+  /** assistantMsgId → { rating, comment } for the run that produced it. Seeds
+   *  the 👍/👎 thumb state on reload (ratings persist to agent_runs.rating). */
+  ratingByMsgId?: Record<string, { rating: 'up' | 'down' | null; comment: string | null }>;
 }
 
 // ============================================================================
@@ -148,6 +151,7 @@ export async function fetchV2ConversationMessages(
   registerClawIcons(response.data.icons);
 
   const runByMsgId = response.data.runByMsgId || undefined;
+  const ratingByMsgId = response.data.ratingByMsgId || undefined;
 
   // Backend now writes parentId on every chat_messages row (branching tree).
   // Check whether ANY row in this conversation has a non-null parentId — if
@@ -247,6 +251,13 @@ export async function fetchV2ConversationMessages(
       toolInvocations: msgToolInvocations,
       pendingActions,
       ...(!isUser && runByMsgId?.[msg.id] ? { debugSessionId: runByMsgId[msg.id] } : {}),
+      // Seed 👍/👎 thumb state from the run's persisted rating (up→1, down→2).
+      ...(!isUser && ratingByMsgId?.[msg.id]?.rating
+        ? {
+            feedback: (ratingByMsgId[msg.id]!.rating === 'up' ? 1 : 2) as 0 | 1 | 2,
+            ratingComment: ratingByMsgId[msg.id]!.comment,
+          }
+        : {}),
     };
 
     // Map attachments from claw format to frontend format
@@ -284,6 +295,25 @@ export async function deleteV2Conversation(
   await apiInstance.delete(
     `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}${query}`,
   );
+}
+
+/**
+ * Persist a 👍/👎 (+ optional comment) for the AgentRun that produced an
+ * assistant message. `messageId` is the assistant ChatMessage id — known the
+ * instant a turn completes, so the control never has to wait on a /messages
+ * refetch. The backend proxies to claw-auth's
+ * POST /runs/by-message/:chatMessageId/rate → agent_runs.rating, so the signal
+ * shows in the claw metrics SentimentPanel and survives reload.
+ */
+export async function rateV2Message(
+  messageId: string,
+  rating: 'up' | 'down',
+  comment?: string | null,
+): Promise<void> {
+  await apiInstance.post(`/xyne-ai/v2/messages/${encodeURIComponent(messageId)}/rate`, {
+    rating,
+    ...(typeof comment === 'string' ? { comment } : {}),
+  });
 }
 
 export async function fetchV2DebugArtifacts(

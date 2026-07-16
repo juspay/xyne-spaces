@@ -1,4 +1,13 @@
-import { ReactElement, useState, useMemo, useEffect, createContext, useContext } from 'react';
+import {
+  ReactElement,
+  useState,
+  useMemo,
+  useEffect,
+  useCallback,
+  useRef,
+  createContext,
+  useContext,
+} from 'react';
 import {
   Globe,
   Pencil,
@@ -17,6 +26,10 @@ import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { createMarkdownComponents } from '../../../../utils/markdownComponents';
+import {
+  StreamingMarkdownBlocks,
+  rehypeStreamWordFade,
+} from '../../../utils/StreamingMarkdownBlocks';
 import {
   stripCitationMarks,
   extractInlineCitations,
@@ -71,6 +84,7 @@ import { PendingActionBlock } from './PendingActionBlock';
 import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendingActionService';
 import { Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { AskAiRatingButtons } from '../../../AIScreen/AskAiRatingButtons';
 
 /**
  * v3-style inline citation chip for `[clf-<toolCallId>#<chunkIndex>]` tokens.
@@ -632,6 +646,11 @@ interface MessageActionsProps {
   onFeedback: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   feedbackValue: 'LIKE' | 'DISLIKE' | null;
   onRegenerate?: (() => void) | undefined;
+  /** v2 (claw-backed): route 👍/👎 to agent_runs.rating instead of Langfuse. */
+  isV2?: boolean | undefined;
+  onRatingChange?:
+    | ((messageId: string, feedback: 0 | 1 | 2, comment?: string | null) => void)
+    | undefined;
 }
 
 interface MessageItemProps {
@@ -645,6 +664,11 @@ interface MessageItemProps {
   ) => void;
   onSummarizerCitationClick: (citation: SummarizerCitation) => void;
   feedbackValue: 'LIKE' | 'DISLIKE' | null;
+  /** v2 (claw-backed): route 👍/👎 to agent_runs.rating instead of Langfuse. */
+  isV2?: boolean | undefined;
+  onRatingChange?:
+    | ((messageId: string, feedback: 0 | 1 | 2, comment?: string | null) => void)
+    | undefined;
   onRegenerate?: (() => void) | undefined;
   onEditSubmit?: ((newContent: string) => void) | undefined;
   onEditMobile?: (() => void) | undefined;
@@ -1036,6 +1060,8 @@ export const MessageItem = React.memo(
     onCitationClick,
     onSummarizerCitationClick,
     feedbackValue,
+    isV2,
+    onRatingChange,
     onRegenerate,
     onOpenToolDebug,
     onEditSubmit,
@@ -1463,6 +1489,8 @@ export const MessageItem = React.memo(
                         onCopy={handleCopy}
                         onFeedback={onFeedback}
                         feedbackValue={feedbackValue}
+                        isV2={isV2}
+                        onRatingChange={onRatingChange}
                         onRegenerate={isLatestBotMessage ? onRegenerate : undefined}
                       />
                     </div>
@@ -1518,6 +1546,21 @@ export const MessageItem = React.memo(
 MessageItem.displayName = 'MessageItem';
 
 // Message content rendering component
+// Stable identities for the streaming answer's markdown render. React matches
+// JSX elements by component-type REFERENCE — if these were fresh inline values
+// on every render, React would treat each streaming delta as all-new element
+// types, discard the real DOM nodes and rebuild them (re-firing the mount fade
+// = the blink). Hoisted to module scope so identity can never change.
+const ANSWER_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+// Word-fade spans for live-streamed answers (see rehypeStreamWordFade). Only
+// applied on the everStreamed path so history messages carry no extra spans.
+const ANSWER_REHYPE_PLUGINS = [rehypeStreamWordFade];
+// Preserve `cite:clf-…` hrefs — react-markdown's default sanitizer strips
+// non-http(s) schemes, which would erase the href before the `a` override can
+// intercept it and substitute a ClawCitationChip. Same fix as v3
+// ChatPageV3.tsx:417.
+const preserveUrlTransform = (url: string): string => url;
+
 const MessageContent = ({
   message,
   displayContent,
@@ -1529,6 +1572,17 @@ const MessageContent = ({
   onOpenToolDebug,
 }: MessageContentProps): ReactElement => {
   const resolveMention = useMentionResolver(message.userTags);
+
+  // Once this message has streamed live, KEEP the per-block render after
+  // completion: the subtree keeps the same component type, unchanged blocks
+  // memo-bail, and the streaming→done transition reuses the existing DOM in
+  // place instead of tearing down and rebuilding the whole answer (a visibly
+  // harsh repaint). History messages that never streamed here keep the plain
+  // single-parse render, so cross-block markdown (reference links, footnotes)
+  // renders exactly as before for them.
+  const everStreamedRef = useRef(message.isStreaming);
+  if (message.isStreaming) everStreamedRef.current = true;
+
   // Memoize markdown components to prevent re-renders on parent updates
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
 
@@ -1539,6 +1593,163 @@ const MessageContent = ({
       img: props => <ImageWithDownload {...props} />,
     };
   }, [markdownComponents]);
+
+  // Volatile inputs of the markdown overrides, read through a ref so the
+  // component identities below never depend on them. Updated every render —
+  // the overrides always see current data without changing type reference.
+  const latestAnswerDeps = useRef({
+    resolveMention,
+    toolInvocations: message.toolInvocations,
+    clawCitationToolNumbers,
+    onOpenToolDebug,
+  });
+  latestAnswerDeps.current = {
+    resolveMention,
+    toolInvocations: message.toolInvocations,
+    clawCitationToolNumbers,
+    onOpenToolDebug,
+  };
+
+  // THE anti-blink invariant (found via stream_debug logs): these override
+  // components are memoized once per message. A fresh inline `p:`/`a:` arrow
+  // per render is a NEW element type to React, which then rebuilds the real
+  // <p>/<a> DOM nodes on every streaming delta — re-firing the mount fade on
+  // text already on screen (the blink). With stable types React reconciles
+  // the existing DOM in place, so the fade physically cannot re-fire.
+  const answerComponents = useMemo<Components>(() => {
+    const deps = latestAnswerDeps;
+    return {
+      ...sidebarMarkdownComponents,
+      p: ({ children }) => {
+        const processed = processNodeForUserTags(children, deps.current.resolveMention);
+        return <p className='mb-2 last:mb-0'>{processed}</p>;
+      },
+      li: ({ children, ...props }) => {
+        const processed = processNodeForUserTags(children, deps.current.resolveMention);
+        return <li {...props}>{processed}</li>;
+      },
+      td: ({ children, ...props }) => {
+        const processed = processNodeForUserTags(children, deps.current.resolveMention);
+        return <td {...props}>{processed}</td>;
+      },
+      th: ({ children, ...props }) => {
+        const processed = processNodeForUserTags(children, deps.current.resolveMention);
+        return <th {...props}>{processed}</th>;
+      },
+      a: ({ href, children, ...props }) => {
+        const {
+          toolInvocations,
+          clawCitationToolNumbers: toolNumbers,
+          onOpenToolDebug: openToolDebug,
+        } = deps.current;
+        // Grouped run of adjacent citations → one stacked cluster chip.
+        if (href && href.startsWith('cite-group:')) {
+          const groupRefs = parseCiteGroupHref(href);
+          if (groupRefs.length >= 2) {
+            return (
+              <ClawCitationGroup
+                refs={groupRefs}
+                toolInvocations={toolInvocations}
+                onOpenToolDebug={openToolDebug}
+              />
+            );
+          }
+        }
+        // v3-style inline citation: `linkifyClawCitations` rewrites
+        // `[clf-<toolCallId>#<N>]` → `[<num>.<N>](cite:clf-<toolCallId>#<N>)`.
+        // Intercept the synthetic `cite:` href and substitute a chip
+        // that resolves to the matching ClawCitation on the parent
+        // message's toolInvocations.
+        if (href && href.startsWith('cite:clf-')) {
+          const body = href.slice('cite:clf-'.length);
+          const hashIdx = body.lastIndexOf('#');
+          if (hashIdx > 0) {
+            const toolCallId = body.slice(0, hashIdx);
+            const chunkIndex = Number(body.slice(hashIdx + 1));
+            const toolNumber = toolNumbers.get(toolCallId) ?? 0;
+            if (toolNumber > 0 && Number.isFinite(chunkIndex)) {
+              return (
+                <ClawCitationChip
+                  toolCallId={toolCallId}
+                  chunkIndex={chunkIndex}
+                  toolNumber={toolNumber}
+                  toolInvocations={toolInvocations}
+                  onOpenToolDebug={openToolDebug}
+                />
+              );
+            }
+          }
+        }
+
+        // Check if URL is external
+        const isExternal = (() => {
+          if (!href) return false;
+          try {
+            const urlObj = new URL(href, window.location.origin);
+            return urlObj.origin !== window.location.origin;
+          } catch {
+            return true;
+          }
+        })();
+
+        const isApiPath = href?.startsWith('/api/');
+
+        // Add target="_blank" for external links
+        if (isExternal) {
+          return (
+            <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+              {children}
+            </a>
+          );
+        }
+
+        if (isApiPath) {
+          return (
+            <a
+              href={href}
+              data-track-category='xyne-ai'
+              data-track-name='api-download'
+              onClick={e => {
+                e.preventDefault();
+                window.location.href = href!;
+              }}
+              {...props}
+            >
+              {children}
+            </a>
+          );
+        }
+
+        return (
+          <a href={href} {...props}>
+            {children}
+          </a>
+        );
+      },
+    };
+  }, [sidebarMarkdownComponents]);
+
+  // One definition of the answer's markdown render, shared verbatim by the
+  // streaming per-block path and the completed single-parse path so both
+  // produce identical output. Every prop has stable identity across streaming
+  // deltas, so settled StreamingMarkdownBlocks blocks memo-bail entirely.
+  // `wordFade` is constant for a given message's lifetime (true from the
+  // first streaming render, false for history), so it never churns the
+  // callback identity mid-stream.
+  const wordFade = everStreamedRef.current;
+  const renderAnswerBlock = useCallback(
+    (markdown: string): ReactElement => (
+      <ReactMarkdown
+        remarkPlugins={ANSWER_REMARK_PLUGINS}
+        rehypePlugins={wordFade ? ANSWER_REHYPE_PLUGINS : undefined}
+        urlTransform={preserveUrlTransform}
+        components={answerComponents}
+      >
+        {markdown}
+      </ReactMarkdown>
+    ),
+    [answerComponents, wordFade],
+  );
 
   return (
     <div className='space-y-4 max-w-full'>
@@ -1572,121 +1783,21 @@ const MessageContent = ({
 
       {/* Genius: Summary text */}
       {(!message.agentType || message.agentType === 'genius') && displayContent && (
-        <div className="bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkBreaks]}
-            // Preserve `cite:clf-…` hrefs — react-markdown's default sanitizer
-            // strips non-http(s) schemes, which would erase the href before our
-            // `a` override can intercept it and substitute a ClawCitationChip.
-            // Same fix as v3 ChatPageV3.tsx:417.
-            urlTransform={url => url}
-            components={{
-              ...sidebarMarkdownComponents,
-              p: ({ children }) => {
-                const processed = processNodeForUserTags(children, resolveMention);
-                return <p className='mb-2 last:mb-0'>{processed}</p>;
-              },
-              li: ({ children, ...props }) => {
-                const processed = processNodeForUserTags(children, resolveMention);
-                return <li {...props}>{processed}</li>;
-              },
-              td: ({ children, ...props }) => {
-                const processed = processNodeForUserTags(children, resolveMention);
-                return <td {...props}>{processed}</td>;
-              },
-              th: ({ children, ...props }) => {
-                const processed = processNodeForUserTags(children, resolveMention);
-                return <th {...props}>{processed}</th>;
-              },
-              a: ({ href, children, ...props }) => {
-                // Grouped run of adjacent citations → one stacked cluster chip.
-                if (href && href.startsWith('cite-group:')) {
-                  const groupRefs = parseCiteGroupHref(href);
-                  if (groupRefs.length >= 2) {
-                    return (
-                      <ClawCitationGroup
-                        refs={groupRefs}
-                        toolInvocations={message.toolInvocations}
-                        onOpenToolDebug={onOpenToolDebug}
-                      />
-                    );
-                  }
-                }
-                // v3-style inline citation: `linkifyClawCitations` rewrites
-                // `[clf-<toolCallId>#<N>]` → `[<num>.<N>](cite:clf-<toolCallId>#<N>)`.
-                // Intercept the synthetic `cite:` href and substitute a chip
-                // that resolves to the matching ClawCitation on the parent
-                // message's toolInvocations.
-                if (href && href.startsWith('cite:clf-')) {
-                  const body = href.slice('cite:clf-'.length);
-                  const hashIdx = body.lastIndexOf('#');
-                  if (hashIdx > 0) {
-                    const toolCallId = body.slice(0, hashIdx);
-                    const chunkIndex = Number(body.slice(hashIdx + 1));
-                    const toolNumber = clawCitationToolNumbers.get(toolCallId) ?? 0;
-                    if (toolNumber > 0 && Number.isFinite(chunkIndex)) {
-                      return (
-                        <ClawCitationChip
-                          toolCallId={toolCallId}
-                          chunkIndex={chunkIndex}
-                          toolNumber={toolNumber}
-                          toolInvocations={message.toolInvocations}
-                          onOpenToolDebug={onOpenToolDebug}
-                        />
-                      );
-                    }
-                  }
-                }
-
-                // Check if URL is external
-                const isExternal = (() => {
-                  if (!href) return false;
-                  try {
-                    const urlObj = new URL(href, window.location.origin);
-                    return urlObj.origin !== window.location.origin;
-                  } catch {
-                    return true;
-                  }
-                })();
-
-                const isApiPath = href?.startsWith('/api/');
-
-                // Add target="_blank" for external links
-                if (isExternal) {
-                  return (
-                    <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
-                      {children}
-                    </a>
-                  );
-                }
-
-                if (isApiPath) {
-                  return (
-                    <a
-                      href={href}
-                      data-track-category='xyne-ai'
-                      data-track-name='api-download'
-                      onClick={e => {
-                        e.preventDefault();
-                        window.location.href = href!;
-                      }}
-                      {...props}
-                    >
-                      {children}
-                    </a>
-                  );
-                }
-
-                return (
-                  <a href={href} {...props}>
-                    {children}
-                  </a>
-                );
-              },
-            }}
-          >
-            {displayContent}
-          </ReactMarkdown>
+        <div
+          className={`bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal${
+            // Keyed off everStreamed (not isStreaming) so content that lands
+            // AT completion — the final tail words, finalized citation chips —
+            // still fades in instead of popping the instant isStreaming flips
+            // false. Mount-only animations + the no-remount architecture make
+            // the class harmless to keep: settled DOM never re-animates.
+            everStreamedRef.current ? ' streaming-answer-fade' : ''
+          }`}
+        >
+          {everStreamedRef.current ? (
+            <StreamingMarkdownBlocks content={displayContent} render={renderAnswerBlock} />
+          ) : (
+            renderAnswerBlock(displayContent)
+          )}
         </div>
       )}
 
@@ -2311,6 +2422,8 @@ const MessageActions = ({
   onCopy,
   onFeedback,
   feedbackValue,
+  isV2,
+  onRatingChange,
   onRegenerate,
 }: MessageActionsProps): ReactElement => (
   <div className='flex justify-between items-center gap-3'>
@@ -2344,94 +2457,107 @@ const MessageActions = ({
         </button>
       )}
 
-      {/* Like Button */}
-      <button
-        onClick={() => onFeedback(message.id, 'LIKE')}
-        className='p-1.5 rounded transition-colors hover:bg-accent'
-        title='Like'
-        data-track-category='XyneAI'
-        data-track-name='LIKE_MESSAGE'
-        data-track-metadata={JSON.stringify({ messageId: message.id })}
-      >
-        <svg
-          xmlns='http://www.w3.org/2000/svg'
-          width='16'
-          height='16'
-          viewBox='0 0 16 16'
-          fill='none'
-        >
-          <g clipPath='url(#clip0_9950_23975)'>
-            <path
-              d='M9.99479 3.9187L9.32813 6.66536H13.2148C13.4218 6.66536 13.6259 6.71356 13.8111 6.80613C13.9962 6.8987 14.1573 7.0331 14.2815 7.1987C14.4057 7.36429 14.4896 7.55653 14.5266 7.76018C14.5636 7.96384 14.5528 8.17332 14.4948 8.37203L12.9415 13.7054C12.8607 13.9823 12.6923 14.2256 12.4615 14.3987C12.2307 14.5718 11.95 14.6654 11.6615 14.6654H2.66146C2.30784 14.6654 1.9687 14.5249 1.71865 14.2748C1.4686 14.0248 1.32813 13.6857 1.32812 13.332V7.9987C1.32812 7.64508 1.4686 7.30594 1.71865 7.05589C1.9687 6.80584 2.30784 6.66536 2.66146 6.66536H4.50146C4.74951 6.66523 4.99262 6.59591 5.20343 6.46518C5.41424 6.33445 5.58441 6.14751 5.69479 5.92536L7.99479 1.33203C8.30918 1.33592 8.61862 1.41081 8.89999 1.5511C9.18137 1.69138 9.42741 1.89344 9.61973 2.14217C9.81205 2.3909 9.94567 2.67987 10.0106 2.9875C10.0756 3.29513 10.0702 3.61345 9.99479 3.9187Z'
-              stroke='currentColor'
-              fill={feedbackValue === 'LIKE' ? 'currentColor' : 'none'}
-              strokeWidth='1.33333'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-              fillOpacity={feedbackValue === 'LIKE' ? 0.3 : 1}
-            />
-            <path
-              d='M4.67188 6.66797V14.668'
-              stroke='currentColor'
-              strokeWidth='1.33333'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-            />
-          </g>
-          <defs>
-            <clipPath id='clip0_9950_23975'>
-              <rect width='16' height='16' fill='currentColor' />
-            </clipPath>
-          </defs>
-        </svg>
-      </button>
+      {isV2 ? (
+        // v2 (claw): persist to agent_runs.rating (metrics + reload) with an
+        // optional comment on 👎.
+        <AskAiRatingButtons
+          messageId={message.id}
+          feedback={message.feedback}
+          comment={message.ratingComment}
+          onChange={(fb, c): void => onRatingChange?.(message.id, fb, c)}
+        />
+      ) : (
+        <>
+          {/* Like Button */}
+          <button
+            onClick={() => onFeedback(message.id, 'LIKE')}
+            className='p-1.5 rounded transition-colors hover:bg-accent'
+            title='Like'
+            data-track-category='XyneAI'
+            data-track-name='LIKE_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId: message.id })}
+          >
+            <svg
+              xmlns='http://www.w3.org/2000/svg'
+              width='16'
+              height='16'
+              viewBox='0 0 16 16'
+              fill='none'
+            >
+              <g clipPath='url(#clip0_9950_23975)'>
+                <path
+                  d='M9.99479 3.9187L9.32813 6.66536H13.2148C13.4218 6.66536 13.6259 6.71356 13.8111 6.80613C13.9962 6.8987 14.1573 7.0331 14.2815 7.1987C14.4057 7.36429 14.4896 7.55653 14.5266 7.76018C14.5636 7.96384 14.5528 8.17332 14.4948 8.37203L12.9415 13.7054C12.8607 13.9823 12.6923 14.2256 12.4615 14.3987C12.2307 14.5718 11.95 14.6654 11.6615 14.6654H2.66146C2.30784 14.6654 1.9687 14.5249 1.71865 14.2748C1.4686 14.0248 1.32813 13.6857 1.32812 13.332V7.9987C1.32812 7.64508 1.4686 7.30594 1.71865 7.05589C1.9687 6.80584 2.30784 6.66536 2.66146 6.66536H4.50146C4.74951 6.66523 4.99262 6.59591 5.20343 6.46518C5.41424 6.33445 5.58441 6.14751 5.69479 5.92536L7.99479 1.33203C8.30918 1.33592 8.61862 1.41081 8.89999 1.5511C9.18137 1.69138 9.42741 1.89344 9.61973 2.14217C9.81205 2.3909 9.94567 2.67987 10.0106 2.9875C10.0756 3.29513 10.0702 3.61345 9.99479 3.9187Z'
+                  stroke='currentColor'
+                  fill={feedbackValue === 'LIKE' ? 'currentColor' : 'none'}
+                  strokeWidth='1.33333'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  fillOpacity={feedbackValue === 'LIKE' ? 0.3 : 1}
+                />
+                <path
+                  d='M4.67188 6.66797V14.668'
+                  stroke='currentColor'
+                  strokeWidth='1.33333'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                />
+              </g>
+              <defs>
+                <clipPath id='clip0_9950_23975'>
+                  <rect width='16' height='16' fill='currentColor' />
+                </clipPath>
+              </defs>
+            </svg>
+          </button>
 
-      {/* Dislike Button */}
-      <button
-        onClick={() => onFeedback(message.id, 'DISLIKE')}
-        className='p-1.5 rounded transition-colors hover:bg-accent'
-        title='Dislike'
-        data-track-category='XyneAI'
-        data-track-name='DISLIKE_MESSAGE'
-        data-track-metadata={JSON.stringify({ messageId: message.id })}
-      >
-        <svg
-          xmlns='http://www.w3.org/2000/svg'
-          width='16'
-          height='16'
-          viewBox='0 0 16 16'
-          fill='none'
-        >
-          <g clipPath='url(#clip0_9950_23979)'>
-            <path
-              d='M6.00521 12.0813L6.67188 9.33464L2.78521 9.33464C2.57822 9.33464 2.37406 9.28644 2.18892 9.19387C2.00378 9.1013 1.84274 8.9669 1.71854 8.8013C1.59435 8.63571 1.51041 8.44347 1.47338 8.23982C1.43635 8.03616 1.44725 7.82668 1.50521 7.62797L3.05854 2.29464C3.13932 2.01768 3.30775 1.7744 3.53854 1.6013C3.76934 1.42821 4.05005 1.33464 4.33854 1.33464L13.3385 1.33464C13.6922 1.33464 14.0313 1.47511 14.2814 1.72516C14.5314 1.97521 14.6719 2.31435 14.6719 2.66797L14.6719 8.0013C14.6719 8.35493 14.5314 8.69406 14.2814 8.94411C14.0313 9.19416 13.6922 9.33464 13.3385 9.33464L11.4985 9.33464C11.2505 9.33477 11.0074 9.4041 10.7966 9.53482C10.5858 9.66555 10.4156 9.85249 10.3052 10.0746L8.00521 14.668C7.69082 14.6641 7.38138 14.5892 7.10001 14.4489C6.81863 14.3086 6.57259 14.1066 6.38027 13.8578C6.18795 13.6091 6.05433 13.3201 5.98938 13.0125C5.92444 12.7049 5.92985 12.3865 6.00521 12.0813Z'
-              stroke='currentColor'
-              fill={feedbackValue === 'DISLIKE' ? 'currentColor' : 'none'}
-              strokeWidth='1.33333'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-              fillOpacity={feedbackValue === 'DISLIKE' ? 0.3 : 1}
-            />
-            <path
-              d='M11.3359 9.33203L11.3359 1.33203'
-              stroke='currentColor'
-              strokeWidth='1.33333'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-            />
-          </g>
-          <defs>
-            <clipPath id='clip0_9950_23979'>
-              <rect
-                width='16'
-                height='16'
-                fill='currentColor'
-                transform='translate(16 16) rotate(-180)'
-              />
-            </clipPath>
-          </defs>
-        </svg>
-      </button>
+          {/* Dislike Button */}
+          <button
+            onClick={() => onFeedback(message.id, 'DISLIKE')}
+            className='p-1.5 rounded transition-colors hover:bg-accent'
+            title='Dislike'
+            data-track-category='XyneAI'
+            data-track-name='DISLIKE_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId: message.id })}
+          >
+            <svg
+              xmlns='http://www.w3.org/2000/svg'
+              width='16'
+              height='16'
+              viewBox='0 0 16 16'
+              fill='none'
+            >
+              <g clipPath='url(#clip0_9950_23979)'>
+                <path
+                  d='M6.00521 12.0813L6.67188 9.33464L2.78521 9.33464C2.57822 9.33464 2.37406 9.28644 2.18892 9.19387C2.00378 9.1013 1.84274 8.9669 1.71854 8.8013C1.59435 8.63571 1.51041 8.44347 1.47338 8.23982C1.43635 8.03616 1.44725 7.82668 1.50521 7.62797L3.05854 2.29464C3.13932 2.01768 3.30775 1.7744 3.53854 1.6013C3.76934 1.42821 4.05005 1.33464 4.33854 1.33464L13.3385 1.33464C13.6922 1.33464 14.0313 1.47511 14.2814 1.72516C14.5314 1.97521 14.6719 2.31435 14.6719 2.66797L14.6719 8.0013C14.6719 8.35493 14.5314 8.69406 14.2814 8.94411C14.0313 9.19416 13.6922 9.33464 13.3385 9.33464L11.4985 9.33464C11.2505 9.33477 11.0074 9.4041 10.7966 9.53482C10.5858 9.66555 10.4156 9.85249 10.3052 10.0746L8.00521 14.668C7.69082 14.6641 7.38138 14.5892 7.10001 14.4489C6.81863 14.3086 6.57259 14.1066 6.38027 13.8578C6.18795 13.6091 6.05433 13.3201 5.98938 13.0125C5.92444 12.7049 5.92985 12.3865 6.00521 12.0813Z'
+                  stroke='currentColor'
+                  fill={feedbackValue === 'DISLIKE' ? 'currentColor' : 'none'}
+                  strokeWidth='1.33333'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  fillOpacity={feedbackValue === 'DISLIKE' ? 0.3 : 1}
+                />
+                <path
+                  d='M11.3359 9.33203L11.3359 1.33203'
+                  stroke='currentColor'
+                  strokeWidth='1.33333'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                />
+              </g>
+              <defs>
+                <clipPath id='clip0_9950_23979'>
+                  <rect
+                    width='16'
+                    height='16'
+                    fill='currentColor'
+                    transform='translate(16 16) rotate(-180)'
+                  />
+                </clipPath>
+              </defs>
+            </svg>
+          </button>
+        </>
+      )}
       {/* Participants avatars - shown for Summarizer messages */}
       {(message.agentType === 'summarizer' || message.agentType === 'genius') &&
         message.participants &&

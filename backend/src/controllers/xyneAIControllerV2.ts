@@ -15,6 +15,7 @@ import {
   cancelClawAgentRun,
   listClawConversations,
   getClawConversationMessages,
+  rateClawRun,
   streamClawConversationLive,
   getClawDebugArtifacts,
   approveClawAction,
@@ -713,10 +714,48 @@ export class XyneAIControllerV2 {
         ...(result.toolInvocations && { toolInvocations: result.toolInvocations }),
         ...(result.invocationsByMsgId && { invocationsByMsgId: result.invocationsByMsgId }),
         ...(result.runByMsgId && { runByMsgId: result.runByMsgId }),
+        ...(result.ratingByMsgId && { ratingByMsgId: result.ratingByMsgId }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] getMessages error:', error);
+      res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  /**
+   * POST /api/xyne-ai/v2/messages/:messageId/rate — persist a 👍/👎 (+ optional
+   * comment) for the AgentRun that produced an assistant message. Proxies to
+   * claw-auth so the rating lands in agent_runs.rating (metrics SentimentPanel
+   * + reload state). messageId is the assistant ChatMessage id.
+   */
+  rateRun = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { messageId } = req.params;
+    if (!messageId) {
+      res.status(400).json({ success: false, error: 'messageId is required' });
+      return;
+    }
+
+    const { rating, comment } = req.body as { rating?: string; comment?: string | null };
+    if (rating !== 'up' && rating !== 'down') {
+      res.status(400).json({ success: false, error: "rating must be 'up' or 'down'" });
+      return;
+    }
+    // Clamp the optional comment to 500 chars (matches the UI limit).
+    const clampedComment = typeof comment === 'string' ? comment.slice(0, 500) : null;
+
+    try {
+      const result = await rateClawRun({ headers: req.headers, userId }, messageId, rating, clampedComment);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] rateRun error:', error);
       res.status(503).json({ success: false, error: message });
     }
   };

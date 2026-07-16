@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { Loader2, ChevronRight, Check, AlertCircle, Link2, CircleSlash } from 'lucide-react';
+import { Loader2, ChevronRight, Check, AlertCircle, Link2, CircleSlash, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { ToolInvocation, ClawCitation } from '../utils/XyneAITypes';
 import { buildClawCitationUrl, getClawCitationLabel } from '../utils/clawCitationUrl';
+import { activityAccent } from './activityShared';
 
 interface ToolInvocationListProps {
   invocations: ToolInvocation[];
@@ -42,7 +43,9 @@ export function ToolInvocationList({
   const normalized = useMemo<ToolInvocation[]>(() => {
     if (!messageAborted) return invocations;
     return invocations.map(inv =>
-      inv.status === 'running' ? { ...inv, status: 'cancelled' as const } : inv,
+      inv.status === 'running' || (inv.background && inv.backgroundState === 'running')
+        ? { ...inv, status: 'cancelled' as const }
+        : inv,
     );
   }, [invocations, messageAborted]);
 
@@ -140,8 +143,16 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
   const isSubagent = children && children.length > 0;
   const isRunning = invocation.status === 'running';
   const isCancelled = invocation.status === 'cancelled';
+  // A subagent spawned with run_in_background: the wrapper tool call returned
+  // immediately (status='completed'), so its live state lives in backgroundState.
+  const isBackground = invocation.background === true;
+  const bgState = invocation.backgroundState;
+  const isBackgroundRunning = isBackground && bgState === 'running' && !isCancelled;
   const runningChildren = children?.filter(c => c.status === 'running').length ?? 0;
   const completedChildren = (children?.length ?? 0) - runningChildren;
+  // The subagent's currently-running inner tool — surfaced live on the card so a
+  // busy subagent reads as busy without the user expanding it.
+  const runningChild = children?.find(c => c.status === 'running');
 
   // Get a simple preview of what the tool is doing
   const getActionPreview = () => {
@@ -155,7 +166,9 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
   const preview = getActionPreview();
 
   return (
-    <div className='group'>
+    // Subagents get a distinct bordered card so a nested LLM run reads as more
+    // than a plain tool row; ordinary tools stay borderless.
+    <div className={isSubagent ? `group rounded-md border px-1.5 ${activityAccent.card}` : 'group'}>
       <button
         onClick={() => setExpanded(!expanded)}
         className='flex w-full items-center gap-2 py-1 text-left transition-colors hover:text-foreground'
@@ -170,15 +183,25 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
 
         <div className='flex min-w-0 flex-1 items-center gap-2'>
           {/* Status indicator */}
-          {isRunning ? (
-            <Loader2 size={12} className='animate-spin shrink-0 text-blue-500' />
-          ) : isCancelled ? (
+          {isCancelled ? (
             // Subtle Stopped marker — same visual weight as the success Check
             // but always visible, so a user scanning a cancelled message sees
             // which tools were mid-flight when they hit Stop.
             <CircleSlash size={12} className='shrink-0 text-muted-foreground' />
-          ) : invocation.isError ? (
-            <AlertCircle size={12} className='shrink-0 text-destructive' />
+          ) : isBackgroundRunning ? (
+            // Detached background subagent still running — a slow gray clock,
+            // deliberately distinct from the accent spinner of a BLOCKING tool
+            // so it reads as "fired and kept going", not "waiting on this".
+            <Clock size={12} className='animate-pulse shrink-0 text-muted-foreground' />
+          ) : isRunning ? (
+            <Loader2 size={12} className={`animate-spin shrink-0 ${activityAccent.text}`} />
+          ) : invocation.isError || bgState === 'error' ? (
+            // Errors are the only red — kept faint (red-400), not full destructive.
+            <AlertCircle size={12} className='shrink-0 text-red-400' />
+          ) : isBackground ? (
+            // Completed background subagent — keep the check always visible so a
+            // finished detached task reads as resolved, not hover-revealed.
+            <Check size={12} className='shrink-0 text-emerald-500' />
           ) : (
             <Check
               size={12}
@@ -186,16 +209,39 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
             />
           )}
 
-          {/* Tool name */}
-          <span className='text-xs text-muted-foreground'>
+          {/* Tool name — subagents read as a group via the hairline box + the
+              medium-weight name + child count, not a colored badge. */}
+          <span
+            className={`text-xs ${isSubagent ? 'font-medium text-foreground/80' : 'text-muted-foreground'}`}
+          >
             {humanizeToolName(invocation.toolName)}
           </span>
 
+          {/* Background (run_in_background) tag */}
+          {isBackground && (
+            <span
+              className={`shrink-0 rounded px-1 text-[9px] uppercase tracking-wide ${activityAccent.bgChip}`}
+            >
+              {bgState === 'error'
+                ? 'background · failed'
+                : bgState === 'completed'
+                  ? 'background · done'
+                  : 'background'}
+            </span>
+          )}
+
           {/* Subagent indicator */}
           {isSubagent && (
-            <span className='text-[10px] text-muted-foreground/70'>
+            <span className='shrink-0 text-[10px] text-muted-foreground/70'>
               ({runningChildren > 0 ? `${completedChildren}/${children?.length}` : children?.length}
               )
+            </span>
+          )}
+
+          {/* Live running child — what the subagent is doing right now */}
+          {isSubagent && runningChild && !expanded && (
+            <span className={`truncate text-[10px] ${activityAccent.soft}`}>
+              ↳ {humanizeToolName(runningChild.toolName)}…
             </span>
           )}
 
@@ -206,7 +252,13 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
 
           {/* Duration */}
           <span className='ml-auto shrink-0 text-[10px] text-muted-foreground/60 tabular-nums'>
-            {isRunning ? '…' : isCancelled ? 'stopped' : `${invocation.durationMs}ms`}
+            {isBackgroundRunning
+              ? 'running…'
+              : isRunning
+                ? '…'
+                : isCancelled
+                  ? 'stopped'
+                  : `${invocation.durationMs}ms`}
           </span>
         </div>
       </button>
@@ -236,7 +288,7 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
               <pre
                 className={`overflow-x-auto whitespace-pre-wrap break-all rounded px-2 py-1.5 font-mono text-[10px] ${
                   invocation.isError
-                    ? 'bg-destructive/10 text-destructive'
+                    ? 'bg-red-400/10 text-red-400'
                     : 'bg-muted text-muted-foreground'
                 }`}
               >

@@ -243,6 +243,13 @@ export default {
           '0%': { opacity: '0', transform: 'translateY(4px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        // Opacity-only fade — for crossfading inline text/icons in place (e.g.
+        // the activity header morphing "Thinking…" → "Thought process") without
+        // the vertical travel of fadeInUp, which reads as a jump on one line.
+        fadeIn: {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -255,6 +262,7 @@ export default {
         'slide-up-in': 'slideUpIn 280ms cubic-bezier(0.22, 0.9, 0.3, 1) both',
         'slide-up-out': 'slideUpOut 280ms cubic-bezier(0.22, 0.9, 0.3, 1) both',
         'fade-in-up': 'fadeInUp 220ms ease-out both',
+        'fade-in': 'fadeIn 220ms ease-out both',
       },
     },
   },

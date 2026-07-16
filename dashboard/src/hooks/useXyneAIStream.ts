@@ -344,6 +344,10 @@ export const useXyneAIStream = ({
       const botMessageId = `bot-${Date.now()}`;
       const botMessage: Message = {
         id: botMessageId,
+        // Stable render key — survives the id swap to the server id at
+        // completion so the bubble updates in place (no remount) and the
+        // activity block can animate its live→done transition.
+        stableKey: botMessageId,
         type: 'bot',
         content: '',
         timestamp: new Date(),

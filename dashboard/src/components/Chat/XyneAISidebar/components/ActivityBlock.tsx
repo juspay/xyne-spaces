@@ -3,6 +3,7 @@ import type { CSSProperties, ReactElement } from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { ToolInvocation } from '../utils/XyneAITypes';
 import { ToolInvocationList } from './ToolInvocationList';
+import { ActivityStatusChip, LiveReasoning, useSmoothCount, formatCount } from './activityShared';
 
 /**
  * 8-bit cycle loader — a horizontal strip of small pixel cells with one cell
@@ -81,23 +82,6 @@ const THINKING_PHRASES = [
   'Sifting evidence',
   'Reasoning',
 ] as const;
-
-/**
- * Turn a raw tool id (e.g. `Xyne_Spaces__spaces-create-ticket`) into a
- * user-friendly verb-form ("Creating ticket"). Used in the header subtext
- * to show which tool is currently running below the main thinking phrase.
- */
-function humanizeRunningTool(toolName: string | undefined): string | null {
-  if (!toolName) return null;
-  const stripped = toolName.includes('__') ? toolName.split('__').slice(1).join('__') : toolName;
-  const trimmed = stripped.includes(':') ? stripped.split(':').slice(-1)[0]! : stripped;
-  const pretty = trimmed
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ');
-  return pretty || null;
-}
 
 /**
  * Pick one random thinking phrase and hold it for the lifetime of the
@@ -197,7 +181,7 @@ export function ActivityBlock({
   streaming,
   messageAborted,
   fillHeight = false,
-}: ActivityBlockProps): ReactElement | null {
+}: ActivityBlockProps): ReactElement {
   const hasReasoning = !!reasoning && reasoning.length > 0;
   const hasTools = !!toolInvocations && toolInvocations.length > 0;
 
@@ -205,10 +189,6 @@ export function ActivityBlock({
   // fillHeight mode (a dedicated panel) it starts open so the panel isn't empty.
   const [expanded, setExpanded] = useState(fillHeight);
 
-  const runningTool = useMemo(
-    () => toolInvocations?.find(t => t.status === 'running'),
-    [toolInvocations],
-  );
   const completedToolCount = useMemo(
     () => (toolInvocations ?? []).filter(t => !t.parentToolCallId).length,
     [toolInvocations],
@@ -220,128 +200,167 @@ export function ActivityBlock({
   );
   const displayedDurationMs = elapsedMs ?? toolDurationSumMs;
 
+  // Tool count tweens on the rare +1; the char count updates per delta (no
+  // per-frame tween) — keeps streaming cheap.
+  const smoothTools = useSmoothCount(completedToolCount);
+
   // One phrase per turn — picked at mount, never changes mid-stream. The
   // concrete "Calling X" tool subtext below carries the live progress; the
   // top line just sets the vibe.
   const phrase = useTurnPhrase();
-  const runningToolLabel = humanizeRunningTool(runningTool?.toolName);
   const mainLine = streaming ? `${phrase}…` : 'Thought process';
 
-  // Don't render at all when there's nothing to show — silent on user turns
-  // and on completed bot messages that produced no reasoning + no tools.
-  if (!streaming && !hasReasoning && !hasTools) return null;
+  // Whether the block has anything to show. Silent on user turns and on
+  // completed bot messages with no reasoning + no tools.
+  const shouldShow = !!streaming || hasReasoning || hasTools;
 
-  // Right-side summary metadata. While streaming: just the live elapsed
-  // counter. Done: tool count · final duration.
+  // Right-side summary. Streaming: live char counter + tool count + elapsed.
+  // Done: tool count + total duration. Counts are tweened (smoothChars/Tools).
   const summaryBits: string[] = [];
-  if (hasTools && !streaming) {
-    summaryBits.push(`${completedToolCount} tool${completedToolCount === 1 ? '' : 's'}`);
-  }
-  if (displayedDurationMs > 0) {
-    summaryBits.push(formatDuration(displayedDurationMs));
-  }
+  if (streaming && (reasoning?.length ?? 0) > 0)
+    summaryBits.push(`${formatCount(reasoning?.length ?? 0)} chars`);
+  if (hasTools) summaryBits.push(`${smoothTools} tool${smoothTools === 1 ? '' : 's'}`);
+  if (displayedDurationMs > 0) summaryBits.push(formatDuration(displayedDurationMs));
 
   const canExpand = hasReasoning || hasTools;
 
   return (
-    <div className='py-1'>
-      <button
-        type='button'
-        onClick={() => canExpand && setExpanded(e => !e)}
-        className={`flex w-full items-start gap-2 text-left transition-colors ${
-          canExpand ? 'cursor-pointer hover:text-foreground' : 'cursor-default'
-        }`}
-        data-track-category='xyne-ai'
-        data-track-name='toggle-activity-block'
-        aria-expanded={expanded}
-        disabled={!canExpand}
-      >
-        {/* Indicator: 8-bit cycle while live, chevron once done. Top-aligned
-            with the first text line so the subtext below sits flush. */}
-        <span className='mt-[2px] inline-flex shrink-0'>
-          {streaming ? (
-            <EightBitLoader />
-          ) : (
-            <ChevronRight
-              size={14}
-              className={`text-muted-foreground transition-transform duration-200 ${
-                expanded ? 'rotate-90' : ''
-              }`}
-            />
-          )}
-        </span>
-
-        <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
-          {/* Top line: phrase / "Thought process" + summary metadata. */}
-          <span className='flex items-center gap-1.5'>
-            <span
-              className={`text-xs ${streaming ? 'text-foreground/80' : 'text-muted-foreground'}`}
-            >
-              {mainLine}
-            </span>
-            {summaryBits.length > 0 && (
-              <span className='text-[10px] text-muted-foreground/70'>
-                · {summaryBits.join(' · ')}
-              </span>
-            )}
-          </span>
-
-          {/* Subtext slot: always present so the layout doesn't jump when a
-              tool starts or finishes. Opacity + translate-y transition fades
-              the row in/out smoothly. Consecutive tool changes crossfade via
-              the keyed inner span — each new tool name triggers a quick
-              fade-in animation on its own element.
-              `min-h-[14px]` reserves space at all times so the header rows
-              above don't shift when the subtext appears. */}
-          <span
-            className={`block min-h-[14px] truncate text-[10.5px] text-muted-foreground/70 transition-[opacity,transform] duration-200 ease-out ${
-              streaming && runningToolLabel
-                ? 'translate-y-0 opacity-100'
-                : '-translate-y-0.5 opacity-0'
+    // Whole-block collapse. With the stable render key the bubble no longer
+    // remounts on completion, so this grid-rows(1fr↔0fr)+opacity transition
+    // actually animates: on a pure-text answer `shouldShow` flips false and the
+    // block eases out instead of snapping. Kept mounted (collapsed to 0 height)
+    // when hidden; CSS only animates on change, so a message that starts hidden
+    // (history) renders collapsed with no motion. Padding is on the inner div so
+    // it collapses with the height.
+    <div
+      className={`grid ${shouldShow ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+      style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
+    >
+      <div className='overflow-hidden'>
+        {/* pt matches the assistant logo's `mt-2.5` in MessageItem so the header
+            line (loader/chevron) sits centered with the Xyne logo beside it. */}
+        <div className='pb-1 pt-2.5'>
+          <button
+            type='button'
+            onClick={() => canExpand && setExpanded(e => !e)}
+            className={`flex w-full items-center gap-2 text-left transition-colors ${
+              canExpand ? 'cursor-pointer hover:text-foreground' : 'cursor-default'
             }`}
-            aria-live='polite'
+            data-track-category='xyne-ai'
+            data-track-name='toggle-activity-block'
+            aria-expanded={expanded}
+            disabled={!canExpand}
           >
-            {runningToolLabel && (
-              <span key={runningToolLabel} className='inline-block animate-fade-in-up'>
-                ↳ Calling {runningToolLabel}
-              </span>
-            )}
-          </span>
-        </span>
-      </button>
-
-      {expanded && canExpand && (
-        <div
-          className={
-            fillHeight
-              ? 'mt-1.5 pl-5 pr-0.5 py-2 space-y-3'
-              : 'mt-1.5 max-h-[28rem] overflow-y-auto pl-5 pr-0.5 py-2 space-y-3'
-          }
-          style={fillHeight ? undefined : FADE_MASK_STYLE}
-        >
-          {hasReasoning && (
-            <div>
-              <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
-                Reasoning
-              </div>
-              <pre className='whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground'>
-                {reasoning}
-              </pre>
-            </div>
-          )}
-
-          {hasTools && (
-            <div>
-              {hasReasoning && (
-                <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
-                  Tool calls
-                </div>
+            {/* Indicator: 8-bit cycle while live, chevron once done. Keyed on
+            streaming so the swap crossfades (fade-in) in place instead of
+            snapping when the run completes. */}
+            <span
+              key={streaming ? 'live' : 'done'}
+              className='inline-flex shrink-0 animate-fade-in'
+            >
+              {streaming ? (
+                <EightBitLoader />
+              ) : (
+                <ChevronRight
+                  size={14}
+                  className={`text-muted-foreground transition-transform duration-200 ${
+                    expanded ? 'rotate-90' : ''
+                  }`}
+                />
               )}
-              <ToolInvocationList invocations={toolInvocations} messageAborted={messageAborted} />
+            </span>
+
+            <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
+              {/* Top line: phrase / "Thought process" + summary metadata. */}
+              <span className='flex items-center gap-1.5'>
+                {/* Color eases via transition-colors; the label text itself
+                crossfades (keyed on streaming) so "Thinking…" → "Thought
+                process" fades rather than snapping. */}
+                <span
+                  className={`text-xs transition-colors duration-300 ${streaming ? 'text-foreground/80' : 'text-muted-foreground'}`}
+                >
+                  <span key={streaming ? 'live' : 'done'} className='inline-block animate-fade-in'>
+                    {mainLine}
+                  </span>
+                </span>
+                {summaryBits.length > 0 && (
+                  <span
+                    key={streaming ? 'live' : 'done'}
+                    className='animate-fade-in text-[10px] tabular-nums text-muted-foreground/70'
+                  >
+                    · {summaryBits.join(' · ')}
+                  </span>
+                )}
+                {/* ONE consolidated status chip ("⟳ 2 running · ⧗ 5 bg") — fixed
+                footprint, tweened counts, so the header never grows or jumps
+                as parallel calls come and go. Not gated on `streaming`: it
+                keeps showing detached background work after the answer lands. */}
+                <ActivityStatusChip toolInvocations={toolInvocations} />
+              </span>
+            </span>
+          </button>
+
+          {/* Live reasoning pane — collapses out (grid-rows + opacity) when
+          streaming ends instead of unmounting abruptly. Kept mounted while
+          collapsed so the exit transitions. */}
+          <div
+            className={`grid ${streaming ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+            style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
+          >
+            <div className='overflow-hidden'>
+              <div className='mt-0.5 pl-6' aria-live='polite'>
+                <LiveReasoning reasoning={reasoning ?? ''} streaming={!!streaming} lines={3} />
+              </div>
+            </div>
+          </div>
+
+          {/* Smooth height transition on expand/collapse via the grid-rows 0fr→1fr
+          trick — quick (200ms), never snaps. Content stays mounted. */}
+          {canExpand && (
+            <div
+              className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+              }`}
+            >
+              <div className='overflow-hidden'>
+                <div
+                  className={
+                    fillHeight
+                      ? 'mt-1.5 pl-5 pr-0.5 py-2 space-y-3'
+                      : 'mt-1.5 max-h-[28rem] overflow-y-auto pl-5 pr-0.5 py-2 space-y-3'
+                  }
+                  style={fillHeight ? undefined : FADE_MASK_STYLE}
+                >
+                  {hasReasoning && (
+                    <div>
+                      <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
+                        Reasoning
+                      </div>
+                      <pre className='whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground'>
+                        {reasoning}
+                      </pre>
+                    </div>
+                  )}
+
+                  {hasTools && (
+                    <div>
+                      {hasReasoning && (
+                        <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
+                          Tool calls
+                        </div>
+                      )}
+                      <ToolInvocationList
+                        invocations={toolInvocations}
+                        messageAborted={messageAborted}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

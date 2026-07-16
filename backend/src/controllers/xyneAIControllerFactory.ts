@@ -207,6 +207,15 @@ export class XyneAIControllerFactory {
     return xyneAIControllerV2.getConversationMessages(req, res);
   };
 
+  rateRun = async (req: Request, res: Response): Promise<void> => {
+    const agentSlug = (req.query?.agentSlug || req.query?.agent_slug) as string | undefined;
+    if (config.askAI.version !== 'v2' && !agentSlug) {
+      res.status(404).json({ error: 'v2 endpoints not enabled' });
+      return;
+    }
+    return xyneAIControllerV2.rateRun(req, res);
+  };
+
   getConversationDebug = async (req: Request, res: Response): Promise<void> => {
     const agentSlug = (req.query?.agentSlug || req.query?.agent_slug) as string | undefined;
     if (config.askAI.version !== 'v2' && !agentSlug) {
