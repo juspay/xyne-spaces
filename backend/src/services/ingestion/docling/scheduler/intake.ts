@@ -64,6 +64,7 @@ const routeCollection = async (fileId: string): Promise<boolean> => {
 
   logger.info('[DOCLING_SCHEDULER] Routed COLLECTION PDF to scheduler', {
     fileId: item.fileId,
+    basePriority,
     alreadyQueued: inserted === null,
   });
   return true;
@@ -87,7 +88,7 @@ const routeAttachment = async (attachmentId: string, app: SubApp): Promise<boole
   });
 
   logger.info('[DOCLING_SCHEDULER] Routed ATTACHMENT PDF to scheduler', {
-    attachmentId: att.id, app, alreadyQueued: inserted === null,
+    attachmentId: att.id, app, basePriority, alreadyQueued: inserted === null,
   });
   return true;
 };

@@ -13,6 +13,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { db } from '@/database/client';
+import { config } from '@/config/env';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import {
   DOCLING_FILE_STATUS,
@@ -101,7 +102,12 @@ const setCollectionItemStatus = async (
 };
 
 export const inferDoclingSourcePriority = (input: { collectionId: string }) => {
-  const basePriority = input.collectionId === '' ? 100 : 0;
+  // '' sentinel = chat/ticket attachment; a real collectionId = KB collection file.
+  // KB files get the highest OCR priority (claimed ORDER BY base_priority DESC).
+  const isKb = input.collectionId !== '';
+  const basePriority = isKb
+    ? config.kbIngestion.ocrPriority // KB collections: highest (default 200)
+    : config.kbIngestion.attachmentOcrPriority; // attachments (default 100)
   return { basePriority };
 };
 
