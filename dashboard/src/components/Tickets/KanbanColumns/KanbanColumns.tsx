@@ -35,6 +35,8 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   onClick,
   availableTags = [],
   visibleColumns,
+  activeTicketId,
+  showEmailReads,
   slaPolicies,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -65,6 +67,8 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
         onClick={onClick}
         availableTags={availableTags}
         visibleColumns={visibleColumns}
+        {...(activeTicketId !== undefined && { activeTicketId })}
+        {...(showEmailReads !== undefined && { showEmailReads })}
         {...(slaPolicies !== undefined && { slaPolicies })}
       />
     </div>
@@ -87,6 +91,8 @@ const VirtualizedStageList: React.FC<{
   onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
   availableTags: string[];
   visibleColumns?: Set<string> | undefined;
+  activeTicketId?: string;
+  showEmailReads?: boolean;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   onAddTicket?: () => void;
   slaPolicies?: BoardSlaPolicy[];
@@ -101,6 +107,8 @@ const VirtualizedStageList: React.FC<{
   onAddTicket,
   availableTags,
   visibleColumns,
+  activeTicketId,
+  showEmailReads,
   onTicketClick,
   slaPolicies,
 }) => {
@@ -181,6 +189,8 @@ const VirtualizedStageList: React.FC<{
                 availableTags={availableTags}
                 onClick={e => onTicketClick(e, ticket)}
                 visibleColumns={visibleColumns}
+                {...(activeTicketId !== undefined && { activeTicketId })}
+                {...(showEmailReads !== undefined && { showEmailReads })}
                 {...(slaPolicies !== undefined && { slaPolicies })}
               />
             </div>
@@ -215,6 +225,8 @@ const PaginatedStageList: React.FC<{
   onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
   availableTags: string[];
   visibleColumns?: Set<string> | undefined;
+  activeTicketId?: string;
+  showEmailReads?: boolean;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   onAddTicket?: () => void;
   slaPolicies?: BoardSlaPolicy[];
@@ -227,6 +239,8 @@ const PaginatedStageList: React.FC<{
   onTicketsChange,
   availableTags,
   visibleColumns,
+  activeTicketId,
+  showEmailReads,
   onTicketClick,
   onAddTicket,
   slaPolicies,
@@ -285,6 +299,8 @@ const PaginatedStageList: React.FC<{
         onLoadMore={loadMore}
         availableTags={availableTags}
         visibleColumns={visibleColumns}
+        {...(activeTicketId !== undefined && { activeTicketId })}
+        {...(showEmailReads !== undefined && { showEmailReads })}
         onTicketClick={onTicketClick}
         {...(onAddTicket !== undefined && { onAddTicket })}
         {...(slaPolicies !== undefined && { slaPolicies })}
@@ -328,6 +344,9 @@ interface KanbanColumnsProps {
     status?: TicketStatusV2 | undefined;
     stageName?: string | undefined;
   }) => void;
+  activeTicketId?: string;
+  /** Only true for email-type desks; hides the email unread indicator in normal channels. */
+  showEmailReads?: boolean;
   /**
    * SLA policies pre-fetched by the parent for the active board.
    * Passed through to each TicketCard so they skip their own per-card
@@ -358,6 +377,8 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   containerClassName,
   availableTags = [],
   visibleColumns,
+  activeTicketId,
+  showEmailReads,
   slaPolicies,
   paginatedColumnConfig,
   allKnownTickets,
@@ -544,6 +565,8 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                       availableTags={availableTags}
                       visibleColumns={visibleColumns}
+                      {...(activeTicketId !== undefined && { activeTicketId })}
+                      {...(showEmailReads !== undefined && { showEmailReads })}
                       onTicketClick={onTicketClick}
                       {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
                       {...(slaPolicies !== undefined && { slaPolicies })}
@@ -557,6 +580,8 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                         {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                         availableTags={availableTags}
                         visibleColumns={visibleColumns}
+                        {...(activeTicketId !== undefined && { activeTicketId })}
+                        {...(showEmailReads !== undefined && { showEmailReads })}
                         onTicketClick={onTicketClick}
                         {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
                         {...(slaPolicies !== undefined && { slaPolicies })}

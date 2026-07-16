@@ -37,6 +37,7 @@ import {
   Search,
   GitMerge,
   Mail,
+  MailOpen,
   User,
   ListFilter,
   BarChart4Icon,
@@ -2540,6 +2541,7 @@ const SupportScreen = (): ReactElement => {
                         ticketFilter={ticketFilter}
                         onTicketClick={handleTicketClick}
                         onTicketsLoaded={setKanbanTickets}
+                        {...(ticketId !== undefined && { activeTicketId: ticketId })}
                       />
                     ) : viewMode === 'table' ? (
                       <SupportTicketTable
@@ -3621,6 +3623,31 @@ export const SupportTicketDetail = ({
                     <Archive size={16} />
                   </button>
                 </Tooltip>
+                {emails.length > 0 &&
+                  channel?.type !== ChannelType.SLACK &&
+                  channel?.type !== ChannelType.APP && (
+                    <>
+                      <div className='w-px h-4 bg-border' />
+                      <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
+                        <button
+                          type='button'
+                          onClick={() => {
+                            if (!ticket?.id) return;
+                            void zero.mutate(
+                              mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
+                            );
+                            goBackToTicketList();
+                          }}
+                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                          aria-label='Mark as unread'
+                          data-track-category='Support'
+                          data-track-name='MarkTicketUnread'
+                        >
+                          <MailOpen size={16} />
+                        </button>
+                      </Tooltip>
+                    </>
+                  )}
                 <div className='w-px h-4 bg-border' />
 
                 <div className='flex items-center gap-1'>

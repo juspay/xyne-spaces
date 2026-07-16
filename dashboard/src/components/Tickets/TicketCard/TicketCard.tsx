@@ -25,6 +25,7 @@ import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { PriorityOptions, useAssigneeOptions } from '../TicketTable/TicketTableHelper';
 import { v4 as uuidv4 } from 'uuid';
 import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 
 const DEFAULT_VISIBLE_COLUMNS = new Set(['assignee', 'dueDate', 'priority', 'tags']);
 
@@ -174,6 +175,9 @@ interface TicketCardProps {
   isCompact?: boolean;
   visibleColumns?: Set<string> | undefined;
   isConversation?: boolean;
+  activeTicketId?: string;
+  /** Only true for email-type desks; hides the email unread indicator everywhere else. */
+  showEmailReads?: boolean;
   /**
    * SLA policies pre-fetched by the parent for the whole board.
    * When omitted, SLA badges are not shown — no per-card fetch is performed.
@@ -190,17 +194,35 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   isCompact = false,
   visibleColumns = DEFAULT_VISIBLE_COLUMNS,
   isConversation = false,
+  activeTicketId,
+  showEmailReads = false,
   slaPolicies: slaPoliciesProp,
 }) => {
   const zero = useZero();
+  const { userID } = useAuthContextValues();
   const contentRef = useRef<HTMLDivElement>(null);
   const descriptionRef = useRef<HTMLDivElement>(null);
   const [isEditingTags, setIsEditingTags] = useState(false);
-  // const navigate = useNavigate();
 
   const [isEditingPriority, setIsEditingPriority] = useState(false);
   const [isEditingAssignee, setIsEditingAssignee] = useState(false);
   const [showAllTags, setShowAllTags] = useState(false);
+
+  const isActiveKanbanTicket =
+    !!activeTicketId && activeTicketId === (ticket as unknown as { xyneId?: string }).xyneId;
+
+  const emailReads = (
+    ticket as unknown as { emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }> }
+  ).emailReads;
+  const emailCount = (ticket as unknown as { emailCount?: number }).emailCount ?? 0;
+  const lastEmailAt = (ticket as unknown as { lastEmailAt?: number }).lastEmailAt ?? 0;
+  const userReadRow = (emailReads ?? []).find(r => r.userId === userID);
+  const isEmailRead =
+    showEmailReads &&
+    !isActiveKanbanTicket &&
+    emailCount > 0 &&
+    !!userReadRow &&
+    userReadRow.lastReadEmailAt >= lastEmailAt;
 
   const isStageOverdue = isStageEtaOverdue(ticket);
   const hasDueDate = !!ticket.eta;
@@ -555,6 +577,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         width,
         `text-left ${releaseBoardBgColor} rounded-xl border w-full max-w-lg hover:shadow-sm transition-all cursor-pointer group shadow-sm relative container-type-inline overflow-hidden`,
         isCompact ? 'p-3' : 'p-0',
+        isCompact && isEmailRead && 'email-read-card shadow-none',
       )}
       data-track-category='Tickets'
       data-track-name='OpenTicketCard'
@@ -711,8 +734,13 @@ export const TicketCard: React.FC<TicketCardProps> = ({
               <h3
                 data-testid='ticket-card-title'
                 className={cn(
-                  'text-foreground line-clamp-1 break-all mb-2',
-                  isCompact ? 'font-medium text-sm' : 'font-semibold text-[15px]',
+                  'line-clamp-1 break-all mb-2',
+                  isCompact
+                    ? isEmailRead
+                      ? 'font-normal text-sm'
+                      : 'font-medium text-sm'
+                    : 'font-semibold text-[15px]',
+                  isCompact && isEmailRead ? 'text-muted-foreground' : 'text-foreground',
                 )}
               >
                 {ticket.title}
