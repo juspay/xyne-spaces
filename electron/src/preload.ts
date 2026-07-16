@@ -121,9 +121,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onTokenExpired: (callback: () => void) => {
     ipcRenderer.on('auth:token-expired', callback);
   },
-  openPreviewWindow: (url: string, userAgent?: string) => {
-    ipcRenderer.send('open-preview-window', url, userAgent);
-  },
   showBrowserView: (config: {
     url: string;
     userAgent: string;

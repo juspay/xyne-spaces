@@ -63,7 +63,6 @@ export interface ElectronAPI {
   ) => () => void;
   onAuthSuccess: (callback: () => void) => void;
   onTokenExpired: (callback: () => void) => void;
-  openPreviewWindow: (url: string, userAgent?: string) => void;
   showBrowserView: (config: {
     url: string;
     userAgent: string;

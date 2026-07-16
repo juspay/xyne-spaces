@@ -1,4 +1,5 @@
 import { ipcMain, shell, app, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
+import type { IpcMainEvent } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } from '../services/cookies';
@@ -24,6 +25,90 @@ import Sentry from '@sentry/electron/main';
 
 
 let previewBrowserView: BrowserView | null = null;
+
+// ─── XYNE-17182 Issue 227 — hardening for BrowserView preview handlers ────
+// The workflow live-preview loads a customer-owned URL into a BrowserView
+// overlaid on the main window. Without validation, a renderer-supplied URL
+// could load file:// / data: / javascript: schemes, or reach the app's
+// authenticated defaultSession (Xyne cookies + mTLS cert). These helpers
+// enforce: https-only, no IP/loopback/private hosts, dedicated session
+// partition, no post-load navigation escape, clamped bounds, top-level
+// main-window sender.
+const PREVIEW_PARTITION = 'preview';
+
+function isAllowedPreviewScheme(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isReasonablePreviewHost(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    if (!h) return false;
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return false;                // IPv4 literal
+    if (h.startsWith('[') && h.endsWith(']')) return false;             // IPv6 literal
+    if (h === 'localhost') return false;
+    const badSuffixes = ['.local', '.internal', '.corp', '.lan'];
+    if (badSuffixes.some((s) => h.endsWith(s))) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isSafePreviewUrl(url: unknown): url is string {
+  return typeof url === 'string' && isAllowedPreviewScheme(url) && isReasonablePreviewHost(url);
+}
+
+function clampPreviewBounds(raw: unknown, win: Electron.Rectangle): Electron.Rectangle | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const b = raw as Record<string, unknown>;
+  const nums: number[] = [];
+  for (const key of ['x', 'y', 'width', 'height'] as const) {
+    const v = b[key];
+    if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+    nums.push(Math.floor(v));
+  }
+  const [x, y, width, height] = nums;
+  const MIN = 50;
+  const MAX = 8000;
+  return {
+    x: Math.max(0, Math.min(x, Math.max(0, win.width - MIN))),
+    y: Math.max(0, Math.min(y, Math.max(0, win.height - MIN))),
+    width: Math.max(MIN, Math.min(width, MAX)),
+    height: Math.max(MIN, Math.min(height, MAX)),
+  };
+}
+
+function attachPreviewGuards(wc: Electron.WebContents): void {
+  wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const guard = (e: Electron.Event, navUrl: string): void => {
+    if (!isSafePreviewUrl(navUrl)) {
+      e.preventDefault();
+      errorLogger.warn('[preview] Blocked navigation to unsafe URL', { navUrl });
+    }
+  };
+  wc.on('will-navigate', guard);
+  wc.on('will-redirect', guard);
+}
+
+function isPreviewSenderTrusted(event: IpcMainEvent): boolean {
+  const mainWindow = getMainWindow();
+  const frame = event.senderFrame;
+  const trusted =
+    !!mainWindow &&
+    !mainWindow.isDestroyed() &&
+    event.sender === mainWindow.webContents &&
+    !!frame &&
+    frame.parent === null;
+  if (!trusted) {
+    errorLogger.warn('[preview] Blocked IPC from untrusted sender');
+  }
+  return trusted;
+}
 
 export function setupIpcHandlers(): void {
 
@@ -278,76 +363,62 @@ export function setupIpcHandlers(): void {
     toggleWindowCompactMode();
   });
 
-  // BrowserView handlers for inline preview
+  // BrowserView handlers for inline preview.
+  // See XYNE-17182 Issue 227 helpers above for the hardening rationale.
   ipcMain.on(
     'show-browser-view',
-    (
-      _event,
-      config: {
-        url: string;
-        userAgent: string;
-        bounds: { x: number; y: number; width: number; height: number };
+    (event, config: { url: unknown; bounds: unknown }) => {
+      if (!isPreviewSenderTrusted(event)) return;
+      if (!isSafePreviewUrl(config.url)) {
+        errorLogger.warn('[preview] Rejected unsafe preview URL', { url: config.url });
+        return;
       }
-    ) => {
       const mainWindow = getMainWindow();
       if (!mainWindow) return;
+      const clamped = clampPreviewBounds(config.bounds, mainWindow.getBounds());
+      if (!clamped) {
+        errorLogger.warn('[preview] Rejected invalid preview bounds');
+        return;
+      }
 
-      // Create BrowserView if it doesn't exist
       if (!previewBrowserView) {
         previewBrowserView = new BrowserView({
           webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
+            // Isolate from defaultSession so the loaded page carries no Xyne
+            // cookies and no mTLS client cert.
+            partition: PREVIEW_PARTITION,
           },
         });
         mainWindow.setBrowserView(previewBrowserView);
+        attachPreviewGuards(previewBrowserView.webContents);
       }
 
-      // Set user agent
-      previewBrowserView.webContents.setUserAgent(config.userAgent);
-
-      // Set bounds
-      previewBrowserView.setBounds(config.bounds);
-
-      // Load URL
+      // Renderer-supplied userAgent intentionally ignored — Chromium default
+      // is used so the renderer cannot spoof platform-detection headers.
+      previewBrowserView.setBounds(clamped);
       void previewBrowserView.webContents.loadURL(config.url);
     }
   );
 
-  ipcMain.on('update-browser-view-bounds', (_event, { bounds }) => {
+  ipcMain.on('update-browser-view-bounds', (event, payload: { bounds: unknown }) => {
+    if (!isPreviewSenderTrusted(event)) return;
     const mainWindow = getMainWindow();
-    if (previewBrowserView && mainWindow) {
-      previewBrowserView.setBounds(bounds as Electron.Rectangle);
-    }
+    if (!previewBrowserView || !mainWindow) return;
+    const clamped = clampPreviewBounds(payload?.bounds, mainWindow.getBounds());
+    if (!clamped) return;
+    previewBrowserView.setBounds(clamped);
   });
 
-  ipcMain.on('hide-browser-view', () => {
+  ipcMain.on('hide-browser-view', (event) => {
+    if (!isPreviewSenderTrusted(event)) return;
     const mainWindow = getMainWindow();
     if (mainWindow && previewBrowserView) {
       mainWindow.removeBrowserView(previewBrowserView);
       previewBrowserView.webContents.close();
       previewBrowserView = null;
     }
-  });
-
-  // Preview window handler (opens in separate window)
-  ipcMain.on('open-preview-window', (_event, url: string, userAgent?: string) => {
-    const previewWindow = new BrowserWindow({
-      width: 1200,
-      height: 900,
-      title: 'Live Preview',
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-      },
-    });
-
-    // Set custom user agent if provided
-    if (userAgent) {
-      previewWindow.webContents.setUserAgent(userAgent);
-    }
-
-    void previewWindow.loadURL(url);
   });
 
   // Bundle version handler - gets the dashboard's __APP_VERSION__
