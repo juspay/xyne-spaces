@@ -3230,7 +3230,10 @@ img.inline-emoji,
   background-color: #2a2d30 !important;
 }
 
-[data-theme="midnight"] [role="option"][aria-selected="true"] {
+/* Select/combobox dropdown options. Excludes cmd+K rows ([cmdk-item]) so they keep the
+   documented gray-resting / blue-navigated two-tier above — otherwise this !important blue
+   overrides the resting gray and resting vs. navigated become indistinguishable in midnight. */
+[data-theme="midnight"] [role="option"][aria-selected="true"]:not([cmdk-item]) {
   background-color: rgba(37, 99, 235, 0.2) !important;
   color: #60a5fa !important;
 }

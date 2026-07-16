@@ -66,6 +66,7 @@ interface LexicalSearchInputProps {
   onManualKeystroke?: () => void;
   autocompleteSuffix?: string;
   onInsertTextReady?: (insertText: (text: string) => void) => void;
+  onSetTextReady?: (setText: (text: string) => void) => void;
   initialMention?: MentionData | null | undefined;
   initialQuery?: InitialQueryData | null | undefined;
   disableAutoFocus?: boolean;
@@ -281,6 +282,32 @@ function InsertTextPlugin({
   return null;
 }
 
+// Imperative "replace the whole editor with plain text" (caret at end). Used by
+// the slash-command mode to seed `/call `/`/chat ` or clear a typed name fragment.
+function SetTextPlugin({
+  onSetTextReady,
+}: {
+  onSetTextReady: (setText: (text: string) => void) => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const setText = (text: string) => {
+      editor.update(() => {
+        const root = $getRoot();
+        root.clear();
+        const paragraph = $createParagraphNode();
+        if (text) paragraph.append($createTextNode(text));
+        root.append(paragraph);
+        paragraph.selectEnd();
+      });
+    };
+    onSetTextReady(setText);
+  }, [editor, onSetTextReady]);
+
+  return null;
+}
+
 function CursorPositionPlugin({
   onPositionChange,
 }: {
@@ -461,6 +488,7 @@ export function LexicalSearchInput({
   onManualKeystroke,
   autocompleteSuffix,
   onInsertTextReady,
+  onSetTextReady,
   initialMention,
   initialQuery,
   disableAutoFocus = false,
@@ -542,6 +570,7 @@ export function LexicalSearchInput({
             />
           )}
           {onInsertTextReady && <InsertTextPlugin onInsertTextReady={onInsertTextReady} />}
+          {onSetTextReady && <SetTextPlugin onSetTextReady={onSetTextReady} />}
           <CursorPositionPlugin onPositionChange={handlePositionChange} />
           <SingleLinePastePlugin />
           <FilterChipPlugin />

@@ -1,8 +1,17 @@
-import { useState, useEffect, useRef, ReactNode, useMemo } from 'react';
+import { useState, useEffect, useRef, ReactNode, useMemo, createContext, useContext } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import type { Editor } from '@tiptap/react';
 import { PluginKey } from '@tiptap/pm/state';
 import type { VirtualElement } from './Selectors.utils';
+
+/**
+ * Tailwind z-index class for the (portaled) selector popover. Defaults to `z-50`.
+ * Wrap an `InputBox` in this provider to raise its @/#/emoji popovers when the
+ * composer lives inside a high-z overlay (e.g. the Cmd+K dialog at `z-[9999]`).
+ * Context flows through Radix's `Popover.Portal` (createPortal keeps the React
+ * tree intact), so no props need threading through InputBox/MentionSelector.
+ */
+export const SelectorZIndexContext = createContext('z-50');
 
 export interface BaseSelectorItem {
   id: string;
@@ -44,6 +53,7 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
   className = 'w-80',
   triggerChar = '@',
 }: BasePopoverSelectorProps<T>): React.JSX.Element | null {
+  const zIndexClass = useContext(SelectorZIndexContext);
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [queryLength, setQueryLength] = useState(0);
@@ -170,7 +180,7 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
       <Popover.Anchor virtualRef={{ current: virtualAnchor }} />
       <Popover.Portal>
         <Popover.Content
-          className={`p-0 ${className} rounded-2xl bg-popover border border-border shadow-lg z-50 animate-slide-in-up`}
+          className={`p-0 ${className} rounded-2xl bg-popover border border-border shadow-lg ${zIndexClass} animate-slide-in-up`}
           side='top'
           align='start'
           sideOffset={8}
