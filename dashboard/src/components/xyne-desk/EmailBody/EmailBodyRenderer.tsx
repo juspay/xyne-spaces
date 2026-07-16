@@ -96,10 +96,13 @@ const IFRAME_STYLES = `
     background: #ffffff;
     word-wrap: break-word;
     overflow-wrap: anywhere;
+    overflow-y: hidden;
   }
   html { overflow-x: auto; }
   body { padding: 4px 2px; }
   img { max-width: 100%; height: auto; }
+  table { max-width: 100%; }
+  pre, code { overflow-wrap: anywhere; word-wrap: break-word; white-space: pre-wrap; }
   td, th { overflow-wrap: normal; word-wrap: normal; }
   ::-webkit-scrollbar { height: 8px; width: 8px; }
   ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 4px; }
