@@ -1997,6 +1997,13 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   color: inherit;
 }
 
+/* Prevent BlockNote's custom mention wrapper from shifting the surrounding text baseline. */
+.canvas-editor-container [data-inline-content-type="mention"],
+.collaborative-canvas-editor [data-inline-content-type="mention"] {
+  line-height: 1;
+  vertical-align: middle;
+}
+
 /* Call summary card */
 .call-summary-card {
   background: var(--surface);

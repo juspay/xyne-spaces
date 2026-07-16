@@ -77,7 +77,7 @@ type NoStyleSchema = Record<string, never>;
 
 type MentionRenderProps = ReactCustomInlineContentRenderProps<MentionConfig, NoStyleSchema>;
 
-const MentionRender = ({ inlineContent, contentRef }: MentionRenderProps) => {
+const MentionRender = ({ inlineContent }: MentionRenderProps) => {
   const props = inlineContent.props;
   const displayName = props.groupId && props.groupName ? props.groupName : props.username || '';
   const {
@@ -96,20 +96,14 @@ const MentionRender = ({ inlineContent, contentRef }: MentionRenderProps) => {
 
   if (hasAccess) {
     return (
-      <span
-        ref={contentRef}
-        className='inline-flex items-center rounded-[4px] bg-black/5 px-1 py-0.5 font-medium text-[#0066cc]'
-      >
+      <span className='inline-flex items-center align-middle rounded-[4px] bg-black/5 px-1 py-0.5 font-medium leading-none text-[#0066cc]'>
         @{displayName}
       </span>
     );
   }
 
   const trigger = (
-    <span
-      ref={contentRef}
-      className='inline-flex items-center gap-1 rounded-[4px] border border-dashed border-amber-400 bg-amber-50 px-1 py-0.5 font-medium text-amber-700'
-    >
+    <span className='inline-flex items-center gap-1 align-middle rounded-[4px] border border-dashed border-amber-400 bg-amber-50 px-1 py-0.5 font-medium leading-none text-amber-700'>
       @{displayName}
       <Lock className='h-3 w-3' />
     </span>
