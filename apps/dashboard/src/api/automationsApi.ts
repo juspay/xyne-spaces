@@ -228,6 +228,58 @@ export interface Automation {
   automationSeriesId: string | null;
 }
 
+export interface DeskLabelRulesPayload {
+  channelId: string;
+  labelName: string;
+  color?: string;
+  labelId?: string;
+  name?: string;
+  emailFilters?: Record<string, unknown>;
+  keepInInbox?: boolean;
+}
+
+export function createDeskLabelRules(
+  payload: DeskLabelRulesPayload,
+): Promise<{ automations: Automation[] }> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<{ automations: Automation[] }>>(
+      '/automations/desk-label-rules',
+      payload,
+    ),
+  );
+}
+
+export function fetchDeskLabelRules(channelId?: string): Promise<{ automations: Automation[] }> {
+  const qs = channelId ? `?channelId=${encodeURIComponent(channelId)}` : '';
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<{ automations: Automation[] }>>(
+      `/automations/desk-label-rules${qs}`,
+    ),
+  );
+}
+
+export function setDeskLabelRuleStatus(
+  id: string,
+  status: 'ACTIVE' | 'DISABLED',
+): Promise<{ automation: Automation }> {
+  return unwrap(
+    apiInstance.patch<SuccessEnvelope<{ automation: Automation }>>(
+      `/automations/desk-label-rules/${encodeURIComponent(id)}`,
+      { status },
+    ),
+  );
+}
+
+export function archiveAutomation(
+  id: string,
+): Promise<{ automation?: Automation; message?: string }> {
+  return unwrap(
+    apiInstance.delete<SuccessEnvelope<{ automation?: Automation; message?: string }>>(
+      `/automations/${encodeURIComponent(id)}`,
+    ),
+  );
+}
+
 /** Row shape returned by the runs list — no context blobs. */
 export interface AutomationRunSummary {
   id: string;

@@ -3,7 +3,7 @@ import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { currentUpstreamChain } from './automation-context-storage';
 import {
-  AUTOMATION_WORKFLOW_TYPE,
+  EXECUTABLE_AUTOMATION_WORKFLOW_TYPES,
   parseAutomationMetadata,
   triggerTypeToEventType,
 } from '../types/workflow-adapter';
@@ -19,7 +19,7 @@ class EventRouter {
 
     const candidates = await db.workflow.findMany({
       where: {
-        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workflowType: { in: [...EXECUTABLE_AUTOMATION_WORKFLOW_TYPES] },
         eventType: mappedEventType,
         status: AutomationStatus.ACTIVE,
         workspaceId,
@@ -55,7 +55,7 @@ class EventRouter {
               const created = await tx.workflowExecution.create({
                 data: {
                   workflowId: workflow.id,
-                  workflowType: AUTOMATION_WORKFLOW_TYPE,
+                  workflowType: workflow.workflowType,
                   status: AutomationRunStatus.PENDING,
                   tag: 'root',
                   workspaceId,

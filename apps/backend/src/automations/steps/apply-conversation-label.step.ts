@@ -1,0 +1,134 @@
+import { z } from 'zod';
+import { BaseActionStep } from './base-step';
+import { StepCategory } from '../types/categories';
+import type { AutomationContext } from '../types/context';
+import { variableRef } from '../engine/variable-ref';
+import { logger } from '@/utils/logger';
+import {
+  applyConversationLabel,
+  archiveConversationMailbox,
+} from '../services/conversation-label.service';
+
+const ApplyConversationLabelConfigSchema = z.object({
+  conversationId: variableRef(z.string().min(1)).describe(
+    'Conversation (email thread) to label. Defaults to the email/ticket conversation from the trigger.',
+  ),
+  channelId: variableRef(z.string().min(1)).describe('Desk channel that owns the label catalog.'),
+  labelName: z
+    .string()
+    .min(1)
+    .describe('Label name to apply. Created in your catalog if it does not exist yet.'),
+  color: z.string().optional().describe('Optional hex color for a newly created label.'),
+  labelId: z
+    .string()
+    .optional()
+    .describe('Optional existing label id; ignored if a label with this name already exists.'),
+  keepInInbox: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe('Keep the owner’s matching email in Inbox when enabled.'),
+});
+
+const ApplyConversationLabelOutputSchema = z.object({
+  conversationId: z.string().nullable(),
+  channelId: z.string().nullable(),
+  labelId: z.string().nullable(),
+  labelName: z.string(),
+  applied: z.boolean(),
+  alreadyPresent: z.boolean(),
+  skipped: z.boolean(),
+  skipReason: z.string().nullable(),
+});
+
+interface ApplyConversationLabelOutput extends Record<string, unknown> {
+  conversationId: string | null;
+  channelId: string | null;
+  labelId: string | null;
+  labelName: string;
+  applied: boolean;
+  alreadyPresent: boolean;
+  skipped: boolean;
+  skipReason: string | null;
+}
+
+export class ApplyConversationLabelStep extends BaseActionStep<
+  typeof ApplyConversationLabelConfigSchema,
+  ApplyConversationLabelOutput
+> {
+  readonly type = 'APPLY_CONVERSATION_LABEL';
+  readonly configSchema = ApplyConversationLabelConfigSchema;
+  readonly outputSchema = ApplyConversationLabelOutputSchema;
+  readonly name = 'Add or update email label';
+  readonly description =
+    'Applies a conversation (email thread) label from your private Desk catalog. Creates the label if needed.';
+  readonly category = StepCategory.TICKET;
+  readonly icon = 'Tag';
+
+  async execute(
+    config: z.infer<typeof ApplyConversationLabelConfigSchema>,
+    context: AutomationContext,
+  ): Promise<ApplyConversationLabelOutput> {
+    const labelName = (config.labelName as string).trim();
+    const conversationId = (config.conversationId as string | undefined)?.trim() || null;
+    const channelId = (config.channelId as string | undefined)?.trim() || null;
+    const createdById = context.automation.createdById;
+
+    const skipped = (reason: string): ApplyConversationLabelOutput => ({
+      conversationId,
+      channelId,
+      labelId: null,
+      labelName,
+      applied: false,
+      alreadyPresent: false,
+      skipped: true,
+      skipReason: reason,
+    });
+
+    if (!labelName) return skipped('empty_label_name');
+    if (!conversationId) return skipped('missing_conversation_id');
+    if (!channelId) return skipped('missing_channel_id');
+    if (!createdById) return skipped('missing_owner');
+
+    try {
+      const result = await applyConversationLabel({
+        conversationId,
+        channelId,
+        labelName,
+        createdById,
+        color: config.color as string | undefined,
+        labelId: config.labelId as string | undefined,
+      });
+      if (config.keepInInbox === false) {
+        await archiveConversationMailbox({
+          conversationId,
+          channelId,
+          workspaceId: context.automation.workspaceId,
+          userId: createdById,
+        });
+      }
+      logger.info(
+        `[automations] APPLY_CONVERSATION_LABEL conversationId=${conversationId} label=${labelName} applied=${result.applied} alreadyPresent=${result.alreadyPresent}`,
+      );
+      return {
+        ...result,
+        skipped: false,
+        skipReason: null,
+      };
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code;
+      if (code === 'channel_not_found') return skipped('channel_not_found');
+      if (code === 'conversation_not_found') return skipped('conversation_not_found');
+      if (code === 'conversation_channel_mismatch') return skipped('conversation_channel_mismatch');
+      if (code === 'conversation_workspace_mismatch') {
+        return skipped('conversation_workspace_mismatch');
+      }
+      if (code === 'ticket_not_found') return skipped('ticket_not_found');
+      if (code === 'ticket_channel_mismatch') return skipped('ticket_channel_mismatch');
+      if (code === 'ticket_workspace_mismatch') return skipped('ticket_workspace_mismatch');
+      throw err;
+    }
+  }
+}
+
+export const applyConversationLabelStep = new ApplyConversationLabelStep();

@@ -4,6 +4,19 @@ import { AutomationStatus, AutomationRunStatus } from './status';
 import type { AutomationConfig } from './automation-config';
 
 export const AUTOMATION_WORKFLOW_TYPE = 'Automations';
+/** Personal desk auto-label rules — not listed or synced via Automations Zero queries. */
+export const DESK_AUTOMATION_WORKFLOW_TYPE = 'DeskAutomations';
+
+export const EXECUTABLE_AUTOMATION_WORKFLOW_TYPES = [
+  AUTOMATION_WORKFLOW_TYPE,
+  DESK_AUTOMATION_WORKFLOW_TYPE,
+] as const;
+
+export function isExecutableAutomationWorkflowType(workflowType: string | null | undefined): boolean {
+  return (
+    workflowType === AUTOMATION_WORKFLOW_TYPE || workflowType === DESK_AUTOMATION_WORKFLOW_TYPE
+  );
+}
 
 export interface AutomationView {
   id: string;
