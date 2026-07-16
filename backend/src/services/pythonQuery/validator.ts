@@ -23,6 +23,8 @@ export const ALLOWED_MODELS = new Set([
   'canvas',
   'organization',
   'form',
+  'formEntityValues',
+  'formFields',
   'activity',
   'userActivityEvent',
   'email',
