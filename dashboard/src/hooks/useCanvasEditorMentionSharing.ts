@@ -3,11 +3,13 @@ import type { Zero } from '@rocicorp/zero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { CanvasRole } from '@xyne/shared';
+import { useCachedQuery } from '@xyne/shared/hooks';
 import type {
   CanvasMentionContextValue,
   MentionUser,
 } from '../components/Canvas/CanvasMentionSpec/CanvasMentionSpec';
 import { mutators } from '../zero/mutators';
+import { queries } from '../zero/queries';
 
 export type CanvasParticipantRow = {
   readonly userId?: string | null;
@@ -92,28 +94,6 @@ export function useCanvasEditorMentionSharing({
     [canvasId, z],
   );
 
-  const hasMentionAccess = useCallback(
-    (userId: string): boolean => {
-      const participantIds = new Set(
-        canvasParticipants
-          .map(p => p.userId)
-          .filter((participantUserId): participantUserId is string => Boolean(participantUserId)),
-      );
-      return participantIds.has(userId) || canvasCreatedBy === userId;
-    },
-    [canvasParticipants, canvasCreatedBy],
-  );
-
-  const getMentionAccessRole = useCallback(
-    (userId: string): CanvasRole | null => {
-      if (!hasMentionAccess(userId)) return null;
-      const row = canvasParticipants.find(p => p.userId === userId);
-      if (row) return row.role;
-      if (canvasCreatedBy === userId) return CanvasRole.OWNER;
-      return null;
-    },
-    [hasMentionAccess, canvasParticipants, canvasCreatedBy],
-  );
   const groupParticipantIds = useMemo(
     () =>
       new Set(
@@ -125,6 +105,40 @@ export function useCanvasEditorMentionSharing({
           ),
       ),
     [canvasParticipants],
+  );
+  const groupIdList = useMemo(() => Array.from(groupParticipantIds), [groupParticipantIds]);
+  const [groupMemberRows = []] = useCachedQuery(
+    queries.getUserGroupMembersByGroupIds({ userGroupIds: groupIdList }),
+    { enabled: groupIdList.length > 0 },
+  );
+  const groupMemberUserIds = useMemo(
+    () => new Set(groupMemberRows.map(row => row.userId)),
+    [groupMemberRows],
+  );
+
+  const hasMentionAccess = useCallback(
+    (userId: string): boolean => {
+      const participantIds = new Set(
+        canvasParticipants
+          .map(p => p.userId)
+          .filter((participantUserId): participantUserId is string => Boolean(participantUserId)),
+      );
+      return (
+        participantIds.has(userId) || canvasCreatedBy === userId || groupMemberUserIds.has(userId)
+      );
+    },
+    [canvasParticipants, canvasCreatedBy, groupMemberUserIds],
+  );
+
+  const getMentionAccessRole = useCallback(
+    (userId: string): CanvasRole | null => {
+      if (!hasMentionAccess(userId)) return null;
+      const row = canvasParticipants.find(p => p.userId === userId);
+      if (row) return row.role;
+      if (canvasCreatedBy === userId) return CanvasRole.OWNER;
+      return null;
+    },
+    [hasMentionAccess, canvasParticipants, canvasCreatedBy],
   );
   const hasGroupMentionAccess = useCallback(
     (groupId: string): boolean => groupParticipantIds.has(groupId),

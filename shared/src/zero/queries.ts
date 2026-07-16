@@ -2447,6 +2447,13 @@ export const queries = defineQueries({
         .related('role');
     },
   ),
+
+  getUserGroupMembersByGroupIds: defineQuery(
+    z.object({ userGroupIds: z.array(z.string()) }),
+    ({ args: { userGroupIds } }) => {
+      return zql.user_group_mappings.where('userGroupId', 'IN', userGroupIds);
+    },
+  ),
   // Query for user group mappings by user ID
   getUserGroupMappingsByUserId: defineQuery(({ ctx }) => {
     return zql.user_group_mappings.where('userId', ctx.userID);

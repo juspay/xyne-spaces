@@ -2776,6 +2776,13 @@ export const queries = defineQueries({
     },
   ),
 
+  getUserGroupMembersByGroupIds: defineQuery(
+    z.object({ userGroupIds: z.array(z.string()) }),
+    ({ args: { userGroupIds } }) => {
+      return zql.user_group_mappings.where('userGroupId', 'IN', userGroupIds);
+    },
+  ),
+
   getUserGroupMappingsByUserId: defineQuery(({ ctx }) => {
     return zql.user_group_mappings.where('userId', ctx.userID);
   }),
