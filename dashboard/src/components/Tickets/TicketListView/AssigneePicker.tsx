@@ -52,7 +52,7 @@ export function AssigneePicker({
 
   const assign = (userId: string | null): void => {
     void zero.mutate(
-      mutators.ticket.updateAssignment({ ticketId, assignedTo: userId, timestamp: Date.now() }),
+      mutators.ticket.update({ id: ticketId, assignedTo: userId, updatedAt: Date.now() }),
     );
     setOpen(false);
     setSearch('');
