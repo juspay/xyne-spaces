@@ -73,7 +73,7 @@ export const TeamOverdueTickets = (): ReactElement => {
   }
 
   const overdueTickets = data?.overdueTickets ?? [];
-  const overdueCount = data?.ticketMetrics.overdueCount ?? overdueTickets.length;
+  const overdueCount = data?.ticketMetrics?.overdueCount ?? overdueTickets.length;
 
   return (
     <section className='space-y-4'>
