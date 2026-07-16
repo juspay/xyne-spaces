@@ -59,6 +59,7 @@ export interface SupportKanbanBoardProps {
   };
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   onTicketsLoaded?: (tickets: Ticket[]) => void;
+  activeTicketId?: string;
 }
 
 /**
@@ -77,6 +78,7 @@ export const SupportKanbanBoard = ({
   ticketFilter,
   onTicketClick,
   onTicketsLoaded,
+  activeTicketId,
 }: SupportKanbanBoardProps): ReactElement => {
   const zero = useZero();
 
@@ -386,6 +388,8 @@ export const SupportKanbanBoard = ({
           ticketsByStage={ticketsByStage}
           onTicketClick={onTicketClick}
           containerClassName='h-full'
+          showEmailReads={true}
+          {...(activeTicketId !== undefined && { activeTicketId })}
           slaPolicies={slaPolicies}
         />
         <DragOverlay>

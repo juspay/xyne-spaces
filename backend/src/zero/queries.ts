@@ -1034,7 +1034,7 @@ export const queries = defineQueries({
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
     }),
-    ({ args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
       if (merchantMid) {
@@ -1080,7 +1080,8 @@ export const queries = defineQueries({
         .related('project')
         .related('tagMappings')
         .related('entity')
-        .related('conversation', (c) => c.related('channel'));
+        .related('conversation', (c) => c.related('channel'))
+        .related('emailReads', (q) => q.where('userId', ctx.userID));
     }
   ),
 

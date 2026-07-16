@@ -39,9 +39,9 @@ export function useMarkEmailRead(
     if (!shouldMark) return;
     if (!ticketId) return;
     if (!latestEmailId) return;
-    if (isRead) return;
     if (markedRef.current === latestEmailId) return;
     markedRef.current = latestEmailId;
+    if (isRead) return;
     void zero.mutate(
       mutators.emailRead.markAsRead({
         id: uuidv4(),

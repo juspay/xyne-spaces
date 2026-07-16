@@ -1493,7 +1493,7 @@ export const EmailComposer = ({
 
   // Fire-and-forget wrapper for handleSendEmail that surfaces any rejection
   // that escapes its internal try/catch instead of swallowing it. Used by the
-  // onClick/onSendShortcut handlers below; never call handleSendEmail() with a
+  // onClick handler below; never call handleSendEmail() with a
   // bare `void` — a rejection there becomes an unhandled promise rejection.
   const runSendEmail = (): void => {
     handleSendEmail().catch(error => {
@@ -2693,19 +2693,6 @@ export const EmailComposer = ({
                   onEditorReady={handleBodyEditorReady}
                   onDropAttachmentIntoEditor={handleDropAttachmentIntoEditor}
                   onFileDropHandled={resetDragState}
-                  onSendShortcut={() => {
-                    const canSend = isComposeMode
-                      ? !!channelId && composeSubject.trim().length > 0
-                      : !!conversationId;
-                    if (
-                      (hasEmailBody || attachments.length > 0) &&
-                      canSend &&
-                      !isSending &&
-                      toEmails.length > 0
-                    ) {
-                      runSendEmail();
-                    }
-                  }}
                   onBlur={() => {
                     if (!isComposeMode && hasEmailBody && isDirty) saveDraft(emailContent);
                   }}
@@ -2897,8 +2884,6 @@ export const EmailComposer = ({
                   </button>
                 </Tooltip>
               ) : null}
-            </div>
-            <div className='flex items-center gap-1.5'>
               <Tooltip content='Clear body (Ctrl+Z to undo)' side='top' delayDuration={300}>
                 <button
                   type='button'
@@ -2945,34 +2930,30 @@ export const EmailComposer = ({
                   showSeeSources={showSeeSources || !!aiDraft.sessionId}
                 />
               )}
-              <button
-                className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
-                onClick={runSendEmail}
-                disabled={
-                  (!hasEmailBody && attachments.length === 0 && !hasInlineImages) ||
-                  (isComposeMode
-                    ? !channelId || composeSubject.trim().length === 0
-                    : !conversationId) ||
-                  isSending ||
-                  toEmails.length === 0 ||
-                  aiDraft.isDraftActive
-                }
-                aria-label='Send email'
-                title={aiDraft.isDraftActive ? 'Accept the AI draft to enable Send' : 'Send (⌘↵)'}
-                data-track-category='Support'
-                data-track-name='SendEmailReply'
-                data-track-metadata={JSON.stringify({
-                  conversationId,
-                  attachmentCount: attachments.length,
-                })}
-              >
-                {isSending ? (
-                  <RefreshCw size={16} className='animate-spin' />
-                ) : (
-                  <ArrowUp size={16} />
-                )}
-              </button>
             </div>
+            <button
+              className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
+              onClick={runSendEmail}
+              disabled={
+                (!hasEmailBody && attachments.length === 0 && !hasInlineImages) ||
+                (isComposeMode
+                  ? !channelId || composeSubject.trim().length === 0
+                  : !conversationId) ||
+                isSending ||
+                toEmails.length === 0 ||
+                aiDraft.isDraftActive
+              }
+              aria-label='Send email'
+              title={aiDraft.isDraftActive ? 'Accept the AI draft to enable Send' : 'Send'}
+              data-track-category='Support'
+              data-track-name='SendEmailReply'
+              data-track-metadata={JSON.stringify({
+                conversationId,
+                attachmentCount: attachments.length,
+              })}
+            >
+              {isSending ? <RefreshCw size={16} className='animate-spin' /> : <ArrowUp size={16} />}
+            </button>
           </div>
         )}
       </div>

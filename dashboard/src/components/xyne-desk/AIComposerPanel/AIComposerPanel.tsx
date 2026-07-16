@@ -232,7 +232,7 @@ export const AIRefineDropdown = ({
       <AnimatePresence>
         {open && (
           <motion.div
-            className='ai-refine-menu absolute bottom-full right-0 mb-1.5 z-50 w-52 rounded-xl border border-border bg-popover shadow-lg overflow-hidden'
+            className='ai-refine-menu absolute bottom-full left-0 mb-1.5 z-50 w-52 rounded-xl border border-border bg-popover shadow-lg overflow-hidden'
             initial={{ opacity: 0, scale: 0.96, y: 4 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 4 }}

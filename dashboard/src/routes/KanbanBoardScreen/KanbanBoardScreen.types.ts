@@ -29,6 +29,8 @@ export interface SortableTicketCardProps {
   availableTags?: string[];
   onClick: (e: React.MouseEvent | KeyboardEvent) => void;
   visibleColumns?: Set<string> | undefined;
+  activeTicketId?: string;
+  showEmailReads?: boolean;
   /** SLA policies pre-fetched by the parent; forwarded to TicketCard to avoid per-card fetches. */
   slaPolicies?: BoardSlaPolicy[];
 }

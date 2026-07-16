@@ -3687,3 +3687,15 @@ img.inline-emoji,
 [data-theme="midnight"] .schema-json-editor .cm-editor.cm-focused .cm-selectionBackground {
   background: hsl(var(--accent)) !important;
 }
+
+/* Email read ticket card — overrides --card and --background so every child
+   element using bg-card / bg-background inherits the dimmed colour. */
+.email-read-card {
+  --card: 240 8% 96.5%;
+  --background: 240 8% 96.5%;
+}
+
+[data-theme="midnight"] .email-read-card {
+  --card: 216 5% 18.5%;
+  --background: 216 5% 18.5%;
+}

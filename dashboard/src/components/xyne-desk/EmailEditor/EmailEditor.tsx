@@ -88,7 +88,6 @@ interface EmailEditorProps {
   onChange: (html: string) => void;
   onAddFiles?: (files: File[]) => void | Promise<void>;
   uploadAndInsertInlineImages?: (images: File[]) => void | Promise<void>;
-  onSendShortcut?: () => void;
   onBlur?: () => void;
   onFocus?: () => void;
   onEditorReady?: (editor: Editor) => void;
@@ -122,7 +121,6 @@ export const EmailEditor = ({
   onChange,
   onAddFiles,
   uploadAndInsertInlineImages,
-  onSendShortcut,
   onBlur,
   onFocus,
   onEditorReady,
@@ -145,7 +143,6 @@ export const EmailEditor = ({
     onChange,
     onAddFiles,
     uploadAndInsertInlineImages,
-    onSendShortcut,
     onBlur,
     onFocus,
     onEditorReady,
@@ -158,7 +155,6 @@ export const EmailEditor = ({
     onChange,
     onAddFiles,
     uploadAndInsertInlineImages,
-    onSendShortcut,
     onBlur,
     onFocus,
     onEditorReady,
@@ -322,18 +318,6 @@ export const EmailEditor = ({
       attributes: {
         class:
           'tiptap email-composer-editor prose prose-sm dark:prose-invert max-w-none focus:outline-none px-4 py-3 min-h-full',
-      },
-      handleKeyDown: (_view, event) => {
-        if (
-          event.key === 'Enter' &&
-          (event.metaKey || event.ctrlKey) &&
-          cb.current.onSendShortcut
-        ) {
-          event.preventDefault();
-          cb.current.onSendShortcut();
-          return true;
-        }
-        return false;
       },
       handlePaste: (_view, event) => {
         const files = Array.from(event.clipboardData?.files ?? []);
