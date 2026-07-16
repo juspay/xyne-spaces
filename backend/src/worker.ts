@@ -18,7 +18,6 @@ import { notificationService, notificationService as realTimeNotificationService
 import { redisService } from '@/services/redisService'
 //import { vespaWorker } from '@/workers/vespaWorker'
 import { workerScheduler } from './workers';
-import { initializeOpenCode, shutdownOpenCode } from '@/workflows/framework/opencode';
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
@@ -58,14 +57,6 @@ class WorkerService {
 
       logger.info('Initializing Vespa queue (producer)...')
       await vespaQueue.initialize()
-
-      // Initialize OpenCode only if enabled
-      if (appConfig.openCode.enabled) {
-        logger.info('Initializing OpenCode server...')
-        await initializeOpenCode()
-      } else {
-        logger.info('OpenCode is disabled, skipping initialization')
-      }
 
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
@@ -296,7 +287,6 @@ class WorkerService {
 
     try {
       logger.info('Shutting down worker service...')
-      await shutdownOpenCode()
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
       const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'

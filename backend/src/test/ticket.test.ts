@@ -23,7 +23,7 @@ describe('Ticket API', () => {
     it('should create a new ticket', async () => {
       const ticketData = {
         title: `Test Ticket ${Date.now()}`,
-        workflowType: TicketCategory.BUG_WORKFLOW,
+        workflowType: TicketCategory.QUERY,
         description: 'Test description',
         attachments: [],
         createdBy: 'test-user',
@@ -48,7 +48,7 @@ describe('Ticket API', () => {
       const ticket = await prisma.ticket.create({
         data: {
           title: `Test Ticket ${Date.now()}`,
-          workflowType: TicketCategory.BUG_WORKFLOW,
+          workflowType: TicketCategory.QUERY,
           description: 'Test description',
           attachments: null,
           createdBy: 'test-user',
@@ -77,7 +77,7 @@ describe('Ticket API', () => {
       const ticket = await prisma.ticket.create({
         data: {
           title: `Test Ticket ${Date.now()}`,
-          workflowType: TicketCategory.XYNE_SPACES_FEATURE_IMPLEMENTATION,
+          workflowType: TicketCategory.QUERY,
           description: 'Test description',
           attachments: null,
           createdBy: 'test-user',
@@ -104,7 +104,7 @@ describe('Ticket API', () => {
       await prisma.ticket.create({
         data: {
           title: `Test Ticket ${Date.now()}`,
-          workflowType: TicketCategory.BUG_WORKFLOW,
+          workflowType: TicketCategory.QUERY,
           description: 'Test description',
           attachments: null,
           createdBy: 'test-user',
