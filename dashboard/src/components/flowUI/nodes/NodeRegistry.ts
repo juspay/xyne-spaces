@@ -12,6 +12,7 @@ import { RowNode, ColumnNode, CardNode } from './ContainerNodes';
 import { DividerNode } from './DividerNode';
 import { ImageNode } from './ImageNode';
 import { TableNode } from './TableNode';
+import { LinkNode } from './LinkNode';
 
 // Base props interface that all node components extend
 export interface NodeComponentBaseProps {
@@ -53,6 +54,7 @@ NodeRegistry.register('card', CardNode);
 NodeRegistry.register('divider', DividerNode);
 NodeRegistry.register('image', ImageNode);
 NodeRegistry.register('table', TableNode);
+NodeRegistry.register('link', LinkNode);
 
 /**
  * Kept for backward compatibility with existing callers/imports.
