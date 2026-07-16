@@ -78,7 +78,16 @@ const EmailReceivedConfigSchema = z.object({
     .describe(
       'When on, only the first email of a thread fires this trigger. Useful for "new ticket" rules.',
     ),
-});
+  onlyReplies: z
+    .boolean()
+    .optional()
+    .describe(
+      'When on, only reply emails (not the first email in a thread) fire this trigger.',
+    ),
+}).refine(
+  data => !(data.onlyNewThreads === true && data.onlyReplies === true),
+  { message: 'onlyNewThreads and onlyReplies cannot both be true — they are mutually exclusive' },
+);
 
 export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
   email: z.object({
@@ -224,6 +233,9 @@ function matchEmailReceived(cfg: EmailReceivedConfig, payload: EmailReceivedPayl
 
   if (cfg.onlyNewThreads) {
     if (payload.isReply) return false;
+  }
+  if (cfg.onlyReplies) {
+    if (!payload.isReply) return false;
   }
   return true;
 }

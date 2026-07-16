@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
+import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
+import { DatabaseClient } from '@/database/client';
+import { ActivityType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 
 const UpdateTagsConfigSchema = z.object({
@@ -37,12 +40,27 @@ export class UpdateTagsStep extends BaseActionStep<typeof UpdateTagsConfigSchema
 
   async execute(
     config: z.infer<typeof UpdateTagsConfigSchema>,
+    context: AutomationContext,
   ): Promise<UpdateTagsOutput> {
     const ticketId = config.ticketId as string;
+    const prisma = DatabaseClient.getInstance();
+
     const { added, alreadyPresent } = await repositories.tickets.addTagsByName(
       ticketId,
       config.tags as string[],
     );
+
+    if (added.length > 0) {
+      await prisma.ticketActivity.createMany({
+        data: added.map(tag => ({
+          ticketId,
+          updatedBy: context.automation.createdById,
+          activityType: ActivityType.TAGS,
+          value: { action: 'added', newValue: tag, isAutomation: true },
+        })),
+      });
+    }
+
     logger.info(
       `[automations] UPDATE_TAGS ticket=${ticketId} added=[${added.join(',')}] alreadyPresent=[${alreadyPresent.join(',')}]`,
     );

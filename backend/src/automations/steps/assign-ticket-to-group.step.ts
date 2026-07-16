@@ -4,6 +4,8 @@ import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { ticketAssignmentService } from '@/services/ticketAssignmentService';
+import { DatabaseClient } from '@/database/client';
+import { ActivityType } from '@prisma/client';
 
 const AssignTicketToGroupConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
@@ -40,11 +42,24 @@ export class AssignTicketToGroupStep extends BaseActionStep<
   ): Promise<AssignTicketToGroupOutput> {
     const ticketId = config.ticketId as string;
     const groupId = config.groupId as string;
+    const prisma = DatabaseClient.getInstance();
+
+    const prev = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { userGroupId: true } });
     const assignedUserId = await ticketAssignmentService.assignTicketToGroup({
       ticketId,
       groupId,
       actorId: context.automation.createdById,
     });
+
+    await prisma.ticketActivity.create({
+      data: {
+        ticketId,
+        updatedBy: context.automation.createdById,
+        activityType: ActivityType.USER_GROUP_ID,
+        value: { field: 'userGroupId', oldValue: prev?.userGroupId ?? null, newValue: groupId, isAutomation: true },
+      },
+    });
+
     return { ticketId, groupId, assignedUserId: assignedUserId ?? null };
   }
 }

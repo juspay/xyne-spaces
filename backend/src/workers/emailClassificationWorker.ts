@@ -11,6 +11,7 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { activityService } from '@/services/activity/activityService';
 import { ActivityClassification, ActivityType } from '@prisma/client';
 import type { BoardMetadata } from '@xyne/shared';
+import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
 
 const emailClassificationService = new EmailClassificationService();
 const prisma = DatabaseClient.getInstance();
@@ -253,6 +254,11 @@ class EmailClassificationWorker {
       }
 
       if (newAssignedTo && assignmentSucceeded) {
+        void emitTicketUpdated({
+          ticket: updatedTicket,
+          changes: { assignedTo: { previousValue: ticket.assignedTo ?? null, newValue: newAssignedTo } },
+          performedById: SYSTEM_ACTOR,
+        });
         try {
           await syncUserWorkload(
             newAssignedTo,

@@ -139,10 +139,14 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         return;
       }
 
-      const fieldDefinition = await resolveFieldDefinitionById(db, formEntityValue.fieldId);
+      // fieldId is globalField.id for new-style fields, formFields.id for legacy fields
+      const [globalField, legacyFormField] = await Promise.all([
+        db.globalField.findUnique({ where: { id: formEntityValue.fieldId }, select: { fieldName: true } }),
+        db.formFields.findUnique({ where: { id: formEntityValue.fieldId }, select: { fieldName: true } }),
+      ]);
 
       const ticketId = formEntityValue.entityId;
-      const fieldName = fieldDefinition?.fieldName;
+      const fieldName = globalField?.fieldName ?? legacyFormField?.fieldName;
       const fieldValue = formEntityValue.actualFieldValue ?? formEntityValue.fieldValue;
 
       if (!ticketId || !fieldName) {
@@ -224,14 +228,17 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         if (v === null || v === undefined) return null;
         return String(v);
       };
+      const changeEntry = {
+        previousValue: toTicketChangeValue(prevFormValue),
+        newValue: toTicketChangeValue(fieldValue),
+      };
       void emitTicketUpdated({
         ticket,
         changes: {},
         formFieldChanges: {
-          [formEntityValue.fieldId]: {
-            previousValue: toTicketChangeValue(prevFormValue),
-            newValue: toTicketChangeValue(fieldValue),
-          },
+          [formEntityValue.fieldId]: changeEntry,
+          [fieldName]: changeEntry,
+          [fieldName.toLowerCase()]: changeEntry,
         },
         performedById: this.ctx.userID,
       });

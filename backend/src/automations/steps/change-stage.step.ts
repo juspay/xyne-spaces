@@ -4,9 +4,11 @@ import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
-import { BoardType } from '@prisma/client';
+import { BoardType, ActivityType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { ticketStageTransitionService } from '@/services/stageTransition/ticketStageTransitionService';
+import { ActivitySource } from '@/types/ticket';
+import { logger } from '@/utils/logger';
 
 const ChangeStageConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
@@ -43,7 +45,7 @@ export class ChangeStageStep extends BaseActionStep<typeof ChangeStageConfigSche
     const prisma = DatabaseClient.getInstance();
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { board: { select: { boardType: true } } },
+      select: { stageName: true, board: { select: { boardType: true } } },
     });
 
     if (ticket?.board?.boardType === BoardType.NON_LINEAR) {
@@ -56,8 +58,16 @@ export class ChangeStageStep extends BaseActionStep<typeof ChangeStageConfigSche
       if (!result.success) {
         throw new Error(result.message ?? 'Stage transition failed');
       }
+      prisma.ticketActivity.create({
+        data: {
+          ticketId,
+          updatedBy,
+          activityType: ActivityType.STAGE_NAME,
+          value: { field: 'stageName', oldValue: ticket.stageName ?? null, newValue: stageName, source: ActivitySource.AUTOMATION, isAutomation: true },
+        },
+      }).catch(err => logger.warn(`[automations] CHANGE_STAGE audit write failed ticketId=${ticketId}:`, err));
     } else {
-      await repositories.tickets.updateTicketStage(ticketId, stageName, updatedBy);
+      await repositories.tickets.updateTicketStage(ticketId, stageName, updatedBy, ActivitySource.AUTOMATION);
     }
 
     return { ticketId, stageName };

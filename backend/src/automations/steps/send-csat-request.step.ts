@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
+import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { db } from '@/database/client';
 import { ensureCsatFormFields } from '@/services/csatFields';
@@ -8,6 +9,7 @@ import { csatTokenService } from '@/services/csatTokenService';
 import { logger } from '@/utils/logger';
 import { emailService } from '@/services/emailService';
 import { config as appConfig } from '@/config/env';
+import { ActivityType } from '@prisma/client';
 
 const SendCsatRequestConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)).describe('The ticket to request a satisfaction rating for.'),
@@ -46,6 +48,7 @@ export class SendCsatRequestStep extends BaseActionStep<
 
   async execute(
     config: z.infer<typeof SendCsatRequestConfigSchema>,
+    context: AutomationContext,
   ): Promise<SendCsatRequestOutput> {
     const ticketId = config.ticketId as string;
     const question = (config.question as string | undefined) || 'How did we do?';
@@ -97,6 +100,7 @@ export class SendCsatRequestStep extends BaseActionStep<
     }
 
     // Send via emailService directly for maximum reliability
+    let emailId: string;
     try {
       const result = await emailService.sendReplyOnConversation({
         conversationId: ticket.conversationId,
@@ -104,12 +108,10 @@ export class SendCsatRequestStep extends BaseActionStep<
         type: 'REPLY',
         to: [customerEmail],
       });
-
+      emailId = result.emailId;
       logger.info(
-        `[automations] SEND_CSAT_REQUEST sent successfully | ticketId=${ticketId} emailId=${result.emailId} to=${customerEmail}`,
+        `[automations] SEND_CSAT_REQUEST sent successfully | ticketId=${ticketId} emailId=${emailId} to=${customerEmail}`,
       );
-
-      return { ticketId, emailId: result.emailId };
     } catch (error) {
       logger.error(
         `[automations] SEND_CSAT_REQUEST: failed to send email | ticketId=${ticketId} customerEmail=${customerEmail} error=${
@@ -118,6 +120,17 @@ export class SendCsatRequestStep extends BaseActionStep<
       );
       throw error;
     }
+
+    db.ticketActivity.create({
+      data: {
+        ticketId,
+        updatedBy: context.automation.createdById,
+        activityType: ActivityType.METADATA,
+        value: { field: 'csatRequest', emailId, isAutomation: true },
+      },
+    }).catch(err => logger.warn(`[automations] SEND_CSAT_REQUEST audit write failed ticketId=${ticketId}:`, err));
+
+    return { ticketId, emailId };
   }
 
   /**

@@ -2382,6 +2382,11 @@ export const stageTransitionTableRelationships = relationships(stageTransitionTa
     destField: ['id'],
     destSchema: boardTable,
   }),
+  form: one({
+    sourceField: ['formId'],
+    destField: ['id'],
+    destSchema: formTable,
+  }),
 }));
 
 export const stageApproversTableRelationships = relationships(stageApproversTable, ({ one }) => ({
