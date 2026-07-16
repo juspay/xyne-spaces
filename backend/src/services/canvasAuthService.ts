@@ -1,9 +1,12 @@
 import { db } from '@/database/client';
-import { CanvasRole } from '@prisma/client';
+import { CanvasRole, CanvasVisibility } from '@prisma/client';
 import { resolveCanvasHierarchy } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
+import { cloneYSweetDoc, initializeYSweetDoc } from '@/utils/ysweetUtils';
+import { randomUUID } from 'crypto';
+import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 
 export interface CanvasAuthResult {
   hasAccess: boolean;
@@ -210,6 +213,7 @@ class CanvasAuthService {
       projectId?: string;
       folderId?: string;
       title?: string;
+      visibility?: CanvasVisibility;
     }
   ): Promise<void> {
     try {
@@ -276,7 +280,7 @@ class CanvasAuthService {
           data: {
             id: canvasId,
             createdBy: userId,
-            visibility: 'PRIVATE',
+            visibility: options?.visibility ?? 'PRIVATE',
             title: options?.title || 'Untitled Canvas',
             content: [],
             isCollaborative: true,
@@ -317,6 +321,112 @@ class CanvasAuthService {
     } catch (error) {
       logger.error('Failed to auto-create canvas', { canvasId, userId, error });
       throw error;
+    }
+  }
+
+  async duplicateCanvas(
+    sourceCanvasId: string,
+    userId: string
+  ): Promise<{ id: string }> {
+    const auth = await this.checkCanvasAccess(sourceCanvasId, userId);
+    if (!auth.hasAccess || !auth.canView) {
+      throw new Error('Canvas not found');
+    }
+
+    const source = await db.canvas.findUnique({
+      where: { id: sourceCanvasId },
+      select: {
+        title: true,
+        visibility: true,
+        isCollaborative: true,
+        content: true,
+        channelId: true,
+        folderId: true,
+        projectId: true,
+        createdBy: true,
+      },
+    });
+
+    if (!source) {
+      throw new Error('Canvas not found');
+    }
+
+    await this.assertSameWorkspace(source.channelId, source.createdBy, userId);
+    const newCanvasId = randomUUID();
+
+    await this.createCanvasForUser(newCanvasId, userId, {
+      title: `${source.title} (Copy)`,
+      visibility: source.visibility,
+      ...(source.channelId ? { channelId: source.channelId } : {}),
+      ...(source.folderId ? { folderId: source.folderId } : {}),
+      ...(source.projectId ? { projectId: source.projectId } : {}),
+    });
+
+    try {
+      const seeded = source.isCollaborative
+        ? await cloneYSweetDoc(sourceCanvasId, newCanvasId)
+        : await initializeYSweetDoc(newCanvasId, (source.content ?? []) as unknown as BlockNoteBlock[]);
+      if (!seeded) {
+        throw new Error('Y-Sweet seeding returned false');
+      }
+    } catch (error) {
+      logger.error('[CanvasAuth] Failed to seed duplicated canvas content, rolling back', {
+        sourceCanvasId,
+        newCanvasId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      await this.deleteCanvasRow(newCanvasId);
+      throw new Error('Failed to copy canvas content');
+    }
+
+    return { id: newCanvasId };
+  }
+  private async assertSameWorkspace(
+    channelId: string | null,
+    createdBy: string,
+    userId: string
+  ): Promise<void> {
+    const requester = await db.user.findUnique({
+      where: { id: userId },
+      select: { workspaceId: true },
+    });
+
+    let sourceWorkspaceId: string | null = null;
+    if (channelId) {
+      const channel = await db.channel.findUnique({
+        where: { id: channelId },
+        select: { workspaceId: true },
+      });
+      sourceWorkspaceId = channel?.workspaceId ?? null;
+    }
+    if (!sourceWorkspaceId) {
+      const creator = await db.user.findUnique({
+        where: { id: createdBy },
+        select: { workspaceId: true },
+      });
+      sourceWorkspaceId = creator?.workspaceId ?? null;
+    }
+
+    if (
+      !requester?.workspaceId ||
+      !sourceWorkspaceId ||
+      requester.workspaceId !== sourceWorkspaceId
+    ) {
+      throw new Error('Canvas not found');
+    }
+  }
+
+  private async deleteCanvasRow(canvasId: string): Promise<void> {
+    try {
+      await db.$transaction([
+        db.canvasParticipant.deleteMany({ where: { canvasId } }),
+        db.canvas.delete({ where: { id: canvasId } }),
+      ]);
+    } catch (error) {
+      logger.error('[CanvasAuth] Failed to roll back canvas row after seeding failure', {
+        canvasId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
     }
   }
 }
