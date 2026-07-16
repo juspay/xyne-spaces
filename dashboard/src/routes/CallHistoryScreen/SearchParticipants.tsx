@@ -518,7 +518,10 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                               'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm text-foreground hover:bg-muted',
                               isHighlighted && 'bg-muted',
                             )}
-                            onClick={() => toggleValue(option.value)}
+                            onClick={() => {
+                              toggleValue(option.value);
+                              setIsOpen(false);
+                            }}
                             onMouseEnter={() => setIndex(index)}
                             data-track-category='calls'
                             data-track-name='select-participant-option'
