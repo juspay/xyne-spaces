@@ -13,11 +13,21 @@ import { ActivityClassification } from '@prisma/client'
 import { DatabaseClient } from '@/database/client'
 import { activityService } from '@/services/activity/activityService'
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service'
-import type { QuestionAskedEvent } from '../framework/opencode/types'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * A single question surfaced by an agentic ask-question step.
+ */
+export interface AskedQuestion {
+  question: string
+  header: string
+  options: Array<{ label: string; description?: string }>
+  multiple?: boolean
+  custom?: boolean
+}
 
 /**
  * Shape of a question group coming from the agentic framework's ask_question tool.
@@ -41,7 +51,7 @@ export interface FrameworkQuestionGroup {
  * Format OpenCode-style questions as readable text for display as an assistant message.
  */
 export function formatQuestionsAsText(
-  questions: QuestionAskedEvent['properties']['questions']
+  questions: AskedQuestion[]
 ): string {
   const parts: string[] = []
   parts.push('I have some questions before proceeding:\n')
@@ -71,7 +81,7 @@ export function formatQuestionsAsText(
  */
 function flattenFrameworkQuestionGroups(
   groups: FrameworkQuestionGroup[]
-): QuestionAskedEvent['properties']['questions'] {
+): AskedQuestion[] {
   return groups.flatMap(group => {
     const groupHeader = group.heading || group.header || ''
     return (group.questions ?? []).map(q => ({

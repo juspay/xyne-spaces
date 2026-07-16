@@ -20,30 +20,10 @@ export interface PRWorkflowContextParams {
  */
 export function buildPRWorkflowContext(
   workflowType: WorkflowType,
-  params: PRWorkflowContextParams
+  _params: PRWorkflowContextParams
 ): Record<string, unknown> {
-  switch (workflowType) {
-    case WorkflowType.XYNE_SPACES_FEATURE_IMPLEMENTATION:
-      return {
-        ...params.originalContext,
-        title: params.title,
-        description: params.description,
-        repoBranch: params.repoBranch,
-      };
-
-    case WorkflowType.FIDO_SERVER_WORKFLOW:
-      params.originalContext['reviewCode'] = false; // FIDO workflows don't require code review
-      return {
-        ...params.originalContext,
-        description: params.description,
-        repoBranch: params.repoBranch,
-      };
-
-    default:
-      // Unsupported workflow type - throw error
-      throw new Error(
-        `[PR-Context-Builder] Workflow type ${workflowType} is not supported for PR comment triggers. ` +
-        `Only XYNE_SPACES_FEATURE_IMPLEMENTATION and FIDO_SERVER_WORKFLOW are supported.`
-      );
-  }
+  // No workflow types are currently supported for PR comment triggers.
+  throw new Error(
+    `[PR-Context-Builder] Workflow type ${workflowType} is not supported for PR comment triggers.`
+  );
 }

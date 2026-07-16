@@ -4,6 +4,36 @@ import { rm, access, constants } from 'fs/promises';
 import { logger } from './logger.js';
 
 /**
+ * Hosts we are willing to clone from. Override with GIT_CLONE_ALLOWED_HOSTS
+ * (comma-separated) if a new internal host is introduced.
+ */
+const ALLOWED_CLONE_HOSTS: ReadonlySet<string> = new Set(
+  (process.env['GIT_CLONE_ALLOWED_HOSTS'] ?? 'ssh.bitbucket.juspay.net,bitbucket.juspay.net')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean),
+);
+
+/**
+ * Reject any repository URL we are not explicitly willing to clone from, BEFORE it
+ * reaches git. `repoUrl` is passed positionally to `git clone`, so an unvalidated
+ * value allows remote code execution via git transports (`ext::sh -c ...`) and
+ * argument injection (`--upload-pack=...`). Parsing as a URL also rejects both of
+ * those shapes outright, since neither yields an allowlisted hostname.
+ */
+function assertAllowedRepoUrl(repoUrl: string): void {
+  let hostname: string;
+  try {
+    hostname = new URL(repoUrl).hostname;
+  } catch {
+    throw new Error('Refusing to clone: repository URL is not a valid URL');
+  }
+  if (!ALLOWED_CLONE_HOSTS.has(hostname)) {
+    throw new Error(`Refusing to clone: repository host "${hostname}" is not allowlisted`);
+  }
+}
+
+/**
  * Check if a directory exists
  * @param dirPath Path to the directory to check
  * @returns true if directory exists, false if it doesn't exist
@@ -109,6 +139,8 @@ export async function cloneRepository(
   checkoutCommit?: string,
   shallow: boolean = false
 ): Promise<{ repoPath: string; branchName: string }> {
+  assertAllowedRepoUrl(repoUrl);
+
   // Create a temp directory for cloning the repo
   const tempDir = `/tmp/${executionId}`;
 

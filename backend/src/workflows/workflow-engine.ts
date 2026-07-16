@@ -19,14 +19,12 @@ import {
 import { IterationScopedEngine } from './engines/iteration-scoped-engine'
 import { WorkflowStorage } from './workflow-storage'
 import { AgentExecutor } from './framework/agent-executor'
-import { OpenCodeExecutor } from './framework/opencode'
 import type { ConversationRequest } from './framework/types'
 import { createUserMessage } from 'agentic-framework'
 import { WorkflowPausedException, WorkflowCancelledException, WorkflowExternalWaitException, WorkflowLockLostException } from './exceptions/workflow-exceptions'
 import { WorkflowExecutionStatus, WorkflowStatus, WorkflowStepStatus } from './types/workflow-enums'
 import { LockService } from '@/services/lockService'
 import { generateMarkdownSummary } from './utils/markdown-generator'
-import { config as appConfig } from '@/config/env'
 import {logger} from '@/utils/logger';
 
 export class WorkflowEngineImpl<
@@ -267,46 +265,22 @@ export class WorkflowEngineImpl<
       systemPrompt: agentConfig?.metadata?.description
     }
 
-    const executorType = config.executorType ?? this.currentState.context.executorType ?? appConfig.workflow.defaultExecutor
-    const useOpenCode = executorType === 'opencode' && appConfig.openCode.enabled
-    
     let result, updatedState, gitInfo
-    
-    if (useOpenCode) {
-      logger.info(`[WORKFLOW-ENGINE] Using OpenCode executor for checkpoint ${String(id)}, useQuestioningMode=${fullConfig.useQuestioningMode}`)
-      const openCodeExecutor = new OpenCodeExecutor(this.storage, {
-        baseUrl: appConfig.openCode.baseUrl,
-        timeout: appConfig.openCode.timeoutMs,
-        autoCompact: appConfig.openCode.autoCompact
-      })
-      const executionResult = await openCodeExecutor.executeWithWorkflowTracking(
-        this.currentState.workflowExecutionId,
-        this.currentState.workflowId,
-        fullConfig,
-        conversationRequest,
-        this.currentState,
-        inputStepDbId || id,
-        continuationOverride
-      )
-      result = executionResult.result
-      updatedState = executionResult.updatedState
-      gitInfo = executionResult.gitInfo
-    } else {
-      logger.info(`[WORKFLOW-ENGINE] Using AgentExecutor for checkpoint ${String(id)}`)
-      const agentExecutor = new AgentExecutor(this.storage)
-      const executionResult = await agentExecutor.executeWithWorkflowTracking(
-        this.currentState.workflowExecutionId,
-        this.currentState.workflowId,
-        fullConfig,
-        conversationRequest,
-        this.currentState,
-        inputStepDbId || id,  // 🎯 FIX: Use WorkflowStep DB ID instead of step name
-        continuationOverride  // Pass continuation override if this is a continuation rerun
-      )
-      result = executionResult.result
-      updatedState = executionResult.updatedState
-      gitInfo = executionResult.gitInfo
-    }
+
+    logger.info(`[WORKFLOW-ENGINE] Using AgentExecutor for checkpoint ${String(id)}`)
+    const agentExecutor = new AgentExecutor(this.storage)
+    const executionResult = await agentExecutor.executeWithWorkflowTracking(
+      this.currentState.workflowExecutionId,
+      this.currentState.workflowId,
+      fullConfig,
+      conversationRequest,
+      this.currentState,
+      inputStepDbId || id,  // 🎯 FIX: Use WorkflowStep DB ID instead of step name
+      continuationOverride  // Pass continuation override if this is a continuation rerun
+    )
+    result = executionResult.result
+    updatedState = executionResult.updatedState
+    gitInfo = executionResult.gitInfo
 
     // Update current state with framework execution result
     this.currentState = updatedState

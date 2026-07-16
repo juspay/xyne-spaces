@@ -1,8 +1,5 @@
 // Configuration types and enums for workflow agents
 import { ENHANCED_AI_ASSISTANT_PROMPT, AI_PLAN_MODE_PROMPT } from './constants'
-import { SYSTEM_PROMPTS as PLAN_REVIEW_LOOP_PROMPTS } from './definitions/plan-review-loop/constants';
-import { SYSTEM_PROMPTS as XYNE_SPACES_FEATURE_IMPLEMENTATION_WORKFLOW } from './definitions/xyne-spaces-workflows';
-import { verificationAgentSystemPrompt, docParserSystemPrompt2 } from './definitions/specs-verification-workflow/prompts.js';
 
 export enum ToolStatus {
   ENABLED = 'enabled',
@@ -476,70 +473,6 @@ The following files contain L2 logic and changes to them indicate L2-level modif
       { name: "todo-write", status: ToolStatus.ENABLED }
     ]
   },
-  "xyne-cli-planner": {
-    systemPrompt: XYNE_SPACES_FEATURE_IMPLEMENTATION_WORKFLOW.PLANNER,
-    tools: [
-      { name: "read", status: ToolStatus.ENABLED },
-      { name: "grep", status: ToolStatus.ENABLED },
-      { name: "glob", status: ToolStatus.ENABLED },
-      { name: "ls", status: ToolStatus.ENABLED },
-      { name: "bash", status: ToolStatus.ENABLED },
-      { name: "todo-write", status: ToolStatus.ENABLED }
-    ]
-  },
-  "xyne-cli-implementer": {
-    systemPrompt: XYNE_SPACES_FEATURE_IMPLEMENTATION_WORKFLOW.IMPLEMENTER,
-    tools: [
-      { name: "read", status: ToolStatus.ENABLED },
-      { name: "write", status: ToolStatus.ENABLED },
-      { name: "edit", status: ToolStatus.ENABLED },
-      { name: "multiedit", status: ToolStatus.ENABLED },
-      { name: "grep", status: ToolStatus.ENABLED },
-      { name: "glob", status: ToolStatus.ENABLED },
-      { name: "ls", status: ToolStatus.ENABLED },
-      { name: "bash", status: ToolStatus.ENABLED },
-      { name: "todo-write", status: ToolStatus.ENABLED }
-    ]
-  },
-  "xyne-cli-validator": {
-    systemPrompt: XYNE_SPACES_FEATURE_IMPLEMENTATION_WORKFLOW.VALIDATOR,
-    tools: [
-      { name: "read", status: ToolStatus.ENABLED },
-      { name: "write", status: ToolStatus.ENABLED },
-      { name: "edit", status: ToolStatus.ENABLED },
-      { name: "multiedit", status: ToolStatus.ENABLED },
-      { name: "grep", status: ToolStatus.ENABLED },
-      { name: "glob", status: ToolStatus.ENABLED },
-      { name: "ls", status: ToolStatus.ENABLED },
-      { name: "bash", status: ToolStatus.ENABLED },
-      { name: "todo-write", status: ToolStatus.ENABLED }
-    ]
-  },
-  "xyne-cli-reviewer": {
-    systemPrompt: XYNE_SPACES_FEATURE_IMPLEMENTATION_WORKFLOW.REVIEWER,
-    tools: [
-      { name: "read", status: ToolStatus.ENABLED },
-      { name: "write", status: ToolStatus.ENABLED },
-      { name: "grep", status: ToolStatus.ENABLED },
-      { name: "glob", status: ToolStatus.ENABLED },
-      { name: "ls", status: ToolStatus.ENABLED },
-      { name: "bash", status: ToolStatus.ENABLED },
-      { name: "todo-write", status: ToolStatus.ENABLED }
-    ]
-  },
-  "xyne-cli-test-fixer": {
-    systemPrompt: XYNE_SPACES_FEATURE_IMPLEMENTATION_WORKFLOW.TEST_FIXER,
-    tools: [
-      { name: "read", status: ToolStatus.ENABLED },
-      { name: "write", status: ToolStatus.ENABLED },
-      { name: "edit", status: ToolStatus.ENABLED },
-      { name: "multiedit", status: ToolStatus.ENABLED },
-      { name: "grep", status: ToolStatus.ENABLED },
-      { name: "glob", status: ToolStatus.ENABLED },
-      { name: "ls", status: ToolStatus.ENABLED },
-      { name: "todo-write", status: ToolStatus.ENABLED }
-    ]
-  },
   "document-summarization-agent": {
     systemPrompt: "You are a network document analyst. Analyze network documents and provide actionable insights.\n\nProvide:\n- 2-3 sentence executive summary\n- Key findings\n- Action items with deadlines and priority\n- Risk assessment\n- Tags for categorization\n- Priority level (LOW/MEDIUM/HIGH/CRITICAL)\n- Recommendation (action needed / review / informational)\n\nReturn results as JSON.",
     tools: [
@@ -549,76 +482,6 @@ The following files contain L2 logic and changes to them indicate L2-level modif
       { name: "bash", status: ToolStatus.DISABLED },
       { name: "write", status: ToolStatus.DISABLED },
       { name: "edit", status: ToolStatus.DISABLED }
-    ]
-  },
-  "xyne-planner": {
-    systemPrompt: PLAN_REVIEW_LOOP_PROMPTS.PLANNER,
-    tools: [
-      { name: "read", status: ToolStatus.ENABLED },
-      { name: "grep", status: ToolStatus.ENABLED },
-      { name: "glob", status: ToolStatus.ENABLED },
-      { name: "ls", status: ToolStatus.ENABLED },
-      { name: "bash", status: ToolStatus.ENABLED },
-      { name: "todo-write", status: ToolStatus.ENABLED },
-      { name: "write", status: ToolStatus.DISABLED },
-      { name: "edit", status: ToolStatus.DISABLED },
-      { name: "multiedit", status: ToolStatus.DISABLED }
-    ]
-  },
-  "xyne-plan-reviewer": {
-    systemPrompt: PLAN_REVIEW_LOOP_PROMPTS.PLAN_REVIEWER,
-    tools: [
-      { name: "read", status: ToolStatus.ENABLED },
-      { name: "grep", status: ToolStatus.ENABLED },
-      { name: "glob", status: ToolStatus.ENABLED },
-      { name: "ls", status: ToolStatus.ENABLED },
-      { name: "bash", status: ToolStatus.ENABLED },
-      { name: "write", status: ToolStatus.DISABLED },
-      { name: "edit", status: ToolStatus.DISABLED },
-      { name: "multiedit", status: ToolStatus.DISABLED },
-      { name: "todo-write", status: ToolStatus.DISABLED }
-    ]
-  },
-  "xyne-implementer": {
-    systemPrompt: PLAN_REVIEW_LOOP_PROMPTS.IMPLEMENTER,
-    tools: [
-      { name: "read", status: ToolStatus.ENABLED },
-      { name: "write", status: ToolStatus.ENABLED },
-      { name: "edit", status: ToolStatus.ENABLED },
-      { name: "multiedit", status: ToolStatus.ENABLED },
-      { name: "grep", status: ToolStatus.ENABLED },
-      { name: "glob", status: ToolStatus.ENABLED },
-      { name: "ls", status: ToolStatus.ENABLED },
-      { name: "bash", status: ToolStatus.ENABLED },
-      { name: "todo-write", status: ToolStatus.ENABLED }
-    ]
-  },
-  "xyne-implementation-reviewer": {
-    systemPrompt: PLAN_REVIEW_LOOP_PROMPTS.IMPLEMENTATION_REVIEWER,
-    tools: [
-      { name: "read", status: ToolStatus.ENABLED },
-      { name: "grep", status: ToolStatus.ENABLED },
-      { name: "glob", status: ToolStatus.ENABLED },
-      { name: "ls", status: ToolStatus.ENABLED },
-      { name: "bash", status: ToolStatus.ENABLED },
-      { name: "write", status: ToolStatus.DISABLED },
-      { name: "edit", status: ToolStatus.DISABLED },
-      { name: "multiedit", status: ToolStatus.DISABLED },
-      { name: "todo-write", status: ToolStatus.DISABLED }
-    ]
-  },
-  "xyne-validator": {
-    systemPrompt: PLAN_REVIEW_LOOP_PROMPTS.VALIDATOR,
-    tools: [
-      { name: "read", status: ToolStatus.ENABLED },
-      { name: "write", status: ToolStatus.ENABLED },
-      { name: "edit", status: ToolStatus.ENABLED },
-      { name: "multiedit", status: ToolStatus.ENABLED },
-      { name: "grep", status: ToolStatus.ENABLED },
-      { name: "glob", status: ToolStatus.ENABLED },
-      { name: "ls", status: ToolStatus.ENABLED },
-      { name: "bash", status: ToolStatus.ENABLED },
-      { name: "todo-write", status: ToolStatus.ENABLED }
     ]
   },
   "integrity-fix-agent": {
@@ -694,14 +557,6 @@ The following files contain L2 logic and changes to them indicate L2-level modif
       { name: "write", status: ToolStatus.DISABLED },
       { name: "edit", status: ToolStatus.DISABLED }
     ]
-  },
-  "specs-verification": {
-    systemPrompt: verificationAgentSystemPrompt,
-    tools: []
-  },
-  "document-parsing": {
-    systemPrompt: docParserSystemPrompt2,
-    tools: []
   },
   "support-query-processor": {
     systemPrompt: `You are an intelligent IT Support Assistant that combines query classification and response generation into a single operation.

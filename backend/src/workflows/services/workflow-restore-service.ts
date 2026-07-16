@@ -33,16 +33,7 @@ export interface ContinueAgenticStepOptions {
 // Webhook to workflow-step mapping
 const webhookWorkflowMapper = {
   bitbucket: {
-    workflows: [
-      {
-        workflow: 'XYNE_SPACES_FEATURE_IMPLEMENTATION',
-        step: 'implementation',
-      },
-      {
-        workflow: 'FIDO_SERVER_WORKFLOW',
-        step: 'code_implementation',
-      },
-    ],
+    workflows: [] as ReadonlyArray<{ workflow: string; step: string }>,
   },
 } as const;
 
