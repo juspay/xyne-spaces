@@ -75,6 +75,7 @@ type ActivityValue = Partial<
       emailType?: string;
       rating?: string;
       score?: number | null;
+      isAutomation?: boolean;
     }
 >;
 
@@ -359,6 +360,14 @@ const getActivityDescription = (
           description: `cleared ${fieldLabel}`,
           details: oldValue ? <span className='font-semibold'>{oldValue}</span> : '',
         };
+      }
+
+      if (value?.field === 'emailReply') {
+        return { description: 'sent an automated email reply', details: '' };
+      }
+
+      if (value?.field === 'csatRequest') {
+        return { description: 'sent a CSAT survey to the customer', details: '' };
       }
 
       return {
@@ -735,6 +744,7 @@ export const ActivityComponent = ({
 }) => {
   const [formExpanded, setFormExpanded] = useState(true);
   const activityUser = users?.find(u => u.id === activity.updatedBy);
+  const isAutomationActivity = (activity.value as ActivityValue | null)?.isAutomation === true;
   const { description, details, hideActorName } = getActivityDescription(
     activity,
     users,
@@ -776,7 +786,9 @@ export const ActivityComponent = ({
           <p className='text-sm text-muted-foreground'>
             {activity.activityType !== ActivityType.PR &&
               !hideActorName &&
-              (getUserDisplayName(activityUser) || 'Someone')}{' '}
+              (isAutomationActivity
+                ? 'Automation'
+                : getUserDisplayName(activityUser) || 'Someone')}{' '}
             {description}
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>

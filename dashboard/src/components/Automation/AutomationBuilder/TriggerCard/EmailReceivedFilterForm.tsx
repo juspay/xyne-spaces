@@ -14,6 +14,7 @@ const INCLUDE_KEYS = [
   'bodyContains',
   'matchCase',
   'onlyNewThreads',
+  'onlyReplies',
 ];
 const EXCLUDE_KEYS = [
   'excludedFromEmails',
@@ -44,12 +45,23 @@ export function EmailReceivedFilterForm({
   const hasAnyExclusion = useMemo(() => EXCLUDE_KEYS.some(k => !isEmpty(value[k])), [value]);
   const [excludeOpen, setExcludeOpen] = useState(hasAnyExclusion);
 
+  // onlyNewThreads and onlyReplies are mutually exclusive — checking one clears the other.
+  const handleIncludeChange = (next: Record<string, unknown>) => {
+    if (next['onlyNewThreads'] === true && value['onlyNewThreads'] !== true) {
+      onChange({ ...next, onlyReplies: false });
+    } else if (next['onlyReplies'] === true && value['onlyReplies'] !== true) {
+      onChange({ ...next, onlyNewThreads: false });
+    } else {
+      onChange(next);
+    }
+  };
+
   return (
     <div className='flex flex-col gap-4'>
       <SchemaForm
         schema={includeSchema}
         value={value}
-        onChange={onChange}
+        onChange={handleIncludeChange}
         issues={issues}
         pathPrefix={pathPrefix}
       />

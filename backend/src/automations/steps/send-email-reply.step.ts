@@ -1,8 +1,12 @@
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
+import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { emailService } from '@/services/emailService';
+import { repositories } from '@/database/repositories';
+import { DatabaseClient } from '@/database/client';
+import { ActivityType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 
 const SendEmailReplyConfigSchema = z.object({
@@ -38,10 +42,12 @@ export class SendEmailReplyStep extends BaseActionStep<
 
   async execute(
     config: z.infer<typeof SendEmailReplyConfigSchema>,
+    context: AutomationContext,
   ): Promise<SendEmailReplyOutput> {
     const conversationId = config.conversationId as string;
     const body = config.body as string;
     const type = config.replyAll === true ? 'REPLY_ALL' : 'REPLY';
+    const prisma = DatabaseClient.getInstance();
 
     const result = await emailService.sendReplyOnConversation({
       conversationId,
@@ -52,6 +58,18 @@ export class SendEmailReplyStep extends BaseActionStep<
     logger.info(
       `[automations] SEND_EMAIL_REPLY ${type} via ${result.externalSourceType} conv=${conversationId} email=${result.emailId}`,
     );
+
+    const ticket = await repositories.tickets.findFirstByConversationId(conversationId);
+    if (ticket?.id) {
+      prisma.ticketActivity.create({
+        data: {
+          ticketId: ticket.id,
+          updatedBy: context.automation.createdById,
+          activityType: ActivityType.METADATA,
+          value: { field: 'emailReply', emailId: result.emailId, isAutomation: true },
+        },
+      }).catch(err => logger.warn(`[automations] SEND_EMAIL_REPLY audit write failed conv=${conversationId}:`, err));
+    }
 
     return {
       emailId: result.emailId,

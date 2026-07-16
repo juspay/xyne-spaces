@@ -4,6 +4,8 @@ import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
+import { DatabaseClient } from '@/database/client';
+import { ActivityType } from '@prisma/client';
 
 const AssignTicketConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
@@ -33,15 +35,23 @@ export class AssignTicketStep extends BaseActionStep<typeof AssignTicketConfigSc
     config: z.infer<typeof AssignTicketConfigSchema>,
     context: AutomationContext,
   ): Promise<AssignTicketOutput> {
-    await repositories.tickets.updateTicketAssignee(
-      config.ticketId as string,
-      config.assigneeId as string,
-      context.automation.createdById,
-    );
-    return {
-      ticketId: config.ticketId as string,
-      assigneeId: config.assigneeId as string,
-    };
+    const ticketId = config.ticketId as string;
+    const assigneeId = config.assigneeId as string;
+    const prisma = DatabaseClient.getInstance();
+
+    const prev = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { assignedTo: true } });
+    await repositories.tickets.updateTicketAssignee(ticketId, assigneeId, context.automation.createdById);
+
+    await prisma.ticketActivity.create({
+      data: {
+        ticketId,
+        updatedBy: context.automation.createdById,
+        activityType: ActivityType.ASSIGNED_TO,
+        value: { oldValue: prev?.assignedTo ?? null, newValue: assigneeId, isAutomation: true },
+      },
+    });
+
+    return { ticketId, assigneeId };
   }
 }
 

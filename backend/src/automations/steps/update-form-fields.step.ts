@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
+import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
+import { DatabaseClient } from '@/database/client';
+import { ActivityType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 
 const UpdateFormFieldsConfigSchema = z.object({
@@ -45,9 +48,11 @@ export class UpdateFormFieldsStep extends BaseActionStep<
 
   async execute(
     config: z.infer<typeof UpdateFormFieldsConfigSchema>,
+    context: AutomationContext,
   ): Promise<UpdateFormFieldsOutput> {
     const ticketId = config.ticketId as string;
     const fieldPairs = config.fields as { fieldName: string; value: string | null | undefined }[];
+    const prisma = DatabaseClient.getInstance();
 
     const ticket = await repositories.tickets.getTicketWithBoard(ticketId);
 
@@ -61,6 +66,23 @@ export class UpdateFormFieldsStep extends BaseActionStep<
       ticket.boardId,
       fieldPairs,
     );
+
+    if (updatedFields.length > 0) {
+      const fieldValueMap = new Map(fieldPairs.map(f => [f.fieldName, f.value]));
+      await prisma.ticketActivity.createMany({
+        data: updatedFields.map(fieldName => ({
+          ticketId,
+          updatedBy: context.automation.createdById,
+          activityType: ActivityType.METADATA,
+          value: {
+            field: 'customField',
+            fieldName,
+            newValue: fieldValueMap.get(fieldName) ?? null,
+            isAutomation: true,
+          },
+        })),
+      });
+    }
 
     logger.info('[automations] UPDATE_FORM_FIELDS completed', {
       ticketId,

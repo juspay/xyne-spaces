@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { FormContextType, FormEntityType } from '@xyne/shared';
+import type { FormFields, GlobalField } from '@xyne/shared';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import { Checkbox } from '../../../ui/Checkbox/Checkbox';
 import { cn } from '../../../../utils/classNames';
 import { resolveDisplayFormFields } from '../../../../utils/board/resolveDisplayFormFields';
+
+type MembershipRow = FormFields & { globalField?: GlobalField | null };
 
 interface TicketUpdatedFormFieldsSectionProps {
   boardIds: string[];
@@ -24,9 +26,14 @@ export function TicketUpdatedFormFieldsSection({
   formFieldIds,
   onChange,
 }: TicketUpdatedFormFieldsSectionProps): React.ReactElement {
-  const [forms] = useCachedQuery(
-    queries.getFormsByContextType({ contextType: FormContextType.BOARD }),
-  );
+  // Scoped to selected boardIds — avoids fetching all board forms
+  const [boardMappings] = useCachedQuery(queries.getFormMappingsByBoardIds({ boardIds }), {
+    enabled: boardIds.length > 0,
+  });
+  // Stage transitions scoped to selected boards
+  const [stageTransitions] = useCachedQuery(queries.getStageTransitionsByBoardIds({ boardIds }), {
+    enabled: boardIds.length > 0,
+  });
   const [boards] = useCachedQuery(queries.getAllBoardsList());
   const [expandedBoards, setExpandedBoards] = useState<Set<string>>(new Set());
 
@@ -36,44 +43,56 @@ export function TicketUpdatedFormFieldsSection({
     return map;
   }, [boards]);
 
+  type StageTransitionRow = NonNullable<typeof stageTransitions>[number];
+  const stageTransitionsByBoardId = useMemo(() => {
+    const map = new Map<string, StageTransitionRow[]>();
+    stageTransitions?.forEach(t => {
+      const existing = map.get(t.boardId);
+      if (existing) existing.push(t);
+      else map.set(t.boardId, [t]);
+    });
+    return map;
+  }, [stageTransitions]);
+
   const boardGroups = useMemo((): BoardGroup[] => {
-    if (!forms || boardIds.length === 0) return [];
+    if (boardIds.length === 0) return [];
 
     return boardIds
       .map(boardId => {
-        const boardForms = forms.filter(f =>
-          f.formContextMappings?.some(
-            m => m.contextId === boardId && m.entityType === FormEntityType.TICKET,
-          ),
+        const boardFields = (boardMappings ?? [])
+          .filter(m => m.contextId === boardId)
+          .flatMap(m => resolveDisplayFormFields(m.formId, (m.formFields ?? []) as MembershipRow[]))
+          .map(f => ({ id: f.id, fieldName: f.fieldName }));
+
+        const stageFields = (stageTransitionsByBoardId.get(boardId) ?? [])
+          .filter(t => t.formId && t.form)
+          .flatMap(t =>
+            resolveDisplayFormFields(t.formId!, (t.form?.formFields ?? []) as MembershipRow[]),
+          )
+          .map(f => ({ id: f.id, fieldName: f.fieldName }));
+
+        const fields = [...boardFields, ...stageFields].filter(
+          (f, i, arr) => arr.findIndex(x => x.id === f.id) === i,
         );
-        const fields = boardForms
-          .flatMap(f => resolveDisplayFormFields(f.id, [...(f.formFields ?? [])]))
-          .map(f => ({ id: f.id, fieldName: f.fieldName }))
-          .filter((f, i, arr) => arr.findIndex(t => t.id === f.id) === i);
-        return {
-          boardId,
-          boardName: boardNameMap.get(boardId) ?? boardId,
-          fields,
-        };
+
+        return { boardId, boardName: boardNameMap.get(boardId) ?? boardId, fields };
       })
       .filter(g => g.fields.length > 0);
-  }, [forms, boardIds, boardNameMap]);
+  }, [boardMappings, stageTransitionsByBoardId, boardIds, boardNameMap]);
 
   const formFieldIdsRef = useRef(formFieldIds);
   formFieldIdsRef.current = formFieldIds;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  // Prune formFieldIds that belong to boards no longer selected.
-  // Bail out while forms are still loading to avoid wiping saved selections.
   useEffect(() => {
-    if (!forms) return;
+    if (!boardMappings || !stageTransitions) return;
     const validIds = new Set(boardGroups.flatMap(g => g.fields.map(f => f.id)));
     const pruned = formFieldIdsRef.current.filter(id => validIds.has(id));
     if (pruned.length !== formFieldIdsRef.current.length) {
       onChangeRef.current(pruned);
     }
-  }, [boardGroups, forms, boardIds]);
+  }, [boardGroups, boardMappings, stageTransitions, boardIds]);
 
   const handleToggle = (fieldId: string, checked: boolean) => {
     if (checked) {
@@ -112,11 +131,9 @@ export function TicketUpdatedFormFieldsSection({
         <span className='text-[11px] text-muted-foreground'>
           {boardIds.length === 0
             ? 'Select a board above to see its form fields.'
-            : !forms
-              ? 'Loading form fields…'
-              : boardGroups.length === 0
-                ? 'No form fields configured for the selected boards.'
-                : 'Fire only when any of these form fields changed. Leave empty to skip form field tracking entirely.'}
+            : boardGroups.length === 0
+              ? 'No form fields configured for the selected boards.'
+              : 'Fire only when any of these form fields changed. Leave empty to skip form field tracking entirely.'}
         </span>
       </div>
 

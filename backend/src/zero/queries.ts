@@ -3407,6 +3407,22 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .orderBy('createdAt', 'desc');
     }
   ),
+  getFormMappingsByBoardIds: defineQuery(
+    z.object({ boardIds: z.array(z.string()) }),
+    ({ args: { boardIds } }) => {
+      if (boardIds.length === 0) {
+        return zql.forms_context_mapping
+          .where('id', 'nonexistent')
+          .limit(0)
+          .related('formFields', q => q.related('globalField'));
+      }
+      return zql.forms_context_mapping
+        .where('contextId', 'IN', boardIds)
+        .where('contextType', 'BOARD' as FormContextType)
+        .where('entityType', 'TICKET' as FormEntityType)
+        .related('formFields', q => q.related('globalField'));
+    },
+  ),
   // Query to get form context mapping for a specific context
   getFormMappingByContextId: defineQuery(
     z.object({
@@ -3744,6 +3760,23 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     z.object({ boardId: z.string() }),
     ({ args: { boardId } }) => {
       return zql.stage_transitions.where('boardId', boardId).related('transitionApprovers');
+    },
+  ),
+
+  // Stage transitions for multiple boards — used by automation form-field picker to resolve
+  // which stage forms belong to which board.
+  getStageTransitionsByBoardIds: defineQuery(
+    z.object({ boardIds: z.array(z.string()) }),
+    ({ args: { boardIds } }) => {
+      if (boardIds.length === 0) {
+        return zql.stage_transitions
+          .where('id', 'nonexistent')
+          .limit(0)
+          .related('form', q => q.related('formFields', q2 => q2.related('globalField')));
+      }
+      return zql.stage_transitions
+        .where('boardId', 'IN', boardIds)
+        .related('form', q => q.related('formFields', q2 => q2.related('globalField')));
     },
   ),
 

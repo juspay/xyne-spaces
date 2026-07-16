@@ -100,6 +100,7 @@ export interface TicketDuplicateCheckResponse {
 export enum ActivitySource {
   INTERNAL = 'INTERNAL', // All internal updates (manual user actions + AI workflows) - creates STAGE_NAME activity
   WEBHOOK = 'WEBHOOK', // External PR webhook events - skips STAGE_NAME activity (handled separately)
+  AUTOMATION = 'AUTOMATION', // Automation engine steps — shows "Automation" in activity feed
 }
 
 /**

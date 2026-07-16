@@ -517,8 +517,8 @@ export class TicketRepository {
         `[TicketRepository] Created PR activity for ticket ${ticketId}, PR ${prActivityData.prId} ` +
         `(action: ${prActivityData.prEvent}, author: ${prActivityData.prAuthor || 'unknown'})`
       );
-    } else if (source === ActivitySource.INTERNAL) {
-      // For INTERNAL source: Create STAGE_NAME activity
+    } else if (source === ActivitySource.INTERNAL || source === ActivitySource.AUTOMATION) {
+      // For INTERNAL / AUTOMATION source: Create STAGE_NAME activity
       await prisma.ticketActivity.create({
         data: {
           ticketId: ticketId,
@@ -528,7 +528,8 @@ export class TicketRepository {
             field: 'stageName',
             oldValue: oldStageName,
             newValue: newStageName,
-            source: source  // Store source for audit trail
+            source: source,
+            ...(source === ActivitySource.AUTOMATION ? { isAutomation: true } : {}),
           } as Prisma.InputJsonValue,
           channelId: currentTicket.channelId
         }
