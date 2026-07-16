@@ -17,8 +17,6 @@ import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
 import { TicketCard } from '../../Tickets/TicketCard/TicketCard';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { API_BASE_URL, APPS_PUBLIC_BASE_URL } from '../../../config';
-
 interface InternalMessagePreviewProps {
   metadata: InternalMessageLinkMetadata;
   onClose?: () => void;
@@ -357,21 +355,12 @@ const InternalMessagePreviewComponent: React.FC<InternalMessagePreviewProps> = (
   const showAttachments = !isDeleted && hasAttachment && attachments && attachments.length > 0;
 
   const normalizeToCurrentOrigin = (targetUrl: URL): URL => {
-    const currentHost = window.location.host;
-    const targetHost = targetUrl.host;
+    if (targetUrl.host === window.location.host) return targetUrl;
 
-    if (targetHost === currentHost) return targetUrl;
-
-    // Derive known app domains from existing config (already environment-aware)
-    const knownHosts = [new URL(API_BASE_URL).host, new URL(APPS_PUBLIC_BASE_URL).host];
-
-    if (knownHosts.includes(targetHost)) {
-      const normalized = new URL(targetUrl.href);
-      normalized.host = currentHost;
-      return normalized;
-    }
-
-    return targetUrl;
+    // InternalMessagePreview is produced from backend-validated internal URLs.
+    const normalized = new URL(targetUrl.href);
+    normalized.host = window.location.host;
+    return normalized;
   };
 
   const handleNavigate = (event?: React.MouseEvent | React.KeyboardEvent): void => {
