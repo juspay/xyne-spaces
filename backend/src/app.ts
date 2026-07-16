@@ -25,8 +25,6 @@ import authRoutes from '@/routes/auth';
 import authV2Routes from '@/routes/authV2';
 import ticketRoutes from '@/routes/tickets';
 import externalStepResponseRoutes from '@/routes/externalStepResponses';
-import agentRoutes from '@/routes/agents';
-import modelRoutes from '@/routes/models';
 import toolRoutes from '@/routes/tools';
 import agentToolsMappingRoutes from '@/routes/agent-tools-mappings';
 import analyticsRoutes from '@/routes/analytics';
@@ -482,18 +480,6 @@ export class App {
       authMiddleware.authenticate,
       aclMiddleware.checkAccess,
       workflowRoutes
-    );
-    this.app.use(
-      '/api/agents',
-      authMiddleware.authenticate,
-      aclMiddleware.checkAccess,
-      agentRoutes
-    );
-    this.app.use(
-      '/api/models',
-      authMiddleware.authenticate,
-      aclMiddleware.checkAccess,
-      modelRoutes
     );
     this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     this.app.use(
