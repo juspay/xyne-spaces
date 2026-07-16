@@ -296,6 +296,54 @@ export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
   return `${frontendUrl}${path}`;
 }
 
+type LooseInline = { type?: string; text?: string; props?: Record<string, unknown>; styles?: unknown };
+type LooseBlock = {
+  type?: string;
+  content?: unknown;
+  children?: LooseBlock[];
+};
+
+// Inline content types the frontend canvas schema adds on top of the BlockNote
+// defaults. ServerBlockNoteEditor.create() only knows the default schema, so any
+// of these custom inline nodes make blocksToMarkdownLossy throw
+// "node type <x> not found in schema". We rewrite them to plain text first.
+const CUSTOM_INLINE_TYPES = new Set(['mention']);
+
+// Render a custom inline node as plain text, mirroring the frontend display
+// logic (CanvasMentionSpec: prefer the group name for group mentions, otherwise
+// the username).
+function customInlineToText(inline: LooseInline): string {
+  const props = inline.props || {};
+  const groupId = props['groupId'] as string | undefined;
+  const groupName = props['groupName'] as string | undefined;
+  const username = props['username'] as string | undefined;
+  const name = groupId && groupName ? groupName : username || 'mention';
+  return `@${name}`;
+}
+
+// Recursively replace custom inline nodes with plain-text runs so the default
+// server schema can serialize the document. Returns a new tree; the input is not
+// mutated.
+function normalizeBlocksForMarkdown(blocks: LooseBlock[]): LooseBlock[] {
+  return blocks.map(block => {
+    const next: LooseBlock = { ...block };
+
+    if (Array.isArray(block.content)) {
+      next.content = (block.content as LooseInline[]).map(inline =>
+        inline?.type && CUSTOM_INLINE_TYPES.has(inline.type)
+          ? { type: 'text', text: customInlineToText(inline), styles: {} }
+          : inline,
+      );
+    }
+
+    if (Array.isArray(block.children) && block.children.length > 0) {
+      next.children = normalizeBlocksForMarkdown(block.children);
+    }
+
+    return next;
+  });
+}
+
 /**
  * Convert BlockNote JSON content to Markdown
  * @param blocks - BlockNote JSON blocks (from canvas.content)
@@ -304,8 +352,12 @@ export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
 export async function convertBlockNoteToMarkdown(blocks: unknown[]): Promise<string> {
   try {
     const editor = ServerBlockNoteEditor.create();
+    // Strip custom inline nodes (e.g. mentions) the default server schema does
+    // not know about, otherwise blocksToMarkdownLossy throws
+    // "node type <x> not found in schema".
+    const normalized = normalizeBlocksForMarkdown((blocks as LooseBlock[]) || []);
     // blocksToMarkdownLossy accepts the blocks array directly
-    const markdown = await editor.blocksToMarkdownLossy(blocks as any);
+    const markdown = await editor.blocksToMarkdownLossy(normalized as any);
     return markdown;
   } catch (error) {
     logger.error('[CanvasService] Failed to convert BlockNote to Markdown:', error);
