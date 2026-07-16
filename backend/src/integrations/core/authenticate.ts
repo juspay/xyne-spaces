@@ -92,8 +92,8 @@ export async function authenticate(
       logger.warn(
         `Skipping ingest for disconnected source: ${resolvedSourceName} (isActive=false)`,
       );
-      res.status(200).json({
-        success: true,
+      res.status(504).json({
+        success: false,
         skipped: true,
         reason: 'inactive_source',
         sourceName: resolvedSourceName,
