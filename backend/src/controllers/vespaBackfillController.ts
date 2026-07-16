@@ -972,6 +972,7 @@ export class AdminBackfillController {
       // Get query parameters
       const schemasParam = req.query.schemas as string | undefined;
       const fromTimestampParam = req.query.fromTimestamp as string | undefined;
+      const toTimestampParam = req.query.toTimestamp as string | undefined;
       const filtersParam = req.query.filters as string | undefined;
       const queueName = req.query.queueName as string;
 
@@ -1002,7 +1003,37 @@ export class AdminBackfillController {
         logger.info(`📅 No fromTimestamp provided - will backfill from the beginning`);
       }
 
-      const validSchemas = ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail', 'app', 'calls'];
+      // Parse toTimestamp if provided, otherwise it defaults to "now" (see cutoffTime below)
+      let toTime: Date | null = null;
+      if (toTimestampParam) {
+        try {
+          toTime = new Date(toTimestampParam);
+          if (isNaN(toTime.getTime())) {
+            throw new Error('Invalid timestamp format');
+          }
+          logger.info(`📅 Using provided toTimestamp: ${toTime.toISOString()}`);
+        } catch (error) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid toTimestamp parameter',
+            message: 'toTimestamp must be a valid ISO 8601 date string',
+            timestamp: new Date().toISOString(),
+          } as ApiResponse);
+          return;
+        }
+      }
+
+      if (fromTime && toTime && toTime.getTime() <= fromTime.getTime()) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid time range',
+          message: 'toTimestamp must be after fromTimestamp',
+          timestamp: new Date().toISOString(),
+        } as ApiResponse);
+        return;
+      }
+
+      const validSchemas =['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail', 'app', 'calls'];
       const schemasToBackfill = requestedSchemas.filter(s => validSchemas.includes(s));
 
       if (schemasToBackfill.length === 0) {
@@ -1049,9 +1080,10 @@ export class AdminBackfillController {
       // Generate a unique job ID for tracking
       const backfillJobId = `backfill-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
-      // Capture cutoff time NOW only if a fromTime is provided
-      // If no fromTime is provided, we will backfill all records
-      const cutoffTime = fromTime ? new Date() : undefined;
+      // Use the explicit toTimestamp when provided; otherwise, if a fromTime was given,
+      // default the upper bound to "now" (preserves prior behavior). If neither is
+      // provided, cutoffTime stays undefined and we backfill all records.
+      const cutoffTime = toTime ?? (fromTime ? new Date() : undefined);
 
       // Prepare response data
       const responseData: any = {
