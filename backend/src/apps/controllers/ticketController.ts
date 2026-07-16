@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
-import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, FormContextType, FormEntityType, Prisma, EmailType, DeskType } from '@prisma/client';
+import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, Prisma, EmailType, DeskType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
@@ -23,8 +23,6 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
-import { vespaQueue } from '@/queues/vespaQueue';
-import { ticketSchema } from '@/vespa/src/types';
 
 import { resolveChannelId } from '../utils/channelUtils';
 import { decodeCursor, paginateResults } from '../core/paginationUtils';
@@ -38,6 +36,13 @@ import {
   normalizeCustomFieldValue,
   normalizeHistoryLimit,
 } from './ticketController.helpers';
+import {
+  buildCustomFieldWritePayload,
+  buildPartialCustomFieldWritePayload,
+  syncCustomFieldValues,
+  validateUserCustomFieldReferences,
+  type CustomFieldWritePayload,
+} from '@/services/ticketCustomFieldService';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
@@ -201,335 +206,6 @@ interface TicketConversationCursor {
   id: string;
   createdAt: number;
 }
-type CustomFieldWritePayload = {
-  formId: string;
-  contextId: string;
-  fieldValues: Array<{
-    fieldName: string;
-    fieldId: string;
-    fieldValue: string;
-    actualFieldValue: Prisma.InputJsonValue;
-  }>;
-};
-
-const validateUserCustomFieldReferences = async (
-  fieldValues: Array<{
-    fieldName: string;
-    fieldType: string;
-    actualFieldValue: Prisma.InputJsonValue;
-  }>,
-  workspaceId: string,
-): Promise<void> => {
-  const userFieldEntries = fieldValues.filter(fieldValue => fieldValue.fieldType === 'USER');
-  if (userFieldEntries.length === 0) return;
-
-  const userIds = Array.from(
-    new Set(
-      userFieldEntries.flatMap(fieldValue =>
-        Array.isArray(fieldValue.actualFieldValue)
-          ? fieldValue.actualFieldValue
-          : [fieldValue.actualFieldValue],
-      ).filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
-    ),
-  );
-
-  if (userIds.length === 0) return;
-
-  const users = await prismaClient.user.findMany({
-    where: {
-      id: { in: userIds },
-      workspaceId,
-    },
-    select: { id: true },
-  });
-  const validUserIds = new Set(users.map(user => user.id));
-
-  for (const fieldValue of userFieldEntries) {
-    const referencedUserIds = (
-      Array.isArray(fieldValue.actualFieldValue)
-        ? fieldValue.actualFieldValue
-        : [fieldValue.actualFieldValue]
-    ).filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
-
-    const invalidUserIds = referencedUserIds.filter(userId => !validUserIds.has(userId));
-    if (invalidUserIds.length > 0) {
-      throw new Error(
-        `Field "${fieldValue.fieldName}" contains invalid user ID${invalidUserIds.length > 1 ? 's' : ''}: ${invalidUserIds.join(', ')}`,
-      );
-    }
-  }
-};
-
-const buildCustomFieldWritePayload = async (
-  boardId: string,
-  workspaceId: string,
-  dynamicFields: Record<string, unknown> | undefined,
-  options?: { requireAllRequiredFields?: boolean },
-): Promise<CustomFieldWritePayload | undefined> => {
-  const normalizedInput = dynamicFields ?? {};
-  const requireAllRequiredFields = options?.requireAllRequiredFields ?? true;
-  const formMapping = await prismaClient.formContextMapping.findFirst({
-    where: {
-      contextId: boardId,
-      contextType: FormContextType.BOARD,
-      entityType: FormEntityType.TICKET,
-    },
-    select: { formId: true },
-  });
-
-  if (!formMapping) {
-    if (Object.keys(normalizedInput).length > 0) {
-      throw new Error(`No form configured for board ${boardId}`);
-    }
-    return undefined;
-  }
-
-  const formFields = await resolveFormFieldDefinitionsForForm(prismaClient, formMapping.formId);
-
-  const fieldByName = new Map(formFields.map(field => [field.fieldName, field]));
-  const unknownFields = Object.keys(normalizedInput).filter(fieldName => !fieldByName.has(fieldName));
-  if (unknownFields.length > 0) {
-    throw new Error(`Unknown custom fields for board ${boardId}: ${unknownFields.join(', ')}`);
-  }
-
-  if (requireAllRequiredFields) {
-    const requiredFields = formFields
-      .filter(field => !field.isOptional)
-      .map(field => field.fieldName)
-      .filter(fieldName => normalizedInput[fieldName] === undefined || normalizedInput[fieldName] === null);
-
-    if (requiredFields.length > 0) {
-      throw new Error(`Missing required custom fields: ${requiredFields.join(', ')}`);
-    }
-  }
-
-  const fieldValues = Object.entries(normalizedInput).map(([fieldName, rawValue]) => {
-    const field = fieldByName.get(fieldName);
-    if (!field) {
-      throw new Error(`Unknown custom field: ${fieldName}`);
-    }
-
-    const normalized = normalizeCustomFieldValue(field, rawValue);
-    return {
-      fieldName,
-      fieldId: field.id,
-      fieldValue: normalized.fieldValue,
-      actualFieldValue: normalized.actualFieldValue,
-    };
-  });
-
-  await validateUserCustomFieldReferences(
-    fieldValues.map(fieldValue => {
-      const field = fieldByName.get(fieldValue.fieldName);
-      return {
-        fieldName: fieldValue.fieldName,
-        fieldType: field?.fieldType ?? '',
-        actualFieldValue: fieldValue.actualFieldValue,
-      };
-    }),
-    workspaceId,
-  );
-
-  return {
-    formId: formMapping.formId,
-    contextId: boardId,
-    fieldValues,
-  };
-};
-
-const buildPartialCustomFieldWritePayload = async (
-  boardId: string,
-  workspaceId: string,
-  dynamicFields: Record<string, unknown> | undefined,
-  options?: { requireAllRequiredFields?: boolean },
-): Promise<{
-  customFieldValues?: CustomFieldWritePayload;
-  validationErrors: Array<{ error: string; code: 'VALIDATION_ERROR' }>;
-}> => {
-  const normalizedInput = dynamicFields ?? {};
-  const validationErrors: Array<{ error: string; code: 'VALIDATION_ERROR' }> = [];
-  const requireAllRequiredFields = options?.requireAllRequiredFields ?? true;
-
-  const formMapping = await prismaClient.formContextMapping.findFirst({
-    where: {
-      contextId: boardId,
-      contextType: FormContextType.BOARD,
-      entityType: FormEntityType.TICKET,
-    },
-    select: { formId: true },
-  });
-
-  if (!formMapping) {
-    if (Object.keys(normalizedInput).length > 0) {
-      validationErrors.push({
-        error: `No form configured for board ${boardId}`,
-        code: 'VALIDATION_ERROR',
-      });
-    }
-    return { validationErrors };
-  }
-
-  const formFields = await resolveFormFieldDefinitionsForForm(prismaClient, formMapping.formId);
-
-  const fieldByName = new Map(formFields.map(field => [field.fieldName, field]));
-
-  if (requireAllRequiredFields) {
-    const requiredFields = formFields
-      .filter(field => !field.isOptional)
-      .map(field => field.fieldName)
-      .filter(fieldName => normalizedInput[fieldName] === undefined || normalizedInput[fieldName] === null);
-
-    if (requiredFields.length > 0) {
-      validationErrors.push({
-        error: `Missing required custom fields: ${requiredFields.join(', ')}`,
-        code: 'VALIDATION_ERROR',
-      });
-    }
-  }
-
-  const fieldValues: CustomFieldWritePayload['fieldValues'] = [];
-
-  for (const [fieldName, rawValue] of Object.entries(normalizedInput)) {
-    const field = fieldByName.get(fieldName);
-    if (!field) {
-      validationErrors.push({
-        error: `Unknown custom field: ${fieldName}`,
-        code: 'VALIDATION_ERROR',
-      });
-      continue;
-    }
-
-    try {
-      const normalized = normalizeCustomFieldValue(field, rawValue);
-      const fieldValue = {
-        fieldName,
-        fieldId: field.id,
-        fieldValue: normalized.fieldValue,
-        actualFieldValue: normalized.actualFieldValue,
-      };
-
-      await validateUserCustomFieldReferences(
-        [{
-          fieldName,
-          fieldType: field.fieldType,
-          actualFieldValue: fieldValue.actualFieldValue,
-        }],
-        workspaceId,
-      );
-
-      fieldValues.push(fieldValue);
-    } catch (error) {
-      validationErrors.push({
-        error: error instanceof Error ? error.message : `Invalid value for field "${fieldName}"`,
-        code: 'VALIDATION_ERROR',
-      });
-    }
-  }
-
-  if (fieldValues.length === 0) {
-    return { validationErrors };
-  }
-
-  return {
-    customFieldValues: {
-      formId: formMapping.formId,
-      contextId: boardId,
-      fieldValues,
-    },
-    validationErrors,
-  };
-};
-
-const syncCustomFieldValues = async (
-  ticketId: string,
-  customFieldValues: CustomFieldWritePayload,
-  updatedBy: string,
-): Promise<void> => {
-  const latestValue = await prismaClient.formEntityValues.findFirst({
-    where: {
-      entityId: ticketId,
-      entityType: FormEntityType.TICKET,
-      contextId: customFieldValues.contextId,
-    },
-    orderBy: { version: 'desc' },
-    select: { version: true },
-  });
-  const currentVersion = latestValue?.version ?? 1;
-  const existingValues = await prismaClient.formEntityValues.findMany({
-    where: {
-      entityId: ticketId,
-      entityType: FormEntityType.TICKET,
-      contextId: customFieldValues.contextId,
-      version: currentVersion,
-      fieldId: { in: customFieldValues.fieldValues.map(fieldValue => fieldValue.fieldId) },
-    },
-    select: {
-      fieldId: true,
-      fieldValue: true,
-      actualFieldValue: true,
-    },
-  });
-  const existingValueByFieldId = new Map(existingValues.map(value => [value.fieldId, value]));
-
-  await Promise.all(
-    customFieldValues.fieldValues.map(async fieldValue => {
-      const existingValue = existingValueByFieldId.get(fieldValue.fieldId);
-      await prismaClient.formEntityValues.upsert({
-        where: {
-          entityId_entityType_fieldId_contextId_version: {
-            entityId: ticketId,
-            entityType: FormEntityType.TICKET,
-            fieldId: fieldValue.fieldId,
-            contextId: customFieldValues.contextId,
-            version: currentVersion,
-          },
-        },
-        create: {
-          entityId: ticketId,
-          entityType: FormEntityType.TICKET,
-          formId: customFieldValues.formId,
-          fieldId: fieldValue.fieldId,
-          contextId: customFieldValues.contextId,
-          version: currentVersion,
-          fieldValue: fieldValue.fieldValue,
-          actualFieldValue: fieldValue.actualFieldValue,
-        },
-        update: {
-          fieldValue: fieldValue.fieldValue,
-          actualFieldValue: fieldValue.actualFieldValue,
-          updatedAt: new Date(),
-        },
-      });
-
-      await createTicketCustomFieldActivity({
-        ticketId,
-        fieldName: fieldValue.fieldName,
-        oldValue: existingValue?.actualFieldValue ?? existingValue?.fieldValue,
-        newValue: fieldValue.actualFieldValue,
-        updatedBy,
-      });
-    }),
-  );
-};
-
-const queueTicketVespaFeed = async (
-  ticketId: string,
-  userId: string,
-  workspaceId?: string,
-): Promise<void> => {
-  await vespaQueue.addJob({
-    schema: ticketSchema,
-    jobType: 'feed',
-    docId: ticketId,
-    userId,
-    ...(workspaceId ? { workspaceId } : {}),
-  }).catch((error) => {
-    logger.error('[TicketController] Failed to queue ticket Vespa feed:', {
-      ticketId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  });
-};
 
 const replaceTicketTags = async (ticketId: string, tags: string[]): Promise<void> => {
   const normalizedTags = Array.from(new Set(tags.map(tag => tag.trim()).filter(Boolean)));
@@ -2702,7 +2378,6 @@ export class TicketController {
 
             if (customFieldValues && customFieldValues.fieldValues.length > 0) {
               await syncCustomFieldValues(existingTicket.id, customFieldValues, userId);
-              await queueTicketVespaFeed(existingTicket.id, userId, workspaceId);
             }
           }
         }
@@ -2777,7 +2452,6 @@ export class TicketController {
 
       if (customFieldValues && customFieldValues.fieldValues.length > 0 && ticket?.id) {
         await syncCustomFieldValues(ticket.id, customFieldValues, userId);
-        await queueTicketVespaFeed(ticket.id, userId, workspaceId);
       }
 
       await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, initialEmail.id);

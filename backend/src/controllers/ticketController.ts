@@ -23,6 +23,11 @@ import {
 import { evaluateAssignmentRule } from '../utils/assignmentEngine';
 import { syncUserWorkload } from '../utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf, secondaryAssignmentsOf } from '../services/ticketAssignmentService';
+import {
+  buildPartialCustomFieldWritePayload,
+  syncCustomFieldValues,
+  type CustomFieldWritePayload,
+} from '../services/ticketCustomFieldService';
 import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '../utils/ticketMd';
 import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
@@ -1358,10 +1363,29 @@ export class TicketController {
       }
 
       const { assigneeId, stage, groupId, title, description, priority, status, eta, tags } = req.body ?? {};
+      // Custom form-field values, keyed by field name. Accept `formFields`
+      // (preferred) or the legacy `dynamicFields` alias used by the apps API.
+      const rawFormFields = (req.body?.formFields ?? req.body?.dynamicFields) as unknown;
+      let formFields: Record<string, unknown> | undefined;
+      if (rawFormFields !== undefined && rawFormFields !== null) {
+        if (
+          typeof rawFormFields !== 'object' ||
+          Array.isArray(rawFormFields)
+        ) {
+          res.status(400).json({ error: 'formFields must be an object keyed by field name' });
+          return;
+        }
+        formFields = rawFormFields as Record<string, unknown>;
+      }
+      const hasFormFields = !!formFields && Object.keys(formFields).length > 0;
 
-      if (!assigneeId && !stage && !groupId && !title && !description && !priority && !status && !eta && tags === undefined) {
+      const hasScalarUpdate =
+        !!assigneeId || !!stage || !!groupId || !!title || !!description ||
+        !!priority || !!status || !!eta || tags !== undefined;
+
+      if (!hasScalarUpdate && !hasFormFields) {
         res.status(400).json({
-          error: 'At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, eta, or tags)',
+          error: 'At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, eta, tags, or formFields)',
         });
         return;
       }
@@ -1371,9 +1395,54 @@ export class TicketController {
         return;
       }
 
-      const updates = await ticketService.updateTicket(ticketId, userId, {
-        assigneeId, stage, groupId, title, description, priority, status, eta, tags,
-      });
+      // Resolve + validate custom form-field values BEFORE mutating scalar
+      // fields so an invalid formFields payload fails the whole request
+      // instead of leaving a half-applied update. Custom fields are persisted
+      // through the shared ticketCustomFieldService — the same engine the apps
+      // ticket API uses — keeping normalization, USER-reference validation,
+      // versioning, and activity logging single-sourced.
+      let customFieldValues: CustomFieldWritePayload | undefined;
+      if (hasFormFields) {
+        const ticket = await prisma.ticket.findUnique({
+          where: { id: ticketId },
+          select: { boardId: true, workspaceId: true },
+        });
+        if (!ticket) {
+          res.status(404).json({ error: 'Ticket not found' });
+          return;
+        }
+        const fieldWorkspaceId = ticket.workspaceId ?? req.user?.workspaceId;
+        if (!fieldWorkspaceId) {
+          res.status(400).json({ error: 'Unable to resolve workspace for custom field validation' });
+          return;
+        }
+        const partialResult = await buildPartialCustomFieldWritePayload(
+          ticket.boardId,
+          fieldWorkspaceId,
+          formFields,
+          { requireAllRequiredFields: false },
+        );
+        if (partialResult.validationErrors.length > 0) {
+          res.status(400).json({
+            error: 'Custom field validation error',
+            code: 'VALIDATION_ERROR',
+            details: partialResult.validationErrors,
+          });
+          return;
+        }
+        customFieldValues = partialResult.customFieldValues;
+      }
+
+      const updates = hasScalarUpdate
+        ? await ticketService.updateTicket(ticketId, userId, {
+            assigneeId, stage, groupId, title, description, priority, status, eta, tags,
+          })
+        : [];
+
+      if (customFieldValues) {
+        await syncCustomFieldValues(ticketId, customFieldValues, userId);
+        updates.push('customFields');
+      }
 
       res.status(200).json({ success: true, updated: updates });
     } catch (error) {
