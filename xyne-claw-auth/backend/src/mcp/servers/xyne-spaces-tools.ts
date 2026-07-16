@@ -1579,6 +1579,42 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
     }
   }
 
+  // Hydrate ticket form-field answers. A ticket's custom-form values live in
+  // FormEntityValues (entityId = ticket.id, entityType = "TICKET"); the field
+  // labels live in FormFields keyed by FormEntityValues.fieldId. There is no
+  // Prisma relation between the two and the query gateway strips `include`, so we
+  // fetch both with two batched gateway calls and join by fieldId in memory.
+  // Non-fatal: any failure (e.g. gateway rejects the model) falls through to
+  // rendering tickets without a Form fields line.
+  const formValuesByTicket = new Map<string, Array<{ fieldId: string; fieldValue: string; actualFieldValue?: unknown }>>();
+  let fieldNameMap = new Map<string, string>();
+  try {
+    const ticketIds = rows.map((t) => t.id);
+    const values = (await interact({
+      model: "formEntityValues",
+      operation: "findMany",
+      where: { entityId: { in: ticketIds }, entityType: "TICKET" },
+      take: 1000,
+    })) as Array<{ entityId: string; fieldId: string; fieldValue: string; actualFieldValue?: unknown }>;
+    if (values && values.length > 0) {
+      for (const v of values) {
+        const arr = formValuesByTicket.get(v.entityId) ?? [];
+        arr.push({ fieldId: v.fieldId, fieldValue: v.fieldValue, actualFieldValue: v.actualFieldValue });
+        formValuesByTicket.set(v.entityId, arr);
+      }
+      const fieldIds = Array.from(new Set(values.map((v) => v.fieldId)));
+      const fields = (await interact({
+        model: "formFields",
+        operation: "findMany",
+        where: { id: { in: fieldIds } },
+        take: 1000,
+      })) as Array<{ id: string; fieldName: string }>;
+      fieldNameMap = new Map((fields ?? []).map((f) => [f.id, f.fieldName] as const));
+    }
+  } catch {
+    // Non-fatal — render tickets without form fields if the gateway rejects the model.
+  }
+
   // "Name <email> (id: …)" for a user id via the batched nameMap (relations are
   // never hydrated by the gateway, so nameMap is the source of truth).
   const userLabel = (id?: string): string => {
@@ -1639,6 +1675,19 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
     if (t.board) parts.push(`  Board: ${t.board.name}${t.project ? ` · Project: ${t.project.name}` : ""}`);
     if (t.tags && t.tags.length > 0) parts.push(`  Tags: ${t.tags.map((tg) => tg.name).join(", ")}`);
     if (t.eta) parts.push(`  ETA: ${new Date(t.eta).toLocaleDateString()}`);
+    const formVals = formValuesByTicket.get(t.id);
+    if (formVals && formVals.length > 0) {
+      const rendered = formVals
+        .map((fv) => {
+          const label = fieldNameMap.get(fv.fieldId) ?? fv.fieldId;
+          const raw = fv.actualFieldValue !== undefined && fv.actualFieldValue !== null
+            ? (typeof fv.actualFieldValue === "string" ? fv.actualFieldValue : JSON.stringify(fv.actualFieldValue))
+            : fv.fieldValue;
+          return `${label}: ${raw}`;
+        })
+        .join(" · ");
+      parts.push(`  Form fields: ${rendered}`);
+    }
     if (t.description && t.description.trim().length > 0) {
       // Full description — no cap. claw's promoteIfOversized() is the single
       // context-size guard: it spills an over-large response to a file behind a
