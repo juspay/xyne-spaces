@@ -453,13 +453,26 @@ const NAMED_COLORS: Record<string, string> = {
   success: '#36a64f',
 };
 
+// #RGB, #RGBA, #RRGGBB, or #RRGGBBAA — leading '#' optional (Slack allows both)
+const HEX_COLOR_REGEX = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
 /**
  * Resolve a Slack attachment color (named string or hex) to a CSS hex value.
- * Falls back to a neutral grey when absent.
+ * Falls back to a neutral grey for anything invalid — absent, empty, not a
+ * string (e.g. `{}`), an unknown name ('meow'), or a malformed hex code —
+ * since payloads are unvalidated and a bad value must not throw or emit
+ * broken CSS that the browser would silently drop.
  */
-function resolveAttachmentColor(color?: string): string {
-  if (!color) return '#d1d5db'; // neutral grey
-  return NAMED_COLORS[color.toLowerCase()] ?? (color.startsWith('#') ? color : `#${color}`);
+function resolveAttachmentColor(color?: unknown): string {
+  const FALLBACK = '#d1d5db'; // neutral grey
+  if (typeof color !== 'string') return FALLBACK;
+  const trimmed = color.trim();
+  const named = NAMED_COLORS[trimmed.toLowerCase()];
+  if (named) return named;
+  if (HEX_COLOR_REGEX.test(trimmed)) {
+    return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+  }
+  return FALLBACK;
 }
 
 /**
@@ -781,9 +794,10 @@ export function slackAttachmentToFlowComponent(
 
   // Only add a left colour stripe when the attachment explicitly sets a color.
   // Attachments without color get a plain subtle border — NO left bar (matches Slack).
+  // Invalid values (empty string, `{}`, null) still get the stripe, in the
+  // default grey — the caller set `color`, so they wanted a bar.
   if (attachment.color !== undefined) {
-    const color = resolveAttachmentColor(attachment.color as string | undefined);
-    return withColorStripe(children, color);
+    return withColorStripe(children, resolveAttachmentColor(attachment.color));
   }
 
   return {
