@@ -115,8 +115,8 @@ const envSchema = Joi.object({
   SAM_BASE_URL: Joi.string().uri().default(''),
   SAM_API_KEY: Joi.string().allow('').default(''),
   // LiveKit Configuration
-  LIVEKIT_API_KEY: Joi.string().default(''),
-  LIVEKIT_API_SECRET: Joi.string().default(''),
+  LIVEKIT_API_KEY: Joi.string().allow('').default(''),
+  LIVEKIT_API_SECRET: Joi.string().allow('').default(''),
   LIVEKIT_URL: Joi.string().default(''),
   LIVEKIT_CLIENT_URL: Joi.string().default(''),
   LIVEKIT_SERVER_URL: Joi.string().default(''),
