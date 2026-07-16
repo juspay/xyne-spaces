@@ -69,6 +69,10 @@ import { useAllChannels } from '../../../hooks/useChannels';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
+import { QuickDmComposer } from './SlashCommands/QuickDmComposer';
+import { SlashCommandPalette } from './SlashCommands/SlashCommandPalette';
+import { useSlashCommands } from './SlashCommands/useSlashCommands';
+import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
@@ -498,6 +502,41 @@ const ChannelCommandMenu = ({
   // enterWillOpen = Enter opens the row vs. runs a search; activeItemLabel = its name.
   const [enterWillOpen, setEnterWillOpen] = useState(false);
   const [activeItemLabel, setActiveItemLabel] = useState<string | null>(null);
+
+  // Slash-command mode (`/call`, `/chat`, `/askai`). All command state + logic lives in the hook;
+  // the parent feeds it the shared cmdk selection (activeItemLabel/hasNavigated) and wires its
+  // outputs into the ghost text, mention guards, keyboard handler, and the palette render below.
+  const {
+    commandActive,
+    commandKind,
+    commandText,
+    commandTarget,
+    isComposing,
+    pendingChannelCall,
+    commandUserResults,
+    commandChannelResults,
+    commandGhost,
+    setActiveCommandWord,
+    setPendingChannelCall,
+    clearTarget,
+    applyCommand,
+    openAskAI,
+    openRecordings,
+    runCommandTarget,
+    startChannelCall,
+    isInCommandMode,
+    onSetTextReady,
+    handleEditorText,
+  } = useSlashCommands({
+    open,
+    onOpenChange,
+    currentUserID,
+    activeItemLabel,
+    hasNavigated,
+    resetSearchState,
+    navigate: path => void navigate(path),
+  });
+
   const syncEnterIntent = useCallback((): void => {
     const active = commandRef.current?.querySelector('[cmdk-item][aria-selected="true"]');
     const willOpen = !!active && active.getAttribute('data-show-results-item') !== 'true';
@@ -759,6 +798,20 @@ const ChannelCommandMenu = ({
       text: string,
       mentions: Array<{ id: string; type: MentionType; prefix?: string; name?: string }>,
     ) => {
+      // Slash-command mode: the hook consumes `/`-prefixed text (keeping it OUT of the search
+      // hook so Vespa never runs) and returns true; keep prevSearchTextRef in sync and bail.
+      if (handleEditorText(text)) {
+        // On the transition INTO command mode, drop any prior query + mentions so a pending
+        // debounced Vespa search can't repopulate results and the old query doesn't resurface
+        // when Cmd+K reopens (resetSearchState clears results/pagination but not the query text).
+        if (!prevSearchTextRef.current.startsWith('/')) {
+          setSearch('');
+          setSelectedMentions([]);
+        }
+        prevSearchTextRef.current = text;
+        return;
+      }
+
       const trimmedText = text.trim();
       const prevTrimmedText = prevSearchTextRef.current.trim();
 
@@ -776,7 +829,7 @@ const ChannelCommandMenu = ({
       // Update refs for next comparison
       prevSearchTextRef.current = text;
     },
-    [onClose, onOpen],
+    [onClose, onOpen, handleEditorText],
   );
 
   // On a mention pick: quick-switch (navigate to the DM/channel) only when the box is truly
@@ -861,6 +914,9 @@ const ChannelCommandMenu = ({
   // Handle user search from mention plugin
   const handleUserSearch = useCallback(
     (query: string | null, trigger?: '@' | 'from:' | 'to:' | 'with:' | 'assignee:' | 'in:@') => {
+      // In `/call`/`/chat` mode, `@` is a literal character in the message — never
+      // open the user mention picker.
+      if (isInCommandMode()) return;
       if (query === null) {
         // Mention search was cancelled/cleared
         setMentionSearchType(null);
@@ -874,12 +930,15 @@ const ChannelCommandMenu = ({
       setUserTrigger(trigger ?? 'from:');
       setSelectedMentionIndex(0); // Reset selection when search changes
     },
-    [],
+    [isInCommandMode],
   );
 
   // Handle channel search from mention plugin
   const handleChannelSearch = useCallback(
     (query: string | null, trigger?: '#' | 'in:' | 'in:#' | 'in:@') => {
+      // In `/call`/`/chat` mode, `#` is a literal character in the message — never
+      // open the channel mention picker.
+      if (isInCommandMode()) return;
       if (query === null) {
         // Mention search was cancelled/cleared
         setMentionSearchType(null);
@@ -912,23 +971,28 @@ const ChannelCommandMenu = ({
       }
       setSelectedMentionIndex(0); // Reset selection when search changes
     },
-    [],
+    [isInCommandMode],
   );
 
   // Handle priority search from mention plugin. Priority is a closed enum, so
   // there is no backend lookup — we just track the typed query to filter the
   // static value list (availablePriorities).
-  const handlePrioritySearch = useCallback((query: string | null) => {
-    if (query === null) {
-      setMentionSearchType(null);
-      setMentionSearchQuery('');
+  const handlePrioritySearch = useCallback(
+    (query: string | null) => {
+      // In `/call`/`/chat` mode, `priority:` is literal message text.
+      if (isInCommandMode()) return;
+      if (query === null) {
+        setMentionSearchType(null);
+        setMentionSearchQuery('');
+        setSelectedMentionIndex(0);
+        return;
+      }
+      setMentionSearchQuery(query);
+      setMentionSearchType(MentionType.PRIORITY);
       setSelectedMentionIndex(0);
-      return;
-    }
-    setMentionSearchQuery(query);
-    setMentionSearchType(MentionType.PRIORITY);
-    setSelectedMentionIndex(0);
-  }, []);
+    },
+    [isInCommandMode],
+  );
 
   // `from:` typeahead user candidates. Uses the same data source and rank as
   // plain user search (useUserSearch + rankUsers) so a query like "abhi"
@@ -1249,12 +1313,17 @@ const ChannelCommandMenu = ({
   // mention popup or a mid-delete transition can otherwise leave the suffix floating at the
   // caret with nothing to anchor to ("ghost text floating when deleted").
   const inputIsEmpty = !searchText.trim() && selectedMentions.length === 0;
-  const autocompleteSuffix = inputIsEmpty
-    ? undefined
-    : typeAutocomplete.suffix ||
-      textFilterHint ||
-      popupFilterHint ||
-      (screenSearchActive ? getScreenSearchSuffix() : undefined);
+  // The slash-command ghost wins first: command text lives in `commandText`, so
+  // `searchText` (and thus `inputIsEmpty`) is empty during a `/call`/`/chat`; without
+  // this priority the command format preview would be suppressed.
+  const autocompleteSuffix = commandGhost.suffix
+    ? commandGhost.suffix
+    : inputIsEmpty
+      ? undefined
+      : typeAutocomplete.suffix ||
+        textFilterHint ||
+        popupFilterHint ||
+        (screenSearchActive ? getScreenSearchSuffix() : undefined);
 
   // Track search performed in command menu (debounced)
   useEffect(() => {
@@ -1690,11 +1759,14 @@ const ChannelCommandMenu = ({
     setHasNavigated(false);
     // Emptying the input (e.g. Cmd+A + backspace over a chip) must also drop the stale row
     // preview, or openTargetLabel keeps rendering "<prev item> - Open" over the placeholder.
-    if (!searchText.trim() && selectedMentions.length === 0) {
+    // In command mode `searchText` is empty but a picker row IS highlighted (its label drives
+    // the `<name> – Select` ghost), so don't clear it there. `commandText` is a dep so the flag
+    // resets on each command keystroke — the from:/in: ghost behaviour the picker mirrors.
+    if (!commandActive && !searchText.trim() && selectedMentions.length === 0) {
       setActiveItemLabel(null);
       setEnterWillOpen(false);
     }
-  }, [searchText, selectedMentions]);
+  }, [searchText, selectedMentions, commandText, commandActive]);
 
   // The user-facing banner shows a generic "Search is unavailable" message;
   // log the raw backend error to the console so devs can still triage from
@@ -1713,10 +1785,20 @@ const ChannelCommandMenu = ({
     // latter catches the case where the user typed `from:<name>` / `in:<ch>`,
     // inserted a chip, and the backend returned results for that filter with
     // no free-text query.
-    const hasActiveSearch = searchText.trim().length > 0 || selectedMentions.length > 0;
+    // Command mode (`/call`/`/chat`) keeps its text in `commandText`, not `searchText`,
+    // and renders its own cmdk rows — so treat it as active and skip the `hasResults`
+    // gate (which tracks Vespa results) so the first command row is highlighted at rest.
+    const hasActiveSearch =
+      searchText.trim().length > 0 || selectedMentions.length > 0 || commandActive;
     // While a mention typeahead is open, selection is owned by selectedMentionIndex - don't
     // also auto-select a cmdk row, or two rows light up.
-    if (!hasActiveSearch || !hasResults || hasNavigatedRef.current || mentionSearchType) return;
+    if (
+      !hasActiveSearch ||
+      (!hasResults && !commandActive) ||
+      hasNavigatedRef.current ||
+      mentionSearchType
+    )
+      return;
     // Small delay to let DOM render the items
     const timer = setTimeout(() => {
       if (hasNavigatedRef.current) return;
@@ -1738,6 +1820,10 @@ const ChannelCommandMenu = ({
     backendResultOrder,
     mentionSearchType,
     syncEnterIntent,
+    commandActive,
+    // `commandText` is a dep (not read in the body) so the first-row auto-select
+    // re-fires as the `/` command list / user picker narrows while typing.
+    commandText,
   ]);
 
   // Render backend results for the search-active branch (flat list filtered by activeTab)
@@ -2256,9 +2342,55 @@ const ChannelCommandMenu = ({
   const hoistUser = canHoist && hasStrongUserMatch;
   const hoistChannel = canHoist && hasStrongChannelMatch;
 
-  if (inline && !open) return null;
+  // Shared confirmation for a `/call` on a channel. Rendered from every return branch
+  // (below) so it survives the Cmd+K close — the menu unmounts its dialog, this stays.
+  const channelCallConfirm = (
+    <CallConfirmationModal
+      isOpen={pendingChannelCall !== null}
+      onClose={() => setPendingChannelCall(null)}
+      onConfirm={() => {
+        if (pendingChannelCall) startChannelCall(pendingChannelCall.id, pendingChannelCall.name);
+        setPendingChannelCall(null);
+      }}
+    />
+  );
+
+  if (inline && !open) return channelCallConfirm;
 
   const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
+    // A picked target renders its own UI (composer or confirm modal) — let it own all
+    // keys (typing, Enter to send/confirm, its own @/# mention pickers).
+    if (commandTarget) return;
+
+    // ── Slash-command mode: picker / `/` discovery ───────────────────────
+    // Escape is intentionally NOT handled here — it falls through so the menu
+    // closes like everywhere else (Radix dismiss), rather than a hidden
+    // exit-command-mode step users aren't told about.
+    if (commandActive) {
+      // Tab / Right accept the command-name ghost (`/cal` → `/call `).
+      if ((e.key === 'Tab' || e.key === 'ArrowRight') && commandGhost.canComplete) {
+        e.preventDefault();
+        e.stopPropagation();
+        applyCommand(commandGhost.word);
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        return; // no tab-cycling in command mode
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        const active = commandRef.current?.querySelector(
+          '[cmdk-item][aria-selected="true"]',
+        ) as HTMLElement | null;
+        active?.click();
+        return;
+      }
+      // ArrowUp/ArrowDown fall through to the shared list-navigation below.
+    }
+
     // ── Tab / Shift+Tab: cycle filter tabs ──────────────────────────────
     // If type autocomplete suggestion is showing, Tab accepts it instead of cycling tabs
     if (e.key === 'Tab' && !(typeAutocomplete.suggestion && typeAutocomplete.match)) {
@@ -2348,6 +2480,9 @@ const ChannelCommandMenu = ({
 
       // Track which result is currently selected via keyboard
       const newlySelectedItem = items[nextIndex];
+      // Keep the command ghost in sync when arrowing through the `/` command list.
+      const navCommandWord = newlySelectedItem?.getAttribute('data-command-word');
+      if (navCommandWord) setActiveCommandWord(navCommandWord);
       const resultId = newlySelectedItem?.getAttribute('data-result-id');
       const resultType = newlySelectedItem?.getAttribute('data-result-type');
       if (resultId && resultType) {
@@ -2628,8 +2763,10 @@ const ChannelCommandMenu = ({
 
   const commandBody = (
     <>
-      {/* Search Input */}
-      <div className='flex items-center border-b border-border'>
+      {/* Search Input — hidden (but kept mounted) during `/chat` compose so its
+          `/chat <query>` text survives for the "back" button. Stays visible during the
+          `/call` channel-confirm so the modal overlays the picker. */}
+      <div className={cn('flex items-center border-b border-border', isComposing && 'hidden')}>
         <div className='relative flex-1 flex items-center gap-2 px-4 py-2.5'>
           <button
             onClick={() => onOpenChange(false)}
@@ -2646,7 +2783,7 @@ const ChannelCommandMenu = ({
               openTargetLabel
                 ? `${openTargetLabel} – Open`
                 : hideTabs || activeTab === TabType.ALL
-                  ? 'Search everything...'
+                  ? 'Type / for quick commands, or search'
                   : `Search ${activeTab}...`
             }
             onChange={handleEditorChange}
@@ -2675,6 +2812,7 @@ const ChannelCommandMenu = ({
             onInsertTextReady={insertText => {
               insertTextRef.current = insertText;
             }}
+            onSetTextReady={onSetTextReady}
             initialMention={initialMention}
             initialQuery={initialQuery}
           />
@@ -2871,9 +3009,30 @@ const ChannelCommandMenu = ({
 
       {/* Body: results panel + optional context panel side-by-side */}
       <div className='flex flex-1 min-h-0 overflow-hidden bg-background rounded-b-2xl'>
+        {/* `/chat` compose: the real message composer (mentions, formatting, attachments).
+            Stop keys from bubbling to cmdk (which wraps this) so cmdk can't steal focus
+            or hijack Enter/arrows — the editor and its mention dropdown handle them.
+            Radix (Escape) and ProseMirror listen at document/editor level, so they still
+            work. */}
+        {isComposing && commandTarget && (
+          <div
+            role='presentation'
+            className='flex-1 min-h-0 overflow-y-auto'
+            onKeyDown={e => e.stopPropagation()}
+          >
+            <QuickDmComposer
+              target={commandTarget}
+              onSent={() => onOpenChange(false)}
+              onBack={clearTarget}
+            />
+          </div>
+        )}
         {/* Tabs, Results, Footer Container - modal overlays everything below search input */}
         <div
-          className='relative flex-1 flex flex-col min-h-0 overflow-x-hidden bg-background rounded-b-2xl'
+          className={cn(
+            'relative flex-1 flex flex-col min-h-0 overflow-x-hidden bg-background rounded-b-2xl',
+            isComposing && 'hidden',
+          )}
           role='presentation'
           data-track-category='CHANNEL_SEARCH'
           data-track-name='ClickSearchResultsArea'
@@ -2972,100 +3131,393 @@ const ChannelCommandMenu = ({
               }
             }}
           >
-            {/* Best local matches pinned to the top of the list — both popup and
-                screen. Starred leads; the strong-matched user/channel then becomes
-                the default Enter target (Slack-style). In screen mode these sit
-                above the "Show results for" row below. */}
-            {hoistStarred && renderSearchStarredSection()}
-            {hoistUser && renderSearchUsersSection()}
-            {hoistChannel && renderSearchChannelsSection()}
-
-            {/* Show results for: [query] — screen mode only */}
-            {hideTabs &&
-              searchMode === 'screen' &&
-              !mentionSearchType &&
-              (searchText.trim() || selectedMentions.length > 0) && (
-                <Command.Item
-                  value='__show-results-for__'
-                  data-show-results-item='true'
-                  onSelect={() => {
-                    onOpenChange(false);
-                    void navigate(
-                      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
-                    );
-                  }}
-                  className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
-                  data-track-category='SEARCH'
-                  data-track-name='SHOW_RESULTS_FOR'
-                >
-                  <Search size={14} className='text-muted-foreground shrink-0' />
-                  <span className='flex items-center flex-wrap gap-1'>
-                    <span className='text-sm'>Show results for:</span>
-                    {selectedMentions.map(m => {
-                      const isPriority = m.type === MentionType.PRIORITY;
-                      const isUser = m.type === MentionType.USER;
-                      const name = isPriority
-                        ? m.id.toLowerCase()
-                        : isUser
-                          ? getUserDisplayName(
-                              usersById.get(m.id) ?? { displayName: m.id, email: '' },
-                            )
-                          : (() => {
-                              const ch = allChannels.find(c => c.channel.id === m.id);
-                              if (!ch) return m.id;
-                              return formatChannelLabel(ch);
-                            })();
-                      const prefix =
-                        m.prefix ?? (isPriority ? 'priority:' : isUser ? 'from:' : 'in:');
-                      return (
-                        <span
-                          key={`${m.prefix}-${m.id}`}
-                          className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-foreground text-xs font-medium h-6'
-                        >
-                          {isPriority ? (
-                            <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-                              <SignalHigh
-                                size={12}
-                                className={PRIORITY_ICON_COLOR[m.id] ?? 'text-foreground'}
-                              />
-                            </div>
-                          ) : isUser ? (
-                            <Avatar
-                              userId={m.id}
-                              size='sm'
-                              className='rounded-none flex-shrink-0 size-3'
-                            />
-                          ) : (
-                            <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-                              <Hash size={12} className='text-foreground' />
-                            </div>
-                          )}
-                          <span className='leading-tight'>
-                            {prefix} {name}
-                          </span>
-                        </span>
-                      );
-                    })}
-                    {searchText.trim() && (
-                      <span className='font-semibold text-sm'>{searchText.trim()}</span>
-                    )}
-                  </span>
-                </Command.Item>
-              )}
-
-            {/* Mention Suggestions - Show when mention search is active */}
-            {mentionSearchType && (
+            {commandActive ? (
+              <SlashCommandPalette
+                commandKind={commandKind}
+                commandText={commandText}
+                commandTarget={commandTarget}
+                commandUserResults={commandUserResults}
+                commandChannelResults={commandChannelResults}
+                onApplyCommand={applyCommand}
+                onOpenAskAI={openAskAI}
+                onOpenRecordings={openRecordings}
+                onRunTarget={runCommandTarget}
+                onHoverCommand={setActiveCommandWord}
+              />
+            ) : (
               <>
-                {/* 'in:' trigger - Show Channels + DMs (NO Users) */}
-                {channelTrigger === 'in:' && (
+                {/* Best local matches pinned to the top of the list — both popup and
+                    screen. Starred leads; the strong-matched user/channel then becomes
+                    the default Enter target (Slack-style). In screen mode these sit
+                    above the "Show results for" row below. */}
+                {hoistStarred && renderSearchStarredSection()}
+                {hoistUser && renderSearchUsersSection()}
+                {hoistChannel && renderSearchChannelsSection()}
+
+                {/* Show results for: [query] — screen mode only */}
+                {hideTabs &&
+                  searchMode === 'screen' &&
+                  !mentionSearchType &&
+                  (searchText.trim() || selectedMentions.length > 0) && (
+                    <Command.Item
+                      value='__show-results-for__'
+                      data-show-results-item='true'
+                      onSelect={() => {
+                        onOpenChange(false);
+                        void navigate(
+                          `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
+                        );
+                      }}
+                      className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
+                      data-track-category='SEARCH'
+                      data-track-name='SHOW_RESULTS_FOR'
+                    >
+                      <Search size={14} className='text-muted-foreground shrink-0' />
+                      <span className='flex items-center flex-wrap gap-1'>
+                        <span className='text-sm'>Show results for:</span>
+                        {selectedMentions.map(m => {
+                          const isPriority = m.type === MentionType.PRIORITY;
+                          const isUser = m.type === MentionType.USER;
+                          const name = isPriority
+                            ? m.id.toLowerCase()
+                            : isUser
+                              ? getUserDisplayName(
+                                  usersById.get(m.id) ?? { displayName: m.id, email: '' },
+                                )
+                              : (() => {
+                                  const ch = allChannels.find(c => c.channel.id === m.id);
+                                  if (!ch) return m.id;
+                                  return formatChannelLabel(ch);
+                                })();
+                          const prefix =
+                            m.prefix ?? (isPriority ? 'priority:' : isUser ? 'from:' : 'in:');
+                          return (
+                            <span
+                              key={`${m.prefix}-${m.id}`}
+                              className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-foreground text-xs font-medium h-6'
+                            >
+                              {isPriority ? (
+                                <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
+                                  <SignalHigh
+                                    size={12}
+                                    className={PRIORITY_ICON_COLOR[m.id] ?? 'text-foreground'}
+                                  />
+                                </div>
+                              ) : isUser ? (
+                                <Avatar
+                                  userId={m.id}
+                                  size='sm'
+                                  className='rounded-none flex-shrink-0 size-3'
+                                />
+                              ) : (
+                                <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
+                                  <Hash size={12} className='text-foreground' />
+                                </div>
+                              )}
+                              <span className='leading-tight'>
+                                {prefix} {name}
+                              </span>
+                            </span>
+                          );
+                        })}
+                        {searchText.trim() && (
+                          <span className='font-semibold text-sm'>{searchText.trim()}</span>
+                        )}
+                      </span>
+                    </Command.Item>
+                  )}
+
+                {/* Mention Suggestions - Show when mention search is active */}
+                {mentionSearchType && (
                   <>
-                    {/* 1. Channels Section */}
-                    {availableRegularChannels.length > 0 && (
+                    {/* 'in:' trigger - Show Channels + DMs (NO Users) */}
+                    {channelTrigger === 'in:' && (
+                      <>
+                        {/* 1. Channels Section */}
+                        {availableRegularChannels.length > 0 && (
+                          <Command.Group
+                            heading='Channels'
+                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                          >
+                            {availableRegularChannels.map(({ channel, displayName }, index) => {
+                              return (
+                                <Command.Item
+                                  key={channel.id}
+                                  value={`mention-channel-${channel.id}`}
+                                  onSelect={() => {
+                                    void handleMentionSelect({
+                                      id: channel.id,
+                                      name: displayName,
+                                      type: MentionType.CHANNEL,
+                                    });
+                                  }}
+                                  onMouseEnter={() => {
+                                    selectMention(index);
+                                  }}
+                                  className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                    index === selectedMentionIndex
+                                      ? hasNavigated
+                                        ? 'cmdk-active-row'
+                                        : 'bg-muted'
+                                      : ''
+                                  } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                                >
+                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                    {getChannelIcon(channel)}
+                                  </div>
+                                  <div className='flex-1 min-w-0'>
+                                    <div className='font-semibold text-sm text-foreground truncate'>
+                                      {displayName}
+                                    </div>
+                                  </div>
+                                </Command.Item>
+                              );
+                            })}
+                          </Command.Group>
+                        )}
+                        {/* 2. DMs Section (includes Group DMs) */}
+                        {availableDMs.length > 0 && (
+                          <Command.Group
+                            heading='DMs'
+                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                          >
+                            {availableDMs.map(({ channel, displayName }, index) => {
+                              // Calculate index offset for keyboard navigation
+                              const channelCount = availableRegularChannels.length;
+                              const adjustedIndex = channelCount + index;
+                              return (
+                                <Command.Item
+                                  key={channel.id}
+                                  value={`mention-dm-${channel.id}`}
+                                  onSelect={() => {
+                                    void handleMentionSelect({
+                                      id: channel.id,
+                                      name: displayName,
+                                      type: MentionType.CHANNEL,
+                                    });
+                                  }}
+                                  onMouseEnter={() => {
+                                    selectMention(adjustedIndex);
+                                  }}
+                                  className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                    adjustedIndex === selectedMentionIndex
+                                      ? hasNavigated
+                                        ? 'cmdk-active-row'
+                                        : 'bg-muted'
+                                      : ''
+                                  } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                                >
+                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                    {getChannelIcon(channel)}
+                                  </div>
+                                  <div className='flex-1 min-w-0'>
+                                    <div className='font-semibold text-sm text-foreground truncate'>
+                                      {displayName}
+                                    </div>
+                                  </div>
+                                </Command.Item>
+                              );
+                            })}
+                          </Command.Group>
+                        )}
+                        {/* Empty state for in: when nothing matches */}
+                        {availableRegularChannels.length === 0 &&
+                          availableDMs.length === 0 &&
+                          mentionSearchQuery && (
+                            <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+                              No results found for &quot;{mentionSearchQuery}&quot;
+                            </Command.Empty>
+                          )}
+
+                        {/* Regular USER mention search (@, from:, assignee:) - Show only Users */}
+                        {mentionSearchType === MentionType.USER &&
+                          (userTrigger === '@' ||
+                            userTrigger === 'from:' ||
+                            userTrigger === 'to:' ||
+                            userTrigger === 'assignee:') &&
+                          availableUsers.length > 0 && (
+                            <Command.Group
+                              heading='Users'
+                              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                            >
+                              {availableUsers.map((user, index) => {
+                                const isDeactivated = isUserDeactivated(user);
+                                return (
+                                  <Command.Item
+                                    key={user.id}
+                                    value={`mention-user-${user.id}`}
+                                    onSelect={() => {
+                                      void handleMentionSelect({
+                                        id: user.id,
+                                        name: getUserDisplayName(user),
+                                        type: MentionType.USER,
+                                        ...(user.email ? { email: user.email } : {}),
+                                      });
+                                    }}
+                                    onMouseEnter={() => {
+                                      selectMention(index);
+                                    }}
+                                    className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                      index === selectedMentionIndex
+                                        ? hasNavigated
+                                          ? 'cmdk-active-row'
+                                          : 'bg-muted'
+                                        : ''
+                                    } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                                  >
+                                    <Avatar userId={user.id} size='sm' />
+                                    <div className='flex-1 min-w-0'>
+                                      <div className='flex items-center gap-1.5'>
+                                        <div
+                                          className={`font-semibold text-sm truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+                                        >
+                                          {getUserDisplayName(user)}
+                                        </div>
+                                        {isDeactivated && (
+                                          <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                                            Deactivated
+                                          </span>
+                                        )}
+                                      </div>
+                                      {user.email && (
+                                        <div className='text-xs text-muted-foreground truncate'>
+                                          {user.email}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </Command.Item>
+                                );
+                              })}
+                            </Command.Group>
+                          )}
+                        {mentionSearchType === MentionType.USER &&
+                          (userTrigger === '@' ||
+                            userTrigger === 'from:' ||
+                            userTrigger === 'to:' ||
+                            userTrigger === 'assignee:') &&
+                          availableUsers.length === 0 &&
+                          mentionSearchQuery && (
+                            <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+                              No users found for &quot;{mentionSearchQuery}&quot;
+                            </Command.Empty>
+                          )}
+                      </>
+                    )}
+
+                    {/* 'in:#' trigger - Show Channels only (NO DMs, NO Users) */}
+                    {channelTrigger === 'in:#' && (
+                      <>
+                        {/* Channels Section */}
+                        {availableRegularChannels.length > 0 && (
+                          <Command.Group
+                            heading='Channels'
+                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                          >
+                            {availableRegularChannels.map(({ channel, displayName }, index) => {
+                              return (
+                                <Command.Item
+                                  key={channel.id}
+                                  value={`mention-channel-${channel.id}`}
+                                  onSelect={() => {
+                                    void handleMentionSelect({
+                                      id: channel.id,
+                                      name: displayName,
+                                      type: MentionType.CHANNEL,
+                                    });
+                                  }}
+                                  onMouseEnter={() => {
+                                    selectMention(index);
+                                  }}
+                                  className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                    index === selectedMentionIndex
+                                      ? hasNavigated
+                                        ? 'cmdk-active-row'
+                                        : 'bg-muted'
+                                      : ''
+                                  } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                                >
+                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                    {getChannelIcon(channel)}
+                                  </div>
+                                  <div className='flex-1 min-w-0'>
+                                    <div className='font-semibold text-sm text-foreground truncate'>
+                                      {displayName}
+                                    </div>
+                                  </div>
+                                </Command.Item>
+                              );
+                            })}
+                          </Command.Group>
+                        )}
+                        {/* Empty state */}
+                        {availableRegularChannels.length === 0 && mentionSearchQuery && (
+                          <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+                            No channels found for &quot;{mentionSearchQuery}&quot;
+                          </Command.Empty>
+                        )}
+                      </>
+                    )}
+
+                    {/* 'in:@' trigger - Show DMs only (NOT Users!) */}
+                    {channelTrigger === 'in:@' && availableDMs.length > 0 && (
+                      <Command.Group
+                        heading='DMs'
+                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                      >
+                        {availableDMs.map(({ channel, displayName }, index) => (
+                          <Command.Item
+                            key={channel.id}
+                            value={`mention-dm-${channel.id}`}
+                            onSelect={() => {
+                              void handleMentionSelect({
+                                id: channel.id,
+                                name: displayName,
+                                type: MentionType.CHANNEL,
+                              });
+                            }}
+                            onMouseEnter={() => {
+                              selectMention(index);
+                            }}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                              index === selectedMentionIndex
+                                ? hasNavigated
+                                  ? 'cmdk-active-row'
+                                  : 'bg-muted'
+                                : ''
+                            } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                            style={{ WebkitTapHighlightColor: 'transparent' }}
+                          >
+                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                              {getChannelIcon(channel)}
+                            </div>
+                            <div className='flex-1 min-w-0'>
+                              <div className='font-semibold text-sm text-foreground truncate'>
+                                {displayName}
+                              </div>
+                            </div>
+                          </Command.Item>
+                        ))}
+                      </Command.Group>
+                    )}
+                    {channelTrigger === 'in:@' &&
+                      availableDMs.length === 0 &&
+                      mentionSearchQuery && (
+                        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+                          No DMs found for &quot;{mentionSearchQuery}&quot;
+                        </Command.Empty>
+                      )}
+
+                    {/* '#' trigger - Show only Channels (Slack-style quick switcher) */}
+                    {channelTrigger === '#' && availableChannels.length > 0 && (
                       <Command.Group
                         heading='Channels'
                         className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                       >
-                        {availableRegularChannels.map(({ channel, displayName }, index) => {
+                        {availableChannels.map(({ channel, displayName }, index) => {
                           return (
                             <Command.Item
                               key={channel.id}
@@ -3102,32 +3554,43 @@ const ChannelCommandMenu = ({
                         })}
                       </Command.Group>
                     )}
-                    {/* 2. DMs Section (includes Group DMs) */}
-                    {availableDMs.length > 0 && (
-                      <Command.Group
-                        heading='DMs'
-                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                      >
-                        {availableDMs.map(({ channel, displayName }, index) => {
-                          // Calculate index offset for keyboard navigation
-                          const channelCount = availableRegularChannels.length;
-                          const adjustedIndex = channelCount + index;
-                          return (
+                    {channelTrigger === '#' &&
+                      availableChannels.length === 0 &&
+                      mentionSearchQuery && (
+                        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+                          No channels found for &quot;{mentionSearchQuery}&quot;
+                        </Command.Empty>
+                      )}
+
+                    {/* Regular USER mention search (@, from:, with:, assignee:) - Show only Users */}
+                    {mentionSearchType === MentionType.USER &&
+                      (userTrigger === '@' ||
+                        userTrigger === 'from:' ||
+                        userTrigger === 'to:' ||
+                        userTrigger === 'with:' ||
+                        userTrigger === 'assignee:') &&
+                      availableUsers.length > 0 && (
+                        <Command.Group
+                          heading='Users'
+                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                        >
+                          {availableUsers.map((user, index) => (
                             <Command.Item
-                              key={channel.id}
-                              value={`mention-dm-${channel.id}`}
+                              key={user.id}
+                              value={`mention-user-${user.id}`}
                               onSelect={() => {
                                 void handleMentionSelect({
-                                  id: channel.id,
-                                  name: displayName,
-                                  type: MentionType.CHANNEL,
+                                  id: user.id,
+                                  name: getUserDisplayName(user),
+                                  type: MentionType.USER,
+                                  ...(user.email ? { email: user.email } : {}),
                                 });
                               }}
                               onMouseEnter={() => {
-                                selectMention(adjustedIndex);
+                                selectMention(index);
                               }}
                               className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                                adjustedIndex === selectedMentionIndex
+                                index === selectedMentionIndex
                                   ? hasNavigated
                                     ? 'cmdk-active-row'
                                     : 'bg-muted'
@@ -3135,94 +3598,26 @@ const ChannelCommandMenu = ({
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
-                              <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
-                                {getChannelIcon(channel)}
-                              </div>
+                              <Avatar userId={user.id} size='sm' />
                               <div className='flex-1 min-w-0'>
                                 <div className='font-semibold text-sm text-foreground truncate'>
-                                  {displayName}
+                                  {getUserDisplayName(user)}
                                 </div>
+                                {user.email && (
+                                  <div className='text-xs text-muted-foreground truncate'>
+                                    {user.email}
+                                  </div>
+                                )}
                               </div>
                             </Command.Item>
-                          );
-                        })}
-                      </Command.Group>
-                    )}
-                    {/* Empty state for in: when nothing matches */}
-                    {availableRegularChannels.length === 0 &&
-                      availableDMs.length === 0 &&
-                      mentionSearchQuery && (
-                        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                          No results found for &quot;{mentionSearchQuery}&quot;
-                        </Command.Empty>
-                      )}
-
-                    {/* Regular USER mention search (@, from:, assignee:) - Show only Users */}
-                    {mentionSearchType === MentionType.USER &&
-                      (userTrigger === '@' ||
-                        userTrigger === 'from:' ||
-                        userTrigger === 'to:' ||
-                        userTrigger === 'assignee:') &&
-                      availableUsers.length > 0 && (
-                        <Command.Group
-                          heading='Users'
-                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                        >
-                          {availableUsers.map((user, index) => {
-                            const isDeactivated = isUserDeactivated(user);
-                            return (
-                              <Command.Item
-                                key={user.id}
-                                value={`mention-user-${user.id}`}
-                                onSelect={() => {
-                                  void handleMentionSelect({
-                                    id: user.id,
-                                    name: getUserDisplayName(user),
-                                    type: MentionType.USER,
-                                    ...(user.email ? { email: user.email } : {}),
-                                  });
-                                }}
-                                onMouseEnter={() => {
-                                  selectMention(index);
-                                }}
-                                className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                                  index === selectedMentionIndex
-                                    ? hasNavigated
-                                      ? 'cmdk-active-row'
-                                      : 'bg-muted'
-                                    : ''
-                                } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                                style={{ WebkitTapHighlightColor: 'transparent' }}
-                              >
-                                <Avatar userId={user.id} size='sm' />
-                                <div className='flex-1 min-w-0'>
-                                  <div className='flex items-center gap-1.5'>
-                                    <div
-                                      className={`font-semibold text-sm truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-                                    >
-                                      {getUserDisplayName(user)}
-                                    </div>
-                                    {isDeactivated && (
-                                      <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-                                        Deactivated
-                                      </span>
-                                    )}
-                                  </div>
-                                  {user.email && (
-                                    <div className='text-xs text-muted-foreground truncate'>
-                                      {user.email}
-                                    </div>
-                                  )}
-                                </div>
-                              </Command.Item>
-                            );
-                          })}
+                          ))}
                         </Command.Group>
                       )}
                     {mentionSearchType === MentionType.USER &&
                       (userTrigger === '@' ||
                         userTrigger === 'from:' ||
                         userTrigger === 'to:' ||
+                        userTrigger === 'with:' ||
                         userTrigger === 'assignee:') &&
                       availableUsers.length === 0 &&
                       mentionSearchQuery && (
@@ -3230,28 +3625,23 @@ const ChannelCommandMenu = ({
                           No users found for &quot;{mentionSearchQuery}&quot;
                         </Command.Empty>
                       )}
-                  </>
-                )}
 
-                {/* 'in:#' trigger - Show Channels only (NO DMs, NO Users) */}
-                {channelTrigger === 'in:#' && (
-                  <>
-                    {/* Channels Section */}
-                    {availableRegularChannels.length > 0 && (
-                      <Command.Group
-                        heading='Channels'
-                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                      >
-                        {availableRegularChannels.map(({ channel, displayName }, index) => {
-                          return (
+                    {/* 'priority:' trigger — the closed TicketPriority value list */}
+                    {mentionSearchType === MentionType.PRIORITY &&
+                      availablePriorities.length > 0 && (
+                        <Command.Group
+                          heading='Priority'
+                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                        >
+                          {availablePriorities.map((priority, index) => (
                             <Command.Item
-                              key={channel.id}
-                              value={`mention-channel-${channel.id}`}
+                              key={priority.id}
+                              value={`mention-priority-${priority.id}`}
                               onSelect={() => {
                                 void handleMentionSelect({
-                                  id: channel.id,
-                                  name: displayName,
-                                  type: MentionType.CHANNEL,
+                                  id: priority.id,
+                                  name: priority.name,
+                                  type: MentionType.PRIORITY,
                                 });
                               }}
                               onMouseEnter={() => {
@@ -3266,374 +3656,174 @@ const ChannelCommandMenu = ({
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
-                              <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
-                                {getChannelIcon(channel)}
+                              <div
+                                className={`flex items-center justify-center h-4 w-5 flex-shrink-0 ${
+                                  PRIORITY_ICON_COLOR[priority.id] ?? 'text-muted-foreground'
+                                }`}
+                              >
+                                <SignalHigh size={16} />
                               </div>
                               <div className='flex-1 min-w-0'>
                                 <div className='font-semibold text-sm text-foreground truncate'>
-                                  {displayName}
+                                  {priority.name}
                                 </div>
                               </div>
                             </Command.Item>
-                          );
-                        })}
-                      </Command.Group>
-                    )}
-                    {/* Empty state */}
-                    {availableRegularChannels.length === 0 && mentionSearchQuery && (
-                      <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                        No channels found for &quot;{mentionSearchQuery}&quot;
-                      </Command.Empty>
-                    )}
+                          ))}
+                        </Command.Group>
+                      )}
                   </>
                 )}
 
-                {/* 'in:@' trigger - Show DMs only (NOT Users!) */}
-                {channelTrigger === 'in:@' && availableDMs.length > 0 && (
-                  <Command.Group
-                    heading='DMs'
-                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                  >
-                    {availableDMs.map(({ channel, displayName }, index) => (
-                      <Command.Item
-                        key={channel.id}
-                        value={`mention-dm-${channel.id}`}
-                        onSelect={() => {
-                          void handleMentionSelect({
-                            id: channel.id,
-                            name: displayName,
-                            type: MentionType.CHANNEL,
-                          });
-                        }}
-                        onMouseEnter={() => {
-                          selectMention(index);
-                        }}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                          index === selectedMentionIndex
-                            ? hasNavigated
-                              ? 'cmdk-active-row'
-                              : 'bg-muted'
-                            : ''
-                        } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                        style={{ WebkitTapHighlightColor: 'transparent' }}
-                      >
-                        <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
-                          {getChannelIcon(channel)}
-                        </div>
-                        <div className='flex-1 min-w-0'>
-                          <div className='font-semibold text-sm text-foreground truncate'>
-                            {displayName}
-                          </div>
-                        </div>
-                      </Command.Item>
-                    ))}
-                  </Command.Group>
-                )}
-                {channelTrigger === 'in:@' && availableDMs.length === 0 && mentionSearchQuery && (
+                {/* ─── Inline context picker: locked + recent sections ─────────────────── */}
+                {inline &&
+                  contextSelectionMode &&
+                  !mentionSearchType &&
+                  activeTab !== TabType.ALL && (
+                    <>
+                      {/* Recent items — shown when search box is empty, read directly from localStorage */}
+                      {!searchText.trim() && loadRecents(activeTab).length > 0 && (
+                        <Command.Group
+                          heading='Recent'
+                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                        >
+                          {loadRecents(activeTab).map(item => {
+                            const isChannelTab = activeTab === TabType.CHANNELS;
+                            const subApp =
+                              activeTab === TabType.CANVAS
+                                ? 'canvas'
+                                : activeTab === TabType.CALL || activeTab === TabType.RECORDING
+                                  ? 'transcript'
+                                  : undefined;
+                            const resultType: 'channel' | 'ticket' | 'attachment' = isChannelTab
+                              ? 'channel'
+                              : activeTab === TabType.TICKETS
+                                ? 'ticket'
+                                : 'attachment';
+                            const compositeId = `${resultType}-${item.id}`;
+                            const isSelected = contextItems.some(c => c.id === compositeId);
+                            return (
+                              <Command.Item
+                                key={item.id}
+                                value={`recent-${activeTab}-${item.id}`}
+                                onSelect={() => {
+                                  if (!onContextItemToggle) return;
+                                  onContextItemToggle({
+                                    id: compositeId,
+                                    title: item.title,
+                                    type: resultType,
+                                    url: isChannelTab ? `/chat/dir/${item.id}` : '#',
+                                    searchResult: {
+                                      id: item.id,
+                                      type: resultType,
+                                      title: item.title,
+                                      subtitle: '',
+                                      relevanceScore: 0,
+                                      metadata: {},
+                                      ...(subApp
+                                        ? { searchContext: { subApp, attachmentId: item.id } }
+                                        : {}),
+                                    } as DisplaySearchResult,
+                                  });
+                                }}
+                                className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'hover:bg-muted aria-selected:bg-muted'}`}
+                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                              >
+                                {isChannelTab &&
+                                  (item.isPrivate ? (
+                                    <Lock
+                                      size={14}
+                                      className='text-muted-foreground flex-shrink-0'
+                                    />
+                                  ) : (
+                                    <Hash
+                                      size={14}
+                                      className='text-muted-foreground flex-shrink-0'
+                                    />
+                                  ))}
+                                <span className='flex-1 min-w-0 text-left text-sm font-medium text-foreground truncate'>
+                                  {item.title}
+                                </span>
+                                {isSelected && (
+                                  <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
+                                    <Check size={10} />
+                                  </span>
+                                )}
+                              </Command.Item>
+                            );
+                          })}
+                        </Command.Group>
+                      )}
+                    </>
+                  )}
+
+                {showEmptyState && !mentionSearchType && (
                   <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                    No DMs found for &quot;{mentionSearchQuery}&quot;
+                    No results found for &quot;{search}&quot;
                   </Command.Empty>
                 )}
 
-                {/* '#' trigger - Show only Channels (Slack-style quick switcher) */}
-                {channelTrigger === '#' && availableChannels.length > 0 && (
-                  <Command.Group
-                    heading='Channels'
-                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                  >
-                    {availableChannels.map(({ channel, displayName }, index) => {
-                      return (
-                        <Command.Item
-                          key={channel.id}
-                          value={`mention-channel-${channel.id}`}
-                          onSelect={() => {
-                            void handleMentionSelect({
-                              id: channel.id,
-                              name: displayName,
-                              type: MentionType.CHANNEL,
-                            });
-                          }}
-                          onMouseEnter={() => {
-                            selectMention(index);
-                          }}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                            index === selectedMentionIndex
-                              ? hasNavigated
-                                ? 'cmdk-active-row'
-                                : 'bg-muted'
-                              : ''
-                          } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                          style={{ WebkitTapHighlightColor: 'transparent' }}
-                        >
-                          <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
-                            {getChannelIcon(channel)}
-                          </div>
-                          <div className='flex-1 min-w-0'>
-                            <div className='font-semibold text-sm text-foreground truncate'>
-                              {displayName}
-                            </div>
-                          </div>
-                        </Command.Item>
-                      );
-                    })}
-                  </Command.Group>
-                )}
-                {channelTrigger === '#' && availableChannels.length === 0 && mentionSearchQuery && (
-                  <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                    No channels found for &quot;{mentionSearchQuery}&quot;
-                  </Command.Empty>
-                )}
-
-                {/* Regular USER mention search (@, from:, with:, assignee:) - Show only Users */}
-                {mentionSearchType === MentionType.USER &&
-                  (userTrigger === '@' ||
-                    userTrigger === 'from:' ||
-                    userTrigger === 'to:' ||
-                    userTrigger === 'with:' ||
-                    userTrigger === 'assignee:') &&
-                  availableUsers.length > 0 && (
-                    <Command.Group
-                      heading='Users'
-                      className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                    >
-                      {availableUsers.map((user, index) => (
-                        <Command.Item
-                          key={user.id}
-                          value={`mention-user-${user.id}`}
-                          onSelect={() => {
-                            void handleMentionSelect({
-                              id: user.id,
-                              name: getUserDisplayName(user),
-                              type: MentionType.USER,
-                              ...(user.email ? { email: user.email } : {}),
-                            });
-                          }}
-                          onMouseEnter={() => {
-                            selectMention(index);
-                          }}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                            index === selectedMentionIndex
-                              ? hasNavigated
-                                ? 'cmdk-active-row'
-                                : 'bg-muted'
-                              : ''
-                          } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                          style={{ WebkitTapHighlightColor: 'transparent' }}
-                        >
-                          <Avatar userId={user.id} size='sm' />
-                          <div className='flex-1 min-w-0'>
-                            <div className='font-semibold text-sm text-foreground truncate'>
-                              {getUserDisplayName(user)}
-                            </div>
-                            {user.email && (
-                              <div className='text-xs text-muted-foreground truncate'>
-                                {user.email}
-                              </div>
-                            )}
-                          </div>
-                        </Command.Item>
-                      ))}
-                    </Command.Group>
-                  )}
-                {mentionSearchType === MentionType.USER &&
-                  (userTrigger === '@' ||
-                    userTrigger === 'from:' ||
-                    userTrigger === 'to:' ||
-                    userTrigger === 'with:' ||
-                    userTrigger === 'assignee:') &&
-                  availableUsers.length === 0 &&
-                  mentionSearchQuery && (
-                    <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                      No users found for &quot;{mentionSearchQuery}&quot;
-                    </Command.Empty>
-                  )}
-
-                {/* 'priority:' trigger — the closed TicketPriority value list */}
-                {mentionSearchType === MentionType.PRIORITY && availablePriorities.length > 0 && (
-                  <Command.Group
-                    heading='Priority'
-                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                  >
-                    {availablePriorities.map((priority, index) => (
-                      <Command.Item
-                        key={priority.id}
-                        value={`mention-priority-${priority.id}`}
-                        onSelect={() => {
-                          void handleMentionSelect({
-                            id: priority.id,
-                            name: priority.name,
-                            type: MentionType.PRIORITY,
-                          });
-                        }}
-                        onMouseEnter={() => {
-                          selectMention(index);
-                        }}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                          index === selectedMentionIndex
-                            ? hasNavigated
-                              ? 'cmdk-active-row'
-                              : 'bg-muted'
-                            : ''
-                        } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                        style={{ WebkitTapHighlightColor: 'transparent' }}
-                      >
-                        <div
-                          className={`flex items-center justify-center h-4 w-5 flex-shrink-0 ${
-                            PRIORITY_ICON_COLOR[priority.id] ?? 'text-muted-foreground'
-                          }`}
-                        >
-                          <SignalHigh size={16} />
-                        </div>
-                        <div className='flex-1 min-w-0'>
-                          <div className='font-semibold text-sm text-foreground truncate'>
-                            {priority.name}
-                          </div>
-                        </div>
-                      </Command.Item>
-                    ))}
-                  </Command.Group>
-                )}
-              </>
-            )}
-
-            {/* ─── Inline context picker: locked + recent sections ─────────────────── */}
-            {inline && contextSelectionMode && !mentionSearchType && activeTab !== TabType.ALL && (
-              <>
-                {/* Recent items — shown when search box is empty, read directly from localStorage */}
-                {!searchText.trim() && loadRecents(activeTab).length > 0 && (
-                  <Command.Group
-                    heading='Recent'
-                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                  >
-                    {loadRecents(activeTab).map(item => {
-                      const isChannelTab = activeTab === TabType.CHANNELS;
-                      const subApp =
-                        activeTab === TabType.CANVAS
-                          ? 'canvas'
-                          : activeTab === TabType.CALL || activeTab === TabType.RECORDING
-                            ? 'transcript'
-                            : undefined;
-                      const resultType: 'channel' | 'ticket' | 'attachment' = isChannelTab
-                        ? 'channel'
-                        : activeTab === TabType.TICKETS
-                          ? 'ticket'
-                          : 'attachment';
-                      const compositeId = `${resultType}-${item.id}`;
-                      const isSelected = contextItems.some(c => c.id === compositeId);
-                      return (
-                        <Command.Item
-                          key={item.id}
-                          value={`recent-${activeTab}-${item.id}`}
-                          onSelect={() => {
-                            if (!onContextItemToggle) return;
-                            onContextItemToggle({
-                              id: compositeId,
-                              title: item.title,
-                              type: resultType,
-                              url: isChannelTab ? `/chat/dir/${item.id}` : '#',
-                              searchResult: {
-                                id: item.id,
-                                type: resultType,
-                                title: item.title,
-                                subtitle: '',
-                                relevanceScore: 0,
-                                metadata: {},
-                                ...(subApp
-                                  ? { searchContext: { subApp, attachmentId: item.id } }
-                                  : {}),
-                              } as DisplaySearchResult,
-                            });
-                          }}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'hover:bg-muted aria-selected:bg-muted'}`}
-                          style={{ WebkitTapHighlightColor: 'transparent' }}
-                        >
-                          {isChannelTab &&
-                            (item.isPrivate ? (
-                              <Lock size={14} className='text-muted-foreground flex-shrink-0' />
-                            ) : (
-                              <Hash size={14} className='text-muted-foreground flex-shrink-0' />
-                            ))}
-                          <span className='flex-1 min-w-0 text-left text-sm font-medium text-foreground truncate'>
-                            {item.title}
-                          </span>
-                          {isSelected && (
-                            <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
-                              <Check size={10} />
-                            </span>
-                          )}
-                        </Command.Item>
-                      );
-                    })}
-                  </Command.Group>
-                )}
-              </>
-            )}
-
-            {showEmptyState && !mentionSearchType && (
-              <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                No results found for &quot;{search}&quot;
-              </Command.Empty>
-            )}
-
-            {/* Local results (channels, users, DMs) are computed client-side and
+                {/* Local results (channels, users, DMs) are computed client-side and
                     don't depend on the backend search — keep rendering them even
                     when Vespa fails. The backend-results section below is the part
                     that gracefully degrades to empty when there's an error. The
                     error notice itself is rendered after the local results below. */}
-            {error && <div className='p-3 text-sm text-destructive'>{error}</div>}
+                {error && <div className='p-3 text-sm text-destructive'>{error}</div>}
 
-            {!showEmptyState && !mentionSearchType && (
-              <>
-                {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
-                {/* When from:/in: filter is active, backend results appear first */}
-                {/* When with: filter is active, only show backend results (no local sections) */}
-                {searchText.trim() || typeFilter ? (
+                {!showEmptyState && !mentionSearchType && (
                   <>
-                    {/* When from:/in: filter is active, backend results appear first; otherwise local sections appear first */}
-                    {/* with: filter suppresses local sections entirely */}
-                    {hasFromOrInFilter ? (
+                    {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
+                    {/* When from:/in: filter is active, backend results appear first */}
+                    {/* When with: filter is active, only show backend results (no local sections) */}
+                    {searchText.trim() || typeFilter ? (
                       <>
-                        {backendResults.length > 0 && renderSearchBackendResults()}
-                        {!hasWithFilter && renderSearchLocalSections()}
-                      </>
-                    ) : (
-                      <>
-                        {/* A section pinned to the top (above) is skipped here to
+                        {/* When from:/in: filter is active, backend results appear first; otherwise local sections appear first */}
+                        {/* with: filter suppresses local sections entirely */}
+                        {hasFromOrInFilter ? (
+                          <>
+                            {backendResults.length > 0 && renderSearchBackendResults()}
+                            {!hasWithFilter && renderSearchLocalSections()}
+                          </>
+                        ) : (
+                          <>
+                            {/* A section pinned to the top (above) is skipped here to
                             avoid a double-render. */}
-                        {!hasWithFilter &&
-                          renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)}
-                        {backendResults.length > 0 && renderSearchBackendResults()}
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    {/* When from:/in: filter is active, backend results appear first; otherwise local channels appear first */}
-                    {/* with: filter suppresses local sections entirely */}
-                    {hasFromOrInFilter ? (
-                      <>
-                        {activeTab !== TabType.CHANNELS &&
-                          backendResults.length > 0 &&
-                          renderDefaultBackendResults()}
-                        {!hasWithFilter && renderBrowseLocalChannels()}
+                            {!hasWithFilter &&
+                              renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)}
+                            {backendResults.length > 0 && renderSearchBackendResults()}
+                          </>
+                        )}
                       </>
                     ) : (
                       <>
-                        {!hasWithFilter && renderBrowseLocalChannels()}
-                        {activeTab !== TabType.CHANNELS &&
-                          backendResults.length > 0 &&
-                          renderDefaultBackendResults()}
+                        {/* When from:/in: filter is active, backend results appear first; otherwise local channels appear first */}
+                        {/* with: filter suppresses local sections entirely */}
+                        {hasFromOrInFilter ? (
+                          <>
+                            {activeTab !== TabType.CHANNELS &&
+                              backendResults.length > 0 &&
+                              renderDefaultBackendResults()}
+                            {!hasWithFilter && renderBrowseLocalChannels()}
+                          </>
+                        ) : (
+                          <>
+                            {!hasWithFilter && renderBrowseLocalChannels()}
+                            {activeTab !== TabType.CHANNELS &&
+                              backendResults.length > 0 &&
+                              renderDefaultBackendResults()}
+                          </>
+                        )}
                       </>
                     )}
                   </>
                 )}
-              </>
-            )}
 
-            {error && !mentionSearchType && (
-              <div className='px-3 py-2 text-sm text-red-600'>
-                Search is unavailable. Only People and Channels are accessible.
-              </div>
+                {error && !mentionSearchType && (
+                  <div className='px-3 py-2 text-sm text-red-600'>
+                    Search is unavailable. Only People and Channels are accessible.
+                  </div>
+                )}
+              </>
             )}
           </Command.List>
 
@@ -3851,6 +4041,7 @@ const ChannelCommandMenu = ({
         }}
         onKeyDownCapture={handleCommandKeyDown}
       >
+        {channelCallConfirm}
         {commandBody}
       </Command>
     );
@@ -3861,49 +4052,54 @@ const ChannelCommandMenu = ({
   // selection that navigated (e.g. cmd+K → DM) leaves focus with the
   // destination screen instead of restoring it to the pre-open element.
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay />
-        <DialogPrimitive.Content
-          onCloseAutoFocus={e => {
-            const href = window.location.pathname + window.location.search;
-            if (href !== openedAtHrefRef.current) e.preventDefault();
-          }}
-        >
-          <Command
-            ref={commandRef}
-            // See inline <Command> above: pin cmdk's value to a sentinel ('__none__') that matches no
-            // item so it never adds a second highlighted row next to the imperatively-managed one.
-            value='__none__'
-            onValueChange={() => {}}
-            data-nav-active={hasNavigated ? 'true' : undefined}
-            data-mention-active={mentionSearchType ? 'true' : undefined}
-            shouldFilter={false}
-            onMouseMove={() => {
-              if (suppressHover) {
-                commandRef.current
-                  ?.querySelectorAll('[cmdk-item][aria-selected="true"]')
-                  .forEach(item => {
-                    item.setAttribute('aria-selected', 'false');
-                  });
-                setSuppressHover(false);
-              }
-              reconcileHoverSelection();
+    <>
+      <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay />
+          <DialogPrimitive.Content
+            onCloseAutoFocus={e => {
+              const href = window.location.pathname + window.location.search;
+              if (href !== openedAtHrefRef.current) e.preventDefault();
             }}
-            className={cn(
-              'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
-              isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
-              contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
-              'md:w-full md:h-auto bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
-              showMergeDialog ? 'z-40' : 'z-[9999]',
-            )}
-            onKeyDownCapture={handleCommandKeyDown}
           >
-            {commandBody}
-          </Command>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+            <Command
+              ref={commandRef}
+              // See inline <Command> above: pin cmdk's value to a sentinel ('__none__') that matches no
+              // item so it never adds a second highlighted row next to the imperatively-managed one.
+              value='__none__'
+              onValueChange={() => {}}
+              data-nav-active={hasNavigated ? 'true' : undefined}
+              data-mention-active={mentionSearchType ? 'true' : undefined}
+              shouldFilter={false}
+              onMouseMove={() => {
+                if (suppressHover) {
+                  commandRef.current
+                    ?.querySelectorAll('[cmdk-item][aria-selected="true"]')
+                    .forEach(item => {
+                      item.setAttribute('aria-selected', 'false');
+                    });
+                  setSuppressHover(false);
+                }
+                reconcileHoverSelection();
+              }}
+              className={cn(
+                'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
+                isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
+                contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
+                'md:w-full md:h-auto bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
+                showMergeDialog ? 'z-40' : 'z-[9999]',
+              )}
+              onKeyDownCapture={handleCommandKeyDown}
+            >
+              {commandBody}
+            </Command>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+      {/* Sibling of the Cmd+K dialog (NOT a child) so closing Cmd+K can't tear it down; the
+          `/call` channel confirmation renders after Cmd+K is dismissed, clear of z-[9999]. */}
+      {channelCallConfirm}
+    </>
   );
 };
 
