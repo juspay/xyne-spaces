@@ -11,15 +11,15 @@ const TeamMembers = (): ReactElement => {
   const [query, setQuery] = useState('');
 
   const { data: teamMembers, isLoading } = useTeamMembers(teamId!);
-  const members =
-    teamMembers?.employee_list.filter(m => {
-      const q = query.toLowerCase();
-      return (
-        m.name.toLowerCase().includes(q) ||
-        m.email.toLowerCase().includes(q) ||
-        m.designation.toLowerCase().includes(q)
-      );
-    }) ?? [];
+  const employeeList = teamMembers?.employee_list ?? [];
+  const members = employeeList.filter(m => {
+    const q = query.toLowerCase();
+    return (
+      (m.name ?? '').toLowerCase().includes(q) ||
+      (m.email ?? '').toLowerCase().includes(q) ||
+      (m.designation ?? '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <section className='space-y-4'>
@@ -50,7 +50,7 @@ const TeamMembers = (): ReactElement => {
       ) : (
         <div className='grid gap-4 md:grid-cols-2'>
           {members.length === 0 ? (
-            teamMembers?.employee_list?.length === 0 ? (
+            employeeList.length === 0 ? (
               <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center justify-start gap-2 col-span-2'>
                 <p className='text-sm text-muted-foreground'>No team members.</p>
               </div>

@@ -14,6 +14,7 @@ const MemberAchievements = (): ReactElement => {
     from: dateRange.from,
     to: dateRange.to,
   });
+  const insights = member?.teamInsights?.items ?? [];
 
   return (
     <section className='space-y-4'>
@@ -31,7 +32,7 @@ const MemberAchievements = (): ReactElement => {
         </div>
       ) : (
         <div className='space-y-4'>
-          {member?.teamInsights?.items?.map((insight, index) => {
+          {insights.map((insight, index) => {
             const teamColor = getTeamColor(insight.teamName).primary;
 
             return (
@@ -58,7 +59,7 @@ const MemberAchievements = (): ReactElement => {
               </article>
             );
           })}
-          {member && member.teamInsights.items.length === 0 && (
+          {!isLoading && insights.length === 0 && (
             <div className='w-full rounded-xl border border-border/50 bg-card p-5'>
               <p className='text-sm text-muted-foreground'>
                 No accomplishments available in the selected time period.

@@ -42,7 +42,7 @@ export const StatCard = ({
                 <CountUp
                   to={numericValue}
                   className='text-3xl font-bold tracking-tight text-foreground font-mono'
-                  duration={0.3}
+                  duration={0.5}
                 />
               ) : (
                 <p className='text-3xl font-bold tracking-tight text-foreground font-mono'>

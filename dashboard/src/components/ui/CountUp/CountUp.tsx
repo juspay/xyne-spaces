@@ -29,6 +29,7 @@ export default function CountUp({
   onEnd,
 }: CountUpProps) {
   const ref = useRef<HTMLSpanElement>(null);
+  const isSettled = useRef(true);
   const motionValue = useMotionValue(direction === 'down' ? to : from);
 
   const springConfig = useMemo(
@@ -56,7 +57,7 @@ export default function CountUp({
 
   const maxDecimals = Math.max(getDecimalPlaces(from), getDecimalPlaces(to));
 
-  const abbreviateNumber = (num: number, decimals: number): string => {
+  const abbreviateNumber = (num: number, decimals: number, stripTrailingZeros: boolean): string => {
     const abs = Math.abs(num);
     const sign = num < 0 ? '-' : '';
     const units = ['', 'k', 'M', 'B', 'T', 'P'];
@@ -70,16 +71,18 @@ export default function CountUp({
 
     const formatted =
       unitIndex === 0
-        ? value.toFixed(decimals).replace(/\.0+$/, '')
-        : value.toFixed(value < 10 ? 2 : value < 100 ? 1 : 0).replace(/\.0+$/, '');
+        ? value.toFixed(decimals)
+        : value.toFixed(value < 10 ? 2 : value < 100 ? 1 : 0);
 
-    return `${sign}${formatted}${units[unitIndex]}`;
+    const result = stripTrailingZeros ? formatted.replace(/\.0+$/, '') : formatted;
+
+    return `${sign}${result}${units[unitIndex]}`;
   };
 
   const formatValue = useCallback(
     (latest: number) => {
       if (abbreviate) {
-        return abbreviateNumber(latest, maxDecimals);
+        return abbreviateNumber(latest, maxDecimals, isSettled.current);
       }
 
       const hasDecimals = maxDecimals > 0;
@@ -109,12 +112,18 @@ export default function CountUp({
         onStart();
       }
 
+      isSettled.current = false;
+
       const timeoutId = setTimeout(() => {
         motionValue.set(direction === 'down' ? from : to);
       }, delay * 1000);
 
       const durationTimeoutId = setTimeout(
         () => {
+          isSettled.current = true;
+          if (ref.current) {
+            ref.current.textContent = formatValue(direction === 'down' ? from : to);
+          }
           if (typeof onEnd === 'function') {
             onEnd();
           }
@@ -128,11 +137,23 @@ export default function CountUp({
       };
     }
     return undefined;
-  }, [isInView, startWhen, motionValue, direction, from, to, delay, onStart, onEnd, duration]);
+  }, [
+    isInView,
+    startWhen,
+    motionValue,
+    direction,
+    from,
+    to,
+    delay,
+    onStart,
+    onEnd,
+    duration,
+    formatValue,
+  ]);
 
   useEffect(() => {
     const unsubscribe = springValue.on('change', (latest: number) => {
-      if (ref.current) {
+      if (ref.current && !isSettled.current) {
         ref.current.textContent = formatValue(latest);
       }
     });
@@ -140,5 +161,5 @@ export default function CountUp({
     return () => unsubscribe();
   }, [springValue, formatValue]);
 
-  return <span className={className} ref={ref} />;
+  return <span className={`${className} tabular-nums`} ref={ref} />;
 }

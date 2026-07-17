@@ -22,8 +22,8 @@ const MemberQuickInsights = (): ReactElement => {
 
   const totalCommitCount = member?.productivityMetrics?.totalCommitCount || 0;
   const mergedPrCount = member?.productivityMetrics?.mergedPullRequestCount || 0;
-  const totalAiTokens = member?.aiUsages.totalTokens || 0;
-  const aiCost = member?.aiUsages.cost ?? { amount: 0, currency: 'USD' };
+  const totalAiTokens = member?.aiUsages?.totalTokens || 0;
+  const aiCost = member?.aiUsages?.cost ?? { amount: 0, currency: 'USD' };
 
   return (
     <section className='space-y-4'>

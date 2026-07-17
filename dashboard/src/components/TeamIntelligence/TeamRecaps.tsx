@@ -1,4 +1,4 @@
-import { ReactElement, useState } from 'react';
+import { ReactElement, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, MessageSquareIcon } from 'lucide-react';
 import { useTeamTicketRecaps } from '@/hooks/useTeamIntelligence';
 import Button from '../ui/Button';
@@ -12,6 +12,10 @@ export const TeamRecaps = (): ReactElement => {
   const { teamId } = useParams<{ teamId: string }>();
   const [currentPage, setCurrentPage] = useState(1);
   const limit = 4;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [dateRange.from, dateRange.to, teamId]);
 
   const { data, isLoading, error } = useTeamTicketRecaps(teamId!, {
     from: dateRange.from,
@@ -53,11 +57,12 @@ export const TeamRecaps = (): ReactElement => {
       </div>
     );
 
+  const recaps = data?.recaps ?? [];
   const totalPages = data?.totalPages ?? 0;
   const canGoPrevious = currentPage > 1;
   const canGoNext = currentPage < totalPages;
 
-  if (!data || data.recaps.length === 0) {
+  if (recaps.length === 0) {
     return (
       <div className='space-y-4'>
         <div className='flex items-center gap-3'>
@@ -86,7 +91,7 @@ export const TeamRecaps = (): ReactElement => {
 
       {/* Recaps list */}
       <div className='space-y-4'>
-        {data?.recaps.map(recap => {
+        {recaps.map(recap => {
           const parsed = parseRecapSummary(recap.summary);
           const hasPoints = parsed.points.length > 0;
 
@@ -139,32 +144,34 @@ export const TeamRecaps = (): ReactElement => {
       </div>
 
       {/* Pagination controls */}
-      <div className='flex items-center justify-between'>
-        <Button
-          variant={'outline'}
-          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-          disabled={!canGoPrevious}
-          className='flex items-center gap-2 px-4 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50'
-        >
-          <ChevronLeft size={16} />
-        </Button>
+      {totalPages > 1 && (
+        <div className='flex items-center justify-between'>
+          <Button
+            variant={'outline'}
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={!canGoPrevious}
+            className='flex items-center gap-2 px-4 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50'
+          >
+            <ChevronLeft size={16} />
+          </Button>
 
-        <div className='flex items-center gap-2'>
-          <span className='text-xs text-muted-foreground'>
-            Page <span className='font-semibold'>{currentPage}</span> of{' '}
-            <span className='font-semibold'>{totalPages}</span>
-          </span>
+          <div className='flex items-center gap-2'>
+            <span className='text-xs text-muted-foreground'>
+              Page <span className='font-semibold'>{currentPage}</span> of{' '}
+              <span className='font-semibold'>{totalPages}</span>
+            </span>
+          </div>
+
+          <Button
+            variant={'outline'}
+            onClick={() => setCurrentPage(p => p + 1)}
+            disabled={!canGoNext}
+            className='flex items-center gap-2 px-4 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50'
+          >
+            <ChevronRight size={16} />
+          </Button>
         </div>
-
-        <Button
-          variant={'outline'}
-          onClick={() => setCurrentPage(p => p + 1)}
-          disabled={!canGoNext}
-          className='flex items-center gap-2 px-4 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50'
-        >
-          <ChevronRight size={16} />
-        </Button>
-      </div>
+      )}
     </div>
   );
 };

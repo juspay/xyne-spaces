@@ -4,6 +4,7 @@ import {
   getOrgHighlights,
   getOrgSummary,
   getOrgTicketRecaps,
+  getTeamChannelTickets,
   getTeamHighlights,
   getTeamMembers,
   getTeamMetrics,
@@ -13,6 +14,7 @@ import {
   OrgHighlightResponse,
   OrgSummaryResponse,
   OrgTicketRecapsResponse,
+  TeamChannelTicketsResponse,
   TeamHighlightsResponse,
   TeamMember,
   TeamMembersResponse,
@@ -52,11 +54,19 @@ export function useOrgHighlights({
   params: {
     from: string;
     to: string;
+    page: number;
+    limit?: number;
   };
 }): UseQueryResult<OrgHighlightResponse> {
   return useQuery<OrgHighlightResponse>({
     queryKey: ['team-intelligence', 'org-highlights', params],
-    queryFn: () => getOrgHighlights(params),
+    queryFn: () =>
+      getOrgHighlights({
+        from: params.from,
+        to: params.to,
+        page: params.page,
+        limit: params.limit ?? 20,
+      }),
     ...teamIntelligenceQueryOptions,
   });
 }
@@ -86,11 +96,17 @@ export function useTeams(): UseQueryResult<TeamsResponse> {
 
 export function useTeamHighlights(
   teamId: string,
-  params: { from: string; to: string },
+  params: { from: string; to: string; page: number; limit?: number },
 ): UseQueryResult<TeamHighlightsResponse> {
   return useQuery<TeamHighlightsResponse>({
     queryKey: ['team-intelligence', 'team-highlights', teamId, params],
-    queryFn: () => getTeamHighlights(teamId, params),
+    queryFn: () =>
+      getTeamHighlights(teamId, {
+        from: params.from,
+        to: params.to,
+        page: params.page,
+        limit: params.limit ?? 20,
+      }),
     enabled: !!teamId,
     ...teamIntelligenceQueryOptions,
   });
@@ -170,6 +186,29 @@ export function useTeamTicketRecaps(
     queryKey: ['team-intelligence', 'team-ticket-recaps', teamId, params],
     queryFn: () =>
       getTeamTicketRecaps(teamId, {
+        from: params.from,
+        to: params.to,
+        page: params.page,
+        limit: params.limit ?? 10,
+      }),
+    enabled: !!teamId,
+    ...teamIntelligenceQueryOptions,
+  });
+}
+
+export function useTeamChannelTickets(
+  teamId: string,
+  params: {
+    from: string;
+    to: string;
+    page: number;
+    limit?: number;
+  },
+): UseQueryResult<TeamChannelTicketsResponse> {
+  return useQuery<TeamChannelTicketsResponse>({
+    queryKey: ['team-intelligence', 'team-channel-tickets', teamId, params],
+    queryFn: () =>
+      getTeamChannelTickets(teamId, {
         from: params.from,
         to: params.to,
         page: params.page,
