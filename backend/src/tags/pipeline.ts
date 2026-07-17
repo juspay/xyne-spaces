@@ -160,7 +160,7 @@ export class TagGenerationPipeline extends EventEmitter {
 
       this.registerDefaultGenerators();
 
-      this.queue.process('generate-tags', async (job) => this.processGenerateTagsJob(job));
+      this.queue.process('generate-tags', appConfig.tagGenerationConcurrency, async (job) => this.processGenerateTagsJob(job));
 
       this.queue.on('completed', (job, result) => {
         if (!job) return;
@@ -217,6 +217,7 @@ export class TagGenerationPipeline extends EventEmitter {
 
     const jobId = `tag-gen-${data.sourceType}-${data.sourceId}-${data.configKey}`;
     await this.queue.add('generate-tags', { jobId, ...data }, { jobId, priority });
+    logger.info(`[TAG][PIPELINE] Enqueued job ${jobId} (priority=${priority})`);
 
     return jobId;
   }
@@ -264,6 +265,7 @@ export class TagGenerationPipeline extends EventEmitter {
     if (bulkJobs.length === 0) return 0;
 
     await this.queue.addBulk(bulkJobs);
+    logger.info(`[TAG][PIPELINE] Enqueued ${bulkJobs.length} bulk jobs (priority=${priority})`);
     return bulkJobs.length;
   }
 

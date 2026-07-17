@@ -16,6 +16,8 @@ import { EmailType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { mailSchema } from '@/vespa/src/types';
+import { config as appConfig } from '@/config/env';
+import { tagGenerationPipeline, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 
 interface DemergeEmailRequest {
   emailId: string;
@@ -143,6 +145,24 @@ export class EmailDemergeController {
       for (const id of emailIdsToMove) {
         vespaQueue.addJob({ schema: mailSchema, jobType: 'feed', docId: id, workspaceId: originalTicket.workspaceId || undefined }).catch(err => {
           logger.error(`[EmailDemergeController] Failed to queue Vespa re-feed for email ${id}:`, err);
+        });
+      }
+
+      // Enqueue tag generation for all moved emails (fire-and-forget).
+      // Priority 2 — same as new emails; demerge creates a new conversation.
+      if (appConfig.enableTagGenerationPipeline && originalTicket.workspaceId) {
+        void tagGenerationPipeline.addGenerationJobs(
+          emailIdsToMove.map(id => ({
+            sourceId: id,
+            sourceType: DESK_EMAIL_SOURCE_TYPE,
+            workspaceId: originalTicket.workspaceId!,
+            configKey: deskEmailConfigKey(originalTicket.channelId),
+          })),
+          2,
+        ).then((count) => {
+          logger.info(`[TagFramework] Enqueued ${count} tag generation jobs for demerged emails in channel ${originalTicket.channelId}`);
+        }).catch((err: unknown) => {
+          logger.error(`[TagFramework] Failed to enqueue tag generation jobs for demerged emails`, err);
         });
       }
 
