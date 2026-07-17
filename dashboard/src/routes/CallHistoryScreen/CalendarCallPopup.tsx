@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Download,
   MessageSquare,
@@ -6,24 +6,39 @@ import {
   Check,
   HelpCircle,
   Headphones,
+  Headset,
   ChevronDown,
   Users,
   Pencil,
   Trash2,
   ExternalLink,
   MapPin,
+  Video,
+  Clock,
+  Satellite,
+  Circle,
+  AudioLines,
 } from 'lucide-react';
 import { RRule } from 'rrule';
+import { useSelector } from '@xstate/react';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import { Call, isGoogleCalendarCall, isMicrosoftCalendarCall } from './callHistoryItem.utils';
 import Button from '../../components/ui/Button';
 import Avatar from '../../components/ui/Avatar/Avatar';
+import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
 import { useUser } from '../../hooks/useUsers';
 import { callService } from '../../services/Call/callService';
 import { toast } from 'sonner';
 import { cn } from '../../utils/classNames';
-import { formatTimeAmPm } from '../../utils/dateUtils';
+import { formatRelativeTime, formatTimeAmPm, formatTimeUntil } from '../../utils/dateUtils';
+import {
+  didAttend,
+  formatCallDuration,
+  MAX_AVATARS_TO_SHOW,
+  RSVP_BADGE_BASE_CLASS,
+} from './CalenderViewUtils';
+import { roomActor } from '../../machines/roomMachine';
 
 interface CalendarCallPopupProps {
   call: Call;
@@ -50,7 +65,7 @@ function formatPopupDate(startsAt: number | string): string {
  * e.g. "FREQ=WEEKLY;BYDAY=TU" → "Every week on Tuesday"
  */
 function formatRecurrenceRule(ruleStr: string | null | undefined): string {
-  if (!ruleStr) return 'Recurring event';
+  if (!ruleStr) return 'This call repeats on a schedule';
   try {
     // Strip the "RRULE:" prefix if present, then parse
     const cleaned = ruleStr.replace(/^RRULE:/i, '');
@@ -59,7 +74,7 @@ function formatRecurrenceRule(ruleStr: string | null | undefined): string {
     const text = rule.toText();
     return text.charAt(0).toUpperCase() + text.slice(1);
   } catch {
-    return 'Recurring event';
+    return 'This call repeats on a schedule';
   }
 }
 
@@ -69,22 +84,22 @@ function RsvpBadge({ status }: { status: MeetingStatus }): React.ReactElement | 
 
   if (status === MeetingStatus.ACCEPTED) {
     return (
-      <span className='absolute -bottom-0.5 -right-0.5 flex items-center justify-center size-3.5 rounded-full bg-green-500 border border-background'>
-        <Check className='size-2 text-white stroke-[3]' />
+      <span className={cn(RSVP_BADGE_BASE_CLASS, 'bg-green-500')}>
+        <Check className='size-2.5 text-white stroke-[3]' />
       </span>
     );
   }
   if (status === MeetingStatus.DECLINED || status === MeetingStatus.HIDDEN) {
     return (
-      <span className='absolute -bottom-0.5 -right-0.5 flex items-center justify-center size-3.5 rounded-full bg-red-500 border border-background'>
-        <X className='size-2 text-white stroke-[3]' />
+      <span className={cn(RSVP_BADGE_BASE_CLASS, 'bg-red-500')}>
+        <X className='size-2.5 text-white stroke-[3]' />
       </span>
     );
   }
   // MAYBE
   return (
-    <span className='absolute -bottom-0.5 -right-0.5 flex items-center justify-center size-3.5 rounded-full bg-amber-400 border border-background'>
-      <HelpCircle className='size-2 text-white stroke-[3]' />
+    <span className={cn(RSVP_BADGE_BASE_CLASS, 'bg-amber-500')}>
+      <HelpCircle className='size-2.5 text-white stroke-[3]' />
     </span>
   );
 }
@@ -96,6 +111,7 @@ function ParticipantItem({
   isExternal,
   meetingStatus,
   isOrganizer,
+  didAttend,
 }: {
   userId: string;
   displayName?: string | null;
@@ -103,20 +119,27 @@ function ParticipantItem({
   isExternal?: boolean | null;
   meetingStatus: MeetingStatus;
   isOrganizer?: boolean;
+  didAttend: boolean | null;
 }): React.ReactElement {
   const user = useUser(userId);
   const participantName = isExternal ? displayName || email || 'Guest' : (user?.name ?? '...');
 
+  // Determine role label
+  const roleLabel = isOrganizer ? 'Organizer' : isExternal ? 'External' : 'Invited';
+  const participantStatusLabel =
+    didAttend === null ? roleLabel : `${roleLabel} · ${didAttend ? 'Attended' : 'Didn’t attend'}`;
+
   return (
-    <div className='flex items-center gap-2.5'>
+    <div className='flex items-center gap-3 px-3 py-2.5 hover:bg-muted/50 transition-colors'>
       <div className='relative shrink-0'>
-        <Avatar userId={isExternal ? null : userId} size='sm' showActiveStatus={false} rounded />
+        <AvatarStackItem size={30} className='rounded-md'>
+          <Avatar userId={isExternal ? null : userId} size='rg' showActiveStatus={false} />
+        </AvatarStackItem>
         <RsvpBadge status={meetingStatus} />
       </div>
-      <div className='flex flex-row gap-2 items-center min-w-0'>
-        <span className='text-[12px] text-foreground truncate'>{participantName}</span>
-        {isExternal && <span className='text-[10px] text-muted-foreground'>External</span>}
-        {isOrganizer && <span className='text-[10px] text-muted-foreground'>Organizer</span>}
+      <div className='flex flex-col min-w-0 flex-1'>
+        <span className='text-sm font-medium text-foreground truncate'>{participantName}</span>
+        <span className='text-xs text-muted-foreground'>{participantStatusLabel}</span>
       </div>
     </div>
   );
@@ -140,11 +163,28 @@ const CalendarCallPopup = ({
   onDeleteClick,
   onHideClick,
 }: CalendarCallPopupProps): React.ReactElement => {
+  const [now, setNow] = useState(() => Date.now());
+  const currentCallExternalId = useSelector(roomActor, state => state.context.externalId);
+  const isRoomActive = useSelector(
+    roomActor,
+    state => state.matches('joining') || state.matches('connecting') || state.matches('connected'),
+  );
   const isEnded = call.status === CallStatus.ENDED;
+  const startsAtTime = call.startsAt ? new Date(call.startsAt).getTime() : null;
+  const startedAtTime = call.startedAt ? new Date(call.startedAt).getTime() : null;
+  const isLive = call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS;
+  const hasReachedScheduledStart = startsAtTime !== null && now >= startsAtTime;
   const isRecurring = !!call.recurringSeriesId;
   const isGoogleCalendar = isGoogleCalendarCall(call);
   const isMicrosoftCalendar = isMicrosoftCalendarCall(call);
   const isExternalCalendar = isGoogleCalendar || isMicrosoftCalendar;
+
+  useEffect(() => {
+    if (isEnded || isExternalCalendar || startsAtTime === null) return;
+
+    const intervalId = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(intervalId);
+  }, [isEnded, isExternalCalendar, startsAtTime]);
 
   const [seriesPrompt, setSeriesPrompt] = useState<RsvpChoice | null>(null);
   const [showHideSeriesPrompt, setShowHideSeriesPrompt] = useState(false);
@@ -153,6 +193,7 @@ const CalendarCallPopup = ({
   const [isGuestsExpanded, setIsGuestsExpanded] = useState(false);
 
   const currentParticipant = call.participants?.find(p => p.userId === currentUserId);
+  const isCurrentUserInCall = isRoomActive && currentCallExternalId === call.externalId;
   const currentMeetingStatus: MeetingStatus =
     localRsvp ?? currentParticipant?.meetingStatus ?? MeetingStatus.PENDING;
 
@@ -234,13 +275,10 @@ const CalendarCallPopup = ({
     const meetLink = roomLink && roomLink !== htmlLink ? roomLink : undefined;
 
     return (
-      <div className='p-4'>
+      <div className='p-5'>
         {/* Header */}
         <div className='flex items-start justify-between gap-2 mb-2'>
-          <h3
-            className='font-medium flex-1 min-w-0 text-foreground'
-            style={{ fontSize: '16px', lineHeight: '22px' }}
-          >
+          <h3 className='font-semibold text-base leading-snug text-foreground flex-1 min-w-0'>
             {call.title ?? 'Event'}
           </h3>
           <div className='flex items-center gap-1 shrink-0'>
@@ -270,7 +308,7 @@ const CalendarCallPopup = ({
 
         {/* Date & time */}
         {(dateLabel || timeLabel) && (
-          <p className='text-muted-foreground mb-1' style={{ fontSize: '13px' }}>
+          <p className='text-sm text-muted-foreground mb-1'>
             {dateLabel}
             {dateLabel && timeLabel && ' • '}
             {timeLabel}
@@ -280,10 +318,8 @@ const CalendarCallPopup = ({
         {/* Location */}
         {location && (
           <div className='flex items-start gap-1.5 mb-2'>
-            <MapPin className='size-3.5 text-muted-foreground shrink-0 mt-0.5' />
-            <p className='text-muted-foreground' style={{ fontSize: '13px' }}>
-              {location}
-            </p>
+            <MapPin className='size-4 text-muted-foreground shrink-0 mt-0.5' />
+            <p className='text-sm text-muted-foreground'>{location}</p>
           </div>
         )}
 
@@ -308,10 +344,10 @@ const CalendarCallPopup = ({
                 {gcalAttendees.length} Guest{gcalAttendees.length !== 1 ? 's' : ''}
               </span>
             </div>
-            <div className='flex flex-col gap-1 max-h-36 overflow-y-auto'>
+            <div className='flex flex-col gap-1 max-h-32 overflow-y-auto'>
               {gcalAttendees.map((attendee, i) => (
                 <div key={i} className='flex items-center gap-2'>
-                  <span className='text-[12px] text-foreground truncate'>
+                  <span className='text-sm text-foreground truncate'>
                     {attendee.displayName ?? attendee.email ?? 'Unknown'}
                   </span>
                   {attendee.responseStatus && attendee.responseStatus !== 'needsAction' && (
@@ -356,11 +392,11 @@ const CalendarCallPopup = ({
   // ── Series scope confirmation sub-view ────────────────────────────────────
   if (seriesPrompt) {
     return (
-      <div className='p-4'>
+      <div className='p-5'>
         {/* Call icon */}
         <div className='mb-4'>
-          <div className='size-12 rounded-2xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center'>
-            <Headphones className='size-6 text-blue-500 dark:text-blue-400' />
+          <div className='size-12 rounded-xl bg-blue-100 flex items-center justify-center'>
+            <Headphones className='size-6 text-blue-500' />
           </div>
         </div>
 
@@ -400,10 +436,10 @@ const CalendarCallPopup = ({
   // ── Hide series scope confirmation ───────────────────────────────────────
   if (showHideSeriesPrompt) {
     return (
-      <div className='p-4'>
+      <div className='p-5'>
         <div className='mb-4'>
-          <div className='size-12 rounded-2xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center'>
-            <Headphones className='size-6 text-blue-500 dark:text-blue-400' />
+          <div className='size-12 rounded-xl bg-blue-100 flex items-center justify-center'>
+            <Headphones className='size-6 text-blue-500' />
           </div>
         </div>
         <h3 className='font-semibold text-foreground text-base mb-1'>Hide recurring event</h3>
@@ -446,14 +482,11 @@ const CalendarCallPopup = ({
     const status = p.userId === currentUserId && localRsvp !== null ? localRsvp : p.meetingStatus;
     rsvpCounts.set(status, (rsvpCounts.get(status) ?? 0) + 1);
   }
-  const yesCount = rsvpCounts.get(MeetingStatus.ACCEPTED) ?? 0;
-  const noCount =
+  const goingCount = rsvpCounts.get(MeetingStatus.ACCEPTED) ?? 0;
+  const notGoingCount =
     (rsvpCounts.get(MeetingStatus.DECLINED) ?? 0) + (rsvpCounts.get(MeetingStatus.HIDDEN) ?? 0);
-  const waitingCount = participants.length - yesCount - noCount;
-  const rsvpSummaryParts: string[] = [];
-  if (yesCount > 0) rsvpSummaryParts.push(`${yesCount} yes`);
-  if (noCount > 0) rsvpSummaryParts.push(`${noCount} no`);
-  if (waitingCount > 0) rsvpSummaryParts.push(`${waitingCount} waiting`);
+  const waitingCount = participants.length - goingCount - notGoingCount;
+  const attendedCount = participants.filter(didAttend).length;
 
   const sortedParticipants = [...participants].sort((a, b) => {
     if (a.userId === organizerUserId) return -1;
@@ -461,189 +494,318 @@ const CalendarCallPopup = ({
     return 0;
   });
 
+  // Get participant user IDs for avatar stack
+  const participantUserIds = sortedParticipants.slice(0, MAX_AVATARS_TO_SHOW).map(p => p.userId);
+
+  // Duration for ended calls
+  const callDuration = isEnded ? formatCallDuration(call.startedAt, call.endedAt) : '';
+  const startsInLabel =
+    !isEnded && !isLive && startsAtTime !== null && now < startsAtTime
+      ? formatTimeUntil(startsAtTime, now)
+      : null;
+  const liveStartedLabel =
+    isLive && startedAtTime !== null ? formatRelativeTime(startedAtTime) : null;
+
+  const canEdit = !isEnded && !isLive && currentUserId === organizerUserId && !!onEditClick;
+  const canDelete = !isEnded && !isLive && currentUserId === organizerUserId && !!onDeleteClick;
+  const canHide =
+    !isEnded && currentUserId !== organizerUserId && !!currentParticipant && !!onHideClick;
+  const canGotoMessage = isEnded && !!onGotoMessage;
+
+  const visibleHeaderActionCount =
+    1 + [canEdit, canDelete, canHide, canGotoMessage].filter(Boolean).length;
+
   return (
-    <div className='p-4'>
-      {/* Header: title + (message icon for ended) + close */}
-      <div className='flex items-start justify-between gap-2 mb-2'>
-        {/* Title — 16px, medium, 22px line-height */}
-        <h3
-          className='font-medium flex-1 min-w-0 text-foreground'
-          style={{ fontSize: '16px', lineHeight: '22px' }}
-        >
-          {call.title ?? 'Call'}
-        </h3>
-        <div className='flex items-center gap-1 shrink-0 -mt-0.5'>
-          {!isEnded && !isExternalCalendar && currentUserId === organizerUserId && onEditClick && (
-            <button
-              onClick={onEditClick}
-              title='Edit call'
-              data-track-category='Calls'
-              data-track-name='popup-edit-call'
-              className='text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer'
-            >
-              <Pencil className='size-4' />
-            </button>
-          )}
-          {!isEnded &&
-            !isExternalCalendar &&
-            currentUserId === organizerUserId &&
-            onDeleteClick && (
-              <button
-                onClick={onDeleteClick}
-                title='Delete call'
-                data-track-category='Calls'
-                data-track-name='popup-delete-call'
-                className='text-muted-foreground hover:text-destructive transition-colors p-0.5 cursor-pointer'
-              >
-                <Trash2 className='size-4' />
-              </button>
-            )}
-          {!isEnded &&
-            !isExternalCalendar &&
-            currentUserId !== organizerUserId &&
-            currentParticipant &&
-            onHideClick && (
-              <button
-                onClick={handleHideClick}
-                title='Hide call'
-                data-track-category='Calls'
-                data-track-name='popup-hide-call'
-                className='text-muted-foreground hover:text-destructive transition-colors p-0.5 cursor-pointer'
-              >
-                <Trash2 className='size-4' />
-              </button>
-            )}
-          {isEnded && onGotoMessage && (
-            <button
-              onClick={onGotoMessage}
-              title='Go to message'
-              data-track-category='Calls'
-              data-track-name='popup-goto-message'
-              className='text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer'
-            >
-              <MessageSquare className='size-4' />
-            </button>
-          )}
-          <button
-            onClick={onClose}
-            title='Close'
+    <div className='relative p-4'>
+      {/* Actions anchored to the popover edge */}
+      <div className='absolute top-4 right-4 flex items-center'>
+        {canEdit && (
+          <Button
+            onClick={onEditClick}
+            title='Edit call'
+            aria-label='Edit call'
+            variant='ghost'
+            size='iconSm'
             data-track-category='Calls'
-            data-track-name='popup-close'
-            className='text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer'
+            data-track-name='popup-edit-call'
+            className='text-muted-foreground'
           >
-            <X className='size-4' />
-          </button>
+            <Pencil className='size-4' />
+          </Button>
+        )}
+        {canDelete && (
+          <Button
+            onClick={onDeleteClick}
+            title='Delete call'
+            aria-label='Delete call'
+            variant='ghost'
+            size='iconSm'
+            data-track-category='Calls'
+            data-track-name='popup-delete-call'
+            className='text-destructive hover:bg-destructive/10 hover:text-destructive'
+          >
+            <Trash2 className='size-4' />
+          </Button>
+        )}
+        {canHide && (
+          <Button
+            onClick={handleHideClick}
+            title='Hide call'
+            aria-label='Hide call'
+            variant='ghost'
+            size='iconSm'
+            data-track-category='Calls'
+            data-track-name='popup-hide-call'
+            className='text-destructive hover:bg-destructive/10 hover:text-destructive'
+          >
+            <Trash2 className='size-4' />
+          </Button>
+        )}
+        {canGotoMessage && (
+          <Button
+            onClick={onGotoMessage}
+            title='Go to message'
+            aria-label='Go to message'
+            variant='ghost'
+            size='iconSm'
+            data-track-category='Calls'
+            data-track-name='popup-goto-message'
+            className='text-muted-foreground'
+          >
+            <MessageSquare className='size-4' />
+          </Button>
+        )}
+        <Button
+          onClick={onClose}
+          title='Close'
+          aria-label='Close'
+          variant='ghost'
+          size='iconSm'
+          data-track-category='Calls'
+          data-track-name='popup-close'
+          className='text-muted-foreground'
+        >
+          <X className='size-4' />
+        </Button>
+      </div>
+
+      {/* Header: video icon + title and status */}
+      <div
+        className={cn(
+          'flex items-start gap-3',
+          visibleHeaderActionCount === 1 && 'pr-8',
+          visibleHeaderActionCount === 2 && 'pr-16',
+          visibleHeaderActionCount >= 3 && 'pr-24',
+        )}
+      >
+        {/* Video icon container */}
+        <div className='size-12 rounded-xl bg-stage-completed flex items-center justify-center shrink-0'>
+          <Video className='size-5 text-action-primary' />
+        </div>
+
+        {/* Title and status */}
+        <div className='flex-1 min-w-0 pt-0.5'>
+          <h3 className='no-scrollbar overflow-x-auto whitespace-nowrap font-semibold text-base leading-snug text-foreground'>
+            {call.title ?? 'Call'}
+          </h3>
+
+          {/* Status badges */}
+          {isLive && (
+            <div className='inline-flex items-center gap-1.5 mt-0.5 rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-destructive'>
+              <Circle className='size-2.5 fill-current animate-pulse' />
+              <span>
+                <span className='font-mono'>LIVE</span>
+                {liveStartedLabel && (
+                  <> · started {liveStartedLabel === 'Just now' ? 'just now' : liveStartedLabel}</>
+                )}
+              </span>
+            </div>
+          )}
+          {isEnded && (
+            <span className='inline-flex items-center mt-0.5 rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground'>
+              Ended{callDuration ? ` · lasted ${callDuration}` : ''}
+            </span>
+          )}
+          {startsInLabel && (
+            <span className='inline-flex items-center gap-1 mt-0.5 rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground'>
+              <Clock className='size-3' />
+              Starts in {startsInLabel}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Date and time — 14px, weight 450 */}
+      {/* Date and time with clock icon */}
       {(dateLabel || timeLabel) && (
-        <p className='text-muted-foreground' style={{ fontSize: '13px', fontWeight: 400 }}>
-          {dateLabel}
-          {dateLabel && timeLabel && ' • '}
-          {timeLabel}
-        </p>
+        <div className='flex items-center gap-2 mt-2 text-muted-foreground'>
+          <Clock className='size-4 shrink-0' />
+          <span className='text-sm'>
+            {dateLabel}
+            {dateLabel && timeLabel && ' · '}
+            {timeLabel}
+          </span>
+        </div>
       )}
 
-      {/* Recurrence label — human-readable rule */}
+      {/* Recurrence label */}
       {recurrenceLabel && (
-        <p className='text-muted-foreground mb-3' style={{ fontSize: '13px', fontWeight: 400 }}>
-          {recurrenceLabel}
-        </p>
+        <div className='mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--mention-current-user-bg)] px-3 py-1.5 text-xs font-medium text-status-pending'>
+          <Satellite className='size-4 shrink-0' />
+          <span>{recurrenceLabel}</span>
+        </div>
       )}
 
-      {/* Guests section */}
+      {/* Guests section - card style */}
       {participants.length > 0 && (
-        <div className='mb-3 mt-2'>
+        <div className='mt-4 rounded-xl border border-border overflow-hidden'>
           {/* Collapsible header */}
           <button
             onClick={() => setIsGuestsExpanded(prev => !prev)}
             data-track-category='Calls'
             data-track-name='toggle-guests-list'
-            className='w-full flex items-center justify-between cursor-pointer group'
+            className='w-full flex items-center gap-3 px-3 py-3 cursor-pointer hover:bg-muted/50 transition-colors'
           >
-            <div className='flex items-center gap-1.5'>
+            {/* Avatar stack using AvatarStackItem - rounded square style */}
+            <div className='flex items-center -space-x-1.5'>
+              {participantUserIds.map((userId, index) => (
+                <AvatarStackItem
+                  key={`${userId}-${index}`}
+                  size={24}
+                  className='rounded-md flex items-center justify-center ring-[1px] ring-background z-10'
+                  data-slot='avatar-stack-item'
+                  data-index={index}
+                >
+                  <Avatar userId={userId} size='rg' showActiveStatus={false} />
+                </AvatarStackItem>
+              ))}
+            </div>
+            {participants.length > MAX_AVATARS_TO_SHOW && (
+              <span className='text-xs text-muted-foreground tabular-nums'>
+                +{participants.length - MAX_AVATARS_TO_SHOW}
+              </span>
+            )}
+
+            {/* Guest count and status */}
+            <div className='flex-1 min-w-0 text-left'>
               <span className='text-sm font-medium text-foreground'>
                 {participants.length} Guest{participants.length !== 1 ? 's' : ''}
               </span>
-              <Users className='size-4 text-muted-foreground' />
+              <div className='flex items-center gap-3 mt-0.5'>
+                {isEnded ? (
+                  <span className='flex items-center gap-1.5 text-xs'>
+                    <span className='size-1.5 rounded-full bg-green-500' />
+                    <span className='text-green-600'>{attendedCount} attended</span>
+                  </span>
+                ) : (
+                  <>
+                    {goingCount > 0 && (
+                      <span className='flex items-center gap-1.5 text-xs'>
+                        <span className='size-1.5 rounded-full bg-green-500' />
+                        <span className='text-green-600'>{goingCount} going</span>
+                      </span>
+                    )}
+                    {waitingCount > 0 && (
+                      <span className='flex items-center gap-1.5 text-xs'>
+                        <span className='size-1.5 rounded-full bg-amber-500' />
+                        <span className='text-amber-600'>{waitingCount} waiting</span>
+                      </span>
+                    )}
+                    {notGoingCount > 0 && (
+                      <span className='flex items-center gap-1.5 text-xs'>
+                        <span className='size-1.5 rounded-full bg-red-500' />
+                        <span className='text-red-600'>{notGoingCount} no</span>
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
+
             <ChevronDown
               className={cn(
-                'size-4 text-muted-foreground transition-transform duration-200',
+                'size-5 text-muted-foreground transition-transform duration-200 shrink-0',
                 isGuestsExpanded && 'rotate-180',
               )}
             />
           </button>
 
-          {/* RSVP summary counts */}
-          {rsvpSummaryParts.length > 0 && (
-            <p className='text-xs text-muted-foreground mt-0.5'>{rsvpSummaryParts.join(', ')}</p>
-          )}
-
           {/* Expanded participants list */}
           {isGuestsExpanded && (
-            <div className='flex flex-col gap-1 max-h-48 overflow-y-auto mt-2'>
-              {sortedParticipants.map(p => (
-                <ParticipantItem
-                  key={p.userId}
-                  userId={p.userId}
-                  displayName={p.displayName}
-                  email={p.email}
-                  isExternal={p.isExternal}
-                  meetingStatus={
-                    p.userId === currentUserId && localRsvp !== null
-                      ? localRsvp
-                      : ((p.meetingStatus as MeetingStatus | undefined) ?? MeetingStatus.PENDING)
-                  }
-                  isOrganizer={p.userId === organizerUserId}
-                />
-              ))}
+            <div className='border-t border-border'>
+              <div className='flex flex-col max-h-44 overflow-y-auto'>
+                {sortedParticipants.map(p => (
+                  <ParticipantItem
+                    key={p.userId}
+                    userId={p.userId}
+                    displayName={p.displayName}
+                    email={p.email}
+                    isExternal={p.isExternal}
+                    meetingStatus={
+                      p.userId === currentUserId && localRsvp !== null
+                        ? localRsvp
+                        : ((p.meetingStatus as MeetingStatus | undefined) ?? MeetingStatus.PENDING)
+                    }
+                    isOrganizer={p.userId === organizerUserId}
+                    didAttend={isEnded ? didAttend(p) : null}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </div>
       )}
 
       {/* Action button: Join / Download */}
-      <div className='mb-3 mt-[20px]'>
-        {isEnded
-          ? onDownloadTranscript && (
-              <button
-                onClick={onDownloadTranscript}
-                data-track-category='Calls'
-                data-track-name='popup-download-transcript'
-                className='flex items-center gap-2 text-sm text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors cursor-pointer'
-              >
-                <Download className='size-3.5 shrink-0' />
-                Download transcript
-              </button>
-            )
-          : onJoinCall &&
-            currentParticipant && (
-              <Button
-                onClick={onJoinCall}
-                className='!bg-action-primary !text-action-primary-foreground hover:opacity-90 duration-200 rounded-lg gap-1.5 px-4 py-2 h-8'
-              >
-                <span className='text-sm font-semibold'>Join Call</span>
-              </Button>
-            )}
-      </div>
+      {isEnded
+        ? onDownloadTranscript && (
+            <button
+              onClick={onDownloadTranscript}
+              data-track-category='Calls'
+              data-track-name='popup-download-transcript'
+              className='w-full mt-3 h-8 flex items-center justify-center gap-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer'
+            >
+              <Download className='size-3.5' />
+              <span>Download transcript</span>
+            </button>
+          )
+        : onJoinCall &&
+          currentParticipant && (
+            <button
+              onClick={onJoinCall}
+              disabled={isCurrentUserInCall}
+              data-track-category='Calls'
+              data-track-name='popup-join-call'
+              className={cn(
+                'w-full mt-3 h-10 flex items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-opacity',
+                isCurrentUserInCall
+                  ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                  : 'bg-action-primary text-action-primary-foreground hover:opacity-90 cursor-pointer',
+              )}
+            >
+              {isCurrentUserInCall ? (
+                <AudioLines className='size-4' />
+              ) : (
+                <Headset className='size-4' />
+              )}
+              <span>{isCurrentUserInCall ? 'Already joined' : 'Join Call'}</span>
+            </button>
+          )}
 
-      {/* RSVP footer — justify-between so "Going?" sits at left, buttons at right */}
-      {!isEnded && (
-        <div className='border-t border-border pt-3'>
+      {/* RSVP footer */}
+      {!isEnded && !hasReachedScheduledStart && (
+        <div className='-mx-4 px-4 border-t border-border pt-3 mt-4'>
           <div className='flex items-center justify-between'>
-            <span className='text-xs text-muted-foreground'>Going?</span>
-            <div className='flex items-center gap-2'>
+            <span className='text-xs text-muted-foreground font-medium'>Going?</span>
+            <div className='flex items-center gap-1.5'>
               <button
                 disabled={isLoading}
                 onClick={() => handleRsvpClick(RSVP_CHOICE.ACCEPTED)}
                 data-track-category='Calls'
                 data-track-name='rsvp-accepted'
                 className={cn(
-                  'text-xs px-3 py-1.5 rounded-full border transition-colors cursor-pointer disabled:opacity-50',
+                  'text-xs px-3 py-1 rounded-full border font-medium transition-colors cursor-pointer disabled:opacity-50',
                   currentMeetingStatus === MeetingStatus.ACCEPTED
-                    ? 'bg-green-500 text-white border-green-500'
+                    ? 'bg-action-primary text-action-primary-foreground border-action-primary'
                     : 'border-border hover:bg-muted text-foreground',
                 )}
               >
@@ -655,7 +817,7 @@ const CalendarCallPopup = ({
                 data-track-category='Calls'
                 data-track-name='rsvp-declined'
                 className={cn(
-                  'text-xs px-3 py-1.5 rounded-full border transition-colors cursor-pointer disabled:opacity-50',
+                  'text-xs px-3 py-1 rounded-full border font-medium transition-colors cursor-pointer disabled:opacity-50',
                   currentMeetingStatus === MeetingStatus.DECLINED
                     ? 'bg-red-500 text-white border-red-500'
                     : 'border-border hover:bg-muted text-foreground',
@@ -669,9 +831,9 @@ const CalendarCallPopup = ({
                 data-track-category='Calls'
                 data-track-name='rsvp-maybe'
                 className={cn(
-                  'text-xs px-3 py-1.5 rounded-full border transition-colors cursor-pointer disabled:opacity-50',
+                  'text-xs px-3 py-1 rounded-full border font-medium transition-colors cursor-pointer disabled:opacity-50',
                   currentMeetingStatus === MeetingStatus.MAYBE
-                    ? 'bg-amber-400 text-white border-amber-400'
+                    ? 'bg-amber-500 text-white border-amber-500'
                     : 'border-border hover:bg-muted text-foreground',
                 )}
               >

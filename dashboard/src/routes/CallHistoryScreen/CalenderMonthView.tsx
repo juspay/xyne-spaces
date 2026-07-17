@@ -279,9 +279,8 @@ const CalendarMonthView = ({
                                   <div className='w-0.5 h-3.5 rounded-full shrink-0 bg-primary max-sm:mt-0.5 max-sm:hidden' />
                                   <div className='flex min-w-0 flex-1 items-baseline max-sm:flex-col max-sm:items-stretch gap-1 max-sm:gap-0'>
                                     <span
-                                      className='truncate min-w-0 leading-tight max-sm:w-full'
+                                      className='truncate min-w-0 leading-tight text-foreground max-sm:w-full'
                                       style={{
-                                        color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
                                         fontSize: isMobile ? '8px' : '12px',
                                         lineHeight: '18px',
                                         fontWeight: 500,
@@ -302,11 +301,8 @@ const CalendarMonthView = ({
                                     </span>
                                     {!isMobile && call.startsAt && (
                                       <span
-                                        className='shrink-0 tabular-nums'
+                                        className='shrink-0 tabular-nums text-muted-foreground'
                                         style={{
-                                          color: isEnded
-                                            ? 'hsl(var(--muted-foreground))'
-                                            : '#092E58',
                                           fontSize: '10px',
                                           lineHeight: '14px',
                                           opacity: 0.7,
@@ -470,12 +466,8 @@ const CalendarMonthView = ({
                                             )}
                                             <div className='w-0.5 h-4 rounded-full shrink-0 bg-[#0077FF]' />
                                             <span
-                                              className='flex-1 min-w-0 truncate text-sm font-medium'
+                                              className='flex-1 min-w-0 truncate text-sm font-medium text-foreground'
                                               style={{
-                                                color:
-                                                  call.status === CallStatus.ENDED
-                                                    ? 'hsl(var(--foreground))'
-                                                    : '#092E58',
                                                 textDecorationLine: isDeclined
                                                   ? 'line-through'
                                                   : 'none',
@@ -485,12 +477,8 @@ const CalendarMonthView = ({
                                             </span>
                                             {call.startsAt && (
                                               <span
-                                                className='shrink-0 text-xs tabular-nums'
+                                                className='shrink-0 text-xs tabular-nums text-muted-foreground'
                                                 style={{
-                                                  color:
-                                                    call.status === CallStatus.ENDED
-                                                      ? 'hsl(var(--muted-foreground))'
-                                                      : '#092E58',
                                                   opacity: 0.7,
                                                   textDecorationLine: isDeclined
                                                     ? 'line-through'

@@ -160,9 +160,8 @@ function WeekViewCallCard({
             <div className='w-0.5 rounded-full shrink-0 bg-primary self-stretch max-sm:hidden' />
             <div className='flex flex-col flex-1 overflow-hidden'>
               <span
-                className='truncate max-sm:whitespace-normal max-sm:overflow-visible max-sm:break-words'
+                className='truncate text-foreground max-sm:whitespace-normal max-sm:overflow-visible max-sm:break-words'
                 style={{
-                  color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
                   fontSize: isMobile ? '10px' : '12px',
                   lineHeight: isMobile ? '13px' : '18px',
                   fontWeight: 500,
@@ -183,9 +182,8 @@ function WeekViewCallCard({
               </span>
               {height >= 40 && !isMobile && (
                 <span
-                  className='mt-0.5 whitespace-nowrap'
+                  className='mt-0.5 whitespace-nowrap text-muted-foreground'
                   style={{
-                    color: isEnded ? 'hsl(var(--muted-foreground))' : '#092E58',
                     fontSize: '10px',
                     lineHeight: '14px',
                     opacity: 0.7,
