@@ -7,7 +7,9 @@ export interface FormFieldInput {
   fieldName: string;
   fieldType: FormFieldType;
   fieldEnum?: Prisma.InputJsonValue;
+  fieldOptions?: Prisma.InputJsonValue;
   isOptional?: boolean;
+  parentOptionId?: string | null;
 }
 
 export interface ResolvedFormField {
@@ -16,10 +18,12 @@ export interface ResolvedFormField {
   fieldName: string;
   fieldType: FormFieldType;
   fieldEnum: Prisma.JsonValue | null;
+  fieldOptions: string | null; // JSON-stringified {id,value}[]
   isOptional: boolean;
   sequenceNumber: number;
   createdAt: Date;
   updatedAt: Date;
+  parentOptionId?: string | null;
   membershipId?: string; // form_fields row id (per-form membership)
 }
 
@@ -39,19 +43,34 @@ export const normalizeFormFieldInput = (
     fieldName?: string;
     fieldType?: FormFieldType;
     fieldEnum?: Prisma.InputJsonValue;
+    fieldOptions?: Array<{ id: string; value: string }>;
     isOptional?: boolean;
+    parentOptionId?: string | null;
   },
 ): FormFieldInput => {
   if (!field.fieldName || !field.fieldType) {
     throw new Error('Fields must include fieldName and fieldType');
   }
 
+  // Split options into the two persisted columns: fieldOptions ({id,value}[]) is the canonical
+  // shape; fieldEnum is always the string[] projection kept for old clients. Legacy callers that
+  // still send fieldEnum (string[]) pass through unchanged, with no fieldOptions.
+  const cleanedOptions = field.fieldOptions
+    ?.map(opt => ({ id: opt.id, value: opt.value.trim() }))
+    .filter(opt => opt.value !== '');
+  const hasOptions = cleanedOptions !== undefined && cleanedOptions.length > 0;
+
   return {
     fieldName: field.fieldName,
     fieldType: field.fieldType,
     ...(field.fieldId ? { fieldId: field.fieldId } : {}),
-    ...(field.fieldEnum !== undefined ? { fieldEnum: field.fieldEnum } : {}),
+    ...(hasOptions
+      ? { fieldEnum: cleanedOptions.map(opt => opt.value), fieldOptions: cleanedOptions }
+      : field.fieldEnum !== undefined
+        ? { fieldEnum: field.fieldEnum }
+        : {}),
     ...(field.isOptional !== undefined ? { isOptional: field.isOptional } : {}),
+    ...(field.parentOptionId !== undefined ? { parentOptionId: field.parentOptionId } : {}),
   };
 };
 
@@ -103,6 +122,7 @@ export const resolveFormFields = (
     let fieldName: string | null;
     let fieldTypeValue: string | null;
     let fieldEnum: Prisma.JsonValue | null;
+    let fieldOptions: string | null;
 
     if (row.globalFieldId) {
       const def = globalById.get(row.globalFieldId);
@@ -113,11 +133,13 @@ export const resolveFormFields = (
       fieldName = def.fieldName;
       fieldTypeValue = def.fieldType;
       fieldEnum = parseGlobalFieldEnum(def.fieldEnum);
+      fieldOptions = def.fieldOptions;
     } else {
       resolvedId = row.id;
       fieldName = row.fieldName;
       fieldTypeValue = row.fieldType;
       fieldEnum = row.fieldEnum;
+      fieldOptions = row.fieldOptions;
     }
 
     if (!fieldName || !fieldTypeValue) {
@@ -130,10 +152,12 @@ export const resolveFormFields = (
       fieldName,
       fieldType: toFormFieldType(fieldTypeValue),
       fieldEnum,
+      fieldOptions,
       isOptional: row.isOptional,
       sequenceNumber: row.sequenceNumber,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      parentOptionId: row.parentOptionId,
       membershipId: row.id,
     }];
   });

@@ -40,7 +40,9 @@ export const resolveFieldDefinitionsByIds = async (
       id: g.id,
       fieldName: g.fieldName,
       fieldType: g.fieldType as FormFieldType,
-      fieldEnum: parseGlobalFieldEnum(g.fieldEnum),
+      // Prefer the canonical {id,value}[] (fieldOptions); fall back to the legacy fieldEnum,
+      // which is now a JSON-stringified string[] and needs parsing back.
+      fieldEnum: g.fieldOptions ?? parseGlobalFieldEnum(g.fieldEnum),
       source: 'global',
     });
   }
@@ -54,7 +56,7 @@ export const resolveFieldDefinitionsByIds = async (
           id: f.id,
           fieldName: f.fieldName,
           fieldType: f.fieldType as FormFieldType,
-          fieldEnum: f.fieldEnum,
+          fieldEnum: f.fieldOptions ?? f.fieldEnum,
           source: 'legacy',
         });
       }
@@ -79,6 +81,7 @@ export interface ResolvedFormFieldDefinition {
   fieldEnum: Prisma.JsonValue | null;
   isOptional: boolean;
   sequenceNumber: number;
+  parentOptionId?: string | null;
 }
 
 type FormFieldsQueryClient = Pick<PrismaClient, 'formFields'>;
@@ -99,11 +102,15 @@ export const resolveFormFieldDefinitionsForForm = async (
   });
 
   return rows
-    .map(row => {
+    .map((row): ResolvedFormFieldDefinition | null => {
       const id = row.globalFieldId ?? row.id;
       const fieldName = row.globalField?.fieldName ?? row.fieldName;
       const fieldType = (row.globalField?.fieldType ?? row.fieldType) as FormFieldType | null;
-      const fieldEnum = row.globalField ? parseGlobalFieldEnum(row.globalField.fieldEnum) : row.fieldEnum;
+      // Prefer the canonical {id,value}[] (fieldOptions); fall back to fieldEnum, which for a
+      // global field is now a JSON-stringified string[] and needs parsing back.
+      const fieldEnum = row.globalField
+        ? (row.globalField.fieldOptions ?? parseGlobalFieldEnum(row.globalField.fieldEnum))
+        : (row.fieldOptions ?? row.fieldEnum);
       if (!fieldName || !fieldType) {
         return null;
       }
@@ -114,6 +121,7 @@ export const resolveFormFieldDefinitionsForForm = async (
         fieldEnum,
         isOptional: row.isOptional,
         sequenceNumber: row.sequenceNumber,
+        parentOptionId: row.parentOptionId,
       };
     })
     .filter((field): field is ResolvedFormFieldDefinition => field !== null);

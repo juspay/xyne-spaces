@@ -11,7 +11,7 @@ import { TicketStatusV2 } from '@xyne/shared';
 import { parseAssigneeFilter } from '../../zero/queries';
 import type { Stage } from './KanbanBoardScreen.types';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
-import { FormFieldType, type FormFields } from '@xyne/shared';
+import { FormFieldType, type FieldEnumOption, type FormFields } from '@xyne/shared';
 import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
 
 /**
@@ -349,7 +349,7 @@ export const applyTicketFilters = (
   filters: TicketFilters,
   tagsByTicketId?: Map<string, TicketTag[]>,
   formValuesByTicketId?: Map<string, FormEntityValues[]>,
-  formFieldsById?: Map<string, { fieldType: FormFieldType; fieldEnum?: string[] | null }>,
+  formFieldsById?: Map<string, { fieldType: FormFieldType; fieldEnum?: FieldEnumOption[] | null }>,
   currentUserId?: string,
 ): Ticket[] => {
   return tickets.filter(ticket => {

@@ -32,7 +32,6 @@ import {
   PRStatusEvent,
   RotationInterval,
   QueryVisualizationType,
-
   ActivityClassification,
   AccessType,
   BoardType,
@@ -59,8 +58,6 @@ import {
   DelayedMessageStatus,
   Schema,
   CollectionRole,
-  DeskType,
-
   VCSProviderType,
   ReleaseTrackingMode,
 } from './schema.js';
@@ -77,6 +74,12 @@ import {
   rethrowCanvasFolderNameConflict,
 } from '../utils/canvasFolderNameConflict.js';
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
+import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
+import {
+  validateFieldBranches,
+  validateUniqueFieldNames,
+  assertFieldIsCurrentlyActive,
+} from './formsMutatorHelpers.js';
 import type { MessageType as MessageTypeEnum } from './schema.js';
 import { extractAllMentions } from '../utils/mentionParser.js';
 import {
@@ -7168,7 +7171,9 @@ export const mutators = defineMutators({
               fieldName: z.string(),
               fieldType: z.nativeEnum(FormFieldType),
               fieldEnum: z.array(z.string()).optional(),
+              fieldOptions: z.array(z.object({ id: z.string(), value: z.string() })).optional(),
               isOptional: z.boolean().optional(),
+              parentOptionId: z.string().nullable().optional(),
             }),
           )
           .optional(),
@@ -7176,13 +7181,15 @@ export const mutators = defineMutators({
         // Legacy clients pass new form_fields ids by field array index.
         fieldIds: z.record(z.string(), z.string()).optional(),
       }),
-      async ({ tx, args: { formId, projectId, formDescription, fields, timestamp, fieldIds = {} } }) => {
+      async ({
+        tx,
+        args: { formId, projectId, formDescription, fields, timestamp, fieldIds = {} },
+      }) => {
         // Validate form exists
         const form = await tx.run(zql.forms.where('id', formId).one());
         if (!form) {
           throw new Error('Form not found');
         }
-
 
         // Update form description if provided
         if (formDescription !== undefined) {
@@ -7240,6 +7247,9 @@ export const mutators = defineMutators({
           const serializeGlobalFieldEnum = (value: string[] | null | undefined): string | null =>
             value && value.length > 0 ? JSON.stringify(value) : null;
 
+          validateUniqueFieldNames(fields);
+          validateFieldBranches(fields.map(f => ({ ...f, fieldEnum: f.fieldOptions ?? f.fieldEnum })));
+
           const ensureLegacyGlobalDefinition = async (
             row: (typeof existingRows)[number],
             projectId: string,
@@ -7268,6 +7278,7 @@ export const mutators = defineMutators({
               fieldName: row.fieldName,
               fieldType: row.fieldType,
               ...(row.fieldEnum ? { fieldEnum: JSON.stringify(row.fieldEnum) } : {}),
+              ...(row.fieldOptions ? { fieldOptions: row.fieldOptions } : {}),
               createdAt: now,
               updatedAt: now,
             });
@@ -7278,7 +7289,8 @@ export const mutators = defineMutators({
             candidateId: string,
             fieldName: string,
             fieldType: FormFieldType,
-            fieldEnum: string[] | undefined,
+            fieldEnum: ReadonlyJSONValue | undefined,
+            fieldOptions: string | null,
             projectId: string,
           ): Promise<string> => {
             const found = await tx.run(
@@ -7290,11 +7302,12 @@ export const mutators = defineMutators({
             );
             if (found) {
               if (fieldEnum) {
-                  await tx.mutate.global_fields.update({
-                    id: found.id,
-                    fieldEnum: serializeGlobalFieldEnum(fieldEnum),
-                    updatedAt: now,
-                  });
+                await tx.mutate.global_fields.update({
+                  id: found.id,
+                  fieldEnum: serializeGlobalFieldEnum(fieldEnum as string[] | undefined),
+                  fieldOptions: fieldOptions ?? null,
+                  updatedAt: now,
+                });
               }
               return found.id;
             }
@@ -7303,7 +7316,8 @@ export const mutators = defineMutators({
               projectId,
               fieldName,
               fieldType,
-              ...(fieldEnum ? { fieldEnum: serializeGlobalFieldEnum(fieldEnum) } : {}),
+              ...(fieldEnum ? { fieldEnum: serializeGlobalFieldEnum(fieldEnum as string[] | undefined) } : {}),
+              ...(fieldOptions ? { fieldOptions } : {}),
               createdAt: now,
               updatedAt: now,
             });
@@ -7315,9 +7329,11 @@ export const mutators = defineMutators({
             formId: string,
             fieldName: string,
             fieldType: FormFieldType,
-            fieldEnum: string[] | undefined,
+            fieldEnum: ReadonlyJSONValue | undefined,
+            fieldOptions: string | null,
             isOptional: boolean,
             sequenceNumber: number,
+            parentOptionId: string | null,
           ): Promise<string> => {
             const found = await tx.run(
               zql.form_fields
@@ -7332,8 +7348,10 @@ export const mutators = defineMutators({
                 fieldName,
                 fieldType,
                 fieldEnum: fieldEnum ?? null,
+                fieldOptions: fieldOptions ?? null,
                 isOptional,
                 sequenceNumber,
+                parentOptionId,
                 updatedAt: now,
               });
               return found.id;
@@ -7345,8 +7363,10 @@ export const mutators = defineMutators({
               fieldName,
               fieldType,
               fieldEnum: fieldEnum ?? null,
+              fieldOptions: fieldOptions ?? null,
               isOptional,
               sequenceNumber,
+              parentOptionId,
               createdAt: now,
               updatedAt: now,
             });
@@ -7357,8 +7377,17 @@ export const mutators = defineMutators({
             const sequenceNumber = index + 1;
             const isOptional = field.isOptional ?? false;
             const fieldName = field.fieldName.trim();
-            const cleanedEnum = field.fieldEnum?.filter(opt => opt.trim() !== '');
-            const fieldEnum = cleanedEnum && cleanedEnum.length > 0 ? cleanedEnum : undefined;
+            const cleanedOptions = field.fieldOptions
+              ?.map(opt => ({ id: opt.id, value: opt.value.trim() }))
+              .filter(opt => opt.value !== '');
+            const cleanedValues = cleanedOptions
+              ? cleanedOptions.map(opt => opt.value)
+              : field.fieldEnum?.map(v => v.trim()).filter(v => v !== '');
+            const fieldOptions = serializeFieldOptions(cleanedOptions);
+            const fieldEnum =
+              cleanedValues && cleanedValues.length > 0
+                ? (cleanedValues as ReadonlyJSONValue)
+                : undefined;
             const legacyFieldId = field.id ?? fieldIds[index];
 
             // Editing a legacy row in place (keeps its id + saved values stable).
@@ -7370,13 +7399,15 @@ export const mutators = defineMutators({
                   fieldName,
                   field.fieldType,
                   fieldEnum,
+                  fieldOptions,
                   isOptional,
                   sequenceNumber,
+                  field.parentOptionId ?? null,
                 );
                 keptRowIds.add(legacyFieldId);
                 continue;
               }
-              
+
               const legacyRow = existingById.get(legacyFieldId);
               if (legacyRow && !legacyRow.globalFieldId) {
                 await tx.mutate.form_fields.update({
@@ -7384,8 +7415,10 @@ export const mutators = defineMutators({
                   fieldName,
                   fieldType: field.fieldType,
                   fieldEnum: fieldEnum ?? null,
+                  fieldOptions: fieldOptions ?? null,
                   isOptional,
                   sequenceNumber,
+                  parentOptionId: field.parentOptionId ?? null,
                   updatedAt: now,
                 });
                 keptRowIds.add(legacyRow.id);
@@ -7401,15 +7434,32 @@ export const mutators = defineMutators({
                 if (scopedProjectId && existingGlobal.projectId !== scopedProjectId) {
                   throw new Error(`Field ${field.id} does not belong to this form`);
                 }
+
+                const oldOptionIds = new Set(
+                  parseFieldOptions(existingGlobal.fieldOptions ?? existingGlobal.fieldEnum).map(o => o.id),
+                );
+                const newOptionIds = new Set((cleanedOptions ?? []).map(o => o.id));
+                const removedOptionIds = [...oldOptionIds].filter(id => !newOptionIds.has(id));
+                if (removedOptionIds.length > 0) {
+                  const dependentRows = await tx.run(
+                    zql.form_fields.where('parentOptionId', 'IN', removedOptionIds),
+                  );
+                  if (dependentRows.some(row => row.formId !== formId)) {
+                    throw new Error(
+                      `An option on "${fieldName}" can't be removed — a nested field on another board depends on it.`,
+                    );
+                  }
+                }
                 await tx.mutate.global_fields.update({
                   id: definitionId,
                   fieldName,
                   fieldType: field.fieldType,
-                  fieldEnum: serializeGlobalFieldEnum(fieldEnum),
-                  updatedAt: timestamp,
+                  fieldEnum: serializeGlobalFieldEnum(fieldEnum as string[] | undefined),
+                  fieldOptions: fieldOptions ?? null,
+                  updatedAt: now,
                 });
               } else if(scopedProjectId) {
-                definitionId = await ensureGlobalField(definitionId, fieldName, field.fieldType, fieldEnum, scopedProjectId);
+                definitionId = await ensureGlobalField(definitionId, fieldName, field.fieldType, fieldEnum, fieldOptions, scopedProjectId);
               } else {
                 definitionId = await ensureLegacyFieldDefinition(
                   legacyFieldId,
@@ -7417,8 +7467,10 @@ export const mutators = defineMutators({
                   fieldName,
                   field.fieldType,
                   fieldEnum,
+                  fieldOptions,
                   isOptional,
                   sequenceNumber,
+                  field.parentOptionId ?? null,
                 );
                 keptRowIds.add(definitionId);
               }
@@ -7435,18 +7487,21 @@ export const mutators = defineMutators({
                 fieldName: null,
                 fieldType: null,
                 fieldEnum: null,
+                fieldOptions: null,
                 isOptional,
                 sequenceNumber,
+                parentOptionId: field.parentOptionId ?? null,
                 updatedAt: now,
               });
               keptRowIds.add(existingMembership.id);
-            } else if(field.membershipId) {
+            } else if (field.membershipId) {
               await tx.mutate.form_fields.insert({
                 id: field.membershipId,
                 formId,
                 globalFieldId: definitionId,
                 isOptional,
                 sequenceNumber,
+                parentOptionId: field.parentOptionId ?? null,
                 createdAt: now,
                 updatedAt: now,
               });
@@ -7486,6 +7541,7 @@ export const mutators = defineMutators({
                   updatedAt: now,
                 });
               }
+
             }
 
             await tx.mutate.form_fields.delete({ id: row.id });
@@ -7590,6 +7646,19 @@ export const mutators = defineMutators({
           throw new Error('Form field not found, cannot make an entry');
         }
         const formId = legacyField.formId;
+        const fieldName = legacyField.globalField?.fieldName ?? legacyField.fieldName ?? 'Field';
+
+        await assertFieldIsCurrentlyActive(
+          tx,
+          {
+            id: resolvedFieldId,
+            formId,
+            fieldName,
+            parentOptionId: legacyField.parentOptionId,
+          },
+          entityId,
+          entityType,
+        );
 
         // Determine actualFieldValue based on field type
         const isMultiValue =
@@ -7663,16 +7732,36 @@ export const mutators = defineMutators({
         if (!resolvedFieldId || !fieldType) {
           throw new Error('Form field not found');
         }
+        let membership: any = null;
         if (globalField) {
-          const membership = await tx.run(
-            zql.form_fields.where('formId', formId).where('globalFieldId', globalField.id).one(),
+          membership = await tx.run(
+            zql.form_fields
+              .where('formId', formId)
+              .where('globalFieldId', globalField.id)
+              .related('globalField')
+              .one(),
           );
           if (!membership) {
             throw new Error('Form field not found in this form');
           }
         } else if (legacyField?.formId !== formId) {
           throw new Error('Form field not found in this form');
+        } else {
+          membership = legacyField;
         }
+        const fieldName =
+          globalField?.fieldName ?? legacyField?.globalField?.fieldName ?? legacyField?.fieldName;
+        await assertFieldIsCurrentlyActive(
+          tx,
+          {
+            id: resolvedFieldId,
+            formId,
+            fieldName: fieldName ?? 'Field',
+            parentOptionId: membership?.parentOptionId,
+          },
+          entityId,
+          entityType,
+        );
 
         // Determine actualFieldValue based on field type
         const isMultiValue =
@@ -7745,6 +7834,35 @@ export const mutators = defineMutators({
         }
 
         const fieldType = formEntityValue.globalField?.fieldType ?? formEntityValue.formField?.fieldType;
+        const resolvedFieldName =
+          formEntityValue.globalField?.fieldName ?? formEntityValue.formField?.fieldName;
+        const membership = formEntityValue.formField
+          ?? (formEntityValue.globalField
+            ? await tx.run(
+              zql.form_fields
+                .where('formId', formEntityValue.formId)
+                .where('globalFieldId', formEntityValue.globalField.id)
+                .related('globalField')
+                .one(),
+            )
+            : null);
+        if (membership) {
+          await assertFieldIsCurrentlyActive(
+            tx,
+            {
+              id: membership.globalFieldId ?? membership.id,
+              formId: membership.formId,
+              fieldName:
+                (membership as { globalField?: { fieldName?: string | null } }).globalField?.fieldName
+                ?? membership.fieldName
+                ?? resolvedFieldName
+                ?? 'Field',
+              parentOptionId: membership.parentOptionId,
+            },
+            formEntityValue.entityId,
+            formEntityValue.entityType,
+          );
+        }
 
         // Determine what to store based on field type
         const isMultiValue =

@@ -2,7 +2,8 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { BoardType, type Channel, type TicketStatusV2 } from '@prisma/client';
 import { formService } from '../formService';
-import { FormContextType, FormEntityType, LookupType } from '@xyne/shared';
+import { FormContextType, FormEntityType, LookupType, type FieldEnumOption } from '@xyne/shared';
+import { randomUUID } from 'crypto';
 import { XyneChangeType, XyneFormSchemaProvider } from './xyne/xyneReleaseForm';
 import { BaseTicketType } from '@xyne/shared';
 
@@ -13,6 +14,11 @@ interface ApplicationData {
   deployedCommit: string;
   ownerTeam: string;
 }
+
+const toFieldEnum = (
+  options: readonly { readonly value: string; readonly label: string }[] | undefined,
+): FieldEnumOption[] | undefined =>
+  options?.map(option => ({ id: randomUUID(), value: option.value }));
 
 export class ApplicationBackfillService {
   private async getChannel(channelId: string): Promise<Channel | undefined> {
@@ -108,7 +114,7 @@ export class ApplicationBackfillService {
           fields: formSchema.fields.map(field => ({
             fieldName: field.name,
             fieldType: field.type,
-            fieldEnum: field.options ? JSON.stringify(field.options) : undefined,
+            fieldOptions: toFieldEnum(field.options),
             isOptional: !field.required,
           })),
         });
@@ -140,7 +146,7 @@ export class ApplicationBackfillService {
           fields: formSchema.fields.map(field => ({
             fieldName: field.name,
             fieldType: field.type,
-            fieldEnum: field.options ? JSON.stringify(field.options) : undefined,
+            fieldOptions: toFieldEnum(field.options),
             isOptional: !field.required,
           })),
         });
@@ -172,7 +178,7 @@ export class ApplicationBackfillService {
           fields: formSchema.fields.map(field => ({
             fieldName: field.name,
             fieldType: field.type,
-            fieldEnum: field.options ? JSON.stringify(field.options) : undefined,
+            fieldOptions: toFieldEnum(field.options),
             isOptional: !field.required,
           })),
         });

@@ -1,4 +1,4 @@
-import type { TicketStatusV2, TicketPriority } from '@xyne/shared';
+import type { TicketStatusV2, TicketPriority, FieldEnumOption } from '@xyne/shared';
 
 export interface Tag {
   name: string;
@@ -34,7 +34,7 @@ export interface PreviewField {
   id: string;
   label: string;
   type: string;
-  options?: readonly string[] | undefined;
+  options?: readonly FieldEnumOption[] | undefined;
   required?: boolean;
 }
 
@@ -46,7 +46,7 @@ export interface CreateField {
   required: boolean;
   order: number;
   visibleInCreate: boolean;
-  options?: readonly string[] | undefined;
+  options?: readonly FieldEnumOption[] | undefined;
 }
 
 export interface TicketPreviewContentProps {

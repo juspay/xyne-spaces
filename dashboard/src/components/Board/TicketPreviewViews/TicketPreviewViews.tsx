@@ -401,19 +401,19 @@ const CreateTicketModal = ({
                     <>
                       <List size={14} className='text-muted-foreground' />
                       <p className='text-[14px] font-medium text-muted-foreground leading-[18px]'>
-                        {field.options[0] || 'Select option'}
+                        {field.options[0]?.value || 'Select option'}
                       </p>
                     </>
                   )}
 
                   {field.type === 'multiselect' && field.options && (
                     <div className='flex gap-1.5 flex-wrap'>
-                      {field.options.slice(0, 3).map((option, idx) => (
+                      {field.options.slice(0, 3).map(option => (
                         <span
-                          key={idx}
+                          key={option.id}
                           className='inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded'
                         >
-                          {option}
+                          {option.value}
                           <X size={10} className='ml-0.5 cursor-pointer hover:opacity-70' />
                         </span>
                       ))}

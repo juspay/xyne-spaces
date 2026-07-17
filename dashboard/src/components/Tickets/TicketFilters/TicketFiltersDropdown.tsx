@@ -49,7 +49,7 @@ import {
 } from './Submenus';
 import { TicketFiltersProps, DateRange, BoardOption } from './types';
 import type { TicketFilters } from './types';
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, parseFieldOptionValues } from '@xyne/shared';
 import type { TicketPriority, FormFields } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import * as Popover from '@radix-ui/react-popover';
@@ -324,7 +324,7 @@ export const TicketFiltersDropdown = ({
         filterKey: `dynamicFields.${field.id}`,
         isDynamic: true,
         fieldType: field.fieldType,
-        fieldEnum: field.fieldEnum as string[] | null,
+        fieldEnum: parseFieldOptionValues(field.fieldEnum),
       };
     });
   }, [formMappings, allBoardsList, selectedBoards]);
@@ -709,7 +709,7 @@ export const TicketFiltersDropdown = ({
                 fieldId={fieldId}
                 fieldName={field.fieldName}
                 fieldType={field.fieldType}
-                fieldEnum={field.fieldEnum ?? null}
+                fieldEnum={parseFieldOptionValues(field.fieldEnum)}
                 selectedValue={currentValue}
                 onChange={value => handleDynamicFieldChange(fieldId, value)}
                 onClose={() => setActiveSubmenu(null)}

@@ -49,16 +49,19 @@ export const renderPreviewFieldValue = (field: PreviewField): ReactNode => {
         <>
           <List size={14} className='text-gray-400' />
           <span className='text-[14px] text-muted-foreground'>
-            {field.options?.[0] || 'Select option'}
+            {field.options?.[0]?.value || 'Select option'}
           </span>
         </>
       );
     case 'multiselect':
       return (
         <div className='flex flex-wrap gap-1.5'>
-          {field.options?.slice(0, 2).map((option, idx) => (
-            <span key={idx} className='px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded'>
-              {option}
+          {field.options?.slice(0, 2).map(option => (
+            <span
+              key={option.id}
+              className='px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded'
+            >
+              {option.value}
             </span>
           ))}
         </div>

@@ -46,6 +46,8 @@ import {
   BoardType,
   ApproverType,
   ReenterMode,
+  isFieldActive,
+  parseFieldOptionValues,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -104,7 +106,6 @@ import {
   resolveBoardAdditionalFields,
   type ResolvedBoardAdditionalField,
 } from '../../../utils/board/boardFormEntityValues';
-import { parseFieldEnumOptions } from '../../../utils/formFieldEnum';
 
 const formatTimestamp = (timestamp: number): string => {
   const date = new Date(timestamp);
@@ -234,6 +235,7 @@ interface FormEntityValueWithField extends FormEntityValues {
               fieldName?: string | null;
               fieldType?: FormFieldType | null;
               fieldEnum?: unknown;
+              fieldOptions?: unknown;
             }
           | null
           | undefined;
@@ -246,6 +248,7 @@ interface FormEntityValueWithField extends FormEntityValues {
     fieldName?: string | null;
     fieldType?: FormFieldType | null;
     fieldEnum?: unknown;
+    fieldOptions?: unknown;
   } | null;
 }
 
@@ -277,11 +280,17 @@ const getFormEntityFieldEnum = (
   fieldValue: FormEntityValueWithField | ResolvedBoardAdditionalField,
 ): string[] | undefined => {
   const withGlobal = fieldValue.formField as FormEntityValueWithField['formField'];
+  // Prefer the canonical {id,value}[] (fieldOptions); fall back to the legacy fieldEnum
+  // string[] projection for rows written before the fieldOptions column existed.
   const fieldEnum =
+    fieldValue.globalField?.fieldOptions ??
     fieldValue.globalField?.fieldEnum ??
+    withGlobal?.globalField?.fieldOptions ??
     withGlobal?.globalField?.fieldEnum ??
+    fieldValue.formField?.fieldOptions ??
     fieldValue.formField?.fieldEnum;
-  return parseFieldEnumOptions(fieldEnum);
+  const options = parseFieldOptionValues(fieldEnum);
+  return options.length > 0 ? options : undefined;
 };
 
 // ── Stage Form Submissions Component ──────────────────────────────────────────
@@ -1175,12 +1184,55 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const boardCustomFieldsFormId = formMapping?.formId;
 
   const allFormFields = useMemo(() => {
-    return resolveBoardAdditionalFields({
+    const allFields = resolveBoardAdditionalFields({
       formMapping: formMapping ?? undefined,
       formEntityValues: formEntityValues as FormEntityValueWithField[] | undefined,
       boardId: ticket?.boardId,
       ticketId,
       workspaceId: ticket?.workspaceId,
+    });
+
+    // Only show fields that either have no parent, or whose parent's current value
+    // matches the specific branch they belong to. Keyed by fv.fieldId (the coalesced id used
+    // everywhere FormEntityValues.fieldId is stored) rather than fv.formField?.id — a
+    // global-sourced field's value row only resolves the sibling fv.globalField relation,
+    // never fv.formField, so filtering on formField alone silently drops every such field
+    // (which is what any field created through the reusable/global-fields UI actually is).
+    // Prefers the canonical {id,value}[] (fieldOptions) so branch resolution can match
+    // option ids; fieldEnum is the legacy fallback.
+    const allFieldDefs = (allFields as FormEntityValueWithField[]).map(fv => ({
+      id: fv.fieldId,
+      fieldEnum:
+        fv.globalField?.fieldOptions ??
+        fv.globalField?.fieldEnum ??
+        fv.formField?.globalField?.fieldOptions ??
+        fv.formField?.globalField?.fieldEnum ??
+        fv.formField?.fieldOptions ??
+        fv.formField?.fieldEnum,
+    }));
+    const getFieldEffectiveValue = (fieldId: string): string | undefined => {
+      const parentEntry = allFields.find(fv => fv.fieldId === fieldId);
+      const parentRaw = parentEntry?.actualFieldValue ?? parentEntry?.fieldValue;
+      return typeof parentRaw === 'string' ? parentRaw : undefined;
+    };
+
+    // parentOptionId lives only on the per-form membership row (form_fields), not on either
+    // relation a FormEntityValue resolves — a global-sourced field's saved value row only
+    // resolves fv.globalField (no parentOptionId there), so read it from the membership
+    // list directly, keyed by the same coalesced id used everywhere else.
+    const parentOptionIdByFieldId = new Map(
+      (formMapping?.formFields ?? []).map(row => [
+        row.globalFieldId ?? row.id,
+        row.parentOptionId ?? null,
+      ]),
+    );
+
+    // resolveBoardAdditionalFields already returns fields ordered by sequenceNumber
+    // (via resolveDisplayFormFields), so no re-sort is needed here.
+    return allFields.filter(fieldValue => {
+      const parentOptionId = parentOptionIdByFieldId.get(fieldValue.fieldId) ?? null;
+      if (!parentOptionId) return true;
+      return isFieldActive({ parentOptionId }, allFieldDefs, getFieldEffectiveValue);
     });
   }, [formMapping, formEntityValues, ticketId, ticket?.boardId, ticket?.workspaceId]);
 

@@ -2258,6 +2258,7 @@ export const globalFieldsTable = table('global_fields') // Prisma model: GlobalF
     fieldName: string(),
     fieldType: enumeration<FormFieldType>(),
     fieldEnum: string().optional(),
+    fieldOptions: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2273,11 +2274,13 @@ export const formFieldsTable = table('form_fields') // Prisma model: FormFields
     globalFieldId: string().optional(), // definition in global_fields (null for legacy rows)
     fieldName: string().optional(), // DEPRECATED: legacy definition only
     fieldType: enumeration<FormFieldType>().optional(), // DEPRECATED: legacy definition only
-    fieldEnum: json().optional(), // DEPRECATED: legacy definition only
+    fieldEnum: json().optional(), // DEPRECATED: legacy definition only; string[] projection kept for backward compat
+    fieldOptions: string().optional(), // canonical {id,value}[], JSON-stringified; old clients don't declare it, so never receive it
     isOptional: boolean().optional(), // per-form optional
     sequenceNumber: number().optional(), // per-form order
     createdAt: number(),
     updatedAt: number(),
+    parentOptionId: string().optional(),
   })
   .primaryKey('id');
 

@@ -11,6 +11,7 @@ import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssig
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
+import { resolveParentOption } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '../types';
@@ -39,6 +40,7 @@ import {
 import {
   buildCustomFieldWritePayload,
   buildPartialCustomFieldWritePayload,
+  resolveSavedParentValues,
   syncCustomFieldValues,
   validateUserCustomFieldReferences,
   type CustomFieldWritePayload,
@@ -206,7 +208,6 @@ interface TicketConversationCursor {
   id: string;
   createdAt: number;
 }
-
 const replaceTicketTags = async (ticketId: string, tags: string[]): Promise<void> => {
   const normalizedTags = Array.from(new Set(tags.map(tag => tag.trim()).filter(Boolean)));
   const ticket = await prismaClient.ticket.findUnique({
@@ -870,6 +871,7 @@ export class TicketController {
           dynamicFields,
           {
             requireAllRequiredFields: false,
+            ticketId: ticket.id,
           },
         );
       } catch (error) {
@@ -1627,9 +1629,8 @@ export class TicketController {
         return;
       }
 
-      // Get the field by name (resolved across global + legacy definitions)
-      const resolvedFormFields = await resolveFormFieldDefinitionsForForm(prismaClient, formMapping.formId);
-      const field = resolvedFormFields.find(f => f.fieldName === fieldName);
+      const formFields = await resolveFormFieldDefinitionsForForm(prismaClient, formMapping.formId);
+      const field = formFields.find(f => f.fieldName === fieldName);
 
       if (!field) {
         res.status(404).json({ error: `Field "${fieldName}" not found`, code: 'FIELD_NOT_FOUND' });
@@ -1638,6 +1639,24 @@ export class TicketController {
 
       let normalizedFieldValue: ReturnType<typeof normalizeCustomFieldValue>;
       try {
+        if (field.parentOptionId) {
+          const branchLink = resolveParentOption(formFields, field.parentOptionId);
+          const savedParentValues = branchLink
+            ? await resolveSavedParentValues({
+                ticketId,
+                fieldIds: [branchLink.parentField.id],
+                contextId: ticket.boardId,
+              })
+            : new Map<string, string>();
+          const parentEffectiveValue = branchLink
+            ? (savedParentValues.get(branchLink.parentField.id) ?? null)
+            : null;
+          if (!branchLink || branchLink.option.value !== parentEffectiveValue) {
+            throw new Error(
+              `Field "${field.fieldName}" is not applicable for the currently selected value of its parent field`,
+            );
+          }
+        }
         normalizedFieldValue = normalizeCustomFieldValue(field, fieldValue);
         await validateUserCustomFieldReferences(
           [{

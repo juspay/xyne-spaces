@@ -1,4 +1,5 @@
 import { FormContextType, FormEntityType, Prisma } from '@prisma/client';
+import { resolveParentOption, isFieldActive } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
@@ -39,6 +40,38 @@ export type CustomFieldWritePayload = {
     fieldValue: string;
     actualFieldValue: Prisma.InputJsonValue;
   }>;
+};
+
+/**
+ * Resolves each field's latest saved value on a ticket (as a plain string) — used to check
+ * whether a branch-scoped field's parent currently holds the value that field belongs to.
+ */
+export const resolveSavedParentValues = async (params: {
+  ticketId: string;
+  fieldIds: string[];
+  contextId?: string;
+}): Promise<Map<string, string>> => {
+  const { ticketId, fieldIds, contextId } = params;
+  if (fieldIds.length === 0) return new Map();
+
+  const rows = await prismaClient.formEntityValues.findMany({
+    where: {
+      entityId: ticketId,
+      entityType: 'TICKET',
+      fieldId: { in: fieldIds },
+      ...(contextId && { contextId }),
+    },
+    orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
+    distinct: ['fieldId'],
+    select: { fieldId: true, actualFieldValue: true, fieldValue: true },
+  });
+
+  const result = new Map<string, string>();
+  for (const row of rows) {
+    const raw = row.actualFieldValue ?? row.fieldValue;
+    if (typeof raw === 'string') result.set(row.fieldId, raw);
+  }
+  return result;
 };
 
 /**
@@ -102,10 +135,11 @@ export const buildCustomFieldWritePayload = async (
   boardId: string,
   workspaceId: string,
   dynamicFields: Record<string, unknown> | undefined,
-  options?: { requireAllRequiredFields?: boolean },
+  options?: { requireAllRequiredFields?: boolean; ticketId?: string },
 ): Promise<CustomFieldWritePayload | undefined> => {
   const normalizedInput = dynamicFields ?? {};
   const requireAllRequiredFields = options?.requireAllRequiredFields ?? true;
+  const ticketId = options?.ticketId;
   const formMapping = await prismaClient.formContextMapping.findFirst({
     where: {
       contextId: boardId,
@@ -130,9 +164,37 @@ export const buildCustomFieldWritePayload = async (
     throw new Error(`Unknown custom fields for board ${boardId}: ${unknownFields.join(', ')}`);
   }
 
+  // Parent ids of every branch-scoped field, so we can resolve each parent's effective value
+  // (this batch's value, else the latest saved one) before checking which fields are active.
+  const branchParentIds = Array.from(
+    new Set(
+      formFields
+        .filter(field => field.parentOptionId)
+        .map(field => resolveParentOption(formFields, field.parentOptionId!)?.parentField.id)
+        .filter((id): id is string => !!id),
+    ),
+  );
+  const savedParentValueByFieldId = ticketId
+    ? await resolveSavedParentValues({ ticketId, fieldIds: branchParentIds, contextId: boardId })
+    : new Map<string, string>();
+
+  const resolveParentEffectiveValue = (parentFieldId: string): string | null => {
+    const parentField = formFields.find(f => f.id === parentFieldId);
+    if (parentField && Object.prototype.hasOwnProperty.call(normalizedInput, parentField.fieldName)) {
+      const parentRaw = normalizedInput[parentField.fieldName];
+      return typeof parentRaw === 'string' ? parentRaw.trim() : null;
+    }
+    return savedParentValueByFieldId.get(parentFieldId) ?? null;
+  };
+
+  // Shared helper so an orphaned branch reference fails closed here too, not just elsewhere.
+  const isFieldCurrentlyActive = (field: (typeof formFields)[number]): boolean =>
+    isFieldActive(field, formFields, resolveParentEffectiveValue);
+
   if (requireAllRequiredFields) {
     const requiredFields = formFields
       .filter(field => !field.isOptional)
+      .filter(isFieldCurrentlyActive)
       .map(field => field.fieldName)
       .filter(fieldName => normalizedInput[fieldName] === undefined || normalizedInput[fieldName] === null);
 
@@ -145,6 +207,12 @@ export const buildCustomFieldWritePayload = async (
     const field = fieldByName.get(fieldName);
     if (!field) {
       throw new Error(`Unknown custom field: ${fieldName}`);
+    }
+
+    if (!isFieldCurrentlyActive(field)) {
+      throw new Error(
+        `Field "${field.fieldName}" is not applicable for the currently selected value of its parent field`,
+      );
     }
 
     const normalized = normalizeCustomFieldValue(field, rawValue);

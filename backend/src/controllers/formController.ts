@@ -57,7 +57,10 @@ const isExpectedFormInputError = (error: unknown): error is Error => {
     message.includes('does not belong to this form') ||
     message.includes('does not belong to this workspace') ||
     message.includes('Cannot resolve project for form fields') ||
-    message.includes('A field with this name and type already exists')
+    message.includes('A field with this name and type already exists') ||
+    message.includes('references an option') ||
+    message.includes('can only belong to a branch') ||
+    message.includes('cannot belong to a branch')
   );
 };
 
@@ -134,7 +137,9 @@ export class FormController {
       // Validate SELECT fields have at least one option
       fields.forEach((field) => {
         if (field.fieldType === FormFieldType.SINGLE_SELECT || field.fieldType === FormFieldType.MULTI_SELECT) {
-          if (!field.fieldEnum || field.fieldEnum.length === 0) {
+          // New clients send options under fieldOptions ({id,value}[]); legacy under fieldEnum (string[]).
+          const options = field.fieldOptions ?? field.fieldEnum;
+          if (!options || options.length === 0) {
             throw new Error(`Field "${field.fieldName}" must have at least one option`);
           }
         }
@@ -240,7 +245,8 @@ export class FormController {
       // Validate SELECT fields have at least one option
       fields.forEach((field) => {
         if (field.fieldType === FormFieldType.SINGLE_SELECT || field.fieldType === FormFieldType.MULTI_SELECT) {
-          if (!field.fieldEnum || field.fieldEnum.length === 0) {
+          const options = field.fieldOptions ?? field.fieldEnum;
+          if (!options || options.length === 0) {
             throw new Error(`Field "${field.fieldName}" must have at least one option`);
           }
         }
@@ -267,13 +273,17 @@ export class FormController {
           fieldName?: string;
           fieldType?: FormFieldType;
           fieldEnum?: string[];
+          fieldOptions?: Array<{ id: string; value: string }>;
           isOptional?: boolean;
+          parentOptionId?: string | null;
         }) => ({
           ...(field.fieldId !== undefined ? { fieldId: field.fieldId } : {}),
           ...(field.fieldName !== undefined ? { fieldName: field.fieldName } : {}),
           ...(field.fieldType !== undefined ? { fieldType: field.fieldType } : {}),
           ...(field.fieldEnum !== undefined ? { fieldEnum: field.fieldEnum } : {}),
+          ...(field.fieldOptions !== undefined ? { fieldOptions: field.fieldOptions } : {}),
           ...(field.isOptional !== undefined ? { isOptional: field.isOptional } : {}),
+          ...(field.parentOptionId !== undefined ? { parentOptionId: field.parentOptionId } : {}),
         })),
       });
 

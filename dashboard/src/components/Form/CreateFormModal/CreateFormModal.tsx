@@ -3,12 +3,15 @@ import { useForm, Controller } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
 import { useZero } from '../../../hooks/useZero';
 import { Plus, Trash2, Edit2, X } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
 import {
   Form,
   FormContextType,
   FormEntityType,
   FormFieldType,
   FormFields,
+  parseFieldOptions,
+  type FieldEnumOption,
   type GlobalField,
   type Project,
 } from '@xyne/shared';
@@ -27,16 +30,16 @@ import { FORM_CONTEXT_TYPES, getEntityTypesForContext } from '../../../constants
 import { toast } from 'sonner';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { v4 as uuidv4 } from 'uuid';
-import { parseFieldEnumOptions } from '../../../utils/formFieldEnum';
 
 interface FormField {
   id?: string; // Existing field ID for updates
   fieldName: string;
   fieldType: FormFieldType;
-  fieldEnum?: string[]; // Array of options for SELECT fields
+  fieldEnum?: FieldEnumOption[]; // Options for SELECT fields
   isOptional?: boolean | null; // Whether the field is optional
   membershipId?: string; // Membership ID for the field
+  // Branch reference, carried through unchanged — this modal has no UI to edit it.
+  parentOptionId?: string | null;
 }
 
 type FormFieldRow = FormFields & { globalField?: GlobalField | null | undefined };
@@ -140,7 +143,11 @@ export const CreateFormModal = ({
           formFields.flatMap((field: FormFieldRow) => {
             const fieldName = field.globalField?.fieldName ?? field.fieldName;
             const fieldType = field.globalField?.fieldType ?? field.fieldType;
-            const fieldEnum = field.globalField?.fieldEnum ?? field.fieldEnum;
+            const fieldEnum =
+              field.globalField?.fieldOptions ??
+              field.globalField?.fieldEnum ??
+              field.fieldOptions ??
+              field.fieldEnum;
 
             if (!fieldName || !fieldType) {
               return [];
@@ -152,11 +159,12 @@ export const CreateFormModal = ({
               fieldType,
               isOptional: field.isOptional,
               membershipId: field.id,
+              ...(field.parentOptionId && { parentOptionId: field.parentOptionId }),
             };
-            const parsedFieldEnum = parseFieldEnumOptions(fieldEnum);
             // Only add fieldEnum if it exists and is a non-empty array
-            if (parsedFieldEnum) {
-              return [{ ...baseField, fieldEnum: parsedFieldEnum }];
+            const options = parseFieldOptions(fieldEnum);
+            if (options.length > 0) {
+              return [{ ...baseField, fieldEnum: options }];
             }
             return [baseField];
           }),
@@ -257,7 +265,7 @@ export const CreateFormModal = ({
     const updatedFields = [...fields];
     updatedFields[fieldIndex] = {
       ...field,
-      fieldEnum: [...currentOptions, ''],
+      fieldEnum: [...currentOptions, { id: crypto.randomUUID(), value: '' }],
     };
     setFields(updatedFields);
   };
@@ -289,7 +297,7 @@ export const CreateFormModal = ({
     const updatedFields = [...fields];
     updatedFields[fieldIndex] = {
       ...field,
-      fieldEnum: field.fieldEnum.map((opt, i) => (i === optionIndex ? value : opt)),
+      fieldEnum: field.fieldEnum.map((opt, i) => (i === optionIndex ? { ...opt, value } : opt)),
     };
     setFields(updatedFields);
   };
@@ -315,8 +323,9 @@ export const CreateFormModal = ({
           membershipId?: string;
           fieldName: string;
           fieldType: FormFieldType;
-          fieldEnum?: string[];
+          fieldEnum?: FieldEnumOption[];
           isOptional?: boolean;
+          parentOptionId?: string | null;
         }> = [];
 
         fields
@@ -324,7 +333,7 @@ export const CreateFormModal = ({
           .forEach(field => {
             // Add fieldEnum only if it's a SELECT field and has non-empty options
             if (isSelectField(field.fieldType) && field.fieldEnum && field.fieldEnum.length > 0) {
-              const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
+              const nonEmptyOptions = field.fieldEnum.filter(opt => opt.value.trim() !== '');
               if (nonEmptyOptions.length > 0) {
                 if (field.id) {
                   validFields.push({
@@ -334,6 +343,9 @@ export const CreateFormModal = ({
                     fieldType: field.fieldType,
                     fieldEnum: nonEmptyOptions,
                     isOptional: field.isOptional || false,
+                    ...(field.parentOptionId !== undefined
+                      ? { parentOptionId: field.parentOptionId }
+                      : {}),
                   });
                 } else {
                   validFields.push({
@@ -342,6 +354,9 @@ export const CreateFormModal = ({
                     fieldType: field.fieldType,
                     fieldEnum: nonEmptyOptions,
                     isOptional: field.isOptional || false,
+                    ...(field.parentOptionId !== undefined
+                      ? { parentOptionId: field.parentOptionId }
+                      : {}),
                   });
                 }
                 return;
@@ -355,6 +370,9 @@ export const CreateFormModal = ({
                 fieldName: field.fieldName.trim(),
                 fieldType: field.fieldType,
                 isOptional: field.isOptional || false,
+                ...(field.parentOptionId !== undefined
+                  ? { parentOptionId: field.parentOptionId }
+                  : {}),
               });
             } else {
               validFields.push({
@@ -362,6 +380,9 @@ export const CreateFormModal = ({
                 fieldName: field.fieldName.trim(),
                 fieldType: field.fieldType,
                 isOptional: field.isOptional || false,
+                ...(field.parentOptionId !== undefined
+                  ? { parentOptionId: field.parentOptionId }
+                  : {}),
               });
             }
           });
@@ -384,8 +405,9 @@ export const CreateFormModal = ({
             membershipId: string;
             fieldName: string;
             fieldType: FormFieldType;
-            fieldEnum?: string[];
+            fieldOptions?: FieldEnumOption[];
             isOptional?: boolean;
+            parentOptionId?: string | null;
           }>;
         } = {
           formId: form.id,
@@ -398,8 +420,11 @@ export const CreateFormModal = ({
               membershipId: resolvedMembershipId,
               fieldName: field.fieldName,
               fieldType: field.fieldType,
-              ...(field.fieldEnum ? { fieldEnum: field.fieldEnum } : {}),
+              ...(field.fieldEnum ? { fieldOptions: field.fieldEnum } : {}),
               ...(field.isOptional !== undefined ? { isOptional: field.isOptional } : {}),
+              ...(field.parentOptionId !== undefined
+                ? { parentOptionId: field.parentOptionId }
+                : {}),
             };
           }),
         };
@@ -447,7 +472,8 @@ export const CreateFormModal = ({
         // Validation: SELECT fields must have at least one option
         fields.forEach((field, index) => {
           if (isSelectField(field.fieldType)) {
-            const hasOptions = field.fieldEnum && field.fieldEnum.some(opt => opt.trim() !== '');
+            const hasOptions =
+              field.fieldEnum && field.fieldEnum.some(opt => opt.value.trim() !== '');
             if (!hasOptions) {
               throw new Error(
                 `Field "${field.fieldName || index + 1}" must have at least one option`,
@@ -464,8 +490,9 @@ export const CreateFormModal = ({
           fields: Array<{
             fieldName: string;
             fieldType: FormFieldType;
-            fieldEnum?: string[];
+            fieldEnum?: FieldEnumOption[];
             isOptional?: boolean | undefined;
+            parentOptionId?: string | null;
           }>;
           formDescription?: string;
         } = {
@@ -479,12 +506,15 @@ export const CreateFormModal = ({
                 fieldName: field.fieldName.trim(),
                 fieldType: field.fieldType,
                 isOptional: field.isOptional || undefined,
+                ...(field.parentOptionId !== undefined
+                  ? { parentOptionId: field.parentOptionId }
+                  : {}),
               };
               // Add fieldEnum only if it's a SELECT field and has non-empty options
               if (isSelectField(field.fieldType) && field.fieldEnum && field.fieldEnum.length > 0) {
                 const nonEmptyOptions = field.fieldEnum
-                  .filter(opt => opt.trim() !== '')
-                  .map(opt => opt.trim());
+                  .filter(opt => opt.value.trim() !== '')
+                  .map(opt => ({ ...opt, value: opt.value.trim() }));
                 if (nonEmptyOptions.length > 0) {
                   return { ...baseField, fieldEnum: nonEmptyOptions };
                 }
@@ -518,11 +548,10 @@ export const CreateFormModal = ({
   };
 
   const getSubmitButtonText = (): string => {
-    return isEditMode
-      ? 'Update Form'
-      : createFormMutation.isPending
-        ? 'Creating...'
-        : 'Create Form';
+    if (isEditMode) {
+      return 'Update Form';
+    }
+    return createFormMutation.isPending ? 'Creating...' : 'Create Form';
   };
 
   return (
@@ -894,12 +923,12 @@ export const CreateFormModal = ({
                           {isReadOnly ? (
                             <div className='space-y-1'>
                               {field.fieldEnum && field.fieldEnum.length > 0 ? (
-                                field.fieldEnum.map((option, optIndex) => (
+                                field.fieldEnum.map(option => (
                                   <div
-                                    key={optIndex}
+                                    key={option.id}
                                     className='px-3 py-2 text-sm bg-background border border-border rounded-lg'
                                   >
-                                    {option || '(empty)'}
+                                    {option.value || '(empty)'}
                                   </div>
                                 ))
                               ) : (
@@ -911,9 +940,9 @@ export const CreateFormModal = ({
                           ) : (
                             <div className='space-y-2'>
                               {(field.fieldEnum || []).map((option, optIndex) => (
-                                <div key={optIndex} className='flex gap-2'>
+                                <div key={option.id} className='flex gap-2'>
                                   <Input
-                                    value={option}
+                                    value={option.value}
                                     onChange={e =>
                                       updateFieldOption(index, optIndex, e.target.value)
                                     }

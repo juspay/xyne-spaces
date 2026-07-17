@@ -1,19 +1,19 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, type FieldEnumOption } from '@xyne/shared';
 import { useGlobalFieldSearch } from '../../../hooks/useGlobalFieldSearch';
 import { mapFromFormFieldType } from '../BoardEditScreen/BoardEditScreen.types';
 import type { GlobalFieldListResult } from '../../../services/Form/formService';
-import { parseFieldEnumOptions } from '../../../utils/formFieldEnum';
 
 export interface GlobalFieldSuggestion {
   id: string;
   fieldName: string;
   fieldType: FormFieldType;
-  fieldEnum?: string[];
+  fieldEnum?: FieldEnumOption[];
 }
 
 const toSuggestion = (field: GlobalFieldListResult): GlobalFieldSuggestion => {
-  const fieldEnum = parseFieldEnumOptions(field.fieldEnum);
+  const options = field.fieldOptions ?? field.fieldEnum;
+  const fieldEnum = options && options.length > 0 ? options : undefined;
   return {
     id: field.id,
     fieldName: field.fieldName,

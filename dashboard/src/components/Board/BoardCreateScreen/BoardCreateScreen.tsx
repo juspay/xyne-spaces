@@ -68,7 +68,7 @@ const BoardCreateScreen = ({
     const boardFieldMap = new Map<string, string[]>();
     if (allFormMappings && Array.isArray(allFormMappings)) {
       allFormMappings.forEach(form => {
-        const typedForm = form as FormMapping;
+        const typedForm = form as unknown as FormMapping;
         if (typedForm.formContextMappings && Array.isArray(typedForm.formContextMappings)) {
           typedForm.formContextMappings.forEach((mapping: FormContextMapping) => {
             if (

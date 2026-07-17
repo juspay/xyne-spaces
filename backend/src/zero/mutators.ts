@@ -74,6 +74,8 @@ import {
   getCanvasFolderNameConflictMessage,
   rethrowCanvasFolderNameConflict,
   resolveCanvasHierarchy,
+  parseFieldOptions,
+  serializeFieldOptions,
   VCSProviderType,
   ReleaseTrackingMode,
   parseRepliesMd,
@@ -88,6 +90,11 @@ import {
   deskTypeForChannelType,
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
+import {
+  validateFieldBranches,
+  validateUniqueFieldNames,
+  assertFieldIsCurrentlyActive,
+} from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { generatePlainTextContent } from "@/utils/contentUtils";
 import { extractAllMentions } from '@/utils/mentionParser';
@@ -768,7 +775,6 @@ async function createNonParticipantSystemMessages(
     // Don't throw - let the message creation succeed even if system message fails
   }
 }
-
 
 export function createMutators(authData: AuthData, asyncTasks: Array<() => Promise<void>>) {
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
@@ -9715,20 +9721,24 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 fieldName: z.string(),
                 fieldType: z.nativeEnum(FormFieldType),
                 fieldEnum: z.array(z.string()).optional(),
+                fieldOptions: z.array(z.object({ id: z.string(), value: z.string() })).optional(),
                 isOptional: z.boolean().optional(),
+                parentOptionId: z.string().nullable().optional(),
               }),
             )
             .optional(),
           timestamp: z.number(),
           fieldIds: z.record(z.string(), z.string()).optional(),
         }),
-        async ({ tx, args: { formId, projectId, formDescription, fields, timestamp, fieldIds = {} } }) => {
+        async ({
+          tx,
+          args: { formId, projectId, formDescription, fields, timestamp, fieldIds = {} },
+        }) => {
           // Validate form exists
           const form = await tx.run(zql.forms.where('id', formId).one());
           if (!form) {
             throw new Error('Form not found');
           }
-
 
           // Update form description if provided
           if (formDescription !== undefined) {
@@ -9785,6 +9795,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const keptRowIds = new Set<string>();
             const serializeGlobalFieldEnum = (value: string[] | null | undefined): string | null =>
               value && value.length > 0 ? JSON.stringify(value) : null;
+            validateUniqueFieldNames(fields);
+
+            validateFieldBranches(fields.map(f => ({ ...f, fieldEnum: f.fieldOptions ?? f.fieldEnum })));
 
             const ensureLegacyGlobalDefinition = async (
               row: (typeof existingRows)[number],
@@ -9814,6 +9827,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 fieldName: row.fieldName,
                 fieldType: row.fieldType,
                 ...(row.fieldEnum ? { fieldEnum: JSON.stringify(row.fieldEnum) } : {}),
+                ...(row.fieldOptions ? { fieldOptions: row.fieldOptions } : {}),
                 createdAt: now,
                 updatedAt: now,
               });
@@ -9824,7 +9838,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               candidateId: string,
               fieldName: string,
               fieldType: FormFieldType,
-              fieldEnum: string[] | undefined,
+              fieldEnum: ReadonlyJSONValue | undefined,
+              fieldOptions: string | null,
               projectId: string,
             ): Promise<string> => {
               const found = await tx.run(
@@ -9836,11 +9851,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               );
               if (found) {
                 if (fieldEnum) {
-                    await tx.mutate.global_fields.update({
-                      id: found.id,
-                      fieldEnum: serializeGlobalFieldEnum(fieldEnum),
-                      updatedAt: now,
-                    });
+                  await tx.mutate.global_fields.update({
+                    id: found.id,
+                    fieldEnum: serializeGlobalFieldEnum(fieldEnum as string[] | undefined),
+                    fieldOptions: fieldOptions ?? null,
+                    updatedAt: now,
+                  });
                 }
                 return found.id;
               }
@@ -9849,7 +9865,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 projectId,
                 fieldName,
                 fieldType,
-                ...(fieldEnum ? { fieldEnum: serializeGlobalFieldEnum(fieldEnum) } : {}),
+                ...(fieldEnum ? { fieldEnum: serializeGlobalFieldEnum(fieldEnum as string[] | undefined) } : {}),
+                ...(fieldOptions ? { fieldOptions } : {}),
                 createdAt: now,
                 updatedAt: now,
               });
@@ -9861,9 +9878,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               formId: string,
               fieldName: string,
               fieldType: FormFieldType,
-              fieldEnum: string[] | undefined,
+              fieldEnum: ReadonlyJSONValue | undefined,
+              fieldOptions: string | null,
               isOptional: boolean,
               sequenceNumber: number,
+              parentOptionId: string | null,
             ): Promise<string> => {
               const found = await tx.run(
                 zql.form_fields
@@ -9878,8 +9897,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   fieldName,
                   fieldType,
                   fieldEnum: fieldEnum ?? null,
+                  fieldOptions: fieldOptions ?? null,
                   isOptional,
                   sequenceNumber,
+                  parentOptionId,
                   updatedAt: now,
                 });
                 return found.id;
@@ -9891,8 +9912,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 fieldName,
                 fieldType,
                 fieldEnum: fieldEnum ?? null,
+                fieldOptions: fieldOptions ?? null,
                 isOptional,
                 sequenceNumber,
+                parentOptionId,
                 createdAt: now,
                 updatedAt: now,
               });
@@ -9903,8 +9926,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               const sequenceNumber = index + 1;
               const isOptional = field.isOptional ?? false;
               const fieldName = field.fieldName.trim();
-              const cleanedEnum = field.fieldEnum?.filter(opt => opt.trim() !== '');
-              const fieldEnum = cleanedEnum && cleanedEnum.length > 0 ? cleanedEnum : undefined;
+              const cleanedOptions = field.fieldOptions
+                ?.map(opt => ({ id: opt.id, value: opt.value.trim() }))
+                .filter(opt => opt.value !== '');
+              const cleanedValues = cleanedOptions
+                ? cleanedOptions.map(opt => opt.value)
+                : field.fieldEnum?.map(v => v.trim()).filter(v => v !== '');
+              const fieldOptions = serializeFieldOptions(cleanedOptions);
+              const fieldEnum =
+                cleanedValues && cleanedValues.length > 0
+                  ? (cleanedValues as ReadonlyJSONValue)
+                  : undefined;
               const legacyFieldId = field.id ?? fieldIds[index];
 
               // Editing a legacy row in place (keeps its id + saved values stable).
@@ -9916,13 +9948,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     fieldName,
                     field.fieldType,
                     fieldEnum,
+                    fieldOptions,
                     isOptional,
                     sequenceNumber,
+                    field.parentOptionId ?? null,
                   );
                   keptRowIds.add(legacyFieldId);
                   continue;
                 }
-                
+
                 const legacyRow = existingById.get(legacyFieldId);
                 if (legacyRow && !legacyRow.globalFieldId) {
                   await tx.mutate.form_fields.update({
@@ -9930,8 +9964,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     fieldName,
                     fieldType: field.fieldType,
                     fieldEnum: fieldEnum ?? null,
+                    fieldOptions: fieldOptions ?? null,
                     isOptional,
                     sequenceNumber,
+                    parentOptionId: field.parentOptionId ?? null,
                     updatedAt: now,
                   });
                   keptRowIds.add(legacyRow.id);
@@ -9947,15 +9983,32 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   if (scopedProjectId && existingGlobal.projectId !== scopedProjectId) {
                     throw new Error(`Field ${field.id} does not belong to this form`);
                   }
+
+                  const oldOptionIds = new Set(
+                    parseFieldOptions(existingGlobal.fieldOptions ?? existingGlobal.fieldEnum).map(o => o.id),
+                  );
+                  const newOptionIds = new Set((cleanedOptions ?? []).map(o => o.id));
+                  const removedOptionIds = [...oldOptionIds].filter(id => !newOptionIds.has(id));
+                  if (removedOptionIds.length > 0) {
+                    const dependentRows = await tx.run(
+                      zql.form_fields.where('parentOptionId', 'IN', removedOptionIds),
+                    );
+                    if (dependentRows.some(row => row.formId !== formId)) {
+                      throw new Error(
+                        `An option on "${fieldName}" can't be removed — a nested field on another board depends on it.`,
+                      );
+                    }
+                  }
                   await tx.mutate.global_fields.update({
                     id: definitionId,
                     fieldName,
                     fieldType: field.fieldType,
-                    fieldEnum: serializeGlobalFieldEnum(fieldEnum),
+                    fieldEnum: serializeGlobalFieldEnum(fieldEnum as string[] | undefined),
+                    fieldOptions: fieldOptions ?? null,
                     updatedAt: now,
                   });
                 } else if(scopedProjectId) {
-                  definitionId = await ensureGlobalField(definitionId, fieldName, field.fieldType, fieldEnum, scopedProjectId);
+                  definitionId = await ensureGlobalField(definitionId, fieldName, field.fieldType, fieldEnum, fieldOptions, scopedProjectId);
                 } else {
                   definitionId = await ensureLegacyFieldDefinition(
                     legacyFieldId,
@@ -9963,8 +10016,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     fieldName,
                     field.fieldType,
                     fieldEnum,
+                    fieldOptions,
                     isOptional,
                     sequenceNumber,
+                    field.parentOptionId ?? null,
                   );
                   keptRowIds.add(definitionId);
                 }
@@ -9981,8 +10036,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   fieldName: null,
                   fieldType: null,
                   fieldEnum: null,
+                  fieldOptions: null,
                   isOptional,
                   sequenceNumber,
+                  parentOptionId: field.parentOptionId ?? null,
                   updatedAt: now,
                 });
                 keptRowIds.add(existingMembership.id);
@@ -9993,6 +10050,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   globalFieldId: definitionId,
                   isOptional,
                   sequenceNumber,
+                  parentOptionId: field.parentOptionId ?? null,
                   createdAt: now,
                   updatedAt: now,
                 });
@@ -10137,7 +10195,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Form field not found, cannot make an entry');
           }
           const formId = legacyField.formId;
-          const fieldName = legacyField.globalField?.fieldName ?? legacyField.fieldName;
+          const fieldName = legacyField.globalField?.fieldName ?? legacyField.fieldName ?? 'Field';
+
+          await assertFieldIsCurrentlyActive(
+            tx,
+            {
+              id: resolvedFieldId,
+              formId,
+              fieldName,
+              parentOptionId: legacyField.parentOptionId,
+            },
+            entityId,
+            entityType,
+          );
 
           // Determine actualFieldValue based on field type
           const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
@@ -10223,17 +10293,35 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (!resolvedFieldId || !fieldType) {
             throw new Error('Form field not found');
           }
+          let membership: any = null;
           if (globalField) {
-            const membership = await tx.run(
-              zql.form_fields.where('formId', formId).where('globalFieldId', globalField.id).one(),
+            membership = await tx.run(
+              zql.form_fields
+                .where('formId', formId)
+                .where('globalFieldId', globalField.id)
+                .related('globalField')
+                .one(),
             );
             if (!membership) {
               throw new Error('Form field not found in this form');
             }
           } else if (legacyField?.formId !== formId) {
             throw new Error('Form field not found in this form');
+          } else {
+            membership = legacyField;
           }
           const fieldName = globalField?.fieldName ?? legacyField?.globalField?.fieldName ?? legacyField?.fieldName;
+          await assertFieldIsCurrentlyActive(
+            tx,
+            {
+              id: resolvedFieldId,
+              formId,
+              fieldName: fieldName ?? 'Field',
+              parentOptionId: membership?.parentOptionId,
+            },
+            entityId,
+            entityType,
+          );
 
           // Determine actualFieldValue based on field type
           const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
@@ -10320,6 +10408,33 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const fieldType = formEntityValue.globalField?.fieldType ?? formEntityValue.formField?.fieldType;
           const resolvedFieldName =
             formEntityValue.globalField?.fieldName ?? formEntityValue.formField?.fieldName;
+          const membership = formEntityValue.formField
+            ?? (formEntityValue.globalField
+              ? await tx.run(
+                zql.form_fields
+                  .where('formId', formEntityValue.formId)
+                  .where('globalFieldId', formEntityValue.globalField.id)
+                  .related('globalField')
+                  .one(),
+              )
+              : null);
+          if (membership) {
+            await assertFieldIsCurrentlyActive(
+              tx,
+              {
+                id: membership.globalFieldId ?? membership.id,
+                formId: membership.formId,
+                fieldName:
+                  (membership as { globalField?: { fieldName?: string | null } }).globalField?.fieldName
+                  ?? membership.fieldName
+                  ?? resolvedFieldName
+                  ?? 'Field',
+                parentOptionId: membership.parentOptionId,
+              },
+              formEntityValue.entityId,
+              formEntityValue.entityType,
+            );
+          }
 
           // Determine what to store based on field type
           const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
