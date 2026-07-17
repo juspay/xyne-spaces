@@ -5,6 +5,7 @@
 
 import { FileText, Image, Video, Music, Archive } from 'lucide-react';
 import { downloadFile } from '../../../services/clients/fileFetchService';
+import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { JSX } from 'react/jsx-runtime';
 
 /**
@@ -195,34 +196,9 @@ export const getFileCategory = (
  * Uses shared service for API call
  */
 export const downloadAttachment = async (attachmentId: string, fileName: string): Promise<void> => {
-  // Import the service function dynamically to avoid circular imports
   try {
     await downloadFile(attachmentId, fileName);
-    const { toast } = await import('sonner');
-
-    const electronAPI =
-      typeof window !== 'undefined'
-        ? (window as unknown as Record<string, { openDownloadsFolder?: () => Promise<void> }>)[
-            'electronAPI'
-          ]
-        : undefined;
-
-    if (electronAPI?.openDownloadsFolder) {
-      const openDownloads = () => {
-        electronAPI.openDownloadsFolder?.().catch((err: Error) => {
-          console.error('Failed to open downloads folder:', err);
-        });
-      };
-
-      toast.success('Download complete', {
-        description: `${fileName} has been downloaded successfully`,
-        action: {
-          label: 'Open Downloads',
-          onClick: openDownloads,
-        },
-        duration: 5000,
-      });
-    }
+    showDownloadCompleteToast(fileName);
   } catch (error) {
     const { toast } = await import('sonner');
     toast.error('Download failed', {
