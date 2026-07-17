@@ -23,6 +23,7 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 
 interface SearchResultItemProps {
   result: DisplaySearchResult;
+  channelDisplayName?: string | undefined;
   onSelect: (result: DisplaySearchResult) => Promise<void> | void;
   onPreview?: (result: DisplaySearchResult) => void;
   isSelected?: boolean;
@@ -57,10 +58,10 @@ const getResultIcon = (result: DisplaySearchResult): ReactElement => {
     case 'ticket':
       return <Ticket size={16} className='text-muted-foreground' />;
     case 'attachment':
-      if (searchContext?.subApp === 'canvas') {
+      if (searchContext?.subApp?.toUpperCase() === 'CANVAS') {
         return <FileText size={16} className='text-muted-foreground' />;
       }
-      if (searchContext?.subApp === 'transcript') {
+      if (searchContext?.subApp?.toUpperCase() === 'TRANSCRIPT') {
         return <Mic size={16} className='text-muted-foreground' />;
       }
       return <Paperclip size={16} className='text-muted-foreground' />;
@@ -150,6 +151,7 @@ const UserSearchResultItem = ({
 
 const SearchResultItem = ({
   result,
+  channelDisplayName,
   onSelect,
   onPreview,
   isSelected = false,
@@ -314,7 +316,10 @@ const SearchResultItem = ({
         </Command.Item>
       );
 
-    case 'attachment':
+    case 'attachment': {
+      const subtitle = channelDisplayName
+        ? `File uploaded in ${channelDisplayName}`
+        : result.subtitle;
       return (
         <Command.Item
           key={result.id}
@@ -334,7 +339,7 @@ const SearchResultItem = ({
             </div>
             <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
               <span className='truncate'>
-                <RenderMessageWithHTML message={result.subtitle} />
+                {channelDisplayName ? subtitle : <RenderMessageWithHTML message={subtitle} />}
               </span>
               {result.metadata.timestamp && (
                 <span className='shrink-0 whitespace-nowrap'>
@@ -347,7 +352,7 @@ const SearchResultItem = ({
           {!isSelected &&
             onPreview &&
             result.searchContext?.internalUrl &&
-            result.searchContext?.subApp !== 'transcript' && (
+            result.searchContext?.subApp?.toUpperCase() !== 'TRANSCRIPT' && (
               <button
                 onClick={e => {
                   e.stopPropagation();
@@ -367,6 +372,7 @@ const SearchResultItem = ({
             )}
         </Command.Item>
       );
+    }
 
     default:
       return (

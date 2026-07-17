@@ -220,6 +220,7 @@ export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 
   createdAt: string;
   createdAtTimestamp: number;
   threadId: string;
+  isRootMessage?: boolean;
   channelWeightedSet: any,
   userWeightedSet: any,
   channelRef: string;
@@ -288,6 +289,7 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   ticketMentions: string[];
   threadMentions: string[];
   threadSenders: string[];
+  replyCount: number;
   initialMessage: string;
   initialMessageSender: string;
   parentTicketXyneId: string;

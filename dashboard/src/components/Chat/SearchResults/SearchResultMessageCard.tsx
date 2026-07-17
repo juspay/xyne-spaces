@@ -1,22 +1,27 @@
 import {
+  KeyboardEvent,
+  MouseEvent,
   ReactElement,
   memo,
-  MouseEvent,
-  KeyboardEvent,
   useContext,
   useMemo,
   useState,
 } from 'react';
 import { getSmartSnippet } from '../RenderMessageWithHTML/searchSnippetRender';
 import { useNavigate } from 'react-router-dom';
-import { Home, Loader2 } from 'lucide-react';
+import { Home } from 'lucide-react';
 import { ChatBubble } from '../ChatBubble/ChatBubble';
-import ReplyLayoutV2 from '../ReplyLayout/ReplyLayoutV2';
+import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { useChannel } from '../../../hooks/useChannels';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { queries } from '../../../zero/queries';
 import { SearchResultsContext } from './SearchResultsContext';
 import { cn } from '../../../utils/classNames';
+import { AttachmentEntityType, MessageType, type MessageAttachment } from '@xyne/shared';
+import { useQuery } from '@tanstack/react-query';
+import { searchService } from '../../../services/searchService';
+import type {
+  ConversationWithTicket,
+  MessageWithOptionalNudgeCounts,
+} from '../../ui/MessageBubble/MessageBubble.types';
 
 const WORD_LIMIT = 30;
 
@@ -24,45 +29,172 @@ interface SearchResultMessageCardProps {
   channelId: string;
   conversationId: string;
   matchedMessageId: string | null;
+  displayMessageId?: string;
   isSelected?: boolean;
   searchSnippet?: string;
+  onCardClick?: () => void;
+  // Message + thread fields from the Vespa search payload. The card builds the
+  // message object from these — no Zero message/conversation queries. For ticket
+  // results, `ticketMd` carries the serialized ticket card so a conversation is
+  // fabricated too, letting ChatBubble render the embedded ticket widget.
+  searchThread: {
+    isRootMessage: boolean;
+    replyCount: number;
+    senderId: string;
+    msgType: MessageType;
+    createdAt: number;
+    ticketMd?: string;
+    threadSenders?: string[];
+    attachmentIds?: string[];
+  };
 }
 
 export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   channelId,
   conversationId,
   matchedMessageId,
+  displayMessageId,
   isSelected = false,
   searchSnippet,
+  onCardClick,
+  searchThread,
 }: SearchResultMessageCardProps): ReactElement | null {
   const { onSelectThread, onSelectUser, onSelectChannelContext } = useContext(SearchResultsContext);
   const channel = useChannel(channelId);
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
+  const renderedMessageId = displayMessageId ?? matchedMessageId;
 
-  const [messages, messagesDetails] = useCachedQuery(
-    queries.conversationMessagesV2({ conversationId: conversationId || ' ' }),
-    { enabled: !!conversationId },
+  const attachmentIds = useMemo(
+    () => [...new Set(searchThread.attachmentIds ?? [])].sort(),
+    [searchThread.attachmentIds],
   );
-  const [conversation] = useCachedQuery(
-    queries.getConversationByIdWithChannel({
-      conversationId: conversationId || ' ',
-      channelId: channelId || ' ',
-      isMember: true,
-    }),
-    { enabled: !!conversationId && !!channelId },
-  );
+  const attachmentIdsKey = attachmentIds.join(',');
+  const { data: attachmentResults } = useQuery({
+    queryKey: ['search-result-attachments', attachmentIdsKey],
+    enabled: attachmentIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+    queryFn: () =>
+      searchService.vespaSearch({
+        query: '',
+        apps: 'file',
+        fileId: attachmentIdsKey,
+        filterOnly: true,
+        groupBy: '',
+        limit: attachmentIds.length,
+      }),
+  });
+
+  const attachments = useMemo((): MessageAttachment[] => {
+    const resultsById = new Map(
+      (attachmentResults?.results ?? []).map(result => [
+        result.searchContext?.attachmentId,
+        result,
+      ]),
+    );
+
+    return attachmentIds.flatMap(attachmentId => {
+      const result = resultsById.get(attachmentId);
+      const context = result?.searchContext;
+      if (!result || !context?.fileName || !context.mimeType) return [];
+
+      const uploadedByUserId = result.avatar || searchThread.senderId;
+      return [
+        {
+          id: attachmentId,
+          entityType: searchThread.ticketMd
+            ? AttachmentEntityType.TICKET
+            : AttachmentEntityType.CHAT,
+          entityId: renderedMessageId ?? conversationId,
+          workspaceId: '',
+          storageProvider: '',
+          originalFilename: context.fileName,
+          mimetype: context.mimeType,
+          size: context.fileSize ?? 0,
+          width: null,
+          height: null,
+          uploadedByUserId,
+          createdAt: searchThread.createdAt,
+          url: context.originalUrl || context.internalUrl || '',
+          createdBy: uploadedByUserId,
+          metadata: null,
+          conversationId,
+          thumbnailUrl: null,
+          isDeleted: false,
+          uploadStatus: null,
+        },
+      ];
+    });
+  }, [
+    attachmentIds,
+    attachmentResults?.results,
+    conversationId,
+    renderedMessageId,
+    searchThread.createdAt,
+    searchThread.senderId,
+    searchThread.ticketMd,
+  ]);
+
+  // The message is built entirely from the search payload — no Zero fetch.
+  // Optional Message fields not in search are left at safe defaults.
+  const targetMessage: MessageWithOptionalNudgeCounts | null = renderedMessageId
+    ? {
+        messageId: renderedMessageId,
+        conversationId,
+        senderId: searchThread.senderId,
+        content: searchSnippet ?? '',
+        msgType: searchThread.msgType,
+        createdAt: searchThread.createdAt,
+        hasAttachment: attachments.length > 0,
+        attachments,
+        edited: false,
+        isDeleted: false,
+        showInChannel: true,
+        isSent: true,
+        childConversationId: null,
+        workspaceId: null,
+        visibleTo: null,
+        metadata: null,
+        nudgeCount: null,
+        reactions_md: null,
+        link_preview_md: null,
+      }
+    : null;
+
+  // Ticket results fabricate a conversation carrying the ticket_md so ChatBubble's
+  // embedded ticket widget renders (it needs ticket_md + initialMessageId ===
+  // messageId). Conversation results pass no conversation.
+  const fabricatedConversation: ConversationWithTicket | undefined =
+    searchThread.ticketMd && renderedMessageId
+      ? {
+          conversationId,
+          channelId,
+          createdBy: searchThread.senderId,
+          initialMessageId: renderedMessageId,
+          lastActivityAt: searchThread.createdAt,
+          replyCount: searchThread.replyCount,
+          pinned: false,
+          createdAt: searchThread.createdAt,
+          ticket_md: searchThread.ticketMd,
+          workspaceId: null,
+          parentMessageId: null,
+          ticketId: null,
+          metadata: null,
+          callId: null,
+          replies_md: null,
+          initial_message_md: null,
+          parent_message_md: null,
+          doNotPostToChannel: null,
+        }
+      : undefined;
 
   const processedSnippet = useMemo(
     () => (searchSnippet ? getSmartSnippet(searchSnippet, 40) : null),
     [searchSnippet],
   );
 
-  const isMessagesLoaded = messagesDetails.type === 'complete' || messagesDetails.type === 'error';
-  const initialMessageId = conversation?.initialMessageId;
-  const targetMessage = messages?.find(m => m.messageId === (matchedMessageId ?? initialMessageId));
-  const isMatchRoot = !!initialMessageId && targetMessage?.messageId === initialMessageId;
-  const replyCount = conversation?.replyCount ?? 0;
+  const isMatchRoot = searchThread.isRootMessage;
+  const replyCount = searchThread.replyCount;
   const showReplies = isMatchRoot && replyCount > 0;
 
   // Determine if text content needs truncation
@@ -87,14 +219,11 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   if (!channelId || !conversationId) return null;
 
   // Inject "... Show more" inline into the HTML so it appears on the same line as the last word.
-  // The span survives sanitization because 'span' + 'data-*' are in the allowlist.
   const contentWithShowMore =
     canExpand && !isExpanded && previewContent
       ? `${previewContent}<span data-search-show-more="true" style="cursor:pointer;font-size:0.75rem;margin-left:2px;" class="text-muted-foreground hover:underline"> Show more</span>`
       : previewContent;
 
-  // Always use the snippet/preview when available (preserves search highlights),
-  // expanding only swaps back to the full raw content.
   const displayMessage =
     previewContent && targetMessage && !isExpanded
       ? { ...targetMessage, content: contentWithShowMore ?? previewContent }
@@ -109,6 +238,14 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
     );
   };
 
+  const openPanel = (): void => {
+    if (replyCount > 0) {
+      onSelectThread?.({ channelId, conversationId, matchedMessageId });
+    } else {
+      onSelectChannelContext?.(channelId, conversationId, undefined, matchedMessageId);
+    }
+  };
+
   const handleCardClick = (e: MouseEvent<HTMLDivElement>): void => {
     const target = e.target instanceof HTMLElement ? e.target : null;
     if (target?.closest('[data-search-show-more]')) {
@@ -118,36 +255,25 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
     const blocked =
       e.target instanceof HTMLElement ? e.target.closest('a, [data-prevent-thread]') : null;
     if (blocked && blocked !== e.currentTarget) return;
-    if (replyCount > 0) {
-      onSelectThread?.({ channelId, conversationId, matchedMessageId });
-    } else {
-      onSelectChannelContext?.(
-        channelId,
-        conversationId,
-        conversation?.createdAt,
-        matchedMessageId,
-      );
+    if (onCardClick) {
+      onCardClick();
+      return;
     }
+    openPanel();
   };
 
   const handleCardKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     if (e.target !== e.currentTarget) return;
     e.preventDefault();
-    if (replyCount > 0) {
-      onSelectThread?.({ channelId, conversationId, matchedMessageId });
-    } else {
-      onSelectChannelContext?.(
-        channelId,
-        conversationId,
-        conversation?.createdAt,
-        matchedMessageId,
-      );
+    if (onCardClick) {
+      onCardClick();
+      return;
     }
+    openPanel();
   };
 
-  const handleOpenThread = (e?: MouseEvent): void => {
-    e?.stopPropagation();
+  const handleOpenThread = (): void => {
     onSelectThread?.({ channelId, conversationId });
   };
 
@@ -179,11 +305,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
         >
           <Home size={14} />
         </button>
-        {!isMessagesLoaded ? (
-          <div className='flex justify-center py-6'>
-            <Loader2 className='animate-spin text-muted-foreground' size={20} />
-          </div>
-        ) : !targetMessage ? (
+        {!targetMessage ? (
           <div className='px-4 py-3 text-sm text-muted-foreground'>Message no longer available</div>
         ) : (
           <>
@@ -195,7 +317,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
               channelScopeType={channel?.scopeType}
               searchItemView
               {...(onSelectUser && { onUserClick: onSelectUser })}
-              {...(conversation && { conversation })}
+              {...(fabricatedConversation && { conversation: fabricatedConversation })}
               {...(canExpand &&
                 isExpanded && {
                   afterTextContent: (
@@ -215,25 +337,30 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
                   ),
                 })}
             />
-            {/* Replies rendered after Show more, with original ReplyLayoutV2 UI */}
-            {showReplies && (
-              // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions, local-rules/require-tracking-on-click
-              <div data-prevent-thread onClick={e => e.stopPropagation()}>
-                <ReplyLayoutV2
-                  replies={{
-                    replyCount,
-                    ...(conversation?.lastActivityAt !== undefined && {
-                      lastActivityAt: conversation.lastActivityAt,
-                    }),
-                    onOpenThread: handleOpenThread,
-                    ...(conversation && { conversation }),
-                  }}
-                  isThreadOpen={false}
-                  showViewNewerReplies={false}
-                  messageId={targetMessage.messageId}
-                />
-              </div>
-            )}
+            {/* Reply preview: repliers' avatars (from Vespa threadSenders) + count.
+                The conversation isn't fetched, so avatars come from the surfaced
+                participant ids. */}
+            {showReplies &&
+              (() => {
+                const repliers = searchThread.threadSenders ?? [];
+                return (
+                  <button
+                    data-prevent-thread
+                    onClick={e => {
+                      e.stopPropagation();
+                      handleOpenThread();
+                    }}
+                    className='mt-1 ml-14 flex items-center gap-1.5 group/replies'
+                    data-track-category='SEARCH_RESULTS'
+                    data-track-name='OPEN_THREAD_FROM_COUNT'
+                  >
+                    {repliers.length > 0 && <AvatarGroup userIds={repliers} size='sm' count={3} />}
+                    <span className='text-xs font-medium text-muted-foreground group-hover/replies:text-foreground group-hover/replies:underline'>
+                      {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
+                    </span>
+                  </button>
+                );
+              })()}
           </>
         )}
       </div>

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
 import { Calendar, User, Tag, Timer } from 'lucide-react';
 import {
   BaseTicketType,
@@ -28,6 +28,18 @@ import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 
 const DEFAULT_VISIBLE_COLUMNS = new Set(['assignee', 'dueDate', 'priority', 'tags']);
+
+// Search-match highlights (subject/id with `<hi>` markers) keyed by xyneId,
+// supplied by the search results screen. Null everywhere else → plain text.
+export interface TicketSearchHighlight {
+  titleHtml?: string;
+  xyneIdHtml?: string;
+}
+
+export const TicketSearchHighlightContext = createContext<Map<
+  string,
+  TicketSearchHighlight
+> | null>(null);
 
 // ---------------------------------------------------------------------------
 // SLA response badge — module-level component so it is not re-created on
@@ -280,6 +292,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   // Check if ticket is from a release
   const releaseBoardBgColor =
     isReleaseTicket(ticket.ticketType as BaseTicketType) && isConversation ? 'bg-muted' : 'bg-card';
+
+  const searchHighlights = useContext(TicketSearchHighlightContext);
+  const ticketHighlight = ticket.xyneId ? searchHighlights?.get(ticket.xyneId) : undefined;
 
   const handleTagsChange = (newTags: string[]) => {
     const oldTagNames = tags?.map(t => t.name) || [];
@@ -534,7 +549,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     );
 
     return (
-      <div className={cn(width, 'flex flex-col gap-1.5 max-w-lg')}>
+      <div className={cn('flex flex-col gap-1.5 max-w-lg', width)}>
         <button
           type='button'
           onClick={e => onClick?.(e)}
@@ -547,13 +562,21 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
         >
           <span className='text-xs font-medium text-muted-foreground font-mono shrink-0'>
-            {ticket.xyneId}
+            {ticketHighlight?.xyneIdHtml ? (
+              <RenderMessageWithHTML message={ticketHighlight.xyneIdHtml} />
+            ) : (
+              ticket.xyneId
+            )}
           </span>
           <h3
             data-testid='ticket-card-title'
             className='flex-1 min-w-0 truncate text-sm font-medium text-foreground'
           >
-            {ticket.title}
+            {ticketHighlight?.titleHtml ? (
+              <RenderMessageWithHTML message={ticketHighlight.titleHtml} />
+            ) : (
+              ticket.title
+            )}
           </h3>
           <div className='flex items-center gap-2.5 shrink-0'>
             <TicketStatusWithStages

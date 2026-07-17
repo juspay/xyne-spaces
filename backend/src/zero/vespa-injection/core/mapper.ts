@@ -184,7 +184,14 @@ export const updateTicketThreadFields = async (conversationId: string): Promise<
 
   if (!ticket) return; // Not a ticket conversation
 
-  const { messages, threadMentions, threadSenders } = await getThreadInfo(conversationId);
+  const [{ messages, threadMentions, threadSenders }, conversation] = await Promise.all([
+    getThreadInfo(conversationId),
+    db.conversation.findUnique({
+      where: { conversationId },
+      select: { replyCount: true },
+    }),
+  ]);
+  const replyCount = conversation?.replyCount || 0;
 
   if (messages.length === 0) {
     // All messages deleted - clear thread fields
@@ -196,6 +203,7 @@ export const updateTicketThreadFields = async (conversationId: string): Promise<
           docId: ticket.id,
           threadMentions: [],
           threadSenders: [],
+          replyCount,
           initialMessage: '',
           initialMessageSender: ''
         },
@@ -226,6 +234,7 @@ export const updateTicketThreadFields = async (conversationId: string): Promise<
         docId: ticket.id,
         threadMentions,
         threadSenders,
+        replyCount,
         initialMessage,
         initialMessageSender: initialSender?.name || ''
       },
@@ -317,6 +326,13 @@ export const mapAndUpdatePreviousMessagesMentions = async (
   const filteredMessages = messages.filter(m => m.messageId !== messageId);
   logger.info(`[MESSAGE THREAD MENTIONS UPDATE] Updating ${filteredMessages.length} messages for conversationId: ${conversationId}`);
 
+
+  const conversation = await db.conversation.findUnique({
+    where: { conversationId },
+    select: { replyCount: true },
+  });
+  const replyCount = conversation?.replyCount || 0;
+
   const updates = filteredMessages.map(message => ({
     docId: message.messageId,
     fields: {
@@ -324,6 +340,7 @@ export const mapAndUpdatePreviousMessagesMentions = async (
       docId: message.messageId,
       threadMentions,
       threadSenders,
+      replyCount,
     },
   }));
 
@@ -365,7 +382,10 @@ export const mapMessage = async (
       where: { id: args.senderId }
     }),
     db.messageAttachment.findMany({
-      where: { conversationId: args.conversationId }
+      where: {
+        entityId: args.messageId,
+        entityType: AttachmentEntityType.CHAT,
+      },
     }),
   ])
 
@@ -405,13 +425,14 @@ export const mapMessage = async (
     deletedAt: 0,
     channelRef: getRef(channelSchema, conversation.channelId),
     threadId: args.conversationId,
+    isRootMessage: args.messageId === conversation.initialMessageId,
     channelWeightedSet: {
       [`channel:${conversation.channelId}`]: 1
     },
     userWeightedSet: {
       [`user:${args.senderId}`]: 1
     },
-    attachmentIds: attachments.map(a => a.entityId),
+    attachmentIds: attachments.map(a => a.id),
     reactions: 0, // TODO
     replyCount: conversation.replyCount || 0,
     replyUsersCount: 0, // TODO
@@ -649,6 +670,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     ticketMentions: descriptionMentions?.map(v => v.username) || [],
     threadMentions: threadMentions,
     threadSenders: threadSenders,
+    replyCount: conversation?.replyCount || 0,
     initialMessage: initialMessage,
     initialMessageSender: initialMessageSender,
     parentTicketXyneId: parentTicketXyneId,

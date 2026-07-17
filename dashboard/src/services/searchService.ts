@@ -410,6 +410,10 @@ export class SearchService {
       params['ticketId'] = filters.ticketId;
     }
 
+    if (filters.fileId) {
+      params['fileId'] = filters.fileId;
+    }
+
     if (filters.includeDebugInfo !== undefined) {
       params['includeDebugInfo'] = filters.includeDebugInfo.toString();
     }

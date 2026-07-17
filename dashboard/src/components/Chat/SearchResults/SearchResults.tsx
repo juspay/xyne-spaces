@@ -1,7 +1,17 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
-import { GitCompare, Hash, Loader2, Mail, MessageCircle, Paperclip, X } from 'lucide-react';
+import {
+  FileText,
+  GitCompare,
+  Hash,
+  Loader2,
+  Mail,
+  MessageCircle,
+  Mic,
+  Paperclip,
+  X,
+} from 'lucide-react';
 
 const utcToIst = (utcString?: string): string => {
   if (!utcString) return '';
@@ -27,13 +37,24 @@ import {
 import { DisplaySearchResult } from '../../../types/search';
 import { SearchResultMessageCard } from './SearchResultMessageCard';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
+import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
 import { SearchFilterBar } from './SearchFilterBar';
-import { useAllVisibleChannels, useAllChannels } from '../../../hooks/useChannels';
+import {
+  useAllVisibleChannels,
+  useAllChannels,
+  useUserChannelStatuses,
+} from '../../../hooks/useChannels';
 import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
-import { useSearchMetrics, filterChannelsBySearchableNames } from '../../../hooks/useSearchMetrics';
+import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useUser, useUsers } from '../../../hooks/useUsers';
-import { getDMSearchableNames, isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import {
+  formatChannelLabel,
+  getDMSearchableNames,
+  isDMChannel,
+  isGroupDMChannel,
+  groupChannelsByScope,
+} from '../ChatDirectory/ChatDirectory.utils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
   TabType,
@@ -41,6 +62,8 @@ import {
   VALID_DOC_TYPES,
   DOC_TYPE_TO_TAB,
 } from '../ChatDirectory/ChannelCommandMenu.types';
+import { ChannelCategory } from '../ChatDirectory/ChatDirectory.types';
+import { Channel } from '@xyne/shared';
 import { navigateToSearchResult } from '../../../utils/searchNavigation';
 import Avatar from '../../ui/Avatar/Avatar';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -48,7 +71,18 @@ import { cn } from '../../../utils/classNames';
 import { CompareSelectRow } from './compare/CompareSelectRow';
 import { SearchCompareDialog } from './compare/SearchCompareDialog';
 import { hasRankingData } from './compare/rankingFeatures';
-import { TicketPriority } from '@xyne/shared';
+import {
+  TicketSearchHighlightContext,
+  type TicketSearchHighlight,
+} from '../../Tickets/TicketCard/TicketCard';
+import {
+  TicketPriority,
+  TicketStatusV2,
+  MessageType,
+  isDeskChannelType,
+  serializeTicketMd,
+} from '@xyne/shared';
+import { TicketCardV2 } from '../../Tickets/TicketCardV2/TicketCardV2';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
 
 type SidePanelState =
@@ -92,6 +126,12 @@ function hasActiveFilters(
     filters.inChannelIds.length > 0 ||
     filters.assigneeIds.length > 0
   );
+}
+
+function toMessageType(value?: string): MessageType {
+  return (Object.values(MessageType) as string[]).includes(value ?? '')
+    ? (value as MessageType)
+    : MessageType.USER;
 }
 
 // Build the hook's selectedMentions from resolved filter ids. Priority is appended from
@@ -200,6 +240,53 @@ const SearchResults = (): ReactElement => {
   }, []);
   const closeCompare = useCallback(() => setCompareOpen(false), []);
 
+  // Local channel + user data — needed before useSearchMetrics so allChannels can be passed in
+  const isChannelsMode = filters.docType === 'channels';
+  const allChannels = useAllVisibleChannels();
+  const allChannelsForNav = useAllChannels();
+  const allUsers = useUsers();
+  const authContext = useAuthContextValues();
+  const currentUserId = authContext.userID;
+
+  const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
+
+  // Partition channels into starred / regular / DMs — mirrors cmdK's allChannels build exactly.
+  const allChannelStatuses = useUserChannelStatuses();
+  const {
+    starred: starredChannels,
+    channels: regularChannels,
+    directMessages: dmChannels,
+  } = useMemo(
+    () => groupChannelsByScope(allChannels, allChannelStatuses),
+    [allChannels, allChannelStatuses],
+  );
+
+  const allChannelsWithCategory = useMemo((): Array<{
+    channel: Channel;
+    category: ChannelCategory;
+    searchableNames?: string[];
+  }> => {
+    const result = [];
+    for (const ch of starredChannels) {
+      result.push({
+        channel: ch,
+        category: ChannelCategory.STARRED,
+        searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
+      });
+    }
+    for (const ch of regularChannels) {
+      result.push({ channel: ch, category: ChannelCategory.CHANNELS, searchableNames: [ch.name] });
+    }
+    for (const ch of dmChannels) {
+      result.push({
+        channel: ch,
+        category: ChannelCategory.DIRECT_MESSAGES,
+        searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
+      });
+    }
+    return result;
+  }, [starredChannels, regularChannels, dmChannels, currentUserId, usersById]);
+
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
     searchResults: backendResults,
@@ -214,10 +301,13 @@ const SearchResults = (): ReactElement => {
     setIncludeDebugInfo,
     loadMoreRef,
     paginationState,
+    filteredLocalUsers,
+    filteredLocalChannels,
   } = useSearchMetrics({
-    allChannels: [],
+    allChannels: allChannelsWithCategory,
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
+    groupByDocType: true,
   });
 
   // Sync hook text whenever the URL query param changes; also close sidebar on new search
@@ -313,27 +403,6 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compareMode]);
 
-  // Local channel filtering (channels are not in Vespa — use local data)
-  const isChannelsMode = filters.docType === 'channels';
-  const allChannels = useAllVisibleChannels();
-  const allChannelsForNav = useAllChannels();
-  const allUsers = useUsers();
-  const authContext = useAuthContextValues();
-  const currentUserId = authContext.userID;
-
-  const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
-
-  // Build searchableNames for each channel using the canonical getDMSearchableNames
-  // so self-DM handling matches the Cmd-K popup exactly.
-  const channelsWithSearchableNames = useMemo(
-    () =>
-      allChannels.map(channel => ({
-        channel,
-        searchableNames: getDMSearchableNames(channel, currentUserId, usersById),
-      })),
-    [allChannels, currentUserId, usersById],
-  );
-
   // Only explicit in: chips are passed as channel mentions; "only my channels" is
   // applied server-side via the onlyMyChannels flag synced above.
   const channelIdsForSearch = filters.inChannelIds;
@@ -419,46 +488,64 @@ const SearchResults = (): ReactElement => {
       mentionChannelName,
     ],
   );
+  // Use filteredLocalChannels from the hook (same data pipeline as cmdK).
+  // Guard against empty query so we don't show all channels before the user types.
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
     if (!isChannelsMode && filters.docType !== 'all') return [];
     if (!query.trim()) return [];
-    const q = query.trim().replace(/^#/, '');
-    return filterChannelsBySearchableNames(channelsWithSearchableNames, q).map(
-      ({ channel: c, searchableNames }) => {
-        const isDm = isDMChannel(c.scopeType);
-        const title = isDm ? searchableNames.join(', ') || c.name : c.name;
-        return {
-          type: 'channel' as const,
-          id: c.id,
-          title,
-          subtitle: '',
-          relevanceScore: 1,
-          metadata: {},
-        };
-      },
-    );
-  }, [isChannelsMode, filters.docType, query, channelsWithSearchableNames]);
+    return filteredLocalChannels.map(({ channel: c, searchableNames }) => {
+      const isDm = isDMChannel(c.scopeType);
+      const title = isDm ? searchableNames?.join(', ') || c.name : c.name;
+      return {
+        type: 'channel' as const,
+        id: c.id,
+        title,
+        subtitle: '',
+        relevanceScore: 1,
+        metadata: {},
+      };
+    });
+  }, [isChannelsMode, filters.docType, query, filteredLocalChannels]);
+
+  // Single "narrowing filter active" flag (from:/in:/assignee: + priority:, not the
+  // onlyMyChannels scope toggle) — shared by result stripping and local-section suppression.
+  const filtersActive = hasActiveFilters(filters) || !!priorityFilter;
 
   const baseResults = useMemo(() => {
     if (isChannelsMode) return localChannelResults;
     if (filters.docType === 'all') {
-      // When a from:/in:/assignee: filter is active, the hook prepends local users to
-      // backendResults even though we're filtering by sender — suppress them so only
-      // message/file/ticket results appear.
-      const filteredBackend = hasActiveFilters(filters)
-        ? backendResults.filter(r => r.type !== 'user')
-        : backendResults;
-      return [...filteredBackend, ...localChannelResults];
+      if (filtersActive) {
+        // A narrowing filter is active — only message/file/ticket results are relevant.
+        return backendResults.filter(r => r.type !== 'user' && r.type !== 'channel');
+      }
+      // For ALL tab, users and channels come from local Zero data (same as cmdK popup).
+      // Strip them from backend results to avoid duplicates and use local versions.
+      const vespaOnly = backendResults.filter(r => r.type !== 'user' && r.type !== 'channel');
+      const localUserResults: DisplaySearchResult[] = filteredLocalUsers.map(user => ({
+        id: user.id,
+        type: 'user' as const,
+        title: user.name,
+        subtitle: user.email || '',
+        relevanceScore: 1,
+        metadata: {},
+      }));
+      return [...localUserResults, ...vespaOnly, ...localChannelResults];
+    }
+    // The hook retains the previous tab's results while the Desk request starts.
+    // Keep stale files/messages from leaking into the full-screen Desk list.
+    if (filters.docType === 'desk') {
+      return backendResults.filter(
+        r => r.type === 'conversation' && r.searchContext?.subApp === 'DESK',
+      );
     }
     return backendResults;
   }, [
     isChannelsMode,
     localChannelResults,
     filters.docType,
-    filters.fromUserIds,
-    filters.inChannelIds,
-    filters.assigneeIds,
+    filtersActive,
     backendResults,
+    filteredLocalUsers,
   ]);
 
   const results = useMemo(() => {
@@ -473,15 +560,25 @@ const SearchResults = (): ReactElement => {
   // Track whether a search has been initiated for the current query/filters to avoid
   // showing "No results" before the first search fires (300ms debounce window)
   const hasEverLoadedRef = useRef(false);
-  const autoOpenedRef = useRef(false);
-  const prevSearchKeyRef = useRef(
-    `${query}|${fromParam}|${inParam}|${assigneeParam}|${priorityFilter}`,
-  );
-  const currentSearchKey = `${query}|${fromParam}|${inParam}|${assigneeParam}|${priorityFilter}`;
-  // Full key includes all local filter state so auto-open resets on any filter change
-  const fullSearchKey = `${currentSearchKey}|${filters.docType}|${filters.sortBy}|${filters.includeBotMessages}|${filters.onlyMyChannels}`;
-  if (currentSearchKey !== prevSearchKeyRef.current) {
-    prevSearchKeyRef.current = currentSearchKey;
+  const autoOpenedResultKeyRef = useRef<string | null>(null);
+  const hasManualPanelSelectionRef = useRef(false);
+  const searchRequestKey = JSON.stringify([
+    query,
+    filters.docType,
+    filters.fromUserIds,
+    filters.fromEmails,
+    filters.toEmails,
+    filters.inChannelIds,
+    filters.assigneeIds,
+    priorityFilter,
+    filters.includeBotMessages,
+    filters.onlyMyChannels,
+    filters.rankProfile,
+  ]);
+  const fullSearchKey = JSON.stringify([searchRequestKey, filters.sortBy]);
+  const prevSearchKeyRef = useRef(searchRequestKey);
+  if (searchRequestKey !== prevSearchKeyRef.current) {
+    prevSearchKeyRef.current = searchRequestKey;
     hasEverLoadedRef.current = false; // reset for new search
   }
   if (isLoading) hasEverLoadedRef.current = true;
@@ -492,15 +589,18 @@ const SearchResults = (): ReactElement => {
 
   // Reset auto-open and close stale panel whenever the search or any filter changes
   useEffect(() => {
-    autoOpenedRef.current = false;
+    autoOpenedResultKeyRef.current = null;
+    hasManualPanelSelectionRef.current = false;
     setSelectedPanel(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullSearchKey]);
 
   const handleSelectThread = useCallback((thread: SearchResultsThread) => {
+    hasManualPanelSelectionRef.current = true;
     setSelectedPanel({ kind: 'thread', thread });
   }, []);
   const handleSelectUser = useCallback((userId: string) => {
+    hasManualPanelSelectionRef.current = true;
     setSelectedPanel({ kind: 'profile', userId });
   }, []);
   const handleSelectChannelContext = useCallback(
@@ -510,6 +610,7 @@ const SearchResults = (): ReactElement => {
       conversationCreatedAt?: number,
       matchedMessageId?: string | null,
     ) => {
+      hasManualPanelSelectionRef.current = true;
       setSelectedPanel({
         kind: 'channel',
         channelId,
@@ -520,34 +621,81 @@ const SearchResults = (): ReactElement => {
     },
     [],
   );
-  const handleClosePanel = (): void => setSelectedPanel(null);
+  const handleClosePanel = (): void => {
+    hasManualPanelSelectionRef.current = true;
+    setSelectedPanel(null);
+  };
 
   // Auto-open the first result once results arrive for a new search (desktop only)
   useEffect(() => {
-    if (isMobile || isLoading || results.length === 0) return;
-    if (autoOpenedRef.current) return;
-    const first = results[0];
-    if (!first || first.type === 'channel') return;
+    if (isMobile || isLoading) return;
+    if (hasManualPanelSelectionRef.current) return;
+
+    const autoOpenableTypes =
+      filters.docType === 'messages'
+        ? new Set<DisplaySearchResult['type']>(['conversation'])
+        : filters.docType === 'tickets'
+          ? new Set<DisplaySearchResult['type']>(['ticket'])
+          : filters.docType === 'all'
+            ? new Set<DisplaySearchResult['type']>(['conversation', 'ticket'])
+            : null;
+
+    // Files and other non-message tabs do not have a meaningful thread to preview.
+    if (!autoOpenableTypes) return;
+
+    const first = results.find(result => {
+      if (!autoOpenableTypes.has(result.type)) return false;
+      const resultContext = result.searchContext;
+      if (!resultContext?.channelId || !resultContext.conversationId) return false;
+      return !(
+        resultContext.subApp === 'DESK' ||
+        (result.type === 'ticket' &&
+          isDeskChannelType(allChannelsForNav.find(c => c.id === resultContext.channelId)?.type))
+      );
+    });
+
+    if (!first) {
+      // A completed search with no previewable result must not retain a stale panel.
+      if (autoOpenedResultKeyRef.current !== null) {
+        autoOpenedResultKeyRef.current = null;
+        setSelectedPanel(null);
+      }
+      return;
+    }
+
     const ctx = first.searchContext;
     if (!ctx?.channelId || !ctx?.conversationId) return;
-    autoOpenedRef.current = true;
+    const resultKey = JSON.stringify([
+      fullSearchKey,
+      first.type,
+      first.id,
+      ctx.channelId,
+      ctx.conversationId,
+      ctx.messageId,
+    ]);
+    if (autoOpenedResultKeyRef.current === resultKey) return;
+    autoOpenedResultKeyRef.current = resultKey;
+
     // Mirror the click-handler routing: open thread panel for any conversation with
     // replies (replyCount > 0), channel context for standalone messages.
     if (ctx.replyCount && ctx.replyCount > 0) {
-      handleSelectThread({
+      setSelectedPanel({
+        kind: 'thread',
+        thread: {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          matchedMessageId: ctx.messageId ?? null,
+        },
+      });
+    } else {
+      setSelectedPanel({
+        kind: 'channel',
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
         matchedMessageId: ctx.messageId ?? null,
       });
-    } else {
-      handleSelectChannelContext(
-        ctx.channelId,
-        ctx.conversationId,
-        undefined,
-        ctx.messageId ?? null,
-      );
     }
-  }, [results, isMobile, isLoading, handleSelectThread, handleSelectChannelContext]);
+  }, [results, isMobile, isLoading, filters.docType, fullSearchKey, allChannelsForNav]);
 
   const contextValue = useMemo(
     () => ({
@@ -562,6 +710,35 @@ const SearchResults = (): ReactElement => {
   const totalCount = isChannelsMode
     ? localChannelResults.length
     : (paginationState[currentTab]?.total ?? 0);
+
+  // Highlighted ticket strings (subject + id, with `<hi>` match markers) keyed
+  // by xyneId, so the ticket widget embedded in each result card can highlight
+  // the matched text in place. Only tickets whose subject/id actually matched
+  // get an entry — everything else falls back to plain text.
+  const ticketHighlightMap = useMemo(() => {
+    const map = new Map<string, TicketSearchHighlight>();
+    for (const r of results) {
+      if (r.type !== 'ticket') continue;
+      const xyneId = r.searchContext?.xyneId;
+      if (!xyneId) continue;
+      const titleHtml = r.title?.includes('<hi>') ? r.title : undefined;
+      // Backend subtitle leads with the xyneId ("VAI-<hi>0004</hi> | Status | …").
+      // Only accept it if, once `<hi>` is stripped, it matches the plain xyneId — so a
+      // subtitle-format change degrades to no highlight instead of highlighting the wrong text.
+      const idSegment = r.subtitle?.split(' | ')[0];
+      const xyneIdHtml =
+        idSegment?.includes('<hi>') && idSegment.replace(/<\/?hi>/g, '') === xyneId
+          ? idSegment
+          : undefined;
+      if (titleHtml || xyneIdHtml) {
+        map.set(xyneId, {
+          ...(titleHtml && { titleHtml }),
+          ...(xyneIdHtml && { xyneIdHtml }),
+        });
+      }
+    }
+    return map;
+  }, [results]);
 
   const resultsColumn = (
     <div className='relative flex flex-col h-full min-h-0'>
@@ -598,28 +775,27 @@ const SearchResults = (): ReactElement => {
         )}
       </div>
       <div ref={scrollRef} className='flex-1 min-h-0 overflow-y-auto px-4'>
-        <ResultsBody
-          query={query}
-          hasActiveFilters={
-            filters.fromUserIds.length > 0 ||
-            filters.inChannelIds.length > 0 ||
-            filters.assigneeIds.length > 0 ||
-            filters.onlyMyChannels ||
-            !!priorityFilter
-          }
-          hasEverLoaded={hasEverLoadedRef.current}
-          isLoading={isLoading}
-          error={error}
-          results={results}
-          loadMoreRef={loadMoreRef}
-          selectedPanel={selectedPanel}
-          onSelectUser={handleSelectUser}
-          channelData={allChannelsForNav}
-          compareMode={compareMode}
-          selectedIds={selectedIds}
-          relevantIds={relevantIds}
-          onToggleSelect={toggleSelect}
-        />
+        <TicketSearchHighlightContext.Provider value={ticketHighlightMap}>
+          <ResultsBody
+            query={query}
+            hasActiveFilters={filtersActive}
+            hasEverLoaded={hasEverLoadedRef.current}
+            isLoading={isLoading}
+            error={error}
+            results={results}
+            loadMoreRef={loadMoreRef}
+            selectedPanel={selectedPanel}
+            onSelectUser={handleSelectUser}
+            channelData={allChannelsForNav}
+            searchableChannels={allChannelsWithCategory}
+            compareMode={compareMode}
+            selectedIds={selectedIds}
+            relevantIds={relevantIds}
+            onToggleSelect={toggleSelect}
+            docType={filters.docType}
+            filteredLocalChannels={filteredLocalChannels}
+          />
+        </TicketSearchHighlightContext.Provider>
       </div>
 
       <div className='pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center'>
@@ -710,11 +886,66 @@ interface ResultsBodyProps {
   selectedPanel: SidePanelState;
   onSelectUser: (userId: string) => void;
   channelData: ReturnType<typeof useAllChannels>;
+  searchableChannels: Array<{
+    channel: Channel;
+    category: ChannelCategory;
+    searchableNames?: string[];
+  }>;
   compareMode: boolean;
   selectedIds: Set<string>;
   relevantIds: Set<string>;
   onToggleSelect: (result: DisplaySearchResult) => void;
+  docType: SearchResultsFilters['docType'];
+  filteredLocalChannels: Array<{
+    channel: Channel;
+    category: ChannelCategory;
+    searchableNames?: string[];
+  }>;
 }
+
+// Group key assignment — mirrors cmdK's groupedBackendResults logic
+const getResultGroupKey = (result: DisplaySearchResult): string => {
+  if (result.searchContext?.subApp === 'DESK') return 'desk';
+  if (result.type === 'attachment') {
+    const sub = result.searchContext?.subApp?.toLowerCase();
+    if (sub === 'canvas') return 'canvas';
+    if (sub === 'transcript') return 'transcript';
+    if (sub === 'recording') return 'recording';
+    return 'attachment';
+  }
+  return result.type;
+};
+
+// Backend-only group order — local sections (users, channels) are rendered separately above.
+const BACKEND_GROUP_ORDER = [
+  'conversation',
+  'ticket',
+  'attachment',
+  'canvas',
+  'transcript',
+  'recording',
+  'desk',
+] as const;
+
+// Labels mirror cmdK's getGroupLabel exactly
+const GROUP_LABELS: Record<string, string> = {
+  conversation: 'Messages',
+  ticket: 'Tickets',
+  attachment: 'Attachments',
+  canvas: 'Canvas',
+  transcript: 'Calls',
+  recording: 'Recordings',
+  desk: 'Desk',
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  [ChannelCategory.STARRED]: 'Starred',
+  [ChannelCategory.CHANNELS]: 'Channels',
+  [ChannelCategory.DIRECT_MESSAGES]: 'Direct Messages',
+  [ChannelCategory.GROUP_DMS]: 'Group DMs',
+};
+
+const LOCAL_SECTION_DISPLAY_LIMIT = 5;
 
 function UserResultCard({
   result,
@@ -770,6 +1001,21 @@ function UserResultCard({
   );
 }
 
+function getAttachmentResultIcon(result: DisplaySearchResult): ReactElement {
+  const subApp = result.searchContext?.subApp?.toUpperCase();
+
+  switch (subApp) {
+    case 'CANVAS':
+      return <FileText className='size-4 text-muted-foreground' />;
+    case 'TRANSCRIPT':
+      return <Mic className='size-4 text-muted-foreground' />;
+    case 'DESK':
+      return <Mail className='size-4 text-muted-foreground' />;
+    default:
+      return <Paperclip className='size-4 text-muted-foreground' />;
+  }
+}
+
 function ResultsBody({
   query,
   hasActiveFilters,
@@ -781,35 +1027,251 @@ function ResultsBody({
   selectedPanel,
   onSelectUser,
   channelData,
+  searchableChannels,
   compareMode,
   selectedIds,
   relevantIds,
   onToggleSelect,
+  docType,
+  filteredLocalChannels,
 }: ResultsBodyProps): ReactElement {
   const navigate = useNavigate();
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const channelLabelsById = useMemo(
+    () =>
+      new Map(searchableChannels.map(channel => [channel.channel.id, formatChannelLabel(channel)])),
+    [searchableChannels],
+  );
 
-  if (results.length === 0 && !error) {
-    if (!query && !hasActiveFilters) {
+  // Reset expand state when query changes
+  useEffect(() => {
+    if (!query.trim()) setExpandedCategories(new Set());
+  }, [query]);
+
+  const toggleExpand = (key: string): void => {
+    setExpandedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Renders a single result card — shared between flat and grouped views
+  const renderCard = (result: DisplaySearchResult): ReactElement | null => {
+    const key = `${result.type}-${result.id}`;
+
+    // User card — opens profile panel
+    if (result.type === 'user') {
+      return <UserResultCard key={key} result={result} onSelectUser={onSelectUser} />;
+    }
+
+    // Channel card
+    if (result.type === 'channel') {
+      const channelId = result.searchContext?.channelId ?? result.id;
+      const channel = channelData?.find(c => c.id === channelId);
+      const isDeskChannel = isDeskChannelType(channel?.type);
       return (
-        <EmptyState
-          title='Search for messages, files, and tickets'
-          subtitle='Type above and press Enter to search'
-        />
+        <button
+          key={key}
+          onClick={() =>
+            void navigate(isDeskChannel ? `/support/${channelId}` : `/chat/dir/${channelId}`)
+          }
+          className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
+          data-track-category='SEARCH_RESULTS'
+          data-track-name={isDeskChannel ? 'OPEN_DESK_CHANNEL' : 'OPEN_CHANNEL'}
+        >
+          <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
+            {isDeskChannel ? (
+              <Mail className='size-4 text-muted-foreground' />
+            ) : (
+              <Hash className='size-4 text-muted-foreground' />
+            )}
+          </div>
+          <div className='min-w-0'>
+            <p className='text-sm font-medium text-foreground truncate'>
+              <RenderMessageWithHTML message={result.title} />
+            </p>
+            {result.subtitle && result.subtitle !== 'Channel' && (
+              <p className='text-xs text-muted-foreground truncate'>
+                <RenderMessageWithHTML message={result.subtitle} />
+              </p>
+            )}
+          </div>
+        </button>
       );
     }
-    // Show spinner while waiting for the first search to fire (debounce) or while loading
-    if (isLoading || !hasEverLoaded) {
+
+    // Attachment / file card
+    if (result.type === 'attachment') {
+      const icon = getAttachmentResultIcon(result);
+      const channelId = result.searchContext?.channelId;
+      const channelName = channelId ? channelLabelsById.get(channelId) : undefined;
+      const subtitle = channelName ? `File uploaded in ${channelName}` : result.subtitle;
       return (
-        <div className='flex items-center justify-center h-full'>
-          <Loader2 className='animate-spin text-muted-foreground' size={32} />
+        <button
+          key={key}
+          onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+          className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
+          data-track-category='SEARCH_RESULTS'
+          data-track-name='OPEN_ATTACHMENT'
+        >
+          <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
+            {icon}
+          </div>
+          <div className='min-w-0 flex-1'>
+            <p className='text-sm font-medium text-foreground truncate'>
+              <RenderMessageWithHTML message={result.title} />
+            </p>
+            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
+              {subtitle && (
+                <span className='truncate'>
+                  {channelName ? subtitle : <RenderMessageWithHTML message={subtitle} />}
+                </span>
+              )}
+              {result.metadata.timestamp && (
+                <span className='shrink-0 whitespace-nowrap'>
+                  {utcToIst(result.metadata.timestamp)}
+                </span>
+              )}
+            </div>
+          </div>
+        </button>
+      );
+    }
+
+    // Conversation message card (type === 'conversation')
+    // DESK mails navigate away; regular messages open in the side panel
+    if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
+      // Mirrors cmdK's desk-mail row: subject, then sender + recipient count and
+      // timestamp, then the body snippet.
+      const senderName = result.searchContext?.senderName || result.subtitle || '';
+      const recipientCount = result.searchContext?.recipientCount ?? 0;
+      return (
+        <button
+          key={key}
+          onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+          className='w-full flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
+          data-track-category='SEARCH_RESULTS'
+          data-track-name='OPEN_MAIL'
+        >
+          <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
+            <Mail className='size-4 text-muted-foreground' />
+          </div>
+          <div className='min-w-0 flex-1'>
+            <p className='text-sm font-medium text-foreground truncate'>
+              <RenderMessageWithHTML message={result.title} />
+            </p>
+            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
+              <span className='min-w-0 truncate'>
+                {senderName}
+                {recipientCount > 0 && ` +${recipientCount} more`}
+              </span>
+              {result.metadata.timestamp && (
+                <span className='shrink-0 whitespace-nowrap'>
+                  {utcToIst(result.metadata.timestamp)}
+                </span>
+              )}
+            </div>
+            {result.context && (
+              <div className='mt-0.5 text-xs text-muted-foreground'>
+                <SearchSnippetRenderer message={result.context} wordLimit={40} />
+              </div>
+            )}
+          </div>
+        </button>
+      );
+    }
+
+    const ctx = result.searchContext;
+    if (!ctx?.channelId || !ctx?.conversationId) return null;
+    const isTicket = result.type === 'ticket';
+    const isDeskTicket =
+      isTicket && isDeskChannelType(channelData?.find(c => c.id === ctx.channelId)?.type);
+
+    // Ticket summary from the search fields — desk tickets render it as a compact
+    // card; normal tickets serialize it into ticket_md so the message bubble shows
+    // the embedded widget without fetching the conversation.
+    const ticketSummary = isTicket
+      ? {
+          id: ctx.ticketId ?? result.id,
+          title: result.title,
+          description: result.context ?? '',
+          xyneId: ctx.xyneId ?? null,
+          stageName: ctx.stageName ?? null,
+          assignedTo: ctx.assignedTo ?? null,
+          createdBy: ctx.createdBy ?? null,
+          createdAt: ctx.createdAtTimestamp ?? null,
+          ticketType: ctx.ticketType ?? null,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          statusV2: (ctx.ticketStatus as TicketStatusV2 | undefined) ?? null,
+          priority: (ctx.priority as TicketPriority | undefined) ?? null,
+        }
+      : null;
+
+    // Desk tickets: their message-bound widget can't render (bot/AI initial
+    // message, missing ticket_md), so render a compact data-driven ticket card.
+    if (isDeskTicket && ticketSummary) {
+      return (
+        <div key={key} className='w-full'>
+          <TicketCardV2
+            ticket={ticketSummary}
+            isConversation
+            width='max-w-none w-full'
+            onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+          />
         </div>
       );
     }
-    const subtitle = query
-      ? `Nothing matched "${query}"`
-      : 'No results found for the active filters';
-    return <EmptyState title='No results found' subtitle={subtitle} />;
-  }
+
+    // Conversations + normal tickets render as the message bubble, built entirely
+    // from the Vespa payload (no entity queries). Tickets carry a serialized
+    // ticket_md so ChatBubble renders the embedded ticket widget.
+    const ticketMd = ticketSummary ? (serializeTicketMd(ticketSummary) ?? undefined) : undefined;
+    return (
+      <SearchResultMessageCard
+        key={key}
+        channelId={ctx.channelId}
+        conversationId={ctx.conversationId}
+        matchedMessageId={ctx.messageId ?? null}
+        {...(isTicket && { displayMessageId: ctx.messageId ?? result.id })}
+        {...(result.context && { searchSnippet: result.context })}
+        searchThread={{
+          isRootMessage: isTicket ? true : (ctx.isRootMessage ?? false),
+          replyCount: ctx.replyCount ?? 0,
+          senderId: isTicket ? (ctx.createdBy ?? '') : (ctx.senderId ?? ''),
+          msgType: isTicket ? MessageType.USER : toMessageType(ctx.msgType),
+          createdAt: ctx.createdAtTimestamp ?? 0,
+          ...(ticketMd && { ticketMd }),
+          ...(ctx.threadSenders && { threadSenders: ctx.threadSenders }),
+          ...(ctx.attachmentIds?.length && { attachmentIds: ctx.attachmentIds }),
+        }}
+        isSelected={
+          (selectedPanel?.kind === 'channel' &&
+            selectedPanel.conversationId === ctx.conversationId &&
+            selectedPanel.matchedMessageId === (ctx.messageId ?? null)) ||
+          (selectedPanel?.kind === 'thread' &&
+            selectedPanel.thread.conversationId === ctx.conversationId &&
+            selectedPanel.thread.matchedMessageId === (ctx.messageId ?? null))
+        }
+      />
+    );
+  };
+
+  const footer = (
+    <>
+      {/* Sentinel for load-more */}
+      <div ref={loadMoreRef} className='h-1' />
+      {isLoading && (
+        <div className='flex justify-center py-4'>
+          <Loader2 className='animate-spin text-muted-foreground' size={20} />
+        </div>
+      )}
+    </>
+  );
+
+  // ── Error state (all tabs) ──────────────────────────────────────────────
   if (error) {
     return (
       <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
@@ -819,136 +1281,207 @@ function ResultsBody({
     );
   }
 
+  // ── Grouped view — ALL tab, non-compare ─────────────────────────────────
+  // Checked BEFORE the results.length===0 guards so local sections (users,
+  // channels) are always visible even when backend results are still loading
+  // or empty — mirrors cmdK popup (non-screen) ALL tab behaviour.
+  if (docType === 'all' && !compareMode) {
+    // Group backend results only (local users/channels rendered as separate sections)
+    const backendOnly = results.filter(r => r.type !== 'user' && r.type !== 'channel');
+    const userResults = results.filter(r => r.type === 'user');
+
+    const grouped = new Map<string, DisplaySearchResult[]>();
+    for (const result of backendOnly) {
+      const gk = getResultGroupKey(result);
+      if (!grouped.has(gk)) grouped.set(gk, []);
+      grouped.get(gk)!.push(result);
+    }
+
+    // Partition local channels by category — mirrors cmdK's groupedChannels
+    const starredItems = filteredLocalChannels.filter(
+      fc => fc.category === ChannelCategory.STARRED,
+    );
+    const regularItems = filteredLocalChannels.filter(
+      fc => fc.category === ChannelCategory.CHANNELS,
+    );
+    const dmItems = filteredLocalChannels.filter(
+      fc => fc.category === ChannelCategory.DIRECT_MESSAGES,
+    );
+    // cmdK only shows Group DMs in search mode — 1:1 DMs are not a separate section
+    const groupDmItems = dmItems.filter(({ channel }) => isGroupDMChannel(channel.scopeType));
+
+    // Converts a local channel entry to the DisplaySearchResult shape used by renderCard
+    const toChannelResult = (c: Channel, searchableNames?: string[]): DisplaySearchResult => {
+      const isDm = isDMChannel(c.scopeType);
+      return {
+        type: 'channel' as const,
+        id: c.id,
+        title: isDm ? searchableNames?.join(', ') || c.name : c.name,
+        subtitle: '',
+        relevanceScore: 1,
+        metadata: {},
+      };
+    };
+
+    // Renders a collapsible local channel section — label has NO count (mirrors cmdK)
+    const renderLocalChannelSection = (
+      category: ChannelCategory,
+      items: typeof filteredLocalChannels,
+      collapsible = true,
+    ): ReactElement | null => {
+      if (items.length === 0) return null;
+      const sectionKey = category as string;
+      const isExpanded = expandedCategories.has(sectionKey);
+      const hasMore = collapsible && items.length > LOCAL_SECTION_DISPLAY_LIMIT;
+      const displayItems =
+        !isExpanded && hasMore ? items.slice(0, LOCAL_SECTION_DISPLAY_LIMIT) : items;
+      const hiddenCount = items.length - LOCAL_SECTION_DISPLAY_LIMIT;
+      return (
+        <div key={sectionKey} className='mb-6'>
+          <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+            {CATEGORY_LABELS[sectionKey]}
+          </p>
+          <div className='space-y-2'>
+            {displayItems.map(({ channel: c, searchableNames }) =>
+              renderCard(toChannelResult(c, searchableNames)),
+            )}
+          </div>
+          {hasMore && (
+            <button
+              onClick={() => toggleExpand(sectionKey)}
+              className='mt-2 px-1 text-xs text-muted-foreground hover:text-foreground hover:underline'
+              data-track-category='SEARCH_RESULTS'
+              data-track-name='TOGGLE_LOCAL_SECTION'
+            >
+              {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+            </button>
+          )}
+        </div>
+      );
+    };
+
+    // Renders the collapsible Users section — label HAS count (mirrors cmdK: "Users (N)")
+    const renderUserSection = (): ReactElement | null => {
+      if (userResults.length === 0) return null;
+      const isExpanded = expandedCategories.has('user');
+      const hasMore = userResults.length > LOCAL_SECTION_DISPLAY_LIMIT;
+      const displayItems =
+        !isExpanded && hasMore ? userResults.slice(0, LOCAL_SECTION_DISPLAY_LIMIT) : userResults;
+      const hiddenCount = userResults.length - LOCAL_SECTION_DISPLAY_LIMIT;
+      return (
+        <div key='user' className='mb-6'>
+          <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+            Users ({userResults.length})
+          </p>
+          <div className='space-y-2'>{displayItems.map(result => renderCard(result))}</div>
+          {hasMore && (
+            <button
+              onClick={() => toggleExpand('user')}
+              className='mt-2 px-1 text-xs text-muted-foreground hover:text-foreground hover:underline'
+              data-track-category='SEARCH_RESULTS'
+              data-track-name='TOGGLE_USERS_SECTION'
+            >
+              {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+            </button>
+          )}
+        </div>
+      );
+    };
+
+    // Local sections are query-driven — mirrors cmdK's search branch. Without a
+    // query, filteredLocalChannels returns every channel, so gate on the query to
+    // avoid a partial browse (which would also drop 1:1 DMs) and keep the clean
+    // empty state until the user types.
+    const showLocalSections = !hasActiveFilters && !!query.trim();
+    const hasLocalSections =
+      showLocalSections && (userResults.length > 0 || filteredLocalChannels.length > 0);
+    const hasBackendSections = backendOnly.length > 0;
+
+    // True empty: nothing to show at all
+    if (!hasLocalSections && !hasBackendSections) {
+      if (!query && !hasActiveFilters) {
+        return (
+          <EmptyState
+            title='Search for messages, files, and tickets'
+            subtitle='Type above and press Enter to search'
+          />
+        );
+      }
+      if (isLoading || !hasEverLoaded) {
+        return (
+          <div className='flex items-center justify-center h-full'>
+            <Loader2 className='animate-spin text-muted-foreground' size={32} />
+          </div>
+        );
+      }
+      return (
+        <EmptyState
+          title='No results found'
+          subtitle={
+            query ? `Nothing matched "${query}"` : 'No results found for the active filters'
+          }
+        />
+      );
+    }
+
+    return (
+      <div className='w-full pt-2 pb-6'>
+        {/* Local sections — same order as cmdK non-screen popup ALL tab:
+            Starred → Users → Group DMs (not collapsible) → Channels
+            1:1 DMs are intentionally omitted in search mode (matches cmdK) */}
+        {showLocalSections && (
+          <>
+            {renderLocalChannelSection(ChannelCategory.STARRED, starredItems)}
+            {renderUserSection()}
+            {renderLocalChannelSection(ChannelCategory.GROUP_DMS, groupDmItems, false)}
+            {renderLocalChannelSection(ChannelCategory.CHANNELS, regularItems)}
+          </>
+        )}
+        {/* Backend result sections */}
+        {BACKEND_GROUP_ORDER.filter(gk => grouped.has(gk)).map(gk => (
+          <div key={gk} className='mb-6'>
+            <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+              {GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
+            </p>
+            <div className='space-y-2'>{grouped.get(gk)!.map(result => renderCard(result))}</div>
+          </div>
+        ))}
+        {footer}
+      </div>
+    );
+  }
+
+  // ── Flat view — specific docType tabs and compare mode ──────────────────
+  if (results.length === 0) {
+    if (!query && !hasActiveFilters) {
+      return (
+        <EmptyState
+          title='Search for messages, files, and tickets'
+          subtitle='Type above and press Enter to search'
+        />
+      );
+    }
+    if (isLoading || !hasEverLoaded) {
+      return (
+        <div className='flex items-center justify-center h-full'>
+          <Loader2 className='animate-spin text-muted-foreground' size={32} />
+        </div>
+      );
+    }
+    return (
+      <EmptyState
+        title='No results found'
+        subtitle={query ? `Nothing matched "${query}"` : 'No results found for the active filters'}
+      />
+    );
+  }
   return (
     <div className='w-full space-y-2 pt-2 pb-6'>
       {results.map((result, index) => {
-        const key = `${result.type}-${result.id}`;
-        const el = ((): ReactElement | null => {
-          // User card — opens profile panel
-          if (result.type === 'user') {
-            return <UserResultCard key={key} result={result} onSelectUser={onSelectUser} />;
-          }
-
-          // Channel card
-          if (result.type === 'channel') {
-            const channelId = result.searchContext?.channelId ?? result.id;
-            return (
-              <button
-                key={key}
-                onClick={() => void navigate(`/chat/dir/${channelId}`)}
-                className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
-                data-track-category='SEARCH_RESULTS'
-                data-track-name='OPEN_CHANNEL'
-              >
-                <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
-                  <Hash className='size-4 text-muted-foreground' />
-                </div>
-                <div className='min-w-0'>
-                  <p className='text-sm font-medium text-foreground truncate'>
-                    <RenderMessageWithHTML message={result.title} />
-                  </p>
-                  {result.subtitle && result.subtitle !== 'Channel' && (
-                    <p className='text-xs text-muted-foreground truncate'>
-                      <RenderMessageWithHTML message={result.subtitle} />
-                    </p>
-                  )}
-                </div>
-              </button>
-            );
-          }
-
-          // Attachment / file card
-          if (result.type === 'attachment') {
-            const icon =
-              result.searchContext?.subApp === 'DESK' ? (
-                <Mail className='size-4 text-muted-foreground' />
-              ) : (
-                <Paperclip className='size-4 text-muted-foreground' />
-              );
-            return (
-              <button
-                key={key}
-                onClick={() => void navigateToSearchResult(result, navigate, channelData)}
-                className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
-                data-track-category='SEARCH_RESULTS'
-                data-track-name='OPEN_ATTACHMENT'
-              >
-                <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
-                  {icon}
-                </div>
-                <div className='min-w-0 flex-1'>
-                  <p className='text-sm font-medium text-foreground truncate'>
-                    <RenderMessageWithHTML message={result.title} />
-                  </p>
-                  <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-                    {result.subtitle && (
-                      <span className='truncate'>
-                        <RenderMessageWithHTML message={result.subtitle} />
-                      </span>
-                    )}
-                    {result.metadata.timestamp && (
-                      <span className='shrink-0 whitespace-nowrap'>
-                        {utcToIst(result.metadata.timestamp)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </button>
-            );
-          }
-
-          // Conversation message card (type === 'conversation')
-          // DESK mails navigate away; regular messages open in the side panel
-          if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
-            return (
-              <button
-                key={key}
-                onClick={() => void navigateToSearchResult(result, navigate, channelData)}
-                className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
-                data-track-category='SEARCH_RESULTS'
-                data-track-name='OPEN_MAIL'
-              >
-                <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
-                  <Mail className='size-4 text-muted-foreground' />
-                </div>
-                <div className='min-w-0'>
-                  <p className='text-sm font-medium text-foreground truncate'>
-                    <RenderMessageWithHTML message={result.title} />
-                  </p>
-                  {result.subtitle && (
-                    <p className='text-xs text-muted-foreground truncate'>
-                      <RenderMessageWithHTML message={result.subtitle} />
-                    </p>
-                  )}
-                </div>
-              </button>
-            );
-          }
-
-          // Regular message card
-          const ctx = result.searchContext;
-          if (!ctx?.channelId || !ctx?.conversationId) return null;
-          return (
-            <SearchResultMessageCard
-              key={key}
-              channelId={ctx.channelId}
-              conversationId={ctx.conversationId}
-              matchedMessageId={ctx.messageId ?? null}
-              {...(result.context && { searchSnippet: result.context })}
-              isSelected={
-                (selectedPanel?.kind === 'channel' &&
-                  selectedPanel.conversationId === ctx.conversationId &&
-                  selectedPanel.matchedMessageId === (ctx.messageId ?? null)) ||
-                (selectedPanel?.kind === 'thread' &&
-                  selectedPanel.thread.conversationId === ctx.conversationId &&
-                  selectedPanel.thread.matchedMessageId === (ctx.messageId ?? null))
-              }
-            />
-          );
-        })();
-
+        const el = renderCard(result);
         if (!el) return null;
         if (!compareMode) return el;
+        const key = `${result.type}-${result.id}`;
         return (
           <CompareSelectRow
             key={key}
@@ -963,13 +1496,7 @@ function ResultsBody({
           </CompareSelectRow>
         );
       })}
-      {/* Sentinel for load-more (same mechanism as popup modal) */}
-      <div ref={loadMoreRef} className='h-1' />
-      {isLoading && (
-        <div className='flex justify-center py-4'>
-          <Loader2 className='animate-spin text-muted-foreground' size={20} />
-        </div>
-      )}
+      {footer}
     </div>
   );
 }

@@ -309,6 +309,16 @@ const ChannelCommandMenu = ({
     return result;
   }, [channels, starred, directMessages, usersById]);
 
+  const getResultChannelLabel = useCallback(
+    (result: DisplaySearchResult): string | undefined => {
+      const channelId = result.searchContext?.channelId;
+      if (!channelId) return undefined;
+      const channel = allChannels.find(item => item.channel.id === channelId);
+      return channel ? formatChannelLabel(channel) : undefined;
+    },
+    [allChannels],
+  );
+
   // Map of user IDs the current user has a 1:1 DM with → recency index
   // (0 = first DM in `directMessages`, which is the recency-ordered list also
   // used by the empty-state DIRECT MESSAGES section). `rankUsers` uses this
@@ -1876,6 +1886,7 @@ const ChannelCommandMenu = ({
                   <SearchResultItem
                     key={result.id}
                     result={result}
+                    channelDisplayName={getResultChannelLabel(result)}
                     onSelect={res => handleBackendResultSelect(res, index + 1)}
                     onPreview={handleFilePreview}
                     onItemMouseDown={handleItemMouseDown}
@@ -1967,6 +1978,7 @@ const ChannelCommandMenu = ({
                   <SearchResultItem
                     key={result.id}
                     result={result}
+                    channelDisplayName={getResultChannelLabel(result)}
                     onSelect={res => handleBackendResultSelect(res, index + 1)}
                     onPreview={handleFilePreview}
                     onItemMouseDown={handleItemMouseDown}
