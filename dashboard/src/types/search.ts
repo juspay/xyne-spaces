@@ -55,6 +55,10 @@ export interface SearchContext {
   conversationId?: string;
   messageId?: string;
   replyCount?: number; // Number of replies - determines if message is a thread
+  isRootMessage?: boolean; // True when this message is the conversation's initial/root message
+  msgType?: string; // Message type (USER/BOT/SYSTEM/…) — used to fabricate the message from search
+  threadSenders?: string[]; // User ids of thread participants — used for the reply-avatar preview
+  attachmentIds?: string[]; // Vespa file doc ids for attachments owned by this message
   orgName?: string;
   senderName?: string;
   senderId?: string;
@@ -161,6 +165,7 @@ export interface VespaSearchFilters {
   projectId?: string;
   status?: string;
   ticketId?: string;
+  fileId?: string; // Comma-separated Vespa file doc ids
   searchId?: string;
   // Ticket-specific filters
   priority?: string; // HIGH, MEDIUM, LOW, CRITICAL

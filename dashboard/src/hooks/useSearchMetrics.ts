@@ -119,6 +119,10 @@ interface UseSearchMetricsOptions {
   // Initial value for the "Include my channels" toggle. Defaults to false so the
   // full-page search is unaffected; the Cmd-K modal opts in with `true`.
   defaultOnlyMyChannels?: boolean;
+  // When true, the ALL-tab Vespa query uses groupBy:'docType' so the backend
+  // returns results bucketed by document type (≤10 per category) instead of a
+  // flat ranked list — lets the ALL tab show a few of each type at once.
+  groupByDocType?: boolean;
 }
 
 const BACKEND_RESULTS_LIMIT = 25;
@@ -1128,6 +1132,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               const currentSessionId = searchSessionId || '';
               const vespaResponse = await searchService.vespaSearch({
                 ...searchFilters,
+                ...(options.groupByDocType && { groupBy: 'docType' }),
                 searchId: currentSessionId,
                 presentationSummary: 'lean',
               });

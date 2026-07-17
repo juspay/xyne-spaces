@@ -39,6 +39,10 @@ import { PrismaClient } from '@prisma/client';
        conversationId?: string;
        messageId?: string;
        replyCount?: number;
+       isRootMessage?: boolean;
+       msgType?: string;
+       threadSenders?: string[];
+       attachmentIds?: string[];
        senderId?: string;
        senderName?: string;
        senderEmail?: string;
@@ -490,6 +494,11 @@ import { PrismaClient } from '@prisma/client';
          conversationId: doc.threadId,
          messageId: doc.docId,
          replyCount: doc.replyCount || 0,
+         isRootMessage: doc.isRootMessage ?? false,
+         msgType: doc.messageType,
+         createdAtTimestamp: doc.createdAtTimestamp,
+         threadSenders: doc.threadSenders,
+         attachmentIds: doc.attachmentIds,
          senderId: doc.userId,
          senderName: doc.username,
          senderEmail: doc.userEmail,
@@ -746,6 +755,9 @@ function transformCollection(
          ticketType: doc.ticketType,
          userGroupId: doc.userGroupId,
          tags: doc.tags,
+         replyCount: doc.replyCount || 0,
+         threadSenders: doc.threadSenders,
+         attachmentIds: doc.attachmentIds,
        },
      };
    }
@@ -891,4 +903,3 @@ function transformCollection(
        },
      };
    }
-
