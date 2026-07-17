@@ -157,9 +157,8 @@ function DayViewCallCard({
             <div className='w-0.5 rounded-full shrink-0 bg-primary self-stretch max-sm:hidden' />
             <div className='flex flex-col flex-1 overflow-hidden'>
               <span
-                className='leading-tight truncate'
+                className='leading-tight truncate text-foreground'
                 style={{
-                  color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
                   fontSize: '12px',
                   lineHeight: '18px',
                   fontWeight: 500,
@@ -180,9 +179,8 @@ function DayViewCallCard({
               </span>
               {height >= 40 && (
                 <span
-                  className='leading-tight mt-0.5 whitespace-nowrap'
+                  className='leading-tight mt-0.5 whitespace-nowrap text-muted-foreground'
                   style={{
-                    color: isEnded ? 'hsl(var(--muted-foreground))' : '#092E58',
                     fontSize: '10px',
                     lineHeight: '14px',
                     opacity: 0.7,

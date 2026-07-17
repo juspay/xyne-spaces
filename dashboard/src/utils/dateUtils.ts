@@ -121,6 +121,21 @@ export const formatRelativeTime = (date: Date | number): string => {
 };
 
 /**
+ * Format the remaining time until a future timestamp using compact units.
+ * Examples: "2d 5h", "1h 10m", "10m".
+ */
+export const formatTimeUntil = (startsAt: number, now: number): string => {
+  const totalMinutes = Math.max(1, Math.ceil((startsAt - now) / 60_000));
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) return `${days}d${hours > 0 ? ` ${hours}h` : ''}`;
+  if (hours > 0) return `${hours}h${minutes > 0 ? ` ${minutes}m` : ''}`;
+  return `${minutes}m`;
+};
+
+/**
  * Format date for file browser listings (Google Drive-style).
  * - "Just now" for < 1 min
  * - "X min ago" for < 1 hour

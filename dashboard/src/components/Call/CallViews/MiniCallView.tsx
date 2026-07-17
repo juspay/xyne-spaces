@@ -549,6 +549,7 @@ export function MiniCallView({
                         className='h-full'
                         compact={true}
                         showSidebar={true}
+                        allowFullScreen={false}
                         raisedHands={raisedHands}
                         onToggleHandRaise={onToggleHandRaise}
                       />

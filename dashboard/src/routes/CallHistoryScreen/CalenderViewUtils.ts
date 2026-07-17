@@ -2,6 +2,7 @@ import type React from 'react';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import { Call } from './callHistoryItem.utils';
 import type { OtherUserCalls, OtherUserBusySlot } from '../../hooks/useOtherUserCalls';
+import { formatDuration } from '../../utils/dateUtils';
 
 // ── Drag & Drop helpers ──────────────────────────────────────────────────────
 
@@ -82,8 +83,12 @@ export const MIN_EVENT_HEIGHT = 28; // px
 export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+export const MAX_AVATARS_TO_SHOW = 3;
+export const RSVP_BADGE_BASE_CLASS =
+  'absolute -bottom-0.5 -right-0.5 flex items-center justify-center size-4 rounded-full border-2 border-background';
+
 export const POPOVER_CONTENT_CLASS =
-  'z-[60] bg-background rounded-xl border border-border shadow-lg w-[340px] outline-none ' +
+  'z-[60] bg-background rounded-xl border border-border shadow-xl w-[400px] max-w-[calc(100vw-32px)] outline-none ' +
   'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 ' +
   'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 ' +
   'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 ' +
@@ -144,6 +149,13 @@ export function formatCurrentTime(date: Date): string {
   const m = date.getMinutes().toString().padStart(2, '0');
   const ampm = date.getHours() >= 12 ? 'PM' : 'AM';
   return `${h}:${m} ${ampm}`;
+}
+
+/**
+ * Whether a participant actually attended the call.
+ */
+export function didAttend(participant: { joinedAt?: number | null }): boolean {
+  return typeof participant.joinedAt === 'number';
 }
 
 /**
@@ -340,4 +352,20 @@ export function getCallEventProps(call: Call, currentUserId?: string) {
     isDeclined,
     isMaybe,
   };
+}
+
+/**
+ * Format call duration from start and end timestamps.
+ * Returns a human-readable string like "1h 10m" or "45m".
+ */
+export function formatCallDuration(
+  startedAt: number | string | null | undefined,
+  endedAt: number | string | null | undefined,
+): string {
+  if (!startedAt || !endedAt) return '';
+  const start = new Date(startedAt).getTime();
+  const end = new Date(endedAt).getTime();
+  const diffMs = end - start;
+  if (diffMs <= 0) return '';
+  return formatDuration(diffMs);
 }

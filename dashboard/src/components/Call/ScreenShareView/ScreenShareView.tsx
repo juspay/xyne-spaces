@@ -24,6 +24,7 @@ interface ScreenShareViewProps {
   compact?: boolean | undefined;
   showSidebar?: boolean | undefined;
   showDrawingTools?: boolean | undefined;
+  allowFullScreen?: boolean | undefined;
   aiController?: { id: string; name: string } | null;
   requestedAiController?: boolean;
   raisedHands?: string[];
@@ -39,6 +40,7 @@ export function ScreenShareView({
   compact = false,
   showSidebar = true,
   showDrawingTools = false,
+  allowFullScreen = true,
   aiController,
   requestedAiController,
   raisedHands = [],
@@ -161,7 +163,7 @@ export function ScreenShareView({
           </div>
 
           {/* Fullscreen Expand Button - Bottom Right */}
-          {screenShareTrackRef && (
+          {screenShareTrackRef && allowFullScreen && (
             <button
               onClick={handleScreenShareClick}
               className={cn(
