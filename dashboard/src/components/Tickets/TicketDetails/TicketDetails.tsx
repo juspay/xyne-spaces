@@ -1643,6 +1643,26 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
   };
 
+  // Consume the Zero mutator's server result so ticket-detail field edits surface
+  // rejections instead of silently rolling back the optimistic update. Server-side
+  // rules (e.g. Euler board constraints) reject some updates; previously the error was
+  // dropped via `void zero.mutate(...)`, so the user got no feedback (e.g. an unassign
+  // appeared to do nothing).
+  const applyTicketUpdate = async (
+    update: Parameters<typeof mutators.ticket.update>[0],
+    errorFallback = 'Failed to update ticket',
+  ): Promise<void> => {
+    try {
+      const result = await zero.mutate(mutators.ticket.update(update)).server;
+      if (result.type === 'error') {
+        toast.error(result.error.message || errorFallback);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(message || errorFallback);
+    }
+  };
+
   const handleSaveTitle = (): void => {
     if (titleValue.trim() && titleValue !== ticket.title) {
       if (isEmailDeskTicket) {
@@ -1652,12 +1672,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         setTimeout(() => setShowTitleChangeConfirmDialog(true), 0);
         return;
       }
-      void zero.mutate(
-        mutators.ticket.update({
+      void applyTicketUpdate(
+        {
           id: ticket.id,
           title: titleValue.trim(),
           updatedAt: Date.now(),
-        }),
+        },
+        'Failed to update title',
       );
     }
     setEditingTitle(false);
@@ -1665,54 +1686,59 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const handleSaveDescription = (): void => {
     if (descriptionValue !== ticket.description) {
-      void zero.mutate(
-        mutators.ticket.update({
+      void applyTicketUpdate(
+        {
           id: ticket.id,
           description: descriptionValue.trim(),
           updatedAt: Date.now(),
-        }),
+        },
+        'Failed to update description',
       );
     }
     setEditingDescription(false);
   };
 
   const handlePriorityChange = (priority: string): void => {
-    void zero.mutate(
-      mutators.ticket.update({
+    void applyTicketUpdate(
+      {
         id: ticket.id,
         priority: priority as TicketPriority,
         updatedAt: Date.now(),
-      }),
+      },
+      'Failed to update priority',
     );
   };
 
   const handleAssigneeChange = (userId: string | null): void => {
-    void zero.mutate(
-      mutators.ticket.update({
+    void applyTicketUpdate(
+      {
         id: ticket.id,
         assignedTo: userId,
         updatedAt: Date.now(),
-      }),
+      },
+      'Failed to update assignee',
     );
   };
 
   const handleTicketTypeChange = (type: string): void => {
-    void zero.mutate(
-      mutators.ticket.update({
+    void applyTicketUpdate(
+      {
         id: ticket.id,
         ticketType: type,
         updatedAt: Date.now(),
-      }),
+      },
+      'Failed to update ticket type',
     );
   };
 
   const handleUserGroupChange = (groupId: string | null): void => {
-    void zero.mutate(
-      mutators.ticket.update({
+    void applyTicketUpdate(
+      {
         id: ticket.id,
         userGroupId: groupId ?? undefined,
         updatedAt: Date.now(),
-      }),
+      },
+      'Failed to update team',
     );
   };
 
