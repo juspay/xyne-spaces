@@ -1441,6 +1441,8 @@ export class EmailService {
           sourceType: DESK_EMAIL_SOURCE_TYPE,
           workspaceId: channel.workspaceId,
           configKey: deskEmailConfigKey(conversation.channelId),
+        }, 2).then((jobId) => {
+          logger.info(`[TagFramework] Enqueued tag generation job ${jobId} for email ${email.id}`);
         }).catch((err: unknown) => {
           logger.error(`[TagFramework] Failed to enqueue tag generation for email ${email.id}`, err);
         });

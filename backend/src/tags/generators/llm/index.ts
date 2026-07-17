@@ -81,6 +81,7 @@ export async function generateLlmTags(
       config: {
         apiKey: LITELLM_API_KEY,
         baseUrl: LITELLM_BASE_URL,
+        timeout: config.tagGenerationLlmTimeoutMs,
       },
     },
     defaultModel: modelName,
