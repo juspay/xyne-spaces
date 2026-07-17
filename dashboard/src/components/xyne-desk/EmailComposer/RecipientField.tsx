@@ -19,7 +19,7 @@ interface RecipientFieldProps {
   inputValue: string;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
-  onEmailsChangeUpdater: (updater: (prev: string[]) => string[]) => void;
+  onEmailsChange: (next: string[]) => void;
   onInputValueChange: (value: string) => void;
   suggestions: RecipientSuggestion[];
   activeSuggestField: FieldType | null;
@@ -60,7 +60,7 @@ export const RecipientField = ({
   inputValue,
   expanded,
   onExpandedChange,
-  onEmailsChangeUpdater,
+  onEmailsChange,
   onInputValueChange,
   suggestions,
   activeSuggestField,
@@ -154,7 +154,7 @@ export const RecipientField = ({
             <EmailTagWithAvatar
               key={email}
               email={email}
-              onRemove={() => onEmailsChangeUpdater(prev => prev.filter(e => e !== email))}
+              onRemove={() => onEmailsChange(emails.filter(e => e !== email))}
               disabled={disabled}
               users={users}
               draggable
