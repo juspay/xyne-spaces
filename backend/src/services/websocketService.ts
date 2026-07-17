@@ -6,7 +6,7 @@ import { typingService, TypingUser } from './typingService';
 import { userStatusService } from './userStatusService';
 import { workspaceEventService, WorkspaceEvent } from './workspaceEventService';
 import { ChannelRepository } from '../database/repositories/channelRepository';
-import { ConversationRepository } from '../database/repositories/conversationRepository';
+// import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { logger } from '@/utils/logger';
 import { authMiddleware } from '../middleware/auth';
 import { notificationService } from '@/notification-service';
@@ -26,9 +26,9 @@ interface AuthenticatedSocket extends Socket {
   workspaceName?: string;
 }
 
-interface JoinSessionData {
-  sessionId: string; // This will be channelId or conversationId
-}
+// interface JoinSessionData {
+//   sessionId: string; // This will be channelId or conversationId
+// }
 
 
 
@@ -37,9 +37,9 @@ interface SubscribeToChannelsData {
   conversations: string[];
 }
 
-interface ChannelSubscriptionData {
-  sessionId: string;
-}
+// interface ChannelSubscriptionData {
+//   sessionId: string;
+// }
 
 type TicketCountsRoomType = 'project' | 'board' | 'user' | 'group';
 
@@ -50,7 +50,7 @@ interface TicketCountsRoomSubscriptionData {
 class WebSocketService {
   private io: SocketIOServer | null = null;
   private channelRepository: ChannelRepository;
-  private conversationRepository: ConversationRepository;
+  // private conversationRepository: ConversationRepository;
 
   // Track per-socket subscriptions for user-driven subscription model
   private socketSubscriptions = new Map<string, Set<string>>(); // socketId -> Set<sessionId>
@@ -67,7 +67,7 @@ class WebSocketService {
 
   constructor() {
     this.channelRepository = new ChannelRepository();
-    this.conversationRepository = new ConversationRepository();
+    // this.conversationRepository = new ConversationRepository();
   }
 
   initialize(httpServer: HttpServer): void {
@@ -285,15 +285,23 @@ class WebSocketService {
         logger.error('❌ [USER-STATUS] Error setting user online status:', error);
       }
 
-    // Handle joining sessions
-    socket.on('join_session', async (data: JoinSessionData) => {
-      await this.handleJoinSession(socket, data);
-    });
+    // SECURITY (secops): 'join_session'/'leave_session' handlers are disabled.
+    // handleJoinSession joined `session:<id>` rooms with entity-existence as the ONLY gate
+    // (no participant-membership or workspaceId check), so any authenticated socket could
+    // join the room of a private channel/DM/conversation in any workspace and receive
+    // broadcastToSession() message content in real time (cross-workspace broken access control).
+    // No client emits these events (chat delivery is handled by Zero), so disabling the entry
+    // point closes the hole without breaking any feature. The handler methods are kept below,
+    // unreachable — re-enabling MUST first add a membership + workspaceId authorization check.
+    // // Handle joining sessions
+    // socket.on('join_session', async (data: JoinSessionData) => {
+    //   await this.handleJoinSession(socket, data);
+    // });
 
-    // Handle leaving sessions
-    socket.on('leave_session', async (data: JoinSessionData) => {
-      await this.handleLeaveSession(socket, data);
-    });
+    // // Handle leaving sessions
+    // socket.on('leave_session', async (data: JoinSessionData) => {
+    //   await this.handleLeaveSession(socket, data);
+    // });
 
 
 
@@ -312,20 +320,22 @@ class WebSocketService {
       await this.handleTypingStop(socket, data.sessionId);
     });
 
-    // Handle bulk channel subscriptions (new user-driven model)
+    // Channel subscriptions (XYNE-17679): re-enabled WITH authorization.
+    // handleBulkSubscription verifies channel-participant + workspace access for every
+    // requested channel/conversation before subscribing, and caps sessions per request.
+    // This powers real-time typing indicators and agent-progress (via session_activity).
     socket.on('subscribe_to_channels', async (data: SubscribeToChannelsData) => {
       await this.handleBulkSubscription(socket, data);
     });
 
-    // Handle adding single channel subscription
-    socket.on('add_channel_subscription', async (data: ChannelSubscriptionData) => {
-      await this.handleAddSubscription(socket, data);
-    });
-
-    // Handle removing single channel subscription
-    socket.on('remove_channel_subscription', async (data: ChannelSubscriptionData) => {
-      await this.handleRemoveSubscription(socket, data);
-    });
+    // Single-channel add/remove subscription events remain disabled — no client emits
+    // them; re-enabling would require the same authorization as handleBulkSubscription.
+    // socket.on('add_channel_subscription', async (data: ChannelSubscriptionData) => {
+    //   await this.handleAddSubscription(socket, data);
+    // });
+    // socket.on('remove_channel_subscription', async (data: ChannelSubscriptionData) => {
+    //   await this.handleRemoveSubscription(socket, data);
+    // });
 
     // Handle notification acknowledgments
     socket.on('notification_acknowledged', async (data: { notificationId: string }) => {
@@ -398,125 +408,125 @@ class WebSocketService {
     });
   }
 
-  private async handleJoinSession(socket: AuthenticatedSocket, data: JoinSessionData): Promise<void> {
-    try {
-      const { sessionId } = data; // This is either channelId or conversationId
-      const { userId } = socket;
+  // private async handleJoinSession(socket: AuthenticatedSocket, data: JoinSessionData): Promise<void> {
+  //   try {
+  //     const { sessionId } = data; // This is either channelId or conversationId
+  //     const { userId } = socket;
 
-      logger.info(`🎯 [JOIN-SESSION] handleJoinSession called:`, {
-        socketId: socket.id,
-        userId,
-        sessionId,
-        userEmail: socket.userEmail
-      });
+  //     logger.info(`🎯 [JOIN-SESSION] handleJoinSession called:`, {
+  //       socketId: socket.id,
+  //       userId,
+  //       sessionId,
+  //       userEmail: socket.userEmail
+  //     });
 
-      logger.info(`Attempting to join session: ${sessionId} for user: ${userId}`);
+  //     logger.info(`Attempting to join session: ${sessionId} for user: ${userId}`);
 
-      // Try to find as channel first, then as conversation
-      let isChannel = false;
+  //     // Try to find as channel first, then as conversation
+  //     let isChannel = false;
 
-      let entity = null;
+  //     let entity = null;
 
-      // First, try to find as a channel
-      logger.info(`Searching for channel with ID: ${sessionId}`);
-      entity = await this.channelRepository.findById(sessionId);
+  //     // First, try to find as a channel
+  //     logger.info(`Searching for channel with ID: ${sessionId}`);
+  //     entity = await this.channelRepository.findById(sessionId);
 
-      if (entity) {
-        isChannel = true;
-        logger.info(`Found channel: ${entity.name}`);
-      } else {
-        // Not a channel, try as a conversation
-        logger.info(`Searching for conversation with ID: ${sessionId}`);
-        entity = await this.conversationRepository.findById(sessionId);
+  //     if (entity) {
+  //       isChannel = true;
+  //       logger.info(`Found channel: ${entity.name}`);
+  //     } else {
+  //       // Not a channel, try as a conversation
+  //       logger.info(`Searching for conversation with ID: ${sessionId}`);
+  //       entity = await this.conversationRepository.findById(sessionId);
 
-        if (entity) {
+  //       if (entity) {
 
-          logger.info(`Found conversation: ${entity.conversationId}`);
-        }
-      }
+  //         logger.info(`Found conversation: ${entity.conversationId}`);
+  //       }
+  //     }
 
-      if (!entity) {
-        logger.warn(`No channel or conversation found for sessionId: ${sessionId}`);
-        socket.emit('error', { message: 'Channel or conversation not found' });
-        return;
-      }
+  //     if (!entity) {
+  //       logger.warn(`No channel or conversation found for sessionId: ${sessionId}`);
+  //       socket.emit('error', { message: 'Channel or conversation not found' });
+  //       return;
+  //     }
 
-      // Join socket room (using same format for compatibility)
-      logger.info(`🎯 [JOIN-SESSION] Joining socket to room: session:${sessionId}`);
-      await socket.join(`session:${sessionId}`);
-      logger.info(`🎯 [JOIN-SESSION] Socket successfully joined room: session:${sessionId}`);
+  //     // Join socket room (using same format for compatibility)
+  //     logger.info(`🎯 [JOIN-SESSION] Joining socket to room: session:${sessionId}`);
+  //     await socket.join(`session:${sessionId}`);
+  //     logger.info(`🎯 [JOIN-SESSION] Socket successfully joined room: session:${sessionId}`);
 
-      // Add to Redis tracking
-      logger.info(`🎯 [JOIN-SESSION] Adding to Redis tracking...`);
-      try {
-        await redisService.subscribeToSession(sessionId, socket.id);
-        await redisService.addParticipantToSession(sessionId, userId);
-        logger.info(`🎯 [JOIN-SESSION] Successfully added to Redis tracking`);
-      } catch (redisError) {
-        logger.error(`🎯 [JOIN-SESSION] ❌ Redis tracking failed:`, redisError);
-        // Continue even if Redis fails - socket.io room should still work
-      }
+  //     // Add to Redis tracking
+  //     logger.info(`🎯 [JOIN-SESSION] Adding to Redis tracking...`);
+  //     try {
+  //       await redisService.subscribeToSession(sessionId, socket.id);
+  //       await redisService.addParticipantToSession(sessionId, userId);
+  //       logger.info(`🎯 [JOIN-SESSION] Successfully added to Redis tracking`);
+  //     } catch (redisError) {
+  //       logger.error(`🎯 [JOIN-SESSION] ❌ Redis tracking failed:`, redisError);
+  //       // Continue even if Redis fails - socket.io room should still work
+  //     }
 
-      // Notify other participants
-      socket.to(`session:${sessionId}`).emit('user_joined', {
-        sessionId,
-        userId,
-        timestamp: new Date()
-      });
+  //     // Notify other participants
+  //     socket.to(`session:${sessionId}`).emit('user_joined', {
+  //       sessionId,
+  //       userId,
+  //       timestamp: new Date()
+  //     });
 
-      // Confirm join to user
-      logger.info(`🎯 [JOIN-SESSION] Sending session_joined confirmation to user`);
-      socket.emit('session_joined', {
-        sessionId,
-        participants: isChannel ? [] : [], // TODO: Get actual participants from channel/conversation
-        timestamp: new Date()
-      });
+  //     // Confirm join to user
+  //     logger.info(`🎯 [JOIN-SESSION] Sending session_joined confirmation to user`);
+  //     socket.emit('session_joined', {
+  //       sessionId,
+  //       participants: isChannel ? [] : [], // TODO: Get actual participants from channel/conversation
+  //       timestamp: new Date()
+  //     });
 
-      const entityType = isChannel ? 'channel' : 'conversation';
-      logger.info(`🎯 [JOIN-SESSION] ✅ User ${userId} successfully joined ${entityType} ${sessionId}`);
-      logger.info(`User ${userId} joined ${entityType} ${sessionId}`);
-    } catch (error) {
-      logger.error(`🎯 [JOIN-SESSION] ❌ Error in handleJoinSession:`, {
-        sessionId: data.sessionId,
-        userId: socket.userId,
-        error: error instanceof Error ? error.message : error
-      });
-      logger.error('Error handling join session:', error);
-      socket.emit('error', { message: 'Failed to join session' });
-    }
-  }
+  //     const entityType = isChannel ? 'channel' : 'conversation';
+  //     logger.info(`🎯 [JOIN-SESSION] ✅ User ${userId} successfully joined ${entityType} ${sessionId}`);
+  //     logger.info(`User ${userId} joined ${entityType} ${sessionId}`);
+  //   } catch (error) {
+  //     logger.error(`🎯 [JOIN-SESSION] ❌ Error in handleJoinSession:`, {
+  //       sessionId: data.sessionId,
+  //       userId: socket.userId,
+  //       error: error instanceof Error ? error.message : error
+  //     });
+  //     logger.error('Error handling join session:', error);
+  //     socket.emit('error', { message: 'Failed to join session' });
+  //   }
+  // }
 
-  private async handleLeaveSession(socket: AuthenticatedSocket, data: JoinSessionData): Promise<void> {
-    try {
-      const { sessionId } = data;
-      const { userId } = socket;
+  // private async handleLeaveSession(socket: AuthenticatedSocket, data: JoinSessionData): Promise<void> {
+  //   try {
+  //     const { sessionId } = data;
+  //     const { userId } = socket;
 
-      // Leave socket room
-      await socket.leave(`session:${sessionId}`);
+  //     // Leave socket room
+  //     await socket.leave(`session:${sessionId}`);
 
-      // Remove from Redis tracking
-      await redisService.unsubscribeFromSession(sessionId, socket.id);
-      await redisService.removeParticipantFromSession(sessionId, userId);
+  //     // Remove from Redis tracking
+  //     await redisService.unsubscribeFromSession(sessionId, socket.id);
+  //     await redisService.removeParticipantFromSession(sessionId, userId);
 
-      // Notify other participants
-      socket.to(`session:${sessionId}`).emit('user_left', {
-        sessionId,
-        userId,
-        timestamp: new Date()
-      });
+  //     // Notify other participants
+  //     socket.to(`session:${sessionId}`).emit('user_left', {
+  //       sessionId,
+  //       userId,
+  //       timestamp: new Date()
+  //     });
 
-      // Confirm leave to user
-      socket.emit('session_left', {
-        sessionId,
-        timestamp: new Date()
-      });
+  //     // Confirm leave to user
+  //     socket.emit('session_left', {
+  //       sessionId,
+  //       timestamp: new Date()
+  //     });
 
-      logger.info(`User ${userId} left session ${sessionId}`);
-    } catch (error) {
-      logger.error('Error handling leave session:', error);
-      socket.emit('error', { message: 'Failed to leave session' });
-    }
-  }
+  //     logger.info(`User ${userId} left session ${sessionId}`);
+  //   } catch (error) {
+  //     logger.error('Error handling leave session:', error);
+  //     socket.emit('error', { message: 'Failed to leave session' });
+  //   }
+  // }
 
 
   private async handleMarkChannelViewed(socket: AuthenticatedSocket, data: { channelId: string; conversationId: string }): Promise<void> {
@@ -839,73 +849,135 @@ class WebSocketService {
 
   private async handleBulkSubscription(socket: AuthenticatedSocket, data: SubscribeToChannelsData): Promise<void> {
     try {
-      const { channels, conversations } = data;
-      const allSessions = [...channels, ...conversations];
+      const { userId } = socket;
+      const channels = Array.isArray(data?.channels) ? data.channels : [];
+      const conversations = Array.isArray(data?.conversations) ? data.conversations : [];
 
-      // logger.info(`📋 [BULK-SUB] Socket ${socket.id} (user: ${socket.userId}) subscribing to ${allSessions.length} sessions:`, allSessions);
+      // 🔒 Authorize every requested session against the user's channel membership /
+      // workspace BEFORE subscribing. Mirrors the HTTP ACL in conversationController.
+      const authorizedSessions: string[] = [];
 
-      // Clear existing subscriptions for this socket
+      for (const channelId of channels) {
+        if (await this.canAccessChannel(socket, channelId)) {
+          authorizedSessions.push(channelId);
+        } else {
+          logger.warn(`🚫 [BULK-SUB] User ${userId} not authorized for channel ${channelId}; skipping`);
+        }
+      }
+
+      for (const conversationId of conversations) {
+        if (await this.canAccessConversation(socket, conversationId)) {
+          authorizedSessions.push(conversationId);
+        } else {
+          logger.warn(`🚫 [BULK-SUB] User ${userId} not authorized for conversation ${conversationId}; skipping`);
+        }
+      }
+
+      // Reset this socket's subscriptions, then subscribe only to authorized sessions.
       await this.clearSocketSubscriptions(socket.id);
-
-      // Subscribe to all requested sessions
-      for (const sessionId of allSessions) {
-        // logger.info(`📋 [BULK-SUB] Processing session ${sessionId} for socket ${socket.id}`);
+      for (const sessionId of authorizedSessions) {
         await this.addSocketSubscription(socket.id, sessionId);
       }
 
-      // Confirm subscription
+      // Confirm subscription (only the sessions the user is actually allowed on).
       socket.emit('subscriptions_updated', {
-        subscribed: allSessions,
-        total: allSessions.length,
+        subscribed: authorizedSessions,
+        total: authorizedSessions.length,
         timestamp: new Date()
       });
-
-      // logger.info(`✅ [BULK-SUB] Socket ${socket.id} subscribed to ${allSessions.length} sessions`);
     } catch (error) {
-      // logger.error(`❌ [BULK-SUB] Error in bulk subscription for socket ${socket.id}:`, error);
+      logger.error(`❌ [BULK-SUB] Error in bulk subscription for socket ${socket.id}:`, error);
       socket.emit('subscription_error', { message: 'Failed to subscribe to channels' });
     }
   }
 
-  private async handleAddSubscription(socket: AuthenticatedSocket, data: ChannelSubscriptionData): Promise<void> {
+  /**
+   * Authorization for subscribing to a channel's real-time stream.
+   * Mirrors the HTTP ACL (conversationController): allow if the user is a channel
+   * participant, or the channel is not PRIVATE — always scoped to the user's workspace.
+   * DMs and group DMs are created PRIVATE, so they require participation.
+   */
+  private async canAccessChannel(socket: AuthenticatedSocket, channelId: string): Promise<boolean> {
+    if (!channelId || typeof channelId !== 'string') return false;
     try {
-      const { sessionId } = data;
+      const channel = await repositories.channels.findById(channelId);
+      if (!channel) return false;
 
-      logger.info(`➕ [ADD-SUB] Socket ${socket.id} adding subscription to session: ${sessionId}`);
+      // Tenant boundary — never allow a socket to subscribe across workspaces.
+      if (socket.workspaceId && channel.workspaceId && channel.workspaceId !== socket.workspaceId) {
+        return false;
+      }
 
-      await this.addSocketSubscription(socket.id, sessionId);
-
-      socket.emit('subscription_added', {
-        sessionId,
-        timestamp: new Date()
-      });
-
-      logger.info(`✅ [ADD-SUB] Socket ${socket.id} subscribed to session: ${sessionId}`);
+      if (channel.visibility === 'PRIVATE') {
+        return await repositories.channelParticipants.isParticipant(channelId, socket.userId);
+      }
+      return true;
     } catch (error) {
-      logger.error(`❌ [ADD-SUB] Error adding subscription for socket ${socket.id}:`, error);
-      socket.emit('subscription_error', { message: 'Failed to add channel subscription' });
+      logger.error(`❌ [BULK-SUB] canAccessChannel failed for ${channelId}:`, error);
+      return false;
     }
   }
 
-  private async handleRemoveSubscription(socket: AuthenticatedSocket, data: ChannelSubscriptionData): Promise<void> {
+  /**
+   * Authorization for subscribing to a conversation (thread). Access derives from
+   * the parent channel's ACL, scoped to the user's workspace.
+   */
+  private async canAccessConversation(socket: AuthenticatedSocket, conversationId: string): Promise<boolean> {
+    if (!conversationId || typeof conversationId !== 'string') return false;
     try {
-      const { sessionId } = data;
+      const conversation = await repositories.conversations.findById(conversationId);
+      if (!conversation) return false;
 
-      logger.info(`➖ [REMOVE-SUB] Socket ${socket.id} removing subscription from session: ${sessionId}`);
+      if (socket.workspaceId && conversation.workspaceId && conversation.workspaceId !== socket.workspaceId) {
+        return false;
+      }
 
-      await this.removeSocketSubscription(socket.id, sessionId);
-
-      socket.emit('subscription_removed', {
-        sessionId,
-        timestamp: new Date()
-      });
-
-      logger.info(`✅ [REMOVE-SUB] Socket ${socket.id} unsubscribed from session: ${sessionId}`);
+      return await this.canAccessChannel(socket, conversation.channelId);
     } catch (error) {
-      logger.error(`❌ [REMOVE-SUB] Error removing subscription for socket ${socket.id}:`, error);
-      socket.emit('subscription_error', { message: 'Failed to remove channel subscription' });
+      logger.error(`❌ [BULK-SUB] canAccessConversation failed for ${conversationId}:`, error);
+      return false;
     }
   }
+
+  // private async handleAddSubscription(socket: AuthenticatedSocket, data: ChannelSubscriptionData): Promise<void> {
+  //   try {
+  //     const { sessionId } = data;
+
+  //     logger.info(`➕ [ADD-SUB] Socket ${socket.id} adding subscription to session: ${sessionId}`);
+
+  //     await this.addSocketSubscription(socket.id, sessionId);
+
+  //     socket.emit('subscription_added', {
+  //       sessionId,
+  //       timestamp: new Date()
+  //     });
+
+  //     logger.info(`✅ [ADD-SUB] Socket ${socket.id} subscribed to session: ${sessionId}`);
+  //   } catch (error) {
+  //     logger.error(`❌ [ADD-SUB] Error adding subscription for socket ${socket.id}:`, error);
+  //     socket.emit('subscription_error', { message: 'Failed to add channel subscription' });
+  //   }
+  // }
+
+  // private async handleRemoveSubscription(socket: AuthenticatedSocket, data: ChannelSubscriptionData): Promise<void> {
+  //   try {
+  //     const { sessionId } = data;
+
+  //     logger.info(`➖ [REMOVE-SUB] Socket ${socket.id} removing subscription from session: ${sessionId}`);
+
+  //     await this.removeSocketSubscription(socket.id, sessionId);
+
+  //     socket.emit('subscription_removed', {
+  //       sessionId,
+  //       timestamp: new Date()
+  //     });
+
+  //     logger.info(`✅ [REMOVE-SUB] Socket ${socket.id} unsubscribed from session: ${sessionId}`);
+  //   } catch (error) {
+  //     logger.error(`❌ [REMOVE-SUB] Error removing subscription for socket ${socket.id}:`, error);
+  //     socket.emit('subscription_error', { message: 'Failed to remove channel subscription' });
+  //   }
+  // }
 
   /**
    * Setup global presence subscription
