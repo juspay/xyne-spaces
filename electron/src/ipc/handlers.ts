@@ -7,7 +7,6 @@ import { showNotification, NotificationData, showCallNotification, closeCallNoti
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
 import { config } from '../app/config';
-import { docsPublishService } from '../services/docs-publish';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
 import ElectronEvent from '../services/logger/electron-events';
@@ -128,24 +127,6 @@ export function setupIpcHandlers(): void {
   // browserPanelActor OPEN event.
   ipcMain.handle('sync-xyne-cookies-to-browser-panel', async (_event, url: string) => {
     await syncXyneCookiesToBrowserPanel(url);
-  });
-
-  // Docs Publish IPC handlers
-  ipcMain.handle('docs-publish:get-status', () => {
-    return docsPublishService.getStatus();
-  });
-
-  ipcMain.handle('docs-publish:clear-output-dir', async () => {
-    try {
-      await docsPublishService.clearOutputDir();
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) };
-    }
-  });
-
-  ipcMain.handle('docs-publish:get-output-dir', () => {
-    return docsPublishService.getQuartoOutputDir();
   });
 
   ipcMain.on('open-external', (_event, url: string) => {

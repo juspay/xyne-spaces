@@ -38,7 +38,6 @@ import {
 
 const groupedCanvasRowTrackNames = {
   canvasOpen: 'Open_Canvas_Grouped',
-  quartoDocOpen: 'Open_Quarto_Doc_Grouped',
   actionsMenu: 'CANVAS_ACTIONS_MENU',
 } as const;
 

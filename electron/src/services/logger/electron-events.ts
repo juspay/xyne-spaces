@@ -13,26 +13,6 @@ const ElectronEvent = {
     AGENT_AUTH_DENIED: 'agent_auth_denied',
     AGENT_AUTH_GRANTED: 'agent_auth_granted',
     
-    // Docs Publish events
-    DOCS_PUBLISH_SERVER_START: 'docs_publish_server_start',
-    DOCS_PUBLISH_SERVER_STARTED: 'docs_publish_server_started',
-    DOCS_PUBLISH_SERVER_STOP: 'docs_publish_server_stop',
-    DOCS_PUBLISH_SERVER_START_FAILED: 'docs_publish_server_start_failed',
-    DOCS_PUBLISH_SERVER_RESTART: 'docs_publish_server_restart',
-    DOCS_PUBLISH_REQUEST_RECEIVED: 'docs_publish_request_received',
-    DOCS_PUBLISH_GIT_INFO: 'docs_publish_git_info',
-    DOCS_PUBLISH_EXISTING_DOC_CHECK: 'docs_publish_existing_doc_check',
-    DOCS_PUBLISH_CONFLICT: 'docs_publish_conflict',
-    DOCS_PUBLISH_ZIP_CREATE_START: 'docs_publish_zip_create_start',
-    DOCS_PUBLISH_ZIP_CREATE_COMPLETE: 'docs_publish_zip_create_complete',
-    DOCS_PUBLISH_UPLOAD_START: 'docs_publish_upload_start',
-    DOCS_PUBLISH_UPLOAD_SUCCESS: 'docs_publish_upload_success',
-    DOCS_PUBLISH_UPLOAD_FAILED: 'docs_publish_upload_failed',
-    DOCS_PUBLISH_CLEAR_OUTPUT_DIR: 'docs_publish_clear_output_dir',
-    DOCS_PUBLISH_SHARE_TARGETS_REQUEST: 'docs_publish_share_targets_request',
-    DOCS_PUBLISH_SHARE_DOC_REQUEST: 'docs_publish_share_doc_request',
-    DOCS_PUBLISH_OPEN_TICKET_THREAD: 'docs_publish_open_ticket_thread',
-    
     // Memory Proxy events
     MEMORY_SEARCH_REQUEST: 'memory_search_request',
     MEMORY_UPLOAD_REQUEST: 'memory_upload_request',

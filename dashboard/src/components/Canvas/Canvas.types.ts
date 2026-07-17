@@ -112,12 +112,6 @@ export interface Canvas {
   metadata?: Record<string, unknown> | KnowledgeCanvasMetadata;
   accessLevel?: CanvasRole;
   docType?: DocType;
-  userRepo?: string;
-  repoId?: string;
-  branchName?: string;
-  entryFile?: string;
-  quartoDocumentType?: string;
-  gcsPath?: string;
   folder?: CanvasFolder | null;
   channel?: CanvasChannel | null;
   project?: CanvasProject | null;
@@ -149,9 +143,8 @@ export interface CanvasListProps {
   onDelete?: (canvasId: string) => void;
   onDuplicate?: (canvasId: string, canvas?: Canvas) => void;
   currentUserId?: string | undefined;
-  showQuartoDocsFilter?: boolean;
-  activeFilter?: 'all' | 'created_by_me' | 'quarto_docs';
-  onFilterChange?: (filter: 'all' | 'created_by_me' | 'quarto_docs') => void;
+  activeFilter?: 'all' | 'created_by_me';
+  onFilterChange?: (filter: 'all' | 'created_by_me') => void;
   selectedCanvasId?: string;
   paginated?: boolean;
   channelId?: string;

@@ -2402,7 +2402,7 @@ export const ticketStageRequestTable = table('ticket_stage_requests')
   })
   .primaryKey('id');
 
-// publishedDocTable has been deprecated - Quarto docs are now stored in canvasTable with isQuartoDoc=true
+// publishedDocTable has been deprecated - published docs were folded into canvasTable
 export const dashboardTable = table('dashboards')
   .columns({
     workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)

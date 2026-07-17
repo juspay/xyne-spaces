@@ -64,10 +64,7 @@ export function matchesGroupedCanvasSearch(
 }
 
 export function canvasMatchesGroupedSearch(canvas: Canvas, query: string): boolean {
-  return (
-    matchesGroupedCanvasSearch(canvas.title, query) ||
-    matchesGroupedCanvasSearch(canvas.userRepo, query)
-  );
+  return matchesGroupedCanvasSearch(canvas.title, query);
 }
 
 export function getChannelDisplayName(

@@ -126,7 +126,6 @@ Services contain the core business logic. Located in `src/services/`.
 ### Documents & Canvas
 | Service | Purpose |
 |---------|---------|
-| `docsService.ts` | Quarto docs publishing, GCS storage, channel scoping |
 | `canvasService.ts` | BlockNote canvas/whiteboard, knowledge learnings |
 | `canvasAuthService.ts` | Canvas access authentication |
 | `linkPreviewService.ts` | Fetch URL metadata (Open Graph, Twitter Cards) |

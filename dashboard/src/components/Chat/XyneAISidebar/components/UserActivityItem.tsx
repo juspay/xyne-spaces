@@ -73,7 +73,7 @@ const formatEventName = (eventName: string): string => {
       .join(' ');
   }
 
-  // Handle mixed case like Create_Quarto_Doc or GoBack
+  // Handle mixed case like Duplicate_Canvas or GoBack
   return eventName
     .replace(/_/g, ' ')
     .replace(/([a-z])([A-Z])/g, '$1 $2')

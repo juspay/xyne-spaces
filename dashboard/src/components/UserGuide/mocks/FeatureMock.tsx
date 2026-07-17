@@ -1063,25 +1063,6 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
         </MockFrame>
       );
 
-    case 'docs-viewer':
-      return (
-        <MockFrame title={title}>
-          <Shell railActive='ai'>
-            <ScreenHeader title='Engineering Runbook' />
-            <div className='flex-1 p-3 space-y-1.5 overflow-hidden'>
-              <div className='h-3 rounded-full bg-foreground/70 w-[60%]' />
-              <div className='h-2 rounded-full bg-foreground/40 w-[40%] mt-1' />
-              <div className='h-1.5 rounded-full bg-muted w-full' />
-              <div className='h-1.5 rounded-full bg-muted w-[95%]' />
-              <div className='h-1.5 rounded-full bg-muted w-[88%]' />
-              <div className='h-2 rounded-full bg-foreground/40 w-[35%] mt-1.5' />
-              <div className='h-1.5 rounded-full bg-muted w-full' />
-              <div className='h-1.5 rounded-full bg-muted w-[80%]' />
-            </div>
-          </Shell>
-        </MockFrame>
-      );
-
     /* GROUP F — AI & Intelligence ────────────────────────────────────────── */
 
     case 'xyne-ai':

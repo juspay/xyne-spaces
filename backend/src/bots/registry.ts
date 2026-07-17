@@ -23,8 +23,6 @@ import '@/bots/implementations/llm-bot/llm-bot.js';
 // Ticket Bot - creates tickets with workflow automation
 import '@/bots/implementations/ticket-bot/ticket-bot.js';
 
-// Docs Publisher Bot - system bot for docs publishing notifications
-import '@/bots/implementations/docs-publisher/docs-publisher.js';
 
 // Xyne Automatic Bot - system bot for posting automated messages like call summaries
 import '@/bots/implementations/xyne-automatic/xyne-automatic.js';

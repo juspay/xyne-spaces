@@ -8,13 +8,11 @@ import {
   Share2,
   Globe,
   Lock,
-  BookMarked,
-  ExternalLink,
   Check,
   Star,
 } from 'lucide-react';
 import { CanvasListProps, Canvas, CanvasParticipant } from '../Canvas.types';
-import { CanvasRole, CanvasVisibility, DocType } from '@xyne/shared';
+import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import Input from '../../ui/Input';
@@ -34,12 +32,10 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { queries } from '../../../zero/queries';
 import { CanvasParticipantsTray, type ParticipantItem } from '../CanvasParticipantsTray';
 import { useNavigate } from 'react-router-dom';
-import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useCanvasPrefetch } from '../../../hooks/useCanvasPrefetch';
 import { useCachedQuery } from '@xyne/shared/hooks';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useShortcut } from '../../../shortcuts';
-import { openQuartoDoc } from '../openQuartoDoc';
 import { toast } from 'sonner';
 import {
   filterExcludedCallGeneratedCanvases,
@@ -47,7 +43,7 @@ import {
   withStarredCanvasState,
 } from '../canvasFilters';
 
-type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
+type FilterTab = 'all' | 'created_by_me';
 type CanvasCursor = { id: string; updatedAt: number };
 
 const CANVAS_PAGE_SIZE = 25;
@@ -156,29 +152,13 @@ const ParticipantsTray: React.FC<{
 
 const CanvasPageSubscription: React.FC<{
   cursor: CanvasCursor | null;
-  activeFilter: FilterTab;
   channelId?: string | undefined;
   onPageComplete: (page: Canvas[], previousPageIds: Set<string>) => void;
   onLoadingChange: (isLoading: boolean) => void;
-}> = ({ cursor, activeFilter, channelId, onPageComplete, onLoadingChange }) => {
+}> = ({ cursor, channelId, onPageComplete, onLoadingChange }) => {
   const previousPageIdsRef = useRef<Set<string>>(new Set());
 
   const query = useMemo(() => {
-    if (activeFilter === 'quarto_docs') {
-      if (channelId) {
-        return queries.channelQuartoDocsPaginated({
-          channelId,
-          limit: CANVAS_PAGE_SIZE,
-          start: cursor,
-        });
-      }
-
-      return queries.userQuartoDocsPaginated({
-        limit: CANVAS_PAGE_SIZE,
-        start: cursor,
-      });
-    }
-
     if (channelId) {
       return queries.channelCanvasesPaginated({
         channelId,
@@ -188,11 +168,10 @@ const CanvasPageSubscription: React.FC<{
     }
 
     return queries.userCanvasesPaginated({
-      includeQuartoDocs: false,
       limit: CANVAS_PAGE_SIZE,
       start: cursor,
     });
-  }, [activeFilter, channelId, cursor]);
+  }, [channelId, cursor]);
 
   const [page, pageDetails] = useCachedQuery(query as never, { cursorEnabled: true });
   const isLoading = pageDetails.type !== 'complete';
@@ -217,7 +196,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   onDelete,
   onDuplicate,
   currentUserId,
-  showQuartoDocsFilter = false,
   activeFilter: externalActiveFilter,
   onFilterChange,
   selectedCanvasId,
@@ -228,7 +206,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   onToggleStar,
 }) => {
   const navigate = useNavigate();
-  const shareableOrigin = useShareableOrigin();
   const { isMobile } = usePlatform();
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingCanvasId, setDeletingCanvasId] = useState<string | null>(null);
@@ -246,7 +223,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
   // Use external filter if provided, otherwise use internal state
   const activeFilter = externalActiveFilter ?? internalActiveFilter;
-  const isQuartoDocs = activeFilter === 'quarto_docs';
 
   const rawItems = canvasItems;
   const itemsWithStarState = useMemo(() => withStarredCanvasState(rawItems), [rawItems]);
@@ -307,7 +283,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   };
 
   useEffect(() => {
-    if (rawItems.length > 0 && activeFilter !== 'quarto_docs') {
+    if (rawItems.length > 0) {
       const collaborativeCanvases = rawItems.filter(c => c.isCollaborative !== false);
       void prefetchTopCanvases(
         collaborativeCanvases.map(c => ({
@@ -330,19 +306,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   }, [activeFilter, isMobile]);
 
   const filteredCanvases = useMemo(() => {
-    // If showing Quarto docs filter, return Quarto docs when that filter is active
-    if (isQuartoDocs) {
-      let filtered = filterStarredCanvases(itemsWithStarState, showStarredOnly);
-      if (searchQuery) {
-        filtered = filtered.filter(
-          canvas =>
-            canvas.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (canvas.userRepo?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false),
-        );
-      }
-      return filtered;
-    }
-
     let filtered = filterExcludedCallGeneratedCanvases(
       itemsWithStarState,
       excludeCallGeneratedCanvases,
@@ -365,7 +328,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     currentUserId,
     excludeCallGeneratedCanvases,
     itemsWithStarState,
-    isQuartoDocs,
     searchQuery,
     showStarredOnly,
   ]);
@@ -418,7 +380,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   }, [hasMore, isLoadingNext, nextCursor, pageCursor, paginated]);
 
   useEffect(() => {
-    if (!paginated || !excludeCallGeneratedCanvases || isQuartoDocs || isLoadingNext || !hasMore) {
+    if (!paginated || !excludeCallGeneratedCanvases || isLoadingNext || !hasMore) {
       return;
     }
 
@@ -432,7 +394,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     filteredCanvases.length,
     hasMore,
     isLoadingNext,
-    isQuartoDocs,
     paginated,
     rawItems.length,
     requestNextPage,
@@ -465,10 +426,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     },
     [filteredCanvases, isLoadingNext, pageCursor, paginated],
   );
-
-  const handleQuartoDocClick = (e: React.MouseEvent | KeyboardEvent, canvas: Canvas): void => {
-    openQuartoDoc(e, canvas, navigate, isMobile);
-  };
 
   const getUserRole = (canvas: Canvas): CanvasRole | null => {
     if (canvas.createdBy === currentUserId) {
@@ -516,8 +473,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         .filter(id => id !== canvas.createdBy) || []),
     ];
 
-    const isQuartoDoc = canvas.docType === DocType.Quarto;
-
     const isSelected = selectedCanvasId === canvas.id;
     const canToggleStar = !!onToggleStar;
 
@@ -528,17 +483,16 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         className={`group flex items-center px-6 py-4 transition-colors cursor-pointer border-b border-border ${
           isSelected ? 'bg-accent' : 'hover:bg-accent'
         }`}
-        onClick={e => (isQuartoDoc ? handleQuartoDocClick(e, canvas) : onSelect(e, canvas))}
+        onClick={e => onSelect(e, canvas)}
         data-track-category='CANVAS'
-        data-track-name={isQuartoDoc ? 'Open_Quarto_Doc' : 'Open_Canvas'}
+        data-track-name='Open_Canvas'
         data-track-metadata={JSON.stringify({
           canvasId: canvas.id,
           title: canvas.title,
-          isQuartoDoc,
         })}
         data-testid={`canvas-item-${canvas.id}`}
         onMouseEnter={() => {
-          if (!isQuartoDoc && canvas.isCollaborative !== false) {
+          if (canvas.isCollaborative !== false) {
             handleMouseEnter({
               id: canvas.id,
               ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
@@ -553,25 +507,13 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         onKeyDown={(e: React.KeyboardEvent) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            if (isQuartoDoc) {
-              handleQuartoDocClick(e as unknown as KeyboardEvent, canvas);
-            } else {
-              onSelect(e as unknown as KeyboardEvent, canvas);
-            }
+            onSelect(e as unknown as KeyboardEvent, canvas);
           }
         }}
       >
         <div className='flex-shrink-0 mr-4'>
-          <div
-            className={`w-8 h-8 flex items-center justify-center rounded ${
-              isQuartoDoc ? 'bg-blue-50' : 'bg-muted'
-            }`}
-          >
-            {isQuartoDoc ? (
-              <BookMarked className='w-4 h-4 text-blue-500' strokeWidth={2.5} />
-            ) : (
-              <FileText className='w-4 h-4 text-muted-foreground' strokeWidth={2.5} />
-            )}
+          <div className='w-8 h-8 flex items-center justify-center rounded bg-muted'>
+            <FileText className='w-4 h-4 text-muted-foreground' strokeWidth={2.5} />
           </div>
         </div>
 
@@ -580,11 +522,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             <h3 className='font-medium text-foreground truncate' title={canvas.title}>
               {canvas.title}
             </h3>
-            {isQuartoDoc && canvas.quartoDocumentType && canvas.quartoDocumentType !== 'docs' && (
-              <span className='px-2 py-0.5 text-xs font-medium rounded-full bg-muted text-muted-foreground'>
-                {canvas.quartoDocumentType}
-              </span>
-            )}
           </div>
 
           <div className='flex flex-wrap items-center gap-3 text-sm text-muted-foreground'>
@@ -602,29 +539,19 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
             <span className='text-muted-foreground'>|</span>
 
-            {isQuartoDoc && canvas.userRepo ? (
-              <span
-                className='flex items-center gap-1 text-xs truncate max-w-[200px]'
-                title={canvas.userRepo}
-              >
-                <ExternalLink className='w-3 h-3' />
-                {canvas.userRepo}
-              </span>
-            ) : (
-              <span
-                className='flex items-center'
-                aria-label={
-                  canvas.visibility === CanvasVisibility.PUBLIC ? 'Public canvas' : 'Private canvas'
-                }
-                title={canvas.visibility === CanvasVisibility.PUBLIC ? 'Public' : 'Private'}
-              >
-                {canvas.visibility === CanvasVisibility.PUBLIC ? (
-                  <Globe className='w-3.5 h-3.5 text-green-500' strokeWidth={2.5} />
-                ) : (
-                  <Lock className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={2.5} />
-                )}
-              </span>
-            )}
+            <span
+              className='flex items-center'
+              aria-label={
+                canvas.visibility === CanvasVisibility.PUBLIC ? 'Public canvas' : 'Private canvas'
+              }
+              title={canvas.visibility === CanvasVisibility.PUBLIC ? 'Public' : 'Private'}
+            >
+              {canvas.visibility === CanvasVisibility.PUBLIC ? (
+                <Globe className='w-3.5 h-3.5 text-green-500' strokeWidth={2.5} />
+              ) : (
+                <Lock className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={2.5} />
+              )}
+            </span>
           </div>
         </div>
 
@@ -648,11 +575,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 onToggleStar?.(canvas);
               }}
               className='p-1.5 rounded hover:bg-accent'
-              title={
-                canvas.isStarred
-                  ? `Unstar ${isQuartoDoc ? 'doc' : 'canvas'}`
-                  : `Star ${isQuartoDoc ? 'doc' : 'canvas'}`
-              }
+              title={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'}
               data-track-category='CANVAS'
               data-track-name='TOGGLE_CANVAS_STAR'
               data-track-metadata={JSON.stringify({
@@ -668,25 +591,23 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               />
             </button>
           )}
-          {!isQuartoDoc && (
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                setParticipantsTrayCanvas(canvas);
-              }}
-              className='cursor-pointer'
-              data-track-category='CANVAS'
-              data-track-name='Open_Participants_Tray'
-              data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-            >
-              <div className='md:hidden'>
-                <AvatarGroup userIds={participantUserIds} size='sm' count={2} />
-              </div>
-              <div className='hidden md:block'>
-                <AvatarGroup userIds={participantUserIds} size='sm' count={3} />
-              </div>
-            </button>
-          )}
+          <button
+            onClick={e => {
+              e.stopPropagation();
+              setParticipantsTrayCanvas(canvas);
+            }}
+            className='cursor-pointer'
+            data-track-category='CANVAS'
+            data-track-name='Open_Participants_Tray'
+            data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+          >
+            <div className='md:hidden'>
+              <AvatarGroup userIds={participantUserIds} size='sm' count={2} />
+            </div>
+            <div className='hidden md:block'>
+              <AvatarGroup userIds={participantUserIds} size='sm' count={3} />
+            </div>
+          </button>
 
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
@@ -701,7 +622,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end' className='w-48'>
-              {!isQuartoDoc && onDuplicate && (
+              {onDuplicate && (
                 <DropdownMenuItem
                   onClick={e => {
                     e.stopPropagation();
@@ -724,25 +645,18 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 <DropdownMenuItem
                   onClick={e => {
                     e.stopPropagation();
-                    if (isQuartoDoc && canvas.userRepo) {
-                      // For Quarto docs, copy the docs link directly
-                      const docsLink = `${shareableOrigin}/docs/${canvas.userRepo}`;
-                      void navigator.clipboard.writeText(docsLink);
-                    } else {
-                      setShareCanvas(canvas);
-                    }
+                    setShareCanvas(canvas);
                   }}
                   className='flex items-center gap-2 cursor-pointer'
                   data-track-category='CANVAS'
-                  data-track-name={isQuartoDoc ? 'Copy_Quarto_Doc_Link' : 'Share_Canvas'}
+                  data-track-name='Share_Canvas'
                   data-track-metadata={JSON.stringify({
                     canvasId: canvas.id,
                     title: canvas.title,
-                    isQuartoDoc,
                   })}
                 >
                   <Share2 className='w-4 h-4' />
-                  {isQuartoDoc ? 'Copy Link' : 'Share'}
+                  Share
                 </DropdownMenuItem>
               )}
 
@@ -780,7 +694,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             pageCursor ? getCanvasCursorKey(pageCursor) : 'first-page'
           }`}
           cursor={pageCursor}
-          activeFilter={activeFilter}
           channelId={channelId}
           onPageComplete={handlePageComplete}
           onLoadingChange={handlePageLoadingChange}
@@ -818,26 +731,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             >
               Created by me
             </button>
-            {showQuartoDocsFilter && (
-              <button
-                onClick={() => setActiveFilter('quarto_docs')}
-                className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all flex items-center gap-1.5 ${
-                  activeFilter === 'quarto_docs'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-muted-foreground hover:bg-accent'
-                }`}
-                data-testid='canvas-filter-quarto-docs'
-                data-track-category='CANVAS'
-                data-track-name='FILTER_QUARTO_DOCS'
-                data-track-metadata={JSON.stringify({
-                  filter: 'quarto_docs',
-                  quartoCount: isQuartoDocs ? rawItems.length : 0,
-                })}
-              >
-                <BookMarked className='w-3.5 h-3.5' />
-                Docs
-              </button>
-            )}
           </div>
 
           <div className='relative w-full sm:w-auto'>
@@ -865,24 +758,16 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             <h3 className='text-lg font-medium text-foreground mb-2'>
               {searchQuery
                 ? 'No canvases found'
-                : isQuartoDocs
-                  ? showStarredOnly
-                    ? 'No starred docs yet'
-                    : 'No docs yet'
-                  : showStarredOnly
-                    ? 'No starred canvases yet'
-                    : 'No canvases yet'}
+                : showStarredOnly
+                  ? 'No starred canvases yet'
+                  : 'No canvases yet'}
             </h3>
             <p className='text-muted-foreground text-sm'>
               {searchQuery
                 ? 'Try adjusting your search'
-                : isQuartoDocs
-                  ? showStarredOnly
-                    ? 'Star a doc to see it here.'
-                    : 'Publish your first doc from the Xyne Code extension'
-                  : showStarredOnly
-                    ? 'Star a canvas to see it here.'
-                    : 'Create your first canvas to get started'}
+                : showStarredOnly
+                  ? 'Star a canvas to see it here.'
+                  : 'Create your first canvas to get started'}
             </p>
           </div>
         ) : (

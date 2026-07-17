@@ -134,7 +134,6 @@ import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes'
 import deskMetricsRoutes from '@/routes/deskMetricsRoutes';
 import deskMetricsBackfillRoutes from '@/routes/deskMetricsBackfill';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
-import docsRoutes from '@/routes/docs';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import userSkillsRoutes from '@/routes/userSkills';
@@ -550,7 +549,6 @@ export class App {
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
     this.app.use('/api/canvas/claw', authenticateUserOrApp, canvasRoutes);
-    this.app.use('/api/docs/claw', authenticateUserOrApp, docsRoutes);
     this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
 
@@ -607,9 +605,6 @@ export class App {
 
     // Summarization routes (auth required, uses JAF agent)
     this.app.use('/api/summarize', authMiddleware.authenticate, summarizeRoutes);
-
-    // Docs publishing routes (auth required)
-    this.app.use('/api/docs', authMiddleware.authenticate, docsRoutes);
 
     // Xyne AI routes (unified AI assistant with context awareness)
     this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
