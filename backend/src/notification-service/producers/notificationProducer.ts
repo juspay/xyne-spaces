@@ -70,23 +70,29 @@ export class NotificationProducer {
         ...(workspaceName && { workspaceName }),
       };
 
-      await redisService.broadcastNotificationEvent(userId, event);
-
-      // Broadcast to the person's connections in other workspaces
       if (orgMemberId) {
         try {
-          await redisService.broadcastOrgMemberNotificationEvent(orgMemberId, {
-            ...event,
-            sourceUserId: userId,
+          await redisService.publishOrgMemberEvent(orgMemberId, {
+            type: 'notification_received',
+            orgMemberId,
+            data: {
+              ...event,
+              sourceUserId: userId,
+            },
+            timestamp: new Date(),
           });
         } catch (broadcastError) {
-          this.logger.error('Failed cross-workspace notification broadcast', { userId, error: broadcastError });
+          this.logger.error('Failed org-member notification broadcast', { userId, orgMemberId, error: broadcastError });
+          throw broadcastError;
         }
+      } else {
+        this.logger.warn('Notification realtime broadcast skipped: orgMemberId not resolved', { userId, eventId });
       }
 
       this.logger.info('Notification broadcasted via Redis', {
         eventId: event.id,
         userId,
+        orgMemberId,
         type,
         title,
       });

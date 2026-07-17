@@ -77,7 +77,6 @@ export interface NotificationDeliveryResult {
 
 export interface NotificationChannelHandler {
   deliver(event: NotificationEvent): Promise<NotificationDeliveryResult>;
-  acknowledge(eventId: string, userId: string): Promise<boolean>;
 }
 
 export interface UserBucketEntry {

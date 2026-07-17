@@ -1710,16 +1710,10 @@ class NotificationService {
 
   async markAsRead(notificationId: string, userId: string): Promise<void> {
     await repositories.notifications.markAsRead(notificationId, userId);
-
-    // Broadcast real-time update
-    await websocketService.broadcastNotificationUpdate(userId, notificationId, 'READ');
   }
 
   async dismiss(notificationId: string, userId: string): Promise<void> {
     await repositories.notifications.dismiss(notificationId, userId);
-
-    // Broadcast real-time update
-    await websocketService.broadcastNotificationUpdate(userId, notificationId, 'DISMISSED');
   }
 
   async markAllAsRead(userId: string): Promise<void> {
@@ -1731,12 +1725,6 @@ class NotificationService {
     await repositories.notifications.markAllAsRead(userId);
 
     logger.info(`markAllAsRead: Updated ${beforeCount} notifications to READ for user ${userId}`);
-
-    // Broadcast real-time update to all user's connections if any notifications were updated
-    if (beforeCount > 0) {
-      logger.info(`markAllAsRead: Broadcasting WebSocket update for user ${userId}`);
-      await websocketService.broadcastNotificationUpdate(userId, 'all', 'READ');
-    }
 
     // Verify the change
     const afterCount = await repositories.notifications.countByUserId(userId, 'UNREAD');

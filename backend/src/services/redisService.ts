@@ -25,6 +25,13 @@ export interface UserEvent {
   timestamp: Date;
 }
 
+export interface OrgMemberEvent {
+  type: 'notification_received';
+  orgMemberId: string;
+  data: any;
+  timestamp: Date;
+}
+
 export interface WorkflowEvent {
   type: 'step_added' | 'step_updated' | 'execution_completed';
   executionId: string;
@@ -158,12 +165,6 @@ class RedisService {
     await this.redis.set(platformKey, platform, 'EX', 3600);
   }
 
-  async getSocketPlatform(userId: string, socketId: string): Promise<string | null> {
-    if (!this.redis) throw new Error('Redis not initialized');
-    const platformKey = `user:${userId}:socket:${socketId}:platform`;
-    return await this.redis.get(platformKey);
-  }
-
   async removeUserConnection(userId: string, socketId: string): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');
 
@@ -184,12 +185,15 @@ class RedisService {
 
   // Cross-workspace broadcast registry. Keyed on orgMemberId — the person-level
   // identity that stays constant across per-workspace User rows.
-  async addOrgMemberConnection(orgMemberId: string, socketId: string): Promise<void> {
+  async addOrgMemberConnection(orgMemberId: string, socketId: string, platform: string = 'web'): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');
 
     const key = `orgmember:${orgMemberId}:connections`;
     await this.redis.sadd(key, socketId);
     await this.redis.expire(key, 3600);
+
+    const platformKey = `orgmember:${orgMemberId}:socket:${socketId}:platform`;
+    await this.redis.set(platformKey, platform, 'EX', 3600);
   }
 
   async removeOrgMemberConnection(orgMemberId: string, socketId: string): Promise<void> {
@@ -197,6 +201,9 @@ class RedisService {
 
     const key = `orgmember:${orgMemberId}:connections`;
     await this.redis.srem(key, socketId);
+
+    const platformKey = `orgmember:${orgMemberId}:socket:${socketId}:platform`;
+    await this.redis.del(platformKey);
   }
 
   async getOrgMemberConnections(orgMemberId: string): Promise<string[]> {
@@ -204,6 +211,13 @@ class RedisService {
 
     const key = `orgmember:${orgMemberId}:connections`;
     return await this.redis.smembers(key);
+  }
+
+  async getOrgMemberSocketPlatform(orgMemberId: string, socketId: string): Promise<string | null> {
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const platformKey = `orgmember:${orgMemberId}:socket:${socketId}:platform`;
+    return await this.redis.get(platformKey);
   }
 
   // Workspace context cache for notification producer (user:wsctx:{userId}).
@@ -277,6 +291,10 @@ class RedisService {
 
   // User-specific event broadcasting
   async broadcastUserEvent(userId: string, event: UserEvent): Promise<void> {
+    if ((event as { type?: string }).type === 'notification_received') {
+      throw new Error('notification_received events must be published via orgMemberId');
+    }
+
     logger.info(`👤 [REDIS-SERVICE] broadcastUserEvent called:`, {
       userId,
       eventType: event.type,
@@ -302,32 +320,10 @@ class RedisService {
     await this.publisher.publish(channel, JSON.stringify(event));
   }
 
-  // Notification broadcasting (Worker -> API Server)
-  async broadcastNotificationEvent(userId: string, notification: any): Promise<void> {
-    // This reuses the user event channel which WebSocketService already subscribes to
-    await this.broadcastUserEvent(userId, {
-      type: 'notification_received', // This matches the socket event name we want to emit
-      userId,
-      data: notification,
-      timestamp: new Date()
-    } as any);
-  }
-
-  // Cross-workspace broadcast publisher. Delivery is scoped to matching orgMemberId
-  // by WebSocketService.handleOrgMemberEvent.
-  async broadcastOrgMemberNotificationEvent(
-    orgMemberId: string,
-    notification: any
-  ): Promise<void> {
+  async publishOrgMemberEvent(orgMemberId: string, event: OrgMemberEvent): Promise<void> {
     if (!this.publisher) throw new Error('Redis publisher not initialized');
 
     const channel = `orgmember:${orgMemberId}:events`;
-    const event = {
-      type: 'notification_received',
-      orgMemberId,
-      data: notification,
-      timestamp: new Date(),
-    };
     await this.publisher.publish(channel, JSON.stringify(event));
   }
 
@@ -493,7 +489,7 @@ class RedisService {
 
   async subscribeToOrgMemberEvents(
     orgMemberId: string,
-    callback: (event: any) => void
+    callback: (event: OrgMemberEvent) => void
   ): Promise<void> {
     if (!this.subscriber) throw new Error('Redis subscriber not initialized');
 

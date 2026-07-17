@@ -301,10 +301,6 @@ export const NotificationHandler: React.FC = () => {
     [navigate, isElectron, suppressNativeToasts, handleNotificationClick],
   );
 
-  const handleNotificationAckConfirmed = useCallback((): void => {}, []);
-
-  const handleNotificationUpdate = useCallback((): void => {}, []);
-
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
       return undefined;
@@ -525,21 +521,13 @@ export const NotificationHandler: React.FC = () => {
   }, [isElectron, recordingStatus]);
 
   const handleNotificationRef = useRef(handleNotification);
-  const handleNotificationAckConfirmedRef = useRef(handleNotificationAckConfirmed);
-  const handleNotificationUpdateRef = useRef(handleNotificationUpdate);
   const notificationReceivedListenerRef = useRef((n: NotificationData): void =>
     handleNotificationRef.current(n),
   );
-  const notificationAckListenerRef = useRef((): void =>
-    handleNotificationAckConfirmedRef.current(),
-  );
-  const notificationUpdatedListenerRef = useRef((): void => handleNotificationUpdateRef.current());
 
   useEffect(() => {
     handleNotificationRef.current = handleNotification;
-    handleNotificationAckConfirmedRef.current = handleNotificationAckConfirmed;
-    handleNotificationUpdateRef.current = handleNotificationUpdate;
-  }, [handleNotification, handleNotificationAckConfirmed, handleNotificationUpdate]);
+  }, [handleNotification]);
 
   useEffect(() => {
     if (user && !isConnectedRef.current) {
@@ -550,8 +538,6 @@ export const NotificationHandler: React.FC = () => {
 
           // Set up notification listeners after connection is established
           websocketService.on('notification_received', notificationReceivedListenerRef.current);
-          websocketService.on('notification_ack_confirmed', notificationAckListenerRef.current);
-          websocketService.on('notification_updated', notificationUpdatedListenerRef.current);
 
           // Setup presence listeners after socket is connected
           setupPresenceListeners(user.id, websocketService);
@@ -575,14 +561,6 @@ export const NotificationHandler: React.FC = () => {
         websocketService.removeListener(
           'notification_received',
           notificationReceivedListenerRef.current,
-        );
-        websocketService.removeListener(
-          'notification_ack_confirmed',
-          notificationAckListenerRef.current,
-        );
-        websocketService.removeListener(
-          'notification_updated',
-          notificationUpdatedListenerRef.current,
         );
       }
 
