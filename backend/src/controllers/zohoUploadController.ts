@@ -16,7 +16,7 @@ import { Request, Response } from 'express';
 import axios from 'axios';
 import FormData from 'form-data';
 import { ExternalSource, AttachmentEntityType } from '@prisma/client';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { decrypt } from '@/services/encryptionService';
@@ -46,7 +46,7 @@ interface UploadOutcome {
 type Uploader = (ctx: UploadContext) => Promise<UploadOutcome>;
 
 export class ZohoUploadController {
-  private externalSourceRepo = new ExternalSourceRepository();
+  private channelExternalSourceResolver = new ChannelExternalSourceResolver();
   private channelRepo = new ChannelRepository();
   private conversationRepo = new ConversationRepository();
 
@@ -75,7 +75,7 @@ export class ZohoUploadController {
       const channel = await this.channelRepo.findById(conversation.channelId);
       if (!channel) return res.status(404).json({ error: 'Channel not found' });
 
-      const externalSource = await this.externalSourceRepo.findByChannelId(channel.id);
+      const externalSource = await this.channelExternalSourceResolver.resolveForChannel(channel.id);
       if (!externalSource) return res.status(404).json({ error: 'External source not found' });
 
       const uploader = this.uploaders[externalSource.sourceType];
@@ -120,7 +120,7 @@ export class ZohoUploadController {
       const channel = await this.channelRepo.findById(channelId);
       if (!channel) return res.status(404).json({ error: 'Channel not found' });
 
-      const externalSource = await this.externalSourceRepo.findByChannelId(channel.id);
+      const externalSource = await this.channelExternalSourceResolver.resolveForChannel(channel.id);
       if (!externalSource) return res.status(404).json({ error: 'External source not found' });
 
       const uploader = this.uploaders[externalSource.sourceType];

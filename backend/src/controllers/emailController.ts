@@ -6,7 +6,6 @@
 import { Request, Response } from 'express';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { EmailDraftRepository } from '@/database/repositories/emailDraftRepository';
@@ -16,7 +15,7 @@ import { EmailChannelPreferenceRepository } from '@/database/repositories/emailC
 import { UserRepository } from '@/database/repositories/users';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
-import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma, DeskType } from '@prisma/client';
+import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma } from '@prisma/client';
 import { db } from '@/database/client';
 import { listS2SClawAgents, getConversationInsight } from '@/services/clawAgentService';
 import { vespaClient } from '@/services/vespaSearch';
@@ -36,6 +35,7 @@ import { emailService } from '@/services/emailService';
 import { config as appConfig } from '@/config/env';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
+import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 
 interface ReplyEmailRequest {
   body: string;
@@ -53,7 +53,7 @@ interface ReplyEmailRequest {
 export class EmailController {
   private emailRepo = new EmailRepository();
   private conversationRepo = new ConversationRepository();
-  private externalSourceRepo = new ExternalSourceRepository();
+  private channelExternalSourceResolver = new ChannelExternalSourceResolver();
   private channelRepo = new ChannelRepository();
   private channelParticipantRepo = new ChannelParticipantRepository();
   private emailDraftRepo = new EmailDraftRepository();
@@ -61,20 +61,6 @@ export class EmailController {
   private messageAttachmentRepo = new MessageAttachmentRepository();
   private emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
   private userRepo = new UserRepository();
-
-  private async resolveExternalSourceForChannel(channelId: string) {
-    const source = await this.externalSourceRepo.findByChannelId(channelId);
-    if (source) {
-      return source;
-    }
-    const preference = await this.emailChannelPreferenceRepo.findByChannelId(channelId);
-    if (preference?.deskType === DeskType.DL && preference.workspaceId) {
-      const wsSource = await this.externalSourceRepo.findEmailSourceByWorkspaceId(preference.workspaceId);
-      return wsSource;
-    }
-    logger.warn(`[EmailController] No external source found for channel`, { channelId });
-    return null;
-  }
 
   /**
    * POST /api/email/:conversationId/reply
@@ -177,7 +163,7 @@ export class EmailController {
         return res.status(404).json({ error: 'Channel not found' });
       }
 
-      const externalSource = await this.resolveExternalSourceForChannel(channel.id);
+      const externalSource = await this.channelExternalSourceResolver.resolveForChannel(channel.id);
       if (!externalSource) {
         return res.status(404).json({ error: 'External source not found' });
       }
@@ -594,7 +580,7 @@ export class EmailController {
         return res.status(403).json({ error: 'Not a member of this channel' });
       }
 
-      const externalSource = await this.resolveExternalSourceForChannel(channelId);
+      const externalSource = await this.channelExternalSourceResolver.resolveForChannel(channelId);
       if (!externalSource) {
         return res.json({ contacts: [] });
       }
@@ -820,7 +806,7 @@ export class EmailController {
         return res.status(400).json({ error: 'Channel must be of type EMAIL' });
       }
 
-      const externalSource = await this.resolveExternalSourceForChannel(channel.id);
+      const externalSource = await this.channelExternalSourceResolver.resolveForChannel(channel.id);
       if (!externalSource) {
         return res.status(404).json({ error: 'External source not found for channel' });
       }
