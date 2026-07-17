@@ -2067,12 +2067,9 @@ export class EmailService {
           });
 
           const xyneId = await TicketIdService.generateTicketId(tx, projectId);
-          const ticketTitle =
-            (firstEmail.subject ?? '').replace(/^(\s*(re|fwd|fw)\s*:\s*)+/i, '').trim() ||
-            firstEmail.subject;
           const createdTicket = await tx.ticket.create({
             data: {
-              title: ticketTitle,
+              title: firstEmail.subject,
               description: firstEmail.body,
               createdBy: userId,
               updatedBy: userId,
