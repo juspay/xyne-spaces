@@ -381,9 +381,8 @@ const ChannelCommandMenu = ({
   } = useSearchMetrics({
     allChannels,
     mentionSearchType,
-    // Default to "my channels" only in the standard Cmd-K modal (where the toggle
-    // lives). Inline / screen-popup reuses of this component keep the old behavior.
-    defaultOnlyMyChannels: !inline && !hideTabs,
+    // Default "my channels" ON everywhere (restrict to the user's channels by default).
+    defaultOnlyMyChannels: true,
   });
 
   // Aliases to match old usage if needed or just use new names
