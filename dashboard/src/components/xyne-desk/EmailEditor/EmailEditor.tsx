@@ -19,6 +19,7 @@ import TextAlign from '@tiptap/extension-text-align';
 import { Quote } from 'lucide-react';
 import { EmailEditorToolbar } from './EmailEditorToolbar';
 import { TableExtensions } from '../../ui/TipTapExtensions';
+import { FormattingShortcutsExtension } from '../../ui/TipTapExtensions';
 import { InlineImageNodeView } from './InlineImageNodeView';
 import { CitationMark, getCitationRefFromTarget } from '../../ui/TipTapExtensions/CitationMark';
 
@@ -296,6 +297,7 @@ export const EmailEditor = ({
         types: ['heading', 'paragraph'],
       }),
       CitationMark,
+      FormattingShortcutsExtension,
       ...TableExtensions,
       ...(extraExtensions ?? []),
     ],

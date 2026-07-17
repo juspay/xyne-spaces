@@ -11,6 +11,7 @@ import {
   Link,
   List,
   ListOrdered,
+  RemoveFormatting,
   Strikethrough,
   TextQuote,
   X,
@@ -98,6 +99,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
   const handleStrikethrough = useCallback(() => {
     editor?.chain().focus().toggleStrike().run();
+  }, [editor]);
+
+  const handleClearFormatting = useCallback(() => {
+    editor?.chain().focus().clearNodes().unsetAllMarks().run();
   }, [editor]);
 
   const handleUnderline = useCallback(() => {
@@ -324,6 +329,18 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               aria-pressed={isActive.strike}
             >
               <Strikethrough className='h-4 w-4' />
+            </button>
+          </Tooltip>
+
+          <Tooltip content='Clear Formatting (⌘\\)' delayDuration={1000} skipDelayDuration={1000}>
+            <button
+              type='button'
+              onClick={handleClearFormatting}
+              onMouseDown={e => e.preventDefault()}
+              className={buttonClass(false)}
+              aria-label='Clear formatting'
+            >
+              <RemoveFormatting className='h-4 w-4' />
             </button>
           </Tooltip>
 

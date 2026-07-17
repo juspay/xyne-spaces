@@ -61,6 +61,7 @@ import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
 import { EmojiSelectorExtension, emojiSelectorPluginKey } from '../TipTapExtensions';
 import { ChannelMentionExtension, channelMentionPluginKey } from '../TipTapExtensions';
 import { TableExtensions } from '../TipTapExtensions';
+import { FormattingShortcutsExtension } from '../TipTapExtensions';
 import { ColonEmojiExtension } from '../TipTapExtensions/ColonEmojiExtension';
 import { TextEmoticonExtension } from '../TipTapExtensions/TextEmoticonExtension';
 import type { InputBoxProps } from './InputBox.types';
@@ -253,6 +254,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [content, setContent] = useState('');
     const debouncedUpdateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastAppliedValueRef = useRef(value ?? '');
+    // When ⌘⇧V / Ctrl+Shift+V is pressed, flag the next paste to insert plain text only.
+    const plainPasteRef = useRef(false);
     const [isSending, setIsSending] = useState(false);
     // Voice recording state — driven by VoiceInput component via onStateChange
     const [isVoiceRecording, setIsVoiceRecording] = useState(false);
@@ -582,6 +585,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         CommandsExtension,
         EmojiSelectorExtension,
         VoiceShimmerMark,
+        FormattingShortcutsExtension,
         ...TableExtensions,
       ],
       content: value || '',
@@ -710,30 +714,22 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             return true;
           }
 
-          // Inline code: ⌘⇧C (Mac) / Ctrl+Shift+C (Windows/Linux)
-          // Use lowercase check since Shift+key often produces uppercase letter
-          if (
-            (event.key === 'c' || event.key === 'C') &&
-            event.shiftKey &&
-            (event.metaKey || event.ctrlKey)
-          ) {
-            event.preventDefault();
-            event.stopPropagation();
-            editor?.chain().focus().toggleCode().run();
-            return true;
-          }
+          // Inline code (⌘⇧C), Strikethrough (⌘⇧X) and Clear Formatting (⌘\)
+          // are registered via FormattingShortcutsExtension's TipTap keymap.
 
-          // Strikethrough: ⌘⇧X (Mac) / Ctrl+Shift+X (Windows/Linux)
-          // Use lowercase check since Shift+key often produces uppercase letter
+          // Plain-text paste: ⌘⇧V (Mac) / Ctrl+Shift+V (Windows/Linux).
+          // ClipboardEvent carries no modifier state, so flag the intent here and
+          // consume it in handlePaste. Reset shortly after in case no paste fires.
           if (
-            (event.key === 'x' || event.key === 'X') &&
+            (event.key === 'v' || event.key === 'V') &&
             event.shiftKey &&
             (event.metaKey || event.ctrlKey)
           ) {
-            event.preventDefault();
-            event.stopPropagation();
-            editor?.chain().focus().toggleStrike().run();
-            return true;
+            plainPasteRef.current = true;
+            setTimeout(() => {
+              plainPasteRef.current = false;
+            }, 100);
+            return false;
           }
 
           // Enter key WITHOUT Shift/Cmd: Send message or new line depending on preference
@@ -783,6 +779,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         },
         handlePaste: (view, event) => {
           const clipboard = event.clipboardData;
+
+          // Plain-text paste (⌘⇧V / Ctrl+Shift+V): strip all source formatting.
+          // Must run before the table/TSV detection below so a copied table pasted
+          // with Shift is inserted as plain text rather than rebuilt as a table.
+          if (plainPasteRef.current) {
+            plainPasteRef.current = false;
+            const plainText = clipboard?.getData('text/plain') ?? '';
+            if (plainText) {
+              event.preventDefault();
+              editor?.commands.insertContent(plainText);
+              return true;
+            }
+          }
 
           /** Handle File Pasting */
           const files = clipboard?.files ?? [];
