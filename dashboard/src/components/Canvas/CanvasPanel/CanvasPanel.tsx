@@ -13,6 +13,7 @@ import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Input from '../../ui/Input';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
+import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import {
   PanelGroup,
   Panel,
@@ -152,24 +153,40 @@ const CanvasPanel = (): ReactElement => {
       const originalCanvas = typeof canvasOrId === 'string' ? canvasFromList : canvasOrId;
       if (!originalCanvas) return;
 
-      void canvasService
-        .duplicateCanvas({
-          sourceCanvasId: originalCanvas.id,
-        })
-        .then(({ id }) => {
-          toast.success('Success', {
-            description: 'Canvas duplicated successfully.',
-          });
+      try {
+        const newCanvasId = uuidv4();
 
-          void navigate(`/chat/canvas/${id}`);
-        })
-        .catch(() => {
-          toast.error('Error', {
-            description: 'Failed to duplicate canvas. Please try again.',
-          });
+        const resolvedProjectId =
+          originalCanvas.projectId ??
+          originalCanvas.channel?.projectId ??
+          originalCanvas.folder?.project?.id;
+
+        z.mutate(
+          mutators.canvas.create({
+            id: newCanvasId,
+            title: `${originalCanvas.title} (Copy)`,
+            content: originalCanvas.content as ReadonlyJSONValue,
+            visibility: originalCanvas.visibility,
+            ...(originalCanvas.channelId ? { channelId: originalCanvas.channelId } : {}),
+            ...(originalCanvas.folderId ? { folderId: originalCanvas.folderId } : {}),
+            ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
+            timestamp: Date.now(),
+            participantId: uuidv4(),
+          }),
+        );
+
+        toast.success('Success', {
+          description: 'Canvas duplicated successfully.',
         });
+
+        void navigate(`/chat/canvas/${newCanvasId}`);
+      } catch {
+        toast.error('Error', {
+          description: 'Failed to duplicate canvas. Please try again.',
+        });
+      }
     },
-    [navigate],
+    [z, navigate],
   );
 
   // Render the left panel content
