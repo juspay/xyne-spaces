@@ -534,7 +534,21 @@ export class ExternalSourceCore {
         normalizedData.referencedMessageIds,
       );
       if (refMatch) {
-        const conversation = await this.conversationRepo.findById(refMatch.conversationId);
+        const parentThreadEmail = await this.emailRepo.findFirstByThreadAndChannel(
+          refMatch.externalThreadId,
+          source.channelId!,
+        );
+        if (parentThreadEmail?.subject !== normalizedData.emailData.subject) {
+          logger.info('[RFC_REFS_SUBJECT_MISMATCH] Skipping RFC merge, parent thread subject does not match', {
+            externalThreadId: refMatch.externalThreadId,
+            parentSubject: parentThreadEmail?.subject,
+            newSubject: normalizedData.emailData.subject,
+            channelId: source.channelId,
+          });
+        }
+        const conversation = parentThreadEmail?.subject === normalizedData.emailData.subject
+          ? await this.conversationRepo.findById(refMatch.conversationId)
+          : null;
         if (conversation) {
           logger.info('[RFC_REFS_THREAD_FOUND] Cross-mailbox thread matched via References header', {
             conversationId: conversation.conversationId,
