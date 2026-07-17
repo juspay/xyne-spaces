@@ -1,0 +1,34 @@
+services:
+  # Y-Sweet Server with Filesystem Persistence
+  ysweet:
+    image: ghcr.io/xynehq/y-sweet:sha-709cabc
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-ysweet
+    ports:
+      - "${YSWEET_BIND_PORT:-8080}:8080"
+    entrypoint: ["y-sweet"]
+    command: 
+      - "serve"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "--checkpoint-freq-seconds"
+      - "10"
+      - "/data"
+    environment:
+      - Y_SWEET_OTEL_ENDPOINT=${Y_SWEET_OTEL_ENDPOINT:-http://otel-collector:4318/v1/metrics}
+      - Y_SWEET_OTEL_SERVICE_NAME=${Y_SWEET_OTEL_SERVICE_NAME:-y-sweet}
+      - Y_SWEET_OTEL_PUSH_INTERVAL=${Y_SWEET_OTEL_PUSH_INTERVAL:-30}
+    volumes:
+      - ysweet_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-c", "timeout 5 bash -c '</dev/tcp/localhost/8080'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  ysweet_data:
+    driver: local
