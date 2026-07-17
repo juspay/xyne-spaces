@@ -280,6 +280,26 @@ export interface TeamTicketRecapsResponse {
   overdueTickets: Ticket[];
 }
 
+export interface TeamChannelTicketsResponse {
+  from: string;
+  to: string;
+  teamId: string;
+  teamName: string;
+  page: number;
+  limit: number;
+  cache: {
+    hit: boolean;
+    key: string;
+    ttlSeconds: number;
+  };
+  matchedChannels: MatchedTeamChannel[];
+  totalMatchedChannels: number;
+  total: number;
+  totalPages: number;
+  tickets: Ticket[];
+  ticketMetrics: TicketMetrics;
+}
+
 export const getOrgSummary = async (params: {
   from: string;
   to: string;
@@ -299,6 +319,8 @@ export const getOrgSummary = async (params: {
 export const getOrgHighlights = async (params: {
   from: string;
   to: string;
+  page?: number;
+  limit?: number;
 }): Promise<OrgHighlightResponse> => {
   const response = await apiInstance.get<OrgHighlightResponse>(
     '/team-intelligence-dashboard/org/bullets',
@@ -306,8 +328,8 @@ export const getOrgHighlights = async (params: {
       params: {
         from: params.from,
         to: params.to,
-        page: 1,
-        limit: 20,
+        page: params.page ?? 1,
+        limit: params.limit ?? 20,
       },
     },
   );
@@ -452,6 +474,31 @@ export const getTeamTicketRecaps = async (
 ): Promise<TeamTicketRecapsResponse> => {
   const response = await apiInstance.get<TeamTicketRecapsResponse>(
     '/team-intelligence-dashboard/team/channel-recaps',
+    {
+      params: {
+        from: params.from,
+        to: params.to,
+        teamId: teamId,
+        page: params.page ?? 1,
+        limit: params.limit ?? 10,
+      },
+    },
+  );
+
+  return response.data;
+};
+
+export const getTeamChannelTickets = async (
+  teamId: string,
+  params: {
+    from: string;
+    to: string;
+    page?: number;
+    limit?: number;
+  },
+): Promise<TeamChannelTicketsResponse> => {
+  const response = await apiInstance.get<TeamChannelTicketsResponse>(
+    '/team-intelligence-dashboard/team/channel-tickets',
     {
       params: {
         from: params.from,

@@ -13,7 +13,7 @@ const TeamIntelligenceTeamScreen = (): ReactElement => {
   const { teamId } = useParams<{ teamId: string }>();
 
   const { data: teams, isLoading: isLoadingTeams } = useTeams();
-  const team = teams?.data.find(t => t.id === teamId);
+  const team = teams?.data?.find(t => t.id === teamId);
 
   if (isLoadingTeams) {
     return (

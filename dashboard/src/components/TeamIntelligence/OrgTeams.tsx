@@ -40,9 +40,9 @@ const OrgTeams = (): ReactElement => {
         </div>
       ) : (
         <div className='space-y-3'>
-          {teams?.map(team => {
+          {teams.map(team => {
             const cleanSummary =
-              removeFormattedPrefix(team.summaryText[0] || '') || 'No recent updates';
+              removeFormattedPrefix(team.summaryText?.[0] || '') || 'No recent updates';
             const teamColorHex = getTeamColor(team.teamName).primary;
 
             return (

@@ -1,10 +1,17 @@
-import { ReactElement } from 'react';
-import { AlertTriangleIcon, CalendarClockIcon, Loader2 } from 'lucide-react';
+import { ReactElement, useEffect, useState } from 'react';
+import {
+  AlertTriangleIcon,
+  CalendarClockIcon,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+} from 'lucide-react';
 import { useOutletContext, useParams } from 'react-router-dom';
-import { useTeamTicketRecaps } from '@/hooks/useTeamIntelligence';
+import { useTeamChannelTickets } from '@/hooks/useTeamIntelligence';
 import { TeamIntelligenceOutletContext } from '@/routes/TeamIntelligenceScreen/TeamIntelligenceScreen';
 import { cn } from '@/utils/classNames';
 import { format } from 'date-fns';
+import Button from '../ui/Button';
 
 const formatDate = (value: string | null | undefined): string => {
   if (!value) return 'Not available';
@@ -27,13 +34,25 @@ const statusPillClassName = (status: string): string =>
 export const TeamOverdueTickets = (): ReactElement => {
   const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
   const { teamId } = useParams<{ teamId: string }>();
+  const [currentPage, setCurrentPage] = useState(1);
+  const limit = 4;
 
-  const { data, isLoading, error } = useTeamTicketRecaps(teamId!, {
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [dateRange.from, dateRange.to, teamId]);
+
+  const { data, isLoading, error } = useTeamChannelTickets(teamId!, {
     from: dateRange.from,
     to: dateRange.to,
-    page: 1,
-    limit: 1,
+    page: currentPage,
+    limit,
   });
+
+  const tickets = data?.tickets ?? [];
+  const totalPages = data?.totalPages ?? 0;
+  const overdueCount = data?.ticketMetrics?.overdueCount ?? 0;
+  const canGoPrevious = currentPage > 1;
+  const canGoNext = currentPage < totalPages;
 
   if (isLoading) {
     return (
@@ -72,8 +91,8 @@ export const TeamOverdueTickets = (): ReactElement => {
     );
   }
 
-  const overdueTickets = data?.overdueTickets ?? [];
-  const overdueCount = data?.ticketMetrics?.overdueCount ?? overdueTickets.length;
+  const overdueTickets = tickets;
+  const totalOverdueCount = overdueCount;
 
   return (
     <section className='space-y-4'>
@@ -84,7 +103,8 @@ export const TeamOverdueTickets = (): ReactElement => {
         <div>
           <h3 className='text-lg font-semibold text-foreground'>Overdue Tickets</h3>
           <p className='text-xs text-muted-foreground'>
-            {overdueCount} overdue ticket{overdueCount === 1 ? '' : 's'} in the selected range
+            {totalOverdueCount} overdue ticket{totalOverdueCount === 1 ? '' : 's'} in the selected
+            range
           </p>
         </div>
       </div>
@@ -96,37 +116,66 @@ export const TeamOverdueTickets = (): ReactElement => {
           </p>
         </div>
       ) : (
-        <div className='grid gap-4 grid-cols-1 md:grid-cols-2'>
-          {overdueTickets.map(ticket => (
-            <article
-              key={ticket.id}
-              className='rounded-xl border bg-card p-5 shadow-sm h-full flex flex-col gap-2'
-            >
-              <div className='flex items-start justify-between gap-3'>
-                <div className='min-w-0 space-y-1'>
-                  <h4 className='line-clamp-2 text-sm font-semibold text-foreground'>
-                    {ticket.title}
-                  </h4>
-                  <h4 className='line-clamp-2 text-xs font-light text-muted-foreground'>
-                    {ticket.description || 'No description provided.'}
-                  </h4>
+        <>
+          <div className='grid gap-4 grid-cols-1 md:grid-cols-2'>
+            {overdueTickets.map(ticket => (
+              <article
+                key={ticket.id}
+                className='rounded-xl border bg-card p-5 shadow-sm h-full flex flex-col gap-2'
+              >
+                <div className='flex items-start justify-between gap-3'>
+                  <div className='min-w-0 space-y-1'>
+                    <h4 className='line-clamp-2 text-sm font-semibold text-foreground'>
+                      {ticket.title}
+                    </h4>
+                  </div>
+
+                  <span className={statusPillClassName(ticket.statusV2)}>{ticket.statusV2}</span>
                 </div>
 
-                <span className={statusPillClassName(ticket.statusV2)}>{ticket.statusV2}</span>
-              </div>
+                <div className='w-full flex items-center gap-1 mt-auto'>
+                  <div className='flex items-center gap-2 text-xs font-medium text-muted-foreground'>
+                    <CalendarClockIcon className='h-3.5 w-3.5' />
 
-              <div className='w-full flex items-center gap-1 mt-auto'>
-                <div className='flex items-center gap-2 text-xs font-medium text-muted-foreground'>
-                  <CalendarClockIcon className='h-3.5 w-3.5' />
-
-                  <p className='text-xs font-normal text-muted-foreground'>
-                    {formatDate(ticket.eta ?? null)}
-                  </p>
+                    <p className='text-xs font-normal text-muted-foreground'>
+                      {formatDate(ticket.eta ?? null)}
+                    </p>
+                  </div>
                 </div>
+              </article>
+            ))}
+          </div>
+
+          {/* Pagination controls */}
+          {totalPages > 1 && (
+            <div className='flex items-center justify-between'>
+              <Button
+                variant={'outline'}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={!canGoPrevious}
+                className='flex items-center gap-2 px-4 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50'
+              >
+                <ChevronLeft size={16} />
+              </Button>
+
+              <div className='flex items-center gap-2'>
+                <span className='text-xs text-muted-foreground'>
+                  Page <span className='font-semibold'>{currentPage}</span> of{' '}
+                  <span className='font-semibold'>{totalPages}</span>
+                </span>
               </div>
-            </article>
-          ))}
-        </div>
+
+              <Button
+                variant={'outline'}
+                onClick={() => setCurrentPage(p => p + 1)}
+                disabled={!canGoNext}
+                className='flex items-center gap-2 px-4 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50'
+              >
+                <ChevronRight size={16} />
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );
