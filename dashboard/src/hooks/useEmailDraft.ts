@@ -23,6 +23,12 @@ export interface EmailDraftRecord {
   updatedAt: number;
 }
 
+interface DraftRecipients {
+  to: string[];
+  cc: string[];
+  bcc: string[];
+}
+
 /**
  * Zero rows carry the recipient columns as raw TEXT (JSON-stringified string[] —
  * the emailDraft mutators stringify on write), so parse them back at this read
@@ -59,7 +65,8 @@ export function useEmailDraft(
     queries.getDraftForConversation({ conversationId: conversationId || '' }),
     { enabled: !!conversationId },
   );
-  const row = (dbDrafts as unknown as EmailDraftRecord[] | undefined)?.[0];
+  const rows = (dbDrafts as unknown as EmailDraftRecord[] | undefined) ?? [];
+  const row = rows[0];
   // Memoized on the row snapshot so consumers keep stable references between renders.
   return useMemo(() => (row ? parseDraftRecipients(row) : undefined), [row]);
 }
@@ -77,7 +84,11 @@ export function useEmailDraftOperations(
   conversationId: string | null | undefined,
   channelId: string | null | undefined,
 ): {
-  saveDraft: (content: string, attachmentIds?: string[]) => string | null;
+  saveDraft: (
+    content: string,
+    attachmentIds?: string[],
+    recipients?: DraftRecipients,
+  ) => string | null;
   saveRecipients: (to: string[], cc: string[], bcc: string[]) => void;
   deleteDraft: () => void;
   draftId: string | null;
@@ -105,7 +116,7 @@ export function useEmailDraftOperations(
   }, [conversationId, zero]);
 
   const saveDraft = useCallback(
-    (content: string, attachmentIds?: string[]): string | null => {
+    (content: string, attachmentIds?: string[], recipients?: DraftRecipients): string | null => {
       if (!conversationId) return null;
       // When the composer is cleared (no body AND no attachments), remove the
       // persisted draft so the ticket-list "Draft" chip disappears and we don't
@@ -123,6 +134,11 @@ export function useEmailDraftOperations(
           channelId,
           draftContent: content,
           ...(attachmentIds && attachmentIds.length > 0 && { attachmentIds }),
+          ...(recipients && {
+            toRecipients: recipients.to,
+            ccRecipients: recipients.cc,
+            bccRecipients: recipients.bcc,
+          }),
           updatedAt: Date.now(),
         }),
       );
@@ -162,7 +178,16 @@ export function useEmailDraftOperations(
         }),
       );
     },
-    [conversationId, channelId, ownDraftId, ownDraft, zero],
+    [
+      conversationId,
+      channelId,
+      ownDraftId,
+      ownDraft?.toRecipients,
+      ownDraft?.ccRecipients,
+      ownDraft?.bccRecipients,
+      ownDraft?.updatedAt,
+      zero,
+    ],
   );
 
   return { saveDraft, saveRecipients, deleteDraft, draftId: ownDraftId ?? null, draft: ownDraft };

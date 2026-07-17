@@ -135,6 +135,7 @@ interface KeyDownDeps {
   inputValue: string;
   emails: ReadonlyArray<string>;
   setEmails: (next: string[]) => void;
+  onEmailsChange?: (next: string[]) => void;
   setInputValue: (next: string) => void;
   suggestions: ReadonlyArray<RecipientSuggestion>;
   suggestionIndex: number;
@@ -209,13 +210,17 @@ export const makeRecipientKeyDownHandler = (
       e.preventDefault();
       const newEmails = splitAndValidateEmails(deps.inputValue, deps.emails);
       if (newEmails.length > 0) {
-        deps.setEmails([...deps.emails, ...newEmails]);
+        const nextEmails = [...deps.emails, ...newEmails];
+        deps.setEmails(nextEmails);
+        deps.onEmailsChange?.(nextEmails);
       }
       if (newEmails.length > 0 || deps.inputValue.includes('@')) {
         deps.setInputValue('');
       }
     } else if (e.key === 'Backspace' && !deps.inputValue && deps.emails.length > 0) {
-      deps.setEmails(deps.emails.slice(0, -1));
+      const nextEmails = deps.emails.slice(0, -1);
+      deps.setEmails(nextEmails);
+      deps.onEmailsChange?.(nextEmails);
     }
   };
 };

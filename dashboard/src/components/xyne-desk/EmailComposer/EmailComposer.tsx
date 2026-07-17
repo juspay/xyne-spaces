@@ -59,7 +59,11 @@ import { useUsers } from '../../../hooks/useUsers';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useComposeSubjectAI } from '../../../hooks/useComposeSubjectAI';
 import { AutoDraftStatus } from '@xyne/shared';
-import { useEmailDraft, useEmailDraftOperations } from '../../../hooks/useEmailDraft';
+import {
+  useEmailDraft,
+  useEmailDraftOperations,
+  type EmailDraftRecord,
+} from '../../../hooks/useEmailDraft';
 import {
   useComposeDraftOperations,
   parseComposeDraftRow,
@@ -166,6 +170,16 @@ const resolveFeatures = (
   ...overrides,
 });
 
+const sameEmailList = (a: string[] | null | undefined, b: string[] | null | undefined): boolean => {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+};
+
 interface EmailComposerProps {
   conversationId?: string | null | undefined;
   emails?: ReadonlyArray<ComposerEmail> | undefined;
@@ -253,14 +267,16 @@ export const EmailComposer = ({
   const draftAgentName =
     clawAgents.find(a => a.slug === channelPreference?.autoDraftAgentSlug)?.name ?? 'Xyne AI';
   const deskContacts = useDeskContacts(channelId);
-  // Use email draft hooks
-  const draft = useEmailDraft(conversationId);
+  const draft: EmailDraftRecord | undefined = useEmailDraft(conversationId);
+  const {
+    saveDraft,
+    saveRecipients,
+    deleteDraft,
+    draftId,
+    draft: ownDraft,
+  } = useEmailDraftOperations(conversationId, channelId);
   const isAutoDraftGenerating =
     !isComposeMode && draft?.autoDraftStatus === AutoDraftStatus.GENERATING;
-  const { saveDraft, saveRecipients, deleteDraft, draftId } = useEmailDraftOperations(
-    conversationId,
-    channelId,
-  );
   const [emailContent, setEmailContent] = useState<string>('');
   // Subject is only meaningful in compose mode — reply inherits from the thread.
   const [composeSubject, setComposeSubject] = useState<string>('');
@@ -388,28 +404,6 @@ export const EmailComposer = ({
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
   const [bodyEditor, setBodyEditor] = useState<Editor | null>(null);
-  // Body pill → To sync only. To chip add/remove does not touch the editor body.
-  const onRemoveRecipientFromBodyRef = useRef<(email: string) => void>(() => {});
-  onRemoveRecipientFromBodyRef.current = (email: string): void => {
-    const lower = email.toLowerCase().trim();
-    setToEmails(prev => prev.filter(e => e.toLowerCase().trim() !== lower));
-  };
-  const onAddRecipientToFromBodyRef = useRef<(email: string) => void>(() => {});
-  onAddRecipientToFromBodyRef.current = (email: string): void => {
-    const lower = email.toLowerCase().trim();
-    setToEmails(prev => {
-      if (prev.some(e => e.toLowerCase().trim() === lower)) return prev;
-      return [...prev, email];
-    });
-  };
-  const recipientExtensions = useMemo(
-    () => [
-      RecipientPillExtension.configure({
-        onRemoveRecipient: (email: string) => onRemoveRecipientFromBodyRef.current(email),
-      }),
-    ],
-    [],
-  );
   // Tracks the conversation draft for which we have already performed the initial
   // attachment restore. Prevents subsequent Zero reactive updates (e.g. after
   // an autosave changes `updatedAt`) from re-running the restore and clearing
@@ -426,6 +420,7 @@ export const EmailComposer = ({
     setPreviewFile(null);
     setIsPreviewOpen(false);
     restoredAttachmentsForDraftRef.current = null;
+    recipientsHydratedRef.current = null;
   }, [conversationId]);
 
   const lastLoadedContentRef = React.useRef<string>('');
@@ -472,6 +467,73 @@ export const EmailComposer = ({
   const [isToExpanded, setIsToExpanded] = useState(false);
   const [isCcExpanded, setIsCcExpanded] = useState(false);
   const [isBccExpanded, setIsBccExpanded] = useState(false);
+  const onRemoveRecipientFromBodyRef = useRef<(email: string) => void>(() => {});
+  const onAddRecipientToFromBodyRef = useRef<(email: string) => void>(() => {});
+
+  const applyRecipients = useCallback(
+    (next: { to: string[]; cc: string[]; bcc: string[] }): void => {
+      setToEmails(next.to);
+      setCcEmails(next.cc);
+      setBccEmails(next.bcc);
+    },
+    [],
+  );
+
+  const applyUserRecipients = useCallback(
+    (next: { to: string[]; cc: string[]; bcc: string[] }): void => {
+      applyRecipients(next);
+      if (!isComposeMode) saveRecipients(next.to, next.cc, next.bcc);
+    },
+    [applyRecipients, isComposeMode, saveRecipients],
+  );
+
+  const saveReplyDraft = useCallback(
+    (content: string, attachmentIds?: string[]): string | null =>
+      saveDraft(content, attachmentIds, {
+        to: toEmails,
+        cc: ccEmails,
+        bcc: bccEmails,
+      }),
+    [saveDraft, toEmails, ccEmails, bccEmails],
+  );
+
+  // Body pill -> To sync only. To chip add/remove does not touch the editor body.
+  const handleRemoveRecipientFromBody = useCallback(
+    (email: string): void => {
+      const lower = email.toLowerCase().trim();
+      applyUserRecipients({
+        to: toEmails.filter(e => e.toLowerCase().trim() !== lower),
+        cc: ccEmails,
+        bcc: bccEmails,
+      });
+    },
+    [applyUserRecipients, toEmails, ccEmails, bccEmails],
+  );
+
+  const handleAddRecipientFromBody = useCallback(
+    (email: string): void => {
+      const lower = email.toLowerCase().trim();
+      if (toEmails.some(e => e.toLowerCase().trim() === lower)) return;
+      applyUserRecipients({
+        to: [...toEmails, email],
+        cc: ccEmails,
+        bcc: bccEmails,
+      });
+    },
+    [applyUserRecipients, toEmails, ccEmails, bccEmails],
+  );
+
+  onRemoveRecipientFromBodyRef.current = handleRemoveRecipientFromBody;
+  onAddRecipientToFromBodyRef.current = handleAddRecipientFromBody;
+
+  const recipientExtensions = useMemo(
+    () => [
+      RecipientPillExtension.configure({
+        onRemoveRecipient: (email: string) => onRemoveRecipientFromBodyRef.current(email),
+      }),
+    ],
+    [],
+  );
 
   const anyFieldExpanded = isToExpanded || isCcExpanded || isBccExpanded;
 
@@ -683,22 +745,22 @@ export const EmailComposer = ({
   const [dragOverField, setDragOverField] = useState<RecipientField | null>(null);
   const DRAG_MIME = 'application/x-xd-recipient';
 
-  const setForField = useCallback(
-    (field: RecipientField, updater: (prev: string[]) => string[]): void => {
-      if (field === 'to') setToEmails(updater);
-      else if (field === 'cc') setCcEmails(updater);
-      else setBccEmails(updater);
-    },
-    [],
-  );
-
   const moveRecipient = useCallback(
     (from: RecipientField, to: RecipientField, email: string): void => {
       if (from === to) return;
-      setForField(from, prev => prev.filter(e => e !== email));
-      setForField(to, prev => (prev.includes(email) ? prev : [...prev, email]));
+      const current = {
+        to: toEmails,
+        cc: ccEmails,
+        bcc: bccEmails,
+      };
+      const next = {
+        ...current,
+        [from]: current[from].filter(e => e !== email),
+        [to]: current[to].includes(email) ? current[to] : [...current[to], email],
+      };
+      applyUserRecipients(next);
     },
-    [setForField],
+    [applyUserRecipients, toEmails, ccEmails, bccEmails],
   );
 
   const handleChipDragStart = useCallback(
@@ -1045,18 +1107,18 @@ export const EmailComposer = ({
     // Prefer recipients persisted on the draft in the DB (synced across devices). Fall
     // back to legacy localStorage (in-flight drafts saved before this change), then derive
     // from the thread.
-    if (draft && Array.isArray(draft.toRecipients)) {
+    if (ownDraft && Array.isArray(ownDraft.toRecipients)) {
       // The draft carries explicitly-persisted recipients — the source of truth, even when the
       // lists are all empty (the user cleared them). Always re-sync from it: the saveRecipients
       // equality guard keeps this from looping, and respecting an empty list is what makes
       // "clear recipients" actually stick instead of being re-derived from the thread below.
       const ok = (s: unknown): s is string => typeof s === 'string' && s.includes('@');
-      const dbTo = (draft.toRecipients ?? []).filter(ok);
-      const dbCc = (draft.ccRecipients ?? []).filter(ok);
-      const dbBcc = (draft.bccRecipients ?? []).filter(ok);
-      setToEmails(dbTo);
-      setCcEmails(dbCc);
-      setBccEmails(dbBcc);
+      const dbTo = (ownDraft.toRecipients ?? []).filter(ok);
+      const dbCc = (ownDraft.ccRecipients ?? []).filter(ok);
+      const dbBcc = (ownDraft.bccRecipients ?? []).filter(ok);
+      if (!sameEmailList(toEmails, dbTo)) setToEmails(dbTo);
+      if (!sameEmailList(ccEmails, dbCc)) setCcEmails(dbCc);
+      if (!sameEmailList(bccEmails, dbBcc)) setBccEmails(dbBcc);
       setShowCc(dbCc.length > 0);
       setShowBcc(dbBcc.length > 0);
       recipientsHydratedRef.current = conversationId ?? null;
@@ -1219,17 +1281,8 @@ export const EmailComposer = ({
     isComposeMode,
     channelPreference?.defaultCc,
     channelPreferenceDetails?.type,
-    draft,
+    ownDraft,
   ]);
-
-  useEffect(() => {
-    // Persist recipients onto the DB draft (replaces the old localStorage write, so a
-    // draft is one synced record). saveRecipients self-gates: it no-ops until a real
-    // draft exists, so opening a reply (which pre-fills recipients) never creates a
-    // phantom draft.
-    if (isComposeMode) return;
-    saveRecipients(toEmails, ccEmails, bccEmails);
-  }, [isComposeMode, toEmails, ccEmails, bccEmails, saveRecipients]);
 
   // Upload attachments
   const uploadAttachments = async (files: File[]): Promise<string[]> => {
@@ -1602,7 +1655,7 @@ export const EmailComposer = ({
           // case: user clicks the attachment button → editor blurs before any
           // file is attached → file selected → upload completes → no blur fires).
           if (!isComposeMode && allAttachmentIds.length > 0 && conversationId) {
-            const nextDraftId = saveDraft(emailContent, allAttachmentIds);
+            const nextDraftId = saveReplyDraft(emailContent, allAttachmentIds);
             if (nextDraftId) {
               persistAttachmentsForDraft(
                 `xyne:emailDraft:attachments:${conversationId}`,
@@ -1674,13 +1727,19 @@ export const EmailComposer = ({
     const isDup = (list: ReadonlyArray<string>): boolean =>
       list.some(e => e.toLowerCase() === lower);
     if (field === 'to') {
-      if (!isDup(toEmails)) setToEmails([...toEmails, email]);
+      if (!isDup(toEmails)) {
+        applyUserRecipients({ to: [...toEmails, email], cc: ccEmails, bcc: bccEmails });
+      }
       setToInputValue('');
     } else if (field === 'cc') {
-      if (!isDup(ccEmails)) setCcEmails([...ccEmails, email]);
+      if (!isDup(ccEmails)) {
+        applyUserRecipients({ to: toEmails, cc: [...ccEmails, email], bcc: bccEmails });
+      }
       setCcInputValue('');
     } else {
-      if (!isDup(bccEmails)) setBccEmails([...bccEmails, email]);
+      if (!isDup(bccEmails)) {
+        applyUserRecipients({ to: toEmails, cc: ccEmails, bcc: [...bccEmails, email] });
+      }
       setBccInputValue('');
     }
     setSuggestionIndex(0);
@@ -1702,6 +1761,7 @@ export const EmailComposer = ({
     inputValue: toInputValue,
     emails: toEmails,
     setEmails: setToEmails,
+    onEmailsChange: nextTo => applyUserRecipients({ to: nextTo, cc: ccEmails, bcc: bccEmails }),
     setInputValue: setToInputValue,
     suggestions: toSuggestions,
     suggestionIndex,
@@ -1714,7 +1774,7 @@ export const EmailComposer = ({
   const handleToBlur = (): void => {
     const newEmails = splitAndValidateEmails(toInputValue, toEmails);
     if (newEmails.length > 0) {
-      setToEmails([...toEmails, ...newEmails]);
+      applyUserRecipients({ to: [...toEmails, ...newEmails], cc: ccEmails, bcc: bccEmails });
       setToInputValue('');
     }
     blurSuggest('to');
@@ -1744,7 +1804,7 @@ export const EmailComposer = ({
       contactPool={contactPool}
       users={users}
       toEmails={toEmails}
-      onAddToRecipient={email => onAddRecipientToFromBodyRef.current(email)}
+      onAddToRecipient={(email: string) => onAddRecipientToFromBodyRef.current(email)}
     />
   );
 
@@ -1753,6 +1813,7 @@ export const EmailComposer = ({
     inputValue: ccInputValue,
     emails: ccEmails,
     setEmails: setCcEmails,
+    onEmailsChange: nextCc => applyUserRecipients({ to: toEmails, cc: nextCc, bcc: bccEmails }),
     setInputValue: setCcInputValue,
     suggestions: ccSuggestions,
     suggestionIndex,
@@ -1767,6 +1828,7 @@ export const EmailComposer = ({
     inputValue: bccInputValue,
     emails: bccEmails,
     setEmails: setBccEmails,
+    onEmailsChange: nextBcc => applyUserRecipients({ to: toEmails, cc: ccEmails, bcc: nextBcc }),
     setInputValue: setBccInputValue,
     suggestions: bccSuggestions,
     suggestionIndex,
@@ -1775,6 +1837,24 @@ export const EmailComposer = ({
     closeSuggestions,
     onSuggestionSelect: handleSuggestionSelect,
   });
+
+  const handleCcBlur = (): void => {
+    const newEmails = splitAndValidateEmails(ccInputValue, ccEmails);
+    if (newEmails.length > 0) {
+      applyUserRecipients({ to: toEmails, cc: [...ccEmails, ...newEmails], bcc: bccEmails });
+      setCcInputValue('');
+    }
+    blurSuggest('cc');
+  };
+
+  const handleBccBlur = (): void => {
+    const newEmails = splitAndValidateEmails(bccInputValue, bccEmails);
+    if (newEmails.length > 0) {
+      applyUserRecipients({ to: toEmails, cc: ccEmails, bcc: [...bccEmails, ...newEmails] });
+      setBccInputValue('');
+    }
+    blurSuggest('bcc');
+  };
 
   const handleExpand = (): void => {
     setIsExpanded(true);
@@ -1813,7 +1893,7 @@ export const EmailComposer = ({
 
       e.preventDefault();
       e.stopPropagation();
-      if (hasEmailBody && isDirty) saveDraft(emailContent);
+      if (hasEmailBody && isDirty) saveReplyDraft(emailContent);
       onClose();
     };
     document.addEventListener('keydown', handler, true);
@@ -1821,7 +1901,7 @@ export const EmailComposer = ({
   }, [
     onClose,
     emailContent,
-    saveDraft,
+    saveReplyDraft,
     isInlineAIPanelOpen,
     setIsInlineAIPanelOpen,
     hasEmailBody,
@@ -2276,7 +2356,9 @@ export const EmailComposer = ({
                   inputValue={toInputValue}
                   expanded={isToExpanded}
                   onExpandedChange={setIsToExpanded}
-                  onEmailsChangeUpdater={setToEmails}
+                  onEmailsChange={nextTo =>
+                    applyUserRecipients({ to: nextTo, cc: ccEmails, bcc: bccEmails })
+                  }
                   onInputValueChange={setToInputValue}
                   suggestions={toSuggestions}
                   activeSuggestField={activeSuggestField}
@@ -2415,7 +2497,7 @@ export const EmailComposer = ({
                         <button
                           type='button'
                           onClick={() => {
-                            if (hasEmailBody && isDirty) saveDraft(emailContent);
+                            if (hasEmailBody && isDirty) saveReplyDraft(emailContent);
                             onClose();
                           }}
                           disabled={isSending}
@@ -2443,7 +2525,9 @@ export const EmailComposer = ({
                   inputValue={ccInputValue}
                   expanded={isCcExpanded}
                   onExpandedChange={setIsCcExpanded}
-                  onEmailsChangeUpdater={setCcEmails}
+                  onEmailsChange={nextCc =>
+                    applyUserRecipients({ to: toEmails, cc: nextCc, bcc: bccEmails })
+                  }
                   onInputValueChange={setCcInputValue}
                   suggestions={ccSuggestions}
                   activeSuggestField={activeSuggestField}
@@ -2459,14 +2543,7 @@ export const EmailComposer = ({
                   handleFieldDragLeave={handleFieldDragLeave}
                   handleFieldDrop={handleFieldDrop}
                   handleKeyDown={handleCcKeyDown}
-                  handleBlur={() => {
-                    const newEmails = splitAndValidateEmails(ccInputValue, ccEmails);
-                    if (newEmails.length > 0) {
-                      setCcEmails([...ccEmails, ...newEmails]);
-                      setCcInputValue('');
-                    }
-                    blurSuggest('cc');
-                  }}
+                  handleBlur={handleCcBlur}
                   focusSuggest={focusSuggest}
                   trackName='FocusCcField'
                   trackMetadata={{
@@ -2488,7 +2565,9 @@ export const EmailComposer = ({
                   inputValue={bccInputValue}
                   expanded={isBccExpanded}
                   onExpandedChange={setIsBccExpanded}
-                  onEmailsChangeUpdater={setBccEmails}
+                  onEmailsChange={nextBcc =>
+                    applyUserRecipients({ to: toEmails, cc: ccEmails, bcc: nextBcc })
+                  }
                   onInputValueChange={setBccInputValue}
                   suggestions={bccSuggestions}
                   activeSuggestField={activeSuggestField}
@@ -2504,14 +2583,7 @@ export const EmailComposer = ({
                   handleFieldDragLeave={handleFieldDragLeave}
                   handleFieldDrop={handleFieldDrop}
                   handleKeyDown={handleBccKeyDown}
-                  handleBlur={() => {
-                    const newEmails = splitAndValidateEmails(bccInputValue, bccEmails);
-                    if (newEmails.length > 0) {
-                      setBccEmails([...bccEmails, ...newEmails]);
-                      setBccInputValue('');
-                    }
-                    blurSuggest('bcc');
-                  }}
+                  handleBlur={handleBccBlur}
                   focusSuggest={focusSuggest}
                   trackName='FocusBccField'
                   trackMetadata={{
@@ -2602,7 +2674,7 @@ export const EmailComposer = ({
                     const next =
                       action === 'insert' && hasEmailBody ? `${emailContent}${html}` : html;
                     setEmailContent(next);
-                    if (next) saveDraft(next);
+                    if (next) saveReplyDraft(next);
                   })();
                 }}
                 onCollapse={() => setAiPaneOpen(false)}
@@ -2694,7 +2766,7 @@ export const EmailComposer = ({
                   onDropAttachmentIntoEditor={handleDropAttachmentIntoEditor}
                   onFileDropHandled={resetDragState}
                   onBlur={() => {
-                    if (!isComposeMode && hasEmailBody && isDirty) saveDraft(emailContent);
+                    if (!isComposeMode && hasEmailBody && isDirty) saveReplyDraft(emailContent);
                   }}
                   onFocus={() => {
                     setIsToExpanded(false);
