@@ -37,6 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../ui/Select/Select';
+import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 
 export interface DeskMetricsDashboardProps {
   open: boolean;
@@ -95,7 +96,8 @@ const formatTrendLabel = (date: string, hourly: boolean): string => {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-const downloadCsv = (tickets: DeskMetricsTicketRow[]): void => {
+const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
+  const filename = 'desk-metrics.csv';
   const headers = ['ID', 'Title', 'Assignee', 'Priority', 'Stage', 'Status', 'FRT', 'RT', 'CSAT'];
   const rows = tickets.map(t => [
     t.xyneId ?? t.ticketId.slice(0, 8),
@@ -113,9 +115,10 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): void => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'desk-metrics.csv';
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+  return filename;
 };
 
 const MetricsTicketTable = ({
@@ -327,7 +330,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   const isEmpty = !!data && data.tickets.length === 0 && data.counts.stageCounts.length === 0;
 
   const handleDownload = useCallback(() => {
-    if (data?.tickets) downloadCsv(data.tickets);
+    if (!data?.tickets) return;
+    const filename = downloadCsv(data.tickets);
+    showDownloadCompleteToast(filename);
   }, [data?.tickets]);
 
   return (
