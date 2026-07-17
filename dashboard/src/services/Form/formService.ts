@@ -1,12 +1,20 @@
 import { apiInstance } from '../clients/apiClient';
-import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+  parseFieldOptions,
+  type FieldEnumOption,
+} from '@xyne/shared';
 
 export interface CreateFormField {
   fieldId?: string;
   fieldName?: string;
   fieldType?: FormFieldType;
-  fieldEnum?: string[];
+  fieldOptions?: FieldEnumOption[];
+  fieldEnum?: FieldEnumOption[];
   isOptional?: boolean | undefined;
+  parentOptionId?: string | null;
 }
 
 export interface CreateFormRequest {
@@ -27,7 +35,8 @@ export interface GlobalFieldListResult {
   projectId: string;
   fieldName: string;
   fieldType: FormFieldType;
-  fieldEnum: string[] | null;
+  fieldEnum: FieldEnumOption[] | null;
+  fieldOptions: FieldEnumOption[] | null;
 }
 
 export interface CreateFormResponse {
@@ -46,12 +55,14 @@ export interface FormFieldResponse {
   formId: string;
   fieldName: string;
   fieldType: FormFieldType;
-  fieldEnum: string[] | null;
+  fieldEnum: FieldEnumOption[] | null;
+  fieldOptions: FieldEnumOption[] | null;
   isOptional: boolean;
   sequenceNumber: number;
   membershipId?: string;
   createdAt: number;
   updatedAt: number;
+  parentOptionId?: string | null;
 }
 
 export interface FormDetailResponse {
@@ -74,7 +85,16 @@ export class FormService {
 
   async getFormById(formId: string): Promise<FormDetailResponse> {
     const response = await apiInstance.get<FormDetailResponse>(`/forms/${formId}`);
-    return response.data;
+    // Normalize both option columns to {id,value}[]. Consumers prefer fieldOptions and fall
+    // back to fieldEnum (the legacy string[] projection) for rows written before this column.
+    return {
+      ...response.data,
+      fields: response.data.fields.map(field => ({
+        ...field,
+        fieldEnum: field.fieldEnum ? parseFieldOptions(field.fieldEnum) : null,
+        fieldOptions: field.fieldOptions ? parseFieldOptions(field.fieldOptions) : null,
+      })),
+    };
   }
 
   async getGlobalFields(params: { projectId: string }): Promise<GlobalFieldListResult[]> {
@@ -83,7 +103,11 @@ export class FormService {
         projectId: params.projectId,
       },
     });
-    return response.data;
+    return response.data.map(field => ({
+      ...field,
+      fieldEnum: field.fieldEnum ? parseFieldOptions(field.fieldEnum) : null,
+      fieldOptions: field.fieldOptions ? parseFieldOptions(field.fieldOptions) : null,
+    }));
   }
 
   async updateForm(data: UpdateFormRequest): Promise<CreateFormResponse> {

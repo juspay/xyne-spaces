@@ -1,4 +1,4 @@
-import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import { TicketPriority, TicketStatusV2, isFieldActive } from '@xyne/shared';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { CreateTicketFormData } from './CreateTicketModal';
 import {
@@ -36,7 +36,15 @@ interface MissingMandatoryFieldInput {
   formValues: CreateTicketFormData;
   boards: ReadonlyArray<{ id: string }> | undefined;
   formMapping:
-    | { formFields?: ReadonlyArray<{ fieldName: string; isOptional?: boolean | null }> }
+    | {
+        formFields?: ReadonlyArray<{
+          id: string;
+          fieldName: string;
+          isOptional?: boolean | null;
+          parentOptionId?: string | null;
+          fieldEnum?: unknown;
+        }>;
+      }
     | null
     | undefined;
   showUserGroupsOnly: boolean;
@@ -102,8 +110,19 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     return 'Ticket Type is required';
 
   if (formMapping?.formFields && formMapping.formFields.length > 0) {
-    const missing = formMapping.formFields.find(field => {
+    const allFields = formMapping.formFields;
+    const getFieldEffectiveValue = (fieldId: string): string | undefined => {
+      const parentField = allFields.find(f => f.id === fieldId);
+      const parentRaw = parentField
+        ? formValues?.dynamicFields?.[parentField.fieldName]
+        : undefined;
+      return typeof parentRaw === 'string' ? parentRaw : undefined;
+    };
+
+    const missing = allFields.find(field => {
       if (field.isOptional === true) return false;
+      // An inactive branch field was never shown, so it can't block submission.
+      if (!isFieldActive(field, allFields, getFieldEffectiveValue)) return false;
       const value = formValues?.dynamicFields?.[field.fieldName];
       return !value || (typeof value === 'string' && !value.trim());
     });
@@ -111,6 +130,33 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
   }
 
   return null;
+}
+
+// Drops entries left over from a field switched out of its active branch — the backend
+// otherwise rejects the whole submission over a value the user can no longer even see.
+export function filterActiveDynamicFieldValues(
+  allFields: ReadonlyArray<{
+    id: string;
+    fieldName: string;
+    parentOptionId?: string | null;
+    fieldEnum?: unknown;
+  }>,
+  dynamicFields: Record<string, string | string[]>,
+): Record<string, string | string[]> {
+  const fieldByName = new Map(allFields.map(field => [field.fieldName, field]));
+  const getFieldEffectiveValue = (fieldId: string): string | undefined => {
+    const parentField = allFields.find(f => f.id === fieldId);
+    const parentRaw = parentField ? dynamicFields[parentField.fieldName] : undefined;
+    return typeof parentRaw === 'string' ? parentRaw : undefined;
+  };
+
+  return Object.fromEntries(
+    Object.entries(dynamicFields).filter(([fieldName]) => {
+      const field = fieldByName.get(fieldName);
+      if (!field) return true; // not a known form field — leave whatever this key is alone
+      return isFieldActive(field, allFields, getFieldEffectiveValue);
+    }),
+  );
 }
 
 export interface CreateTicketUrlPrefill {

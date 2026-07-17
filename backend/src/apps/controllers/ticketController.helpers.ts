@@ -1,4 +1,5 @@
 import { FormFieldType, Prisma } from '@prisma/client';
+import { parseFieldOptionValues } from '@xyne/shared';
 
 type CustomFieldDefinition = {
   fieldName: string;
@@ -15,14 +16,6 @@ type TicketInfoDependencies<TTicket extends TicketInfoRecord, TCustomFormData, T
   getTicketByIdentifier: (identifier: string, workspaceId: string) => Promise<TTicket | null>;
   getTicketCustomFormData: (ticketId: string, boardId: string) => Promise<TCustomFormData>;
   getTicketHistory: (ticketId: string, limit: number) => Promise<THistory>;
-};
-
-export const parseFieldOptions = (fieldEnum: Prisma.JsonValue | null): string[] => {
-  if (!Array.isArray(fieldEnum)) return [];
-  return fieldEnum
-    .filter((value): value is string => typeof value === 'string')
-    .map(value => value.trim())
-    .filter(Boolean);
 };
 
 export const normalizeCustomFieldValue = (
@@ -109,7 +102,7 @@ export const normalizeCustomFieldValue = (
       }
 
       const value = rawValue.trim();
-      const options = parseFieldOptions(field.fieldEnum);
+      const options = parseFieldOptionValues(field.fieldEnum);
       if (options.length > 0 && !options.includes(value)) {
         throw new Error(`Field "${field.fieldName}" must be one of: ${options.join(', ')}`);
       }
@@ -128,7 +121,7 @@ export const normalizeCustomFieldValue = (
         throw new Error(`Field "${field.fieldName}" must be a non-empty array of strings`);
       }
 
-      const options = parseFieldOptions(field.fieldEnum);
+      const options = parseFieldOptionValues(field.fieldEnum);
       if (options.length > 0) {
         const invalidValues = normalizedValues.filter(value => !options.includes(value));
         if (invalidValues.length > 0) {

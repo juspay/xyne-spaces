@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import { FormContextType, FormEntityType, FormFieldType, parseFieldOptions, resolveParentOption, serializeFieldOptions, type FieldEnumOption } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Form, FormFields, Prisma, PrismaClient, FormFieldType as PrismaFormFieldType } from '@prisma/client';
 import { logger } from '@/utils/logger';
@@ -48,7 +48,10 @@ export interface CreateFormWithFieldsInput extends CreateFormInput {
     fieldName?: string;
     fieldType?: FormFieldType;
     fieldEnum?: Prisma.InputJsonValue;
+    fieldOptions?: Array<{ id: string; value: string }>;
     isOptional?: boolean;
+    // Id of an option in another field's fieldOptions — this field only applies in that branch.
+    parentOptionId?: string | null;
   }>;
 }
 
@@ -62,6 +65,7 @@ export interface GlobalFieldListResult {
   fieldName: string;
   fieldType: PrismaFormFieldType;
   fieldEnum: Prisma.JsonValue | null;
+  fieldOptions: Prisma.JsonValue | null;
 }
 
 interface LocalFieldDefinitionInput {
@@ -69,7 +73,49 @@ interface LocalFieldDefinitionInput {
   fieldName: string;
   fieldType: FormFieldType;
   fieldEnum?: Prisma.InputJsonValue;
+  fieldOptions?: Prisma.InputJsonValue;
+  parentOptionId?: string | null;
 }
+
+type BranchableFieldInput = {
+  fieldName: string;
+  fieldType: FormFieldType;
+  fieldEnum?: Prisma.InputJsonValue;
+  fieldOptions?: Prisma.InputJsonValue;
+  parentOptionId?: string | null;
+};
+
+/** Validates a field's parentOptionId against its resolved parent. No-op if unset. */
+const validateBranch = (child: BranchableFieldInput, allFields: BranchableFieldInput[]): void => {
+  if (!child.parentOptionId) return;
+
+  const resolved = resolveParentOption(allFields, child.parentOptionId);
+  if (!resolved) {
+    throw new Error(
+      `Field "${child.fieldName}" references an option that doesn't exist on any field in this form`
+    );
+  }
+  if (resolved.parentField.fieldType !== FormFieldType.SINGLE_SELECT) {
+    throw new Error(
+      `Field "${child.fieldName}" can only belong to a branch of a Single Select field`
+    );
+  }
+  if (resolved.parentField.parentOptionId) {
+    throw new Error(
+      `Field "${child.fieldName}" cannot belong to a branch of "${resolved.parentField.fieldName}" — that field is itself in a branch, only one level is allowed`
+    );
+  }
+};
+
+/** Validates every field's branch tag; a parent is always another entry in the same payload. */
+const validateAllBranches = (fields: BranchableFieldInput[]): void => {
+  // fieldEnum is the string[] projection after normalization. Feed fieldOptions as the scanned
+  // property so branch parents can still be resolved.
+  const withOptions = fields.map(f => ({ ...f, fieldEnum: f.fieldOptions ?? f.fieldEnum }));
+  for (const field of withOptions) {
+    validateBranch(field, withOptions);
+  }
+};
 
 export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prisma.FormUpdateInput> {
   constructor() {
@@ -109,6 +155,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     const normalizedFields = data.fields.map(normalizeFormFieldInput);
     validateFormFieldInputs(normalizedFields);
     this.validateLocalFieldDefinitions(normalizedFields);
+    validateAllBranches(normalizedFields);
 
     return await this.db.$transaction(async (tx) => {
       const form = await tx.form.create({
@@ -155,7 +202,10 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     });
   }
 
-  async findFormByContextAndEntity(context: FormContextType, entity: FormEntityType): Promise<Form | null> {
+  async findFormByContextAndEntity(
+    context: FormContextType,
+    entity: FormEntityType
+  ): Promise<Form | null> {
     return await this.db.form.findFirst({
       where: {
         contextType: context,
@@ -213,6 +263,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         fieldName: true,
         fieldType: true,
         fieldEnum: true,
+        fieldOptions: true,
       },
     });
 
@@ -236,7 +287,9 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         fieldName?: string;
         fieldType?: FormFieldType;
         fieldEnum?: Prisma.InputJsonValue;
+        fieldOptions?: Array<{ id: string; value: string }>;
         isOptional?: boolean;
+        parentOptionId?: string | null;
       }>;
     }
   ): Promise<Form> {
@@ -246,6 +299,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     const normalizedFields = data.fields.map(normalizeFormFieldInput);
     validateFormFieldInputs(normalizedFields);
     this.validateLocalFieldDefinitions(normalizedFields);
+    validateAllBranches(normalizedFields);
 
     return await this.db.$transaction(async (tx) => {
       const existingForm = await tx.form.findUnique({
@@ -340,10 +394,10 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       if (field.fieldId) {
         const existingGlobalRow = existingByGlobalId.get(field.fieldId);
         if (existingGlobalRow) {
-          await this.updateGlobalFieldDefinition(tx, field.fieldId, field);
+          await this.updateGlobalFieldDefinition(tx, formId, field.fieldId, field);
           await tx.formFields.update({
             where: { id: existingGlobalRow.id },
-            data: { sequenceNumber, isOptional },
+            data: { sequenceNumber, isOptional, parentOptionId: field.parentOptionId ?? null },
           });
           keptRowIds.add(existingGlobalRow.id);
           continue;
@@ -358,8 +412,10 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
               fieldName: field.fieldName.trim(),
               fieldType: field.fieldType,
               fieldEnum: field.fieldEnum ?? Prisma.DbNull,
+              fieldOptions: serializeFieldOptions(field.fieldOptions as FieldEnumOption[] | undefined),
               sequenceNumber,
               isOptional,
+              parentOptionId: field.parentOptionId ?? null,
             },
           });
           keptRowIds.add(existingLegacyRow.id);
@@ -375,13 +431,14 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
           if (reusableGlobal.projectId !== projectId) {
             throw new Error(`Field ${field.fieldId} does not belong to this form`);
           }
-          await this.updateGlobalFieldDefinition(tx, reusableGlobal.id, field);
+          await this.updateGlobalFieldDefinition(tx, formId, reusableGlobal.id, field);
           const rowId = await this.upsertGlobalMembershipRow(
             tx,
             formId,
             reusableGlobal.id,
             sequenceNumber,
             isOptional,
+            field.parentOptionId ?? null,
             existingByGlobalId.get(reusableGlobal.id),
           );
           keptRowIds.add(rowId);
@@ -398,7 +455,8 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
           globalFieldId,
           sequenceNumber,
           isOptional,
-            existingByGlobalId.get(globalFieldId),
+          field.parentOptionId ?? null,
+          existingByGlobalId.get(globalFieldId),
         );
         keptRowIds.add(rowId);
       } else {
@@ -417,6 +475,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     globalFieldId: string,
     sequenceNumber: number,
     isOptional: boolean,
+    parentOptionId: string | null,
     existing?: FormFields,
   ): Promise<string> {
     if (existing) {
@@ -426,9 +485,11 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
           globalFieldId,
           sequenceNumber,
           isOptional,
+          parentOptionId,
           fieldName: null,
           fieldType: null,
           fieldEnum: Prisma.DbNull,
+          fieldOptions: null,
         },
       });
       return existing.id;
@@ -441,6 +502,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         globalFieldId,
         sequenceNumber,
         isOptional,
+        parentOptionId,
       },
     });
     return created.id;
@@ -464,7 +526,10 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       if (def.fieldEnum !== undefined) {
         await tx.globalField.update({
           where: { id: existing.id },
-          data: { fieldEnum: serializeGlobalFieldEnum(def.fieldEnum) },
+          data: {
+            fieldEnum: serializeGlobalFieldEnum(def.fieldEnum),
+            fieldOptions: serializeFieldOptions(def.fieldOptions as FieldEnumOption[] | undefined),
+          },
         });
       }
       return existing.id;
@@ -478,6 +543,9 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         fieldName,
         fieldType: def.fieldType,
         ...(def.fieldEnum !== undefined ? { fieldEnum: serializeGlobalFieldEnum(def.fieldEnum) } : {}),
+        ...(def.fieldOptions !== undefined
+          ? { fieldOptions: serializeFieldOptions(def.fieldOptions as FieldEnumOption[] | undefined) }
+          : {}),
         createdAt: now,
         updatedAt: now,
       },
@@ -509,6 +577,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
           fieldName,
           fieldType: def.fieldType,
           fieldEnum: def.fieldEnum ?? Prisma.DbNull,
+          fieldOptions: serializeFieldOptions(def.fieldOptions as FieldEnumOption[] | undefined),
           isOptional,
           sequenceNumber,
           updatedAt: new Date(),
@@ -526,6 +595,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         fieldName,
         fieldType: def.fieldType,
         fieldEnum: def.fieldEnum ?? Prisma.DbNull,
+        fieldOptions: serializeFieldOptions(def.fieldOptions as FieldEnumOption[] | undefined),
         isOptional,
         sequenceNumber,
         createdAt: now,
@@ -537,15 +607,36 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
 
   private async updateGlobalFieldDefinition(
     tx: Prisma.TransactionClient,
+    formId: string,
     globalFieldId: string,
     def: LocalFieldDefinitionInput,
   ): Promise<void> {
     const existing = await tx.globalField.findUnique({
       where: { id: globalFieldId },
-      select: { fieldName: true, fieldType: true, fieldEnum: true },
+      select: { fieldName: true, fieldType: true, fieldEnum: true, fieldOptions: true },
     });
     if (!existing) {
       throw new Error(`Field ${globalFieldId} does not belong to this form`);
+    }
+
+    // An option's id is a per-form parentOptionId's only anchor — if some other form has a
+    // branch child pointing at an option this save is about to remove, that child would be
+    // left referencing an option that no longer exists.
+    const oldOptionIds = new Set(parseFieldOptions(existing.fieldOptions ?? existing.fieldEnum).map(o => o.id));
+    const newOptionIds = new Set(
+      ((def.fieldOptions as FieldEnumOption[] | undefined) ?? []).map(o => o.id),
+    );
+    const removedOptionIds = [...oldOptionIds].filter(id => !newOptionIds.has(id));
+    if (removedOptionIds.length > 0) {
+      const dependentRows = await tx.formFields.findMany({
+        where: { parentOptionId: { in: removedOptionIds } },
+        select: { formId: true },
+      });
+      if (dependentRows.some(row => row.formId !== formId)) {
+        throw new Error(
+          `An option on "${def.fieldName.trim()}" can't be removed — a nested field on another board depends on it.`,
+        );
+      }
     }
 
     try {
@@ -555,6 +646,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
           fieldName: def.fieldName.trim(),
           fieldType: def.fieldType,
           fieldEnum: serializeGlobalFieldEnum(def.fieldEnum),
+          fieldOptions: serializeFieldOptions(def.fieldOptions as FieldEnumOption[] | undefined),
         },
       });
     } catch (error: unknown) {
@@ -675,6 +767,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         fieldName: row.fieldName,
         fieldType: row.fieldType,
         ...(row.fieldEnum !== null ? { fieldEnum: serializeGlobalFieldEnum(row.fieldEnum) } : {}),
+        ...(row.fieldOptions !== null ? { fieldOptions: row.fieldOptions } : {}),
         createdAt: now,
         updatedAt: now,
       },
@@ -708,7 +801,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
   ): Promise<{ count: number }> {
     const client = tx || this.db;
     return await client.formEntityValues.createMany({
-      data: data.map(item => ({
+      data: data.map((item) => ({
         formId: item.formId,
         entityId: item.entityId,
         entityType: item.entityType,
@@ -728,15 +821,18 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
   async upsertTicketFormFields(
     ticketId: string,
     boardId: string,
-    fieldPairs: Array<{ fieldName: string; value: string | null | undefined }>,
+    fieldPairs: Array<{ fieldName: string; value: string | null | undefined }>
   ): Promise<UpsertTicketFormFieldsResult> {
     const formMapping = await this.db.formContextMapping.findFirst({
       where: { contextId: boardId, contextType: 'BOARD', entityType: 'TICKET' },
     });
 
     if (!formMapping) {
-      logger.warn('[FormsRepository] upsertTicketFormFields — no form mapped to board', { ticketId, boardId });
-      return { updatedFields: [], skippedFields: fieldPairs.map(f => f.fieldName) };
+      logger.warn('[FormsRepository] upsertTicketFormFields — no form mapped to board', {
+        ticketId,
+        boardId,
+      });
+      return { updatedFields: [], skippedFields: fieldPairs.map((f) => f.fieldName) };
     }
 
     const formFields = await this.resolveFormFieldsForFormId(formMapping.formId);
@@ -758,11 +854,18 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
 
     for (const { fieldName, value } of fieldPairs) {
       const valueStr = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
-      if (!valueStr) { skippedFields.push(fieldName); continue; }
+      if (!valueStr) {
+        skippedFields.push(fieldName);
+        continue;
+      }
 
       const field = fieldsByName.get(fieldName);
       if (!field) {
-        logger.warn('[FormsRepository] upsertTicketFormFields — field not found on form', { ticketId, fieldName, formId: formMapping.formId });
+        logger.warn('[FormsRepository] upsertTicketFormFields — field not found on form', {
+          ticketId,
+          fieldName,
+          formId: formMapping.formId,
+        });
         skippedFields.push(fieldName);
         continue;
       }
@@ -829,7 +932,10 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     return result;
   }
 
-  async getTicketCustomFormData(ticketId: string, boardId: string): Promise<TicketCustomFormData | null> {
+  async getTicketCustomFormData(
+    ticketId: string,
+    boardId: string
+  ): Promise<TicketCustomFormData | null> {
     const formMapping = await this.db.formContextMapping.findFirst({
       where: {
         contextId: boardId,
@@ -881,7 +987,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       }),
     ]);
 
-    const validValueByFieldId = new Map<string, typeof formValues[number]>();
+    const validValueByFieldId = new Map<string, (typeof formValues)[number]>();
 
     for (const value of formValues) {
       if (value.contextId !== boardId || value.version !== currentVersion) {

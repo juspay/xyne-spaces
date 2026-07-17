@@ -10,9 +10,10 @@
  * Usage: npx tsx backend/scripts/dummy-seed.ts
  */
 
-import { PrismaClient, 
-  AccessType, 
-  AuthProvider, 
+import { randomUUID } from 'crypto';
+import { PrismaClient,
+  AccessType,
+  AuthProvider,
   UserStatus, 
   SessionStatus,
   TicketStatus,
@@ -1177,7 +1178,7 @@ async function main() {
             formId: form1.id,
             fieldName: 'complexity',
             fieldType: FormFieldType.SINGLE_SELECT,
-            fieldEnum: ['Low', 'Medium', 'High'],
+            fieldEnum: ['Low', 'Medium', 'High'].map(value => ({ id: randomUUID(), value })),
             isOptional: false
           },
           {

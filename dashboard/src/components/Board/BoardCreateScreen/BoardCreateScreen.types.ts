@@ -1,4 +1,4 @@
-import type { FormContextType } from '@xyne/shared';
+import type { FormContextType, FieldEnumOption } from '@xyne/shared';
 
 export interface BoardRow {
   id: string;
@@ -35,7 +35,7 @@ export interface FormField {
   id: string;
   fieldName: string;
   fieldType: string;
-  fieldEnum?: readonly string[];
+  fieldEnum?: readonly FieldEnumOption[];
   isOptional?: boolean;
 }
 

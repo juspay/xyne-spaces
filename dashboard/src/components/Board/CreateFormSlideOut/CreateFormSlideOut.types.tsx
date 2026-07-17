@@ -1,4 +1,4 @@
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, type FieldEnumOption } from '@xyne/shared';
 
 export interface FormField {
   id: string;
@@ -6,7 +6,8 @@ export interface FormField {
   fieldName: string;
   fieldType: FormFieldType;
   isOptional: boolean;
-  fieldEnum?: string[];
+  fieldEnum?: FieldEnumOption[];
+  parentOptionId?: string | null;
 }
 
 export interface CreateFormSlideOutProps {

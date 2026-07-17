@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { FormFieldType, SavedConfigEntityName, Schema, TicketPriority, schema } from '@xyne/shared';
+import { FormFieldType, SavedConfigEntityName, Schema, TicketPriority, schema, parseFieldOptionValues } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema, type QueryContext } from '../core/types';
 import { zql } from '../../queries';
@@ -173,7 +173,7 @@ async function validateFormEntityValue(
 
     case FormFieldType.SINGLE_SELECT:
     case FormFieldType.MULTI_SELECT: {
-      const options = Array.isArray(formField.fieldEnum) ? (formField.fieldEnum as string[]) : [];
+      const options = parseFieldOptionValues(formField.fieldOptions ?? formField.fieldEnum);
       if (options.length > 0 && !options.includes(fieldValue)) {
         throw new MutationACLError(
           `Invalid value "${fieldValue}" for field "${fieldId}"`,

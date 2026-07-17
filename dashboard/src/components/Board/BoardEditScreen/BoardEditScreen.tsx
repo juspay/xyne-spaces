@@ -22,6 +22,7 @@ import {
   type BoardMetadata,
   type FieldOrderItem,
   type TicketFormConfig,
+  type FieldEnumOption,
 } from '@xyne/shared';
 import { toast } from 'sonner';
 import { formService } from '../../../services/Form/formService';
@@ -33,6 +34,7 @@ import {
   mapToFormFieldType,
 } from './BoardEditScreen.types';
 import { getFieldTypeLabel } from './BoardEditScreen.utils';
+import { Dialog } from '../../../components/ui/Dialog/Dialog';
 import { CustomField } from '../../../components/Board/CustomField/CustomField';
 import { TicketPreviewPanel } from '../../../components/Board/TicketPreviewPanel/TicketPreviewPanel';
 import {
@@ -149,6 +151,23 @@ const getDuplicateStageFormId = (stage: DuplicateSourceStage): string | undefine
       String(mapping.entityType) === String(FormEntityType.TICKET),
   )?.formId ?? undefined;
 
+const getDuplicateFieldName = (fields: readonly TicketField[]): string | null => {
+  const seen = new Set<string>();
+
+  for (const field of fields) {
+    const fieldName = field.name.trim();
+    if (!fieldName) continue;
+
+    const normalizedName = fieldName.toLowerCase();
+    if (seen.has(normalizedName)) {
+      return fieldName;
+    }
+    seen.add(normalizedName);
+  }
+
+  return null;
+};
+
 interface BoardEditScreenProps {
   boardId?: string;
   projectId: string;
@@ -234,9 +253,164 @@ const BoardEditScreen = ({
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState<TicketField['type']>('text');
   const [newFieldRequired, setNewFieldRequired] = useState(false);
-  const [newFieldOptions, setNewFieldOptions] = useState<string[]>([]);
+  const [newFieldOptions, setNewFieldOptions] = useState<FieldEnumOption[]>([]);
   const addFieldBoxRef = useRef<HTMLDivElement>(null);
   const customFieldRef = useRef<HTMLDivElement>(null);
+
+  // Names of branch fields scoped to an option — lets CustomField confirm ambiguous renames.
+  const getDependentFieldNames = useCallback(
+    (optionId: string): string[] =>
+      fields.filter(f => f.parentOptionId === optionId).map(f => f.label),
+    [fields],
+  );
+
+  // Turns a CustomField "create" save payload into a real TicketField — appended to the
+  // end of the list, tagged with a branch option id when added as a branch field.
+  const buildNewTicketField = useCallback(
+    (
+      newField: Omit<TicketField, 'id' | 'order'> & { id?: string },
+      parentOptionId?: string,
+    ): TicketField => {
+      const fieldId = newField.id ?? uuidv4();
+      return {
+        ...newField,
+        id: fieldId,
+        membershipId: uuidv4(),
+        order: fields.length + 1,
+        ...(parentOptionId && { parentOptionId }),
+      };
+    },
+    [fields.length],
+  );
+
+  // Waiting on the admin to confirm deleting a branch's fields when their parent (or just
+  // one of its options) is removed.
+  type PendingCascadeDecision = {
+    affectedFieldNames: string[];
+    onConfirm: () => void;
+  };
+  const [pendingCascadeDecision, setPendingCascadeDecision] =
+    useState<PendingCascadeDecision | null>(null);
+
+  // Applies immediately if nothing would be orphaned; otherwise pauses for a delete confirmation.
+  const resolveCascade = useCallback((affectedFields: TicketField[], onConfirm: () => void) => {
+    if (affectedFields.length === 0) {
+      onConfirm();
+      return;
+    }
+    setPendingCascadeDecision({
+      affectedFieldNames: affectedFields.map(f => f.label),
+      onConfirm: () => {
+        onConfirm();
+        setPendingCascadeDecision(null);
+      },
+    });
+  }, []);
+
+  // Branch fields scoped to a specific option — shown as the option's own chip/panel inside
+  // CustomField now, rather than a separate always-visible accordion below the field row.
+  const getBranchFields = useCallback(
+    (optionId: string): TicketField[] => fields.filter(f => f.parentOptionId === optionId),
+    [fields],
+  );
+
+  // A branch field never has children of its own; this only updates the branch field itself.
+  const handleSaveBranchField = useCallback(
+    (
+      optionId: string,
+      updatedField: Omit<TicketField, 'id' | 'order'> & { id?: string },
+      existingFieldId?: string,
+    ) => {
+      if (existingFieldId) {
+        setFields(prev =>
+          prev.map(f => {
+            if (f.id !== existingFieldId) return f;
+
+            const nextFieldId = updatedField.id ?? uuidv4();
+            const identityChanged = nextFieldId !== existingFieldId;
+            const nextField: TicketField = {
+              ...f,
+              ...updatedField,
+              id: nextFieldId,
+              parentOptionId: optionId,
+              ...(identityChanged ? { membershipId: uuidv4() } : {}),
+            };
+
+            if (updatedField.options) {
+              return nextField;
+            }
+
+            const { options: _removed, ...fieldWithoutOptions } = nextField;
+            return fieldWithoutOptions;
+          }),
+        );
+      } else {
+        setFields(prev => [...prev, buildNewTicketField(updatedField, optionId)]);
+      }
+    },
+    [buildNewTicketField],
+  );
+
+  const handleDeleteBranchField = useCallback((fieldId: string) => {
+    setFields(prev => prev.filter(f => f.id !== fieldId));
+  }, []);
+
+  // Saves an edited top-level field, cascading to any branch fields scoped to an option
+  // that was actually removed (a rename alone doesn't orphan anything — options are
+  // matched by id).
+  const handleSaveEditedField = useCallback(
+    (field: TicketField, updatedField: Omit<TicketField, 'id' | 'order'> & { id?: string }) => {
+      const oldOptionIds = new Set((field.options ?? []).map(o => o.id));
+      const newOptionIds = new Set((updatedField.options ?? []).map(o => o.id));
+      const removedOptionIds = new Set([...oldOptionIds].filter(id => !newOptionIds.has(id)));
+      const affected = fields.filter(
+        f => f.parentOptionId && removedOptionIds.has(f.parentOptionId),
+      );
+
+      resolveCascade(affected, () => {
+        setFields(prev => {
+          const nextFieldId = updatedField.id ?? uuidv4();
+          const identityChanged = nextFieldId !== field.id;
+          const merged = prev.map(f => {
+            if (f.id !== field.id) return f;
+
+            const nextField: TicketField = {
+              ...f,
+              ...updatedField,
+              id: nextFieldId,
+              ...(identityChanged ? { membershipId: uuidv4() } : {}),
+            };
+
+            if (updatedField.options) {
+              return nextField;
+            }
+
+            const { options: _removed, ...fieldWithoutOptions } = nextField;
+            return fieldWithoutOptions;
+          });
+          return merged.filter(f => !f.parentOptionId || !removedOptionIds.has(f.parentOptionId));
+        });
+        setEditingFieldId(null);
+        setNewFieldName('');
+        setNewFieldType('text');
+        setNewFieldRequired(false);
+        setNewFieldOptions([]);
+      });
+    },
+    [fields, resolveCascade],
+  );
+
+  const handleCancelEditField = useCallback(() => {
+    setEditingFieldId(null);
+    setNewFieldName('');
+    setNewFieldType('text');
+    setNewFieldRequired(false);
+    setNewFieldOptions([]);
+  }, []);
+
+  // Whether any open CustomField editor has an unresolved rename/replace decision — blocks
+  // the "Next" board-save button too, since a field's own save-blocking can't reach it.
+  const [hasPendingOptionDecision, setHasPendingOptionDecision] = useState(false);
 
   // Assignee type selection (User or User Group)
   const [assigneeType, setAssigneeType] = useState<'user' | 'userGroup'>('user');
@@ -313,6 +487,8 @@ const BoardEditScreen = ({
     mode === 'create' && sourceFormMapping ? sourceFormMapping : formMapping;
 
   const customFieldsFormId = activeFormMapping?.formId ?? boardMetadata.customFieldsFormId;
+  // Duplicating cannot reuse source form membership ids; those rows belong to another form.
+  const isDuplicating = mode === 'create' && !!sourceBoardId;
 
   const activeResolvedCustomFields = useMemo(() => {
     if (!customFieldsFormId) {
@@ -327,10 +503,17 @@ const BoardEditScreen = ({
 
   useEffect(() => {
     if (activeResolvedCustomFields.length > 0) {
+      const idMap = new Map<string, string>();
+      if (isDuplicating) {
+        for (const field of activeResolvedCustomFields) {
+          idMap.set(field.id, uuidv4());
+        }
+      }
+
       const customFields: TicketField[] = activeResolvedCustomFields.map(field => {
         const ticketField: TicketField = {
-          id: field.id,
-          ...(field.membershipId ? { membershipId: field.membershipId } : {}),
+          id: isDuplicating ? (idMap.get(field.id) ?? field.id) : field.id,
+          ...(!isDuplicating && field.membershipId ? { membershipId: field.membershipId } : {}),
           name: field.fieldName,
           type: mapFromFormFieldType(field.fieldType),
           label: field.fieldName,
@@ -341,6 +524,12 @@ const BoardEditScreen = ({
 
         if (field.fieldEnum && field.fieldEnum.length > 0) {
           ticketField.options = field.fieldEnum;
+        }
+
+        // No remapping needed: parentOptionId points at an id inside fieldEnum, which is
+        // copied verbatim above, so it still resolves correctly on the duplicated field.
+        if (field.parentOptionId) {
+          ticketField.parentOptionId = field.parentOptionId;
         }
 
         return ticketField;
@@ -373,7 +562,7 @@ const BoardEditScreen = ({
         return [...updatedFields, ...newFields];
       });
     }
-  }, [activeResolvedCustomFields]);
+  }, [activeResolvedCustomFields, isDuplicating]);
 
   // Apply field order and required from metadata when board loads
   useEffect(() => {
@@ -663,13 +852,18 @@ const BoardEditScreen = ({
           contextType: sourceForm.contextType,
           entityType: sourceForm.entityType,
           projectId,
-          fields: sourceForm.fields.map(field => ({
-            fieldName: field.fieldName,
-            fieldType: field.fieldType,
-            ...(Array.isArray(field.fieldEnum) &&
-              field.fieldEnum.length > 0 && { fieldEnum: field.fieldEnum }),
-            isOptional: field.isOptional,
-          })),
+          fields: sourceForm.fields.map(field => {
+            const options = field.fieldOptions ?? field.fieldEnum;
+            return {
+              fieldName: field.fieldName,
+              fieldType: field.fieldType,
+              ...(Array.isArray(options) && options.length > 0 && { fieldOptions: options }),
+              isOptional: field.isOptional,
+              ...(field.parentOptionId !== undefined
+                ? { parentOptionId: field.parentOptionId }
+                : {}),
+            };
+          }),
         });
         formIdMap.set(sourceFormId, clonedForm.id);
         return clonedForm.id;
@@ -849,6 +1043,20 @@ const BoardEditScreen = ({
   );
 
   const handleSave = useCallback(async () => {
+    if (hasPendingOptionDecision) {
+      toast.error('Resolve the pending option change before saving.');
+      return;
+    }
+
+    const duplicateFieldName = getDuplicateFieldName(fields);
+    if (duplicateFieldName) {
+      toast.error('Field name already exists', {
+        description: `A field named "${duplicateFieldName}" already exists. Field names must be unique.`,
+        duration: 5000,
+      });
+      return;
+    }
+
     // Create mode: create board first
     if (!boardId && mode === 'create') {
       let createdBoardIdForCleanup: string | null = null;
@@ -869,11 +1077,11 @@ const BoardEditScreen = ({
             entityType: FormEntityType.TICKET,
             projectId,
             fields: customFields.map(f => ({
-              fieldId: f.id,
               fieldName: f.name,
               fieldType: mapToFormFieldType(f.type),
-              ...(f.options && f.options.length > 0 && { fieldEnum: f.options }),
+              ...(f.options && f.options.length > 0 && { fieldOptions: f.options }),
               isOptional: !f.required,
+              ...(f.parentOptionId !== undefined ? { parentOptionId: f.parentOptionId } : {}),
             })),
           });
           customFieldsFormId = formResponse.id;
@@ -1093,8 +1301,12 @@ const BoardEditScreen = ({
                 membershipId: f.membershipId ?? uuidv4(),
                 fieldName: f.name,
                 fieldType: mapToFormFieldType(f.type),
-                ...(f.options && f.options.length > 0 && { fieldEnum: f.options }),
+                ...(f.options && f.options.length > 0 && { fieldOptions: f.options }),
                 isOptional: !f.required,
+                // Always sent (not just when truthy) so clearing a previously-set
+                // parentOptionId actually persists — the mutator only writes it when the key
+                // is present at all, null included.
+                parentOptionId: f.parentOptionId ?? null,
               })),
               timestamp: Date.now(),
             }),
@@ -1117,11 +1329,11 @@ const BoardEditScreen = ({
             entityType: FormEntityType.TICKET,
             projectId,
             fields: customFields.map(f => ({
-              ...(f.id && { id: f.id }),
               fieldName: f.name,
               fieldType: mapToFormFieldType(f.type),
-              ...(f.options && f.options.length > 0 && { fieldEnum: f.options }),
+              ...(f.options && f.options.length > 0 && { fieldOptions: f.options }),
               isOptional: !f.required,
+              ...(f.parentOptionId !== undefined ? { parentOptionId: f.parentOptionId } : {}),
             })),
           });
 
@@ -1193,6 +1405,7 @@ const BoardEditScreen = ({
     sourceBoard,
     sourceBoardId,
     cloneSourceBoardWorkflow,
+    hasPendingOptionDecision,
   ]);
 
   if (!isOpen) return null;
@@ -1236,319 +1449,327 @@ const BoardEditScreen = ({
   }
 
   return (
-    <>
-      <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-        <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
-          <header className='flex items-center justify-between px-[18px] py-4'>
-            <div className='flex items-center gap-2'>
-              <Button
-                onClick={() => (onBack ? onBack() : onClose())}
-                variant='ghost'
-                size='iconSm'
-                className='w-[16px] h-[16px] text-foreground hover:opacity-70'
-                data-track-category='BOARD_EDIT'
-                data-track-name='NAVIGATE_BACK'
-              >
-                <ChevronLeft size={16} />
-              </Button>
-              <span className='text-[16px] font-semibold text-foreground'>
-                Edit Board - {boardData?.name || 'Board'}
-              </span>
-            </div>
-            <div className='flex items-center gap-3'>
-              <Button variant='secondary' onClick={onClose}>
-                Cancel
-              </Button>
-              <Button
-                className='bg-[#6276BE] hover:bg-[#5060A0] text-white'
-                onClick={() => void handleSave()}
-              >
-                Next
-              </Button>
-            </div>
-          </header>
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
+      <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
+        <header className='flex items-center justify-between px-[18px] py-4'>
+          <div className='flex items-center gap-2'>
+            <Button
+              onClick={() => (onBack ? onBack() : onClose())}
+              variant='ghost'
+              size='iconSm'
+              className='w-[16px] h-[16px] text-foreground hover:opacity-70'
+              data-track-category='BOARD_EDIT'
+              data-track-name='NAVIGATE_BACK'
+            >
+              <ChevronLeft size={16} />
+            </Button>
+            <span className='text-[16px] font-semibold text-foreground'>
+              Edit Board - {boardData?.name || 'Board'}
+            </span>
+          </div>
+          <div className='flex items-center gap-3'>
+            <Button variant='secondary' onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              className='bg-[#6276BE] hover:bg-[#5060A0] text-white disabled:opacity-50'
+              onClick={() => void handleSave()}
+              disabled={hasPendingOptionDecision}
+              title={
+                hasPendingOptionDecision
+                  ? 'Resolve the pending option change before saving'
+                  : undefined
+              }
+            >
+              Next
+            </Button>
+          </div>
+        </header>
 
-          <div className='flex-1 flex overflow-hidden'>
-            <div className='w-[50%] flex flex-col bg-background overflow-hidden'>
-              <div className='p-6 flex-shrink-0'>
-                <h2 className='text-[16px] font-semibold text-foreground'>Define Fields</h2>
-                <p className='text-[14px] text-xyne-gray-600 mt-1'>
-                  Choose the fields needed in your tickets, arrange their order, and preview how
-                  they&apos;ll appear.
-                </p>
+        <div className='flex-1 flex overflow-hidden'>
+          <div className='w-[50%] flex flex-col bg-background overflow-hidden'>
+            <div className='p-6 flex-shrink-0'>
+              <h2 className='text-[16px] font-semibold text-foreground'>Define Fields</h2>
+              <p className='text-[14px] text-xyne-gray-600 mt-1'>
+                Choose the fields needed in your tickets, arrange their order, and preview how
+                they&apos;ll appear.
+              </p>
+            </div>
+
+            <div className='flex-1 overflow-y-auto p-6 space-y-6'>
+              <div className='mt-2 pl-5'>
+                <input
+                  type='text'
+                  value={boardName}
+                  onChange={e => setBoardName(e.target.value)}
+                  className={`text-[22px] font-semibold bg-transparent border-none focus:outline-none focus:ring-0 p-0 w-full ${
+                    boardName ? 'text-foreground' : 'text-xyne-gray-300'
+                  } placeholder:text-muted-foreground/50 tracking-[-0.44px]`}
+                  placeholder='Enter Board Name'
+                  data-track-category='form'
+                  data-track-name='board-name-input'
+                />
               </div>
-
-              <div className='flex-1 overflow-y-auto p-6 space-y-6'>
-                <div className='mt-2 pl-5'>
-                  <input
-                    type='text'
-                    value={boardName}
-                    onChange={e => setBoardName(e.target.value)}
-                    className={`text-[22px] font-semibold bg-transparent border-none focus:outline-none focus:ring-0 p-0 w-full ${
-                      boardName ? 'text-foreground' : 'text-xyne-gray-300'
-                    } placeholder:text-muted-foreground/50 tracking-[-0.44px]`}
-                    placeholder='Enter Board Name'
-                    data-track-category='form'
-                    data-track-name='board-name-input'
-                  />
-                </div>
-                <div className='bg-background rounded-lg'>
-                  <div className='divide'>
-                    {fields
-                      .sort((a, b) => a.order - b.order)
-                      .map(field => (
-                        <div key={field.id}>
-                          {editingFieldId === field.id ? (
-                            // Edit mode - use CustomField component
-                            <CustomField
-                              mode='edit'
-                              field={field}
-                              projectId={projectId}
-                              onSave={updatedField => {
-                                setFields(prev =>
-                                  prev.map(f => {
-                                    if (f.id !== field.id) return f;
-
-                                    const nextFieldId = updatedField.id ?? uuidv4();
-                                    const identityChanged = nextFieldId !== field.id;
-                                    const nextField: TicketField = {
-                                      ...f,
-                                      ...updatedField,
-                                      id: nextFieldId,
-                                      ...(identityChanged ? { membershipId: uuidv4() } : {}),
-                                    };
-
-                                    if (updatedField.options) {
-                                      return nextField;
+              <div className='bg-background rounded-lg'>
+                <div className='divide'>
+                  {fields
+                    .filter(f => !f.parentOptionId)
+                    .sort((a, b) => a.order - b.order)
+                    .map(field => (
+                      <div key={field.id}>
+                        {editingFieldId === field.id ? (
+                          // Edit mode - use CustomField component
+                          <CustomField
+                            mode='edit'
+                            field={field}
+                            projectId={projectId}
+                            getDependentFieldNames={getDependentFieldNames}
+                            onPendingDecisionChange={setHasPendingOptionDecision}
+                            getBranchFields={getBranchFields}
+                            onSaveBranchField={handleSaveBranchField}
+                            onDeleteBranchField={handleDeleteBranchField}
+                            onSave={updatedField => handleSaveEditedField(field, updatedField)}
+                            onCancel={handleCancelEditField}
+                          />
+                        ) : (
+                          // Normal view mode
+                          <div
+                            draggable
+                            onDragStart={() => handleDragStart(field.id)}
+                            onDragOver={e => handleDragOver(e, field.id)}
+                            onDragEnd={handleDragEnd}
+                            onMouseEnter={() => setHoveredFieldId(field.id)}
+                            onMouseLeave={() => setHoveredFieldId(null)}
+                            onKeyDown={() => {}}
+                            role='button'
+                            tabIndex={0}
+                            onClick={e => {
+                              // Make entire row clickable for custom fields
+                              if (!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)) {
+                                // Only trigger if clicking on the row background, not on interactive elements
+                                const target = e.target as HTMLElement;
+                                if (
+                                  target.tagName !== 'BUTTON' &&
+                                  target.tagName !== 'INPUT' &&
+                                  target.tagName !== 'SPAN' &&
+                                  !target.closest('button')
+                                ) {
+                                  e.stopPropagation();
+                                  startEditField(field);
+                                }
+                              }
+                            }}
+                            className={`flex items-center gap-3 px-4 py-2 transition-colors rounded-[12px] ${
+                              isDragging === field.id
+                                ? 'bg-muted opacity-50'
+                                : hoveredFieldId === field.id
+                                  ? 'bg-muted'
+                                  : ''
+                            } ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer' : 'cursor-move'}`}
+                            data-track-category='form'
+                            data-track-name='field-row'
+                          >
+                            {/* Grip icon - visible only on hover, but space is reserved */}
+                            <div className='w-4 flex-shrink-0'>
+                              {hoveredFieldId === field.id && (
+                                <GripVertical size={16} className='text-xyne-gray-300' />
+                              )}
+                            </div>
+                            <div className='flex-1 flex items-center gap-3'>
+                              {editingFieldLabelId === field.id ? (
+                                <div className='flex items-center min-w-[150px] flex-shrink-0'>
+                                  <input
+                                    ref={editLabelInputRef}
+                                    type='text'
+                                    value={editLabelValue}
+                                    onChange={e => setEditLabelValue(e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        saveFieldLabel();
+                                      } else if (e.key === 'Escape') {
+                                        cancelEditFieldLabel();
+                                      }
+                                    }}
+                                    onBlur={saveFieldLabel}
+                                    className='font-medium text-muted-foreground text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-none focus:ring-0'
+                                    data-track-category='board_edit'
+                                    data-track-name='edit_label_input'
+                                  />
+                                  {field.required && <span className='text-[#ff4f4f] ml-1'>*</span>}
+                                </div>
+                              ) : (
+                                <button
+                                  type='button'
+                                  onClick={e => {
+                                    if (!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)) {
+                                      e.stopPropagation();
+                                      startEditFieldLabel(field);
                                     }
-
-                                    const { options: _removed, ...fieldWithoutOptions } = nextField;
-                                    return fieldWithoutOptions;
-                                  }),
-                                );
-                                setEditingFieldId(null);
-                                setNewFieldName('');
-                                setNewFieldType('text');
-                                setNewFieldRequired(false);
-                                setNewFieldOptions([]);
-                              }}
-                              onCancel={() => {
-                                setEditingFieldId(null);
-                                setNewFieldName('');
-                                setNewFieldType('text');
-                                setNewFieldRequired(false);
-                                setNewFieldOptions([]);
-                              }}
-                            />
-                          ) : (
-                            // Normal view mode
-                            <div
-                              draggable
-                              onDragStart={() => handleDragStart(field.id)}
-                              onDragOver={e => handleDragOver(e, field.id)}
-                              onDragEnd={handleDragEnd}
-                              onMouseEnter={() => setHoveredFieldId(field.id)}
-                              onMouseLeave={() => setHoveredFieldId(null)}
-                              onKeyDown={() => {}}
-                              role='button'
-                              tabIndex={0}
-                              onClick={e => {
-                                // Make entire row clickable for custom fields
-                                if (!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)) {
-                                  // Only trigger if clicking on the row background, not on interactive elements
-                                  const target = e.target as HTMLElement;
+                                  }}
+                                  className={`font-medium text-muted-foreground text-[14px] leading-[20px] min-w-[150px] flex-shrink-0 text-left bg-transparent border-0 p-0 ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer hover:text-foreground' : ''}`}
+                                  disabled={DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)}
+                                  data-track-category='board_edit'
+                                  data-track-name='edit_field_label'
+                                >
+                                  {field.label}
+                                  {field.required && <span className='text-[#ff4f4f] ml-1'>*</span>}
+                                </button>
+                              )}
+                              <button
+                                type='button'
+                                className={`w-[140px] shrink-0 text-left ${
+                                  DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) &&
+                                  field.name !== 'assignedTo'
+                                    ? 'bg-muted text-muted-foreground'
+                                    : field.name === 'assignedTo'
+                                      ? 'cursor-pointer'
+                                      : 'cursor-pointer'
+                                }`}
+                                onClick={e => {
                                   if (
-                                    target.tagName !== 'BUTTON' &&
-                                    target.tagName !== 'INPUT' &&
-                                    target.tagName !== 'SPAN' &&
-                                    !target.closest('button')
+                                    !DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ||
+                                    field.name === 'assignedTo'
                                   ) {
                                     e.stopPropagation();
-                                    startEditField(field);
+                                    if (field.name === 'assignedTo') {
+                                      setAssigneeTypeDropdownOpen(!assigneeTypeDropdownOpen);
+                                    } else {
+                                      startEditField(field);
+                                    }
                                   }
+                                }}
+                                disabled={
+                                  DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) &&
+                                  field.name !== 'assignedTo'
                                 }
-                              }}
-                              className={`flex items-center gap-3 px-4 py-2 transition-colors rounded-[12px] ${
-                                isDragging === field.id
-                                  ? 'bg-muted opacity-50'
-                                  : hoveredFieldId === field.id
-                                    ? 'bg-muted'
-                                    : ''
-                              } ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer' : 'cursor-move'}`}
-                              data-track-category='form'
-                              data-track-name='field-row'
-                            >
-                              {/* Grip icon - visible only on hover, but space is reserved */}
-                              <div className='w-4 flex-shrink-0'>
-                                {hoveredFieldId === field.id && (
-                                  <GripVertical size={16} className='text-xyne-gray-300' />
-                                )}
-                              </div>
-                              <div className='flex-1 flex items-center gap-3'>
-                                {editingFieldLabelId === field.id ? (
-                                  <div className='flex items-center min-w-[150px] flex-shrink-0'>
-                                    <input
-                                      ref={editLabelInputRef}
-                                      type='text'
-                                      value={editLabelValue}
-                                      onChange={e => setEditLabelValue(e.target.value)}
-                                      onKeyDown={e => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          saveFieldLabel();
-                                        } else if (e.key === 'Escape') {
-                                          cancelEditFieldLabel();
-                                        }
-                                      }}
-                                      onBlur={saveFieldLabel}
-                                      className='font-medium text-muted-foreground text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-none focus:ring-0'
-                                      data-track-category='board_edit'
-                                      data-track-name='edit_label_input'
-                                    />
-                                    {field.required && (
-                                      <span className='text-[#ff4f4f] ml-1'>*</span>
+                                data-track-category='board_edit'
+                                data-track-name='edit_field_type'
+                              >
+                                {field.name === 'assignedTo' ? (
+                                  <div className='relative' ref={assigneeTypeDropdownRef}>
+                                    <div className='h-8 w-[140px] rounded-md border border-input bg-background px-3 py-1.5 text-[13px] flex items-center justify-between'>
+                                      <span>{assigneeType === 'user' ? 'User' : 'User Group'}</span>
+                                      <ChevronDown className='h-4 w-4 text-muted-foreground' />
+                                    </div>
+                                    {assigneeTypeDropdownOpen && (
+                                      <div className='absolute top-full left-0 mt-1 w-[140px] bg-background border border-input rounded-md shadow-lg z-50 overflow-hidden'>
+                                        <Button
+                                          variant='ghost'
+                                          size='sm'
+                                          onClick={e => {
+                                            e.stopPropagation();
+                                            setAssigneeType('user');
+                                            setAssigneeTypeDropdownOpen(false);
+                                          }}
+                                          className='w-full justify-start px-3 py-2 text-[13px] hover:bg-muted'
+                                          data-track-category='board_edit'
+                                          data-track-name='select_assignee_type_user'
+                                        >
+                                          <span>User</span>
+                                          {assigneeType === 'user' && (
+                                            <Check className='h-4 w-4 ml-auto' />
+                                          )}
+                                        </Button>
+                                        <Button
+                                          variant='ghost'
+                                          size='sm'
+                                          onClick={e => {
+                                            e.stopPropagation();
+                                            setAssigneeType('userGroup');
+                                            setAssigneeTypeDropdownOpen(false);
+                                          }}
+                                          className='w-full justify-start px-3 py-2 text-[13px] hover:bg-muted'
+                                          data-track-category='board_edit'
+                                          data-track-name='select_assignee_type_user_group'
+                                        >
+                                          <span>User Group</span>
+                                          {assigneeType === 'userGroup' && (
+                                            <Check className='h-4 w-4 ml-auto' />
+                                          )}
+                                        </Button>
+                                      </div>
                                     )}
                                   </div>
                                 ) : (
-                                  <button
-                                    type='button'
-                                    onClick={e => {
-                                      if (!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)) {
-                                        e.stopPropagation();
-                                        startEditFieldLabel(field);
-                                      }
-                                    }}
-                                    className={`font-medium text-muted-foreground text-[14px] leading-[20px] min-w-[150px] flex-shrink-0 text-left bg-transparent border-0 p-0 ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer hover:text-foreground' : ''}`}
-                                    disabled={DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)}
-                                    data-track-category='board_edit'
-                                    data-track-name='edit_field_label'
+                                  <div
+                                    className={`h-8 w-[140px] rounded-md border border-input px-3 py-1.5 text-[13px] flex items-center justify-between ${
+                                      DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)
+                                        ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                                        : 'bg-background text-foreground cursor-pointer hover:bg-muted'
+                                    }`}
                                   >
-                                    {field.label}
-                                    {field.required && (
-                                      <span className='text-[#ff4f4f] ml-1'>*</span>
-                                    )}
-                                  </button>
+                                    <span>{getFieldTypeLabel(field.type)}</span>
+                                    <ChevronDown className='h-4 w-4 text-muted-foreground' />
+                                  </div>
                                 )}
-                                <button
-                                  type='button'
-                                  className={`w-[140px] shrink-0 text-left ${
-                                    DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) &&
-                                    field.name !== 'assignedTo'
-                                      ? 'bg-muted text-muted-foreground'
-                                      : field.name === 'assignedTo'
-                                        ? 'cursor-pointer'
-                                        : 'cursor-pointer'
-                                  }`}
-                                  onClick={e => {
-                                    if (
-                                      !DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ||
-                                      field.name === 'assignedTo'
-                                    ) {
-                                      e.stopPropagation();
-                                      if (field.name === 'assignedTo') {
-                                        setAssigneeTypeDropdownOpen(!assigneeTypeDropdownOpen);
-                                      } else {
-                                        startEditField(field);
-                                      }
-                                    }
-                                  }}
-                                  disabled={
-                                    DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) &&
-                                    field.name !== 'assignedTo'
-                                  }
-                                  data-track-category='board_edit'
-                                  data-track-name='edit_field_type'
-                                >
-                                  {field.name === 'assignedTo' ? (
-                                    <div className='relative' ref={assigneeTypeDropdownRef}>
-                                      <div className='h-8 w-[140px] rounded-md border border-input bg-background px-3 py-1.5 text-[13px] flex items-center justify-between'>
-                                        <span>
-                                          {assigneeType === 'user' ? 'User' : 'User Group'}
-                                        </span>
-                                        <ChevronDown className='h-4 w-4 text-muted-foreground' />
-                                      </div>
-                                      {assigneeTypeDropdownOpen && (
-                                        <div className='absolute top-full left-0 mt-1 w-[140px] bg-background border border-input rounded-md shadow-lg z-50 overflow-hidden'>
-                                          <Button
-                                            variant='ghost'
-                                            size='sm'
-                                            onClick={e => {
-                                              e.stopPropagation();
-                                              setAssigneeType('user');
-                                              setAssigneeTypeDropdownOpen(false);
-                                            }}
-                                            className='w-full justify-start px-3 py-2 text-[13px] hover:bg-muted'
-                                            data-track-category='board_edit'
-                                            data-track-name='select_assignee_type_user'
-                                          >
-                                            <span>User</span>
-                                            {assigneeType === 'user' && (
-                                              <Check className='h-4 w-4 ml-auto' />
-                                            )}
-                                          </Button>
-                                          <Button
-                                            variant='ghost'
-                                            size='sm'
-                                            onClick={e => {
-                                              e.stopPropagation();
-                                              setAssigneeType('userGroup');
-                                              setAssigneeTypeDropdownOpen(false);
-                                            }}
-                                            className='w-full justify-start px-3 py-2 text-[13px] hover:bg-muted'
-                                            data-track-category='board_edit'
-                                            data-track-name='select_assignee_type_user_group'
-                                          >
-                                            <span>User Group</span>
-                                            {assigneeType === 'userGroup' && (
-                                              <Check className='h-4 w-4 ml-auto' />
-                                            )}
-                                          </Button>
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <div
-                                      className={`h-8 w-[140px] rounded-md border border-input px-3 py-1.5 text-[13px] flex items-center justify-between ${
-                                        DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)
-                                          ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                                          : 'bg-background text-foreground cursor-pointer hover:bg-muted'
-                                      }`}
+                              </button>
+                            </div>
+
+                            <div className='relative flex items-center shrink-0'>
+                              {field.type === 'select' &&
+                                field.options &&
+                                hoveredFieldId !== field.id &&
+                                ((): ReactElement | null => {
+                                  const optionIds = new Set(field.options.map(o => o.id));
+                                  const branchCount = fields.filter(
+                                    f => f.parentOptionId && optionIds.has(f.parentOptionId),
+                                  ).length;
+                                  if (branchCount === 0) return null;
+                                  return (
+                                    <span
+                                      className='absolute left-0 text-[11px] font-mono px-2 py-[3px] rounded-full bg-[#6276be]/10 text-[#6276be] whitespace-nowrap'
+                                      data-track-category='form'
+                                      data-track-name='conditional-fields-badge'
                                     >
-                                      <span>{getFieldTypeLabel(field.type)}</span>
-                                      <ChevronDown className='h-4 w-4 text-muted-foreground' />
-                                    </div>
-                                  )}
-                                </button>
-                              </div>
+                                      {branchCount} nested field{branchCount === 1 ? '' : 's'}
+                                    </span>
+                                  );
+                                })()}
+
                               {!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) && (
                                 <div
                                   className={`shrink-0 ${hoveredFieldId === field.id ? 'visible' : 'invisible'}`}
                                 >
-                                  <Tooltip
-                                    content={
-                                      copiedFieldId === field.id
-                                        ? 'Field ID copied'
-                                        : 'Copy field ID'
-                                    }
-                                    side='top'
-                                    delayDuration={200}
-                                  >
+                                  {hoveredFieldId === field.id ? (
+                                    <Tooltip
+                                      content={
+                                        copiedFieldId === field.id
+                                          ? 'Field ID copied'
+                                          : 'Copy field ID'
+                                      }
+                                      side='top'
+                                      delayDuration={200}
+                                    >
+                                      <Button
+                                        type='button'
+                                        variant='ghost'
+                                        size='iconSm'
+                                        className='h-6 w-6 p-0 text-muted-foreground hover:text-foreground'
+                                        onClick={e => handleCopyFieldId(e, field.id)}
+                                        data-track-category='board_edit'
+                                        data-track-name='copy_field_id'
+                                      >
+                                        {copiedFieldId === field.id ? (
+                                          <Check size={14} />
+                                        ) : (
+                                          <Copy size={14} />
+                                        )}
+                                      </Button>
+                                    </Tooltip>
+                                  ) : (
                                     <Button
                                       type='button'
                                       variant='ghost'
                                       size='iconSm'
-                                      className='h-6 w-6 p-0 text-muted-foreground hover:text-foreground'
-                                      onClick={e => handleCopyFieldId(e, field.id)}
+                                      className='h-6 w-6 p-0 text-muted-foreground'
+                                      tabIndex={-1}
                                       data-track-category='board_edit'
                                       data-track-name='copy_field_id'
                                     >
-                                      {copiedFieldId === field.id ? (
-                                        <Check size={14} />
-                                      ) : (
-                                        <Copy size={14} />
-                                      )}
+                                      <Copy size={14} />
                                     </Button>
-                                  </Tooltip>
+                                  )}
                                 </div>
                               )}
 
@@ -1604,10 +1825,7 @@ const BoardEditScreen = ({
                                   'tags',
                                   'ticketType',
                                 ].includes(field.name) && (
-                                  <div
-                                    className='flex items-center gap-2'
-                                    title='Shown when creating a ticket; field remains available for stage transition forms'
-                                  >
+                                  <div className='flex items-center gap-2'>
                                     <span className='text-[13px] text-[#505b62] leading-[18px] tracking-[-0.2px]'>
                                       Show in Create
                                     </span>
@@ -1617,10 +1835,12 @@ const BoardEditScreen = ({
                                         setFields(prev =>
                                           prev.map(f => {
                                             if (f.id === field.id) {
+                                              const newVisibleInCreate = !f.visibleInCreate;
+                                              // If hiding the field, it cannot be required
                                               return {
                                                 ...f,
-                                                visibleInCreate: !f.visibleInCreate,
-                                                required: !f.visibleInCreate ? f.required : false,
+                                                visibleInCreate: newVisibleInCreate,
+                                                required: newVisibleInCreate ? f.required : false,
                                               };
                                             }
                                             return f;
@@ -1699,7 +1919,28 @@ const BoardEditScreen = ({
                                           variant: 'destructive',
                                         }).then(confirmed => {
                                           if (!confirmed) return;
-                                          setFields(prev => prev.filter(f => f.id !== field.id));
+
+                                          const ownOptionIds = new Set(
+                                            (field.options ?? []).map(o => o.id),
+                                          );
+                                          const affected = fields.filter(
+                                            f =>
+                                              f.parentOptionId &&
+                                              ownOptionIds.has(f.parentOptionId),
+                                          );
+
+                                          resolveCascade(affected, () => {
+                                            setFields(prev => {
+                                              const withoutField = prev.filter(
+                                                f => f.id !== field.id,
+                                              );
+                                              return withoutField.filter(
+                                                f =>
+                                                  !f.parentOptionId ||
+                                                  !ownOptionIds.has(f.parentOptionId),
+                                              );
+                                            });
+                                          });
                                         });
                                       }}
                                       variant='ghost'
@@ -1714,111 +1955,148 @@ const BoardEditScreen = ({
                                 )}
                               </div>
                             </div>
-                          )}
-                        </div>
-                      ))}
-                  </div>
-
-                  {/* Inline Custom Field Creation */}
-                  {!editingFieldId && (
-                    <div>
-                      {isAddingField ? (
-                        <div ref={customFieldRef}>
-                          <CustomField
-                            mode='create'
-                            projectId={projectId}
-                            onSave={newField => {
-                              const membershipId = uuidv4();
-                              const reusedGlobalId = newField.id;
-                              const globalFieldId = reusedGlobalId ?? uuidv4();
-                              const field: TicketField = {
-                                ...newField,
-                                id: globalFieldId,
-                                membershipId,
-                                ...(reusedGlobalId ? {} : { globalFieldId }),
-                                order: fields.length + 1,
-                              };
-                              setFields(prev => [...prev, field]);
-                              setIsAddingField(false);
-                              setNewFieldName('');
-                              setNewFieldType('text');
-                              setNewFieldRequired(false);
-                              setNewFieldOptions([]);
-                            }}
-                            onCancel={() => {
-                              setIsAddingField(false);
-                              setNewFieldName('');
-                              setNewFieldType('text');
-                              setNewFieldRequired(false);
-                              setNewFieldOptions([]);
-                            }}
-                            existingFieldCount={fields.length}
-                          />
-                        </div>
-                      ) : null}
-
-                      {/* + Custom Field button */}
-                      <div className='px-4 py-3'>
-                        <Button
-                          onClick={() => setIsAddingField(true)}
-                          variant='ghost'
-                          size='sm'
-                          className='flex items-center gap-2 text-xyne-primary-600 hover:text-xyne-primary-700 font-medium'
-                          data-track-category='form'
-                          data-track-name='add-custom-field'
-                        >
-                          <Plus size={16} />
-                          Custom Field
-                        </Button>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  )}
+                    ))}
                 </div>
+
+                {/* Inline Custom Field Creation */}
+                {!editingFieldId && (
+                  <div>
+                    {isAddingField ? (
+                      <div ref={customFieldRef}>
+                        <CustomField
+                          mode='create'
+                          projectId={projectId}
+                          onSave={newField => {
+                            setFields(prev => [...prev, buildNewTicketField(newField)]);
+                            setIsAddingField(false);
+                            setNewFieldName('');
+                            setNewFieldType('text');
+                            setNewFieldRequired(false);
+                            setNewFieldOptions([]);
+                          }}
+                          onCancel={() => {
+                            setIsAddingField(false);
+                            setNewFieldName('');
+                            setNewFieldType('text');
+                            setNewFieldRequired(false);
+                            setNewFieldOptions([]);
+                          }}
+                          existingFieldCount={fields.length}
+                        />
+                      </div>
+                    ) : null}
+
+                    {/* + Custom Field button */}
+                    <div className='px-4 py-3'>
+                      <Button
+                        onClick={() => setIsAddingField(true)}
+                        variant='ghost'
+                        size='sm'
+                        className='flex items-center gap-2 text-xyne-primary-600 hover:text-xyne-primary-700 font-medium'
+                        data-track-category='form'
+                        data-track-name='add-custom-field'
+                      >
+                        <Plus size={16} />
+                        Custom Field
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-
-            {/* Right Panel - Preview */}
-            <TicketPreviewPanel
-              onClose={() => {}}
-              trackCategory='BOARD_EDIT'
-              ticketPreviewContent={
-                <TicketPreviewContent
-                  boardId={boardId || ''}
-                  ticket={{
-                    title: `Sample ticket in ${boardName || 'Board'}`,
-                    description:
-                      'This is a sample ticket description showing how tickets will look in this board. Users can add detailed descriptions, attachments, and links here.',
-                    status: 'Open',
-                    statusV2: TicketStatusV2.TODO,
-                    priority: TicketPriority.MEDIUM,
-                    assignee: 'Neha Joshi',
-                    assigneeAvatar: 'NJ',
-                    dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(
-                      'en-US',
-                      {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric',
-                      },
-                    ),
-                    createdBy: 'Neha Joshi',
-                    channel: 'Support',
-                  }}
-                  fields={mapToPreviewFields(filterFieldsForPreview(fields, ticketFormConfig))}
-                />
-              }
-              createTicketContent={
-                <CreateTicketModal
-                  boardId={boardId || ''}
-                  fields={mapToCreateModalFields(filterFieldsForPreview(fields, ticketFormConfig))}
-                />
-              }
-            />
           </div>
+
+          {/* Right Panel - Preview */}
+          <TicketPreviewPanel
+            onClose={() => {}}
+            trackCategory='BOARD_EDIT'
+            ticketPreviewContent={
+              <TicketPreviewContent
+                boardId={boardId || ''}
+                ticket={{
+                  title: `Sample ticket in ${boardName || 'Board'}`,
+                  description:
+                    'This is a sample ticket description showing how tickets will look in this board. Users can add detailed descriptions, attachments, and links here.',
+                  status: 'Open',
+                  statusV2: TicketStatusV2.TODO,
+                  priority: TicketPriority.MEDIUM,
+                  assignee: 'Neha Joshi',
+                  assigneeAvatar: 'NJ',
+                  dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(
+                    'en-US',
+                    {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric',
+                    },
+                  ),
+                  createdBy: 'Neha Joshi',
+                  channel: 'Support',
+                }}
+                fields={mapToPreviewFields(filterFieldsForPreview(fields, ticketFormConfig))}
+              />
+            }
+            createTicketContent={
+              <CreateTicketModal
+                boardId={boardId || ''}
+                fields={mapToCreateModalFields(filterFieldsForPreview(fields, ticketFormConfig))}
+              />
+            }
+          />
         </div>
       </div>
+
+      <Dialog
+        open={!!pendingCascadeDecision}
+        onOpenChange={open => {
+          if (!open) setPendingCascadeDecision(null);
+        }}
+        title='Delete dependent fields'
+      >
+        {pendingCascadeDecision &&
+          ((): ReactElement => {
+            const isSingle = pendingCascadeDecision.affectedFieldNames.length === 1;
+            const subj = isSingle ? 'it' : 'they';
+            const obj = isSingle ? 'it' : 'them';
+
+            return (
+              <div className='p-6 space-y-4'>
+                <p className='text-[14px] text-foreground'>
+                  {isSingle ? 'This field depends' : 'These fields depend'} on the option
+                  you&apos;re removing:{' '}
+                  <span className='font-medium'>
+                    {pendingCascadeDecision.affectedFieldNames.join(', ')}
+                  </span>
+                  . Delete {obj} too? {subj === 'it' ? 'It' : 'They'} can&apos;t be left pointing at
+                  an option that no longer exists.
+                </p>
+                <div className='flex justify-end gap-2'>
+                  <Button
+                    variant='outline'
+                    onClick={() => setPendingCascadeDecision(null)}
+                    data-track-category='form'
+                    data-track-name='cancel-delete-dependent-fields'
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant='default'
+                    onClick={() => pendingCascadeDecision.onConfirm()}
+                    data-track-category='form'
+                    data-track-name='delete-dependent-fields'
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+      </Dialog>
       <ConfirmDialog />
-    </>
+    </div>
   );
 };
 

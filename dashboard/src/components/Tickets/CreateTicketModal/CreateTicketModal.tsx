@@ -15,6 +15,9 @@ import {
   LookupType,
   TicketPriority,
   TicketStatusV2,
+  isFieldActive,
+  resolveParentOption,
+  toSelectOptions,
   type User as UserType,
 } from '@xyne/shared';
 import {
@@ -73,6 +76,7 @@ import Tooltip from '../../ui/Tooltip';
 import { getFilesDimensions } from '../../ui/utils/files';
 import {
   buildCreateTicketShareLink,
+  filterActiveDynamicFieldValues,
   getMissingMandatoryFieldMessage,
   getPriorityOptions,
   hasCreateTicketFlag,
@@ -1046,11 +1050,25 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
 
       // Validate dynamic fields if form mapping exists
-      if (requiredDynamicFields.length > 0) {
+      if (resolvedFormFields.length > 0) {
+        const allFields = resolvedFormFields;
+        const getFieldEffectiveValue = (fieldId: string): string | undefined => {
+          const parentField = allFields.find(f => f.id === fieldId);
+          const parentRaw = parentField
+            ? formData.dynamicFields?.[parentField.fieldName]
+            : undefined;
+          return typeof parentRaw === 'string' ? parentRaw : undefined;
+        };
+
         const errors: Record<string, string> = {};
         let hasErrors = false;
 
-        for (const field of requiredDynamicFields) {
+        for (const field of allFields) {
+          // Only validate required fields (isOptional must be true to skip, otherwise validate)
+          if (field.isOptional === true) continue;
+          // Inactive branch fields were never shown to fill in — same rule the backend uses.
+          if (!isFieldActive(field, allFields, getFieldEffectiveValue)) continue;
+
           const fieldName = field.fieldName;
           const value = formData.dynamicFields[fieldName];
 
@@ -1069,6 +1087,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           return;
         }
       }
+
+      // Drop any stale value left over for a field switched out of its active branch — the
+      // backend rejects the whole ticket if a value is present for an inactive field.
+      const activeDynamicFields =
+        resolvedFormFields.length > 0
+          ? filterActiveDynamicFieldValues(resolvedFormFields, formData.dynamicFields)
+          : formData.dynamicFields;
 
       // Split assignee into assignedTo and userGroupId
       const assignedTo = formData.assignee?.type === 'assigneeTo' ? formData.assignee.value : null;
@@ -1221,8 +1246,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             }),
           ...(formData.merchantId && { merchantId: formData.merchantId }),
           ...(parentTicketId && { parentTicketId }),
-          // Include dynamic fields
-          dynamicFields: formData.dynamicFields,
+          // Include dynamic fields (pruned of any now-inactive branch field's stale value)
+          dynamicFields: activeDynamicFields,
         });
 
         createdTicketResponse = response.data;
@@ -1534,11 +1559,41 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }));
   }, [availableTags, newTags, initialTags, formValues?.tags]);
 
-  // Get required dynamic fields
-  const requiredDynamicFields = useMemo(
-    () => resolvedFormFields.filter(field => field.isOptional === false),
-    [resolvedFormFields],
-  );
+  // Required fields, plus any (possibly optional) parent a required branch field needs set.
+  const requiredDynamicFields = useMemo(() => {
+    const allFields = resolvedFormFields;
+    const required = allFields.filter(field => field.isOptional === false);
+    const neededParentIds = new Set(
+      required
+        .map(field =>
+          field.parentOptionId
+            ? resolveParentOption(allFields, field.parentOptionId)?.parentField.id
+            : undefined,
+        )
+        .filter((id): id is string => !!id),
+    );
+    const neededOptionalParents = allFields.filter(
+      field => neededParentIds.has(field.id) && field.isOptional !== false,
+    );
+    return [...neededOptionalParents, ...required].sort(
+      (a, b) => (a.sequenceNumber ?? 0) - (b.sequenceNumber ?? 0),
+    );
+  }, [resolvedFormFields]);
+
+  // Of those, only the ones currently active given the parent values selected so far.
+  const activeDynamicFields = useMemo(() => {
+    const allFields = resolvedFormFields;
+    const getFieldEffectiveValue = (fieldId: string): string | undefined => {
+      const parentField = allFields.find(f => f.id === fieldId);
+      const parentRaw = parentField
+        ? formValues?.dynamicFields?.[parentField.fieldName]
+        : undefined;
+      return typeof parentRaw === 'string' ? parentRaw : undefined;
+    };
+    return requiredDynamicFields.filter(field =>
+      isFieldActive(field, allFields, getFieldEffectiveValue),
+    );
+  }, [requiredDynamicFields, resolvedFormFields, formValues?.dynamicFields]);
 
   // Field error
   const FieldError: React.FC<FieldErrorProps> = ({ error }) => {
@@ -1992,11 +2047,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         </div>
 
         {/* Dynamic Form Fields */}
-        {requiredDynamicFields.length > 0 && (
+        {activeDynamicFields.length > 0 && (
           <div className='space-y-2'>
             <div className='text-sm font-bold text-foreground pb-2'>Additional Information</div>
             <div className='space-y-2 h-full max-h-56 overflow-scroll -mx-4 px-4'>
-              {requiredDynamicFields.map(field => {
+              {activeDynamicFields.map(field => {
                 const fieldName = field.fieldName;
                 const fieldType = field.fieldType;
                 const rawValue = formValues?.dynamicFields?.[fieldName] || '';
@@ -2099,11 +2154,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         placeholder={`Select ${fieldName.toLowerCase()}`}
                         items={[
                           {
-                            items:
-                              field.fieldEnum?.map(opt => ({
-                                label: opt,
-                                value: opt,
-                              })) || [],
+                            items: toSelectOptions(field.fieldEnum),
                           },
                         ]}
                         selected={stringValue}
@@ -2131,12 +2182,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       <MultiSelect
                         label={`${fieldName}${!isOptional ? ' *' : ''}`}
                         placeholder={`Select ${fieldName.toLowerCase()}`}
-                        options={
-                          field.fieldEnum?.map(opt => ({
-                            label: opt,
-                            value: opt,
-                          })) || []
-                        }
+                        options={toSelectOptions(field.fieldEnum)}
                         selectedValues={arrayValue}
                         onChange={newValues => {
                           const cleanedValues = (newValues ?? []).filter(

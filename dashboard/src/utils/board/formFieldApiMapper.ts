@@ -1,4 +1,4 @@
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, type FieldEnumOption } from '@xyne/shared';
 import type { CreateFormField } from '../../services/Form/formService';
 import type { FormDetailResponse } from '../../services/Form/formService';
 import type { FormField } from '../../components/Board/CreateFormSlideOut/CreateFormSlideOut.types';
@@ -14,9 +14,13 @@ const getFieldName = (field: { fieldName: unknown }): string =>
 export const getStartedFormFields = (fields: FormField[]): FormField[] =>
   fields.filter(field => getFieldName(field).trim().length > 0);
 
-const normalizeSelectOptions = (options: string[] | undefined): string[] | undefined => {
+const normalizeSelectOptions = (
+  options: FieldEnumOption[] | undefined,
+): FieldEnumOption[] | undefined => {
   if (!options) return undefined;
-  const normalized = options.map(option => option.trim()).filter(Boolean);
+  const normalized = options
+    .map(option => ({ ...option, value: option.value.trim() }))
+    .filter(option => option.value.length > 0);
   return normalized.length > 0 ? normalized : undefined;
 };
 
@@ -47,7 +51,7 @@ export const hasDuplicateFormFieldNames = (fields: FormField[]): boolean => {
 
 const fieldHasValidSelectOptions = (field: FormField): boolean => {
   if (!isSelectFormFieldType(field.fieldType)) return true;
-  const options = (field.fieldEnum ?? []).map(option => option.trim()).filter(Boolean);
+  const options = (field.fieldEnum ?? []).map(option => option.value.trim()).filter(Boolean);
   return options.length > 0;
 };
 
@@ -68,7 +72,7 @@ export const buildFieldTypeChangeUpdates = (
   const isSelect = isSelectFormFieldType(nextType);
 
   if (isSelect && !wasSelect) {
-    return { fieldType: nextType, fieldEnum: [''] };
+    return { fieldType: nextType, fieldEnum: [{ id: uuidv4(), value: '' }] };
   }
   if (wasSelect && !isSelect) {
     return { fieldType: nextType };
@@ -78,7 +82,7 @@ export const buildFieldTypeChangeUpdates = (
 
 export const mapFormFieldsToApiPayload = (fields: FormField[]): CreateFormField[] =>
   getSavableFormFields(fields).map(field => {
-    const fieldEnum = isSelectFormFieldType(field.fieldType)
+    const fieldOptions = isSelectFormFieldType(field.fieldType)
       ? normalizeSelectOptions(field.fieldEnum)
       : field.fieldEnum;
 
@@ -86,8 +90,9 @@ export const mapFormFieldsToApiPayload = (fields: FormField[]): CreateFormField[
       ...(field.persistedFieldId ? { fieldId: field.persistedFieldId } : {}),
       fieldName: getFieldName(field).trim(),
       fieldType: field.fieldType,
-      ...(fieldEnum ? { fieldEnum } : {}),
+      ...(fieldOptions ? { fieldOptions } : {}),
       isOptional: field.isOptional,
+      ...(field.parentOptionId !== undefined ? { parentOptionId: field.parentOptionId } : {}),
     };
   });
 
@@ -122,12 +127,14 @@ export const getFieldTypeLabel = (fieldType: FormFieldType): string => {
 
 export const mapFormDetailsToBuilderFields = (formDetails: FormDetailResponse): FormField[] =>
   formDetails.fields.map(field => {
+    const options = field.fieldOptions ?? field.fieldEnum;
     return {
       id: uuidv4(),
       persistedFieldId: field.id,
       fieldName: getFieldName(field),
       fieldType: field.fieldType,
       isOptional: field.isOptional,
-      ...(field.fieldEnum ? { fieldEnum: field.fieldEnum } : {}),
+      ...(options ? { fieldEnum: options } : {}),
+      ...(field.parentOptionId ? { parentOptionId: field.parentOptionId } : {}),
     };
   });

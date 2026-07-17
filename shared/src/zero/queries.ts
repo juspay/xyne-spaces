@@ -3178,6 +3178,7 @@ export const queries = defineQueries({
         .one();
     },
   ),
+
   // Dashboard queries
   getAllDashboards: defineQuery(() => {
     return zql.dashboards.orderBy('updatedAt', 'desc');

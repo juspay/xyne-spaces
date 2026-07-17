@@ -1,5 +1,5 @@
 import { useMemo, type Dispatch, type SetStateAction } from 'react';
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, isFieldActive, parseFieldOptionValues } from '@xyne/shared';
 import type { FormEntityValues, MessageAttachment } from '@xyne/shared';
 import { StageFormDocField } from '../StageFormModal/StageFormDocField';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -87,225 +87,231 @@ export const StageFormFields = ({
     setFormData(prev => ({ ...prev, [fieldId]: value }));
   };
 
+  // formData is already keyed by field id here, unlike the ticket-creation form which is
+  // keyed by fieldName — no name lookup needed to find a parent's current value.
+  const getFieldEffectiveValue = (fieldId: string): string | undefined => formData[fieldId]?.[0];
+
   return (
     <>
-      {fields.map(field => {
-        const fieldValue = formData[field.id] ?? [];
-        const fieldEnumOptions = (field.fieldEnum as string[] | null | undefined) ?? [];
-        const trackMetadata = JSON.stringify({
-          fieldId: field.id,
-          fieldName: field.fieldName,
-        });
+      {fields
+        .filter(field => isFieldActive(field, fields, getFieldEffectiveValue))
+        .map(field => {
+          const fieldValue = formData[field.id] ?? [];
+          const fieldEnumOptions = parseFieldOptionValues(field.fieldEnum);
+          const trackMetadata = JSON.stringify({
+            fieldId: field.id,
+            fieldName: field.fieldName,
+          });
 
-        return (
-          <div key={field.id} className='mb-4'>
-            <label className='mb-1 block text-sm font-medium text-foreground'>
-              {field.fieldName}
-              {!field.isOptional && <span className='text-red-500'>*</span>}
-            </label>
+          return (
+            <div key={field.id} className='mb-4'>
+              <label className='mb-1 block text-sm font-medium text-foreground'>
+                {field.fieldName}
+                {!field.isOptional && <span className='text-red-500'>*</span>}
+              </label>
 
-            {field.fieldType === FormFieldType.STRING && (
-              <input
-                type='text'
-                value={fieldValue[0] ?? ''}
-                onChange={event => updateFieldValue(field.id, [event.target.value])}
-                disabled={disabled}
-                className={stageFormControlClassName}
-                data-track-category='Tickets'
-                data-track-name={`${trackNamePrefix}StringInput`}
-                data-track-metadata={trackMetadata}
-              />
-            )}
+              {field.fieldType === FormFieldType.STRING && (
+                <input
+                  type='text'
+                  value={fieldValue[0] ?? ''}
+                  onChange={event => updateFieldValue(field.id, [event.target.value])}
+                  disabled={disabled}
+                  className={stageFormControlClassName}
+                  data-track-category='Tickets'
+                  data-track-name={`${trackNamePrefix}StringInput`}
+                  data-track-metadata={trackMetadata}
+                />
+              )}
 
-            {field.fieldType === FormFieldType.NUMBER && (
-              <input
-                type='number'
-                value={fieldValue[0] ?? ''}
-                onChange={event => updateFieldValue(field.id, [event.target.value])}
-                disabled={disabled}
-                className={stageFormControlClassName}
-                data-track-category='Tickets'
-                data-track-name={`${trackNamePrefix}NumberInput`}
-                data-track-metadata={trackMetadata}
-              />
-            )}
+              {field.fieldType === FormFieldType.NUMBER && (
+                <input
+                  type='number'
+                  value={fieldValue[0] ?? ''}
+                  onChange={event => updateFieldValue(field.id, [event.target.value])}
+                  disabled={disabled}
+                  className={stageFormControlClassName}
+                  data-track-category='Tickets'
+                  data-track-name={`${trackNamePrefix}NumberInput`}
+                  data-track-metadata={trackMetadata}
+                />
+              )}
 
-            {field.fieldType === FormFieldType.BOOLEAN && (
-              <div className='flex items-center gap-4'>
-                {[
-                  { value: 'true', label: 'Yes' },
-                  { value: 'false', label: 'No' },
-                ].map(option => (
-                  <label
-                    key={option.value}
-                    className={`flex items-center gap-2 text-sm ${
-                      disabled
-                        ? 'cursor-not-allowed text-muted-foreground opacity-70'
-                        : 'cursor-pointer text-foreground'
-                    }`}
-                  >
-                    <input
-                      type='radio'
-                      name={`${idPrefix}-${field.id}`}
-                      value={option.value}
-                      checked={fieldValue[0] === option.value}
-                      onChange={() => updateFieldValue(field.id, [option.value])}
-                      disabled={disabled}
-                      className='h-4 w-4 border-input bg-background text-blue-600 disabled:cursor-not-allowed dark:[color-scheme:dark]'
-                      data-track-category='Tickets'
-                      data-track-name={`${trackNamePrefix}Boolean`}
-                      data-track-metadata={trackMetadata}
-                    />
-                    {option.label}
-                  </label>
-                ))}
-              </div>
-            )}
+              {field.fieldType === FormFieldType.BOOLEAN && (
+                <div className='flex items-center gap-4'>
+                  {[
+                    { value: 'true', label: 'Yes' },
+                    { value: 'false', label: 'No' },
+                  ].map(option => (
+                    <label
+                      key={option.value}
+                      className={`flex items-center gap-2 text-sm ${
+                        disabled
+                          ? 'cursor-not-allowed text-muted-foreground opacity-70'
+                          : 'cursor-pointer text-foreground'
+                      }`}
+                    >
+                      <input
+                        type='radio'
+                        name={`${idPrefix}-${field.id}`}
+                        value={option.value}
+                        checked={fieldValue[0] === option.value}
+                        onChange={() => updateFieldValue(field.id, [option.value])}
+                        disabled={disabled}
+                        className='h-4 w-4 border-input bg-background text-blue-600 disabled:cursor-not-allowed dark:[color-scheme:dark]'
+                        data-track-category='Tickets'
+                        data-track-name={`${trackNamePrefix}Boolean`}
+                        data-track-metadata={trackMetadata}
+                      />
+                      {option.label}
+                    </label>
+                  ))}
+                </div>
+              )}
 
-            {field.fieldType === FormFieldType.DATE && (
-              <input
-                type='date'
-                value={fieldValue[0] ?? ''}
-                onChange={event => updateFieldValue(field.id, [event.target.value])}
-                disabled={disabled}
-                className={stageFormControlClassName}
-                data-track-category='Tickets'
-                data-track-name={`${trackNamePrefix}DateInput`}
-                data-track-metadata={trackMetadata}
-              />
-            )}
+              {field.fieldType === FormFieldType.DATE && (
+                <input
+                  type='date'
+                  value={fieldValue[0] ?? ''}
+                  onChange={event => updateFieldValue(field.id, [event.target.value])}
+                  disabled={disabled}
+                  className={stageFormControlClassName}
+                  data-track-category='Tickets'
+                  data-track-name={`${trackNamePrefix}DateInput`}
+                  data-track-metadata={trackMetadata}
+                />
+              )}
 
-            {field.fieldType === FormFieldType.SINGLE_SELECT && (
-              <select
-                value={fieldValue[0] ?? ''}
-                onChange={event => updateFieldValue(field.id, [event.target.value])}
-                disabled={disabled}
-                className={stageFormControlClassName}
-                data-track-category='Tickets'
-                data-track-name={`${trackNamePrefix}Select`}
-                data-track-metadata={trackMetadata}
-              >
-                <option value='' className='bg-background text-muted-foreground'>
-                  Select an option
-                </option>
-                {fieldEnumOptions.map(option => (
-                  <option key={option} value={option} className='bg-background text-foreground'>
-                    {option}
+              {field.fieldType === FormFieldType.SINGLE_SELECT && (
+                <select
+                  value={fieldValue[0] ?? ''}
+                  onChange={event => updateFieldValue(field.id, [event.target.value])}
+                  disabled={disabled}
+                  className={stageFormControlClassName}
+                  data-track-category='Tickets'
+                  data-track-name={`${trackNamePrefix}Select`}
+                  data-track-metadata={trackMetadata}
+                >
+                  <option value='' className='bg-background text-muted-foreground'>
+                    Select an option
                   </option>
-                ))}
-              </select>
-            )}
+                  {fieldEnumOptions.map(option => (
+                    <option key={option} value={option} className='bg-background text-foreground'>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              )}
 
-            {field.fieldType === FormFieldType.MULTI_SELECT && (
-              <div
-                className='min-h-10 rounded-md border border-input bg-background p-2 text-sm text-foreground shadow-sm'
-                data-track-category='Tickets'
-                data-track-name={`${trackNamePrefix}MultiSelect`}
-                data-track-metadata={trackMetadata}
-              >
-                {((field.fieldEnum as string[] | null | undefined) ?? []).length > 0 ? (
-                  <div className='grid gap-1.5'>
-                    {((field.fieldEnum as string[] | null | undefined) ?? []).map(option => {
-                      const checked = fieldValue.includes(option);
-                      return (
-                        <label
-                          key={option}
-                          className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors ${
-                            disabled
-                              ? 'cursor-not-allowed text-muted-foreground opacity-70'
-                              : 'cursor-pointer hover:bg-muted/60'
-                          }`}
-                        >
-                          <input
-                            type='checkbox'
-                            checked={checked}
-                            disabled={disabled}
-                            onChange={event => {
-                              const nextValue = event.target.checked
-                                ? [...fieldValue, option]
-                                : fieldValue.filter(value => value !== option);
-                              updateFieldValue(field.id, nextValue);
-                            }}
-                            className='h-4 w-4 rounded border-input bg-background text-blue-600 disabled:cursor-not-allowed dark:[color-scheme:dark]'
-                            data-track-category='Tickets'
-                            data-track-name={`${trackNamePrefix}MultiSelectOption`}
-                            data-track-metadata={trackMetadata}
-                          />
-                          <span className='min-w-0 truncate'>{option}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <span className='text-muted-foreground'>No options configured</span>
-                )}
-              </div>
-            )}
+              {field.fieldType === FormFieldType.MULTI_SELECT && (
+                <div
+                  className='min-h-10 rounded-md border border-input bg-background p-2 text-sm text-foreground shadow-sm'
+                  data-track-category='Tickets'
+                  data-track-name={`${trackNamePrefix}MultiSelect`}
+                  data-track-metadata={trackMetadata}
+                >
+                  {fieldEnumOptions.length > 0 ? (
+                    <div className='grid gap-1.5'>
+                      {fieldEnumOptions.map(option => {
+                        const checked = fieldValue.includes(option);
+                        return (
+                          <label
+                            key={option}
+                            className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors ${
+                              disabled
+                                ? 'cursor-not-allowed text-muted-foreground opacity-70'
+                                : 'cursor-pointer hover:bg-muted/60'
+                            }`}
+                          >
+                            <input
+                              type='checkbox'
+                              checked={checked}
+                              disabled={disabled}
+                              onChange={event => {
+                                const nextValue = event.target.checked
+                                  ? [...fieldValue, option]
+                                  : fieldValue.filter(value => value !== option);
+                                updateFieldValue(field.id, nextValue);
+                              }}
+                              className='h-4 w-4 rounded border-input bg-background text-blue-600 disabled:cursor-not-allowed dark:[color-scheme:dark]'
+                              data-track-category='Tickets'
+                              data-track-name={`${trackNamePrefix}MultiSelectOption`}
+                              data-track-metadata={trackMetadata}
+                            />
+                            <span className='min-w-0 truncate'>{option}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <span className='text-muted-foreground'>No options configured</span>
+                  )}
+                </div>
+              )}
 
-            {field.fieldType === FormFieldType.USER && (
-              <input
-                type='text'
-                placeholder='User ID'
-                value={fieldValue[0] ?? ''}
-                onChange={event => updateFieldValue(field.id, [event.target.value])}
-                disabled={disabled}
-                className={stageFormControlClassName}
-                data-track-category='Tickets'
-                data-track-name={`${trackNamePrefix}UserInput`}
-                data-track-metadata={trackMetadata}
-              />
-            )}
+              {field.fieldType === FormFieldType.USER && (
+                <input
+                  type='text'
+                  placeholder='User ID'
+                  value={fieldValue[0] ?? ''}
+                  onChange={event => updateFieldValue(field.id, [event.target.value])}
+                  disabled={disabled}
+                  className={stageFormControlClassName}
+                  data-track-category='Tickets'
+                  data-track-name={`${trackNamePrefix}UserInput`}
+                  data-track-metadata={trackMetadata}
+                />
+              )}
 
-            {field.fieldType === FormFieldType.DOC &&
-              ((): React.JSX.Element => {
-                const latestValue = showPersistedDocValues
-                  ? valuesForRender
-                      .filter(
-                        value => value.fieldId === field.id && value.contextId === targetStageId,
-                      )
-                      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
-                  : undefined;
-                const savedAttachmentId =
-                  fieldValue[0] ??
-                  (showPersistedDocValues
-                    ? stringValuesFromJson(latestValue?.actualFieldValue)[0]
-                    : undefined);
-                const persistedAttachment =
-                  latestValue?.attachments?.[0] ??
-                  (savedAttachmentId ? attachmentById.get(savedAttachmentId) : undefined);
-                const change = localDocChanges.get(field.id);
-                const effectiveExisting =
-                  change && 'removed' in change ? undefined : persistedAttachment;
-                const effectiveExistingAttachmentId =
-                  change && 'removed' in change ? undefined : savedAttachmentId;
+              {field.fieldType === FormFieldType.DOC &&
+                ((): React.JSX.Element => {
+                  const latestValue = showPersistedDocValues
+                    ? valuesForRender
+                        .filter(
+                          value => value.fieldId === field.id && value.contextId === targetStageId,
+                        )
+                        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
+                    : undefined;
+                  const savedAttachmentId =
+                    fieldValue[0] ??
+                    (showPersistedDocValues
+                      ? stringValuesFromJson(latestValue?.actualFieldValue)[0]
+                      : undefined);
+                  const persistedAttachment =
+                    latestValue?.attachments?.[0] ??
+                    (savedAttachmentId ? attachmentById.get(savedAttachmentId) : undefined);
+                  const change = localDocChanges.get(field.id);
+                  const effectiveExisting =
+                    change && 'removed' in change ? undefined : persistedAttachment;
+                  const effectiveExistingAttachmentId =
+                    change && 'removed' in change ? undefined : savedAttachmentId;
 
-                return (
-                  <StageFormDocField
-                    key={`${field.id}:${effectiveExistingAttachmentId ?? 'empty'}`}
-                    fieldId={field.id}
-                    existingAttachment={effectiveExisting}
-                    existingAttachmentId={effectiveExistingAttachmentId}
-                    onLocalChange={file => {
-                      setLocalDocChanges(prev => {
-                        const next = new Map(prev);
-                        if (file) {
-                          next.set(field.id, { file });
-                        } else if (persistedAttachment || savedAttachmentId) {
-                          next.set(field.id, { removed: true });
-                        } else {
-                          next.delete(field.id);
-                        }
-                        return next;
-                      });
-                    }}
-                    disabled={disabled}
-                    readOnly={readOnlyDocs}
-                  />
-                );
-              })()}
-          </div>
-        );
-      })}
+                  return (
+                    <StageFormDocField
+                      key={`${field.id}:${effectiveExistingAttachmentId ?? 'empty'}`}
+                      fieldId={field.id}
+                      existingAttachment={effectiveExisting}
+                      existingAttachmentId={effectiveExistingAttachmentId}
+                      onLocalChange={file => {
+                        setLocalDocChanges(prev => {
+                          const next = new Map(prev);
+                          if (file) {
+                            next.set(field.id, { file });
+                          } else if (persistedAttachment || savedAttachmentId) {
+                            next.set(field.id, { removed: true });
+                          } else {
+                            next.delete(field.id);
+                          }
+                          return next;
+                        });
+                      }}
+                      disabled={disabled}
+                      readOnly={readOnlyDocs}
+                    />
+                  );
+                })()}
+            </div>
+          );
+        })}
     </>
   );
 };

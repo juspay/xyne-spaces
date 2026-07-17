@@ -1,4 +1,4 @@
-import type { BoardMetadata, TicketFormConfig } from '@xyne/shared';
+import type { BoardMetadata, TicketFormConfig, FieldEnumOption } from '@xyne/shared';
 import type { TicketField } from '../../components/Board/BoardEditScreen/BoardEditScreen.types';
 /**
  * Extract ticket form config from board metadata
@@ -49,7 +49,7 @@ export const mapToPreviewFields = (
   label: string;
   type: string;
   required: boolean;
-  options?: string[];
+  options?: FieldEnumOption[];
 }> => {
   return fields.map(field => ({
     id: field.id,
@@ -74,7 +74,7 @@ export const mapToCreateModalFields = (
   required: boolean;
   order: number;
   visibleInCreate: boolean;
-  options?: string[];
+  options?: FieldEnumOption[];
 }> => {
   return fields.map(field => ({
     id: field.id,

@@ -2,6 +2,7 @@ import {
   TicketStatusV2,
   type BoardMetadata,
   type FieldOrderItem,
+  type FieldEnumOption,
   FormFieldType,
 } from '@xyne/shared';
 
@@ -41,8 +42,9 @@ export interface TicketField {
   label: string;
   required: boolean;
   order: number;
-  options?: string[];
+  options?: FieldEnumOption[];
   visibleInCreate: boolean;
+  parentOptionId?: string;
 }
 
 // Helper function to map FormFieldType to TicketField type

@@ -77,6 +77,7 @@ export class FormService {
         fieldType?: FormFieldType;
         fieldEnum?: Prisma.InputJsonValue;
         isOptional?: boolean;
+        parentOptionId?: string | null;
       }>;
     }
   ) {

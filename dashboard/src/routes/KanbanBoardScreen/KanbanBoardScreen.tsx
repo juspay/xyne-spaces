@@ -72,6 +72,8 @@ import {
   ChannelType,
   BoardType,
   TicketStageRequestStatus,
+  parseFieldOptions,
+  type FieldEnumOption,
 } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import {
@@ -217,7 +219,7 @@ type KanbanLocalTicket = Ticket & {
   tags?: Array<{ id: string; name: string; ticketId?: string }>;
   formEntityValues?: Array<
     FormEntityValues & {
-      formField?: { fieldType: FormFieldType; fieldEnum?: unknown } | null;
+      formField?: { fieldType: FormFieldType; fieldEnum?: unknown; fieldOptions?: unknown } | null;
     }
   >;
 };
@@ -1486,7 +1488,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   //   formFieldsById: fieldId → { fieldType, fieldEnum }
   const { formValuesByTicketId, formFieldsById } = useMemo(() => {
     const valuesMap = new Map<string, FormEntityValues[]>();
-    const fieldsMap = new Map<string, { fieldType: FormFieldType; fieldEnum?: string[] | null }>();
+    const fieldsMap = new Map<
+      string,
+      { fieldType: FormFieldType; fieldEnum?: FieldEnumOption[] | null }
+    >();
 
     // Extract formEntityValues from tickets (when fetched as related data)
     if (kanbanSourceTickets && fevFieldIds.length > 0) {
@@ -1502,7 +1507,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               if (fev.formField && !fieldsMap.has(fev.fieldId)) {
                 fieldsMap.set(fev.fieldId, {
                   fieldType: fev.formField.fieldType,
-                  fieldEnum: (fev.formField.fieldEnum as string[] | null) ?? null,
+                  fieldEnum: parseFieldOptions(
+                    fev.formField.fieldOptions ?? fev.formField.fieldEnum,
+                  ),
                 });
               }
             });

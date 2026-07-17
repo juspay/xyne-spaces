@@ -1,18 +1,29 @@
-import { FormFieldType, type FormFields, type GlobalField } from '@xyne/shared';
-import { parseFieldEnumOptions } from '../formFieldEnum';
+import {
+  FormFieldType,
+  parseFieldOptions,
+  type FieldEnumOption,
+  type FormFields,
+  type GlobalField,
+} from '@xyne/shared';
 
 export interface ResolvedDisplayFormField {
   id: string;
   formId: string;
   fieldName: string;
   fieldType: FormFieldType;
-  fieldEnum?: string[];
+  fieldEnum?: FieldEnumOption[];
   isOptional: boolean;
   sequenceNumber: number;
+  parentOptionId?: string | null;
   membershipId?: string;
 }
 
 type MembershipRow = FormFields & { globalField?: GlobalField | null | undefined };
+
+const toFieldOptions = (value: unknown): FieldEnumOption[] | undefined => {
+  const items = parseFieldOptions(value);
+  return items.length > 0 ? items : undefined;
+};
 
 /**
  * Resolve a form's fields from its per-form membership rows (form_fields).
@@ -29,18 +40,18 @@ export const resolveDisplayFormFields = (
     let resolvedId: string;
     let fieldName: string | undefined;
     let fieldType: FormFieldType | undefined;
-    let fieldEnum: string[] | undefined;
+    let fieldEnum: FieldEnumOption[] | undefined;
 
     if (row.globalFieldId && row.globalField) {
       resolvedId = row.globalFieldId;
       fieldName = row.globalField.fieldName;
       fieldType = row.globalField.fieldType;
-      fieldEnum = parseFieldEnumOptions(row.globalField.fieldEnum);
+      fieldEnum = toFieldOptions(row.globalField.fieldOptions ?? row.globalField.fieldEnum);
     } else if (row.fieldName && row.fieldType) {
       resolvedId = row.id;
       fieldName = row.fieldName;
       fieldType = row.fieldType;
-      fieldEnum = parseFieldEnumOptions(row.fieldEnum);
+      fieldEnum = toFieldOptions(row.fieldOptions ?? row.fieldEnum);
     } else {
       return [];
     }
@@ -54,6 +65,7 @@ export const resolveDisplayFormFields = (
         ...(fieldEnum ? { fieldEnum } : {}),
         isOptional: row.isOptional ?? false,
         sequenceNumber: row.sequenceNumber ?? 0,
+        parentOptionId: row.parentOptionId,
         membershipId: row.id,
       },
     ];

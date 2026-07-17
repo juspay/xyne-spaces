@@ -13,6 +13,7 @@ type FormEntityValueRow = FormEntityValues & {
         fieldName?: string | null;
         fieldType?: FormFieldType | null;
         fieldEnum?: unknown;
+        fieldOptions?: unknown;
       }
     | null
     | undefined;

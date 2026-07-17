@@ -1,7 +1,7 @@
 import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
 import { X, Plus, GripVertical, Trash2, ChevronDown } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, type FieldEnumOption } from '@xyne/shared';
 import { toast } from 'sonner';
 import { Button } from '../../ui/Button/Button';
 import {
@@ -89,7 +89,10 @@ interface FieldEditorProps {
   projectId: string | undefined;
   isExpanded: boolean;
   registerInputRef: (fieldId: string, el: HTMLInputElement | null) => void;
-  registerFieldOptionsResolver: (fieldId: string, resolver: (() => string[]) | null) => void;
+  registerFieldOptionsResolver: (
+    fieldId: string,
+    resolver: (() => FieldEnumOption[]) | null,
+  ) => void;
   onExpand: (fieldId: string) => void;
   onToggleExpand: (fieldId: string) => void;
   onUpdate: (fieldId: string, updates: Partial<FormField>) => void;
@@ -126,18 +129,11 @@ const FieldEditor = ({
       }
     : undefined;
 
-  const optionKeysRef = useRef<string[]>([]);
-  if (optionKeysRef.current.length !== options.length) {
-    const next = optionKeysRef.current.slice(0, options.length);
-    while (next.length < options.length) next.push(uuidv4());
-    optionKeysRef.current = next;
-  }
-
   const [editMode, setEditMode] = useState<OptionsEditMode>('individual');
   const [bulkDraft, setBulkDraft] = useState('');
   const [feedback, setFeedback] = useState<BulkOptionsFeedback | null>(null);
 
-  const setOptions = (next: string[], nextFeedback?: BulkOptionsFeedback): void => {
+  const setOptions = (next: FieldEnumOption[], nextFeedback?: BulkOptionsFeedback): void => {
     onUpdate(field.id, { fieldEnum: next });
     if (nextFeedback) {
       setFeedback(nextFeedback);
@@ -146,12 +142,13 @@ const FieldEditor = ({
 
   const editOption = (index: number, value: string): void => {
     const next = [...options];
-    next[index] = value;
+    const current = next[index];
+    if (!current) return;
+    next[index] = { ...current, value };
     onUpdate(field.id, { fieldEnum: next });
   };
 
   const removeOption = (index: number): void => {
-    optionKeysRef.current = optionKeysRef.current.filter((_, i) => i !== index);
     onUpdate(field.id, { fieldEnum: options.filter((_, i) => i !== index) });
   };
 
@@ -172,7 +169,7 @@ const FieldEditor = ({
 
     registerFieldOptionsResolver(field.id, () => {
       if (editMode === 'bulk') {
-        return normalizeFieldOptions(parseBulkOptions(bulkDraft)).options;
+        return normalizeFieldOptions(parseBulkOptions(bulkDraft), options).options;
       }
       return options;
     });
@@ -182,15 +179,15 @@ const FieldEditor = ({
 
   const applyBulkDraft = (): void => {
     const parsed = parseBulkOptions(bulkDraft);
-    const { options: next, duplicatesRemoved, truncated } = normalizeFieldOptions(parsed);
-    setBulkDraft(next.join('\n'));
+    const { options: next, duplicatesRemoved, truncated } = normalizeFieldOptions(parsed, options);
+    setBulkDraft(next.map(option => option.value).join('\n'));
     setOptions(next, { duplicatesRemoved, truncated });
   };
 
   const toggleEditMode = (): void => {
     if (editMode === 'individual') {
       setEditMode('bulk');
-      setBulkDraft(options.join('\n'));
+      setBulkDraft(options.map(option => option.value).join('\n'));
       setFeedback(null);
       return;
     }
@@ -391,13 +388,13 @@ const FieldEditor = ({
                   <div className='flex flex-col gap-[8px]'>
                     {options.map((option, optionIndex) => (
                       <div
-                        key={optionKeysRef.current[optionIndex]}
+                        key={option.id}
                         className='flex items-center gap-[8px] border border-border rounded-[8px] px-[8px] h-[34px]'
                       >
                         <GripVertical size={14} className='text-muted-foreground' />
                         <input
                           type='text'
-                          value={option}
+                          value={option.value}
                           onChange={e => editOption(optionIndex, e.target.value)}
                           placeholder={`Option ${optionIndex + 1}`}
                           className='flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
@@ -473,7 +470,7 @@ export const CreateFormSlideOut = ({
   const [expandedFieldId, setExpandedFieldId] = useState<string | null>(null);
   const fieldInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   const fieldsContainerRef = useRef<HTMLDivElement>(null);
-  const fieldOptionsResolversRef = useRef<Map<string, () => string[]>>(new Map());
+  const fieldOptionsResolversRef = useRef<Map<string, () => FieldEnumOption[]>>(new Map());
   // Track whether we've already seeded the form with initialData for this open session
   const hasSeededRef = useRef(false);
 
@@ -549,7 +546,7 @@ export const CreateFormSlideOut = ({
   };
 
   const registerFieldOptionsResolver = useCallback(
-    (fieldId: string, resolver: (() => string[]) | null): void => {
+    (fieldId: string, resolver: (() => FieldEnumOption[]) | null): void => {
       if (resolver) {
         fieldOptionsResolversRef.current.set(fieldId, resolver);
       } else {
@@ -677,7 +674,8 @@ export const CreateFormSlideOut = ({
           : getStartedFormFields(fields).some(
                 f =>
                   isSelectField(f.fieldType) &&
-                  (f.fieldEnum ?? []).map(option => option.trim()).filter(Boolean).length === 0,
+                  (f.fieldEnum ?? []).map(option => option.value.trim()).filter(Boolean).length ===
+                    0,
               )
             ? 'Add at least one option to every select question'
             : null;
