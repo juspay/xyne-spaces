@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { db } from '@/database/client';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
@@ -69,9 +70,9 @@ export class ApplyConversationLabelStep extends BaseActionStep<
     config: z.infer<typeof ApplyConversationLabelConfigSchema>,
     context: AutomationContext,
   ): Promise<ApplyConversationLabelOutput> {
-    const labelName = (config.labelName as string).trim();
-    const conversationId = (config.conversationId as string | undefined)?.trim() || null;
-    const channelId = (config.channelId as string | undefined)?.trim() || null;
+    const labelName = config.labelName.trim();
+    const conversationId = config.conversationId.trim() || null;
+    const channelId = config.channelId.trim() || null;
     const createdById = context.automation.createdById;
 
     const skipped = (reason: string): ApplyConversationLabelOutput => ({
@@ -91,22 +92,31 @@ export class ApplyConversationLabelStep extends BaseActionStep<
     if (!createdById) return skipped('missing_owner');
 
     try {
-      const result = await applyConversationLabel({
-        conversationId,
-        channelId,
-        labelName,
-        createdById,
-        color: config.color as string | undefined,
-        labelId: config.labelId as string | undefined,
+      const result = await db.$transaction(async tx => {
+        const applied = await applyConversationLabel(
+          {
+            conversationId,
+            channelId,
+            labelName,
+            createdById,
+            color: config.color,
+            labelId: config.labelId,
+          },
+          tx,
+        );
+        if (config.keepInInbox === false) {
+          await archiveConversationMailbox(
+            {
+              conversationId,
+              channelId,
+              workspaceId: context.automation.workspaceId,
+              userId: createdById,
+            },
+            tx,
+          );
+        }
+        return applied;
       });
-      if (config.keepInInbox === false) {
-        await archiveConversationMailbox({
-          conversationId,
-          channelId,
-          workspaceId: context.automation.workspaceId,
-          userId: createdById,
-        });
-      }
       logger.info(
         `[automations] APPLY_CONVERSATION_LABEL conversationId=${conversationId} label=${labelName} applied=${result.applied} alreadyPresent=${result.alreadyPresent}`,
       );

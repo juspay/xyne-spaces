@@ -21,7 +21,6 @@ import {
   workflowExecutionToRun,
   workflowExecutionToRunSummary,
   AUTOMATION_WORKFLOW_TYPE,
-  DESK_AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
   triggerTypeToEventType,
   workflowToAutomation,
@@ -640,45 +639,37 @@ router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
         id: req.params.id,
         workspaceId: auth.workspaceId,
         status: { not: AutomationStatus.ARCHIVED },
-        OR: [
-          { workflowType: AUTOMATION_WORKFLOW_TYPE },
-          { workflowType: DESK_AUTOMATION_WORKFLOW_TYPE },
-        ],
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
       },
     });
-    if (!existing) {
-      res.status(404).json({ success: false, error: 'Automation not found' });
+    if (existing) {
+      void notifyAdminsOfArchiveRequest(workflowToAutomation(existing), auth.userId).catch(err =>
+        logger.error('[automations] notifyAdminsOfArchiveRequest failed', err),
+      );
+      res.json({
+        success: true,
+        data: { message: 'Archive request submitted to admins.' },
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
-    const view = workflowToAutomation(existing);
-    if (existing.workflowType === DESK_AUTOMATION_WORKFLOW_TYPE) {
-      try {
-        const archived = await deskLabelRulesService.archivePersonal(req.params.id, auth);
-        res.json({
-          success: true,
-          data: { automation: archived, message: 'Personal desk rule archived.' },
-          timestamp: new Date().toISOString(),
-        });
-      } catch (err) {
-        const code = (err as { code?: string } | null)?.code;
-        if (code === 'forbidden') {
-          res.status(403).json({ success: false, error: (err as Error).message });
-          return;
-        }
-        throw err;
+    try {
+      const archived = await deskLabelRulesService.archivePersonal(req.params.id, auth);
+      res.json({
+        success: true,
+        data: { automation: archived, message: 'Personal desk rule archived.' },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code;
+      if (code === 'not-found' || code === 'forbidden') {
+        // Do not disclose another user's personal rule through this shared endpoint.
+        res.status(404).json({ success: false, error: 'Automation not found' });
+        return;
       }
-      return;
+      throw err;
     }
-
-    void notifyAdminsOfArchiveRequest(view, auth.userId).catch(err =>
-      logger.error('[automations] notifyAdminsOfArchiveRequest failed', err),
-    );
-    res.json({
-      success: true,
-      data: { message: 'Archive request submitted to admins.' },
-      timestamp: new Date().toISOString(),
-    });
   } catch (err) {
     logger.error('[automations] delete failed:', err);
     res.status(500).json({ success: false, error: 'Failed to submit archive request' });

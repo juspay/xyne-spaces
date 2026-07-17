@@ -52,27 +52,19 @@ function applyLabelStepConfig(params: {
   };
 }
 
-function buildApplyLabelSteps(params: {
+function buildApplyLabelStep(params: {
   conversationIdVar: string;
   channelId: string;
   labelName: string;
   color?: string | undefined;
   labelId?: string | undefined;
   keepInInbox?: boolean | undefined;
-}): AutomationConfig['steps'] {
-  return [
-    {
-      id: uuidv4(),
-      type: 'APPLY_CONVERSATION_LABEL',
-      config: applyLabelStepConfig(params),
-    },
-  ];
-}
-
-interface PendingDeskAutomation {
-  name: string;
-  description: string;
-  config: AutomationConfig;
+}): AutomationConfig['steps'][number] {
+  return {
+    id: uuidv4(),
+    type: 'APPLY_CONVERSATION_LABEL',
+    config: applyLabelStepConfig(params),
+  };
 }
 
 class DeskLabelRulesService {
@@ -106,77 +98,63 @@ class DeskLabelRulesService {
       );
     }
 
-    const baseName = payload.name?.trim() || `Auto-label: ${payload.labelName}`;
-    const pending: PendingDeskAutomation[] = [];
-
-    if (wantEmail) {
-      const emailFilters = { ...(payload.emailFilters ?? {}) };
-      pending.push({
-        name: baseName,
-        description: `Desk auto-label for incoming email → ${payload.labelName}`,
+    const name = payload.name?.trim() || `Auto-label: ${payload.labelName}`;
+    const config: AutomationConfig = {
+      trigger: {
+        type: 'EMAIL_RECEIVED',
         config: {
-          trigger: {
-            type: 'EMAIL_RECEIVED',
-            config: {
-              ...emailFilters,
-              channelIds: [payload.channelId],
-            },
-          },
-          steps: buildApplyLabelSteps({
-            conversationIdVar: '{{context.trigger.email.conversationId}}',
-            channelId: payload.channelId,
-            labelName: payload.labelName,
-            color: payload.color,
-            labelId: payload.labelId,
-            keepInInbox: payload.keepInInbox,
-          }),
+          ...(payload.emailFilters ?? {}),
+          channelIds: [payload.channelId],
         },
+      },
+      steps: [
+        buildApplyLabelStep({
+          conversationIdVar: '{{context.trigger.email.conversationId}}',
+          channelId: payload.channelId,
+          labelName: payload.labelName,
+          color: payload.color,
+          labelId: payload.labelId,
+          keepInInbox: payload.keepInInbox,
+        }),
+      ],
+    };
+
+    const validation = automationService.validateConfig(config);
+    if (!validation.valid) {
+      const summary = validation.issues
+        .slice(0, 3)
+        .map(i => `${i.path}: ${i.message}`)
+        .join('; ');
+      throw Object.assign(new Error(`Invalid automation config: ${summary}`), {
+        code: 'invalid' as const,
+        validation,
       });
     }
 
-    for (const item of pending) {
-      const validation = automationService.validateConfig(item.config);
-      if (!validation.valid) {
-        const summary = validation.issues
-          .slice(0, 3)
-          .map(i => `${i.path}: ${i.message}`)
-          .join('; ');
-        throw Object.assign(new Error(`Invalid automation config: ${summary}`), {
-          code: 'invalid' as const,
-          validation,
-        });
-      }
-    }
-
     const created = await db.$transaction(async tx => {
-      const rows = [];
-      for (const item of pending) {
-        const id = uuidv4();
-        const workflow = await tx.workflow.create({
-          data: {
-            id,
-            workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-            workflowName: item.name,
-            workspaceId: auth.workspaceId,
-            status: AutomationStatus.ACTIVE,
-            eventType: triggerTypeToEventType(item.config.trigger.type),
-            automationSeriesId: id,
-            context: JSON.stringify(item.config),
-            metadata: buildAutomationMetadata({
-              description: item.description,
-              createdById: auth.userId,
-            }),
-          },
-        });
-        rows.push(workflow);
-      }
-      return rows;
+      const id = uuidv4();
+      return tx.workflow.create({
+        data: {
+          id,
+          workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+          workflowName: name,
+          workspaceId: auth.workspaceId,
+          status: AutomationStatus.ACTIVE,
+          eventType: triggerTypeToEventType(config.trigger.type),
+          automationSeriesId: id,
+          context: JSON.stringify(config),
+          metadata: buildAutomationMetadata({
+            description: `Desk auto-label for incoming email → ${payload.labelName}`,
+            createdById: auth.userId,
+          }),
+        },
+      });
     });
 
     logger.info(
-      `[automations] desk-label-rules created count=${created.length} user=${auth.userId} channel=${payload.channelId}`,
+      `[automations] desk-label-rule created user=${auth.userId} channel=${payload.channelId}`,
     );
-    return created.map(workflowToAutomation);
+    return [workflowToAutomation(created)];
   }
 
   async listOwned(
@@ -248,12 +226,6 @@ class DeskLabelRulesService {
       throw Object.assign(new Error('Automation not found'), { code: 'not-found' as const });
     }
     const metadata = parseAutomationMetadata(workflow.metadata);
-    const isDesk = workflow.workflowType === DESK_AUTOMATION_WORKFLOW_TYPE
-    if (!isDesk) {
-      throw Object.assign(new Error('Only personal desk rules can be managed this way.'), {
-        code: 'forbidden' as const,
-      });
-    }
     if (metadata.createdById !== auth.userId) {
       throw Object.assign(new Error('Only the owner can manage this rule.'), {
         code: 'forbidden' as const,

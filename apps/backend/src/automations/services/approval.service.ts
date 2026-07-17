@@ -5,7 +5,6 @@ import type { Workflow } from '@/types/database';
 import { AutomationStatus, isLiveStatus } from '../types/status';
 import {
   AUTOMATION_WORKFLOW_TYPE,
-  DESK_AUTOMATION_WORKFLOW_TYPE,
   parseAutomationMetadata,
   workflowToAutomation,
   type AutomationView,
@@ -240,12 +239,10 @@ class ApprovalService {
         'invalid-arg',
       );
     }
-    const row = ensureAutomation(await repositories.workflows.findById(liveId), liveId);
-    const ownerCanTogglePersonal = row.workflowType === DESK_AUTOMATION_WORKFLOW_TYPE && proposerOf(row) === actorUserId;
-
-    if (nextStatus === AutomationStatus.DISABLED && !ownerCanTogglePersonal) {
+    if (nextStatus === AutomationStatus.DISABLED) {
       await assertIsAutomationsAdmin(actorUserId, opts);
     }
+    const row = ensureAutomation(await repositories.workflows.findById(liveId), liveId);
 
     if (!isLiveStatus(row.status)) {
       throw new ApprovalError(

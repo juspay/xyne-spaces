@@ -1,4 +1,4 @@
-import { MailboxState } from '@prisma/client';
+import { MailboxState, Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -28,10 +28,13 @@ interface ArchiveConversationMailboxInput {
   userId: string;
 }
 
+type LabelDatabaseClient = typeof db | Prisma.TransactionClient;
+
 export async function archiveConversationMailbox(
   input: ArchiveConversationMailboxInput,
+  client: LabelDatabaseClient = db,
 ): Promise<void> {
-  const ticket = await db.ticket.findFirst({
+  const ticket = await client.ticket.findFirst({
     where: { conversationId: input.conversationId },
     select: { id: true, channelId: true, workspaceId: true },
   });
@@ -49,14 +52,14 @@ export async function archiveConversationMailbox(
     });
   }
 
-  const existing = await db.ticketUserMailbox.findUnique({
+  const existing = await client.ticketUserMailbox.findUnique({
     where: { ticketId_userId: { ticketId: ticket.id, userId: input.userId } },
     select: { state: true },
   });
   if (existing?.state === MailboxState.ARCHIVED) return;
 
   const now = new Date();
-  await db.ticketUserMailbox.upsert({
+  await client.ticketUserMailbox.upsert({
     where: { ticketId_userId: { ticketId: ticket.id, userId: input.userId } },
     create: {
       id: uuidv4(),
@@ -79,13 +82,14 @@ export async function archiveConversationMailbox(
  */
 export async function applyConversationLabel(
   input: ApplyConversationLabelInput,
+  client: LabelDatabaseClient = db,
 ): Promise<ApplyConversationLabelResult> {
   const labelName = input.labelName.trim();
   const conversationId = input.conversationId.trim();
   const channelId = input.channelId.trim();
   const createdById = input.createdById;
 
-  const channel = await db.channel.findUnique({
+  const channel = await client.channel.findUnique({
     where: { id: channelId },
     select: { id: true, projectId: true, workspaceId: true },
   });
@@ -93,7 +97,7 @@ export async function applyConversationLabel(
     throw Object.assign(new Error('Channel not found'), { code: 'channel_not_found' as const });
   }
 
-  const conversation = await db.conversation.findUnique({
+  const conversation = await client.conversation.findUnique({
     where: { conversationId },
     select: { conversationId: true, channelId: true, workspaceId: true },
   });
@@ -118,9 +122,37 @@ export async function applyConversationLabel(
   }
 
   const now = new Date();
-  const catalogLabelId = input.labelId?.trim() || uuidv4();
+  const requestedLabelId = input.labelId?.trim();
+  const requestedLabel = requestedLabelId
+    ? await client.conversationLabel.findUnique({
+        where: { id: requestedLabelId },
+        select: {
+          id: true,
+          name: true,
+          channelId: true,
+          workspaceId: true,
+          createdBy: true,
+        },
+      })
+    : null;
 
-  const label = await db.conversationLabel.upsert({
+  if (
+    requestedLabel &&
+    (requestedLabel.name !== labelName ||
+      requestedLabel.channelId !== channelId ||
+      requestedLabel.workspaceId !== channel.workspaceId ||
+      requestedLabel.createdBy !== createdById)
+  ) {
+    throw Object.assign(new Error('Label does not belong to the requested owner and desk'), {
+      code: 'label_id_mismatch' as const,
+    });
+  }
+
+  // Only reuse a caller-provided ID after validating the existing catalog row.
+  // Stale/nonexistent IDs get a server-generated ID instead of controlling a PK.
+  const catalogLabelId = requestedLabel?.id ?? uuidv4();
+
+  const label = await client.conversationLabel.upsert({
     where: {
       channelId_createdBy_name: {
         channelId,
@@ -146,7 +178,7 @@ export async function applyConversationLabel(
     select: { id: true },
   });
 
-  const existingMapping = await db.conversationLabelMapping.findUnique({
+  const existingMapping = await client.conversationLabelMapping.findUnique({
     where: {
       conversationId_labelId: {
         conversationId,
@@ -168,7 +200,7 @@ export async function applyConversationLabel(
   }
 
   try {
-    await db.conversationLabelMapping.create({
+    await client.conversationLabelMapping.create({
       data: {
         id: uuidv4(),
         labelId: label.id,
