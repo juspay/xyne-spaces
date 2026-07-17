@@ -8,6 +8,7 @@ import {
   Link,
   List,
   ListOrdered,
+  RemoveFormatting,
   Strikethrough,
   TextQuote,
   X,
@@ -79,6 +80,10 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
 
   const handleStrikethrough = useCallback(() => {
     editor?.chain().focus().toggleStrike().run();
+  }, [editor]);
+
+  const handleClearFormatting = useCallback(() => {
+    editor?.chain().focus().clearNodes().unsetAllMarks().run();
   }, [editor]);
 
   const handleCode = useCallback(() => {
@@ -196,6 +201,17 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
           onMouseDown={e => e.preventDefault()}
         >
           <Strikethrough className='h-4 w-4' />
+        </button>
+
+        {/* Clear Formatting */}
+        <button
+          type='button'
+          onClick={handleClearFormatting}
+          className={buttonClass(false)}
+          aria-label='Clear formatting'
+          onMouseDown={e => e.preventDefault()}
+        >
+          <RemoveFormatting className='h-4 w-4' />
         </button>
 
         {/* Inline Code */}

@@ -30,3 +30,13 @@ export {
   TableHeaderExtension,
   TableExtensions,
 } from './TableExtension';
+
+export {
+  FormattingShortcutsExtension,
+  FORMATTING_SHORTCUTS,
+  getFormattingShortcut,
+} from './FormattingShortcutsExtension';
+export type {
+  FormattingShortcut,
+  FormattingShortcutsOptions,
+} from './FormattingShortcutsExtension';
