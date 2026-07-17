@@ -1,7 +1,7 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
 
-import { redisService, ChatMessage, WorkflowEvent, PresenceEvent } from './redisService';
+import { redisService, ChatMessage, WorkflowEvent, PresenceEvent, OrgMemberEvent } from './redisService';
 import { typingService, TypingUser } from './typingService';
 import { userStatusService } from './userStatusService';
 import { workspaceEventService, WorkspaceEvent } from './workspaceEventService';
@@ -61,6 +61,7 @@ class WebSocketService {
 
   private orgMemberEventSubscriptions = new Map<string, boolean>(); // orgMemberId -> hasSubscription
   private orgMemberSocketIds = new Map<string, Set<string>>(); // orgMemberId -> Set<socketId>
+  private notificationHealthIntervals = new Map<string, ReturnType<typeof setInterval>>(); // socketId -> healthcheck interval
 
   // Track workflow room membership for Redis subscription cleanup
   private workflowRoomSubscribers = new Map<string, Set<string>>(); // executionId -> Set<socketId>
@@ -242,13 +243,14 @@ class WebSocketService {
         socket.workspaceId = userWithWorkspace.workspaceId;
         socket.workspaceName = userWithWorkspace.workspace?.name;
 
-        await redisService.addOrgMemberConnection(userWithWorkspace.orgMemberId, socket.id);
+        await redisService.addOrgMemberConnection(userWithWorkspace.orgMemberId, socket.id, platform);
         await this.setupOrgMemberEventSubscription(userWithWorkspace.orgMemberId);
 
         if (!this.orgMemberSocketIds.has(userWithWorkspace.orgMemberId)) {
           this.orgMemberSocketIds.set(userWithWorkspace.orgMemberId, new Set());
         }
         this.orgMemberSocketIds.get(userWithWorkspace.orgMemberId)!.add(socket.id);
+        this.startOrgMemberConnectionHealthcheck(socket);
       } else {
         logger.warn(`🔌 [CONNECT] User ${userId} has no orgMemberId; skipping cross-workspace broadcast registration`);
       }
@@ -406,6 +408,49 @@ class WebSocketService {
       logger.info(`🔌 [DISCONNECTING] Socket ${socket.id} (user: ${socket.userId}) is disconnecting...`);
       logger.info(`🔌 [DISCONNECTING] Socket was in rooms:`, Array.from(socket.rooms));
     });
+  }
+  private startOrgMemberConnectionHealthcheck(socket: AuthenticatedSocket): void {
+    const orgMemberId = socket.orgMemberId;
+    if (!orgMemberId) return;
+
+    this.stopOrgMemberConnectionHealthcheck(socket.id);
+
+    const interval = setInterval(async () => {
+      const currentOrgMemberId = socket.orgMemberId;
+      if (!currentOrgMemberId) {
+        this.stopOrgMemberConnectionHealthcheck(socket.id);
+        return;
+      }
+
+      const healthy = socket.connected === true && this.io?.sockets.sockets.has(socket.id) === true;
+      if (healthy) {
+        try {
+          await redisService.addOrgMemberConnection(currentOrgMemberId, socket.id, this.getPlatformFromSocket(socket));
+        } catch (error) {
+          logger.error(`🔌 [ORGMEMBER-HEALTH] Failed to refresh notification socket TTL for ${socket.id}:`, error);
+        }
+        return;
+      }
+
+      this.stopOrgMemberConnectionHealthcheck(socket.id);
+
+      try {
+        await this.handleDisconnection(socket);
+      } catch (error) {
+        logger.error(`🔌 [ORGMEMBER-HEALTH] Failed unhealthy socket cleanup for ${socket.id}:`, error);
+      }
+    }, 15 * 60 * 1000);
+
+    interval.unref?.();
+    this.notificationHealthIntervals.set(socket.id, interval);
+  }
+
+  private stopOrgMemberConnectionHealthcheck(socketId: string): void {
+    const interval = this.notificationHealthIntervals.get(socketId);
+    if (!interval) return;
+
+    clearInterval(interval);
+    this.notificationHealthIntervals.delete(socketId);
   }
 
   // private async handleJoinSession(socket: AuthenticatedSocket, data: JoinSessionData): Promise<void> {
@@ -659,6 +704,8 @@ class WebSocketService {
       const { userId, userEmail, userName } = socket;
 
       logger.info(`🔌 [DISCONNECT] Socket ${socket.id} disconnecting for user ${userName || userEmail} (${userId})`);
+
+      this.stopOrgMemberConnectionHealthcheck(socket.id);
 
       // Clean up channel subscriptions for this socket
       await this.clearSocketSubscriptions(socket.id);
@@ -1058,7 +1105,7 @@ class WebSocketService {
     if (this.orgMemberEventSubscriptions.has(orgMemberId)) return;
 
     try {
-      await redisService.subscribeToOrgMemberEvents(orgMemberId, (event: any) => {
+      await redisService.subscribeToOrgMemberEvents(orgMemberId, (event: OrgMemberEvent) => {
         this.handleOrgMemberEvent(orgMemberId, event);
       });
       this.orgMemberEventSubscriptions.set(orgMemberId, true);
@@ -1068,19 +1115,11 @@ class WebSocketService {
     }
   }
 
-  // Emits the cross-workspace copy. Same-workspace sockets are skipped since
-  // handleUserEvent already delivered to them, preventing duplicate banners.
-  private async handleOrgMemberEvent(orgMemberId: string, event: any): Promise<void> {
+  private async handleOrgMemberEvent(orgMemberId: string, event: OrgMemberEvent): Promise<void> {
     try {
       if (event.type !== 'notification_received') return;
 
-      const eventWorkspaceId: string | undefined = event.data?.workspaceId;
-      if (!eventWorkspaceId) {
-        logger.warn(`[ORGMEMBER-EVENT] Missing workspaceId on event for orgMember ${orgMemberId}; dropping`);
-        return;
-      }
-
-      const sourceUserId: string | undefined = event.data?.sourceUserId;
+      const sourceUserId: string | undefined = event.data?.sourceUserId ?? event.data?.userId;
       if (!sourceUserId) {
         logger.warn(`[ORGMEMBER-EVENT] Missing sourceUserId on event for orgMember ${orgMemberId}; dropping`);
         return;
@@ -1096,10 +1135,7 @@ class WebSocketService {
         // Enforce strict orgMemberId match — guards against cross-tenant leakage.
         if (socket.orgMemberId !== orgMemberId) continue;
 
-        // Skip if workspace is unknown or matches source
-        if (!socket.workspaceId || socket.workspaceId === eventWorkspaceId) continue;
-
-        await this.handleNotificationEvent(sourceUserId, socketId, event);
+        await this.handleNotificationEvent(sourceUserId, orgMemberId, socketId, event);
       }
     } catch (error) {
       logger.error(`[ORGMEMBER-EVENT] Error handling event for orgMember ${orgMemberId}:`, error);
@@ -1114,6 +1150,11 @@ class WebSocketService {
         timestamp: event.timestamp
       });
 
+      if (event.type === 'notification_received') {
+        logger.info(`👤 [USER-EVENT] Ignoring legacy user-channel notification for user ${userId}; notifications route by orgMemberId`);
+        return;
+      }
+
       // Get all active connections for this user
       const userConnections = await redisService.getUserConnections(userId);
 
@@ -1126,14 +1167,6 @@ class WebSocketService {
 
       // Broadcast to all user's active connections
       for (const socketId of userConnections) {
-        // Special filtering and edge creation for notifications
-        if (event.type === 'notification_received') {
-          const handled = await this.handleNotificationEvent(userId, socketId, event);
-          if (handled) {
-            continue; 
-          }
-        }
-
         this.io?.to(socketId).emit(event.type, {
           ...event.data,
           timestamp: event.timestamp
@@ -1150,9 +1183,9 @@ class WebSocketService {
    * Helper to handle notification events with edge creation and platform filtering
    * Returns true if the event was fully handled (emitted or skipped), false if it should fall back to standard emission
    */
-  private async handleNotificationEvent(userId: string, socketId: string, event: any): Promise<boolean> {
+  private async handleNotificationEvent(userId: string, orgMemberId: string, socketId: string, event: any): Promise<boolean> {
     try {
-      const platform = await redisService.getSocketPlatform(userId, socketId);
+      const platform = await redisService.getOrgMemberSocketPlatform(orgMemberId, socketId);
       
       // Skip if platform is mobile (iOS/Android) as they get Push Notifications
       if (platform === 'mobile' || platform === 'ios' || platform === 'android') {
@@ -1305,68 +1338,6 @@ class WebSocketService {
     this.io.to(roomName).emit(event, data);
   }
 
-  async broadcastNotificationToUser(userId: string, notification: any): Promise<void> {
-    try {
-      logger.info(`🔔 [NOTIFICATION] Broadcasting notification to user ${userId}:`, {
-        id: notification.id,
-        type: notification.type,
-        title: notification.title
-      });
-
-      // Get all active connections for this user
-      const userConnections = await redisService.getUserConnections(userId);
-
-      if (userConnections.length === 0) {
-        logger.info(`🔔 [NOTIFICATION] No active connections for user ${userId}, skipping broadcast`);
-        return;
-      }
-
-      logger.info(`🔔 [NOTIFICATION] Broadcasting to ${userConnections.length} connections for user ${userId}`);
-
-      // Broadcast to all user's active connections
-      for (const socketId of userConnections) {
-        this.io?.to(socketId).emit('notification_received', {
-          notification,
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      logger.info(`✅ [NOTIFICATION] Successfully broadcasted notification to user ${userId}`);
-    } catch (error) {
-      logger.error(`❌ [NOTIFICATION] Error broadcasting notification to user ${userId}:`, error);
-    }
-  }
-
-  async broadcastNotificationUpdate(userId: string, notificationId: string, status: string): Promise<void> {
-    try {
-      logger.info(`🔔 [NOTIFICATION-UPDATE] Broadcasting notification update to user ${userId}:`, {
-        notificationId,
-        status
-      });
-
-      // Get all active connections for this user
-      const userConnections = await redisService.getUserConnections(userId);
-
-      if (userConnections.length === 0) {
-        logger.info(`🔔 [NOTIFICATION-UPDATE] No active connections for user ${userId}, skipping broadcast`);
-        return;
-      }
-
-      // Broadcast to all user's active connections
-      for (const socketId of userConnections) {
-        this.io?.to(socketId).emit('notification_updated', {
-          notificationId,
-          status,
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      logger.info(`✅ [NOTIFICATION-UPDATE] Successfully broadcasted notification update to user ${userId}`);
-    } catch (error) {
-      logger.error(`❌ [NOTIFICATION-UPDATE] Error broadcasting notification update to user ${userId}:`, error);
-    }
-  }
-
   broadcastTicketCountsUpdate(payload: {
     operation: 'insert' | 'update' ;
     ticket: {
@@ -1463,40 +1434,6 @@ class WebSocketService {
       logger.warn(`[WebSocketService] Failed to check online status for user ${userId}`, { error });
       return false;
     }
-  }
-
-  // Send call notification to user
-  sendCallNotification(userId: string, notification: any): void {
-    if (!this.io) {
-      logger.warn('WebSocket server not initialized');
-      return;
-    }
-
-    // Get user's socket connections and emit notification
-    redisService.getUserConnections(userId).then((connections) => {
-      for (const socketId of connections) {
-        this.io?.to(socketId).emit('call_notification', notification);
-      }
-      logger.info(`Call notification sent to user ${userId} (${connections.length} connections)`);
-    }).catch((error) => {
-      logger.error('Failed to send call notification:', error);
-    });
-  }
-
-  // Send call status update
-  sendCallStatus(userId: string, status: any): void {
-    if (!this.io) {
-      logger.warn('WebSocket server not initialized');
-      return;
-    }
-
-    redisService.getUserConnections(userId).then((connections) => {
-      for (const socketId of connections) {
-        this.io?.to(socketId).emit('call_status', status);
-      }
-    }).catch((error) => {
-      logger.error('Failed to send call status:', error);
-    });
   }
 
   // Workflow subscription handlers (room-based with Redis pub/sub bridge)
@@ -1679,64 +1616,6 @@ class WebSocketService {
     if (executionIdsToCleanup.length > 0) {
       logger.info(`🧹 [WORKFLOW-CLEANUP] Cleaned up ${executionIdsToCleanup.length} workflow subscriptions for socket ${socketId}`);
     }
-  }
-
-  // Broadcast workflow step added event to all subscribers of a workflow execution
-  broadcastWorkflowStepAdded(executionId: string, stepData: {
-    stepId: string;
-    stepName: string | null;
-    type: string | null;
-    stepExecutorType: string;
-  }): void {
-    if (!this.io) {
-      logger.info('❌ [WORKFLOW-BROADCAST] WebSocket server not initialized');
-      return;
-    }
-
-    const roomName = `workflow:${executionId}`;
-
-    this.io.to(roomName).emit('workflow_step_added', {
-      executionId,
-      ...stepData,
-      timestamp: new Date().toISOString()
-    });
-
-    logger.info(`📊 [WORKFLOW-BROADCAST] Emitted workflow_step_added to room ${roomName}:`, {
-      executionId,
-      stepId: stepData.stepId,
-      stepName: stepData.stepName
-    });
-  }
-
-  /**
-   * Broadcast workspace_updated event when files change in the live workspace
-   * This is emitted after tool executions that modify files (e.g., after commits)
-   * Frontend listens to this to refresh the file tree in real-time
-   */
-  broadcastWorkspaceUpdated(parentExecutionId: string, childExecutionId: string, data?: {
-    commitHash?: string;
-    filesChanged?: number;
-  }): void {
-    if (!this.io) {
-      logger.info('❌ [WORKSPACE-BROADCAST] WebSocket server not initialized');
-      return;
-    }
-
-    const roomName = `workflow:${parentExecutionId}`;
-
-    this.io.to(roomName).emit('workspace_updated', {
-      executionId: parentExecutionId,
-      childExecutionId,
-      commitHash: data?.commitHash,
-      filesChanged: data?.filesChanged,
-      timestamp: new Date().toISOString()
-    });
-
-    logger.info(`📁 [WORKSPACE-BROADCAST] Emitted workspace_updated to room ${roomName}:`, {
-      parentExecutionId,
-      childExecutionId,
-      commitHash: data?.commitHash
-    });
   }
 
   // Debug method to get subscription stats
