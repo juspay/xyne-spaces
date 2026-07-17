@@ -65,6 +65,7 @@ export interface GlobalFieldListResult {
 }
 
 interface LocalFieldDefinitionInput {
+  fieldId?: string;
   fieldName: string;
   fieldType: FormFieldType;
   fieldEnum?: Prisma.InputJsonValue;
@@ -386,8 +387,6 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
           keptRowIds.add(rowId);
           continue;
         }
-
-        throw new Error(`Field ${field.fieldId} does not belong to this form`);
       }
 
       // New local field → find-or-create the global definition by (projectId, name + type).
@@ -474,7 +473,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     const now = new Date();
     const created = await tx.globalField.create({
       data: {
-        id: randomUUID(),
+        id: def.fieldId ?? randomUUID(),
         projectId,
         fieldName,
         fieldType: def.fieldType,
@@ -521,7 +520,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     const now = new Date();
     const created = await tx.formFields.create({
       data: {
-        id: randomUUID(),
+        id: def.fieldId ?? randomUUID(),
         formId,
         globalFieldId: null,
         fieldName,
