@@ -165,16 +165,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportCanvasPdf: (fileName: string, html: string) =>
     ipcRenderer.invoke('canvas:export-pdf', { fileName, html }),
 
-  // Docs Publish APIs
-  docsPublish: {
-    getStatus: () =>
-      ipcRenderer.invoke('docs-publish:get-status'),
-    clearOutputDir: () =>
-      ipcRenderer.invoke('docs-publish:clear-output-dir'),
-    getOutputDir: () =>
-      ipcRenderer.invoke('docs-publish:get-output-dir'),
-  },
-
   // Log listener
   onLog: (callback: (message: any) => void) => {
     const listener = (_event: unknown, message: any) => callback(message);

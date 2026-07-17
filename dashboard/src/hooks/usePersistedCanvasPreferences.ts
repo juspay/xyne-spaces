@@ -1,6 +1,6 @@
 import { useSyncExternalStore, useCallback } from 'react';
 
-export type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
+export type FilterTab = 'all' | 'created_by_me';
 export type ViewMode = 'grouped' | 'list';
 
 const STORAGE_KEY = 'canvas-preferences';
@@ -18,7 +18,7 @@ const DEFAULT: CanvasPreferences = {
 };
 
 const isValidFilter = (value: unknown): value is FilterTab =>
-  value === 'all' || value === 'created_by_me' || value === 'quarto_docs';
+  value === 'all' || value === 'created_by_me';
 
 const isValidViewMode = (value: unknown): value is ViewMode =>
   value === 'grouped' || value === 'list';

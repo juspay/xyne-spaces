@@ -4,9 +4,8 @@ import { CanvasList } from '../CanvasList';
 import { Button } from '../../ui/Button';
 import type { Canvas } from '../Canvas.types';
 import { useAuth } from '../../../hooks/useAuth';
-import { DocType } from '@xyne/shared';
 
-type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
+type FilterTab = 'all' | 'created_by_me';
 
 export interface CanvasAttachmentModalProps {
   /** Whether the modal is open */
@@ -36,10 +35,6 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
 
   const handleSelectCanvas = useCallback((_e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => {
-    // Only allow selecting non-Quarto canvases for attachment
-    if (canvas.docType === DocType.Quarto) {
-      return;
-    }
     setSelectedCanvas(canvas);
   }, []);
 
@@ -120,7 +115,6 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
           <CanvasList
             onSelect={handleSelectCanvas}
             currentUserId={user?.id}
-            showQuartoDocsFilter={true}
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
             {...(selectedCanvas ? { selectedCanvasId: selectedCanvas.id } : {})}

@@ -1,13 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import {
-  BookMarked,
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  Folder,
-  Plus,
-  Search,
-} from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Folder, Plus, Search } from 'lucide-react';
 import type { Canvas, CanvasFolder } from '../Canvas.types';
 import Input from '../../ui/Input';
 import { Dialog } from '../../ui/Dialog';
@@ -16,11 +8,10 @@ import { CanvasRow } from '../CanvasRow';
 import { getDisplayedCanvases } from '../canvasListFilters';
 import { filterStarredCanvases, withStarredCanvasState } from '../canvasFilters';
 
-type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
+type FilterTab = 'all' | 'created_by_me';
 
 const channelCanvasRowTrackNames = {
   canvasOpen: 'Open_Canvas_Channel_Grouped',
-  quartoDocOpen: 'Open_Quarto_Doc_Channel_Grouped',
   actionsMenu: 'CHANNEL_CANVAS_ACTIONS_MENU',
 } as const;
 
@@ -32,7 +23,6 @@ interface FolderGroup {
 interface ChannelCanvasListProps {
   canvases: Canvas[];
   folders: CanvasFolder[];
-  quartoDocs?: Canvas[];
   activeFilter: FilterTab;
   onFilterChange: (filter: FilterTab) => void;
   onSelect: (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => void;
@@ -52,7 +42,6 @@ function sortByName<T>(items: T[], getName: (item: T) => string): T[] {
 export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
   canvases,
   folders,
-  quartoDocs = [],
   activeFilter,
   onFilterChange,
   onSelect,
@@ -69,32 +58,23 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
   const [deletingCanvas, setDeletingCanvas] = useState<Canvas | null>(null);
 
   const canvasesWithStarState = useMemo(() => withStarredCanvasState(canvases), [canvases]);
-  const quartoDocsWithStarState = useMemo(() => withStarredCanvasState(quartoDocs), [quartoDocs]);
 
   const displayedCanvases = useMemo(
     () =>
       filterStarredCanvases(
         getDisplayedCanvases({
           canvases: canvasesWithStarState,
-          quartoDocs: quartoDocsWithStarState,
           activeFilter,
           currentUserId,
           searchQuery,
         }),
         showStarredOnly,
       ),
-    [
-      activeFilter,
-      canvasesWithStarState,
-      currentUserId,
-      quartoDocsWithStarState,
-      searchQuery,
-      showStarredOnly,
-    ],
+    [activeFilter, canvasesWithStarState, currentUserId, searchQuery, showStarredOnly],
   );
 
   const displayedFolders = useMemo(() => {
-    if (activeFilter === 'quarto_docs' || searchQuery.trim()) return [];
+    if (searchQuery.trim()) return [];
     return activeFilter === 'created_by_me' && currentUserId
       ? folders.filter(folder => folder.createdBy === currentUserId)
       : folders;
@@ -127,10 +107,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
     };
   }, [activeFilter, displayedCanvases, displayedFolders, showStarredOnly]);
 
-  const isEmpty =
-    activeFilter === 'quarto_docs'
-      ? displayedCanvases.length === 0
-      : folderGroups.length === 0 && rootCanvases.length === 0;
+  const isEmpty = folderGroups.length === 0 && rootCanvases.length === 0;
 
   const toggleFolder = (id: string): void => {
     setCollapsedFolders(prev => {
@@ -177,20 +154,6 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
               >
                 Created by me
               </button>
-              <button
-                onClick={() => onFilterChange('quarto_docs')}
-                className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all flex items-center gap-1.5 ${
-                  activeFilter === 'quarto_docs'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-muted-foreground hover:bg-accent'
-                }`}
-                data-testid='canvas-filter-quarto-docs'
-                data-track-category='CANVAS'
-                data-track-name='Filter_Channel_Canvases_Docs'
-              >
-                <BookMarked className='w-3.5 h-3.5' />
-                Docs
-              </button>
             </div>
 
             <div className='relative w-full sm:w-auto'>
@@ -213,23 +176,13 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
             <div className='flex flex-col items-center justify-center h-full text-center py-16'>
               <FileText className='w-16 h-16 text-muted-foreground mb-4' />
               <h3 className='text-lg font-medium text-foreground mb-2'>
-                {searchQuery
-                  ? 'No canvases found'
-                  : activeFilter === 'quarto_docs'
-                    ? showStarredOnly
-                      ? 'No starred docs yet'
-                      : 'No docs yet'
-                    : 'No canvases yet'}
+                {searchQuery ? 'No canvases found' : 'No canvases yet'}
               </h3>
               <p className='text-muted-foreground text-sm'>
-                {searchQuery
-                  ? 'Try a different search'
-                  : activeFilter === 'quarto_docs' && showStarredOnly
-                    ? 'Star a doc to see it here.'
-                    : 'Create your first canvas to get started'}
+                {searchQuery ? 'Try a different search' : 'Create your first canvas to get started'}
               </p>
             </div>
-          ) : activeFilter === 'quarto_docs' || searchQuery.trim() ? (
+          ) : searchQuery.trim() ? (
             <div className='p-2 space-y-0.5'>
               {displayedCanvases.map(canvas => (
                 <CanvasRow
@@ -239,16 +192,12 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                   onSelect={onSelect}
                   selectedCanvasId={selectedCanvasId}
                   currentUserId={currentUserId}
-                  quartoDocIcon='bookmark'
                   trackNames={channelCanvasRowTrackNames}
                   onToggleStar={onToggleStar}
                   onDelete={
                     onDelete
                       ? (id): void => {
-                          const targetCanvas =
-                            canvases.find(item => item.id === id) ??
-                            quartoDocs.find(item => item.id === id) ??
-                            null;
+                          const targetCanvas = canvases.find(item => item.id === id) ?? null;
                           if (targetCanvas) setDeletingCanvas(targetCanvas);
                         }
                       : undefined
@@ -303,16 +252,13 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                           onSelect={onSelect}
                           selectedCanvasId={selectedCanvasId}
                           currentUserId={currentUserId}
-                          quartoDocIcon='bookmark'
                           trackNames={channelCanvasRowTrackNames}
                           onToggleStar={onToggleStar}
                           onDelete={
                             onDelete
                               ? (id): void => {
                                   const targetCanvas =
-                                    canvases.find(item => item.id === id) ??
-                                    quartoDocs.find(item => item.id === id) ??
-                                    null;
+                                    canvases.find(item => item.id === id) ?? null;
                                   if (targetCanvas) setDeletingCanvas(targetCanvas);
                                 }
                               : undefined
@@ -331,16 +277,12 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                   onSelect={onSelect}
                   selectedCanvasId={selectedCanvasId}
                   currentUserId={currentUserId}
-                  quartoDocIcon='bookmark'
                   trackNames={channelCanvasRowTrackNames}
                   onToggleStar={onToggleStar}
                   onDelete={
                     onDelete
                       ? (id): void => {
-                          const targetCanvas =
-                            canvases.find(item => item.id === id) ??
-                            quartoDocs.find(item => item.id === id) ??
-                            null;
+                          const targetCanvas = canvases.find(item => item.id === id) ?? null;
                           if (targetCanvas) setDeletingCanvas(targetCanvas);
                         }
                       : undefined

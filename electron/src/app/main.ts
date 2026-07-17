@@ -11,7 +11,6 @@ import {
   hydrateCachedUserFromCookies,
 } from '../services/request-interceptor';
 import { setupMTLS } from '../services/mtls';
-import { docsPublishService } from '../services/docs-publish';
 import { agentAuthService } from '../services/agent-auth';
 import { BrowserWindow } from 'electron';
 import { Logger } from '../services/logger/Logger';
@@ -110,13 +109,6 @@ app.on('before-quit', async () => {
     Logger.logError(ElectronEvent.AGENT_AUTH_SERVER_START_FAILED, error, {}, 'App');
   }
 
-  // Gracefully stop docs publish server
-  try {
-    await docsPublishService.stopServer();
-    Logger.info(ElectronEvent.DOCS_PUBLISH_SERVER_STOP, {}, 'App');
-  } catch (error) {
-    Logger.logError(ElectronEvent.DOCS_PUBLISH_SERVER_START_FAILED, error, {}, 'App');
-  }
 });
 
 
@@ -205,9 +197,6 @@ async function initializeApp(): Promise<void> {
   if (config.useBundledUI) {
     void initializeUIUpdater();
   }
-  // Auto-start docs publish server in the background
-  startDocsPublishServerInBackground();
-
   // Start version checker to auto-reload on new deployments
   startVersionChecker();
 
@@ -239,22 +228,6 @@ function startAgentAuthServerInBackground(): void {
     })
     .catch((error) => {
       log.error('[App] Failed to start agent auth server:', error);
-    });
-}
-
-/**
- * Start docs publish server in the background
- */
-function startDocsPublishServerInBackground(): void {
-  docsPublishService.setBackendUrl(config.BACKEND_URL);
-
-  Logger.info(ElectronEvent.DOCS_PUBLISH_SERVER_START, {}, 'App');
-  docsPublishService.startServer()
-    .then((port) => {
-      Logger.info(ElectronEvent.DOCS_PUBLISH_SERVER_STARTED, { port }, 'App');
-    })
-    .catch((error) => {
-      Logger.logError(ElectronEvent.DOCS_PUBLISH_SERVER_START_FAILED, error, {}, 'App');
     });
 }
 

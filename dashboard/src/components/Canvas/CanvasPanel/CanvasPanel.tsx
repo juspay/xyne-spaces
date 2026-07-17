@@ -1,28 +1,16 @@
 import { ReactElement, useState, useRef, useCallback, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
-import {
-  FileText,
-  Plus,
-  ArrowLeft,
-  Info,
-  Loader2,
-  List,
-  FolderTree,
-  Search,
-  Star,
-} from 'lucide-react';
+import { FileText, Plus, ArrowLeft, Loader2, List, FolderTree, Search, Star } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import type { Canvas } from '../Canvas.types';
-import { DocType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { Button } from '../../ui/Button';
 import { Switch } from '../../ui/Switch';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Input from '../../ui/Input';
-import { PublishDocsModal } from '../QuartoInstructionsModal/QuartoInstructionsModal';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import {
@@ -35,7 +23,6 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { usePath } from '../../../hooks/usePath';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasService } from '../../../services/Canvas/canvasService';
-import { openQuartoDoc } from '../openQuartoDoc';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 
 const CanvasPanel = (): ReactElement => {
@@ -57,7 +44,6 @@ const CanvasPanel = (): ReactElement => {
     setLastCanvasId,
   } = usePersistedCanvasPreferences();
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
-  const [showPublishModal, setShowPublishModal] = useState(false);
   const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
   const [excludeCallGeneratedCanvases, setExcludeCallGeneratedCanvases] = useState(true);
   const [showStarredOnly, setShowStarredOnly] = useState(false);
@@ -80,8 +66,6 @@ const CanvasPanel = (): ReactElement => {
       void navigate(`/chat/canvas/${lastCanvasId}`, { replace: true });
     }
   }, [isMobile, isOnIndexRoute, lastCanvasId, navigate]);
-
-  const isQuartoDocsListView = viewMode === 'list' && activeFilter === 'quarto_docs';
 
   const handleCreateCanvas = useCallback(async () => {
     setIsCreatingCanvas(true);
@@ -115,11 +99,6 @@ const CanvasPanel = (): ReactElement => {
         return;
       }
 
-      // If it's a Quarto doc, navigate to docs
-      if (canvas.docType === DocType.Quarto && canvas.userRepo) {
-        openQuartoDoc(e, canvas, navigate, isMobile);
-        return;
-      }
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       // Navigate to the canvas in the right panel
       const canvasUrl = `/chat/canvas/${canvas.id}`;
@@ -167,10 +146,6 @@ const CanvasPanel = (): ReactElement => {
     },
     [z],
   );
-
-  const handleCreateQuartoDoc = useCallback((): void => {
-    setShowPublishModal(true);
-  }, []);
 
   const handleDuplicateCanvas = useCallback(
     (canvasOrId: Canvas | string, canvasFromList?: Canvas) => {
@@ -240,25 +215,21 @@ const CanvasPanel = (): ReactElement => {
                 />
               </button>
             </Tooltip>
-            {!isQuartoDocsListView && (
-              <>
-                <Tooltip
-                  content={
-                    excludeCallGeneratedCanvases ? 'Show system generated' : 'Hide system generated'
-                  }
-                  side='bottom'
-                  delayDuration={300}
-                >
-                  <div>
-                    <Switch
-                      id='exclude-call-generated-canvases'
-                      checked={!excludeCallGeneratedCanvases}
-                      onCheckedChange={checked => setExcludeCallGeneratedCanvases(!checked)}
-                    />
-                  </div>
-                </Tooltip>
-              </>
-            )}
+            <Tooltip
+              content={
+                excludeCallGeneratedCanvases ? 'Show system generated' : 'Hide system generated'
+              }
+              side='bottom'
+              delayDuration={300}
+            >
+              <div>
+                <Switch
+                  id='exclude-call-generated-canvases'
+                  checked={!excludeCallGeneratedCanvases}
+                  onCheckedChange={checked => setExcludeCallGeneratedCanvases(!checked)}
+                />
+              </div>
+            </Tooltip>
             <div className='flex items-center border border-border rounded-md'>
               <button
                 type='button'
@@ -291,34 +262,21 @@ const CanvasPanel = (): ReactElement => {
                 <List size={16} />
               </button>
             </div>
-            {viewMode === 'list' && activeFilter === 'quarto_docs' ? (
-              <Button
-                variant='default'
-                size='sm'
-                onClick={handleCreateQuartoDoc}
-                data-track-category='CANVAS'
-                data-track-name='Publish_Doc_Instructions'
-              >
-                <Info size={16} className='mr-1' />
-                How to publish
-              </Button>
-            ) : (
-              <Button
-                variant='default'
-                size='sm'
-                onClick={() => void handleCreateCanvas()}
-                disabled={isCreatingCanvas}
-                data-track-category='CANVAS'
-                data-track-name='Create_Canvas'
-              >
-                {isCreatingCanvas ? (
-                  <Loader2 size={16} className='mr-1 animate-spin' />
-                ) : (
-                  <Plus size={16} className='mr-1' />
-                )}
-                {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
-              </Button>
-            )}
+            <Button
+              variant='default'
+              size='sm'
+              onClick={() => void handleCreateCanvas()}
+              disabled={isCreatingCanvas}
+              data-track-category='CANVAS'
+              data-track-name='Create_Canvas'
+            >
+              {isCreatingCanvas ? (
+                <Loader2 size={16} className='mr-1 animate-spin' />
+              ) : (
+                <Plus size={16} className='mr-1' />
+              )}
+              {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
+            </Button>
           </div>
         </div>
         {viewMode === 'grouped' && (
@@ -361,7 +319,6 @@ const CanvasPanel = (): ReactElement => {
             onDelete={handleDeleteCanvas}
             onDuplicate={handleDuplicateCanvas}
             currentUserId={user?.id}
-            showQuartoDocsFilter={true}
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
             excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
@@ -371,7 +328,6 @@ const CanvasPanel = (): ReactElement => {
           />
         )}
       </div>
-      <PublishDocsModal isOpen={showPublishModal} onClose={() => setShowPublishModal(false)} />
     </div>
   );
 

@@ -1,16 +1,6 @@
 import React, { useState } from 'react';
-import {
-  BookMarked,
-  Copy,
-  FileText,
-  Globe,
-  Lock,
-  MoreHorizontal,
-  Share2,
-  Star,
-  Trash2,
-} from 'lucide-react';
-import { CanvasRole, CanvasVisibility, DocType } from '@xyne/shared';
+import { Copy, FileText, Globe, Lock, MoreHorizontal, Share2, Star, Trash2 } from 'lucide-react';
+import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import type { Canvas } from './Canvas.types';
 import {
   DropdownMenu,
@@ -25,7 +15,6 @@ import { formatDate } from '../../utils/dateUtils';
 
 interface CanvasRowTrackNames {
   canvasOpen: string;
-  quartoDocOpen: string;
   actionsMenu: string;
 }
 
@@ -77,7 +66,6 @@ export interface CanvasRowProps {
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
   onToggleStar?: ((canvas: Canvas) => void) | undefined;
   trackNames: CanvasRowTrackNames;
-  quartoDocIcon?: 'bookmark' | 'file';
   highlightQuery?: string | undefined;
 }
 
@@ -91,14 +79,12 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   onDuplicate,
   onToggleStar,
   trackNames,
-  quartoDocIcon = 'file',
   highlightQuery,
 }) => {
   const [shareOpen, setShareOpen] = useState(false);
   const isSelected = selectedCanvasId === canvas.id;
   const isOwner = canvas.createdBy === currentUserId;
   const isEditor = canvas.accessLevel === CanvasRole.EDITOR;
-  const isQuartoDoc = canvas.docType === DocType.Quarto;
   const canToggleStar = !!onToggleStar;
   const createdDateText = `Created ${formatDate(canvas.createdAt)}`;
 
@@ -111,34 +97,28 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
           }`}
           onClick={event => onSelect(event, canvas)}
           data-track-category='CANVAS'
-          data-track-name={isQuartoDoc ? trackNames.quartoDocOpen : trackNames.canvasOpen}
+          data-track-name={trackNames.canvasOpen}
         >
-          {isQuartoDoc && quartoDocIcon === 'bookmark' ? (
-            <BookMarked className='w-4 h-4 text-blue-500 shrink-0' />
-          ) : (
-            <FileText className='w-4 h-4 text-muted-foreground shrink-0' />
-          )}
+          <FileText className='w-4 h-4 text-muted-foreground shrink-0' />
           <div className='min-w-0 flex-1'>
             <div className='text-sm truncate'>
               <HighlightedText text={canvas.title || 'Untitled'} query={highlightQuery} />
             </div>
             <div className='text-xs text-muted-foreground truncate'>{createdDateText}</div>
           </div>
-          {!isQuartoDoc && (
-            <span
-              className='ml-3 flex items-center text-xs text-muted-foreground shrink-0'
-              aria-label={
-                canvas.visibility === CanvasVisibility.PUBLIC ? 'Public canvas' : 'Private canvas'
-              }
-              title={canvas.visibility === CanvasVisibility.PUBLIC ? 'Public' : 'Private'}
-            >
-              {canvas.visibility === CanvasVisibility.PUBLIC ? (
-                <Globe className='w-3 h-3 text-green-500' />
-              ) : (
-                <Lock className='w-3 h-3' />
-              )}
-            </span>
-          )}
+          <span
+            className='ml-3 flex items-center text-xs text-muted-foreground shrink-0'
+            aria-label={
+              canvas.visibility === CanvasVisibility.PUBLIC ? 'Public canvas' : 'Private canvas'
+            }
+            title={canvas.visibility === CanvasVisibility.PUBLIC ? 'Public' : 'Private'}
+          >
+            {canvas.visibility === CanvasVisibility.PUBLIC ? (
+              <Globe className='w-3 h-3 text-green-500' />
+            ) : (
+              <Lock className='w-3 h-3' />
+            )}
+          </span>
         </button>
 
         {canToggleStar && (
@@ -148,11 +128,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
               event.stopPropagation();
               onToggleStar?.(canvas);
             }}
-            title={
-              canvas.isStarred
-                ? `Unstar ${isQuartoDoc ? 'doc' : 'canvas'}`
-                : `Star ${isQuartoDoc ? 'doc' : 'canvas'}`
-            }
+            title={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_CANVAS_STAR'
           >
@@ -176,27 +152,17 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align='end' className='w-44'>
-            {!isQuartoDoc && onDuplicate && (
+            {onDuplicate && (
               <DropdownMenuItem onClick={() => onDuplicate(canvas)}>
                 <Copy className='w-4 h-4 mr-2' />
                 Duplicate
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem
-              onClick={() => {
-                if (isQuartoDoc && canvas.userRepo) {
-                  void navigator.clipboard.writeText(
-                    `${window.location.origin}/docs/${canvas.userRepo}`,
-                  );
-                } else {
-                  setShareOpen(true);
-                }
-              }}
-            >
+            <DropdownMenuItem onClick={() => setShareOpen(true)}>
               <Share2 className='w-4 h-4 mr-2' />
-              {isQuartoDoc ? 'Copy Link' : 'Share'}
+              Share
             </DropdownMenuItem>
-            {onDelete && isOwner && !isQuartoDoc && (
+            {onDelete && isOwner && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

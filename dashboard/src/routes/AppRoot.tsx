@@ -167,7 +167,6 @@ import {
   isAIOnboardingActive,
 } from '../contexts/AIOnboardingContext';
 import UnreadsInbox from '../components/Chat/UnreadsInbox/UnreadsInbox';
-import DocsScreen from './DocsScreen/DocsScreen';
 import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
@@ -1372,10 +1371,6 @@ export const router = createBrowserRouter([
               {
                 path: 'apps',
                 element: <AppsScreen />,
-              },
-              {
-                path: 'docs/*',
-                element: <DocsScreen />,
               },
               {
                 path: 'resource-access',

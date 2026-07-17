@@ -925,14 +925,6 @@ export function transformCanvasToEntity(
     content += `\n\nMetadata:\n${JSON.stringify(canvas.metadata, null, 2)}`;
   }
 
-  // Add document type info for Quarto docs
-  if (canvas.docType === 'Quarto' && canvas.quartoDocumentType) {
-    content += `\n\nQuarto Document Type: ${canvas.quartoDocumentType}`;
-    if (canvas.entryFile) {
-      content += `\nEntry File: ${canvas.entryFile}`;
-    }
-  }
-
   return {
     entityType: 'canvas',
     entityId: canvas.id,

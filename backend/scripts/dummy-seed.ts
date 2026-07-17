@@ -1479,7 +1479,7 @@ async function main() {
           editAccessId: generateId(),
           visibility: CanvasVisibility.PRIVATE,
           isTemplate: true,
-          docType: DocType.Quarto,
+          docType: DocType.Canvas,
           isCollaborative: false
         }
       });
