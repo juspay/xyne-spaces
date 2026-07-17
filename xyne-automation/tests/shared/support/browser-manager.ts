@@ -58,6 +58,39 @@ const TEST_CLIPBOARD_SCRIPT = `(() => {
   });
 })();`;
 
+// Neutralises CSS animations/transitions in the app under test so Playwright's
+// actionability "element is stable" check never races an entry animation.
+// This kills the class of flake where a click lands on a still-animating target
+// (e.g. the sidebar "More" overflow popover, which zooms/slides in via
+// tailwindcss-animate). Runs before any page script and persists across
+// navigations because it is registered as an init script.
+const DISABLE_ANIMATIONS_SCRIPT = `(() => {
+  const css = \`*, *::before, *::after {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }\`;
+  const inject = () => {
+    if (document.getElementById('__test-disable-animations')) {
+      return;
+    }
+    const style = document.createElement('style');
+    style.id = '__test-disable-animations';
+    style.textContent = css;
+    (document.head || document.documentElement).appendChild(style);
+  };
+  inject();
+  // head may not exist yet at init time — re-run once the DOM is parsed.
+  // Guard so re-executions of this init script don't stack duplicate listeners.
+  if (!document.__testDisableAnimationsHooked) {
+    document.__testDisableAnimationsHooked = true;
+    document.addEventListener('DOMContentLoaded', inject);
+  }
+})();`;
+
 export function isMainSession(sessionName: string): boolean {
   return sessionName === MAIN_BROWSER_NAME;
 }
@@ -136,6 +169,10 @@ async function buildSession(
       height,
     },
     baseURL: config.dashboard.baseUrl,
+    // Ask the app to skip motion. Covers framer-motion / anything gated behind
+    // prefers-reduced-motion; the DISABLE_ANIMATIONS_SCRIPT below covers the
+    // rest (raw CSS animations/transitions).
+    reducedMotion: 'reduce',
     ...(isChromium
       ? { permissions: ['microphone', 'camera', 'clipboard-read', 'clipboard-write'] }
       : {}),
@@ -148,6 +185,7 @@ async function buildSession(
   // wait for Zero to finish syncing mutations to the backend.
   await context.addInitScript(ZERO_SYNC_BRIDGE_SCRIPT);
   await context.addInitScript(TEST_CLIPBOARD_SCRIPT);
+  await context.addInitScript(DISABLE_ANIMATIONS_SCRIPT);
 
   const page: Page = await context.newPage();
 
