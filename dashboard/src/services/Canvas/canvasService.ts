@@ -59,13 +59,6 @@ export class CanvasService {
     return response.data;
   }
 
-  async duplicateCanvas(request: { sourceCanvasId: string }): Promise<{ id: string }> {
-    const response = await apiInstance.post<{ id: string }>('/ysweet/duplicate', {
-      sourceCanvasId: request.sourceCanvasId,
-    });
-    return response.data;
-  }
-
   async prefetchCanvas(
     queryClient: QueryClient,
     canvasId: string,
