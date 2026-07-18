@@ -31,6 +31,15 @@ export const shortcuts = {
     category: 'Navigation',
     preventDefault: true,
   },
+  'global.openCommandMode': {
+    keys: 'mod+/',
+    scope: 'global',
+    allowInInputs: true,
+    priority: 100,
+    description: 'Open command mode',
+    category: 'Navigation',
+    useKey: true,
+  },
   'global.openCanvasTab': {
     keys: ['mod+shift+n'],
     scope: 'channel',
@@ -75,7 +84,7 @@ export const shortcuts = {
     useKey: true,
   },
   'global.toggleRightSidebar': {
-    keys: 'mod+/',
+    keys: 'mod+.',
     scope: 'global',
     description: 'Close thread panel',
     category: 'Navigation',

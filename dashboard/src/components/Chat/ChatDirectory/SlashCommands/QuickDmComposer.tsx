@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { X, Hash } from 'lucide-react';
+import { X, Hash, Users } from 'lucide-react';
 import { ChannelScopeType, ChannelVisibility, type User, type Channel } from '@xyne/shared';
 import { InputBox } from '../../../ui/InputBox';
 import { useAuth } from '../../../../hooks/useAuth';
@@ -14,8 +14,14 @@ import Avatar from '../../../ui/Avatar/Avatar';
 import { SelectorZIndexContext } from '../../../ui/Selectors/BasePopoverSelector';
 import { getUserDisplayName, userToMentionResult } from '../../../../utils/userDisplayName';
 
-/** A slash-command target: a 1:1 user or an existing channel. Shared with ChannelCommandMenu. */
-export type CommandTarget = { type: 'user'; user: User } | { type: 'channel'; channel: Channel };
+/**
+ * A slash-command target: a 1:1 user or an existing channel. Shared with ChannelCommandMenu.
+ * A group DM is a channel under the hood; `isDm` makes it read like a DM (friendly participant
+ * label, no `#`) and `displayName` carries that label so callers don't re-resolve it.
+ */
+export type CommandTarget =
+  | { type: 'user'; user: User }
+  | { type: 'channel'; channel: Channel; displayName?: string; isDm?: boolean };
 
 // Result limits for the in-composer `@`/`#` mention pickers.
 const MENTION_USER_LIMIT = 20;
@@ -39,7 +45,13 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
   const { user } = useAuth();
   const zero = useZero();
   const isChannel = target.type === 'channel';
-  const targetName = isChannel ? target.channel.name : getUserDisplayName(target.user);
+  // A group DM is a channel, but should render like a DM (no `#`, group icon, participant label).
+  const isGroupDm = target.type === 'channel' && target.isDm === true;
+  const isRealChannel = isChannel && !isGroupDm;
+  const targetName =
+    target.type === 'channel'
+      ? (target.displayName ?? target.channel.name)
+      : getUserDisplayName(target.user);
   const targetId = isChannel ? target.channel.id : target.user.id;
 
   // @-mention users. The channel-scoped useMentionSearch returns nothing without a
@@ -98,7 +110,7 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
             }
           }
           await sendConversationWithAttachments(channelId, html, files);
-          toast.success(`Message sent to ${isChannel ? `#${targetName}` : targetName}`);
+          toast.success(`Message sent to ${isRealChannel ? `#${targetName}` : targetName}`);
         } catch (error) {
           toast.error('Failed to send message', {
             description: error instanceof Error ? error.message : 'Please try again.',
@@ -106,7 +118,7 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
         }
       })();
     },
-    [user?.id, target, isChannel, targetName, onSent, zero],
+    [user?.id, target, isRealChannel, targetName, onSent, zero],
   );
 
   return (
@@ -116,8 +128,10 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
         <div className='flex items-center gap-2 text-sm'>
           <span className='text-muted-foreground'>Message to</span>
           <span className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-xs font-medium text-foreground'>
-            {isChannel ? (
+            {isRealChannel ? (
               <Hash className='size-3.5' />
+            ) : isGroupDm ? (
+              <Users className='size-3.5' />
             ) : (
               <Avatar userId={targetId} size='sm' className='size-4' />
             )}
@@ -144,7 +158,7 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
           <InputBox
             id={`quick-dm-${targetId}`}
             autoFocus='end'
-            placeholder={`Message ${isChannel ? `#${targetName}` : targetName}...`}
+            placeholder={`Message ${isRealChannel ? `#${targetName}` : targetName}...`}
             showTypingIndicator={false}
             mentionItems={mentionItems}
             onMentionSearch={handleMentionSearch}

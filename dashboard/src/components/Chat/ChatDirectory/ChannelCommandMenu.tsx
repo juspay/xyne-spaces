@@ -73,6 +73,7 @@ import { QuickDmComposer } from './SlashCommands/QuickDmComposer';
 import { SlashCommandPalette } from './SlashCommands/SlashCommandPalette';
 import { useSlashCommands } from './SlashCommands/useSlashCommands';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
+import { ActionModal } from '../../Call/ActionModal';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
@@ -240,6 +241,19 @@ const ChannelCommandMenu = ({
 
   const { searchMode } = useSearchMode();
 
+  // When opened via the `mod+/` shortcut, seed the search box with `/` so it lands in command mode.
+  // The popup path flips this on in the shortcut handler; the screen overlay is mounted fresh with a
+  // `/` initialQuery, so seed from that here to render the palette on frame 1 (no normal-search flash).
+  const [seedCommandMode, setSeedCommandMode] = useState(
+    () => initialQuery?.text === '/' && initialQuery.mentions.length === 0,
+  );
+  // While seeding, feed the editor a `/` through the existing initial-query path; otherwise pass the
+  // caller's query straight through. Memoized so the reference stays stable across renders.
+  const effectiveInitialQuery = useMemo(
+    () => (seedCommandMode ? { mentions: [], text: '/' } : initialQuery),
+    [seedCommandMode, initialQuery],
+  );
+
   useShortcutById(
     'global.search',
     () => {
@@ -251,6 +265,27 @@ const ChannelCommandMenu = ({
       if (!open && !searchSessionId) {
         onOpen('keyboard_shortcut');
       }
+    },
+    { enabled: !contextSelectionMode },
+  );
+
+  // `mod+/` opens the menu straight into command mode (seeds `/` for slash-command discovery).
+  // In screen (full-page) search mode, route to the same top-bar overlay Cmd+K uses, tagged with a
+  // `command` flag so it opens seeded with `/` — otherwise the popup would ignore the preference.
+  useShortcutById(
+    'global.openCommandMode',
+    () => {
+      if (searchMode === 'screen') {
+        window.dispatchEvent(
+          new CustomEvent('xyne:activate-search-bar', { detail: { command: true } }),
+        );
+        return;
+      }
+      onOpenChange(true);
+      if (!open && !searchSessionId) {
+        onOpen('keyboard_shortcut');
+      }
+      setSeedCommandMode(true);
     },
     { enabled: !contextSelectionMode },
   );
@@ -515,28 +550,7 @@ const ChannelCommandMenu = ({
   // Slash-command mode (`/call`, `/chat`, `/askai`). All command state + logic lives in the hook;
   // the parent feeds it the shared cmdk selection (activeItemLabel/hasNavigated) and wires its
   // outputs into the ghost text, mention guards, keyboard handler, and the palette render below.
-  const {
-    commandActive,
-    commandKind,
-    commandText,
-    commandTarget,
-    isComposing,
-    pendingChannelCall,
-    commandUserResults,
-    commandChannelResults,
-    commandGhost,
-    setActiveCommandWord,
-    setPendingChannelCall,
-    clearTarget,
-    applyCommand,
-    openAskAI,
-    openRecordings,
-    runCommandTarget,
-    startChannelCall,
-    isInCommandMode,
-    onSetTextReady,
-    handleEditorText,
-  } = useSlashCommands({
+  const slash = useSlashCommands({
     open,
     onOpenChange,
     currentUserID,
@@ -545,6 +559,35 @@ const ChannelCommandMenu = ({
     resetSearchState,
     navigate: path => void navigate(path),
   });
+  // The parent owns the input box, ghost, keydown handler, mention guards and the compose/confirm
+  // overlays, so it reads these fields directly. Everything the palette needs is handed to it as the
+  // whole `slash` controller (below) — so adding a command never adds another prop here.
+  const {
+    commandActive,
+    commandText,
+    commandTarget,
+    isComposing,
+    pendingChannelCall,
+    recordingConflict,
+    setRecordingConflict,
+    commandGhost,
+    setActiveCommandWord,
+    setPendingChannelCall,
+    clearTarget,
+    applyCommand,
+    startChannelCall,
+    isInCommandMode,
+    onSetTextReady,
+    handleEditorText,
+  } = slash;
+
+  // Once the seeded `/` actually lands (command mode is genuinely active), drop the seed flag so
+  // normal search resumes if the user later clears the slash.
+  useEffect(() => {
+    if (seedCommandMode && commandText.startsWith('/')) {
+      setSeedCommandMode(false);
+    }
+  }, [seedCommandMode, commandText]);
 
   const syncEnterIntent = useCallback((): void => {
     const active = commandRef.current?.querySelector('[cmdk-item][aria-selected="true"]');
@@ -1394,6 +1437,7 @@ const ChannelCommandMenu = ({
   // Reset state when menu closes; also reset tab on open so dialog always starts on ALL
   useEffect(() => {
     if (!open) {
+      setSeedCommandMode(false);
       setSearch('');
       setSearchText('');
       setSelectedMentions([]);
@@ -2366,7 +2410,36 @@ const ChannelCommandMenu = ({
     />
   );
 
-  if (inline && !open) return channelCallConfirm;
+  // `/record` invoked while a recording is already active — tell the user instead of starting a
+  // second session. Same sibling-of-Cmd+K rendering as the call confirm so it survives the close.
+  const recordingActiveDialog = (
+    <ActionModal
+      isOpen={recordingConflict}
+      onClose={() => setRecordingConflict(false)}
+      showIcon={false}
+      title='Recording in progress'
+      subtitle="You're already recording. Stop the current recording before starting a new one."
+      buttons={[
+        { label: 'Dismiss', variant: 'outline', onClick: () => setRecordingConflict(false) },
+        {
+          label: 'Go to recording',
+          onClick: () => {
+            setRecordingConflict(false);
+            void navigate('/recordings');
+          },
+        },
+      ]}
+    />
+  );
+
+  const commandConfirmations = (
+    <>
+      {channelCallConfirm}
+      {recordingActiveDialog}
+    </>
+  );
+
+  if (inline && !open) return commandConfirmations;
 
   const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
     // A picked target renders its own UI (composer or confirm modal) — let it own all
@@ -2825,7 +2898,7 @@ const ChannelCommandMenu = ({
             }}
             onSetTextReady={onSetTextReady}
             initialMention={initialMention}
-            initialQuery={initialQuery}
+            initialQuery={effectiveInitialQuery}
           />
           {/* Search/Close Icon */}
           {isMobile && (
@@ -3142,19 +3215,8 @@ const ChannelCommandMenu = ({
               }
             }}
           >
-            {commandActive ? (
-              <SlashCommandPalette
-                commandKind={commandKind}
-                commandText={commandText}
-                commandTarget={commandTarget}
-                commandUserResults={commandUserResults}
-                commandChannelResults={commandChannelResults}
-                onApplyCommand={applyCommand}
-                onOpenAskAI={openAskAI}
-                onOpenRecordings={openRecordings}
-                onRunTarget={runCommandTarget}
-                onHoverCommand={setActiveCommandWord}
-              />
+            {commandActive || seedCommandMode ? (
+              <SlashCommandPalette command={slash} />
             ) : (
               <>
                 {/* Best local matches pinned to the top of the list — both popup and
@@ -4052,7 +4114,7 @@ const ChannelCommandMenu = ({
         }}
         onKeyDownCapture={handleCommandKeyDown}
       >
-        {channelCallConfirm}
+        {commandConfirmations}
         {commandBody}
       </Command>
     );
@@ -4107,9 +4169,10 @@ const ChannelCommandMenu = ({
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>
       </DialogPrimitive.Root>
-      {/* Sibling of the Cmd+K dialog (NOT a child) so closing Cmd+K can't tear it down; the
-          `/call` channel confirmation renders after Cmd+K is dismissed, clear of z-[9999]. */}
-      {channelCallConfirm}
+      {/* Siblings of the Cmd+K dialog (NOT children) so closing Cmd+K can't tear them down; the
+          `/call` channel confirmation and the `/record` conflict dialog render after Cmd+K is
+          dismissed, clear of z-[9999]. */}
+      {commandConfirmations}
     </>
   );
 };

@@ -64,6 +64,11 @@ export function sendRecordingEvent(event: RecordingStoreEvent): void {
   store.send(event);
 }
 
+/** Read the current recording status imperatively (e.g. inside an event handler) without subscribing. */
+export function getRecordingStatus(): RecordingState['status'] {
+  return store.getSnapshot().context.status;
+}
+
 export interface UseTranscriptStreamReturn {
   transcripts: TranscriptEntry[];
 }

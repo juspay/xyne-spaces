@@ -1111,6 +1111,9 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
         title='Preferences'
         description='User preferences settings'
         className='max-w-3xl p-0 overflow-hidden'
+        // Don't let focus land on the destructive close (X) — the first focusable element — when
+        // opened by keyboard (e.g. via the `/goto` command); keep it on the dialog itself.
+        onOpenAutoFocus={e => e.preventDefault()}
       >
         {isMobile ? (
           /* Mobile: list → detail drill-down */
