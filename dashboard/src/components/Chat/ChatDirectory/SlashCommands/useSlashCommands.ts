@@ -1,13 +1,20 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
+import { useLocation, useParams } from 'react-router-dom';
+import { SlidersHorizontal, User as UserIcon, type LucideIcon } from 'lucide-react';
 import { ChannelScopeType } from '@xyne/shared';
 import type { User, Channel } from '@xyne/shared';
-import { parseSearchCommand, SEARCH_COMMANDS, type SearchCommandKind } from './commands';
+import { parseSearchCommand, COMMAND_KINDS, getCommand, type SearchCommandKind } from './commands';
 import { useQuickCall } from '../../../../hooks/useQuickCall';
-import { useActiveUserSearch } from '../../../../hooks/useUsers';
+import { useActiveUserSearch, useUsers } from '../../../../hooks/useUsers';
 import { useChannelSearch, useAllVisibleChannels } from '../../../../hooks/useChannels';
+import { useLastVisitedChannel } from '../../../../hooks/useLastVisitedChannel';
 import { CMDK_USER_LIMIT } from '../../../../hooks/useSearchMetrics';
+import { useVisibleNavigationItems } from '../../../../hooks/useVisibleNavigationItems';
+import type { NavigationItem } from '../../../AppSidebar/navigationConfig';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
+import { sendRecordingEvent, getRecordingStatus } from '../../../../hooks/useRecordingStore';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
+import { getDMSearchableNames } from '../ChatDirectory.utils';
 import type { CommandTarget } from './QuickDmComposer';
 
 interface UseSlashCommandsParams {
@@ -29,15 +36,40 @@ interface CommandGhost {
   canComplete: boolean;
 }
 
-interface UseSlashCommandsReturn {
+/** A group-DM picker row: the channel plus its resolved participant-name label. */
+export interface CommandGroupDm {
+  channel: Channel;
+  label: string;
+}
+
+/**
+ * A `/goto` destination that runs an action instead of routing to a static path. The rail sections
+ * come from the nav-bar config (routes); these are the few destinations that aren't rail routes —
+ * Preferences (a modal) and Profile (a dynamic route) — so they carry their own behaviour.
+ */
+export interface GotoExtra {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  run: () => void;
+}
+
+export interface UseSlashCommandsReturn {
   commandActive: boolean;
   commandKind: SearchCommandKind | null;
   commandText: string;
   commandTarget: CommandTarget | null;
   isComposing: boolean;
   pendingChannelCall: { id: string; name: string } | null;
+  /** True when `/record` was invoked while a recording is already active — drives the conflict dialog. */
+  recordingConflict: boolean;
+  setRecordingConflict: (value: boolean) => void;
   commandUserResults: User[];
   commandChannelResults: Channel[];
+  commandGroupDmResults: CommandGroupDm[];
+  commandNavResults: NavigationItem[];
+  currentUserID: string;
+  commandGotoExtras: GotoExtra[];
   commandGhost: CommandGhost;
   setActiveCommandWord: (word: string | null) => void;
   setPendingChannelCall: (value: { id: string; name: string } | null) => void;
@@ -45,8 +77,9 @@ interface UseSlashCommandsReturn {
   exitCommandMode: () => void;
   clearTarget: () => void;
   applyCommand: (word: string) => void;
-  openAskAI: () => void;
-  openRecordings: () => void;
+  runActionCommand: (kind: SearchCommandKind) => void;
+  runNavSection: (item: NavigationItem) => void;
+  runGotoExtra: (extra: GotoExtra) => void;
   runCommandTarget: (target: CommandTarget) => void;
   startChannelCall: (channelId: string, displayName: string) => void;
   isInCommandMode: () => boolean;
@@ -91,6 +124,10 @@ export function useSlashCommands({
   const [pendingChannelCall, setPendingChannelCall] = useState<{ id: string; name: string } | null>(
     null,
   );
+  // `/record` fired while a recording is already active — surfaces a dialog instead of starting a
+  // second session. Independent of the command lifecycle (like pendingChannelCall) so it survives
+  // the Cmd+K close that runs right after the command dispatches.
+  const [recordingConflict, setRecordingConflict] = useState(false);
 
   // True while a command is active (picker, discovery, compose, or call-confirm). Read from refs so
   // it's correct synchronously inside the mention guards.
@@ -104,11 +141,20 @@ export function useSlashCommands({
   // `commandText` keeps its `/call `/`/chat ` prefix even after a target is picked, so the kind is
   // always parseable — no need to infer it from the target.
   const commandKind: SearchCommandKind | null = parsedCommand?.kind ?? null;
-  // A picked target for `/chat` opens the composer; a channel picked for `/call` opens the confirm
-  // modal. A user for `/call` fires instantly and never sets a target.
-  const isComposing = commandTarget !== null && commandKind === 'chat';
-  // Only `/call`/`/chat` have a target picker; `/askai` takes no argument.
-  const isPickerCommand = commandKind === 'call' || commandKind === 'chat';
+  // Resolve the active command's descriptor once; picker detection + dispatch read fields off it.
+  const commandDef = commandKind ? getCommand(commandKind) : null;
+  // A picked target for a `compose` picker (`/chat`) opens the composer; a `call` picker fires or
+  // opens the confirm modal. A user for `/call` fires instantly and never sets a target.
+  const isComposing =
+    commandTarget !== null &&
+    commandDef?.type === 'picker' &&
+    commandDef.pickerAction === 'compose';
+  // Only picker commands (`/call`/`/chat`) have a target picker; action commands take no argument.
+  const isPickerCommand = commandDef?.type === 'picker';
+  // `/chat` (compose) may target your own self-DM; `/call` cannot (you can't call yourself).
+  const isComposePicker = commandDef?.type === 'picker' && commandDef.pickerAction === 'compose';
+  // `/goto` lists nav-bar sections; it takes a plain query (no `@`/`#` scoping) like the pickers.
+  const isNav = commandDef?.type === 'goto';
   // Picker filter (before a target is set). A leading `@`/`#` scopes the picker to people/channels
   // respectively (matching cmdk's general convention); the remainder is the query.
   const commandArg = commandTarget ? '' : (parsedCommand?.arg ?? '');
@@ -119,15 +165,30 @@ export function useSlashCommands({
       : commandArg[0] === '#'
         ? 'channel'
         : null;
-  const commandQuery = isPickerCommand ? (commandScope ? commandArg.slice(1) : commandArg) : '';
+  const commandQuery = isPickerCommand
+    ? commandScope
+      ? commandArg.slice(1)
+      : commandArg
+    : isNav
+      ? commandArg
+      : '';
   const showUserResults = commandScope !== 'channel';
   const showChannelResults = commandScope !== 'user';
 
+  const allUsers = useUsers();
+  const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
   const commandUsers = useActiveUserSearch(commandQuery, CMDK_USER_LIMIT);
-  const commandUserResults = useMemo(
-    () => (showUserResults ? commandUsers.filter(u => u.id !== currentUserID) : []),
-    [showUserResults, commandUsers, currentUserID],
-  );
+  const commandUserResults = useMemo(() => {
+    if (!showUserResults) return [];
+    // `/call` can't call yourself, so keep excluding self there.
+    if (!isComposePicker) return commandUsers.filter(u => u.id !== currentUserID);
+    // `/chat` can message your self-DM. With a query typed, let the search decide (self appears
+    // when its name matches); at rest, pin "You" first so the self-DM is reachable without typing.
+    if (commandQuery.trim()) return commandUsers;
+    const withoutSelf = commandUsers.filter(u => u.id !== currentUserID);
+    const self = usersById.get(currentUserID);
+    return self ? [self, ...withoutSelf] : withoutSelf;
+  }, [showUserResults, isComposePicker, commandQuery, commandUsers, usersById, currentUserID]);
   // Channel picker candidates: real group channels (DEFAULT scope) the user can access.
   const commandChannels = useChannelSearch(commandQuery, CMDK_USER_LIMIT);
   const visibleChannels = useAllVisibleChannels();
@@ -138,6 +199,95 @@ export function useSlashCommands({
       c => c.scopeType === ChannelScopeType.DEFAULT && visibleIds.has(c.id),
     );
   }, [showChannelResults, commandChannels, visibleChannels]);
+
+  // Group-DM picker candidates: the user's GROUP_DM channels, shown for both `/chat` and `/call`.
+  // A group DM's `channel.name` is a comma-joined id list, so channel search can't match it by
+  // name — resolve friendly participant labels here and filter on those instead.
+  const commandGroupDmResults = useMemo<CommandGroupDm[]>(() => {
+    if (!isPickerCommand || !showChannelResults) return [];
+    const query = commandQuery.trim().toLowerCase();
+    const groups = visibleChannels
+      .filter(c => c.scopeType === ChannelScopeType.GROUP_DM)
+      .map(channel => ({
+        channel,
+        label: getDMSearchableNames(channel, currentUserID, usersById).join(', '),
+      }))
+      .filter(g => g.label);
+    const matched = query ? groups.filter(g => g.label.toLowerCase().includes(query)) : groups;
+    return matched.slice(0, CMDK_USER_LIMIT);
+  }, [
+    isPickerCommand,
+    showChannelResults,
+    commandQuery,
+    visibleChannels,
+    usersById,
+    currentUserID,
+  ]);
+
+  // `/goto` candidates: the nav-bar sections the current user can see (permission/electron/claw
+  // gating comes from useVisibleNavigationItems), filtered by the typed query. New nav-bar entries
+  // show up here automatically — no second list to maintain.
+  const visibleNavItems = useVisibleNavigationItems();
+  const commandNavResults = useMemo<NavigationItem[]>(() => {
+    if (!isNav) return [];
+    const query = commandQuery.trim().toLowerCase();
+    if (!query) return visibleNavItems;
+    return visibleNavItems.filter(item => item.label.toLowerCase().includes(query));
+  }, [isNav, commandQuery, visibleNavItems]);
+
+  // `/goto` also reaches destinations that aren't rail routes: Preferences (a modal, opened via the
+  // app-wide `xyne-open-preferences` event) and Profile (a dynamic route built from the general
+  // channel + the user). They can't live in NAVIGATION_ITEMS, so they're a small list defined here.
+  // Profile is a route nested under a conversation (/chat/dir/:channelId/profile/:userId), so it
+  // needs a channel to anchor it. Use whichever conversation is currently open; if none is, fall
+  // back to the last-visited one (the conversation Chat reopens by default).
+  const location = useLocation();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
+  const currentChannelId = useMemo((): string | null => {
+    const parts = location.pathname.split('/').filter(Boolean);
+    const chatIndex = parts.indexOf('chat');
+    if (chatIndex === -1) return null;
+    // A conversation lives under one of these chat contexts, with its id one segment later.
+    const context = parts[chatIndex + 1];
+    const hasChannel =
+      context === 'dir' || context === 'dm' || context === 'bookmarks' || context === 'activity';
+    return hasChannel ? (parts[chatIndex + 2] ?? null) : null;
+  }, [location.pathname]);
+  const profileChannelId = currentChannelId ?? lastVisitedChannelId;
+  const gotoExtras = useMemo<GotoExtra[]>(
+    () => [
+      {
+        id: 'preferences',
+        label: 'Preferences',
+        icon: SlidersHorizontal,
+        run: (): void => {
+          window.dispatchEvent(new CustomEvent('xyne-open-preferences'));
+        },
+      },
+      {
+        id: 'profile',
+        label: 'Profile',
+        icon: UserIcon,
+        run: (): void => {
+          // Anchor the profile on the open/last conversation. With neither (nothing ever opened),
+          // just land on Chat so the directory can resolve a conversation.
+          if (profileChannelId) {
+            navigate(`/chat/dir/${profileChannelId}/profile/${currentUserID}`);
+          } else {
+            navigate('/chat/dir');
+          }
+        },
+      },
+    ],
+    [profileChannelId, navigate, currentUserID],
+  );
+  const commandGotoExtras = useMemo<GotoExtra[]>(() => {
+    if (!isNav) return [];
+    const query = commandQuery.trim().toLowerCase();
+    if (!query) return gotoExtras;
+    return gotoExtras.filter(extra => extra.label.toLowerCase().includes(query));
+  }, [isNav, commandQuery, gotoExtras]);
 
   useEffect(() => {
     commandTargetRef.current = commandTarget;
@@ -180,40 +330,84 @@ export function useSlashCommands({
     setTextRef.current?.(text);
   }, []);
 
-  // `/askai` takes no target — it just opens the global Xyne AI panel and closes Cmd+K.
-  const openAskAI = useCallback((): void => {
-    xyneAIActor.send({ type: 'OPEN' });
-    exitCommandMode();
-    onOpenChange(false);
-  }, [exitCommandMode, onOpenChange]);
+  // Action commands (`/askai`, `/record`) take no target — dispatch the behaviour keyed by kind,
+  // then close Cmd+K. Deps live here (not in the static catalog) so the table can close over the
+  // hook's callbacks/actors; new action commands add one entry.
+  const runActionCommand = useCallback(
+    (kind: SearchCommandKind): void => {
+      const handlers: Partial<Record<SearchCommandKind, () => void>> = {
+        askai: () => xyneAIActor.send({ type: 'OPEN' }),
+        // Start a recording in place — no navigation. The global RecordingOverlay pill surfaces it
+        // wherever the user is. If one is already active (recording/paused/starting), show a conflict
+        // dialog instead of silently starting a second session. Clear transcripts first to match
+        // RecordingsScreen's start flow.
+        record: () => {
+          const status = getRecordingStatus();
+          if (status === 'recording' || status === 'paused' || status === 'starting') {
+            setRecordingConflict(true);
+            return;
+          }
+          sendRecordingEvent({ type: 'clearTranscripts' });
+          sendRecordingEvent({ type: 'startRecording' });
+        },
+      };
+      const handler = handlers[kind];
+      if (!handler) return;
+      handler();
+      exitCommandMode();
+      onOpenChange(false);
+    },
+    [exitCommandMode, onOpenChange],
+  );
 
-  // `/record` takes no target — it navigates to the Recordings page and closes Cmd+K.
-  const openRecordings = useCallback((): void => {
-    navigate('/recordings');
-    exitCommandMode();
-    onOpenChange(false);
-  }, [navigate, exitCommandMode, onOpenChange]);
+  // `/goto`: route to the picked nav-bar section and close Cmd+K. Like runActionCommand, the deps
+  // live here (not in the static catalog) so it can close over the router `navigate`.
+  const runNavSection = useCallback(
+    (item: NavigationItem): void => {
+      navigate(item.path);
+      exitCommandMode();
+      onOpenChange(false);
+    },
+    [navigate, exitCommandMode, onOpenChange],
+  );
+
+  // `/goto` non-route destination: run its action (open the Preferences modal / route to Profile),
+  // then close Cmd+K. The action itself is defined on the extra (it closes over the hook's deps).
+  const runGotoExtra = useCallback(
+    (extra: GotoExtra): void => {
+      extra.run();
+      exitCommandMode();
+      onOpenChange(false);
+    },
+    [exitCommandMode, onOpenChange],
+  );
 
   const runCommandTarget = useCallback(
     (target: CommandTarget): void => {
-      if (commandKind === 'call') {
+      const def = commandKind ? getCommand(commandKind) : null;
+      if (def?.type !== 'picker') return;
+      if (def.pickerAction === 'call') {
         if (target.type === 'user') {
           // A 1:1 call fires instantly, matching the rest of the app.
           startCall(target.user.id, getUserDisplayName(target.user));
         } else if (hasActiveChannelCall(target.channel.id)) {
           // A call is already live on the channel — join it directly, no "start a call?" confirm
-          // (you're joining an existing call, not starting a new channel-wide one).
-          startChannelCall(target.channel.id, target.channel.name);
+          // (you're joining an existing call, not starting a new channel-wide one). Group DMs pass
+          // their friendly label (channel.name is an id list).
+          startChannelCall(target.channel.id, target.displayName ?? target.channel.name);
         } else if (ensureRoomIdle()) {
           // No call yet — confirm before starting a new channel-wide call. The modal renders as a
           // sibling of the Cmd+K dialog, so closing Cmd+K here doesn't tear it down.
-          setPendingChannelCall({ id: target.channel.id, name: target.channel.name });
+          setPendingChannelCall({
+            id: target.channel.id,
+            name: target.displayName ?? target.channel.name,
+          });
         }
         exitCommandMode();
         onOpenChange(false);
         return;
       }
-      // `/chat`: open the composer for the picked user/channel.
+      // `compose` (`/chat`): open the composer for the picked user/channel.
       selectTarget(target);
     },
     [
@@ -241,16 +435,23 @@ export function useSlashCommands({
       // Still typing the word (`/`, `/c`, `/ch`…) — complete the highlighted command's word (falls
       // back to the first match). The argument prompt comes once the word is complete (below).
       const typedWord = commandText.slice(1).toLowerCase();
-      const matches = SEARCH_COMMANDS.filter(c => c.word.startsWith(typedWord));
-      const def = matches.find(c => c.word === activeCommandWord) ?? matches[0];
-      if (def) {
-        return { suffix: def.word.slice(typedWord.length), word: def.word, canComplete: true };
+      // Bare `/` at rest (nothing typed, no row hovered or arrowed yet): show a "Quick commands" hint
+      // rather than previewing an arbitrary first command — mirrors the pickers' at-rest label.
+      if (!typedWord && !hasNavigated && !activeCommandWord) {
+        return { suffix: ' Quick commands', word: '', canComplete: false };
+      }
+      const matches = COMMAND_KINDS.filter(k => k.startsWith(typedWord));
+      const kind = matches.find(k => k === activeCommandWord) ?? matches[0];
+      if (kind) {
+        // Inline-complete the command word, then the " – Select" action (mirrors the picker rows).
+        const completion = kind.slice(typedWord.length);
+        return { suffix: `${completion}\u00a0\u2013 Select`, word: kind, canComplete: true };
       }
       return { suffix: '', word: '', canComplete: false };
     }
     // Recognized command: mirror the from:/in: ghost (popupFilterHint) - preview the highlighted
     // People/Channels row and complete it as you type. askai/record have no picker (no row).
-    if (parsedCommand.kind === 'askai' || parsedCommand.kind === 'record' || !activeItemLabel) {
+    if (getCommand(parsedCommand.kind).type === 'action' || !activeItemLabel) {
       return { suffix: '', word: '', canComplete: false };
     }
     if (!commandQuery) {
@@ -313,8 +514,14 @@ export function useSlashCommands({
     commandTarget,
     isComposing,
     pendingChannelCall,
+    recordingConflict,
+    setRecordingConflict,
     commandUserResults,
     commandChannelResults,
+    commandGroupDmResults,
+    commandNavResults,
+    currentUserID,
+    commandGotoExtras,
     commandGhost,
     setActiveCommandWord,
     setPendingChannelCall,
@@ -322,8 +529,9 @@ export function useSlashCommands({
     exitCommandMode,
     clearTarget,
     applyCommand,
-    openAskAI,
-    openRecordings,
+    runActionCommand,
+    runNavSection,
+    runGotoExtra,
     runCommandTarget,
     startChannelCall,
     isInCommandMode,

@@ -136,9 +136,14 @@ const useElapsedTime = (isActive: boolean, isPaused: boolean, startTime: number 
 
   useEffect(() => {
     if (!isActive || !startTime || isPaused) {
+      // No active timer — clear the stale value so the next recording doesn't flash the previous
+      // one's duration. Skip on pause so the paused reading stays put.
+      if (!isActive || !startTime) setElapsedTime(0);
       return;
     }
 
+    // Recompute immediately (don't wait up to 1s for the first tick), matching RecordingControlBar.
+    setElapsedTime(Date.now() - startTime);
     const interval = setInterval(() => {
       setElapsedTime(Date.now() - startTime);
     }, 1000);

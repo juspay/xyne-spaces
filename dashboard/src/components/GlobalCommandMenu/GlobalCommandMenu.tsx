@@ -54,6 +54,8 @@ interface GlobalCommandMenuProps {
   initialTab?: TabType;
   hideTabs?: boolean;
   restoreQueryFromUrl?: boolean;
+  // Opened by the `mod+/` shortcut in screen mode: seed the box with `/` so it lands in command mode.
+  seedCommand?: boolean;
 }
 
 const GlobalCommandMenu = ({
@@ -71,6 +73,7 @@ const GlobalCommandMenu = ({
   initialTab: externalInitialTab,
   hideTabs,
   restoreQueryFromUrl,
+  seedCommand,
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
@@ -348,6 +351,12 @@ const GlobalCommandMenu = ({
     return { mentions, text };
   }, [restoreQueryFromUrl, location.search, allUsers, channelData, context.userID]);
 
+  // `mod+/` in screen mode seeds `/` so the overlay opens straight into slash-command discovery,
+  // taking priority over any URL-restored query.
+  const seededInitialQuery: InitialQueryData | null = seedCommand
+    ? { mentions: [], text: '/' }
+    : initialQuery;
+
   if (!context.userID) return null;
 
   return (
@@ -360,7 +369,7 @@ const GlobalCommandMenu = ({
       open={open}
       onOpenChange={handleOpenChange}
       initialMention={initialMention}
-      {...(initialQuery !== null ? { initialQuery } : {})}
+      {...(seededInitialQuery !== null ? { initialQuery: seededInitialQuery } : {})}
       {...(contextSelectionMode !== undefined ? { contextSelectionMode } : {})}
       {...(contextItems !== undefined ? { contextItems } : {})}
       {...(onContextItemToggle !== undefined ? { onContextItemToggle } : {})}

@@ -1,42 +1,22 @@
 import { ReactElement } from 'react';
 import { Command } from 'cmdk';
-import { Phone, Sparkles, MessageSquare, Hash, Mic } from 'lucide-react';
-import type { User, Channel } from '@xyne/shared';
-import { SEARCH_COMMANDS, type SearchCommandKind } from './commands';
+import { Users } from 'lucide-react';
+import { COMMAND_KINDS, getCommand } from './commands';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import Avatar from '../../../ui/Avatar/Avatar';
-import type { CommandTarget } from './QuickDmComposer';
+import ChannelIcon from '../../ChannelIcon/ChannelIcon';
+import type { UseSlashCommandsReturn } from './useSlashCommands';
 
 // cmdk group-heading style (uppercase mono muted) so the palette matches the menu's
 // other sections.
 const COMMAND_GROUP_HEADING_CLASS =
   '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono';
 
-// Icon for each command in the `/` discovery list.
-function commandIcon(kind: SearchCommandKind): ReactElement {
-  switch (kind) {
-    case 'call':
-      return <Phone size={15} />;
-    case 'chat':
-      return <MessageSquare size={15} />;
-    case 'askai':
-      return <Sparkles size={15} />;
-    case 'record':
-      return <Mic size={15} />;
-  }
-}
-
+// The whole slash-command controller is handed in as one prop. The palette reads the slice it needs
+// (below); the parent no longer forwards a prop per field, so a new command that adds palette data
+// touches only the hook + this file, never the parent.
 interface SlashCommandPaletteProps {
-  commandKind: SearchCommandKind | null;
-  commandText: string;
-  commandTarget: CommandTarget | null;
-  commandUserResults: User[];
-  commandChannelResults: Channel[];
-  onApplyCommand: (word: string) => void;
-  onOpenAskAI: () => void;
-  onOpenRecordings: () => void;
-  onRunTarget: (target: CommandTarget) => void;
-  onHoverCommand: (word: string) => void;
+  command: UseSlashCommandsReturn;
 }
 
 /**
@@ -45,25 +25,31 @@ interface SlashCommandPaletteProps {
  * Rendered as cmdk rows; selection (aria-selected) is driven imperatively by the parent,
  * which relies on the `data-item-label` / `data-command-word` / `value` attributes here.
  */
-export function SlashCommandPalette({
-  commandKind,
-  commandText,
-  commandTarget,
-  commandUserResults,
-  commandChannelResults,
-  onApplyCommand,
-  onOpenAskAI,
-  onOpenRecordings,
-  onRunTarget,
-  onHoverCommand,
-}: SlashCommandPaletteProps): ReactElement | null {
+export function SlashCommandPalette({ command }: SlashCommandPaletteProps): ReactElement | null {
+  const {
+    commandKind,
+    commandText,
+    commandTarget,
+    commandUserResults,
+    commandChannelResults,
+    commandGroupDmResults,
+    commandNavResults,
+    currentUserID,
+    commandGotoExtras,
+    applyCommand: onApplyCommand,
+    runActionCommand: onRunAction,
+    runNavSection: onRunNavSection,
+    runGotoExtra: onRunGotoExtra,
+    runCommandTarget: onRunTarget,
+    setActiveCommandWord: onHoverCommand,
+  } = command;
   // Compose / call-confirm render their own UI (overlay), not this palette.
   if (commandTarget) return null;
 
   // `/` discovery: just a slash or an unrecognized command → list the commands.
   if (commandKind === null) {
     const typed = commandText.slice(1).toLowerCase();
-    const matches = SEARCH_COMMANDS.filter(c => c.word.startsWith(typed));
+    const matches = COMMAND_KINDS.filter(k => k.startsWith(typed));
     // A non-empty prefix that matches nothing (e.g. `/xyz`) shows a no-match state rather than
     // every command; a bare `/` (empty prefix) still lists them all.
     if (typed && matches.length === 0) {
@@ -71,92 +57,127 @@ export function SlashCommandPalette({
         <div className='py-6 text-center text-sm text-muted-foreground'>No matching commands</div>
       );
     }
-    const shown = matches.length ? matches : SEARCH_COMMANDS;
+    const shown = matches.length ? matches : COMMAND_KINDS;
     return (
       <Command.Group heading='Commands' className={COMMAND_GROUP_HEADING_CLASS}>
-        {shown.map(cmd => (
-          <Command.Item
-            key={cmd.word}
-            value={`command-${cmd.word}`}
-            data-item-label={`/${cmd.word}`}
-            data-command-word={cmd.word}
-            onSelect={() => {
-              if (cmd.kind === 'askai') {
-                onOpenAskAI();
-              } else if (cmd.kind === 'record') {
-                onOpenRecordings();
-              } else {
-                onApplyCommand(cmd.word);
-              }
-            }}
-            onMouseEnter={() => onHoverCommand(cmd.word)}
-            className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
-          >
-            <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
-              {commandIcon(cmd.kind)}
-            </div>
-            <div className='flex-1 min-w-0'>
-              <div className='text-sm font-semibold text-foreground truncate'>/{cmd.word}</div>
-              <div className='text-xs text-muted-foreground truncate'>{cmd.label}</div>
-            </div>
-          </Command.Item>
-        ))}
+        {shown.map(kind => {
+          const def = getCommand(kind);
+          return (
+            <Command.Item
+              key={kind}
+              value={`command-${kind}`}
+              data-item-label={`/${kind}`}
+              data-command-word={kind}
+              onSelect={() => (def.type === 'action' ? onRunAction(kind) : onApplyCommand(kind))}
+              onMouseEnter={() => onHoverCommand(kind)}
+              className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+            >
+              <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
+                <def.icon size={15} />
+              </div>
+              <div className='flex-1 min-w-0'>
+                <div className='text-sm font-semibold text-foreground truncate'>/{kind}</div>
+                <div className='text-xs text-muted-foreground truncate'>{def.label}</div>
+              </div>
+            </Command.Item>
+          );
+        })}
       </Command.Group>
     );
   }
 
-  // `/askai`: no target picker — a single action row that opens the Xyne AI panel.
-  if (commandKind === 'askai') {
+  // Action commands (`/askai`, `/record`): no target picker — one row that runs the action.
+  const activeDef = getCommand(commandKind);
+  if (activeDef.type === 'action') {
     return (
-      <Command.Group heading='Ask AI' className={COMMAND_GROUP_HEADING_CLASS}>
+      <Command.Group heading={activeDef.heading} className={COMMAND_GROUP_HEADING_CLASS}>
         <Command.Item
-          value='command-askai'
-          data-item-label='Ask Xyne AI'
-          onSelect={() => onOpenAskAI()}
+          value={`command-${commandKind}`}
+          data-item-label={activeDef.title}
+          onSelect={() => onRunAction(commandKind)}
           className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
         >
           <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
-            <Sparkles size={15} />
+            <activeDef.icon size={15} />
           </div>
           <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-sm truncate text-foreground'>Ask Xyne AI</div>
-            <div className='text-xs text-muted-foreground truncate'>Open the Xyne AI panel</div>
+            <div className='font-semibold text-sm truncate text-foreground'>{activeDef.title}</div>
+            <div className='text-xs text-muted-foreground truncate'>{activeDef.description}</div>
           </div>
         </Command.Item>
       </Command.Group>
     );
   }
 
-  // `/record`: no target picker — a single action row that opens the Recordings page.
-  if (commandKind === 'record') {
+  // `/goto`: list the nav-bar sections; picking one routes there. Same row markup +
+  // `data-item-label` contract as the pickers, so arrow-nav / Enter / ghost-sync all work through
+  // the parent unchanged.
+  if (activeDef.type === 'goto') {
+    if (commandNavResults.length === 0 && commandGotoExtras.length === 0) {
+      return (
+        <div className='py-6 text-center text-sm text-muted-foreground'>No matching sections</div>
+      );
+    }
     return (
-      <Command.Group heading='Recordings' className={COMMAND_GROUP_HEADING_CLASS}>
-        <Command.Item
-          value='command-record'
-          data-item-label='Recordings'
-          onSelect={() => onOpenRecordings()}
-          className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
-        >
-          <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
-            <Mic size={15} />
-          </div>
-          <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-sm truncate text-foreground'>Recordings</div>
-            <div className='text-xs text-muted-foreground truncate'>View your recordings</div>
-          </div>
-        </Command.Item>
-      </Command.Group>
+      <>
+        {commandNavResults.length > 0 && (
+          <Command.Group heading={activeDef.heading} className={COMMAND_GROUP_HEADING_CLASS}>
+            {commandNavResults.map(item => (
+              <Command.Item
+                key={item.path}
+                value={`goto-${item.path}`}
+                data-item-label={item.label}
+                onSelect={() => onRunNavSection(item)}
+                className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+              >
+                <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
+                  <item.icon size={item.iconSize ?? 15} />
+                </div>
+                <div className='flex-1 min-w-0'>
+                  <div className='text-sm font-semibold text-foreground truncate'>{item.label}</div>
+                </div>
+              </Command.Item>
+            ))}
+          </Command.Group>
+        )}
+        {commandGotoExtras.length > 0 && (
+          <Command.Group heading='Settings' className={COMMAND_GROUP_HEADING_CLASS}>
+            {commandGotoExtras.map(extra => (
+              <Command.Item
+                key={extra.id}
+                value={`goto-${extra.id}`}
+                data-item-label={extra.label}
+                onSelect={() => onRunGotoExtra(extra)}
+                className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+              >
+                <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
+                  <extra.icon size={15} />
+                </div>
+                <div className='flex-1 min-w-0'>
+                  <div className='text-sm font-semibold text-foreground truncate'>
+                    {extra.label}
+                  </div>
+                </div>
+              </Command.Item>
+            ))}
+          </Command.Group>
+        )}
+      </>
     );
   }
 
-  // Picker: choose a person or channel to call / message.
-  if (commandUserResults.length === 0 && commandChannelResults.length === 0) {
+  // Picker: choose a person, channel or group DM to call / message.
+  if (
+    commandUserResults.length === 0 &&
+    commandChannelResults.length === 0 &&
+    commandGroupDmResults.length === 0
+  ) {
     return <div className='py-6 text-center text-sm text-muted-foreground'>No matches</div>;
   }
   return (
     <>
       {commandUserResults.length > 0 && (
-        <Command.Group heading='People' className={COMMAND_GROUP_HEADING_CLASS}>
+        <Command.Group heading='Users' className={COMMAND_GROUP_HEADING_CLASS}>
           {commandUserResults.map(user => (
             <Command.Item
               key={user.id}
@@ -169,6 +190,9 @@ export function SlashCommandPalette({
               <div className='flex-1 min-w-0'>
                 <div className='font-semibold text-sm truncate text-foreground'>
                   {getUserDisplayName(user)}
+                  {user.id === currentUserID && (
+                    <span className='text-muted-foreground font-normal'> (you)</span>
+                  )}
                 </div>
                 <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
               </div>
@@ -187,7 +211,7 @@ export function SlashCommandPalette({
               className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
             >
               <div className='flex items-center justify-center size-7 rounded-md bg-muted text-muted-foreground shrink-0'>
-                <Hash size={14} />
+                <ChannelIcon channel={channel} />
               </div>
               <div className='flex-1 min-w-0'>
                 <div className='font-semibold text-sm truncate text-foreground'>{channel.name}</div>
@@ -196,6 +220,28 @@ export function SlashCommandPalette({
                     {channel.description}
                   </div>
                 )}
+              </div>
+            </Command.Item>
+          ))}
+        </Command.Group>
+      )}
+      {commandGroupDmResults.length > 0 && (
+        <Command.Group heading='Group DMs' className={COMMAND_GROUP_HEADING_CLASS}>
+          {commandGroupDmResults.map(({ channel, label }) => (
+            <Command.Item
+              key={channel.id}
+              value={`command-channel-${channel.id}`}
+              data-item-label={label}
+              onSelect={() =>
+                onRunTarget({ type: 'channel', channel, displayName: label, isDm: true })
+              }
+              className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+            >
+              <div className='flex items-center justify-center size-7 rounded-md bg-muted text-muted-foreground shrink-0'>
+                <Users size={14} />
+              </div>
+              <div className='flex-1 min-w-0'>
+                <div className='font-semibold text-sm truncate text-foreground'>{label}</div>
               </div>
             </Command.Item>
           ))}
