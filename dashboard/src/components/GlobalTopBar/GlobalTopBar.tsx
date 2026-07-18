@@ -45,6 +45,8 @@ const NavigationAndSearch = (): ReactElement => {
   // Cmd+F (screen mode) opens this bar pre-scoped with an in:<channel> chip; the
   // event carries the mention so the input renders cursor-ready with the chip.
   const [pendingMention, setPendingMention] = useState<MentionData | null>(null);
+  // Cmd+/ (screen mode) opens this bar seeded with `/` so it lands in slash-command discovery.
+  const [pendingCommand, setPendingCommand] = useState(false);
   const openedAtHrefRef = useRef('');
   useEffect(() => {
     if (searchOpen) {
@@ -63,11 +65,13 @@ const NavigationAndSearch = (): ReactElement => {
 
   // Listen for the screen-mode search-bar activation event. Cmd+K dispatches it
   // with no detail (empty bar); Cmd+F dispatches it with an in:<channel> mention
-  // so the bar opens pre-scoped. Either way it opens with no query restore.
+  // so the bar opens pre-scoped; Cmd+/ dispatches it with `command: true` so the bar
+  // opens seeded with `/`. Either way it opens with no query restore.
   useEffect(() => {
     const handler = (event: Event): void => {
-      const mention = (event as CustomEvent<{ mention?: MentionData }>).detail?.mention ?? null;
-      setPendingMention(mention);
+      const detail = (event as CustomEvent<{ mention?: MentionData; command?: boolean }>).detail;
+      setPendingMention(detail?.mention ?? null);
+      setPendingCommand(detail?.command ?? false);
       setRestoreQuery(false);
       setSearchOpen(true);
     };
@@ -152,6 +156,7 @@ const NavigationAndSearch = (): ReactElement => {
               setSearchOpen(false);
               setRestoreQuery(false);
               setPendingMention(null);
+              setPendingCommand(false);
             }
           }}
         >
@@ -205,6 +210,7 @@ const NavigationAndSearch = (): ReactElement => {
               onInteractOutside={() => {
                 setSearchOpen(false);
                 setPendingMention(null);
+                setPendingCommand(false);
               }}
               className='z-[9999] bg-background border border-border rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D] overflow-hidden max-h-[80vh]'
               style={{
@@ -221,11 +227,13 @@ const NavigationAndSearch = (): ReactElement => {
                     setSearchOpen(false);
                     setRestoreQuery(false);
                     setPendingMention(null);
+                    setPendingCommand(false);
                   }
                 }}
                 hideTabs
                 initialMention={pendingMention}
                 restoreQueryFromUrl={restoreQuery}
+                seedCommand={pendingCommand}
               />
             </Popover.Content>
           </Popover.Portal>
