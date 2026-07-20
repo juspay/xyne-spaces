@@ -249,7 +249,8 @@ type StateMachineEvent =
   | { type: 'UNARCHIVE_CHANNEL'; channelId: string }
   | { type: 'SET_THREAD_LAST_READ'; conversationId: string; lastReadAt: number }
   | { type: 'SET_THREAD_SCROLL'; conversationId: string; scrollTop: number }
-  | { type: 'SET_UNREAD_ACTIVITIES'; unreadActivities: UnreadActivity[] };
+  | { type: 'SET_UNREAD_ACTIVITIES'; unreadActivities: UnreadActivity[] }
+  | { type: 'RESET_WORKSPACE_SESSION' };
 
 export const stateMachine = setup({
   types: {
@@ -670,6 +671,26 @@ export const stateMachine = setup({
         return [];
       },
     }),
+    // Clears user-scoped state on workspace switch so the app renders the
+    // new workspace's data instead of stale entries from the previous one.
+    // Zero queries refill the context via ADD_USERS / ADD_ALL_CHANNELS / etc.
+    // after the switch completes.
+    resetWorkspaceSession: assign({
+      users: [],
+      watermark: { usersUpdatedAt: 0, allChannelsUpdatedAt: 0 },
+      bookmarks: [],
+      visibleChannels: [],
+      allChannels: [],
+      permissions: [],
+      userChannelStatuses: [],
+      allUserGroups: [],
+      userGroupMappings: [],
+      draftMessages: [],
+      delayedMessages: [],
+      unreadActivities: [],
+      filteredTicketIds: [],
+      onlineUsers: [],
+    }),
   },
 }).createMachine({
   id: 'stateMachine',
@@ -838,6 +859,9 @@ export const stateMachine = setup({
         },
         SET_UNREAD_ACTIVITIES: {
           actions: 'setUnreadActivities',
+        },
+        RESET_WORKSPACE_SESSION: {
+          actions: 'resetWorkspaceSession',
         },
       },
     },

@@ -337,6 +337,10 @@ export function setStorageAdapter(storage: StorageAdapter): void {
   _storageAdapter = storage;
 }
 
+export function getStorageAdapter(): StorageAdapter | null {
+  return _storageAdapter;
+}
+
 export async function loadCacheEntryFromStorage(hash: string): Promise<CacheEntry<unknown> | null> {
   if (!_storageAdapter) return null;
   try {

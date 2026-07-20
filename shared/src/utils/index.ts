@@ -1,5 +1,14 @@
 export { searchUsers, searchChannels } from './search.js';
 export {
+  canonicalArgsJson,
+  shadowKeyFor,
+  readShadow,
+  consumeShadow,
+  writeShadow,
+  removeShadow,
+  type ShadowEntry,
+} from './warmShadow.js';
+export {
   shallowEqualUsers,
   shallowEqualChannels,
   formatChannelTimestamp,

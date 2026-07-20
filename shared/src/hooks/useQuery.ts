@@ -34,6 +34,34 @@ function withDefaultTTL(options?: UseQueryOptions | boolean): UseQueryOptions {
 }
 
 /**
+ * Walks a query result (array or singular) and returns the highest
+ * `updatedAt | lastActivityAt | createdAt` it finds across all rows.
+ * Returns 0 when no timestamps are present, which deterministically
+ * yields to the other source rather than guessing.
+ *
+ * Used as a freshness signal in the SWR ladder: Zero can fire `complete`
+ * from its persisted kv state (see `experimentalWatch({initialValuesInFirstDiff: true})`
+ * in zero-client's queryManager), which means a fresh fallback HTTP result
+ * may carry rows that are strictly newer than what Zero just emitted as
+ * `complete`. Yielding to Zero unconditionally in that window causes the
+ * cache to be overwritten with the older kv snapshot, producing a visible
+ * "fresh → stale → fresh" flicker until IVM applies the next server diff.
+ */
+function maxFreshnessTimestamp(data: unknown): number {
+  if (data == null) return 0;
+  const rows = Array.isArray(data) ? data : [data];
+  let max = 0;
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const v = r['updatedAt'] ?? r['lastActivityAt'] ?? r['createdAt'];
+    const n = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) || 0 : 0;
+    if (n > max) max = n;
+  }
+  return max;
+}
+
+/**
  * Internal: routes query through Zero or fallback based on config.
  */
 function useQueryWithFallback<
@@ -47,14 +75,21 @@ function useQueryWithFallback<
   query: QueryRequest<TTable, TInput, TOutput, TSchema, TReturn, TContext>,
   options?: UseQueryOptions | boolean,
 ): QueryResult<TReturn> {
-  const { fallbackEnabled } = useZeroFallbackConfig();
+  const { fallbackEnabled, keepZeroAlongsideFallback, onZeroComplete } = useZeroFallbackConfig();
 
   const enabledOption = typeof options === 'object' ? options.enabled : options;
   const baseEnabled = enabledOption ?? true;
 
+  // Zero stays subscribed while fallback is on only when the app has opted in
+  // via `keepZeroAlongsideFallback`. Lotus opts in so its first-complete latch
+  // can fire (the latch needs Zero to actually run to flip). Dashboard doesn't
+  // opt in → Zero is disabled while fallback serves the page (original behavior,
+  // no wasted parallel IVM hydration).
+  const zeroEnabled = (keepZeroAlongsideFallback || !fallbackEnabled) && baseEnabled;
+
   const zeroResult = zeroUseQuery(query, {
     ...withDefaultTTL(options),
-    enabled: !fallbackEnabled && baseEnabled,
+    enabled: zeroEnabled,
   });
 
   const fallbackResult = useFallbackQuery<TTable, TInput, TOutput, TSchema, TReturn, TContext>(
@@ -64,7 +99,43 @@ function useQueryWithFallback<
       : fallbackEnabled && baseEnabled,
   );
 
-  return fallbackEnabled ? fallbackResult : zeroResult;
+  // Notify the app's "Zero is ready" signal the first time Zero delivers any
+  // query result. No-op when the app doesn't supply onZeroComplete.
+  const zeroDetailsType = zeroResult[1].type;
+  useEffect(() => {
+    if (zeroDetailsType === 'complete') {
+      onZeroComplete?.();
+    }
+  }, [zeroDetailsType, onZeroComplete]);
+
+  // SWR handoff between fallback and Zero. When `keepZeroAlongsideFallback`
+  // is opted in (lotus), Zero stays subscribed alongside fallback so the
+  // first-complete latch can flip. The handoff handles two known races:
+  //
+  // 1. Latch flips before Zero has confirmed THIS query → Zero is unknown,
+  //    return fallback (stale-while-revalidate, prevents empty flash).
+  // 2. Zero emits `complete` from its persisted kv `got` state (the standard
+  //    Zero behavior — see queryManager's experimentalWatch with
+  //    initialValuesInFirstDiff: true) but the snapshot it carries predates
+  //    a recent postgres mutation that fallback DID capture. Returning Zero
+  //    here would overwrite the fresher fallback rows in queryCacheActor
+  //    until IVM applies the next server diff (typically seconds), producing
+  //    a visible fresh→stale→fresh flicker. Guard by comparing the max
+  //    timestamp across rows and yielding only when Zero is at least as
+  //    fresh.
+  if (fallbackEnabled) return fallbackResult;
+  if (!keepZeroAlongsideFallback) return zeroResult;
+  if (zeroResult[1].type === 'complete') {
+    if (fallbackResult[1].type === 'complete') {
+      const zMax = maxFreshnessTimestamp(zeroResult[0]);
+      const fMax = maxFreshnessTimestamp(fallbackResult[0]);
+      if (zMax >= fMax) return zeroResult;
+      return fallbackResult;
+    }
+    return zeroResult;
+  }
+  if (fallbackResult[1].type === 'complete') return fallbackResult;
+  return zeroResult;
 }
 
 /**
