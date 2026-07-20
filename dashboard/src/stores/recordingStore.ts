@@ -4,11 +4,22 @@
  */
 
 import { createStore } from '@xstate/store';
-import { Room, RoomConnectOptions, RoomEvent, DataPacket_Kind } from 'livekit-client';
+import {
+  Room,
+  RoomConnectOptions,
+  RoomEvent,
+  DataPacket_Kind,
+  type RemoteParticipant,
+} from 'livekit-client';
 import { recordingService } from '../services/Recording/recordingService';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
 import { formatDuration, normalizeTimestamp } from '../utils/dateUtils';
+import {
+  AGENT_LEFT_CONFIRM_DELAY_MS,
+  isTranscriptionAgentIdentity,
+  shouldConfirmTranscriptionAgentLeft,
+} from '../utils/livekitAgent';
 
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
@@ -51,6 +62,7 @@ export interface RecordingState {
   /** Current layout of the recording workspace: transcript-only, split, or notes-only */
   activeLayout: RecordingLayout;
   isTranscriptMinimized: boolean;
+  agentLeft: boolean;
 }
 
 const initialContext: RecordingState = {
@@ -71,6 +83,7 @@ const initialContext: RecordingState = {
   isCanvasPaneOpen: false,
   activeLayout: 'transcript',
   isTranscriptMinimized: false,
+  agentLeft: false,
 };
 
 export const recordingStore = createStore({
@@ -173,6 +186,36 @@ export const recordingStore = createStore({
 
       // Set up transcript subscription directly in the store
       // This ensures only ONE listener regardless of how many components use the hook
+      let agentLeftTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const clearAgentLeftTimer = (): void => {
+        if (agentLeftTimer) {
+          clearTimeout(agentLeftTimer);
+          agentLeftTimer = null;
+        }
+      };
+
+      const handleParticipantDisconnected = (participant: RemoteParticipant): void => {
+        if (!isTranscriptionAgentIdentity(participant.identity)) return;
+
+        clearAgentLeftTimer();
+        agentLeftTimer = setTimeout(() => {
+          agentLeftTimer = null;
+          const current = recordingStore.getSnapshot().context;
+          const isActive = current.status === 'recording' || current.status === 'paused';
+
+          if (current.room === room && isActive && shouldConfirmTranscriptionAgentLeft(room)) {
+            recordingStore.send({ type: 'agentLeftUnexpectedly' });
+          }
+        }, AGENT_LEFT_CONFIRM_DELAY_MS);
+      };
+
+      const handleParticipantConnected = (participant: RemoteParticipant): void => {
+        if (isTranscriptionAgentIdentity(participant.identity)) {
+          clearAgentLeftTimer();
+        }
+      };
+
       const handleDataReceived = (
         payload: Uint8Array,
         _participant?: unknown,
@@ -211,9 +254,14 @@ export const recordingStore = createStore({
       };
 
       room.on(RoomEvent.DataReceived, handleDataReceived);
+      room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
+      room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
 
       transcriptUnsubscribe = (): void => {
+        clearAgentLeftTimer();
         room.off(RoomEvent.DataReceived, handleDataReceived);
+        room.off(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
+        room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
       };
 
       return {
@@ -226,6 +274,7 @@ export const recordingStore = createStore({
         isRecording: true,
         error: null,
         activeLayout: defaultLayout,
+        agentLeft: false,
       };
     },
 
@@ -297,6 +346,7 @@ export const recordingStore = createStore({
         isCanvasPaneOpen: false,
         activeLayout: 'transcript',
         isTranscriptMinimized: false,
+        agentLeft: false,
       };
     },
 
@@ -323,6 +373,7 @@ export const recordingStore = createStore({
         status: 'error',
         isRecording: false,
         error: event.error,
+        agentLeft: false,
       };
     },
 
@@ -344,6 +395,7 @@ export const recordingStore = createStore({
       isCanvasPaneOpen: false,
       activeLayout: 'transcript',
       isTranscriptMinimized: false,
+      agentLeft: false,
     }),
 
     addTranscript: (context, event: { entry: TranscriptEntry }): RecordingState => ({
@@ -355,6 +407,26 @@ export const recordingStore = createStore({
       ...context,
       transcripts: [],
     }),
+
+    /**
+     * The transcription agent unexpectedly left mid-recording. Flag it only while
+     * a recording is genuinely in progress — if we're already stopping / idle, the
+     * agent is just following the room down on a user-initiated stop.
+     *
+     * `agentLeft` is a one-shot signal: the UI (RecordingsScreen / RecordingOverlay)
+     * reacts by auto-ending the recording, and stopRecording clears the flag. There
+     * is deliberately no "continue" path — a note-taker with no transcription is
+     * pointless, so the recording is always ended.
+     */
+    agentLeftUnexpectedly: (context): RecordingState => {
+      if (context.status !== 'recording' && context.status !== 'paused') {
+        return context;
+      }
+      return {
+        ...context,
+        agentLeft: true,
+      };
+    },
 
     setNotesCanvas: (context, event: { canvasId: string; title?: string }): RecordingState => ({
       ...context,

@@ -124,6 +124,9 @@ export default function RecordingsScreen(): ReactElement {
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const [showTitleModal, setShowTitleModal] = useState(false);
   const [savingTitle, setSavingTitle] = useState(false);
+  // True when the title modal was opened because the agent dropped (auto-end),
+  // not by a user-initiated stop. Drives the warning banner in SaveTitleModal.
+  const [endedByAgentDrop, setEndedByAgentDrop] = useState(false);
   const [showSttPicker, setShowSttPicker] = useState(false);
   const [sttModel, setSttModel] = useState<'google' | 'azure' | 'deepgram'>('google');
   // Multi-select for bulk actions (delete / ask AI)
@@ -146,6 +149,7 @@ export default function RecordingsScreen(): ReactElement {
   const notesCanvasId = useRecordingStore(ctx => ctx.notesCanvasId);
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
   const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
+  const agentLeft = useRecordingStore(ctx => ctx.agentLeft);
   const room = useRecordingStore(ctx => ctx.room);
   const activeLayout = useRecordingStore(ctx => ctx.activeLayout);
   const isTranscriptMinimized = useRecordingStore(ctx => ctx.isTranscriptMinimized);
@@ -322,6 +326,18 @@ export default function RecordingsScreen(): ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingStop, recordingStatus]);
 
+  // Agent dropped mid-recording → auto-end and show the save-title modal with a
+  // notice. No confirmation: a note-taker with no transcription can't continue.
+  useEffect(() => {
+    if (agentLeft && (recordingStatus === 'recording' || recordingStatus === 'paused')) {
+      lastExternalIdRef.current = externalId;
+      setEndedByAgentDrop(true);
+      sendRecordingEvent({ type: 'stopRecording' }); // clears agentLeft in the store
+      setShowTitleModal(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentLeft, recordingStatus]);
+
   // ─── REMOVED: connection state management moved to useRecordingConnectionState ───
   // See hooks/useRecordingConnectionState.ts
 
@@ -337,6 +353,7 @@ export default function RecordingsScreen(): ReactElement {
       }
       await recordingService.updateRecordingTitle(lastExternalIdRef.current, title);
       setShowTitleModal(false);
+      setEndedByAgentDrop(false);
       sendRecordingEvent({ type: 'clearTranscripts' });
       toast.success('Recording saved', { description: title });
     } catch {
@@ -859,6 +876,7 @@ export default function RecordingsScreen(): ReactElement {
         defaultTitle={generateAutoTitle()}
         onSave={handleSaveTitle}
         isSaving={savingTitle}
+        endedByAgentDrop={endedByAgentDrop}
       />
 
       {/* ─── Bulk Delete Confirmation Dialog ───── */}
