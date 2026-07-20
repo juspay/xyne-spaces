@@ -133,7 +133,7 @@ router.get(
       const status = (error as { status?: number })?.status ?? 500;
       const message =
         error instanceof Error ? error.message : 'Failed to fetch DL member sync status';
-      logger.error(`${TAG} DL member sync status failed`, { channelId, status, message });
+      logger.error(`${TAG} DL member sync status failed`, { channelId, status, error });
       res.status(status).json({ error: message });
     }
   },

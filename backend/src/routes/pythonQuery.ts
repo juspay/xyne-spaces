@@ -82,7 +82,7 @@ router.post('/', async (req: Request, res: Response) => {
     const duration = Date.now() - startTime
 
     logger.error('Python query failed', {
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
       stack: error instanceof Error ? error.stack : undefined,
       body: req.body,
       duration,

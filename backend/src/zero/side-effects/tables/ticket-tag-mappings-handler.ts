@@ -73,7 +73,7 @@ export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
     } catch (error) {
       logger.error('[TicketTagMappingsSideEffectHandler] Failed to queue ticket Vespa feed:', {
         ticketId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }
@@ -146,7 +146,7 @@ export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
         ticketId,
         tagName,
         action,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }

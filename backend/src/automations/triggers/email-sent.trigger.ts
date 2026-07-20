@@ -193,7 +193,7 @@ export async function emitEmailSent(emailId: string): Promise<void> {
   } catch (err) {
     logger.error('[automations] emitEmailSent failed', {
       emailId,
-      error: err instanceof Error ? err.message : String(err),
+      error: err,
     });
   }
 }

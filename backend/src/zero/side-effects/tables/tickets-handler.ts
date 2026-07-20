@@ -89,7 +89,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
       }).catch(error => {
         logger.error('[UserActivityTracking] Failed to track ticket updated activity:', {
           ticketId,
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
         });
       });
     }

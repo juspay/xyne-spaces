@@ -39,7 +39,7 @@ export async function triggerNudgesFromActivity(payload: ActivityEventTriggerPay
       eventCategory: payload.eventCategory,
       eventName: payload.eventName,
       userId: payload.userId,
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 }

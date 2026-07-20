@@ -159,7 +159,7 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
     }
   } catch (error) {
     logger.error(`${TAG} Error handling Google Calendar webhook`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
     if (!res.headersSent) {
       res.status(500).send('Google Calendar webhook failed');
@@ -199,7 +199,7 @@ router.post('/microsoft-calendar', async (req: Request, res: Response) => {
         payload = JSON.parse(jsonString);
       } catch (parseErr) {
         logger.error(`${TAG} Failed to parse Buffer payload`, {
-          error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+          error: parseErr,
           preview: payload.slice(0, 100).toString('hex'),
         });
         res.status(202).send('Accepted');
@@ -224,7 +224,7 @@ router.post('/microsoft-calendar', async (req: Request, res: Response) => {
     }
   } catch (error) {
     logger.error(`${TAG} Error handling Microsoft Calendar webhook`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 });
@@ -283,7 +283,7 @@ async function processMicrosoftNotification(notification: MicrosoftNotification)
     await microsoftCalendarSyncQueue.enqueueIncrementalSync(subscription.id);
   } catch (error) {
     logger.error(`${TAG} Error processing Microsoft notification`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 }
@@ -315,7 +315,7 @@ async function processMicrosoftLifecycleNotification(
       } catch (err) {
         logger.error(`${TAG} Failed to reauthorize subscription`, {
           email: subscription.displayName,
-          error: err instanceof Error ? err.message : String(err),
+          error: err,
         });
 
         await repositories.externalSources.markCalendarError(subscription.id);
@@ -333,7 +333,7 @@ async function processMicrosoftLifecycleNotification(
       } catch (err) {
         logger.error(`${TAG} Failed to recreate subscription`, {
           email: subscription.displayName,
-          error: err instanceof Error ? err.message : String(err),
+          error: err,
         });
       }
       break;

@@ -77,7 +77,7 @@ class WatchRenewalQueue {
     } catch (err) {
       logger.error(`${TAG} Unexpected error renewing provider`, {
         providerType,
-        error: err instanceof Error ? err.message : String(err),
+        error: err,
       });
       return { renewed: 0, failed: 0, deactivated: 0 };
     }
@@ -159,7 +159,7 @@ class WatchRenewalQueue {
           providerType,
           cron: config.cron,
           defaultCron: config.defaultCron,
-          error: err instanceof Error ? err.message : String(err),
+          error: err,
         });
         await queue.add(
           'renew-provider',

@@ -146,7 +146,7 @@ export async function emitTicketCommented(message: AddedMessage): Promise<void> 
   } catch (err) {
     logger.error('[automations] emitTicketCommented failed', {
       messageId: message.messageId,
-      error: err instanceof Error ? err.message : String(err),
+      error: err,
     });
   }
 }

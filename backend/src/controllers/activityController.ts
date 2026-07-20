@@ -65,7 +65,7 @@ export class ActivityController {
       // Unexpected error (logging failure, etc.)
       logger.error('Unexpected error in activity logging', {
         eventType: 'activity_error',
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
         stack: error instanceof Error ? error.stack : undefined,
       });
 

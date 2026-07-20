@@ -434,7 +434,7 @@ const emitCustomFieldWriteSideEffects = async (
   } catch (error) {
     logger.error('[TicketCustomFieldService] Failed to queue Vespa feed after custom-field write:', {
       ticketId,
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 
@@ -466,7 +466,7 @@ const emitCustomFieldWriteSideEffects = async (
   } catch (error) {
     logger.error('[TicketCustomFieldService] Failed to broadcast ticket counts after custom-field write:', {
       ticketId,
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 
@@ -538,7 +538,7 @@ const emitCustomFieldWriteSideEffects = async (
   } catch (error) {
     logger.error('[TicketCustomFieldService] Failed to emit form-field events after custom-field write:', {
       ticketId,
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 };
@@ -640,7 +640,7 @@ export const syncCustomFieldValues = async (
   await emitCustomFieldWriteSideEffects(ticketId, changedFields, updatedBy).catch(error => {
     logger.error('[TicketCustomFieldService] Custom-field side effects failed:', {
       ticketId,
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   });
 };

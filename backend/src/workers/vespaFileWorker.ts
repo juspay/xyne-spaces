@@ -273,7 +273,7 @@ export class VespaFileWorker {
 						schema,
 						docId,
 						jobType,
-						error: error instanceof Error ? error.message : String(error),
+						error: error,
 					});
 				});
 		} catch (error) {

@@ -66,7 +66,7 @@ async function renewSource(source: {
       } catch (deactivateErr) {
         logger.error(`${TAG} failed to deactivate source`, {
           sourceName: source.name,
-          error: deactivateErr instanceof Error ? deactivateErr.message : String(deactivateErr),
+          error: deactivateErr,
         });
       }
       return { status: 'deactivated', reason: message };

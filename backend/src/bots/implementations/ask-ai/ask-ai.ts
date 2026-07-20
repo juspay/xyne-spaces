@@ -234,7 +234,7 @@ export class AskAIBot extends UnifiedBaseBot<Input, Output> {
       logger.error('[AskAIBot] Execution failed', {
         conversationId,
         userId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
       yield this.createErrorEvent(
         '<p>Sorry, something went wrong. Please try rephrasing your question.</p>',

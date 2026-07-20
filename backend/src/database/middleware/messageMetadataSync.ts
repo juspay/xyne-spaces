@@ -34,8 +34,14 @@ export function setupMessageMetadataSync(prisma: PrismaClient): void {
             select: { messageId: true },
           });
           preQueryIds = messages.map(m => m.messageId);
-        } catch {
-          // If pre-query fails, skip sync for this call
+        } catch (error) {
+          // Skip sync for this call — but say so, or the resulting metadata
+          // divergence has no trace at all.
+          logger.error('message_metadata_sync_prequery_failed', {
+            action: params.action,
+            where: params.args?.where,
+            error,
+          });
         }
       }
 

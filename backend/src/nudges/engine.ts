@@ -170,7 +170,7 @@ export class NudgeEvaluationEngine {
             sourceId: persistenceSourceId,
             userId: event.userId,
             durationMs: Date.now() - startedAt,
-            error: error instanceof Error ? error.message : String(error),
+            error: error,
           });
           throw error;
         }

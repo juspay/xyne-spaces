@@ -851,7 +851,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           source,
           entityId,
           entityType,
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
         });
       }
     });
@@ -875,7 +875,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         logger.error('[Mutator] Failed to cancel bookmark reminder job', {
           entityId,
           entityType,
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
         });
       }
     });
@@ -4516,7 +4516,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Notify all connected LiveKit clients that participants changed
           // This triggers RoomMetadataChanged so native apps can refresh the participant list
           asyncTasks.push(async () => {
-            void livekitService.sendParticipantsChanged(callId);
+            try {
+              await livekitService.sendParticipantsChanged(callId);
+            } catch (error) {
+              logger.error('livekit_participants_changed_failed', { callId, error });
+            }
           });
         },
       ),
@@ -10250,7 +10254,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
             asyncTasks.push(async () => {
-              await versionReleaseMappingService.syncTicketById(entityId);
+              try {
+                await versionReleaseMappingService.syncTicketById(entityId);
+              } catch (error) {
+                logger.error('release_mapping_sync_failed', { entityId, error });
+              }
             });
           }
         },
@@ -10364,7 +10372,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
             asyncTasks.push(async () => {
-              await versionReleaseMappingService.syncTicketById(entityId);
+              try {
+                await versionReleaseMappingService.syncTicketById(entityId);
+              } catch (error) {
+                logger.error('release_mapping_sync_failed', { entityId, error });
+              }
             });
           }
         },
@@ -10472,7 +10484,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             resolvedFieldName === 'releaseVersion'
           ) {
             asyncTasks.push(async () => {
-              await versionReleaseMappingService.syncTicketById(formEntityValue.entityId);
+              try {
+                await versionReleaseMappingService.syncTicketById(formEntityValue.entityId);
+              } catch (error) {
+                logger.error('release_mapping_sync_failed', { entityId: formEntityValue.entityId, error });
+              }
             });
           }
         },
@@ -11320,14 +11336,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (dashboardId) {
             asyncTasks.push(async () => {
-              const remainingMappings = await tx.run(
-                zql.dashboard_queries_mapping.where('dashboardId', dashboardId).orderBy('sequence', 'asc')
-              );
-              for (let i = 0; i < remainingMappings.length; i++) {
-                await tx.mutate.dashboard_queries_mapping.update({
-                  id: remainingMappings[i].id,
-                  sequence: i,
-                });
+              try {
+                const remainingMappings = await tx.run(
+                  zql.dashboard_queries_mapping.where('dashboardId', dashboardId).orderBy('sequence', 'asc')
+                );
+                for (let i = 0; i < remainingMappings.length; i++) {
+                  await tx.mutate.dashboard_queries_mapping.update({
+                    id: remainingMappings[i].id,
+                    sequence: i,
+                  });
+                }
+              } catch (error) {
+                logger.error('dashboard_query_resequence_failed', { dashboardId, error });
               }
             });
           }
@@ -11593,19 +11613,23 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 const currentStageId = currentStageObj.id;
                 const ticketIdForEta = ticket.id;
                 asyncTasks.push(async () => {
-                  const currentETAs = await tx.run(
-                    zql.ticket_stage_eta
-                      .where('ticketId', ticketIdForEta)
-                      .where('stageId', currentStageId),
-                  );
-                  const activeETA = currentETAs.find(e => e.stageLeftAt === null);
-                  if (activeETA) {
-                    await tx.mutate.ticket_stage_eta.update({
-                      id: activeETA.id,
-                      stageLeftAt: now,
-                      updatedAt: now,
-                      updatedBy: authData.sub,
-                    });
+                  try {
+                    const currentETAs = await tx.run(
+                      zql.ticket_stage_eta
+                        .where('ticketId', ticketIdForEta)
+                        .where('stageId', currentStageId),
+                    );
+                    const activeETA = currentETAs.find(e => e.stageLeftAt === null);
+                    if (activeETA) {
+                      await tx.mutate.ticket_stage_eta.update({
+                        id: activeETA.id,
+                        stageLeftAt: now,
+                        updatedAt: now,
+                        updatedBy: authData.sub,
+                      });
+                    }
+                  } catch (error) {
+                    logger.error('stage_eta_close_failed', { ticketId: ticketIdForEta, stageId: currentStageId, error });
                   }
                 });
               } else {
@@ -14683,7 +14707,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             } catch (error) {
               logger.error('[DRAFT-SEND] Failed to convert draft to sent message', {
-                error: error instanceof Error ? error.message : String(error),
+                error: error,
               });
             }
           });
@@ -14796,7 +14820,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             } catch (err) {
               logger.error('[Mutator] submitForApproval asyncTask FAIL', {
                 automationId: id,
-                error: err instanceof Error ? err.message : String(err),
+                error: err,
               });
             }
           });
@@ -14825,7 +14849,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             } catch (err) {
               logger.error('[Mutator] revoke asyncTask FAIL', {
                 automationId: id,
-                error: err instanceof Error ? err.message : String(err),
+                error: err,
               });
             }
           });
@@ -14862,7 +14886,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               logger.error('[Mutator] approve asyncTask FAIL', {
                 automationId: id,
                 elapsedMs: Date.now() - t0,
-                error: err instanceof Error ? err.message : String(err),
+                error: err,
               });
             }
           });
@@ -14895,7 +14919,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             } catch (err) {
               logger.error('[Mutator] reject asyncTask FAIL', {
                 automationId: id,
-                error: err instanceof Error ? err.message : String(err),
+                error: err,
               });
             }
           });
@@ -14936,7 +14960,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               logger.error('[Mutator] automations.activate asyncTask FAIL', {
                 automationId: id,
                 elapsedMs: Date.now() - t0,
-                error: err instanceof Error ? err.message : String(err),
+                error: err,
               });
             }
           });
@@ -14977,7 +15001,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               logger.error('[Mutator] automations.disable asyncTask FAIL', {
                 automationId: id,
                 elapsedMs: Date.now() - t0,
-                error: err instanceof Error ? err.message : String(err),
+                error: err,
               });
             }
           });
@@ -15367,6 +15391,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const conversationId = ticket.conversationId ?? null;
           const fromStageName = ticket.stageName;
           asyncTasks.push(async () => {
+            try {
             // Close the prior stage's open ETA — or, if the current stage couldn't be resolved,
             // close any dangling open ETAs except the target's — so the ticket keeps one open visit.
             if (currentStageIdForEta) {
@@ -15431,6 +15456,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   isTicketActivity: true,
                 },
               });
+            }
+            } catch (error) {
+              logger.error('stage_transition_side_effects_failed', { ticketId, targetStageId, error });
             }
           });
         },

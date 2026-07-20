@@ -28,7 +28,7 @@ export function verifySlackRequest(req: Request, res: Response, next: NextFuncti
         payload = JSON.parse(rawPayload);
       } catch (err) {
         logger.error('[Slack Verification] Failed to parse interactive payload', {
-          error: err instanceof Error ? err.message : String(err),
+          error: err,
           payloadPreview: rawPayload.slice(0, 100),
         });
         return res.status(400).send('Invalid payload format');

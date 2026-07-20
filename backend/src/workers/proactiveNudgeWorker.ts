@@ -115,7 +115,7 @@ class ProactiveNudgeWorker {
         eventName: data.eventName,
         userId: data.userId,
         attemptsMade: job.attemptsMade,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
       throw error;
     }

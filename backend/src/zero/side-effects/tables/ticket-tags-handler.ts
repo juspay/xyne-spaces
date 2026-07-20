@@ -65,7 +65,7 @@ export class TicketTagsSideEffectHandler extends BaseSideEffectHandler {
     } catch (error) {
       logger.error('[TicketTagsSideEffectHandler] Failed to queue ticket Vespa feed:', {
         ticketId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }

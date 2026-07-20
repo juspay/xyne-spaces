@@ -191,7 +191,7 @@ export class RoleFrameworkBackfillController {
             runId,
             batchNumber,
             workspaceId: workspace.id,
-            error: error instanceof Error ? error.message : String(error),
+            error: error,
             stack: error instanceof Error ? error.stack : undefined,
           });
         }
@@ -372,7 +372,7 @@ export class RoleFrameworkBackfillController {
                 responsibility,
                 roleId,
                 chunkSize: chunk.length,
-                error: error instanceof Error ? error.message : String(error),
+                error: error,
                 stack: error instanceof Error ? error.stack : undefined,
               });
             }
@@ -423,7 +423,7 @@ export class RoleFrameworkBackfillController {
           runId,
           userGroupId: userGroup.id,
           workspaceId: userGroup.workspaceId,
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
           stack: error instanceof Error ? error.stack : undefined,
         });
       }
@@ -630,7 +630,7 @@ export class RoleFrameworkBackfillController {
             boardId: board.id,
             boardName: board.name,
             workspaceId: board.workspaceId,
-            error: error instanceof Error ? error.message : String(error),
+            error: error,
             stack: error instanceof Error ? error.stack : undefined,
           });
         }
@@ -746,7 +746,7 @@ export class RoleFrameworkBackfillController {
           batchNumber,
           batchSize: batchIds.length,
           firstRowId: batchIds[0],
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
           stack: error instanceof Error ? error.stack : undefined,
         });
       }
@@ -852,7 +852,7 @@ export class RoleFrameworkBackfillController {
     } catch (error) {
       logger.error(`${TAG} backfill failed`, {
         runId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
         stack: error instanceof Error ? error.stack : undefined,
       });
       const response: ApiResponse = {

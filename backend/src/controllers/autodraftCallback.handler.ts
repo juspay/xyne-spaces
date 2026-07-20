@@ -79,7 +79,7 @@ export async function handleAutoDraftCallback(
       conversationId,
       channelId,
       sessionId,
-      error: err instanceof Error ? err.message : String(err),
+      error: err,
     });
     res.status(500).json({ success: false, error: 'failed to persist auto-draft' });
   }

@@ -22,9 +22,41 @@ const injectContext = winston.format((info) => {
   return info;
 });
 
+const SAFE_ERROR_FIELDS = ['code', 'status', 'statusCode', 'errno', 'syscall'] as const;
+const ERROR_PAYLOAD_KEYS = new Set(['config', 'request', 'response', 'headers', 'options']);
+const REDACTED = '[REDACTED]';
+
+export function serializeError(err: Error): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    name: err.name,
+    message: err.message,
+    stack: err.stack,
+  };
+  for (const field of SAFE_ERROR_FIELDS) {
+    const value = (err as unknown as Record<string, unknown>)[field];
+    if (typeof value === 'string' || typeof value === 'number') {
+      out[field] = value;
+    }
+  }
+  return out;
+}
+
+const normalizeErrors = winston.format((info) => {
+  for (const key of Object.keys(info)) {
+    const value = (info as Record<string, unknown>)[key];
+    if (value instanceof Error) {
+      (info as Record<string, unknown>)[key] = serializeError(value);
+    } else if (ERROR_PAYLOAD_KEYS.has(key)) {
+      (info as Record<string, unknown>)[key] = REDACTED;
+    }
+  }
+  return info;
+});
+
 const productionFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
+  normalizeErrors(),
   injectContext(),
   winston.format.json(),
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
@@ -42,6 +74,7 @@ const devFormat = winston.format.combine(
   winston.format.colorize(),
   winston.format.timestamp({ format: 'HH:mm:ss' }),
   winston.format.errors({ stack: true }),
+  normalizeErrors(),
   injectContext(),
   winston.format.printf(({ timestamp, level, message, module, service, ...meta }) => {
     const context = module || service;
