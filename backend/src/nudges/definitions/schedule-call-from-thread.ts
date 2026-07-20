@@ -214,7 +214,7 @@ export const scheduleCallFromThread: NudgeDefinition<
     } catch (agentError) {
       logger.error('[SCHEDULE_CALL_FROM_THREAD] Agent execution failed', {
         conversationId: context.message.conversationId,
-        error: agentError instanceof Error ? agentError.message : String(agentError),
+        error: agentError,
       });
       return [];
     }

@@ -219,7 +219,7 @@ export async function runTicketDescriptionCleanOnCompletion(
       usedLlm,
       attempts,
       durationMs: Date.now() - startTime,
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 }

@@ -1,28 +1,29 @@
 import { App } from './app.js';
-import { logger } from '@/utils/logger';
+import { logger, serializeError } from '@/utils/logger';
 import { configureJAF } from '@juspay-jaf/jaf';
 
 configureJAF({ verbose: false });
 
-function serializeError(err: unknown) {
-  if (err instanceof Error) {
-    return {
-      ...err,
-      name: err.name,
-      message: err.message,
-      stack: err.stack,
-    };
+/**
+ * A rejection reason is often not an Error. Errors go through the shared
+ * allowlist serializer; anything else is described rather than serialized,
+ * since an arbitrary value may be circular and JSON.stringify would throw
+ * inside the last-resort handler.
+ */
+function describeRejection(reason: unknown): Record<string, unknown> {
+  if (reason instanceof Error) {
+    return serializeError(reason);
   }
-
   return {
     message: 'Non-error rejection',
-    value: err,
+    type: typeof reason,
+    value: typeof reason === 'object' ? Object.prototype.toString.call(reason) : String(reason),
   };
 }
 
 process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
   logger.error('UNHANDLED REJECTION', {
-    error: serializeError(reason),
+    error: describeRejection(reason),
   });
 });
 

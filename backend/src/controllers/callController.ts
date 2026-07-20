@@ -614,7 +614,7 @@ export class CallController {
       });
     } catch (error) {
       const callIdForLog = callExternalId ?? correlationId;
-      logger.error(`[${callIdForLog}] call_initiation_failed`, { stage, error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
+      logger.error(`[${callIdForLog}] call_initiation_failed`, { stage, error: error, stack: error instanceof Error ? error.stack : undefined });
       // If room was already created but token generation failed, the LiveKit room is now
       // orphaned. It will auto-close after emptyTimeout=120s, but this log makes it searchable.
       if (callExternalId && stage === 'token_generation_new_call') {

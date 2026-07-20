@@ -157,7 +157,7 @@ export async function emitCallEvent(
     logger.error('[automations] emitCallEvent failed', {
       callEventType,
       callId: call.id,
-      error: err instanceof Error ? err.message : String(err),
+      error: err,
     });
   }
 }
@@ -231,7 +231,7 @@ async function hydrateCallEventPayload(
   } catch (err) {
     logger.error('[automations] hydrateCallEventPayload failed', {
       callId,
-      error: err instanceof Error ? err.message : String(err),
+      error: err,
     });
     // Return the original payload with an empty participant list so the automation
     // event can still be processed rather than failing the whole run.

@@ -299,7 +299,7 @@ export class WorkerScheduler {
                 logger.error('[PRODUCT_INSIGHTS] Reclustering failed for project', {
                     projectId: project.id,
                     projectName: project.name,
-                    error: error instanceof Error ? error.message : String(error),
+                    error: error,
                 });
             }
         }

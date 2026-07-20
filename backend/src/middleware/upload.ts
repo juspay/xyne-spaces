@@ -46,7 +46,7 @@ const streamingStorage: multer.StorageEngine = {
           requestId,
           fieldName: file.fieldname,
           originalName,
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
         });
       });
 

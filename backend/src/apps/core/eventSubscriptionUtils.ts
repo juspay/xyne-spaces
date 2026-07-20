@@ -96,7 +96,7 @@ export async function handleEventSubscriptionsForUsers(
                 userId: app.userId,
                 webhookUrl: app.webhookUrl,
                 eventType: event.eventType,
-                error: error instanceof Error ? error.message : String(error),
+                error: error,
             });
             return { success: false, userId: app.userId, webhookUrl: app.webhookUrl, error };
         }

@@ -100,7 +100,7 @@ export class ProductInsightsReclusterController {
             logger.error('[ProductInsightsRecluster] Reclustering failed for project', {
               projectId: project.id,
               projectName: project.name,
-              error: error instanceof Error ? error.message : String(error),
+              error: error,
             });
           }
         }

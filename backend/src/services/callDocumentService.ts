@@ -678,7 +678,7 @@ export class CallDocumentService {
       logger.info(`[${logCallId}] Successfully generated PRD`);
       return prd;
     } catch (parseError) {
-      logger.error(`[${logCallId}] PRD JSON parse failed`, { error: parseError instanceof Error ? parseError.message : String(parseError) });
+      logger.error(`[${logCallId}] PRD JSON parse failed`, { error: parseError });
       return null;
     }
   }

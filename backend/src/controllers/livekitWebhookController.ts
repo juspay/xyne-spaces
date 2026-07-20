@@ -99,7 +99,7 @@ class LiveKitWebhookController {
     } catch (authError) {
       logger.error('[LiveKit Webhook] webhook_auth_failed', {
         content_type: req.get('content-type'),
-        error: authError instanceof Error ? authError.message : String(authError),
+        error: authError,
         likely_cause: 'wrong_api_secret_or_tampered_body',
       });
       res.status(400).json({ error: 'Webhook signature verification failed' });
@@ -341,7 +341,7 @@ class LiveKitWebhookController {
             stage: 'metadata_parse',
             room: roomName,
             raw_metadata: (event.room?.metadata ?? '').substring(0, 200),
-            error: parseError instanceof Error ? parseError.message : String(parseError),
+            error: parseError,
           });
           return;
         }
@@ -371,7 +371,7 @@ class LiveKitWebhookController {
             stage: 'acl_validation',
             room: roomName,
             channel: channelId,
-            error: aclError instanceof Error ? aclError.message : String(aclError),
+            error: aclError,
           });
           return;
         }
@@ -400,7 +400,7 @@ class LiveKitWebhookController {
               stage: 'channel_participants_lookup',
               room: roomName,
               channel: channelId,
-              error: participantsError instanceof Error ? participantsError.message : String(participantsError),
+              error: participantsError,
             });
             return;
           }
@@ -442,7 +442,7 @@ class LiveKitWebhookController {
             stage: 'call_record_creation',
             room: roomName,
             channel: channelId,
-            error: txError instanceof Error ? txError.message : String(txError),
+            error: txError,
           });
           logger.error('[LiveKit Webhook] ghost_room_detected', {
             room: roomName,
@@ -651,14 +651,14 @@ class LiveKitWebhookController {
           stage: 'participant_leave_db_update',
           call: callId,
           user: participant.identity,
-          error: leaveError instanceof Error ? leaveError.message : String(leaveError),
+          error: leaveError,
         });
         // Still attempt to stop the recording so the egress can flush to GCS before the room tears down.
         try {
           await callRecordingService.stopActiveRecordingsForCall(callId);
           logger.info('[LiveKit Webhook] recording_stop_attempted_after_db_error', { call: callId });
         } catch (stopErr) {
-          logger.error('[LiveKit Webhook] recording_stop_failed_after_db_error', { call: callId, error: stopErr instanceof Error ? stopErr.message : String(stopErr) });
+          logger.error('[LiveKit Webhook] recording_stop_failed_after_db_error', { call: callId, error: stopErr });
         }
         return null;
       });

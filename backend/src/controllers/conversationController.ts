@@ -592,7 +592,7 @@ export class ConversationController {
         .catch((error) => {
           logger.error('[UserActivityTracking] Failed to track message sent activity:', {
             messageId: message.messageId,
-            error: error instanceof Error ? error.message : String(error),
+            error: error,
           });
         });
 

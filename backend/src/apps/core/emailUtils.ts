@@ -146,7 +146,7 @@ export async function dispatchEmailEventForEmailId(emailId: string): Promise<voi
   } catch (error) {
     logger.error('[dispatchEmailEventForEmailId] Failed to dispatch EMAIL event', {
       emailId,
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 }

@@ -77,8 +77,10 @@ export class MicrosoftAuthenticator extends BaseAuthenticator {
 
           logger.warn('Microsoft webhook clientState missing from credentials');
           return { authenticated: false };
-        } catch {
-          // If credentials can't be parsed, fail closed.
+        } catch (error) {
+          // If credentials can't be parsed, fail closed — but log it, or a
+          // rotated-credential outage looks exactly like an attack.
+          logger.error('microsoft_webhook_auth_failed', { error });
           return { authenticated: false };
         }
       }

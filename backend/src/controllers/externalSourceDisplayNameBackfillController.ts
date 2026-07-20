@@ -169,7 +169,7 @@ export class ExternalSourceDisplayNameBackfillController {
     } catch (error) {
       logger.error(`${TAG} Error during backfill`, {
         triggeredBy,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
         stack: error instanceof Error ? error.stack : undefined,
       });
       const response: ApiResponse = {

@@ -425,7 +425,10 @@ export class EmailService {
       });
 
       // Re-index so search reflects the cleaned description.
-      this.pushVespaJobForTicket(ticketId, userId).catch(() => {});
+      this.pushVespaJobForTicket(ticketId, userId).catch((error) => {
+        // Swallowing this leaves search permanently stale for the ticket.
+        logger.error('ticket_vespa_reindex_failed', { ticketId, userId, error });
+      });
       logger.info(`[EmailService] Ticket description enriched`, { ticketId });
     } catch (error) {
       logger.warn('[EmailService] Ticket description enrichment failed — keeping raw body', {
@@ -802,7 +805,7 @@ export class EmailService {
         ticketId,
         conversationId,
         sessionId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
       return;
     }
@@ -1928,7 +1931,7 @@ export class EmailService {
         }
       } catch (error) {
         logger.error('[EmailService] Superposition check failed, proceeding', {
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
         });
       }
     }

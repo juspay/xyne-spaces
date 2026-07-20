@@ -206,7 +206,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       this.resolveLinkPreview(message.messageId, message.conversationId, message.content).catch(error => {
         logger.error('[MessagesSideEffect] Failed to resolve link preview:', {
           messageId,
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
         });
       });
     }
@@ -225,7 +225,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     }).catch(error => {
       logger.error('[UserActivityTracking] Failed to track message sent activity:', {
         messageId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     });
 
@@ -381,7 +381,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       } catch (error) {
         logger.error('[MessagesSideEffect] Failed to update lastReplyAt for participants:', {
           conversationId,
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
         });
       }
     }
@@ -394,7 +394,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
       const dmPrefetchedData = channelParticipants.length > 0
         ? await prefetchFilterData(channelParticipants.map(p => p.userId), channelId).catch(e => {
-            logger.error('[MessagesSideEffect] Failed to prefetch filter data for DM', { error: e instanceof Error ? e.message : String(e) });
+            logger.error('[MessagesSideEffect] Failed to prefetch filter data for DM', { error: e });
             return undefined;
           })
         : undefined;
@@ -546,7 +546,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // of channelParticipants, so this single round-trip replaces N×3 sequential fetches.
     const prefetchedData = channelParticipants.length > 0
       ? await prefetchFilterData(channelParticipants.map(p => p.userId), channelId).catch(e => {
-          logger.error('[MessagesSideEffect] Failed to prefetch filter data for channel', { error: e instanceof Error ? e.message : String(e) });
+          logger.error('[MessagesSideEffect] Failed to prefetch filter data for channel', { error: e });
           return undefined;
         })
       : undefined;
@@ -1915,7 +1915,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       });
     } catch (error) {
       logger.error('[MessagesSideEffectHandler] Failed to roll back lastReplyAt on delete', {
-        error: error instanceof Error ? error.message : String(error)
+        error: error
       });
     }
 
@@ -2072,7 +2072,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         eventType,
         payload,
         userIds,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }
@@ -2115,7 +2115,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     } catch (error) {
       logger.error('[emitUserMentionedToTwin] Failed to deliver USER_MENTIONED to twin', {
         workspaceId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }
@@ -2249,14 +2249,14 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           logger.error('[BOT-MENTION] Failed to execute bot', {
             botId,
             messageId: message.messageId,
-            error: botError instanceof Error ? botError.message : String(botError),
+            error: botError,
           });
         }
       }
     } catch (error) {
       logger.error('[BOT-MENTION] Error handling bot mentions', {
         messageId: message.messageId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }

@@ -57,7 +57,7 @@ class SurfaceLinkService {
         targetType,
         targetId,
         linkKind,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
       throw error;
     }
@@ -80,7 +80,7 @@ class SurfaceLinkService {
       logger.error('[SurfaceLinkService] Failed to delete links for source', {
         sourceType,
         sourceId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
       throw error;
     }
