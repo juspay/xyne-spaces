@@ -20,7 +20,6 @@ import {
   isExternalBot,
   createErrorEvent,
 } from '../index.js';
-import { processStreamAndCreateCanvas, createCanvasWithGeniusBlock, CANVAS_ENABLED_BOTS } from './canvas-creator.js';
 import {logger} from '@/utils/logger';
 
 const messageRepository = new MessageRepository();
@@ -65,8 +64,6 @@ export interface ExecutionRequest {
   sessionId?: string;
   /** Additional parameters for bot execution */
   parameters?: Record<string, unknown>;
-  /** Whether the query originated from a canvas genius block */
-  isFromCanvas?: boolean;
 }
 
 /**
@@ -155,37 +152,9 @@ class ExecutionOrchestrator {
     // Direct execution with streaming
     const rawStream = internalBotRuntime.executeDirect(entry, context, request);
 
-    // For DM queries from canvas-enabled bots, create canvas first
-    let canvasId: string | undefined;
-    let canvasUrl: string | undefined;
-    
-    if (!request.isFromCanvas && CANVAS_ENABLED_BOTS.includes(request.botId)) {
-        const canvasResult = await createCanvasWithGeniusBlock({
-            botId: request.botId,
-            userId: request.userId,
-            channelId: request.channelId,
-            conversationId: request.conversationId,
-            query: request.message,
-        });
-        canvasId = canvasResult.canvasId;
-        canvasUrl = canvasResult.canvasUrl;
-    }
-
-    // Wrap with canvas creation for Genius bot (must be BEFORE persistence to suppress content)
-    const canvasWrappedStream = await processStreamAndCreateCanvas(rawStream, {
-        botId: request.botId,
-        userId: request.userId,
-        channelId: request.channelId,
-        conversationId: request.conversationId,
-        query: request.message,
-        isFromCanvas: request.isFromCanvas,
-        canvasId,
-        canvasUrl,
-    });
-
-    // Wrap with persistence (canvas creator has already transformed the stream)
+    // Wrap with persistence
     const wrappedStream = this.wrapWithPersistence(
-        canvasWrappedStream,
+        rawStream,
         request,
         entry
     );
@@ -217,37 +186,9 @@ class ExecutionOrchestrator {
     // External bots always execute directly (no queue)
     const rawStream = externalBotRuntime.execute(entry, context, request);
 
-    // For DM queries from canvas-enabled bots, create canvas first
-    let canvasId: string | undefined;
-    let canvasUrl: string | undefined;
-    
-    if (!request.isFromCanvas && CANVAS_ENABLED_BOTS.includes(request.botId)) {
-        const canvasResult = await createCanvasWithGeniusBlock({
-            botId: request.botId,
-            userId: request.userId,
-            channelId: request.channelId,
-            conversationId: request.conversationId,
-            query: request.message,
-        });
-        canvasId = canvasResult.canvasId;
-        canvasUrl = canvasResult.canvasUrl;
-    }
-
-    // Wrap with canvas creation for Genius bot (must be BEFORE persistence to suppress content)
-    const canvasWrappedStream = await processStreamAndCreateCanvas(rawStream, {
-        botId: request.botId,
-        userId: request.userId,
-        channelId: request.channelId,
-        conversationId: request.conversationId,
-        query: request.message,
-        isFromCanvas: request.isFromCanvas,
-        canvasId,
-        canvasUrl,
-    });
-
-    // Wrap with persistence (canvas creator has already transformed the stream)
+    // Wrap with persistence
     const wrappedStream = this.wrapWithPersistence(
-        canvasWrappedStream,
+        rawStream,
         request,
         entry
     );
