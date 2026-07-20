@@ -16,6 +16,14 @@ export function searchUsers(users: User[], query: string, limit = 10): User[] {
 let _usersMapRef: User[] | null = null;
 let _usersMap = new Map<string, User>();
 
+// Force the users map to rebuild on next access. Call this after clearing the
+// underlying users array (e.g. on workspace switch) so the cached Map doesn't
+// keep old entries alive while the state-machine context is empty.
+export function invalidateUsersMapCache(): void {
+  _usersMapRef = null;
+  _usersMap = new Map();
+}
+
 function getUsersMap(users: User[]): Map<string, User> {
   if (_usersMapRef !== users) {
     _usersMapRef = users;

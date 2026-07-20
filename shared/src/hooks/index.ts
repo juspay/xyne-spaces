@@ -9,6 +9,7 @@ export {
   useUserSearch,
   useActiveUsers,
   useActiveUserSearch,
+  invalidateUsersMapCache,
 } from './useUsers.js';
 
 export {
@@ -55,7 +56,12 @@ export type { UseCachedQueryOptions } from './useCachedQuery.js';
 export { useCurrentUserRoleIds } from './useRoles.js';
 export type { Role } from './useRoles.js';
 
-export { ZeroFallbackProvider, useZeroFallbackConfig } from './ZeroFallbackContext.js';
+export {
+  ZeroFallbackProvider,
+  useZeroFallbackConfig,
+  ZeroFallbackContext,
+  DEFAULT_ZERO_FALLBACK_CONFIG,
+} from './ZeroFallbackContext.js';
 export type { ZeroFallbackConfig, FallbackPlatformServices } from './ZeroFallbackContext.js';
 
 export { useFallbackQuery, FallbackExecutorProvider, useFallbackExecutor } from './useFallbackQuery.js';
