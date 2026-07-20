@@ -22,7 +22,11 @@ export type FlowComponentType =
   | 'divider'
   | 'image'
   | 'link'
-  | 'table';
+  | 'table'
+  | 'plan'
+  | 'pr'
+  | 'pr_approval'
+  | 'call_schedule';
 
 export interface FlowComponent {
   id: string;
@@ -84,6 +88,10 @@ export interface SelectOption {
   disabled?: boolean;
   description?: string;
 }
+
+// Plan artifact types (ProposedTodo, ExecTodo, PlanProps, PlanPhase) are defined
+// in validation/flowSchema.ts and inferred from the zod schema so the runtime
+// contract and the TS types can't drift. Both are re-exported from the package root.
 
 // ============================================================================
 // FLOW STATE (v2 — adds loadingComponentIds)

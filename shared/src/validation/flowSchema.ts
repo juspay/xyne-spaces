@@ -238,6 +238,232 @@ export const tableComponentSchema = baseComponentSchema.extend({
   }).strict(),
 });
 
+// ── Plan artifact ─────────────────────────────────────────────────────────
+// The plan lifecycle is the discriminant: each `phase` carries only the todo
+// axis meaningful in it. `proposed` todos have an `included` pick flag (user-
+// toggleable); once the plan is approved the backend drops excluded todos and
+// re-tags the rest with an execution `status`. Inclusion and execution never
+// coexist on a todo, so the renderer branches once on phase — no cross-axis flag.
+export const proposedTodoSchema = z
+  .object({
+    id: z.string().min(1),
+    text: z.string(),
+    included: z.boolean(),
+  })
+  .strict();
+
+export const execTodoSchema = z
+  .object({
+    id: z.string().min(1),
+    text: z.string(),
+    status: z.enum(['queued', 'running', 'done', 'failed']),
+  })
+  .strict();
+
+export const planPropsSchema = z.discriminatedUnion('phase', [
+  z
+    .object({
+      phase: z.literal('proposed'),
+      title: z.string(),
+      desc: z.string().optional(),
+      todos: z.array(proposedTodoSchema),
+    })
+    .strict(),
+  z
+    .object({
+      phase: z.literal('executing'),
+      title: z.string(),
+      desc: z.string().optional(),
+      todos: z.array(execTodoSchema),
+    })
+    .strict(),
+  z
+    .object({
+      phase: z.literal('done'),
+      title: z.string(),
+      desc: z.string().optional(),
+      todos: z.array(execTodoSchema),
+    })
+    .strict(),
+]);
+
+export const planComponentSchema = baseComponentSchema.extend({
+  type: z.literal('plan'),
+  props: planPropsSchema,
+});
+
+// TS mirrors inferred from the schema so the two can't drift.
+export type ProposedTodo = z.infer<typeof proposedTodoSchema>;
+export type ExecTodo = z.infer<typeof execTodoSchema>;
+export type ExecTodoStatus = ExecTodo['status'];
+export type PlanProps = z.infer<typeof planPropsSchema>;
+export type PlanPhase = PlanProps['phase'];
+
+// ── PR artifact ───────────────────────────────────────────────────────────
+// A read-only status card for a pull request. Unlike the plan, the field set is
+// status-INVARIANT: every status carries the same fields, and the only thing
+// that varies by status is presentation (badge colour + label) — which is
+// derived in the renderer, never shipped on the wire. So a discriminated union
+// would be four byte-identical branches: pure boilerplate with no illegal-state
+// to prevent. The real invariant ("status is one of exactly four") is already
+// enforced by z.enum, so the robust, reality-matching shape is a flat object.
+//
+// The card is fully static: nothing lives in flow-state, there is no action.
+// Each status is a FRESH post (unique screenId); the card never updates in place.
+// ticketId/desc are optional (not every PR is ticket-linked or described). Each
+// URL is optional so "no link" is representable as `undefined` (honest) rather
+// than "" (a sentinel that conflates absent with empty); the renderer hides a
+// button whose URL is absent, and drops the footer when both are.
+export const prStatusSchema = z.enum(['created', 'merged', 'reverted', 'deleted']);
+
+export const prPropsSchema = z
+  .object({
+    status: prStatusSchema,
+    title: z.string().min(1),
+    ticketId: z.string().min(1).optional(),
+    desc: z.string().optional(),
+    detailsUrl: z.string().min(1).optional(),
+    bitbucketUrl: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const prComponentSchema = baseComponentSchema.extend({
+  type: z.literal('pr'),
+  props: prPropsSchema,
+});
+
+// TS mirrors inferred from the schema so the two can't drift.
+export type PrStatus = z.infer<typeof prStatusSchema>;
+export type PrProps = z.infer<typeof prPropsSchema>;
+
+// ── PR approval artifact (interactive HITL) ─────────────────────────────────
+// An interactive human-in-the-loop gate: the agent wants to perform a write
+// (merge a PR) and asks the human to Approve/Deny. Unlike the read-only `pr`
+// card, this one has a real flow-action round-trip.
+//
+// The lifecycle IS the discriminant — `phase`:
+//   pending  → shows the meta row + Approve/Deny buttons (real submit actions).
+//   resolved → shows the outcome badge (approved/denied), NO buttons.
+// This earns a discriminated union (unlike `pr`'s flat enum): `outcome` exists
+// EXACTLY when resolved and is unrepresentable while pending — the field set
+// genuinely changes by phase. It is a 2-member union (not pending|approved|
+// denied) because approved and denied carry an identical field set; only their
+// presentation differs (green check vs red cross), which is derived in the
+// renderer. The resolved outcome is agent-authoritative → read from props,
+// never client state (freeze-bug discipline), so a backend `updateMessage` to
+// the same screenId flips pending → resolved.
+//
+// Meta stats are structured; presentation (colours/labels) is derived in the
+// renderer, never on the wire. `diff` is an atomic pair (both-or-neither), so
+// "+N / −M" can never render half-populated. All meta fields are optional (a PR
+// may lack CI, a diffstat, or pending reviews), and `meta` itself is optional.
+export const prApprovalMetaSchema = z
+  .object({
+    ci: z.enum(['passing', 'failing', 'pending']).optional(),
+    diff: z
+      .object({
+        added: z.number().int().nonnegative(),
+        removed: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
+    reviewsPending: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export const prApprovalPropsSchema = z.discriminatedUnion('phase', [
+  z
+    .object({
+      phase: z.literal('pending'),
+      title: z.string().min(1),
+      url: z.string().min(1).optional(),
+      meta: prApprovalMetaSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      phase: z.literal('resolved'),
+      title: z.string().min(1),
+      url: z.string().min(1).optional(),
+      meta: prApprovalMetaSchema.optional(),
+      outcome: z.enum(['approved', 'denied']),
+    })
+    .strict(),
+]);
+
+export const prApprovalComponentSchema = baseComponentSchema.extend({
+  type: z.literal('pr_approval'),
+  props: prApprovalPropsSchema,
+});
+
+// TS mirrors inferred from the schema so the two can't drift.
+export type PrApprovalMeta = z.infer<typeof prApprovalMetaSchema>;
+export type PrApprovalProps = z.infer<typeof prApprovalPropsSchema>;
+export type PrApprovalPhase = PrApprovalProps['phase'];
+export type PrApprovalOutcome = Extract<PrApprovalProps, { phase: 'resolved' }>['outcome'];
+
+// ── Call schedule artifact (interactive proposal) ───────────────────────────
+// The agent proposes a call (title + attendees) with several start-time slots
+// and a duration switcher; the human picks a slot + duration and Approves.
+//
+// The lifecycle IS the discriminant — `phase`:
+//   proposed  → slots + duration switcher + Approve/Set-manually. The user's
+//               chosen { slotId, duration } lives in flow-state (travels with
+//               Approve); everything agent-authoritative stays in props.
+//   scheduled → one confirmed start + duration, no switcher, no buttons.
+// The field set genuinely changes by phase (proposed has `slots[]` + defaults;
+// scheduled has a single `start` + `duration` and NO slots), so this earns a
+// discriminated union — a flat shape would let a "scheduled" card still carry a
+// slots array. Resolved state is agent-authoritative → read from props, never
+// client state (freeze-bug discipline); a same-screenId `updateMessage` flips it.
+//
+// Slots carry START ONLY — the end time is DERIVED client-side from
+// `start + selectedDuration`, so the displayed range recomputes when the user
+// switches duration. `start` is an absolute UTC ISO string, formatted in the
+// viewer's local tz. Duration options (30/45/60) are fixed in the renderer, not
+// on the wire; `defaultDuration`/`defaultSlotId` are the agent's initial picks.
+export const durationMinutesSchema = z.union([z.literal(30), z.literal(45), z.literal(60)]);
+
+export const callSlotSchema = z
+  .object({
+    id: z.string().min(1),
+    start: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
+export const callSchedulePropsSchema = z.discriminatedUnion('phase', [
+  z
+    .object({
+      phase: z.literal('proposed'),
+      title: z.string().min(1),
+      attendees: z.array(z.string().min(1)),
+      slots: z.array(callSlotSchema).min(1),
+      defaultSlotId: z.string().min(1).optional(),
+      defaultDuration: durationMinutesSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      phase: z.literal('scheduled'),
+      title: z.string().min(1),
+      attendees: z.array(z.string().min(1)),
+      start: z.string().datetime({ offset: true }),
+      duration: durationMinutesSchema,
+    })
+    .strict(),
+]);
+
+export const callScheduleComponentSchema = baseComponentSchema.extend({
+  type: z.literal('call_schedule'),
+  props: callSchedulePropsSchema,
+});
+
+// TS mirrors inferred from the schema so the two can't drift.
+export type CallSlot = z.infer<typeof callSlotSchema>;
+export type DurationMinutes = z.infer<typeof durationMinutesSchema>;
+export type CallScheduleProps = z.infer<typeof callSchedulePropsSchema>;
+export type CallSchedulePhase = CallScheduleProps['phase'];
+
 // Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
@@ -254,6 +480,10 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     imageComponentSchema,
     linkComponentSchema,
     tableComponentSchema,
+    planComponentSchema,
+    prComponentSchema,
+    prApprovalComponentSchema,
+    callScheduleComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),

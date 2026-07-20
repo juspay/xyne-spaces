@@ -17,6 +17,7 @@
     "resolvePackageJsonExports": true,
     "paths": {
       "@/*": ["./src/*"],
+      "@xyne/icons/*": ["../icons/dist/*"],
       "@xyne/shared/*": ["../shared/dist/*"],
       "react-router-dom-actual": ["./node_modules/react-router-dom"]
     },

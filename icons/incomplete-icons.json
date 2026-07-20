@@ -1,0 +1,1449 @@
+[
+  {
+    "name": "activity",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "airbnb",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "alphabet-abc-lowercase",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "alphabet-abc-uppercase",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "api",
+    "missing": [
+      "Contrast",
+      "Duo Stroke"
+    ]
+  },
+  {
+    "name": "arc-browser",
+    "missing": [
+      "Solid",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "at-mark",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "atom",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "barchart-line",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "baseline",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "behance",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "bluetooth-connected",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "bluetooth-off",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "bluetooth-on",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "bluetooth-signal",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "bold",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "burger-menu-four",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "burger-menu-three",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "burger-menu-two",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "check-tick-double",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "check-tick-single",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "chevron-big-down",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "chevron-big-left",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "chevron-big-right",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "chevron-big-up",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "chevron-down",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "chevron-left",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "chevron-right",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "chevron-sort-horizontal",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "chevron-sort-vertical",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "chevron-up",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "circle",
+    "missing": [
+      "Solid",
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "circle-dashed",
+    "missing": [
+      "Solid",
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "circle-dotted",
+    "missing": [
+      "Solid",
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "code",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "coinbase",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "command-cmd",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "command-cmd-k",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "copperx",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "crop",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "crypto-currency-bitcoin",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "crypto-currency-eurc",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "crypto-currency-polygon",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "crypto-currency-usdc",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "crypto-currency-usdt",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "crypto-exchange",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "curly-braces-code-check",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "curly-braces-code-default",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "curly-braces-code-dots",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "curly-braces-code-plus",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "curly-braces-code-remove",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "currency-sign-dollar",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "currency-sign-euro",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "currency-sign-franc",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "currency-sign-pound",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "currency-sign-ruble",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "currency-sign-rupees",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "currency-sign-yuan",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "divide-default",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "dock-02",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "dragable-six-dots",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "egg-default",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "encrypted-lock",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "equals-cancel",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "equals-default",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "exclamation-mark",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "face-id",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "filter-lines",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "focus-target",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "font-aa",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "font-tt",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "frame",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "godly-website",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "google",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-bar-line",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-bubblehart",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-chart-average",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-chart-gantt",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-chart-maximum",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-chart-median",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-chart-minimum",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-chart-waterfall",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-trend-line",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-trend-line-downward",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "graph-trend-line-upward",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "hashtag",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "heading",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "heading-h1",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "heading-h2",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "heading-h3",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "heading-h4",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "heading-h5",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "heading-h6",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "ipad",
+    "missing": [
+      "Solid",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "iphone",
+    "missing": [
+      "Solid",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "italic",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "layer-one",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "leetcode",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "link-broken-slant",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "link-chain-horizontal",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "link-chain-slant",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "link-horizontal",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "link-horizontal-broken",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "link-slant",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-arrow-down",
+    "missing": [
+      "Contrast"
+    ]
+  },
+  {
+    "name": "list-arrow-up",
+    "missing": [
+      "Contrast"
+    ]
+  },
+  {
+    "name": "list-cancel",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-check",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-check-double",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-code",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-default",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-descending",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-long",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-music-note",
+    "missing": [
+      "Contrast"
+    ]
+  },
+  {
+    "name": "list-number",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-plus",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-remove",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-short",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-sort-alphabetically",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "list-text-wrap",
+    "missing": [
+      "Contrast"
+    ]
+  },
+  {
+    "name": "math",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "maximize-two-arrow",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "meta",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "microsoft-edge",
+    "missing": [
+      "Solid",
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "minimize-two-arrow",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "minus-default",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "multiple-cross-cancel-default",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "npm-logo",
+    "missing": [
+      "Solid",
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "number-123",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "openai",
+    "missing": [
+      "Solid",
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "paperclip-slant",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "paperclip-vertical",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "pause-big",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "pause-small",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "pinterest",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "play-big",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "play-small",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "plus-default",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "prescription-rx",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "priority-high",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "priority-highest",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "priority-low",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "priority-lowest",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "priority-major",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "priority-medium",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "priority-minor",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "question-mark",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "react",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "reminder-anticlockwise",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "reminder-clockwise",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "rive",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "rss-simple",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "scissors-default",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "scissors-left",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "scissors-left-cut",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "scissors-right",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "scissors-right-cut",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "scribble",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "sidebar-left-dotted",
+    "missing": [
+      "Solid",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "sidebar-right-dotted",
+    "missing": [
+      "Solid",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "snowflake",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "solana-fm",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "spinner",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "square",
+    "missing": [
+      "Solid",
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "square-dashed",
+    "missing": [
+      "Solid",
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "square-dotted",
+    "missing": [
+      "Solid",
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "stop-big",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "stop-small",
+    "missing": [
+      "Duo Stroke",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "strike-through",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "svg",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "text",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "text-cursor",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "text-cursor-alphabet",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "threads-instagram",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "three-dots-menu-horizontal",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "three-dots-menu-vertical",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "tiktok",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "translate",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "underline",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "vison-pro-3-d",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "walletconnect",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "webhook",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "wifi-exclamation-mark",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "wifi-off",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  },
+  {
+    "name": "wifi-on",
+    "missing": [
+      "Solid",
+      "Contrast",
+      "Duo Solid"
+    ]
+  }
+]
