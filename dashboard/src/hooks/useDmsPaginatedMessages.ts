@@ -3,7 +3,8 @@ import { QueryResultType } from '@rocicorp/zero';
 import { useCachedQuery } from './useCachedQuery';
 import { useZero } from './useZero';
 import { queries } from '../zero/queries';
-import { useAllVisibleChannels } from './useChannels';
+import { useAllVisibleChannels, useUserChannelStatuses } from './useChannels';
+import { ChannelScopeType } from '@xyne/shared';
 
 type DmStatsPageResult = QueryResultType<typeof queries.dmChannelsLatestMessagesPaginated>;
 
@@ -28,6 +29,8 @@ interface UseDmsPaginatedMessagesOptions {
 interface UseDmsPaginatedMessagesReturn {
   messagesMap: Map<string, DmConversation>;
   channels: DmChannel[];
+  visibleDmChannels: ReturnType<typeof useAllVisibleChannels>;
+  userChannelStatuses: ReturnType<typeof useUserChannelStatuses>;
   hasMore: boolean;
   hasMoreBefore: boolean;
   loadMore: () => void;
@@ -61,8 +64,18 @@ export const useDmsPaginatedMessages = (
   // Keep a ref so jumpToChannel can read the current visible channels list
   // synchronously without a stale closure, without re-creating the callback.
   const visibleChannels = useAllVisibleChannels();
+  const userChannelStatuses = useUserChannelStatuses();
   const visibleChannelsRef = useRef(visibleChannels);
   visibleChannelsRef.current = visibleChannels;
+  const visibleDmChannels = useMemo(
+    () =>
+      visibleChannels.filter(
+        channel =>
+          channel.scopeType === ChannelScopeType.DM ||
+          channel.scopeType === ChannelScopeType.GROUP_DM,
+      ),
+    [visibleChannels],
+  );
 
   // ── Rows ─────────────────────────────────────────────────────────────────────
   // Ref mirrors state so async callbacks always read current value without stale closures.
@@ -321,6 +334,8 @@ export const useDmsPaginatedMessages = (
   return {
     messagesMap,
     channels,
+    visibleDmChannels,
+    userChannelStatuses,
     hasMore,
     hasMoreBefore,
     loadMore,
