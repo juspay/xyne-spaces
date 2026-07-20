@@ -332,6 +332,7 @@ export class MicrosoftAuthController {
           throw new Error('No ID token received from Microsoft');
         }
         const idTokenClaims = await this.verifyMicrosoftIdToken(idToken);
+        logger.info(`[${requestId}] Verified Microsoft ID token claims`, { claims: idTokenClaims.xms_edov });
         const emailIsDomainVerified = idTokenClaims.xms_edov === true;
 
         if (!emailIsDomainVerified) {
@@ -485,10 +486,24 @@ export class MicrosoftAuthController {
           path: '/',
         };
 
-        // Set auth token cookie
-        res.cookie('google_access_token', customToken, {
+        // Set pending-auth cookie. This must be a pending-auth JWT (not the
+        // session customToken): loginWorkspace/createOrg read it via
+        // parsePendingAuthCookie, which needs providerUserId AND provider — the
+        // session token has neither, so it would mislabel the user as GOOGLE and
+        // drop the refresh token. Mirrors Google's web callback + MS electron.
+        res.cookie('google_access_token', jwt.sign({
+          providerUserId: microsoftUserData.providerUserId,
+          email: microsoftUserData.email,
+          name: microsoftUserData.name,
+          picture: microsoftUserData.picture,
+          provider: 'microsoft',
+          refreshToken: refreshToken ?? null,
+          accessToken: accessToken ?? null,
+          accessTokenExpiry: accessTokenExpiry?.toISOString(),
+          connectCalendar: peekedState?.connectCalendar,
+        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           ...cookieOptions,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
         });
 
         // Set session ID cookie
@@ -1169,15 +1184,6 @@ export class MicrosoftAuthController {
         `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
       );
 
-      const customToken = jwtService.generateToken({
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        picture: user.picture ?? undefined,
-        workspaceId: user.workspaceId ?? undefined,
-        memberId: user.orgMemberId ?? undefined,
-      });
-
       // Create a user session with the Microsoft refresh token (held on the
       // backend so it can refresh access tokens without involving the mobile app).
       let sessionId: string | null = null;
@@ -1227,9 +1233,25 @@ export class MicrosoftAuthController {
         path: '/',
       };
 
-      res.cookie('google_access_token', customToken, {
+      // Pending-auth cookie must carry provider identity (providerUserId +
+      // provider) so a later loginWorkspace / createOrg / acceptInvitation call
+      // resolves the Microsoft user correctly. Mirrors Google's mobile exchange.
+      const mobileExpiresIn = token.expires_in as number | undefined;
+      res.cookie('google_access_token', jwt.sign({
+        providerUserId: profile.id,
+        email,
+        name: profile.displayName,
+        picture: undefined,
+        provider: 'microsoft',
+        refreshToken: refreshToken ?? null,
+        accessToken: accessToken ?? null,
+        accessTokenExpiry: mobileExpiresIn
+          ? new Date(Date.now() + mobileExpiresIn * 1000).toISOString()
+          : undefined,
+        connectCalendar: req.body?.connectCalendar === true,
+      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         ...cookieOptions,
-        maxAge: config.jwt.expirationSeconds * 1000,
+        maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
       });
 
       if (sessionId) {
