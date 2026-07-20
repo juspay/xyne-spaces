@@ -1,7 +1,6 @@
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import * as crypto from 'crypto';
 import { keychain } from '../keychain';
 import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
@@ -13,47 +12,8 @@ export async function setupMTLS() {
 
     // Certificate Selection Handler for mTLS (app-level)
     // This handles client certificate selection for requests from webContents
-    app.on('certificate-error', (event, _webContents, _url, error, certificate, callback) => {
-        log.info(`[mTLS] certificate-error event fired for ${_url}: ${error}`);
-        if (error === 'net::ERR_CERT_AUTHORITY_INVALID') {
-            try {
-                const caCertName = config.USER_DATA_SUFFIX === '-sandbox' ? 'ca.sbx.cert' : 'ca.cert';
-                const caPath = path.join(app.getAppPath(), 'certs', caCertName);
-
-                if (fs.existsSync(caPath)) {
-                    const caContent = fs.readFileSync(caPath);
-                    log.info('[mTLS] Loaded CA certificate for verification.', caContent);
-                    const caCert = new crypto.X509Certificate(caContent);
-                    const serverCert = new crypto.X509Certificate(certificate.data);
-
-                    if (serverCert.verify(caCert.publicKey)) {
-                        event.preventDefault();
-                        log.info('[mTLS] Certificate verified successfully against our CA. Proceeding.');
-                        callback(true);
-                        return;
-                    } else {
-                        throw new Error('Certificate verification failed');
-                    }
-                } else {
-
-                    throw new Error('CA certificate not found');
-                }
-            } catch (e) {
-                log.error('Certificate verification failed:', e);
-                Logger.logError(EnrollmentEvent.SSL_ERROR, e, { url: _url });
-                callback(false);
-                return;
-            }
-        }
-
-        // For self-signed certs (e.g. simulation server), we might need to simulate trust
-        // if the system doesn't trust the simulation Root CA yet.
-        // However, usually we should let the OS handle trust.
-        // If the server certificate is self-signed/untrusted, we might need to bypass:
-        // event.preventDefault();
-        // callback(true);
-        // But for now, we assume the user has trusted the Root CA as per instructions.
-        log.warn('[mTLS] Certificate error encountered. Relying on OS trust settings.', error);
+    app.on('certificate-error', (_event, _webContents, url, error, _certificate, callback) => {
+        Logger.logError(EnrollmentEvent.SSL_ERROR, error, { url });
         callback(false);
     });
 
