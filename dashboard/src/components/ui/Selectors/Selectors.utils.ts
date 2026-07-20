@@ -52,7 +52,7 @@ export const detectMentionTrigger = (editor: Editor): TriggerMatch | null => {
   const { from } = editor.state.selection;
   const textBefore = getTextBeforeCursor(editor);
   // Allow dot in query so firstName.lastName usernames work (e.g. @john. still shows dropdown)
-  const mentionMatch = textBefore.match(/(?:^|[\s\u200B])@([\w\s.-]*)$/);
+  const mentionMatch = textBefore.match(/(?:^|[\s\u200B(])@([\w\s.-]*)$/);
   // Close mention box if:
   // 1. Space comes immediately after @ (e.g., "@ ")
   // 2. Two consecutive spaces are encountered anywhere after @ (e.g., "@john  ")
