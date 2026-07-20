@@ -1,6 +1,7 @@
 import { MouseEvent, ReactElement, useMemo, useRef } from 'react';
 import { Sparkles, Pencil, Wand2, Loader2 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
+import { findEmailAddress, parseFirstEmailAddress } from '../../../utils/emailAddress';
 import useMeasure from '../../../hooks/useMeasure';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
@@ -62,13 +63,25 @@ const formatTime = (date: Date): string =>
     hour12: true,
   });
 
-const extractSenderEmail = (fromEmailAddress: string | null | undefined): string | null => {
-  if (!fromEmailAddress) return null;
-  const bracketMatch = fromEmailAddress.match(/<([^>]+)>/);
-  if (bracketMatch && bracketMatch[1]) return bracketMatch[1].trim();
-  const plainMatch = fromEmailAddress.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-  if (plainMatch && plainMatch[1]) return plainMatch[1];
-  return null;
+// A "From" header can be "Rahul Kumar <john.doe@gmail.com>", a bare address
+// like "bitbucket-no-reply@juspay.email", an RFC 2047 encoded-word, or a list of
+// several addresses — parseFirstEmailAddress handles all of those and returns
+// the first sender. The name is null for bare addresses, so the row falls back
+// to showing the email (Gmail-style).
+const parseSender = (
+  fromEmailAddress: string | null | undefined,
+): { name: string | null; email: string | null } => {
+  if (!fromEmailAddress) return { name: null, email: null };
+  const { name, email } = parseFirstEmailAddress(fromEmailAddress);
+  // Fall back to a loose scan for values that aren't a well-formed address
+  // token at all, e.g. "Wrapper text (user@domain)".
+  const resolvedEmail = email ?? findEmailAddress(fromEmailAddress);
+  // Skip a "display name" that is just the address repeated (avoids "x@y <x@y>").
+  // A real name that happens to contain "@" is kept — we only compare equality,
+  // not a blanket "contains @" check.
+  const resolvedName =
+    name && name.toLowerCase() !== (resolvedEmail ?? '').toLowerCase() ? name : null;
+  return { name: resolvedName, email: resolvedEmail };
 };
 
 export const TicketListRow = ({
@@ -87,7 +100,10 @@ export const TicketListRow = ({
 
   const metadata = ticket.metadata as { fromEmailAddress?: string | null } | null | undefined;
   const fromEmailAddress = metadata?.fromEmailAddress;
-  const senderEmail = useMemo(() => extractSenderEmail(fromEmailAddress), [fromEmailAddress]);
+  const { name: senderName, email: senderEmail } = useMemo(
+    () => parseSender(fromEmailAddress),
+    [fromEmailAddress],
+  );
 
   // Display the date that drives the row's sort position so the column
   // matches the order users see (Gmail-style: most recent activity first).
@@ -96,6 +112,11 @@ export const TicketListRow = ({
   }, [ticket.lastEmailAt]);
 
   const displayEmail = senderEmail || (showExtraFields ? fromEmailAddress?.trim() || null : null);
+  // Show the sender's display name when the email carries one (like Gmail),
+  // otherwise fall back to the email address.
+  const displaySender = senderName || displayEmail;
+  // Keep the full identity on hover even when only the name is shown.
+  const senderTitle = senderName && displayEmail ? `${senderName} <${displayEmail}>` : displayEmail;
   const statusLabel = isHumanInterventionTicket
     ? 'Human Intervention'
     : (ticket.stageName ?? formatStatusText(ticket.status));
@@ -247,9 +268,13 @@ export const TicketListRow = ({
             </Tooltip>
           )}
         </div>
+        {/* 280px is the preferred width of the sender column, not a floor:
+            `shrink` + `min-w-0` let it give space back on narrow rows so the
+            title (the only other flexible item in the row) isn't the sole thing
+            squeezed to zero. The sender span inside already ellipsizes. */}
         {!shouldHideDetails && (
-          <div className='w-[200px] flex items-center gap-2 justify-end flex-shrink-0'>
-            {displayEmail && (
+          <div className='w-[280px] min-w-0 shrink flex items-center gap-2 justify-end'>
+            {displaySender && (
               <>
                 <span className='size-1 rounded-full bg-muted flex-shrink-0' />
                 <span
@@ -259,9 +284,20 @@ export const TicketListRow = ({
                       ? 'text-foreground font-semibold'
                       : 'text-muted-foreground font-normal',
                   )}
-                  title={displayEmail}
+                  title={senderTitle ?? undefined}
                 >
-                  {displayEmail}
+                  {senderName ? (
+                    <>
+                      {senderName}
+                      {displayEmail && (
+                        <span className='ml-1 font-normal text-muted-foreground'>
+                          {`<${displayEmail}>`}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    displayEmail
+                  )}
                 </span>
               </>
             )}

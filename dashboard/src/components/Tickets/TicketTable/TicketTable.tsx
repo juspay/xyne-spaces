@@ -12,7 +12,7 @@ import {
   GridReadyEvent,
 } from 'ag-grid-community';
 import type { Ticket, TicketTag } from '@xyne/shared';
-import { BoardType } from '@xyne/shared';
+import { BoardType, isDeskChannelType } from '@xyne/shared';
 import { toast } from 'sonner';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
@@ -37,6 +37,7 @@ import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { useAllChannels } from '../../../hooks/useChannels';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -161,6 +162,11 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
+
+  // Aggregate ticket lists mix channels, so resolve each row's channel type to
+  // route desk/support tickets to the Support desk instead of the chat panel.
+  const allChannels = useAllChannels();
+  const channelsById = useMemo(() => new Map(allChannels.map(c => [c.id, c])), [allChannels]);
 
   // NON_LINEAR boards reject direct ticket.update — use the transition mutator instead.
   const routeStageChange = useCallback(
@@ -289,18 +295,27 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             }
 
             const currentUrl = window.location.pathname + window.location.search;
+            const navState = { state: { fromMyTickets: false, returnToUrl: currentUrl } };
+
+            // Desk/support tickets (EMAIL / SLACK / APP channels) open in the
+            // Support desk email view (/support/:channelId/:xyneId), not chat.
+            const ticketChannelType = channelsById.get(params.data.channelId)?.type;
+            if (isDeskChannelType(ticketChannelType)) {
+              // Deep-link when we have the xyneId; else fall back to the channel's
+              // support inbox — a desk ticket must never open in chat.
+              const supportRoute = params.data.xyneId
+                ? `/support/${params.data.channelId}/${params.data.xyneId}`
+                : `/support/${params.data.channelId}`;
+              void navigate(supportRoute, navState);
+              return;
+            }
 
             // On mobile: navigate directly to ThreadMessages route with details tab
             // On desktop: use tab-based route for expanded view in ConversationPannel
             if (isMobile) {
               void navigate(
                 `${baseRoute}/${params.data.channelId}/${params.data.conversationId}/${params.data.id}?selectedTab=details`,
-                {
-                  state: {
-                    fromMyTickets: false,
-                    returnToUrl: currentUrl,
-                  },
-                },
+                navState,
               );
             } else {
               void navigate(
@@ -309,12 +324,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
                   ticketId: params.data.id,
                   conversationId: params.data.conversationId,
                 }),
-                {
-                  state: {
-                    fromMyTickets: false,
-                    returnToUrl: currentUrl,
-                  },
-                },
+                navState,
               );
             }
           };
@@ -586,7 +596,16 @@ export const TicketTable: React.FC<TicketTableProps> = ({
       ),
       ...(extraColumns ?? []),
     ];
-  }, [ticketTags, zero, visibleColumns, users, availableTags, onTitleClick, extraColumns]);
+  }, [
+    ticketTags,
+    zero,
+    visibleColumns,
+    users,
+    availableTags,
+    onTitleClick,
+    extraColumns,
+    channelsById,
+  ]);
 
   const handleBulkUpdate = useCallback(
     (updates: Partial<Ticket> = {}) => {
