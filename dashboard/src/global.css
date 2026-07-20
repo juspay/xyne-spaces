@@ -85,6 +85,7 @@
     --mention-channel-hover-bg: rgba(4, 55, 77, 0.1);
     --mention-group-color: #3d74b6;
     --search-result-highlight-bg: #fde68a;
+    --search-result-active-bg: #fb923c;
     --link-color: #2563eb;
     --link-hover-color: #1d4ed8;
     --mobile-panel-bg: #ffffff;
@@ -201,6 +202,7 @@
     --mention-channel-hover-bg: rgba(4, 55, 77, 0.1);
     --mention-group-color: #3d74b6;
     --search-result-highlight-bg: #fde68a;
+    --search-result-active-bg: #fb923c;
     --link-color: #2563eb;
     --link-hover-color: #1d4ed8;
     --mobile-panel-bg: #e9ecf5;
@@ -309,6 +311,7 @@
     --mention-channel-hover-bg: rgba(96, 165, 250, 0.15);
     --mention-group-color: #60a5fa;
     --search-result-highlight-bg: rgba(250, 204, 21, 0.35);
+    --search-result-active-bg: rgba(251, 146, 60, 0.75);
     --link-color: #2563eb;
     --link-hover-color: #1d4ed8;
     --mobile-panel-bg: #18191b;
@@ -3766,4 +3769,43 @@ img.inline-emoji,
 [data-theme="midnight"] .email-read-card {
   --card: 216 5% 18.5%;
   --background: 216 5% 18.5%;
+}
+
+/* ----------------------------
+   File viewer in-file search (Cmd+F)
+   Marks are injected into highlight.js HTML as raw strings (see
+   FileViewer/search/htmlHighlight.ts), so these classes cannot be Tailwind
+   utilities — Tailwind only scans source, not runtime-built markup.
+   ---------------------------- */
+.xyne-find-match {
+  background-color: var(--search-result-highlight-bg, #fde68a);
+  color: inherit;
+  border-radius: 0.125rem;
+  /* hljs tokens set their own color; keep the match readable over the amber. */
+  padding: 0;
+}
+
+.xyne-find-match--active {
+  background-color: var(--search-result-active-bg, #fb923c);
+  box-shadow: 0 0 0 1px var(--search-result-active-bg, #fb923c);
+}
+
+/* Grid (CSV/Excel) cell holding the active match. Cells clip their content, so
+   this outline tells the user which cell matched even when the match text is
+   past the ellipsis. */
+[data-xyne-find-active-cell="true"] {
+  box-shadow: inset 0 0 0 2px var(--search-result-active-bg, #fb923c);
+  border-radius: 2px;
+}
+
+/* Full-DOM viewers (DOCX) paint matches via the CSS Custom Highlight API rather
+   than <mark> injection, so the third-party markup is never mutated. */
+::highlight(xyne-find) {
+  background-color: var(--search-result-highlight-bg, #fde68a);
+  color: inherit;
+}
+
+::highlight(xyne-find-active) {
+  background-color: var(--search-result-active-bg, #fb923c);
+  color: inherit;
 }

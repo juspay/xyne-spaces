@@ -288,6 +288,38 @@ export const shortcuts = {
     scope: 'viewer',
     preventDefault: false,
   },
+  // 'global.findInChannel' also binds mod+f, but the viewer pushes the 'viewer'
+  // scope while open and resolveShortcut ranks scope above priority — so this
+  // wins whenever a file preview is on screen, and channel find is untouched
+  // otherwise. allowInInputs keeps mod+f working while the find input is focused
+  // (it refocuses/selects), and preventDefault suppresses the browser's own find.
+  'viewer.find': {
+    keys: 'mod+f',
+    scope: 'viewer',
+    priority: 200,
+    allowInInputs: true,
+    preventDefault: true,
+    description: 'Find in file',
+    category: 'Viewer',
+  },
+  'viewer.findNext': {
+    keys: 'mod+g',
+    scope: 'viewer',
+    priority: 200,
+    allowInInputs: true,
+    preventDefault: true,
+    description: 'Find next match',
+    category: 'Viewer',
+  },
+  'viewer.findPrevious': {
+    keys: 'mod+shift+g',
+    scope: 'viewer',
+    priority: 200,
+    allowInInputs: true,
+    preventDefault: true,
+    description: 'Find previous match',
+    category: 'Viewer',
+  },
 
   // ===== MODAL SHORTCUTS =====
   'modal.close': {

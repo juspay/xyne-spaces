@@ -25,6 +25,8 @@ import 'pdfjs-dist/web/pdf_viewer.css';
 import { ChevronUp, ChevronDown, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useFileSearchContext } from './search';
+import { MIN_QUERY_LENGTH } from './search';
 
 // Worker is copied to /pdfjs/pdf.worker.min.js by vite-plugin-static-copy
 // (see dashboard/vite.config.ts). Assigned at module import and re-asserted
@@ -41,10 +43,38 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
   initialPage,
   highlightQuery,
   onInteractionStateChange,
+  searchable,
 }) => {
   pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
 
   const { isMobile } = usePlatform();
+  const search = useFileSearchContext();
+
+  // pdf.js owns PDF search: it finds across all pages (handling its own page
+  // virtualisation) and scrolls/highlights the current match itself. The find
+  // bar just feeds it the query and drives next/prev. Refs let the eventBus
+  // listeners (registered once per file) read the latest context callbacks.
+  const reportMatchStateRef = useRef(search?.reportMatchState);
+  reportMatchStateRef.current = search?.reportMatchState;
+  const userSearchActiveRef = useRef(false);
+
+  const searchQuery = search?.query ?? '';
+  const searchCaseSensitive = search?.options.caseSensitive ?? false;
+  const searchWholeWord = search?.options.wholeWord ?? false;
+  // The find bar owns `query` and clears it on close, so query length alone
+  // signals a user search — matching the other viewers (no isOpen check).
+  const isUserSearching = searchQuery.trim().length >= MIN_QUERY_LENGTH;
+  // Latest find params for the navigator, whose closures are registered once.
+  const findParamsRef = useRef({
+    query: searchQuery,
+    caseSensitive: searchCaseSensitive,
+    wholeWord: searchWholeWord,
+  });
+  findParamsRef.current = {
+    query: searchQuery,
+    caseSensitive: searchCaseSensitive,
+    wholeWord: searchWholeWord,
+  };
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   // pdf.js requires a separate inner div (class `pdfViewer`) to hold the page
@@ -168,13 +198,18 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
       setScalePct(Math.round(evt.scale * 100));
       reportInteraction();
     });
-    // Diagnostic: how many text-layer matches the citation snippet produced.
-    // 0 → the PDF has no matching text (image-only/scanned PDF, or the snippet
-    // drifted from the text layer); >0 → matches found and highlighted.
-    eventBus.on('updatefindmatchescount', (evt: { matchesCount?: { total?: number } }): void => {
-      // eslint-disable-next-line no-console
-      console.debug('[PdfViewer] citation find matches:', evt?.matchesCount?.total ?? 0);
-    });
+    // pdf.js reports match counts here as it scans pages. `current` is 1-based
+    // (0 when none). Feed the find bar its N/M while the user is searching; a 0
+    // total on a digital PDF that has the text usually means an image-only /
+    // scanned page. Both find events carry the same matchesCount shape.
+    const onFindCount = (evt: { matchesCount?: { current?: number; total?: number } }): void => {
+      if (!userSearchActiveRef.current) return;
+      const current = evt?.matchesCount?.current ?? 0;
+      const total = evt?.matchesCount?.total ?? 0;
+      reportMatchStateRef.current?.(current > 0 ? current - 1 : 0, total);
+    };
+    eventBus.on('updatefindmatchescount', onFindCount);
+    eventBus.on('updatefindcontrolstate', onFindCount);
 
     let cancelled = false;
     let loadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null;
@@ -248,12 +283,31 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
 
   // Step 2: dispatch the query to pdf.js's find controller, which highlights
   // matches in the transparent text layer (textLayerMode: 2) and scrolls the
-  // first match into view. Empty query resets any prior highlight. Digital PDFs
-  // (real text layer) highlight; image-only scanned PDFs won't match.
+  // current match into view. The user's find bar takes precedence over the
+  // citation snippet; when the user isn't searching, we fall back to the
+  // citation query. Digital PDFs (real text layer) highlight; image-only
+  // scanned PDFs won't match.
   useEffect((): void => {
     if (loadState !== 'ready') return;
     const eb = instanceRef.current?.eventBus;
     if (!eb) return;
+
+    if (isUserSearching) {
+      userSearchActiveRef.current = true;
+      eb.dispatch('find', {
+        source: null,
+        type: '',
+        query: searchQuery.trim(),
+        highlightAll: true,
+        findPrevious: false,
+        caseSensitive: searchCaseSensitive,
+        entireWord: searchWholeWord,
+      });
+      return;
+    }
+
+    // Not user-searching: re-assert the citation query (or clear).
+    userSearchActiveRef.current = false;
     const trimmed = query.trim();
     if (trimmed.length < 2) {
       eb.dispatch('find', {
@@ -276,7 +330,43 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
       caseSensitive: false,
       entireWord: false,
     });
-  }, [query, loadState]);
+  }, [isUserSearching, searchQuery, searchCaseSensitive, searchWholeWord, query, loadState]);
+
+  // ── Find bar integration ────────────────────────────────────────────
+  // Register as the find bar's target (so it appears for PDFs) and take over
+  // next/prev by dispatching pdf.js "find again". Registered once per file;
+  // the handlers read the latest query/options from a ref.
+  const registerTarget = search?.registerTarget;
+  const registerNavigator = search?.registerNavigator;
+  useEffect((): (() => void) | undefined => {
+    if (searchable === false || loadState !== 'ready' || !registerTarget || !registerNavigator) {
+      return undefined;
+    }
+    const untarget = registerTarget();
+    const dispatchAgain = (findPrevious: boolean): void => {
+      const eb = instanceRef.current?.eventBus;
+      const { query: q, caseSensitive, wholeWord } = findParamsRef.current;
+      const trimmed = q.trim();
+      if (!eb || trimmed.length < MIN_QUERY_LENGTH) return;
+      eb.dispatch('find', {
+        source: null,
+        type: 'again',
+        query: trimmed,
+        highlightAll: true,
+        findPrevious,
+        caseSensitive,
+        entireWord: wholeWord,
+      });
+    };
+    const unnav = registerNavigator({
+      next: () => dispatchAgain(false),
+      prev: () => dispatchAgain(true),
+    });
+    return (): void => {
+      untarget();
+      unnav();
+    };
+  }, [searchable, loadState, registerTarget, registerNavigator]);
 
   // ── Re-jump / re-highlight when the same citation is re-clicked ─────
   // CitationLink fires this when its target equals the current URL (a no-op for
