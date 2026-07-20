@@ -19,6 +19,7 @@ import { ExternalSource, AttachmentEntityType } from '@prisma/client';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
+import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { decrypt } from '@/services/encryptionService';
 import { uploadFiles } from '@/services/fileUploadService';
 import { repositories } from '@/database/repositories';
@@ -49,6 +50,7 @@ export class ZohoUploadController {
   private channelExternalSourceResolver = new ChannelExternalSourceResolver();
   private channelRepo = new ChannelRepository();
   private conversationRepo = new ConversationRepository();
+  private channelParticipantRepo = new ChannelParticipantRepository();
 
   // Strategy table — one entry per supported source type. Adding a provider
   // = registering a new uploader here.
@@ -69,11 +71,28 @@ export class ZohoUploadController {
         return res.status(400).json({ error: 'No files uploaded' });
       }
 
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
+
       const conversation = await this.conversationRepo.findById(conversationId);
       if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
 
       const channel = await this.channelRepo.findById(conversation.channelId);
       if (!channel) return res.status(404).json({ error: 'Channel not found' });
+
+      // Membership gate: only participants of the conversation's channel may
+      // stage attachments into it. Mirrors the reply/compose ACL in
+      // emailController so uploads can't plant files into channels (or other
+      // tenants) the caller does not belong to.
+      const isMember = await this.channelParticipantRepo.isParticipant(channel.id, userId);
+      if (!isMember) {
+        logger.warn('[emailUpload] Upload blocked: user is not a channel member', {
+          userId,
+          channelId: channel.id,
+          conversationId,
+        });
+        return res.status(403).json({ error: 'Not a member of this channel' });
+      }
 
       const externalSource = await this.channelExternalSourceResolver.resolveForChannel(channel.id);
       if (!externalSource) return res.status(404).json({ error: 'External source not found' });
@@ -90,7 +109,7 @@ export class ZohoUploadController {
         externalSource,
         conversationId,
         channelId: channel.id,
-        userId: req.user?.id ?? 'system',
+        userId,
         workspaceId: channel.workspaceId,
       });
 
@@ -117,8 +136,22 @@ export class ZohoUploadController {
         return res.status(400).json({ error: 'No files uploaded' });
       }
 
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
+
       const channel = await this.channelRepo.findById(channelId);
       if (!channel) return res.status(404).json({ error: 'Channel not found' });
+
+      // Membership gate: only participants of the channel may stage compose
+      // attachments into it (prevents cross-channel / cross-tenant planting).
+      const isMember = await this.channelParticipantRepo.isParticipant(channel.id, userId);
+      if (!isMember) {
+        logger.warn('[emailUpload] Compose upload blocked: user is not a channel member', {
+          userId,
+          channelId: channel.id,
+        });
+        return res.status(403).json({ error: 'Not a member of this channel' });
+      }
 
       const externalSource = await this.channelExternalSourceResolver.resolveForChannel(channel.id);
       if (!externalSource) return res.status(404).json({ error: 'External source not found' });
@@ -134,7 +167,7 @@ export class ZohoUploadController {
         files,
         externalSource,
         channelId: channel.id,
-        userId: req.user?.id ?? 'system',
+        userId,
         workspaceId: channel.workspaceId,
       });
 
