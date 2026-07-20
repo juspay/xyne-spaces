@@ -185,7 +185,6 @@ export async function chatWithBot(req: Request, res: Response): Promise<void> {
       userId: user.id,
       userEmail: user.email,
       userName: user.name,
-      isFromCanvas: true, // Controller endpoint is used by canvas genius blocks
     });
 
     if (result.stream) {

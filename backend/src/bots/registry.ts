@@ -10,15 +10,11 @@
  * - External bots: Define inline and register with catalog
  */
 
-import { config } from '@/config/env';
 import { botCatalog, type ExternalBotDefinition } from '@/bots/unified/index.js';
 
 // =============================================================================
 // INTERNAL BOTS - Import to trigger @Bot decorator registration
 // =============================================================================
-
-// LLM Bot - dummy bot for testing
-import '@/bots/implementations/llm-bot/llm-bot.js';
 
 // Ticket Bot - creates tickets with workflow automation
 import '@/bots/implementations/ticket-bot/ticket-bot.js';
@@ -61,110 +57,6 @@ import '@/bots/implementations/support-bot/support-bot.js';
  * External bots call external APIs and don't have TypeScript implementations.
  */
 const externalBots: ExternalBotDefinition[] = [
-  {
-    id: 'genius',
-    name: 'Genius AI',
-    email: 'genius@bot.xyne.ai',
-    picture: '/assets/bots/genius-avatar.png',
-    description: 'AI-powered analytics assistant for business insights',
-    runtimeType: 'external',
-    scope: 'all',
-    interactionMode: 'dm',
-    externalApi: {
-      endpoint: config.genius.apiUrl + '/api/v3/query_routing/',
-      method: 'POST',
-      authType: 'api_key',
-      authEnvVar: 'QUERY_ROUTING_KEY',
-      authHeader: 'Authorization',
-      responseType: 'streaming',
-      headers: {
-        Accept: 'text/event-stream',
-        'x-source': 'XyneSpaces',
-      },
-      requestBodyTemplate: {
-        query: '{{message}}',
-        agent: 'analytics',
-        source: 'xyne_spaces',
-        email: '{{userEmail}}',
-      },
-      contextConfig: {
-        includeHistory: false,
-        maxHistoryMessages: 0,
-      },
-      sseParser: 'genius',
-      toolOutputTransformer: 'genius',
-    },
-  },
-  {
-    id: 'genius_deep_rca',
-    name: 'Genius Deep RCA',
-    email: 'genius-deep-rca@bot.xyne.ai',
-    picture: '/assets/bots/genius-avatar.png',
-    description:
-      'AI-powered deep investigation assistant for root cause analysis of complex incidents',
-    runtimeType: 'external',
-    scope: 'all',
-    interactionMode: 'dm',
-    externalApi: {
-      endpoint: config.genius.apiUrl + '/api/v3/query_routing/',
-      method: 'POST',
-      authType: 'api_key',
-      authEnvVar: 'QUERY_ROUTING_KEY',
-      authHeader: 'Authorization',
-      responseType: 'streaming',
-      headers: {
-        Accept: 'text/event-stream',
-        'x-source': 'XyneSpaces',
-      },
-      requestBodyTemplate: {
-        query: '{{message}}',
-        agent: 'investigation',
-        source: 'xyne_spaces',
-        email: '{{userEmail}}',
-      },
-      contextConfig: {
-        includeHistory: false,
-        maxHistoryMessages: 0,
-      },
-      sseParser: 'genius',
-      toolOutputTransformer: 'genius',
-    },
-  },
-  {
-    id: 'genius_upi_analytics',
-    name: 'Genius UPI Analytics',
-    email: 'genius-upi-analytics@bot.xyne.ai',
-    picture: '/assets/bots/genius-avatar.png',
-    description: 'AI-powered UPI analytics assistant for transaction insights and monitoring',
-    runtimeType: 'external',
-    scope: 'all',
-    interactionMode: 'dm',
-    externalApi: {
-      endpoint: config.geniusUpiAnalytics.apiUrl + '/genius/api/v3/analytics/',
-      method: 'POST',
-      authType: 'api_key',
-      authEnvVar: 'GENIUS_UPI_ANALYTICS_API_KEY',
-      authHeader: 'Authorization',
-      responseType: 'streaming',
-      headers: {
-        Accept: 'text/event-stream',
-        'x-source': 'XyneSpaces',
-        'x-username': config.geniusUpiAnalytics.username,
-      },
-      requestBodyTemplate: {
-        query: '{{message}}',
-        agent: 'analytics',
-        source: 'xyne_spaces',
-        email: '{{userEmail}}',
-      },
-      contextConfig: {
-        includeHistory: false,
-        maxHistoryMessages: 0,
-      },
-      sseParser: 'genius',
-      toolOutputTransformer: 'genius',
-    },
-  },
   // Add more external bots here...
   // {
   //   id: 'another-bot',

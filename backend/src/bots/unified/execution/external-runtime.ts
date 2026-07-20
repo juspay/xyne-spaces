@@ -59,6 +59,8 @@ class ExternalBotRuntime {
           ...headers,
         },
         body: JSON.stringify(requestBody),
+        // External APIs must not hang the bot pipeline indefinitely
+        signal: AbortSignal.timeout(120_000),
       });
 
       if (!response.ok) {
