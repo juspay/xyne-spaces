@@ -22,8 +22,6 @@ router.get('/queue-stats', notificationController.getQueueStats);
 router.get('/unread-count', notificationController.getUnreadCount);
 router.get('/workspace-counts', notificationController.getWorkspaceNotificationCounts);
 router.post('/test', notificationController.sendTestNotification);
-router.post('/test-voip', authMiddleware.requireAdmin, notificationController.sendTestVoipPush);
-router.post('/test-apns', authMiddleware.requireAdmin, notificationController.sendTestApnsPush);
 router.patch('/mark-all-read', notificationController.markAllAsRead);
 router.patch('/:id/read', notificationController.markAsRead);
 router.patch('/:id/dismiss', notificationController.dismiss);

@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
 import { notificationService } from '@/services/notificationService';
 import { unreadService } from '@/services/unreadService';
-import { apnsService } from '@/services/apnsService';
-import { fcmPushService } from '@/services/fcmService';
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
 
@@ -60,31 +58,6 @@ const preferencesSchema = z.record(
 export class NotificationController {
   private resolveSessionId(req: Request): string | undefined {
     return req.authenticatedSessionId;
-  }
-
-  private async resolveVoipTokenForCurrentUser(req: Request): Promise<{ voipToken: string; sessionId: string } | null> {
-    const userId = req.user?.id;
-    if (!userId) {
-      return null;
-    }
-
-    const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
-    if (sessions.length === 0) {
-      return null;
-    }
-
-    const preferredSessionId = this.resolveSessionId(req);
-    const preferredSession = preferredSessionId
-      ? sessions.find((session) => session.id === preferredSessionId && session.voipToken)
-      : undefined;
-    const fallbackSession = sessions.find((session) => session.voipToken);
-    const session = preferredSession ?? fallbackSession;
-
-    if (!session?.voipToken) {
-      return null;
-    }
-
-    return { voipToken: session.voipToken, sessionId: session.id };
   }
 
   async getVapidPublicKey(_req: Request, res: Response): Promise<void> {
@@ -432,92 +405,6 @@ export class NotificationController {
       res.json({ success: true, message: 'Test notification created successfully' });
     } catch (error) {
       logger.error('Failed to send test notification:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  async sendTestVoipPush(req: Request, res: Response): Promise<void> {
-    try {
-      const { callerName, callerId, actionUrl } = req.body;
-      const voipTarget = await this.resolveVoipTokenForCurrentUser(req);
-
-      if (!voipTarget) {
-        res.status(400).json({
-          error: 'No registered VoIP token found for the authenticated user',
-        });
-        return;
-      }
-
-      // Extract call ID from actionUrl (e.g., https://domain/call/uuid?type=AUDIO)
-      let relatedEntityId: string | undefined;
-      if (actionUrl) {
-        try {
-          const url = new URL(actionUrl);
-          const pathParts = url.pathname.split('/');
-          const callIndex = pathParts.indexOf('call');
-          if (callIndex !== -1 && pathParts[callIndex + 1]) {
-            relatedEntityId = pathParts[callIndex + 1];
-            logger.info('[sendTestVoipPush] Extracted call ID from actionUrl', { relatedEntityId });
-          }
-        } catch {
-          logger.warn('[sendTestVoipPush] Failed to parse actionUrl', { actionUrl });
-        }
-      }
-
-      const success = await apnsService.sendVoipPush(voipTarget.voipToken, {
-        title: 'Incoming Space Call',
-        message: 'Someone is calling you',
-        type: 'INCOMING_CALL',
-        callerName: callerName || 'Xyne User',
-        handle: callerId || 'xyne-call',
-        actionUrl: actionUrl,
-        relatedEntityId,
-        relatedEntityType: 'call',
-        metadata: {},
-      });
-
-      if (success) {
-        res.json({ success: true, message: 'VoIP push sent', callId: relatedEntityId });
-      } else {
-        res
-          .status(500)
-          .json({ error: 'Failed to send VoIP push', enabled: apnsService.isSendEnabled() });
-      }
-    } catch (error) {
-      logger.error('Failed to send test VoIP push:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  async sendTestApnsPush(req: Request, res: Response): Promise<void> {
-    try {
-      const { apnsToken, title, message } = req.body;
-
-      if (!apnsToken) {
-        res.status(400).json({ error: 'apnsToken is required' });
-        return;
-      }
-
-      const success = await apnsService.sendStandardPush(apnsToken, {
-        title: title || 'Test Alert',
-        message: message || 'This is a standard APNS push notification',
-        type: 'TEST_PUSH',
-        metadata: {
-          test: true,
-          timestamp: Date.now(),
-        },
-      });
-
-      if (success) {
-        res.json({ success: true, message: 'Standard APNS push sent' });
-      } else {
-        res.status(500).json({
-          error: 'Failed to send standard APNS push',
-          enabled: apnsService.isSendEnabled(),
-        });
-      }
-    } catch (error) {
-      logger.error('Failed to send test APNS push:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   }
