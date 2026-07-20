@@ -1,3 +1,5 @@
+import { parseSingleEmailAddress } from '../../../utils/emailAddress';
+
 // Match Gmail's 25MB per-message ceiling.
 export const MAX_EMAIL_ATTACHMENT_FILES = 10;
 export const MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES = 25 * 1024 * 1024;
@@ -19,20 +21,14 @@ export const parseFromField = (raw: string): { name: string; email: string | nul
   if (looksLikeTechnicalId(trimmed)) {
     return { name: 'Unknown sender', email: null };
   }
-  const match = trimmed.match(/^"?([^"<]+?)"?\s*<([^>]+)>$/);
-  if (match) {
-    const name = match[1]!.trim();
-    const email = match[2]!.trim();
-    if (looksLikeTechnicalId(name) || looksLikeTechnicalId(email)) {
+  const { name, email } = parseSingleEmailAddress(trimmed);
+  if (email) {
+    if (looksLikeTechnicalId(name ?? '') || looksLikeTechnicalId(email)) {
       return { name: 'Unknown sender', email: null };
     }
-    return { name, email };
+    return { name: name ?? email.split('@')[0] ?? email, email };
   }
-  const emailOnly = trimmed.match(/^<?([^\s<>@]+@[^\s<>]+)>?$/);
-  if (emailOnly) {
-    return { name: emailOnly[1]!.split('@')[0] ?? emailOnly[1]!, email: emailOnly[1]! };
-  }
-  return { name: trimmed, email: null };
+  return { name: name ?? trimmed, email: null };
 };
 
 export const stripHtml = (html: string): string => {

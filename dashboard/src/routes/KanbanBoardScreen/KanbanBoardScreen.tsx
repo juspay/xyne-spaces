@@ -52,7 +52,7 @@ import type { TicketFilters } from '../../components/Tickets/TicketFilters/types
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
-import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
+import { useAllChannels, useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
@@ -72,6 +72,7 @@ import {
   ChannelType,
   BoardType,
   TicketStageRequestStatus,
+  isDeskChannelType,
   parseFieldOptions,
   type FieldEnumOption,
 } from '@xyne/shared';
@@ -309,8 +310,27 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const channel = useChannel(channelId || '');
   const isEmailChannel = channel?.type === ChannelType.EMAIL;
+
+  // Aggregate views (My Tickets, saved views) mix tickets from many channels,
+  // so we can't rely on the single `channel` above to know a ticket's origin.
+  // Build a channelId -> channel map to resolve each ticket's channel type on
+  // click and route desk/support tickets to the Support desk instead of chat.
+  const allChannels = useAllChannels();
+  const channelsById = useMemo(() => new Map(allChannels.map(c => [c.id, c])), [allChannels]);
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
     new Set(['assignee', 'dueDate', 'status', 'priority', 'tags']),
+  );
+  // The tickets table always surfaces the Stage column (parity with the Support
+  // desk table, which renders TicketTable with its stage-inclusive defaults).
+  // Kanban cards keep using `visibleColumns` unchanged, so the "Sub-status"
+  // toggle still governs card sub-status without affecting the table.
+  // Forcing the column does not strand a dead control: `filteredAvailableColumns`
+  // drops 'stage' from the Customize panel in table view, so there is no visible
+  // toggle contradicting it. Note the table's Stage cell is editable (it routes
+  // through `routeStageChange`), matching the Support desk table.
+  const tableVisibleColumns = useMemo(
+    () => new Set([...visibleColumns, 'stage']),
+    [visibleColumns],
   );
   const [isComfortView, setIsComfortView] = useState(false);
   const [deleteViewConfirm, setDeleteViewConfirm] = useState<{
@@ -1834,27 +1854,43 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
 
+      // Desk/support tickets (EMAIL / SLACK / APP channels) belong to the Support
+      // desk experience, not the chat conversation panel. Route those to the desk
+      // email view (/support/:channelId/:xyneId — the :ticketId segment is the
+      // xyneId). All other tickets keep the existing chat-panel behavior.
+      const ticketChannelType = channelsById.get(ticket.channelId)?.type;
+      const isDeskTicket = isDeskChannelType(ticketChannelType);
+      // Deep-link to the ticket when we have its xyneId; otherwise fall back to
+      // the channel's support inbox — a desk ticket must never open in chat.
+      const supportRoute = ticket.xyneId
+        ? `/support/${ticket.channelId}/${ticket.xyneId}`
+        : `/support/${ticket.channelId}`;
+
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
         const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
-        const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
-        window.open(ticketUrl, '_blank');
+        const relativeUrl = isDeskTicket
+          ? supportRoute
+          : `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
+        window.open(`${ws ? `/${ws}` : ''}${relativeUrl}`, '_blank');
         return;
       }
 
       const currentUrl = window.location.pathname + window.location.search;
+      const navState = { state: { fromMyTickets: false, returnToUrl: currentUrl } };
+
+      // Desk/support ticket -> Support desk email view (channelId + xyneId).
+      if (isDeskTicket) {
+        void navigate(supportRoute, navState);
+        return;
+      }
 
       // On mobile: navigate directly to ThreadMessages route with details tab
       // On desktop: use tab-based route for expanded view in ConversationPannel
       if (isMobile) {
         void navigate(
           `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`,
-          {
-            state: {
-              fromMyTickets: false,
-              returnToUrl: currentUrl,
-            },
-          },
+          navState,
         );
       } else {
         void navigate(
@@ -1863,16 +1899,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             ticketId: ticket.id,
             conversationId: ticket.conversationId,
           }),
-          {
-            state: {
-              fromMyTickets: false,
-              returnToUrl: currentUrl,
-            },
-          },
+          navState,
         );
       }
     },
-    [navigate, channel, isMobile, baseRoute, buildChannelRoute],
+    [navigate, isMobile, baseRoute, buildChannelRoute, channelsById],
   );
 
   const openCreateForColumn = useCallback(
@@ -2793,7 +2824,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       tickets={group.allTickets}
                       ticketTags={tagsByTicketId}
                       availableTags={availableTags || []}
-                      visibleColumns={visibleColumns}
+                      visibleColumns={tableVisibleColumns}
                       isComfortView={isComfortView}
                     />
                   </div>
