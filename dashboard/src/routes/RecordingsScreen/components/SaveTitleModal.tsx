@@ -4,13 +4,19 @@
  */
 
 import { ReactElement, useState, useEffect, useRef } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertTriangle } from 'lucide-react';
 
 interface SaveTitleModalProps {
   isOpen: boolean;
   defaultTitle: string;
   onSave: (title: string) => void | Promise<void>;
   isSaving: boolean;
+  /**
+   * When true, the recording wasn't stopped by the user — the transcription agent
+   * ("Xyne Automatic") dropped, so the recording was auto-ended. Shows a warning
+   * banner explaining why the naming dialog appeared unprompted.
+   */
+  endedByAgentDrop?: boolean;
 }
 
 export function SaveTitleModal({
@@ -18,6 +24,7 @@ export function SaveTitleModal({
   defaultTitle,
   onSave,
   isSaving,
+  endedByAgentDrop = false,
 }: SaveTitleModalProps): ReactElement | null {
   const [title, setTitle] = useState(defaultTitle);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -50,6 +57,19 @@ export function SaveTitleModal({
 
       {/* Modal */}
       <div className='relative bg-background dark:bg-gray-800 rounded-xl shadow-2xl border border-border dark:border-gray-700 w-full max-w-md mx-4 p-6 animate-in zoom-in-95 fade-in duration-200'>
+        {endedByAgentDrop && (
+          <div
+            className='flex items-start gap-2.5 mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5'
+            data-testid='recording-agent-drop-notice'
+          >
+            <AlertTriangle className='w-4 h-4 mt-0.5 shrink-0 text-amber-500' />
+            <p className='text-xs text-amber-700 dark:text-amber-300 leading-relaxed'>
+              Transcription stopped unexpectedly, so this recording was ended and nothing further
+              could be transcribed. Your recording and transcript so far have been saved.
+            </p>
+          </div>
+        )}
+
         <h2 className='text-lg font-semibold text-foreground dark:text-gray-100 mb-1'>
           Save Recording
         </h2>
@@ -71,15 +91,6 @@ export function SaveTitleModal({
         />
 
         <div className='flex items-center justify-end gap-3 mt-5'>
-          <button
-            onClick={() => void onSave(defaultTitle)}
-            disabled={isSaving}
-            className='px-4 py-2 text-sm text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-gray-100 transition-colors disabled:opacity-50'
-            data-track-category='SaveTitleModal'
-            data-track-name='use_default_title'
-          >
-            Use Default
-          </button>
           <button
             onClick={handleSave}
             disabled={isSaving}

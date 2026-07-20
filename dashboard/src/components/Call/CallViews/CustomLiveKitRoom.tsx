@@ -9,6 +9,7 @@ import { FullCallView } from './FullCallView';
 import { createCallReminderClock } from '../CallPrivacyIndicator/CallPrivacyReminder';
 import type { CallReminderClock } from '../CallPrivacyIndicator/CallPrivacyReminder';
 import { useHandRaise } from '../hooks/useHandRaise';
+import { useAgentLeftWarning } from '../hooks/useAgentLeftWarning';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { AIInviteDialog } from '../CallModals/AIInviteDialog';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -75,6 +76,7 @@ export function CustomLiveKitRoom({
     participants,
     connectionState,
     isAIAssistantEnabled,
+    transcriptionAgentLeft,
     aiController,
     pendingControlRequest,
     isAiControlRequested,
@@ -99,6 +101,7 @@ export function CustomLiveKitRoom({
   // Hand raise state, synced over the data channel. Lifted here (always mounted for
   // the call) so it persists and keeps receiving across mini/PIP <-> full view switches.
   const { raisedHands, toggleHandRaise } = useHandRaise(room);
+  useAgentLeftWarning(transcriptionAgentLeft);
   // Session-scoped reminder clock lives here (always mounted for the whole call)
   // so the transcription disclosure timers survive the mini <-> full view switch.
   // It is passed to FullCallView only; mini call view never needs it.
