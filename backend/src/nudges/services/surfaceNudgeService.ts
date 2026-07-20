@@ -34,7 +34,7 @@ class NudgeService {
       logger.error('[NudgeService] Failed to dismiss nudges for source', {
         sourceId,
         sourceType,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }
@@ -85,7 +85,7 @@ class NudgeService {
         sourceId,
         sourceType,
         nudgeKind,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
       throw error;
     }

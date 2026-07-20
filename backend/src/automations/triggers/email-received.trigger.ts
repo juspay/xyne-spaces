@@ -259,7 +259,7 @@ export async function emitEmailReceived(emailId: string): Promise<void> {
   } catch (err) {
     logger.error('[automations] emitEmailReceived failed', {
       emailId,
-      error: err instanceof Error ? err.message : String(err),
+      error: err,
     });
   }
 }

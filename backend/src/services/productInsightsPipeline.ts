@@ -374,7 +374,7 @@ export async function runReclusteringFlow(
     logger.error('[ProductInsightsPipeline] Reclustering flow failed; skipping upload', {
       projectId: params.projectId,
       insightsPath,
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
       durationMs: Date.now() - startedAt,
     });
     return null;

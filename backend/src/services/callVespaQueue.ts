@@ -57,7 +57,7 @@ export const queueCallVespaFeed = (
     logger.error('[CallVespaQueue] Failed to queue call Vespa feed:', {
       callId,
       context,
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorMessage: error,
     });
   });
 };
@@ -76,7 +76,7 @@ export const queueCallVespaDelete = (
     logger.error('[CallVespaQueue] Failed to queue call Vespa delete:', {
       callId,
       context,
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorMessage: error,
     });
   });
 };

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import { logger } from '@/utils/logger';
 
 /**
  * Middleware to authenticate internal service-to-service requests.
@@ -37,7 +38,10 @@ export const internalServiceAuth = (
     }
 
     next();
-  } catch {
+  } catch (error) {
+    // Usually a malformed header or a misconfigured secret — without this log
+    // that is indistinguishable from an auth attack.
+    logger.error('internal_service_auth_failed', { error });
     res.status(401).json({ error: 'Unauthorized' });
   }
 };

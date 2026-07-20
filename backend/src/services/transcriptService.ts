@@ -434,7 +434,7 @@ export class TranscriptService {
       // 13. Fire-and-forget: Translate transcript asynchronously in background
       // This updates the same GCS file without blocking the response
       this.translateTranscriptAsync(callId, txtStoragePath).catch((err) => {
-        logger.error(`[${callId}] background_translation_failed`, { error: err instanceof Error ? err.message : String(err) });
+        logger.error(`[${callId}] background_translation_failed`, { error: err });
       });
 
       // 14. Attach identified transcript (real-name labelled) as a second attachment when available.
@@ -442,7 +442,7 @@ export class TranscriptService {
       // transcriptions/{callId}_identified.jsonl — may not exist if no voiceprints were enrolled.
       void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId, channel.workspaceId);
     } catch (error) {
-      logger.error(`[${callId}] transcript_processing_failed`, { message_id: messageId, error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
+      logger.error(`[${callId}] transcript_processing_failed`, { message_id: messageId, error: error, stack: error instanceof Error ? error.stack : undefined });
       // Throw error to allow controller to return proper error response
       throw error;
     }
@@ -472,7 +472,7 @@ export class TranscriptService {
       logger.info(`[${callId}] transcript_download_completed`, { bytes_downloaded: buffer.length, duration_ms: Date.now() - downloadStart });
       return buffer.toString('utf-8');
     } catch (error) {
-      logger.error(`[${callId}] transcript_download_failed`, { error: error instanceof Error ? error.message : String(error), path: storagePath, stack: error instanceof Error ? error.stack : undefined });
+      logger.error(`[${callId}] transcript_download_failed`, { error: error, path: storagePath, stack: error instanceof Error ? error.stack : undefined });
       throw error;
     }
   }
@@ -676,10 +676,10 @@ export class TranscriptService {
 
       // Apply the same background translation as the plain transcript
       this.translateIdentifiedTranscriptAsync(callId, formattedPath).catch((err) => {
-        logger.error(`[${callId}] identified_background_translation_failed`, { error: err instanceof Error ? err.message : String(err) });
+        logger.error(`[${callId}] identified_background_translation_failed`, { error: err });
       });
     } catch (err) {
-      logger.error(`[${callId}] identified_transcript_attach_failed`, { error: err instanceof Error ? err.message : String(err) });
+      logger.error(`[${callId}] identified_transcript_attach_failed`, { error: err });
     }
   }
 
@@ -855,7 +855,7 @@ export class TranscriptService {
 
       logger.info(`[${callId}] identified_translation_completed`);
     } catch (error) {
-      logger.error(`[${callId}] identified_translation_failed`, { error: error instanceof Error ? error.message : String(error) });
+      logger.error(`[${callId}] identified_translation_failed`, { error: error });
     }
   }
 
@@ -1474,7 +1474,7 @@ Output ONLY the processed transcript, nothing else.`;
         // A GCS fetch failure is not the same as "the agent never wrote a transcript":
         // log it so a transient storage error is distinguishable from an empty transcript.
         logger.error(`[${callId}] transcript_reconcile_retrieve_failed`, {
-          error: retrieveError instanceof Error ? retrieveError.message : String(retrieveError),
+          error: retrieveError,
           stack: retrieveError instanceof Error ? retrieveError.stack : undefined,
         });
         content = null;
@@ -1507,7 +1507,7 @@ Output ONLY the processed transcript, nothing else.`;
       await this.processCallWithSummary(callId, callMessage.messageId, true);
     } catch (error) {
       logger.error(`[${callId}] transcript_reconcile_failed`, {
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
         stack: error instanceof Error ? error.stack : undefined,
       });
     }
@@ -1566,7 +1566,7 @@ Output ONLY the processed transcript, nothing else.`;
       try {
         await this.postCallTranscript(callId, messageId);
       } catch (transcriptError) {
-        logger.error(`[${callId}] post_transcript_failed`, { stage: 'post_call_transcript', error: transcriptError instanceof Error ? transcriptError.message : String(transcriptError), stack: transcriptError instanceof Error ? transcriptError.stack : undefined });
+        logger.error(`[${callId}] post_transcript_failed`, { stage: 'post_call_transcript', error: transcriptError, stack: transcriptError instanceof Error ? transcriptError.stack : undefined });
         // Don't rethrow — retrieveTranscript below fetches raw content from GCS directly and
         // may still succeed even if the DB-side attachment step inside postCallTranscript failed.
       }
@@ -1627,15 +1627,15 @@ Output ONLY the processed transcript, nothing else.`;
       }
       const [summary, title, ticketSuggestions] = await Promise.all([
         this.generateCallSummary(formattedTranscript, callId).catch((err) => {
-          logger.error(`[${callId}] generate_summary_threw`, { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
+          logger.error(`[${callId}] generate_summary_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
           return null;
         }),
         skipTitleGeneration ? Promise.resolve(null) : this.generateCallTitle(titleInput, callId).catch((err) => {
-          logger.error(`[${callId}] generate_title_threw`, { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
+          logger.error(`[${callId}] generate_title_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
           return null;
         }),
         this.generateTicketSuggestions(formattedTranscript).catch((err) => {
-          logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
+          logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
           return [];
         }),
       ]);
@@ -1671,7 +1671,7 @@ Output ONLY the processed transcript, nothing else.`;
             logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
             return;
           }
-          logger.error(`[${callId}] call_record_update_failed`, { stage: 'call_record_update', error: updateError instanceof Error ? updateError.message : String(updateError), stack: updateError instanceof Error ? updateError.stack : undefined });
+          logger.error(`[${callId}] call_record_update_failed`, { stage: 'call_record_update', error: updateError, stack: updateError instanceof Error ? updateError.stack : undefined });
         }
 
         // Update recording attachment filename to use call title
@@ -1725,7 +1725,7 @@ Output ONLY the processed transcript, nothing else.`;
             ticketSuggestions
           );
         } catch (replyError) {
-          logger.error(`[${callId}] post_summary_reply_failed`, { stage: 'post_summary_reply', error: replyError instanceof Error ? replyError.message : String(replyError), stack: replyError instanceof Error ? replyError.stack : undefined });
+          logger.error(`[${callId}] post_summary_reply_failed`, { stage: 'post_summary_reply', error: replyError, stack: replyError instanceof Error ? replyError.stack : undefined });
         }
 
         // Pulse block — completely separate from Xyne tickets.
@@ -1790,7 +1790,7 @@ Output ONLY the processed transcript, nothing else.`;
           logger.info(`Auto-generated detailed summary for call: ${callId}`);
         } catch (error) {
           // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
-          logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
+          logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
         }
       } else {
         // Use error (not warn) so LLM-down conditions generate alertable signal.
@@ -1815,7 +1815,7 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
     } catch (error) {
-      logger.error(`[${callId}] process_call_with_summary_failed`, { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
+      logger.error(`[${callId}] process_call_with_summary_failed`, { error: error, stack: error instanceof Error ? error.stack : undefined });
       // Don't re-throw - the transcript was already processed successfully
     } finally {
       await releaseLock(lockHandle);

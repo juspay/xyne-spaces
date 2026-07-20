@@ -138,7 +138,7 @@ export class SamTranscriptController {
     } catch (error) {
       logger.error('[SamTranscriptController] Error in async transcript processing', {
         docId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   };

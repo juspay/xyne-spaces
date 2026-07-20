@@ -107,7 +107,7 @@ export class DelayedMessagesSideEffectHandler extends BaseSideEffectHandler {
       } catch (error) {
         logger.error('[DELAYED-MSG-SIDE-EFFECT] Failed to create new Bull job on reschedule', {
           delayedMessageId,
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
         });
       }
 

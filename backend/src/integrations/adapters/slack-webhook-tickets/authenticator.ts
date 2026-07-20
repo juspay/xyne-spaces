@@ -14,6 +14,7 @@
  */
 
 import crypto from 'crypto';
+import { logger } from '@/utils/logger';
 import { BaseAuthenticator } from '../../core/baseAuthenticator';
 import { AuthResult } from '../../core/types';
 import { ExternalSourceRepository } from '../../../database/repositories/externalSourceRepository';
@@ -77,6 +78,9 @@ export class SlackAuthenticator extends BaseAuthenticator {
 
       return { authenticated: true };
     } catch (error) {
+      // Fail closed — but log, or a credential/config outage is
+      // indistinguishable from a forged request.
+      logger.error('slack_webhook_auth_failed', { error });
       return { authenticated: false };
     }
   }

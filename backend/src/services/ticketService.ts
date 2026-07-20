@@ -342,7 +342,7 @@ export class TicketService {
     }).catch(error => {
       logger.error('[TicketService] Failed to queue Vespa feed after ticket update:', {
         ticketId: updatedTicket.id,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     });
     const currentCountsSnapshot = await buildKanbanCountsSnapshot(updatedTicket.id);

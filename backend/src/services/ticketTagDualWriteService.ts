@@ -44,7 +44,7 @@ export async function dualWriteTicketTag(
     });
   } catch (error) {
     logger.error(`${TAG} Failed to dual-write for ticket ${ticketId}, tag "${tagName}"`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 }
@@ -98,7 +98,7 @@ export async function dualWriteTicketTags(
     }
   } catch (error) {
     logger.error(`${TAG} Failed to batch dual-write for ticket ${ticketId}`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 }
@@ -117,7 +117,7 @@ export async function dualDeleteTicketTag(
     });
   } catch (error) {
     logger.error(`${TAG} Failed to dual-delete for ticket ${ticketId}, tag "${tagName}"`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
   }
 }

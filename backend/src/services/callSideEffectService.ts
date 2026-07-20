@@ -248,7 +248,7 @@ class CallSideEffectService {
                 {
                     participant_id: participantId,
                     affected_user_id: affectedUserId ?? 'unknown',
-                    error: error instanceof Error ? error.message : String(error),
+                    error: error,
                     stack: error instanceof Error ? error.stack : undefined,
                 }
             );

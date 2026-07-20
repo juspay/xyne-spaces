@@ -225,7 +225,7 @@ export async function emitMessageReceived(message: ReceivedMessage): Promise<voi
   } catch (err) {
     logger.error('[automations] emitMessageReceived failed', {
       messageId: message.messageId,
-      error: err instanceof Error ? err.message : String(err),
+      error: err,
     });
   }
 }

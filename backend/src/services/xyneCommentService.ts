@@ -428,7 +428,7 @@ export class XyneCommentService {
     } catch (error) {
       logger.error(`[Xyne-Comment] Failed to create workflow for PR comments:`, {
         version: '1.0',
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
         stack: error instanceof Error ? error.stack : undefined,
       });
       throw error;

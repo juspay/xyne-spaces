@@ -118,7 +118,7 @@ export async function executeBotForMention({
     logger.error('[BOT-MENTION] Bot execution failed', {
       botId,
       messageId: message.messageId,
-      error: botExecutionError instanceof Error ? botExecutionError.message : String(botExecutionError),
+      error: botExecutionError,
     });
   } finally {
     const remainingTypingUsers = await typingService.stopTypingInConversation(

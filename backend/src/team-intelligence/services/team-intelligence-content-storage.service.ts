@@ -134,7 +134,7 @@ class TeamIntelligenceContentStorageService {
     } catch (error) {
       logger.error('[TeamIntelligenceContentStorage] Failed to hydrate payload from GCS', {
         contentUrl,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
       return null;
     }

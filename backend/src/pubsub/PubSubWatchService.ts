@@ -169,10 +169,7 @@ export class PubSubWatchService {
             logger.error(`${TAG} Failed to deactivate after auth error`, {
               type,
               email: sub.email,
-              error:
-                deactivateErr instanceof Error
-                  ? deactivateErr.message
-                  : String(deactivateErr),
+              error: deactivateErr,
             });
           }
         } else {

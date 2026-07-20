@@ -66,7 +66,7 @@ export class DeskMetricsBackfillController {
         summary.errors += 1;
         logger.error('[DeskMetricsBackfill] channelId batch failed', {
           batchNum: summary.batches,
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
         });
         break;
       }
@@ -126,7 +126,7 @@ export class DeskMetricsBackfillController {
         summary.errors += 1;
         logger.error('[DeskMetricsBackfill] TICKET_CREATED batch failed', {
           batchNum: summary.batches,
-          error: error instanceof Error ? error.message : String(error),
+          error: error,
         });
         break;
       }

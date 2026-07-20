@@ -273,7 +273,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
     logger.error('zero_mutation_error', {
       latency,
       mutation: capturedMutatorName,
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
 
     throw error;
@@ -323,7 +323,7 @@ export async function handleQueries(request: Request): Promise<any> {
     logger.error('zero_query_error', {
       latency,
       query: capturedQueryName,
-      error: error instanceof Error ? error.message : String(error),
+      error: error,
     });
 
     throw error;

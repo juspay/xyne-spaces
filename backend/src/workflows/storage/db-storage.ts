@@ -537,6 +537,9 @@ export class DBWorkflowStorage implements WorkflowStorage {
       })
       return outputSteps.length > 0 && outputSteps[0].data !== null
     } catch (error) {
+      // Returning false on a transient DB error re-runs a checkpoint that may
+      // already have completed — worth knowing about.
+      logger.error('checkpoint_output_check_failed', { workflowExecutionId, checkpointId, error })
       return false
     }
   }
@@ -3029,6 +3032,9 @@ export class DBWorkflowStorage implements WorkflowStorage {
           return state
         }
       } catch (error) {
+        // A load failure is otherwise indistinguishable from "no checkpoint
+        // here", which silently restarts the workflow from scratch.
+        logger.error('agentic_checkpoint_load_failed', { executionId, checkpointId, error })
         continue;
       }
     }

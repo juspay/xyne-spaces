@@ -219,7 +219,7 @@ class BookmarkReminderService {
         bookmarkId: bookmark.id,
         entityId,
         entityType,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }

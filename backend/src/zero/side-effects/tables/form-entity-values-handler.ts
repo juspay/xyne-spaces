@@ -94,7 +94,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
     } catch (error) {
       logger.error('[FormEntityValuesSideEffectHandler] Failed to queue ticket Vespa feed:', {
         ticketId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }
@@ -247,7 +247,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       logger.error('[FormEntityValuesSideEffectHandler] Failed to emit form field event:', {
         entityId,
         operation,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }
@@ -316,7 +316,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       logger.error('[FormEntityValuesSideEffectHandler] Failed to create form field activity:', {
         entityId: job.entityId,
         operation,
-        error: error instanceof Error ? error.message : String(error),
+        error: error,
       });
     }
   }

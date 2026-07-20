@@ -304,7 +304,7 @@ export class XyneAIController {
           sessionId: session_id,
           conversationId: conversation_id,
           durationMs: Date.now() - startTime,
-          error: streamError instanceof Error ? streamError.message : String(streamError),
+          error: streamError,
         });
         throw streamError;
       } finally {
