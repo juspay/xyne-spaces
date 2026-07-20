@@ -1,5 +1,5 @@
 import { ipcMain, shell, app, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
-import type { IpcMainEvent } from 'electron';
+import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } from '../services/cookies';
@@ -109,6 +109,26 @@ function isPreviewSenderTrusted(event: IpcMainEvent): boolean {
   return trusted;
 }
 
+// XYNE Issues 348/393/396 (CWE-862): the privileged handlers gated with this
+// helper act on the authenticated session — wipe cookies, set telemetry
+// identity, write persisted settings. Only honor them from the trusted main
+// window's top-level frame, so a sub-frame, webview, or untrusted origin cannot
+// force a one-call logout/DoS, spoof telemetry identity, or pollute config.
+function isMainWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  const mainWindow = getMainWindow();
+  const frame = event.senderFrame;
+  const trusted =
+    !!mainWindow &&
+    !mainWindow.isDestroyed() &&
+    event.sender === mainWindow.webContents &&
+    !!frame &&
+    frame.parent === null;
+  if (!trusted) {
+    errorLogger.warn('[ipc] Blocked privileged IPC from untrusted sender');
+  }
+  return trusted;
+}
+
 export function setupIpcHandlers(): void {
 
   // Set up mTLS IPC handlers
@@ -125,7 +145,21 @@ export function setupIpcHandlers(): void {
   // partition before opening a Xyne URL in the browser panel. Called by the
   // renderer (CMD+click / open-in-panel flow) right before dispatching the
   // browserPanelActor OPEN event.
-  ipcMain.handle('sync-xyne-cookies-to-browser-panel', async (_event, url: string) => {
+  ipcMain.handle('sync-xyne-cookies-to-browser-panel', async (event, url: string) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    // XYNE Issue 348: only sync auth cookies for first-party Xyne origins.
+    let host: string;
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      throw new Error('Invalid sync URL');
+    }
+    const isXyne = host === 'xyne.juspay.net' || host.endsWith('.xyne.juspay.net');
+    const isLocal = host === 'localhost' || host === '127.0.0.1';
+    if (!isXyne && !isLocal) {
+      errorLogger.warn('[sync-cookies] Rejected non-Xyne origin');
+      throw new Error('Cookie sync only allowed for Xyne origins');
+    }
     await syncXyneCookiesToBrowserPanel(url);
   });
 
@@ -148,8 +182,15 @@ export function setupIpcHandlers(): void {
     setCustomScreenPickerEnabled(enabled);
   });
 
-  ipcMain.on('set-user-email', (_event, email: string) => {
-    if (email && typeof email === 'string') {
+  ipcMain.on('set-user-email', (event, email: string) => {
+    if (!isMainWindowSender(event)) return;
+    // XYNE Issue 393: validate the email format before applying it to Sentry /
+    // logger identity so a compromised renderer cannot poison telemetry.
+    if (
+      typeof email === 'string' &&
+      email.length <= 254 &&
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ) {
       Sentry.setUser({ email });
       Logger.setEmailId(email);
       setCachedUser(email);
@@ -303,7 +344,8 @@ export function setupIpcHandlers(): void {
     return { saved: true, filePath: result.filePath };
   });
 
-  ipcMain.on('clear-all-cookies', () => {
+  ipcMain.on('clear-all-cookies', (event) => {
+    if (!isMainWindowSender(event)) return;
     void clearAllCookies();
   });
 
@@ -482,11 +524,13 @@ export function setupIpcHandlers(): void {
     return browserSettingsService.getSettings();
   });
 
-  ipcMain.handle('set-browser-settings', (_event, settings: Partial<BrowserSettings>) => {
+  ipcMain.handle('set-browser-settings', (event, settings: Partial<BrowserSettings>) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
     return browserSettingsService.setSettings(settings);
   });
 
-  ipcMain.handle('clear-site-data', async () => {
+  ipcMain.handle('clear-site-data', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
     await clearBrowserTabsData();
     return { success: true };
   });

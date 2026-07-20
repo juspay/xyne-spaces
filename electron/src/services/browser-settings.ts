@@ -24,7 +24,18 @@ class BrowserSettingsService {
 
   setSettings(settings: Partial<BrowserSettings>): BrowserSettings {
     const currentSettings = this.getSettings();
-    const newSettings = { ...currentSettings, ...settings };
+    // XYNE Issue 396 (CWE-20): strictly allowlist known keys and validate value
+    // types before persisting. Unknown keys and wrong-typed values are dropped so
+    // a compromised renderer cannot pollute the persisted store or alter policy
+    // via unexpected fields.
+    const sanitized: Partial<BrowserSettings> = {};
+    if (settings && typeof settings.popups === 'boolean') {
+      sanitized.popups = settings.popups;
+    }
+    if (settings && typeof settings.openLinksExternally === 'boolean') {
+      sanitized.openLinksExternally = settings.openLinksExternally;
+    }
+    const newSettings = { ...currentSettings, ...sanitized };
     this.store.set('browserSettings', newSettings);
     return newSettings;
   }
