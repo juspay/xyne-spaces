@@ -56,6 +56,7 @@ import { logger, Event } from '../../../utils/logger';
  */
 export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   message,
+  channelId,
   onCancel,
   onSuccess,
 }) => {
@@ -226,7 +227,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const sender = useUser(message.senderId);
 
   // Mention search for @ mentions in optional message
-  const { results: mentionResults, searchMentions } = useMentionSearch();
+  const { results: mentionResults, searchMentions } = useMentionSearch(channelId);
 
   // Channel mention search for # mentions in optional message
   const [channelMentionQuery, setChannelMentionQuery] = useState('');
