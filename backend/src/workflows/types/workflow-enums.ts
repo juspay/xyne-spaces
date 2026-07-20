@@ -6,7 +6,6 @@ export enum WorkflowType {
   STAGE_APPROVAL_WORKFLOW = 'STAGE_APPROVAL_WORKFLOW',
   GENIUS_QUERY_WORKFLOW = 'GENIUS_QUERY_WORKFLOW',
   NETWORK_DOCUMENT_PROCESSING = 'NETWORK_DOCUMENT_PROCESSING',
-  XYNE_AUTO_RCA_WORKFLOW = 'XYNE_AUTO_RCA_WORKFLOW',
   IT_SUPPORT_WORKFLOW = 'IT_SUPPORT_WORKFLOW',
 }
 
@@ -272,10 +271,11 @@ export function getWorkflowTypeDisplayName(workflowType: WorkflowType): string {
     [WorkflowType.GENIUS_QUERY_WORKFLOW]: 'Genius Query Workflow',
     [WorkflowType.STAGE_APPROVAL_WORKFLOW]: 'Stage Approval Workflow',
     [WorkflowType.NETWORK_DOCUMENT_PROCESSING]: 'Network Document Processing',
-    [WorkflowType.XYNE_AUTO_RCA_WORKFLOW]: 'Xyne Auto RCA Workflow',
     [WorkflowType.IT_SUPPORT_WORKFLOW]: 'IT Support Workflow',
   };
-  return displayNames[workflowType]
+  // Fallback to the raw value: historical DB rows may carry types that have
+  // since been removed from the enum (e.g. XYNE_AUTO_RCA_WORKFLOW).
+  return displayNames[workflowType] ?? workflowType
 }
 
 export function isTerminalStatus(status: WorkflowExecutionStatus): boolean {

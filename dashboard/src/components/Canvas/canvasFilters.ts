@@ -10,6 +10,7 @@ const EXCLUDED_CALL_GENERATED_SOURCES = new Set([
   'workflow_knowledge',
   'commit_analysis',
   'genius_investigation',
+  // Retired generators — kept so their existing legacy canvases stay filtered.
   'xyne_auto_rca',
 ]);
 
