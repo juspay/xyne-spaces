@@ -3,6 +3,7 @@ import * as docx from 'docx-preview';
 import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
+import { useDomSearch } from './search';
 
 /**
  * Standard US Letter page width in pixels at 96 DPI.
@@ -14,12 +15,17 @@ import { useMobileZoom } from '../../hooks/useMobileZoom';
  */
 const PAGE_WIDTH = 816;
 
-export const DocxViewer: React.FC<BaseViewerProps> = ({ source }) => {
+export const DocxViewer: React.FC<BaseViewerProps> = ({ source, searchable }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { isMobile } = usePlatform();
+
+  // docx-preview renders the whole document into containerRef (no
+  // virtualization), so search extracts text + DOM ranges and paints via the
+  // CSS Custom Highlight API without mutating docx-preview's markup.
+  useDomSearch(containerRef, searchable !== false && !loading && !error);
 
   // Mobile zoom hook for pinch-to-zoom
   const {

@@ -3,6 +3,7 @@ import type { BaseViewerProps } from './utils';
 import hljs from 'highlight.js';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import ReadmeViewer from './ReadmeViewer';
+import { injectMarks, useLineSearch, useMatchScroll } from './search';
 
 // Static lookup map — O(1) vs sequential if-chain
 const EXTENSION_TO_LANGUAGE: Record<string, string> = {
@@ -90,8 +91,13 @@ const ErrorDisplay: React.FC<{ error: string; canRetry?: boolean; onRetry?: () =
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
+const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchable }) => {
   const [lines, setLines] = useState<string[]>([]);
+  // Plain-text shadow of `lines`, kept in lockstep. `lines` holds highlight.js
+  // HTML, whose string offsets don't correspond to text offsets (tags are
+  // zero-width, `&amp;` is 5 chars for 1). Search runs against this copy and
+  // injectMarks maps the resulting offsets back into the HTML.
+  const [rawLines, setRawLines] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -196,6 +202,11 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
         throw new Error('File is empty or contains no readable content');
       }
 
+      // hljs only wraps tokens and escapes entities — it never alters the text
+      // itself — so splitting the raw text the same way yields a 1:1 line
+      // correspondence with the highlighted output.
+      setRawLines(text.split(/\r?\n/));
+
       try {
         const highlighted = language
           ? hljs.highlight(text, { language }).value
@@ -223,8 +234,18 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
     void loadFile();
   };
 
+  // Rendered markdown is ReadmeViewer's own DOM, which this viewer neither owns
+  // nor virtualizes — searching it needs the DOM path, so search is off here and
+  // the find bar hides until the user switches back to code view.
+  const isRenderedMarkdown = isMarkdown && markdownMode === 'rendered';
+  const { matchesByRow, activeMatch } = useLineSearch(
+    rawLines,
+    searchable !== false && !loading && !error && !isRenderedMarkdown,
+  );
+  useMatchScroll(activeMatch, virtualizer, shouldVirtualize, containerRef);
+
   // Markdown "rendered" view uses ReadmeViewer in-place (same modal).
-  if (isMarkdown && markdownMode === 'rendered') {
+  if (isRenderedMarkdown) {
     return (
       <div className='relative h-full w-full mt-[65px]'>
         <div className='absolute right-3 top-3 z-20'>
@@ -267,7 +288,12 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
     <div
       className='font-mono text-sm bg-background dark:bg-[#1E1E1E] text-foreground dark:text-gray-100 border border-border dark:border-gray-700 rounded-lg mt-[65px]'
       style={{
-        height: '100%',
+        // Subtracts the 65px margin above, which clears the modal's floating
+        // top bar. Without this, 100% + margin overflows the scrollable wrapper
+        // and clips the bottom of the viewer out of sight — hiding the file's
+        // last lines and any match revealed there. (Csv/Excel avoid this by
+        // using `pt-[65px]` padding rather than a margin.)
+        height: 'calc(100% - 65px)',
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
@@ -344,7 +370,12 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
                   </span>
                   <span
                     // eslint-disable-next-line react/no-danger
-                    dangerouslySetInnerHTML={{ __html: lines[virtualRow.index] ?? '' }}
+                    dangerouslySetInnerHTML={{
+                      __html: injectMarks(
+                        lines[virtualRow.index] ?? '',
+                        matchesByRow.get(virtualRow.index) ?? [],
+                      ),
+                    }}
                     className='flex-1 whitespace-pre-wrap break-words leading-5'
                   />
                 </div>
@@ -360,7 +391,9 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
                 </span>
                 <span
                   // eslint-disable-next-line react/no-danger
-                  dangerouslySetInnerHTML={{ __html: line || '\u00A0' }}
+                  dangerouslySetInnerHTML={{
+                    __html: line ? injectMarks(line, matchesByRow.get(index) ?? []) : '\u00A0',
+                  }}
                   className='flex-1 whitespace-pre-wrap break-words leading-5'
                 />
               </div>

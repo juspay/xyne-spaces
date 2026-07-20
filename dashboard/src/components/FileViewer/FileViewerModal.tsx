@@ -24,6 +24,7 @@ import {
 } from '../../machines/attachmentViewerMachine';
 import { MessageType } from '@xyne/shared';
 import { ZoomState } from './utils';
+import { FileSearchControls, FileSearchProvider, useFileSearchContext } from './search';
 
 export interface FileItem {
   fileName: string;
@@ -208,6 +209,9 @@ const SlideContent: React.FC<{
         key={viewerResetKey}
         source={fileData}
         fileName={file.fileName}
+        // Only the visible slide participates in search; adjacent mounted slides
+        // must not register as the find bar's target.
+        searchable={isActive}
         {...(isCarouselMode && { disableGestures: true })}
         {...(isCarouselMode && onInteractionStateChange && { onInteractionStateChange })}
       />
@@ -273,7 +277,7 @@ const UnsupportedFileState: React.FC<{
   </div>
 );
 
-export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
+const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
   isOpen,
   onClose,
   fileName,
@@ -292,6 +296,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isHovered, setIsHovered] = useState(false);
   const { isMobile } = usePlatform();
+  const search = useFileSearchContext();
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const constraintsRef = useRef(null);
@@ -782,6 +787,14 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
             backgroundRepeat: 'no-repeat',
           }}
           onInteractOutside={() => onClose()}
+          onEscapeKeyDown={event => {
+            // Escape closes the find bar first; only a second Escape closes the
+            // whole preview. Radix would otherwise dismiss the dialog outright.
+            if (search?.isOpen) {
+              event.preventDefault();
+              search.close();
+            }
+          }}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
         >
@@ -798,6 +811,9 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
             >
               {/* Floating top bar */}
               {renderFloatingTopBar(true)}
+              {/* Outside the top bar: that bar fades out on mouse-leave, and the
+                  find bar has to stay put while the user reads results. */}
+              <FileSearchControls />
               <div className='relative z-10 h-full w-full flex items-center justify-center'>
                 {renderMainContent()}
               </div>
@@ -812,11 +828,32 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
   );
 };
 
+/**
+ * The provider wraps the modal rather than living inside it so the modal itself
+ * can read search state — `onEscapeKeyDown` on Dialog.Content needs to know
+ * whether the find bar is open.
+ */
+export const FilePreviewModal: React.FC<FilePreviewModalProps> = props => {
+  const { files, currentIndex = 0, fileUrl, isOpen } = props;
+  // Reset the search when the visible file changes (carousel navigation) or the
+  // modal is reopened — a stale query and match count would otherwise carry over
+  // to a completely different file.
+  const activeFileKey = files?.[currentIndex]?.fileUrl ?? fileUrl;
+  const resetKey = `${isOpen ? 'open' : 'closed'}|${currentIndex}|${activeFileKey}`;
+
+  return (
+    <FileSearchProvider resetKey={resetKey}>
+      <FilePreviewModalInner {...props} />
+    </FileSearchProvider>
+  );
+};
+
 // Global modal instance - connected to attachment viewer machine
-export const AttachmentGalleryModal: React.FC = () => {
+const AttachmentGalleryModalInner: React.FC = () => {
   const state = useSelector(attachmentViewerActor, (s: AttachmentViewerState) => s);
   const context = state.context;
   const location = useLocation();
+  const search = useFileSearchContext();
 
   const isOpen = state.value !== 'closed';
   const currentAttachment = context.attachments[context.currentIndex];
@@ -1570,6 +1607,14 @@ export const AttachmentGalleryModal: React.FC = () => {
           onInteractOutside={() => {
             attachmentViewerActor.send({ type: 'CLOSE' });
           }}
+          onEscapeKeyDown={event => {
+            // Escape closes the find bar first; only a second Escape closes the
+            // whole gallery. Radix would otherwise dismiss the dialog outright.
+            if (search?.isOpen) {
+              event.preventDefault();
+              search.close();
+            }
+          }}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
           onTouchStart={e => e.stopPropagation()}
@@ -1594,6 +1639,7 @@ export const AttachmentGalleryModal: React.FC = () => {
                   >
                     {/* Floating top bar - no close button when thread visible */}
                     {renderFloatingTopBar(false)}
+                    <FileSearchControls />
                     <div
                       className={cn(
                         'relative z-10 h-full w-full flex',
@@ -1631,6 +1677,7 @@ export const AttachmentGalleryModal: React.FC = () => {
                 )}
               >
                 {renderFloatingTopBar(true)}
+                <FileSearchControls />
                 <div
                   className={cn(
                     'relative z-10 h-full w-full flex',
@@ -1646,6 +1693,29 @@ export const AttachmentGalleryModal: React.FC = () => {
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+};
+
+export const AttachmentGalleryModal: React.FC = () => {
+  const currentIndex = useSelector(
+    attachmentViewerActor,
+    (s: AttachmentViewerState) => s.context.currentIndex,
+  );
+  const attachmentId = useSelector(
+    attachmentViewerActor,
+    (s: AttachmentViewerState) => s.context.attachments[s.context.currentIndex]?.attachmentId,
+  );
+  const isOpen = useSelector(
+    attachmentViewerActor,
+    (s: AttachmentViewerState) => s.value !== 'closed',
+  );
+
+  return (
+    <FileSearchProvider
+      resetKey={`${isOpen ? 'open' : 'closed'}|${currentIndex}|${attachmentId ?? ''}`}
+    >
+      <AttachmentGalleryModalInner />
+    </FileSearchProvider>
   );
 };
 
