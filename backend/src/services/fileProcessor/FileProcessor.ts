@@ -6,6 +6,7 @@ import { BaseStrategy } from "./strategies/BaseStrategy"
 import { TextStrategy } from "./strategies/TextStrategy"
 import { PdfJsStrategy } from "./strategies/PdfJsStrategy"
 import { DocxStrategy } from "./strategies/DocxStrategy"
+import { ImageDescriptionStrategy } from "./strategies/ImageStrategy"
 import { SpreadsheetStrategy } from "./strategies/SpreadsheetStrategy"
 import { PdfFallbackProcessor } from "./PdfFallbackProcessor"
 import { DoclingService } from "./DoclingService"
@@ -28,6 +29,12 @@ export const SUPPORTED_MIME_TYPES = new Set([
     "application/json",
     "application/xml",
     "text/xml",
+    // Images — described by a vision LLM (ImageDescriptionStrategy) so standalone
+    // image attachments become searchable in Vespa via their generated description.
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
 ])
 
 /**
@@ -164,6 +171,13 @@ export class FileProcessor {
             return processor.processBuffer(buffer, vespaDocId)
         }
 
+        // Images go straight to the vision-LLM describer — Docling/local text
+        // strategies produce nothing useful for a standalone image.
+        if (mimeType.startsWith("image/")) {
+            const processor = new FileProcessor(new ImageDescriptionStrategy(mimeType, config))
+            return processor.processBuffer(buffer, vespaDocId)
+        }
+
         // Non-PDF: try Docling first if enabled, then the matching local strategy.
         const doclingResult = await FileProcessor.tryDocling(buffer, filename, vespaDocId)
         if (doclingResult) {
@@ -237,6 +251,15 @@ export class FileProcessor {
             case "json":
             case "xml":
                 return new TextStrategy(config)
+            case "png":
+                return new ImageDescriptionStrategy("image/png", config)
+            case "jpg":
+            case "jpeg":
+                return new ImageDescriptionStrategy("image/jpeg", config)
+            case "webp":
+                return new ImageDescriptionStrategy("image/webp", config)
+            case "gif":
+                return new ImageDescriptionStrategy("image/gif", config)
             default:
                 logger.warn(`[FileProcessor] Unknown extension "${ext}", defaulting to TextStrategy`)
                 return new TextStrategy(config)
@@ -264,6 +287,9 @@ export class FileProcessor {
             case "text/xml":
                 return new TextStrategy(config)
             default:
+                if (mimeType.startsWith("image/")) {
+                    return new ImageDescriptionStrategy(mimeType, config)
+                }
                 logger.warn(`[FileProcessor] Unknown MIME type "${mimeType}", defaulting to TextStrategy`)
                 return new TextStrategy(config)
         }
