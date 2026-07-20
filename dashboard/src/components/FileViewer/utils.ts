@@ -31,6 +31,13 @@ export interface BaseViewerProps {
   onExpand?: () => void;
   disableGestures?: boolean;
   onInteractionStateChange?: ((state: ZoomState) => void) | undefined;
+  /**
+   * Whether this viewer should participate in in-file search. Defaults to true.
+   * The carousel keeps adjacent (already-visited) slides mounted, so it passes
+   * `false` for every non-active slide — otherwise several viewers would all
+   * register as the find bar's target and race on the match count.
+   */
+  searchable?: boolean;
 }
 
 export interface FileTypeConfig<P = BaseViewerProps> {

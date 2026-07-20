@@ -4,12 +4,17 @@ import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
 import ExcelParserWorker from './excelParser.worker?worker';
 import type { ExcelParserResponse } from './excelParser.worker';
+import { HighlightedText } from './search/HighlightedText';
+import { cellKey, useSheetsSearch, useGridMatchScroll } from './search';
+import { ACTIVE_CELL_ATTR } from './search/htmlHighlight';
+import type { HighlightRange } from './search';
 
 type CellProps = {
   value: string;
   width: number;
   showRightBorder: boolean;
   showBottomBorder: boolean;
+  ranges?: HighlightRange[] | undefined;
 };
 
 const Cell = React.memo(function Cell({
@@ -17,7 +22,9 @@ const Cell = React.memo(function Cell({
   width,
   showRightBorder,
   showBottomBorder,
+  ranges,
 }: CellProps) {
+  const isActiveCell = ranges?.some(range => range.isActive) ?? false;
   return (
     <div
       className='px-2 py-1 text-sm whitespace-nowrap overflow-hidden text-ellipsis text-foreground border-border bg-background'
@@ -27,13 +34,14 @@ const Cell = React.memo(function Cell({
         borderBottom: showBottomBorder ? '1px solid hsl(var(--border))' : 'none',
         boxSizing: 'border-box',
       }}
+      {...(isActiveCell && { [ACTIVE_CELL_ATTR]: 'true' })}
     >
-      {value}
+      <HighlightedText text={value} ranges={ranges} />
     </div>
   );
 });
 
-const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
+const ExcelViewer: React.FC<BaseViewerProps> = ({ source, searchable }) => {
   const [sheets, setSheets] = useState<{ name: string; data: unknown[][] }[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
   const [loading, setLoading] = useState<boolean>(true);
@@ -201,8 +209,32 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
     overscan: 2,
   });
 
-  // Reset virtualizers on sheet switch
+  // Search spans every sheet. When the active match is on another sheet, the
+  // hook switches to it; activeCellMatch is only set once that sheet is shown.
+  const { matchesByCell, activeCellMatch } = useSheetsSearch(
+    sheets,
+    activeSheet,
+    setActiveSheet,
+    searchable !== false && !loading && sheets.length > 0,
+  );
+  useGridMatchScroll(
+    activeCellMatch,
+    rowVirtualizer,
+    columnVirtualizer,
+    shouldVirtualizeRows,
+    shouldVirtualizeColumns,
+    parentRef,
+  );
+
+  // Read the active match without making it a dep of the reset effect below.
+  const activeCellMatchRef = useRef(activeCellMatch);
+  activeCellMatchRef.current = activeCellMatch;
+
+  // Reset virtualizers on sheet switch — but not when search drove the switch,
+  // or it would scroll to the top and clobber the reveal of the match that
+  // caused the switch.
   useEffect(() => {
+    if (activeCellMatchRef.current) return;
     rowVirtualizer.scrollToIndex(0);
     columnVirtualizer.scrollToIndex(0);
   }, [activeSheet, rowVirtualizer, columnVirtualizer]);
@@ -247,7 +279,16 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
       : null;
   const firstVisibleCol = visibleCols?.[0];
   const lastVisibleCol = visibleCols?.[visibleCols.length - 1];
+  const firstVisibleColForColumns = visibleColumns?.[0];
   const lastVisibleColForColumns = visibleColumns?.[visibleColumns.length - 1];
+  // Column-only mode renders only the visible columns; without this left pad
+  // they'd draw flush against x=0 while the scroller sits at scrollLeft, so
+  // scrolling right (including search reveal) would show empty space. Mirrors
+  // the 2-D path's leftOffset.
+  const columnOnlyLeftOffset =
+    firstVisibleColForColumns && firstVisibleColForColumns.index > 0
+      ? columnWidths.slice(0, firstVisibleColForColumns.index).reduce((sum, w) => sum + w, 0)
+      : 0;
 
   return (
     <div className='pt-[65px] h-full'>
@@ -326,6 +367,7 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
                           width={columnWidths[virtualCol.index] ?? 100}
                           showRightBorder={!isLastVisibleCol}
                           showBottomBorder={!isLastRow}
+                          ranges={matchesByCell.get(cellKey(virtualRow.index, virtualCol.index))}
                         />
                       );
                     })}
@@ -349,6 +391,7 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
                       key={i}
                       style={{
                         display: 'flex',
+                        paddingLeft: columnOnlyLeftOffset,
                       }}
                     >
                       {visibleColumns.map(virtualCol => {
@@ -363,6 +406,7 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
                             width={virtualCol.size}
                             showRightBorder={!isLastVisibleCol}
                             showBottomBorder={!isLastRow}
+                            ranges={matchesByCell.get(cellKey(i, virtualCol.index))}
                           />
                         );
                       })}
@@ -404,6 +448,7 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
                           width={columnWidths[j] ?? 100}
                           showRightBorder={j < lastColIndex}
                           showBottomBorder={!isLastRow}
+                          ranges={matchesByCell.get(cellKey(virtualRow.index, j))}
                         />
                       ))}
                     </div>
@@ -429,6 +474,7 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
                             width={columnWidths[j] ?? 100}
                             showRightBorder={j < lastColIndex}
                             showBottomBorder={!isLastRow}
+                            ranges={matchesByCell.get(cellKey(i, j))}
                           />
                         ))}
                       </div>

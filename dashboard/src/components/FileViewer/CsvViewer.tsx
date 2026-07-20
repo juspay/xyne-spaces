@@ -2,12 +2,17 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import Papa from 'papaparse';
 import { BaseViewerProps } from './utils';
+import { HighlightedText } from './search/HighlightedText';
+import { cellKey, useGridSearch, useGridMatchScroll } from './search';
+import { ACTIVE_CELL_ATTR } from './search/htmlHighlight';
+import type { HighlightRange } from './search';
 
 type CellProps = {
   value: string;
   width: number;
   showRightBorder: boolean;
   showBottomBorder: boolean;
+  ranges?: HighlightRange[] | undefined;
 };
 
 const Cell = React.memo(function Cell({
@@ -15,7 +20,9 @@ const Cell = React.memo(function Cell({
   width,
   showRightBorder,
   showBottomBorder,
+  ranges,
 }: CellProps) {
+  const isActiveCell = ranges?.some(range => range.isActive) ?? false;
   return (
     <div
       className='px-2 py-1 text-sm whitespace-nowrap overflow-hidden text-ellipsis text-foreground border-border bg-background'
@@ -25,13 +32,14 @@ const Cell = React.memo(function Cell({
         borderBottom: showBottomBorder ? '1px solid hsl(var(--border))' : 'none',
         boxSizing: 'border-box',
       }}
+      {...(isActiveCell && { [ACTIVE_CELL_ATTR]: 'true' })}
     >
-      {value}
+      <HighlightedText text={value} ranges={ranges} />
     </div>
   );
 });
 
-const CsvViewer: React.FC<BaseViewerProps> = ({ source }) => {
+const CsvViewer: React.FC<BaseViewerProps> = ({ source, searchable }) => {
   const [data, setData] = useState<string[][]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -144,6 +152,21 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source }) => {
     overscan: 2,
   });
 
+  // Search over the data model, not the DOM: the virtualizers mount only a
+  // handful of cells, so a DOM scan would miss almost every match.
+  const { matchesByCell, activeMatch } = useGridSearch(
+    data,
+    searchable !== false && !loading && data.length > 0,
+  );
+  useGridMatchScroll(
+    activeMatch,
+    rowVirtualizer,
+    columnVirtualizer,
+    shouldVirtualizeRows,
+    shouldVirtualizeColumns,
+    parentRef,
+  );
+
   if (loading) {
     return (
       <div className='pt-[65px] p-4 flex items-center justify-center h-full min-h-[200px]'>
@@ -167,7 +190,16 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source }) => {
       : null;
   const firstVisibleCol = visibleCols?.[0];
   const lastVisibleCol = visibleCols?.[visibleCols.length - 1];
+  const firstVisibleColForColumns = visibleColumns?.[0];
   const lastVisibleColForColumns = visibleColumns?.[visibleColumns.length - 1];
+  // Column-only mode renders only the visible columns; without this left pad
+  // they'd draw flush against x=0 while the scroller sits at scrollLeft, so
+  // scrolling right (including search reveal) would show empty space. Mirrors
+  // the 2-D path's leftOffset.
+  const columnOnlyLeftOffset =
+    firstVisibleColForColumns && firstVisibleColForColumns.index > 0
+      ? columnWidths.slice(0, firstVisibleColForColumns.index).reduce((sum, w) => sum + w, 0)
+      : 0;
 
   return (
     <div className='overflow-auto pt-[65px] h-full' ref={parentRef}>
@@ -222,6 +254,7 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source }) => {
                         width={columnWidths[virtualCol.index] ?? 100}
                         showRightBorder={!isLastVisibleCol}
                         showBottomBorder={!isLastRow}
+                        ranges={matchesByCell.get(cellKey(virtualRow.index, virtualCol.index))}
                       />
                     );
                   })}
@@ -262,6 +295,7 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source }) => {
                         width={columnWidths[j] ?? 100}
                         showRightBorder={j < lastColIndex}
                         showBottomBorder={!isLastRow}
+                        ranges={matchesByCell.get(cellKey(virtualRow.index, j))}
                       />
                     ))}
                   </div>
@@ -285,6 +319,7 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source }) => {
                     key={i}
                     style={{
                       display: 'flex',
+                      paddingLeft: columnOnlyLeftOffset,
                     }}
                   >
                     {visibleColumns.map(virtualCol => {
@@ -298,6 +333,7 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source }) => {
                           width={virtualCol.size}
                           showRightBorder={!isLastVisibleCol}
                           showBottomBorder={!isLastRow}
+                          ranges={matchesByCell.get(cellKey(i, virtualCol.index))}
                         />
                       );
                     })}
@@ -327,6 +363,7 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source }) => {
                       width={columnWidths[j] ?? 100}
                       showRightBorder={j < lastColIndex}
                       showBottomBorder={!isLastRow}
+                      ranges={matchesByCell.get(cellKey(i, j))}
                     />
                   ))}
                 </div>

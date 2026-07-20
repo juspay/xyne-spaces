@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useMemo, memo, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { BaseViewerProps } from './utils';
+import { HighlightedText } from './search/HighlightedText';
+import { useLineSearch, useMatchScroll } from './search';
 
 // Reusable Loading Component
 const LoadingSpinner: React.FC = () => (
@@ -36,7 +38,7 @@ const ErrorDisplay: React.FC<{ error: string; canRetry?: boolean; onRetry?: () =
   </div>
 );
 
-const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
+const TxtViewer: React.FC<BaseViewerProps> = memo(({ source, searchable }) => {
   const [lines, setLines] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +65,14 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     overscan: 10,
     enabled: shouldVirtualize && !loading && !error,
   });
+
+  // Matches come from `lines`, not the DOM: when virtualized, only ~30 rows are
+  // mounted, so a DOM scan would miss almost every match in a large file.
+  const { matchesByRow, activeMatch } = useLineSearch(
+    lines,
+    searchable !== false && !loading && !error,
+  );
+  useMatchScroll(activeMatch, virtualizer, shouldVirtualize, containerRef);
 
   const loadFile = useCallback(async (): Promise<void> => {
     if (!source) {
@@ -152,7 +162,13 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     <div
       className={`font-mono text-sm bg-background dark:bg-[#1E1E1E] text-foreground dark:text-gray-100 border border-border dark:border-gray-700 rounded-lg ${isLargeFile ? 'mt-[65px]' : ''}`}
       style={{
-        height: '100%',
+        // The 65px margin clears the modal's floating top bar, so the height
+        // must subtract it: 100% + a 65px margin overflows the scrollable
+        // wrapper (`h-full w-full overflow-auto p-4`) by 65px, which clips the
+        // bottom ~48px of this viewer out of sight. That hides the last lines of
+        // the file and, because the clipped strip is still inside this
+        // element's own rect, lets find land on a match nobody can see.
+        height: isLargeFile ? 'calc(100% - 65px)' : '100%',
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
@@ -194,26 +210,35 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
             }}
           >
             {virtualizer.getVirtualItems().map(virtualRow => (
+              // The positioned wrapper and the measured element must stay
+              // separate: pinning `height` on the element that carries
+              // `measureElement` feeds the 20px estimate back to the measurer,
+              // so wrapped lines never report their real height — rows overlap
+              // and scrolling to a match drifts. The inner div is left at its
+              // natural height to be measured.
               <div
                 key={virtualRow.key}
-                data-index={virtualRow.index}
-                ref={virtualizer.measureElement}
                 style={{
                   position: 'absolute',
-                  top: virtualRow.start,
+                  top: 0,
                   left: 0,
                   width: '100%',
-                  height: virtualRow.size,
-                  display: 'flex',
-                  alignItems: 'center',
+                  transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                <div className='flex w-full'>
+                <div
+                  ref={virtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  className='flex w-full'
+                >
                   <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
                     {virtualRow.index + 1}
                   </span>
                   <span className='flex-1 whitespace-pre-wrap break-words'>
-                    {lines[virtualRow.index] || ''}
+                    <HighlightedText
+                      text={lines[virtualRow.index] || ''}
+                      ranges={matchesByRow.get(virtualRow.index)}
+                    />
                   </span>
                 </div>
               </div>
@@ -228,7 +253,8 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
                   {index + 1}
                 </span>
                 <span className='flex-1 whitespace-pre-wrap break-words'>
-                  {line || '\u00A0'} {/* Non-breaking space for empty lines */}
+                  {/* Non-breaking space keeps empty lines from collapsing */}
+                  <HighlightedText text={line} ranges={matchesByRow.get(index)} fallback='\u00A0' />
                 </span>
               </div>
             ))}
