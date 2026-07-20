@@ -111,10 +111,8 @@ export interface ExternalApiConfig {
     /** Maximum number of history messages to include */
     readonly maxHistoryMessages?: number;
   };
-  /** SSE parser to use (e.g., 'genius', 'default') */
+  /** SSE parser to use (e.g., 'default') */
   readonly sseParser?: string;
-  /** Tool output transformer to use */
-  readonly toolOutputTransformer?: string;
 }
 
 /**

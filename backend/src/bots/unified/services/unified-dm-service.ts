@@ -74,7 +74,7 @@ class UnifiedDMService {
   }
 
   /**
-   * Get or create a DM channel using bot ID (catalog ID, e.g., 'genius')
+   * Get or create a DM channel using bot ID (catalog ID)
    *
    * @param userId - The human user's ID
    * @param botId - The bot ID from the catalog
