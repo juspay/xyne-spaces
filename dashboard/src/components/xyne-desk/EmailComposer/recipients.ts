@@ -1,4 +1,5 @@
 import { type RecipientSuggestion } from '../RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
+import { parseSingleEmailAddress } from '../../../utils/emailAddress';
 
 /**
  * Recipient-input helpers extracted from the EmailComposer body. Pure
@@ -8,16 +9,18 @@ import { type RecipientSuggestion } from '../RecipientSuggestionsDropdown/Recipi
 
 export type RecipientField = 'to' | 'cc' | 'bcc';
 
-/** Parses RFC 5322-ish `Name <user@domain>` strings into name+email parts. */
+/**
+ * Parses RFC 5322 `Name <user@domain>` strings into name+email parts.
+ *
+ * Unlike the EmailComposer `helpers` variant this one has no technical-id
+ * guard — recipient suggestions want the raw parse.
+ */
 export const parseFromField = (raw: string): { name: string; email: string | null } => {
   const trimmed = (raw || '').trim();
   if (!trimmed) return { name: 'Unknown', email: null };
-  const match = trimmed.match(/^"?([^"<]+?)"?\s*<([^>]+)>$/);
-  if (match) return { name: match[1]!.trim(), email: match[2]!.trim() };
-  const emailOnly = trimmed.match(/^<?([^\s<>@]+@[^\s<>]+)>?$/);
-  if (emailOnly)
-    return { name: emailOnly[1]!.split('@')[0] ?? emailOnly[1]!, email: emailOnly[1]! };
-  return { name: trimmed, email: null };
+  const { name, email } = parseSingleEmailAddress(trimmed);
+  if (email) return { name: name ?? email.split('@')[0] ?? email, email };
+  return { name: name ?? trimmed, email: null };
 };
 
 interface User {

@@ -46,6 +46,7 @@ import {
   Circle,
   UserPlus,
   Info as InfoIcon,
+  Ticket as TicketIcon,
 } from 'lucide-react';
 import {
   ChannelVisibility,
@@ -60,6 +61,7 @@ import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef 
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
 import { logger, Event } from '../../utils/logger';
 import Tooltip from '../../components/ui/Tooltip';
@@ -534,6 +536,8 @@ const SupportScreen = (): ReactElement => {
   }>();
   const supportBase = workspaceId ? `/${workspaceId}/support` : '/support';
   const navigate = useNavigate();
+  // Gate the Tickets shortcut the same way the main rail gates '/projects'.
+  const canAccessProjects = useHasResourceAccess('PROJECTS');
   const [searchParams, setSearchParams] = useSearchParams();
   const { userID } = useAuthContextValues();
   const { isMobile } = usePlatform();
@@ -1787,6 +1791,23 @@ const SupportScreen = (): ReactElement => {
                     </div>
                   </div>
                 </div>
+                {/* Tickets shortcut — jumps to the Projects/Tickets board.
+                    Replaces the old rail icon; gated on PROJECTS access. */}
+                {canAccessProjects && (
+                  <div className='flex-shrink-0 px-3 pt-3'>
+                    <button
+                      onClick={() => void navigate('/projects')}
+                      className='w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                      aria-label='Go to Tickets'
+                      title='Tickets'
+                      data-track-category='Support'
+                      data-track-name='OpenTicketsFromSupport'
+                    >
+                      <TicketIcon className='size-4 shrink-0' />
+                      <span className='font-medium'>My Tickets</span>
+                    </button>
+                  </div>
+                )}
                 {/* Scrollable channel list */}
                 <div className='flex-1 overflow-y-auto px-3 py-4'>
                   {sortedEmailChannels.length === 0 ? (
@@ -2841,6 +2862,7 @@ export const SupportTicketDetail = ({
   const routerState = location.state as {
     conversationId?: string | null;
     ticketId?: string | null;
+    returnToUrl?: string | null;
   };
   // Router state is a perf hint from list navigation (instant paint); direct
   // URL loads and new-tab openings fall back to the supportTicketByXyneId fetch
@@ -3165,10 +3187,20 @@ export const SupportTicketDetail = ({
       onBack();
       return;
     }
+    // Ticket boards (Kanban, My Tickets) hand us the URL they came from, so
+    // "back" returns to that board instead of dumping the user in the channel
+    // inbox they never visited. Only same-origin paths are honoured — reject
+    // absolute URLs and the "//host" / "/\host" protocol-relative forms so
+    // router state can't drive an off-site redirect.
+    const returnToUrl = routerState?.returnToUrl;
+    if (returnToUrl && /^\/(?![/\\])/.test(returnToUrl)) {
+      void navigate(returnToUrl);
+      return;
+    }
     const base = navBasePath ?? supportBase;
     const back = channelIdParam ? `${base}/${channelIdParam}` : base;
     void navigate(back);
-  }, [channelIdParam, navBasePath, navigate, onBack, supportBase]);
+  }, [channelIdParam, navBasePath, navigate, onBack, routerState?.returnToUrl, supportBase]);
 
   const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
     if (!cursorStart || !channelId) return;
