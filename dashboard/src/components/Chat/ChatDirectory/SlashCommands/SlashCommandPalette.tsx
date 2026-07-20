@@ -230,7 +230,7 @@ export function SlashCommandPalette({ command }: SlashCommandPaletteProps): Reac
           {commandGroupDmResults.map(({ channel, label }) => (
             <Command.Item
               key={channel.id}
-              value={`command-channel-${channel.id}`}
+              value={`command-group-dm-${channel.id}`}
               data-item-label={label}
               onSelect={() =>
                 onRunTarget({ type: 'channel', channel, displayName: label, isDm: true })
