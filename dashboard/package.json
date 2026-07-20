@@ -116,6 +116,7 @@
     "@xstate/react": "^6.0.0",
     "@xstate/store": "^3.16.0",
     "@xyflow/react": "^12.11.2",
+    "@xyne/icons": "file:../icons",
     "@xyne/shared": "file:../shared",
     "@y-sweet/client": "^0.9.1",
     "ag-grid-community": "^35.0.0",

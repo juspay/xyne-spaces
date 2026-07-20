@@ -421,7 +421,11 @@ const getMessageBubbleClassName = (
       !isBookmarked &&
       !isShowInChannel &&
       !searchItemView &&
-      'active:bg-accent/50 transition-colors',
+      // Press feedback for the message itself — but NOT when the press lands on
+      // interactive content inside the bubble (e.g. flow-artifact buttons/links).
+      // CSS :active propagates to ancestors regardless of JS event handling, so we
+      // suppress it via :has() when an interactive descendant is the one being pressed.
+      '[&:active:not(:has(:is(button,a,input,textarea,select,[role=button]):active))]:bg-accent/50 transition-colors',
     // Hover highlight lives on the ChatBubble root via `data-[hovered]:bg-...`
     // (stamped imperatively by the shared MessageHoverToolbar) so the bg and
     // the toolbar can never desync, and hovering never triggers a React

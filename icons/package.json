@@ -1,0 +1,39 @@
+{
+  "name": "@xyne/icons",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Pikaicons v2.1 as themeable React components (Stroke / Solid / Contrast / Duo Stroke / Duo Solid)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./icons/*": {
+      "types": "./dist/icons/*.d.ts",
+      "import": "./dist/icons/*.js",
+      "default": "./dist/icons/*.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "export:figma": "node scripts/figma-export.mjs",
+    "build:icons": "node scripts/build-icons.mjs",
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "prepare": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "typescript": "^5.3.3"
+  }
+}
