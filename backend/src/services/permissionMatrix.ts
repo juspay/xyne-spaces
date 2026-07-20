@@ -177,6 +177,7 @@ export async function grantPermissionsForRole(
             userId,
             resourceId: resource.id,
             accessType: entry.accessType,
+            workspaceId,
           },
           actorId,
         );

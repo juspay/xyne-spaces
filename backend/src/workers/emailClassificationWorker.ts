@@ -12,6 +12,7 @@ import { activityService } from '@/services/activity/activityService';
 import { ActivityClassification, ActivityType } from '@prisma/client';
 import type { BoardMetadata } from '@xyne/shared';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
+import { runWithContext } from '@/database/tenant/context';
 
 const emailClassificationService = new EmailClassificationService();
 const prisma = DatabaseClient.getInstance();
@@ -58,6 +59,27 @@ class EmailClassificationWorker {
   }
 
   private async processJob(job: Bull.Job<EmailClassificationJobData>): Promise<void> {
+    // Background job → no HTTP tenant scope. Resolve the channel's workspace and
+    // open a tenant context so every Prisma write below (ticketActivity, activity,
+    // workload, assignments) gets workspaceId stamped instead of leaking NULL.
+    const channel = await prisma.channel.findUnique({
+      where: { id: job.data.channelId },
+      select: { workspaceId: true },
+    });
+    if (!channel?.workspaceId) {
+      logger.error('[EMAIL-CLASSIFICATION-WORKER] Channel not found or has no workspaceId', {
+        channelId: job.data.channelId,
+        ticketId: job.data.ticketId,
+      });
+      throw new Error(`EmailClassificationWorker: channel ${job.data.channelId} not found or has no workspaceId`);
+    }
+    return runWithContext(
+      { userId: 'email-classification-worker', workspaceId: channel.workspaceId },
+      () => this.classifyAndAssign(job),
+    );
+  }
+
+  private async classifyAndAssign(job: Bull.Job<EmailClassificationJobData>): Promise<void> {
     const { ticketId, channelId, emailId, groupId } = job.data;
     // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)
     const runClassification = job.data.runClassification ?? true;

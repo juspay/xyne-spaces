@@ -130,6 +130,7 @@ export async function createQuestionActivity(executionId: string): Promise<void>
           const workflowBot = await unifiedBotUserService.getBotByEmail('workflow-bot@bot.xyne.ai', ticket.workspaceId)
           await activityService.createActivity({
             userId,
+            workspaceId: ticket.workspaceId,
             actorAction: 'workflow_question',
             actionSource: 'workflow',
             actionSourceId: workflowId,

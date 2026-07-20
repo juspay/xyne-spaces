@@ -170,12 +170,14 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
   ): Promise<SessionData> => {
     try {
       const workflowId = await getOrCreateAskAIWorkflow(userId, agentName);
+      const workspaceId = await resolveWorkspaceId(userId);
       const uuid = sessionId || randomUUID();
 
       const execution = await db.workflowExecution.create({
         data: {
           id: uuid,
           workflowId,
+          workspaceId,
           status: ASK_AI_STATUS,
           tag: 'root',
           ignoreDuration: 0,

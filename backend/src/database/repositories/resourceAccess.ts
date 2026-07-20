@@ -255,6 +255,7 @@ export class ResourceAccessRepository extends BaseRepository<ResourceAccess, Cre
     groupId?: string;
     resourceId: string;
     accessType: AccessType;
+    workspaceId?: string;
   }, actorUserId?: string): Promise<ResourceAccess> {
     await this.validateEnum(data.accessType, 'accessType', Object.values(AccessType));
     await this.validateRequired(data.resourceId, 'resourceId');
@@ -274,6 +275,12 @@ export class ResourceAccessRepository extends BaseRepository<ResourceAccess, Cre
         connect: { id: data.resourceId }
       }
     };
+
+    // Explicit tenant key for background/webhook paths (mettle sync, CLI) that
+    // have no request-scoped context for the workspaceId stamper to read.
+    if (data.workspaceId) {
+      createData.workspaceId = data.workspaceId;
+    }
 
     if (data.userId) {
       createData.user = {

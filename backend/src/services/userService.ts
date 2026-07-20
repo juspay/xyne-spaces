@@ -134,7 +134,7 @@ export class UserService {
       await this.ensureUserInGeneralChannel(user);
 
       // Create user presence entry
-      await this.ensureUserPresence(user.id);
+      await this.ensureUserPresence(user.id, user.workspaceId);
 
       // Create user preference entry
       await this.ensureUserPreference(user.id);
@@ -174,7 +174,7 @@ export class UserService {
   /**
    * Ensure user presence entry exists (create if not exists)
    */
-  async ensureUserPresence(userId: string): Promise<void> {
+  async ensureUserPresence(userId: string, workspaceId: string): Promise<void> {
     try {
       const existingPresence = await this.prisma.userPresence.findUnique({
         where: { userId },
@@ -185,6 +185,7 @@ export class UserService {
         await this.prisma.userPresence.create({
           data: {
             userId,
+            workspaceId,
             status: UserPresenceStatus.ONLINE,
             lastActiveAt: new Date(),
             lastSeenAt: new Date(),

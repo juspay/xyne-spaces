@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import process from 'process';
 import { ConfluenceImportService, type ConfluenceImportConfig } from '@/services/confluence/confluenceImportService';
 import { DatabaseClient } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 
 interface CliConfig extends Omit<ConfluenceImportConfig, 'actorUserId'> {
@@ -22,11 +23,27 @@ async function main(): Promise<void> {
 
   await DatabaseClient.connect();
 
+  // CLI import has no HTTP request / req.user, so open an explicit tenant scope from the import's
+  // TARGET workspace so the workspaceId stamper fills the rows this import writes. Resolve the
+  // workspaceId the same way importSpace does: prefer the config's workspaceId, else the actor's.
+  const resolvedWorkspaceId =
+    rawConfig.workspaceId ||
+    (await DatabaseClient.getInstance().user.findUnique({
+      where: { id: actorUserId },
+      select: { workspaceId: true },
+    }))?.workspaceId ||
+    undefined;
+
   const service = new ConfluenceImportService();
-  const summary = await service.importSpace({
-    ...rawConfig,
-    actorUserId,
-  });
+  const runImport = (): Promise<Awaited<ReturnType<typeof service.importSpace>>> =>
+    service.importSpace({
+      ...rawConfig,
+      actorUserId,
+    });
+
+  const summary = resolvedWorkspaceId
+    ? await runWithContext({ userId: actorUserId, workspaceId: resolvedWorkspaceId }, runImport)
+    : await runImport();
 
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }

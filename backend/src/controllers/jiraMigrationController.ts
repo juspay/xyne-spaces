@@ -20,6 +20,7 @@ import {
   queueJiraPurgeMessageVespaDeleteJob,
   queueJiraPurgeTicketVespaDeleteJob,
 } from '@/services/jira/vespa';
+import { runWithContext } from '@/database/tenant/context';
 
 const db = DatabaseClient.getInstance();
 
@@ -1743,59 +1744,70 @@ export class JiraMigrationController {
     input: JiraMigrationExecuteInput,
     actorUserId: string,
   ): Promise<void> {
-    try {
-      await jiraMigrationProgressService.patchJob(jobId, {
-        status: 'running',
-        controlStatus: 'running',
-        currentStep: 'starting',
-        currentIssueKey: null,
-      });
+    // Fire-and-forget background job detached from the HTTP request (no req.user), so open an
+    // explicit tenant scope from the import's TARGET workspace (single-target import) so the
+    // workspaceId stamper fills the rows this job writes downstream.
+    const targetChannel = await db.channel.findUnique({
+      where: { id: input.targetChannelId },
+      select: { workspaceId: true },
+    });
+    const workspaceId = targetChannel?.workspaceId || config.defaultWorkspaceId;
 
-      const result = await jiraMigrationImportService.execute(
-        input,
-        actorUserId,
-        async (update: JiraMigrationProgressUpdate) => {
-          await this.handleProgressUpdate(jobId, update);
-        },
-        async () => (await jiraMigrationProgressService.getJob(jobId))?.controlStatus,
-      );
-
-      await jiraMigrationProgressService.patchJob(jobId, {
-        status: 'completed',
-        currentStep: 'completed',
-        currentIssueKey: null,
-        completedAt: new Date().toISOString(),
-        result,
-        warnings: result.warnings,
-        issueResults: result.issueResults,
-        totalIssues: result.issueResults.length,
-        processedIssues: result.issueResults.length,
-        importedTickets: result.importedTickets,
-        skippedTickets: result.skippedTickets,
-        importedComments: result.importedComments,
-        skippedComments: result.skippedComments,
-        importedAttachments: result.importedAttachments,
-        skippedAttachments: result.skippedAttachments,
-      });
-
+    await runWithContext({ userId: actorUserId, workspaceId }, async () => {
       try {
-        await this.postMigrationReport(input.targetChannelId, actorUserId, result);
-      } catch (reportError) {
-        logger.error('[JiraMigration] Failed to post migration report to channel', reportError, {
-          jobId,
-          channelId: input.targetChannelId,
-          jiraProjectKey: result.jiraProjectKey,
+        await jiraMigrationProgressService.patchJob(jobId, {
+          status: 'running',
+          controlStatus: 'running',
+          currentStep: 'starting',
+          currentIssueKey: null,
+        });
+
+        const result = await jiraMigrationImportService.execute(
+          input,
+          actorUserId,
+          async (update: JiraMigrationProgressUpdate) => {
+            await this.handleProgressUpdate(jobId, update);
+          },
+          async () => (await jiraMigrationProgressService.getJob(jobId))?.controlStatus,
+        );
+
+        await jiraMigrationProgressService.patchJob(jobId, {
+          status: 'completed',
+          currentStep: 'completed',
+          currentIssueKey: null,
+          completedAt: new Date().toISOString(),
+          result,
+          warnings: result.warnings,
+          issueResults: result.issueResults,
+          totalIssues: result.issueResults.length,
+          processedIssues: result.issueResults.length,
+          importedTickets: result.importedTickets,
+          skippedTickets: result.skippedTickets,
+          importedComments: result.importedComments,
+          skippedComments: result.skippedComments,
+          importedAttachments: result.importedAttachments,
+          skippedAttachments: result.skippedAttachments,
+        });
+
+        try {
+          await this.postMigrationReport(input.targetChannelId, actorUserId, result);
+        } catch (reportError) {
+          logger.error('[JiraMigration] Failed to post migration report to channel', reportError, {
+            jobId,
+            channelId: input.targetChannelId,
+            jiraProjectKey: result.jiraProjectKey,
+          });
+        }
+      } catch (error) {
+        logger.error('[JiraMigration] Background migration job failed', error, { jobId });
+        await jiraMigrationProgressService.patchJob(jobId, {
+          status: 'failed',
+          currentStep: 'failed',
+          completedAt: new Date().toISOString(),
+          errorMessage: error instanceof Error ? error.message : 'Unknown migration error',
         });
       }
-    } catch (error) {
-      logger.error('[JiraMigration] Background migration job failed', error, { jobId });
-      await jiraMigrationProgressService.patchJob(jobId, {
-        status: 'failed',
-        currentStep: 'failed',
-        completedAt: new Date().toISOString(),
-        errorMessage: error instanceof Error ? error.message : 'Unknown migration error',
-      });
-    }
+    });
   }
 
   private getMigrationReportSummary(result: import('@/services/jiraMigrationImportService').JiraMigrationExecuteResult) {

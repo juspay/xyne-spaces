@@ -17,6 +17,7 @@ import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
 import { DeskType } from '@prisma/client';
+import { runWithContext } from '@/database/tenant/context';
 
 const router = Router();
 
@@ -76,8 +77,32 @@ router.post(
         adapter: adapter.name,
       });
 
-      // Execute core ingestion: preprocess → transform → sync
-      const results = await externalSourceCore.ingest(adapter, sourceName, req.body, source);
+      // Execute core ingestion: preprocess → transform → sync.
+      // Unauthenticated webhook → no HTTP tenant scope. Open one so ingested
+      // emails/drafts/assignments get workspaceId stamped. ExternalSource.workspaceId
+      // is nullable, so prefer it but fall back to the source's bound channel
+      // (Channel.workspaceId is NOT NULL) — without this, a channel-bound source with a
+      // null workspaceId column would ingest unscoped and leak NULL.
+      let ingestWorkspaceId: string | null = source?.workspaceId ?? null;
+      if (!ingestWorkspaceId && source?.channelId) {
+        const channel = await db.channel.findUnique({
+          where: { id: source.channelId },
+          select: { workspaceId: true },
+        });
+        ingestWorkspaceId = channel?.workspaceId ?? null;
+      }
+      if (!ingestWorkspaceId) {
+        logger.error('[External-Source] ingest with no resolvable workspaceId — refusing to ingest untenanted', {
+          sourceName,
+          sourceId: source?.id,
+          channelId: source?.channelId,
+        });
+        throw new Error(`External source ingest: no resolvable workspaceId for source ${source?.id ?? sourceName}`);
+      }
+      const results = await runWithContext(
+        { userId: 'external-source-ingest', workspaceId: ingestWorkspaceId },
+        () => externalSourceCore.ingest(adapter, sourceName, req.body, source),
+      );
 
       const duration = Date.now() - startTime;
       logger.info(`Data processed in ${duration}ms`, {

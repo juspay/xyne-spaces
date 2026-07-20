@@ -10,6 +10,7 @@ import {
   emailFetchQueue,
   type EmailFetchJobData,
 } from '@/queues/emailFetchQueue';
+import { runWithContext } from '@/database/tenant/context';
 
 class EmailFetchWorker {
   private isInitialized = false;
@@ -72,7 +73,12 @@ class EmailFetchWorker {
         : undefined;
     let result: Awaited<ReturnType<NonNullable<typeof adapter.refetch>>>;
     try {
-      result = await adapter.refetch(source, options);
+      // Background job → open a tenant scope from the job's workspaceId so ingested
+      // emails/drafts/assignments get workspaceId stamped instead of leaking NULL.
+      result = await runWithContext(
+        { userId: 'email-fetch-worker', workspaceId: job.data.workspaceId },
+        () => adapter.refetch!(source, options),
+      );
     } catch (error) {
       if (job.data.isDlMemberSync && this.isFinalAttempt(job)) {
         await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
