@@ -11,6 +11,7 @@ import type {
 } from '@rocicorp/zero';
 import type { UseQueryOptions, QueryResult } from '@rocicorp/zero/react';
 import { queryCacheActor, type CacheEntry, loadCacheEntryFromStorage } from '../machines/queryCacheMachine.js';
+import { consumeShadow } from '../utils/warmShadow.js';
 import { useSelector } from '@xstate/react';
 import { useQuery } from './useQuery.js';
 import { useZero, useInstrumentation } from './useZero.js';
@@ -211,21 +212,38 @@ export function useCachedQuery<
     if (!hash || cacheEntry || idbLoadAttemptedRef.current === hash) return;
     idbLoadAttemptedRef.current = hash;
 
-    void loadCacheEntryFromStorage(hash).then(entry => {
-      if (entry?.data) {
-        const current = queryCacheActor.getSnapshot().context.cache.get(hash);
-        if (current) return;
-
-        queryCacheActor.send({
-          type: 'SET_KEY',
-          hash,
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
-          data: entry.data as any,
-          lastUpdatedAt: entry.lastUpdatedAt,
-        });
+    void (async (): Promise<void> => {
+      // Try shadow first, then IDB. Effect is gated on the actor being
+      // empty for this hash, so writing whichever we find first won't
+      // clobber a fresher live entry.
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
+      const userID = (zero.context as { userID?: string })?.userID;
+      let data: unknown;
+      let lastUpdatedAt: number | undefined;
+      if (userID) {
+        const shadow = await consumeShadow(userID, query.query.queryName, query.args);
+        if (shadow?.data) {
+          data = shadow.data;
+          lastUpdatedAt = shadow.lastUpdatedAt ?? 0;
+        }
       }
-    });
-  }, [hash, cacheEntry]);
+      if (data === undefined) {
+        const entry = await loadCacheEntryFromStorage(hash);
+        if (!entry?.data) return;
+        data = entry.data;
+        lastUpdatedAt = entry.lastUpdatedAt;
+      }
+      const current = queryCacheActor.getSnapshot().context.cache.get(hash);
+      if (current) return;
+      queryCacheActor.send({
+        type: 'SET_KEY',
+        hash,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+        data: data as any,
+        lastUpdatedAt,
+      });
+    })();
+  }, [hash, cacheEntry, query, zero.context]);
 
   const hasCachedData = cacheEntry?.data?.[0] !== null && cacheEntry?.data?.[0] !== undefined;
   const lastUpdatedAt = cacheEntry?.lastUpdatedAt;
@@ -270,7 +288,7 @@ export function useCachedQuery<
           });
         } catch (error) {
           initialLoadStartedRef.current = false;
-          logger.error(Event.ZERO_RUN_ERROR, { error });
+          // ZERO_RUN_ERROR already logged by useZero.ts proxy with query name + args
         }
       })();
     }
