@@ -30,6 +30,7 @@ import { useDmsSearch } from '../../../hooks/useDmsSearch';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Channel, ChannelScopeType } from '@xyne/shared';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { FilterPills, type FilterPillOption } from '../../ui/FilterPills';
 
 // Simple component for DM search results (no message preview)
 const DmSearchResultItem = ({
@@ -98,6 +99,36 @@ const DmUserSearchResultItem = ({
 const DESKTOP_ITEM_HEIGHT = 75;
 const MOBILE_ITEM_HEIGHT = 65;
 
+type DmFilterTab = 'all' | 'unread' | 'groups' | 'favorites';
+
+const getDmFilterEmptyCopy = (activeTab: DmFilterTab): { title: string; description: string } => {
+  if (activeTab === 'unread') {
+    return {
+      title: 'All caught up',
+      description: 'You have no unread direct messages.',
+    };
+  }
+
+  if (activeTab === 'groups') {
+    return {
+      title: 'No group chats',
+      description: 'Group conversations you join will appear here.',
+    };
+  }
+
+  if (activeTab === 'favorites') {
+    return {
+      title: 'No favorites yet',
+      description: 'Starred direct messages and group chats will appear here.',
+    };
+  }
+
+  return {
+    title: 'No conversations yet',
+    description: 'Start a new chat with your team members to collaborate and share ideas.',
+  };
+};
+
 const DmsPage = (): ReactElement => {
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -107,6 +138,7 @@ const DmsPage = (): ReactElement => {
   const dmPanelRef = useRef<ImperativePanelHandle>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [showAddDmForm, setShowAddDmForm] = useState(false);
+  const [activeTab, setActiveTab] = useState<DmFilterTab>('all');
   const context = useAuthContextValues();
 
   const selectedChannelIdRef = useRef<string | undefined>(channelId);
@@ -136,11 +168,57 @@ const DmsPage = (): ReactElement => {
   const {
     messagesMap,
     channels: directMessages,
+    visibleDmChannels,
+    userChannelStatuses,
     loadMore,
     firstItemIndex,
     selectedChannelMovedVersion,
     jumpToChannel,
   } = useDmsPaginatedMessages({ selectedChannelId: channelId });
+
+  const unreadDmCount = useMemo(
+    () =>
+      visibleDmChannels.reduce(
+        (count, channel) => count + ((unreadCounts[channel.id] ?? 0) > 0 ? 1 : 0),
+        0,
+      ),
+    [unreadCounts, visibleDmChannels],
+  );
+
+  const statusByChannelId = useMemo(
+    () => new Map(userChannelStatuses.map(status => [status.channelId, status])),
+    [userChannelStatuses],
+  );
+
+  const filteredDirectMessages = useMemo<Channel[]>(() => {
+    if (activeTab === 'unread') {
+      return visibleDmChannels.filter(channel => (unreadCounts[channel.id] ?? 0) > 0);
+    }
+    if (activeTab === 'groups') {
+      return visibleDmChannels.filter(channel => channel.scopeType === ChannelScopeType.GROUP_DM);
+    }
+    if (activeTab === 'favorites') {
+      return visibleDmChannels.filter(channel => statusByChannelId.get(channel.id)?.isStarred);
+    }
+    return directMessages;
+  }, [activeTab, directMessages, visibleDmChannels, statusByChannelId, unreadCounts]);
+
+  const dmFilterTabs = useMemo<FilterPillOption<DmFilterTab>[]>(
+    () => [
+      { value: 'all', label: 'All' },
+      { value: 'unread', label: 'Unread', count: unreadDmCount },
+      { value: 'favorites', label: 'Favorites' },
+      { value: 'groups', label: 'Groups' },
+    ],
+    [unreadDmCount],
+  );
+
+  const handleDmFilterChange = useCallback((tab: DmFilterTab): void => {
+    setActiveTab(tab);
+    virtuosoRef.current?.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
+  }, []);
+
+  const filterEmptyCopy = getDmFilterEmptyCopy(activeTab);
 
   const {
     dmSearchQuery,
@@ -164,39 +242,39 @@ const DmsPage = (): ReactElement => {
 
   // j/k keyboard navigation through DM list
   const currentDmIndex = useMemo(
-    () => (channelId ? directMessages.findIndex(ch => ch.id === channelId) : -1),
-    [channelId, directMessages],
+    () => (channelId ? filteredDirectMessages.findIndex(ch => ch.id === channelId) : -1),
+    [channelId, filteredDirectMessages],
   );
 
   const navigateDm = useCallback(
     (delta: number) => {
-      if (directMessages.length === 0) return;
+      if (filteredDirectMessages.length === 0) return;
       const nextIndex =
         currentDmIndex < 0
           ? delta > 0
             ? 0
-            : directMessages.length - 1
-          : Math.max(0, Math.min(directMessages.length - 1, currentDmIndex + delta));
-      const next = directMessages[nextIndex];
+            : filteredDirectMessages.length - 1
+          : Math.max(0, Math.min(filteredDirectMessages.length - 1, currentDmIndex + delta));
+      const next = filteredDirectMessages[nextIndex];
       if (next && next.id !== channelId) {
         virtuosoRef.current?.scrollToIndex({ index: nextIndex, align: 'center' });
         void navigate(`/chat/dm/${next.id}?fromDM=true&nofocus=1`);
       }
     },
-    [directMessages, currentDmIndex, channelId, navigate],
+    [filteredDirectMessages, currentDmIndex, channelId, navigate],
   );
 
   useShortcut('j', () => navigateDm(1), {
     scope: 'global',
     description: 'Next DM',
     category: 'DMs',
-    enabled: !isMobile && directMessages.length > 0,
+    enabled: !isMobile && filteredDirectMessages.length > 0,
   });
   useShortcut('k', () => navigateDm(-1), {
     scope: 'global',
     description: 'Previous DM',
     category: 'DMs',
-    enabled: !isMobile && directMessages.length > 0,
+    enabled: !isMobile && filteredDirectMessages.length > 0,
   });
 
   // Handle DM selection from search dropdown
@@ -243,10 +321,15 @@ const DmsPage = (): ReactElement => {
   // Scroll to top when the selected channel receives a new message and moves to top.
   // Only fires in live mode (the hook guards this internally).
   useEffect(() => {
-    if (!isMobile && selectedChannelMovedVersion > 0 && virtuosoRef.current) {
+    if (
+      activeTab === 'all' &&
+      !isMobile &&
+      selectedChannelMovedVersion > 0 &&
+      virtuosoRef.current
+    ) {
       virtuosoRef.current.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
     }
-  }, [selectedChannelMovedVersion, isMobile]);
+  }, [activeTab, selectedChannelMovedVersion, isMobile]);
 
   const handleAddDirectMessage = (): void => {
     setShowAddDmForm(true);
@@ -265,7 +348,7 @@ const DmsPage = (): ReactElement => {
   const threshold = itemHeight * 5;
 
   const renderDmItem = useCallback(
-    (_index: number, channel: (typeof directMessages)[number]) => {
+    (_index: number, channel: Channel) => {
       return (
         <div>
           <DmListItem
@@ -282,7 +365,7 @@ const DmsPage = (): ReactElement => {
   );
 
   const renderMobileDmItem = useCallback(
-    (index: number, channel: (typeof directMessages)[number]) => {
+    (index: number, channel: Channel) => {
       return (
         <div className={index === 0 ? 'pt-4' : 'mt-6'}>
           <DmListItem
@@ -399,7 +482,7 @@ const DmsPage = (): ReactElement => {
     return (
       <div className='flex flex-col h-full max-w-full bg-background text-foreground overflow-x-hidden px-2 w-screen'>
         <div
-          className='block sm:hidden -mx-2 px-4 pt-2 pb-4 rounded-b-[24px] border-b border-border'
+          className='-mx-2 rounded-b-[24px] border-b border-border px-4 pb-4 pt-2'
           style={{ background: 'var(--mobile-panel-bg)' }}
         >
           {/* Top Row: Logo + Avatar */}
@@ -463,32 +546,47 @@ const DmsPage = (): ReactElement => {
             )}
             {renderSearchDropdown()}
           </div>
+          <FilterPills
+            tabs={dmFilterTabs}
+            activeTab={activeTab}
+            onTabChange={handleDmFilterChange}
+            ariaLabel='Filter direct messages'
+            className='mt-3'
+            testIdPrefix='dm-filter'
+          />
         </div>
 
         <div className='flex-1 w-full max-w-full overflow-hidden'>
-          {directMessages.length === 0 ? (
+          {filteredDirectMessages.length === 0 ? (
             <div className='flex flex-col items-center justify-center h-full pb-24 px-6'>
-              <img
-                src='/images/empty-chats.svg'
-                alt='No conversations'
-                className='w-full max-w-[280px] h-auto mb-6 opacity-90 theme-invert'
-              />
-              <h3 className='text-lg font-medium text-foreground mb-2'>No conversations yet</h3>
+              {activeTab === 'all' && (
+                <img
+                  src='/images/empty-chats.svg'
+                  alt='No conversations'
+                  className='w-full max-w-[280px] h-auto mb-6 opacity-90 theme-invert'
+                />
+              )}
+              <h3 className='text-lg font-medium text-foreground mb-2'>{filterEmptyCopy.title}</h3>
               <p className='text-sm text-muted-foreground text-center max-w-[250px]'>
-                Start a new chat with your team members to collaborate and share ideas.
+                {filterEmptyCopy.description}
               </p>
             </div>
           ) : (
             <Virtuoso
+              key={activeTab}
               ref={virtuosoRef}
-              data={directMessages}
-              firstItemIndex={firstItemIndex}
+              data={filteredDirectMessages}
+              firstItemIndex={activeTab === 'all' ? firstItemIndex : 0}
               computeItemKey={(_, channel) => channel.id}
               fixedItemHeight={itemHeight}
               overscan={5}
               increaseViewportBy={{ top: threshold, bottom: threshold }}
-              startReached={() => void jumpToChannel()}
-              endReached={loadMore}
+              startReached={() => {
+                if (activeTab === 'all') void jumpToChannel();
+              }}
+              endReached={() => {
+                if (activeTab === 'all') loadMore();
+              }}
               itemContent={renderMobileDmItem}
               components={{
                 Footer: () => <div className='pb-20' />,
@@ -616,32 +714,49 @@ const DmsPage = (): ReactElement => {
                 )}
                 {renderSearchDropdown()}
               </div>
+              <FilterPills
+                tabs={dmFilterTabs}
+                activeTab={activeTab}
+                onTabChange={handleDmFilterChange}
+                ariaLabel='Filter direct messages'
+                className='mt-3'
+                testIdPrefix='dm-filter'
+              />
             </div>
 
             <div className='flex-1 w-full overflow-hidden'>
-              {directMessages.length === 0 ? (
+              {filteredDirectMessages.length === 0 ? (
                 <div className='flex flex-col items-center justify-center h-full px-6'>
-                  <img
-                    src='/images/empty-chats.svg'
-                    alt='No conversations'
-                    className='w-full max-w-[280px] h-auto mb-6 opacity-90 theme-invert'
-                  />
-                  <h3 className='text-lg font-medium text-foreground mb-2'>No conversations yet</h3>
+                  {activeTab === 'all' && (
+                    <img
+                      src='/images/empty-chats.svg'
+                      alt='No conversations'
+                      className='w-full max-w-[280px] h-auto mb-6 opacity-90 theme-invert'
+                    />
+                  )}
+                  <h3 className='text-lg font-medium text-foreground mb-2'>
+                    {filterEmptyCopy.title}
+                  </h3>
                   <p className='text-sm text-muted-foreground text-center max-w-[250px]'>
-                    Start a new chat with your team members to collaborate and share ideas.
+                    {filterEmptyCopy.description}
                   </p>
                 </div>
               ) : (
                 <Virtuoso
+                  key={activeTab}
                   ref={virtuosoRef}
-                  data={directMessages}
-                  firstItemIndex={firstItemIndex}
+                  data={filteredDirectMessages}
+                  firstItemIndex={activeTab === 'all' ? firstItemIndex : 0}
                   computeItemKey={(_, channel) => channel.id}
                   fixedItemHeight={itemHeight}
                   overscan={5}
                   increaseViewportBy={{ top: threshold, bottom: threshold }}
-                  startReached={() => void jumpToChannel()}
-                  endReached={loadMore}
+                  startReached={() => {
+                    if (activeTab === 'all') void jumpToChannel();
+                  }}
+                  endReached={() => {
+                    if (activeTab === 'all') loadMore();
+                  }}
                   itemContent={renderDmItem}
                   className='h-full'
                   data-testid='dm-list'

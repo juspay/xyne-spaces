@@ -53,6 +53,7 @@ import { logger, Event } from '../../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../../../machines/stateMachine';
+import { ActivityUnreadsFloatingButton } from '../ActivityUnreadsFloatingButton';
 
 type ActivityTab =
   | 'all'
@@ -197,6 +198,7 @@ const ActivityListView = (): ReactElement => {
   const isOnIndexRoute = pathWithoutWorkspace === '/chat/activity';
 
   const activityPanelRef = useRef<ImperativePanelHandle>(null);
+  const activityVirtuosoRef = useRef<VirtuosoHandle>(null);
 
   // All hooks must be called before any conditional returns
   const [activeTab, setActiveTab] = useState<ActivityTab>('all');
@@ -269,6 +271,7 @@ const ActivityListView = (): ReactElement => {
     });
     setShowUnreadOnly(checked);
     window.localStorage.setItem('activity_unread_toggle', String(checked));
+    activityVirtuosoRef.current?.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
   }, []);
 
   const handleActionableToggle = useCallback((checked: boolean): void => {
@@ -524,7 +527,6 @@ const ActivityListView = (): ReactElement => {
     new URLSearchParams(window.location.search).get('selectedActivity'),
   );
   const selectedRowElRef = useRef<HTMLElement | null>(null);
-  const activityVirtuosoRef = useRef<VirtuosoHandle>(null);
   const nofocusRef = useRef(false);
 
   const stampSelectedRow = useCallback((el: HTMLElement | null): void => {
@@ -807,6 +809,7 @@ const ActivityListView = (): ReactElement => {
               }
               increaseViewportBy={1000}
               minOverscanItemCount={{ top: 5, bottom: 10 }}
+              components={{ Footer: () => <div className='h-16' aria-hidden='true' /> }}
               itemsRendered={restoreSelectedRow}
               itemContent={(_, item) => {
                 if (item.type === 'single') {
@@ -839,7 +842,7 @@ const ActivityListView = (): ReactElement => {
   const renderLeftPanel = (): ReactElement => (
     <div
       data-id='activity-list-view'
-      className='h-full bg-background flex flex-col max-w-full overflow-hidden'
+      className='relative h-full bg-background flex flex-col max-w-full overflow-hidden'
     >
       <div className='px-4 py-4 flex items-center justify-between gap-2'>
         <div className='flex items-center gap-2'>
@@ -860,27 +863,6 @@ const ActivityListView = (): ReactElement => {
           </h2>
         </div>
         <div className='flex items-center gap-4'>
-          {/* Unread Filter */}
-          <Button
-            type='button'
-            variant='outline'
-            aria-pressed={showUnreadOnly}
-            onClick={() => handleUnreadToggle(!showUnreadOnly)}
-            className={cn(
-              'flex-shrink-0 flex items-center justify-center gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary',
-              showUnreadOnly && 'bg-accent',
-            )}
-            data-track-category='ACTIVITY'
-            data-track-name='UNREAD_FILTER_TOGGLE'
-            data-track-metadata={JSON.stringify({
-              filter_type: 'unread_only',
-              filter_value: !showUnreadOnly,
-            })}
-            data-testid='activity-unread-toggle'
-          >
-            <span className='text-xs font-medium text-muted-foreground'>Unread</span>
-          </Button>
-
           {/* Mark as Read Button */}
           <Button
             variant='outline'
@@ -1089,6 +1071,12 @@ const ActivityListView = (): ReactElement => {
           </Tabs.Content>
         </Tabs.Root>
       </div>
+
+      <ActivityUnreadsFloatingButton
+        isActive={showUnreadOnly}
+        onActivate={() => handleUnreadToggle(true)}
+        onDeactivate={() => handleUnreadToggle(false)}
+      />
     </div>
   );
 
