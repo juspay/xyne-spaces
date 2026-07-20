@@ -9,7 +9,6 @@ import {
   ExternalLink,
   Headset,
   LucideCommand,
-  RefreshCw,
   Search,
   CircleHelp,
   Square,
@@ -264,41 +263,6 @@ const GlobalTopBar = ({
 }: GlobalTopBarProps): ReactElement => {
   const [supportMenuOpen, setSupportMenuOpen] = useState(false);
   const menuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [updateAvailable, setUpdateAvailable] = useState<{
-    currentVersion: string;
-    latestVersion: string;
-    loadType: 'manual' | 'auto';
-  } | null>(null);
-
-  // Listen for app update available event from Electron
-  useEffect(() => {
-    if (!window.electronAPI?.onAppUpdateAvailable) return;
-
-    const cleanup = window.electronAPI.onAppUpdateAvailable(data => {
-      // Validate the data structure
-      if (
-        !data ||
-        typeof data !== 'object' ||
-        typeof data.currentVersion !== 'string' ||
-        typeof data.latestVersion !== 'string' ||
-        (data.loadType !== 'manual' && data.loadType !== 'auto')
-      ) {
-        console.warn('Invalid app update data received:', data);
-        return;
-      }
-
-      if (data.loadType === 'auto') {
-        window.location.reload();
-      }
-      setUpdateAvailable(data);
-    });
-
-    return cleanup;
-  }, []);
-
-  const handleApplyUpdate = (): void => {
-    window.electronAPI?.applyAppUpdate?.();
-  };
 
   const openSupportMenu = (): void => {
     if (menuTimerRef.current) clearTimeout(menuTimerRef.current);
@@ -335,7 +299,7 @@ const GlobalTopBar = ({
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           {/* Pills collapse from the left as the bar narrows: Connected first
-              (below 1100px), then Support (below 950px). Update always stays. */}
+              (below 1100px), then Support (below 950px). */}
           <div className='flex items-center max-[1100px]:hidden'>
             <ZeroConnectionStatus />
           </div>
@@ -414,29 +378,6 @@ const GlobalTopBar = ({
                 </div>
               )}
             </div>
-          )}
-          {updateAvailable && (
-            <Tooltip
-              content={`Update available: ${updateAvailable.currentVersion} → ${updateAvailable.latestVersion}`}
-              side='bottom'
-              delayDuration={300}
-            >
-              <button
-                type='button'
-                onClick={handleApplyUpdate}
-                className='flex h-6 items-center gap-2 rounded-md px-2 font-sans font-semibold text-xs leading-none tracking-normal bg-[var(--update-btn-bg)] text-[var(--update-btn-text)] hover:opacity-80 transition-opacity cursor-pointer'
-                aria-label='apply-update'
-                data-track-category='MetricsBar'
-                data-track-name='ApplyUpdate'
-                data-track-metadata={JSON.stringify({
-                  currentVersion: updateAvailable.currentVersion,
-                  latestVersion: updateAvailable.latestVersion,
-                })}
-              >
-                <RefreshCw className='w-4 h-4' />
-                <span>Update</span>
-              </button>
-            </Tooltip>
           )}
         </div>
       </div>

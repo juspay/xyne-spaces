@@ -1362,6 +1362,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               />
             )}
 
+            {/* Electron update notices live inside the composer, above the formatting toolbar. */}
+            {features.richText && !isMobile && <div data-electron-update-nudge-slot />}
+
             {/* Desktop: Editor Toolbar */}
             {features.richText && !isMobile && <EditorToolbar editor={editor} />}
 

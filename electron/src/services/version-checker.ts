@@ -154,13 +154,10 @@ async function checkVersionAndReload(): Promise<void> {
     log.debug('[VersionChecker] Skipping check - main window not available');
     return;
   }
-
-  // Don't check if window is focused (user is actively using the app)
   if (mainWindow.isFocused()) {
     log.debug('[VersionChecker] Skipping check - window is focused');
     return;
   }
-
   let [latestVersionInfo, currentVersion] = await Promise.all([
     fetchLatestVersion(),
     getCurrentLoadedVersion(),
