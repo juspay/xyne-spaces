@@ -110,6 +110,10 @@ export interface StreamRequest {
   version?: 'v1' | 'v2' | undefined;
   disableTools?: boolean | undefined;
   agentSlug?: string | undefined;
+  /** Per-run model pin from the composer's model picker. Undefined = the
+   *  agent's own default. Only meaningful on v2 (v1 resolves its model from
+   *  env and ignores the field). */
+  model?: string | undefined;
   showInSidebar?: boolean | undefined;
 }
 
@@ -1027,6 +1031,7 @@ class XyneAIStreamManager {
           ...(request.version && { version: request.version }),
           ...(request.disableTools && { disableTools: true }),
           ...(request.agentSlug && { agentSlug: request.agentSlug }),
+          ...(request.model && { model: request.model }),
         },
       },
     };
