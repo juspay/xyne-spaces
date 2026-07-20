@@ -30,12 +30,12 @@ import { SearchUserV2, type SearchEntry } from '../../ui/SearchUser/SearchUserV2
 import ChatListV2 from '../ChatList/ChatListV2';
 import { sendConversationWithAttachments, useExistingDmChannel } from './useExistingDmChannel';
 import { useDebouncedDmCreation } from './useDebouncedDmCreation';
-import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import {
   useChannelSearch,
   useAllVisibleChannels,
   useGetChannelUserStatus,
 } from '../../../hooks/useChannels';
+import { userToMentionResult } from '../../../utils/userDisplayName';
 
 export interface CreateDmFormData {
   participants: User[];
@@ -175,20 +175,13 @@ export const ComposeDmPanel: React.FC = () => {
     setSelectedUsers(users);
   };
 
-  // Mention search within the compose panel input box
-  const { results: mentionResults, searchMentions } = useMentionSearch('');
-
   // Channel search for # mentions
   const [channelSearchQuery, setChannelSearchQuery] = useState('');
   const channelResults = useChannelSearch(channelSearchQuery, 10);
 
-  const handleMentionSearch = useCallback(
-    (query: string) => {
-      setMentionSearchQuery(query);
-      searchMentions(query);
-    },
-    [searchMentions],
-  );
+  const handleMentionSearch = useCallback((query: string) => {
+    setMentionSearchQuery(query);
+  }, []);
 
   const handleChannelSearch = useCallback((query: string) => {
     setChannelSearchQuery(query);
@@ -210,9 +203,27 @@ export const ComposeDmPanel: React.FC = () => {
   }, [channelResults]);
 
   const composeMentionItems = useMemo(() => {
-    if (selectedUsers.length <= 1) return mentionResults;
-
     const query = mentionSearchQuery.trim().toLowerCase();
+    const isSelfDm = selectedUsers.length === 1 && selectedUsers[0]?.id === context.userID;
+    const selectedUserMentions = selectedUsers
+      .filter(selectedUser => isSelfDm || selectedUser.id !== context.userID)
+      .filter(selectedUser => {
+        if (!query) return true;
+
+        const emailLocalPart = selectedUser.email.split('@')[0] ?? '';
+        return [
+          selectedUser.displayName,
+          selectedUser.name,
+          selectedUser.email,
+          emailLocalPart,
+        ].some(value => value?.toLowerCase().includes(query) ?? false);
+      })
+      .map(selectedUser =>
+        userToMentionResult(selectedUser, selectedUser.id === context.userID, true),
+      );
+
+    if (selectedUsers.length <= 1) return selectedUserMentions;
+
     // Offer @channel and @here for group DMs, matching useMentionSearch's special
     // mentions. The backend (sendInitialMessage) handles both in the initial message.
     const specialMentions = [
@@ -232,10 +243,10 @@ export const ComposeDmPanel: React.FC = () => {
       },
     ].filter(mention => !query || mention.name.includes(query));
 
-    if (specialMentions.length === 0) return mentionResults;
+    if (specialMentions.length === 0) return selectedUserMentions;
 
-    return [...specialMentions, ...mentionResults];
-  }, [mentionResults, mentionSearchQuery, selectedUsers.length]);
+    return [...specialMentions, ...selectedUserMentions];
+  }, [mentionSearchQuery, selectedUsers, context.userID]);
 
   const channelParticipation = useGetChannelUserStatus(existingDmChannel?.id || '');
   const [latestMessage] = useCachedQuery(
