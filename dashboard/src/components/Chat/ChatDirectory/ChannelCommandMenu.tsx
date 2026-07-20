@@ -245,7 +245,7 @@ const ChannelCommandMenu = ({
   // The popup path flips this on in the shortcut handler; the screen overlay is mounted fresh with a
   // `/` initialQuery, so seed from that here to render the palette on frame 1 (no normal-search flash).
   const [seedCommandMode, setSeedCommandMode] = useState(
-    () => initialQuery?.text === '/' && initialQuery.mentions.length === 0,
+    () => initialQuery?.text === '/' && initialQuery?.mentions.length === 0,
   );
   // While seeding, feed the editor a `/` through the existing initial-query path; otherwise pass the
   // caller's query straight through. Memoized so the reference stays stable across renders.

@@ -338,12 +338,13 @@ export function useSlashCommands({
       const handlers: Partial<Record<SearchCommandKind, () => void>> = {
         askai: () => xyneAIActor.send({ type: 'OPEN' }),
         // Start a recording in place — no navigation. The global RecordingOverlay pill surfaces it
-        // wherever the user is. If one is already active (recording/paused/starting), show a conflict
-        // dialog instead of silently starting a second session. Clear transcripts first to match
-        // RecordingsScreen's start flow.
+        // wherever the user is. Any state other than idle/error means a recording is live or
+        // transitioning (recording/paused/starting/stopping) — show a conflict dialog instead of
+        // stacking a second session ('error' is a dead recording, so a fresh start is fine). Clear
+        // transcripts first to match RecordingsScreen's start flow.
         record: () => {
           const status = getRecordingStatus();
-          if (status === 'recording' || status === 'paused' || status === 'starting') {
+          if (status !== 'idle' && status !== 'error') {
             setRecordingConflict(true);
             return;
           }
