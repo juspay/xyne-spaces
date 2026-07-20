@@ -8,7 +8,8 @@ import { ChannelParticipantRepository } from '../database/repositories/channelPa
 import { storageService, getStorageService } from '../services/storage/index';
 import { normalizeStoragePath } from '../services/storage/pathUtils';
 import { logger } from '../utils/logger';
-import { AttachmentEntityType } from '@prisma/client';
+import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
+import { AttachmentEntityType, MessageAttachment } from '@prisma/client';
 import { uploadFiles } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -74,18 +75,106 @@ export class AttachmentController {
   }
 
   /**
+   * Authorization for attachment reads (download / thumbnail).
+   *
+   * Layered and safe for every AttachmentEntityType:
+   *  1. Tenant isolation — the attachment must belong to the caller's workspace.
+   *  2. DRAFT / DELAYED_MESSAGE — only the creator may read it.
+   *  3. Chat attachments (those carrying a conversationId) — the caller must be
+   *     a participant of the owning channel. Mirrors streamAttachment.
+   * Non-chat types without a conversation (TICKET, EMAIL, FORM_ENTITY_VALUE,
+   * IMPACT, …) are bounded by the workspace check only, preserving existing
+   * in-workspace access.
+   */
+  private async assertAttachmentAccess(
+    attachment: MessageAttachment,
+    userId: string,
+    workspaceId?: string,
+  ): Promise<{ ok: true } | { ok: false; status: number; body: Record<string, string> }> {
+    // 1) Tenant isolation — never serve another workspace's file.
+    //    Fail closed: an absent workspace context must never bypass this check,
+    //    otherwise a misconfigured auth path could read attachments across
+    //    workspaces by raw id.
+    if (!workspaceId || attachment.workspaceId !== workspaceId) {
+      logger.warn(
+        `Cross-workspace attachment access blocked: user ${userId} (ws ${workspaceId ?? 'none'}) -> attachment ${attachment.id} (ws ${attachment.workspaceId})`,
+      );
+      return { ok: false, status: 404, body: { error: 'Attachment not found' } };
+    }
+
+    // 2) Draft / scheduled message attachments — creator only.
+    if (
+      attachment.entityType === AttachmentEntityType.DRAFT ||
+      attachment.entityType === AttachmentEntityType.DELAYED_MESSAGE
+    ) {
+      if (attachment.createdBy !== userId) {
+        logger.warn(
+          `Unauthorized draft attachment access: user ${userId} -> ${attachment.id} (creator ${attachment.createdBy})`,
+        );
+        return {
+          ok: false,
+          status: 403,
+          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
+        };
+      }
+      return { ok: true };
+    }
+
+    // 3) Conversation-backed (chat/DM/transcript) attachments — must participate.
+    if (attachment.conversationId) {
+      const conversation = await this.conversationRepository.findById(attachment.conversationId);
+      if (!conversation) {
+        logger.warn(
+          `Attachment access denied: conversation ${attachment.conversationId} not found for attachment ${attachment.id} (user ${userId})`,
+        );
+        return { ok: false, status: 404, body: { error: 'Attachment not found' } };
+      }
+
+      const isParticipant = await this.channelParticipantRepository.isParticipant(
+        conversation.channelId,
+        userId,
+      );
+      if (!isParticipant) {
+        logger.warn(
+          `Unauthorized attachment access: user ${userId} -> ${attachment.id} in channel ${conversation.channelId}`,
+        );
+        return {
+          ok: false,
+          status: 403,
+          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
+        };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  /**
    * GET /api/attachments/:attachmentId/download
    * Stream file from GCS to client
    */
   downloadAttachment = async (req: Request, res: Response): Promise<void> => {
     try {
       const { attachmentId } = req.params;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized - user not authenticated' });
+        return;
+      }
 
       // Get attachment metadata from database
       const attachment = await this.messageAttachmentRepository.findById(attachmentId);
 
       if (!attachment) {
         res.status(404).json({ error: 'Attachment not found'});
+        return;
+      }
+
+      // Authorization: tenant + participant/creator checks
+      const access = await this.assertAttachmentAccess(attachment, userId, req.user?.workspaceId);
+      if (!access.ok) {
+        res.status(access.status).json(access.body);
         return;
       }
 
@@ -105,13 +194,12 @@ export class AttachmentController {
 
       const buffer = await service.getFileBuffer(filePath);
 
-      // Set response headers
-      res.setHeader('Content-Type', attachment.mimetype);
+      // Set response headers (safe disposition/type to prevent stored XSS)
       res.setHeader('Content-Length', buffer.length);
-
-      // Encode filename to handle special characters
-      const encodedFilename = encodeURIComponent(attachment.originalFilename);
-      res.setHeader('Content-Disposition', `inline; filename="${encodedFilename}"`);
+      setSafeDownloadHeaders(res, {
+        mimetype: attachment.mimetype,
+        filename: attachment.originalFilename,
+      });
 
       // Disable caching for transcripts (they can be updated), cache other files
       if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
@@ -132,72 +220,31 @@ export class AttachmentController {
   };
 
   /**
-   * GET /api/attachments/file
-   * Stream file from GCS to client using GCS path as query parameter
-   * This is useful when we have the GCS path but not the attachment ID
-   */
-  downloadByPath = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { path: gcsPath } = req.query;
-
-      if (!gcsPath || typeof gcsPath !== 'string') {
-        res.status(400).json({ error: 'GCS path is required' });
-        return;
-      }
-
-      logger.info(`Streaming file from GCS path: ${gcsPath}`);
-
-      // Check if file exists in GCS
-      const fileExists = await storageService.fileExists(gcsPath);
-      if (!fileExists) {
-        logger.error(`File not found in GCS: ${gcsPath}`);
-        res.status(404).json({ error: 'File not found in storage' });
-        return;
-      }
-
-      // Get file metadata to determine content type and size
-      const metadata = await storageService.getFileMetadata(gcsPath);
-      const contentType = metadata.contentType || 'application/octet-stream';
-      const fileSize = parseInt(String(metadata.size || '0'), 10);
-
-      // Extract filename from path
-      const fileName = gcsPath.split('/').pop() || 'download';
-
-      // Set response headers
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Length', fileSize);
-      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-      res.setHeader('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
-
-      // Stream the file directly from GCS
-      const stream = await storageService.createReadStream(gcsPath);
-      stream.pipe(res);
-
-      stream.on('error', (error) => {
-        logger.error('File stream error:', error);
-        if (!res.headersSent) {
-          res.status(500).json({ error: 'Failed to stream file' });
-        }
-      });
-    } catch (error) {
-      logger.error('Error downloading file by path:', error);
-      res.status(500).json({ error: 'Failed to download file' });
-    }
-  };
-
-  /**
    * GET /api/attachments/:attachmentId/thumbnail
    * Download thumbnail for an attachment (if available)
    */
   downloadThumbnail = async (req: Request, res: Response): Promise<void> => {
     try {
       const { attachmentId } = req.params;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized - user not authenticated' });
+        return;
+      }
 
       // Get attachment metadata from database
       const attachment = await this.messageAttachmentRepository.findById(attachmentId);
 
       if (!attachment) {
         res.status(404).json({ error: 'Attachment not found' });
+        return;
+      }
+
+      // Authorization: tenant + participant/creator checks
+      const access = await this.assertAttachmentAccess(attachment, userId, req.user?.workspaceId);
+      if (!access.ok) {
+        res.status(access.status).json(access.body);
         return;
       }
 
@@ -265,43 +312,11 @@ export class AttachmentController {
         return;
       }
 
-      if (
-        attachment.entityType !== AttachmentEntityType.DRAFT &&
-        attachment.entityType !== AttachmentEntityType.DELAYED_MESSAGE
-      ) {
-        // CHECK: Verify user has access to this attachment
-        // Attachments belong to conversations, conversations belong to channels
-        // User must be a participant of the channel to access the attachment
-        const conversation = attachment.conversationId ? await this.conversationRepository.findById(attachment.conversationId) : null;
-          if (!conversation) {
-          logger.error(`Conversation not found for attachment ${attachmentId}`);
-          res.status(404).json({ error: 'Conversation not found' });
-          return;
-        }
-
-        // Check if user is a participant of the channel
-        const isParticipant = conversation ? await this.channelParticipantRepository.isParticipant(
-          conversation.channelId,
-          userId
-        ) : attachment.createdBy === userId;
-
-        if (!isParticipant) {
-          logger.warn(`Unauthorized access attempt: User ${userId} tried to stream attachment ${attachmentId} from channel ${conversation.channelId}`);
-          res.status(403).json({
-            error: 'Forbidden',
-            message: 'You do not have permission to access this attachment'
-          });
-          return;
-        }
-      } else {
-        if (attachment.createdBy !== userId) {
-          logger.warn(`Unauthorized access attempt: User ${userId} tried to stream draft attachment ${attachmentId} created by ${attachment.createdBy}`);
-          res.status(403).json({
-            error: 'Forbidden',
-            message: 'You do not have permission to access this attachment'
-          });
-          return;
-        }
+      // Authorization: tenant + participant/creator checks
+      const access = await this.assertAttachmentAccess(attachment, userId, req.user?.workspaceId);
+      if (!access.ok) {
+        res.status(access.status).json(access.body);
+        return;
       }
 
       const filePath = normalizeStoragePath(attachment.url);
@@ -333,7 +348,10 @@ export class AttachmentController {
         // No range requested - send entire file
         logger.info(`Streaming entire file: ${filePath}`);
 
-        res.setHeader('Content-Type', attachment.mimetype);
+        setSafeDownloadHeaders(res, {
+          mimetype: attachment.mimetype,
+          filename: attachment.originalFilename,
+        });
         res.setHeader('Content-Length', fileSize);
         res.setHeader('Accept-Ranges', 'bytes');
         if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
@@ -388,7 +406,10 @@ export class AttachmentController {
 
       // Set headers for partial content
       res.status(206); // Partial Content
-      res.setHeader('Content-Type', attachment.mimetype);
+      setSafeDownloadHeaders(res, {
+        mimetype: attachment.mimetype,
+        filename: attachment.originalFilename,
+      });
       res.setHeader('Content-Length', chunkSize);
       res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
       res.setHeader('Accept-Ranges', 'bytes');

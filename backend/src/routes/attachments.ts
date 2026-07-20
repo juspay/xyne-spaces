@@ -63,9 +63,6 @@ router.get('/attachments/:attachmentId/download', attachmentController.downloadA
 // Download thumbnail by attachment ID
 router.get('/attachments/:attachmentId/thumbnail', attachmentController.downloadThumbnail.bind(attachmentController));
 
-// Download file by GCS path (query parameter)
-router.get('/attachments/file', attachmentController.downloadByPath.bind(attachmentController));
-
 // Upload attachments for an entity (e.g., IMPACT)
 router.post(
   '/attachments/upload',
