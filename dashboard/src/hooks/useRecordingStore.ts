@@ -38,7 +38,8 @@ export type RecordingStoreEvent =
   | { type: 'setNotesCanvas'; canvasId: string; title?: string }
   | { type: 'setNotesCanvasTitle'; title: string }
   | { type: 'setActiveLayout'; layout: RecordingLayout }
-  | { type: 'setTranscriptMinimized'; isMinimized: boolean };
+  | { type: 'setTranscriptMinimized'; isMinimized: boolean }
+  | { type: 'agentLeftUnexpectedly' };
 
 interface TypedRecordingStore {
   subscribe: (cb: () => void) => { unsubscribe: () => void };

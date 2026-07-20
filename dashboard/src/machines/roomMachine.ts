@@ -45,6 +45,11 @@ import {
   isNativeCallSupported,
 } from '../utils/reactNativeBridge';
 import { isParticipantScreenShareEnabled } from '../utils/livekitScreenShare';
+import {
+  AGENT_LEFT_CONFIRM_DELAY_MS,
+  isTranscriptionAgentIdentity,
+  shouldConfirmTranscriptionAgentLeft,
+} from '../utils/livekitAgent';
 import { logger, Event } from '../utils/logger';
 import { getCallJoinSettings } from '../hooks/useCallJoinSettings';
 import {
@@ -153,6 +158,7 @@ export interface RoomContext {
   isInitiator: boolean; // Track if user initiated vs joined the call
   callStartTime: number | null; // Track when the call started for duration calculation
   isAIAssistantEnabled: boolean; // Track Xyne Automatic state
+  transcriptionAgentLeft: boolean; // Track if the transcription agent left mid-call
   aiController: { id: string; name: string } | null;
   pendingControlRequest: { requesterId: string; requesterName: string } | null;
   isAiControlRequested: boolean; // Track if local user has a pending control request
@@ -253,6 +259,8 @@ export type RoomMachineEvent =
   | { type: 'CLOSE_TICKET_DIALOG' }
   | { type: 'TICKET_CREATED' }
   | { type: 'AI_CONTROLLER_CHANGED'; controller: string | null; controllerName: string | null }
+  | { type: 'TRANSCRIPTION_AGENT_LEFT' } // LiveKit signalled the agent dropped mid-call
+  | { type: 'DISMISS_AGENT_LEFT_WARNING' } // User acknowledged the agent-left toast
   | { type: 'AI_CONTROL_REQUEST'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_PENDING'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_SENT' } // Local user sent a control request
@@ -372,6 +380,24 @@ export const roomMachine = setup({
         input: { room: Room; callId: string };
       }) => {
         const { room, callId } = input;
+        let agentLeftTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const clearAgentLeftTimer = (): void => {
+          if (agentLeftTimer) {
+            clearTimeout(agentLeftTimer);
+            agentLeftTimer = null;
+          }
+        };
+
+        const confirmAgentLeft = (): void => {
+          clearAgentLeftTimer();
+          agentLeftTimer = setTimeout(() => {
+            agentLeftTimer = null;
+            if (shouldConfirmTranscriptionAgentLeft(room)) {
+              sendBack({ type: 'TRANSCRIPTION_AGENT_LEFT' });
+            }
+          }, AGENT_LEFT_CONFIRM_DELAY_MS);
+        };
 
         // Helper to update participants
         const updateParticipants = (): void => {
@@ -414,6 +440,7 @@ export const roomMachine = setup({
         });
 
         room.on(LiveKitRoomEvent.Disconnected, (reason?: DisconnectReason) => {
+          clearAgentLeftTimer();
           logger.info(Event.LIVEKIT_ROOM_DISCONNECTED, {
             callId,
           });
@@ -431,6 +458,9 @@ export const roomMachine = setup({
             participantIdentity: participant.identity,
           });
           updateParticipants();
+          if (isTranscriptionAgentIdentity(participant.identity)) {
+            confirmAgentLeft();
+          }
           playAudio(AUDIO_PATHS.CALL_EXIT);
         });
 
@@ -573,7 +603,10 @@ export const roomMachine = setup({
         );
 
         // Participant connected
-        room.on(LiveKitRoomEvent.ParticipantConnected, (_participant: RemoteParticipant) => {
+        room.on(LiveKitRoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
+          if (isTranscriptionAgentIdentity(participant.identity)) {
+            clearAgentLeftTimer();
+          }
           updateParticipants();
           playAudio(AUDIO_PATHS.PARTICIPANT_JOIN);
         });
@@ -720,6 +753,7 @@ export const roomMachine = setup({
 
         // Cleanup
         return (): void => {
+          clearAgentLeftTimer();
           room.removeAllListeners();
         };
       },
@@ -1166,6 +1200,7 @@ export const roomMachine = setup({
       isInitiator: () => false,
       callStartTime: () => null,
       isAIAssistantEnabled: () => false,
+      transcriptionAgentLeft: () => false,
       aiController: () => null,
       pendingControlRequest: () => null,
       isAiControlRequested: () => false,
@@ -1310,6 +1345,7 @@ export const roomMachine = setup({
     isInitiator: false,
     callStartTime: null,
     isAIAssistantEnabled: false,
+    transcriptionAgentLeft: false,
     aiController: null,
     pendingControlRequest: null,
     isAiControlRequested: false,
@@ -1849,6 +1885,16 @@ export const roomMachine = setup({
               }
             },
           ],
+        },
+        TRANSCRIPTION_AGENT_LEFT: {
+          actions: assign({
+            transcriptionAgentLeft: () => true,
+          }),
+        },
+        DISMISS_AGENT_LEFT_WARNING: {
+          actions: assign({
+            transcriptionAgentLeft: () => false,
+          }),
         },
         AI_CONTROLLER_CHANGED: {
           actions: assign({
