@@ -4,7 +4,6 @@ import { queryWorkflow } from './query-workflow/queryWorkflow'
 import { geniusQueryWorkflow } from './genius-query-workflow/geniusQueryWorkflow'
 import { stageApprovalWorkflow } from './stageApprovalWorkflow'
 import { networkDocumentWorkflow } from './network-document-workflow/networkDocumentWorkflow'
-import { xyneAutoRcaWorkflow } from './xyne-auto-rca-workflow/xyneAutoRcaWorkflow'
 import { itSupportWorkflow } from './it-support-workflow/itSupportWorkflow'
 import { WorkflowType } from '../types/workflow-enums'
 import {logger} from '@/utils/logger';
@@ -16,7 +15,6 @@ export const WORKFLOW_DEFINITIONS = {
   [WorkflowType.GENIUS_QUERY_WORKFLOW]: geniusQueryWorkflow,
   [WorkflowType.STAGE_APPROVAL_WORKFLOW]: stageApprovalWorkflow,
   [WorkflowType.NETWORK_DOCUMENT_PROCESSING]: networkDocumentWorkflow,
-  [WorkflowType.XYNE_AUTO_RCA_WORKFLOW]: xyneAutoRcaWorkflow,
   [WorkflowType.IT_SUPPORT_WORKFLOW]: itSupportWorkflow,
 } as const
 
@@ -28,7 +26,6 @@ export function registerAllWorkflows(): void {
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.GENIUS_QUERY_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.STAGE_APPROVAL_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.NETWORK_DOCUMENT_PROCESSING])
-  workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.XYNE_AUTO_RCA_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.IT_SUPPORT_WORKFLOW])
 }
 
