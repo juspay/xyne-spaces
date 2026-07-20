@@ -1,0 +1,47 @@
+# Development Dockerfile for sandbox dashboard (HMR via volume mount)
+# Used by sandbox system for per-agent isolated dashboard instances
+
+FROM mirror.gcr.io/library/node:22.22.3-slim
+
+WORKDIR /app
+
+# Install curl for health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Copy shared module and build
+COPY shared ../shared
+RUN cd ../shared && npm ci && npm run build
+
+# Copy icons module and build
+COPY icons ../icons
+RUN cd ../icons && npm ci --ignore-scripts && npm run build
+
+# Copy dashboard and install deps
+COPY dashboard .
+RUN npm ci
+
+# Copy backend dependencies for Prisma (dashboard needs @prisma/client)
+COPY backend/package*.json ../backend/
+RUN cd ../backend && npm install prisma
+COPY backend/prisma ../backend/prisma
+RUN cd ../backend && npx prisma generate
+
+# Copy root package.json to / so logger.ts can import version (../../../package.json)
+COPY package.json /package.json
+
+# Expose Vite dev server port
+EXPOSE 5173
+
+# Create entrypoint script
+# shared is pre-built on host before containers start (see sandbox.sh cmd_create)
+# We just start the Vite dev server
+RUN cat > /entrypoint.sh << 'ENTRY'
+#!/bin/sh
+set -e
+echo "[sandbox] Starting dashboard dev server..."
+cd /app && exec npx vite --host 0.0.0.0
+ENTRY
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD []

@@ -1,0 +1,11 @@
+dist
+node_modules
+
+# secrets — never commit
+.env
+.env.*
+
+# raw Figma SVG exports (intermediate; regenerable via scripts/figma-export.mjs).
+# The committed source of truth is src/icons/*.ts, not these.
+svg/
+_import/
