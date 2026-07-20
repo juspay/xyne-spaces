@@ -10,6 +10,36 @@ import { isHexToken } from '../utils/validation';
 
 let mainWindow: BrowserWindow | null = null;
 
+/**
+ * XYNE Issues 398/405 (CWE-601): a xyne-spaces:// deep link is externally
+ * triggerable (any web page can set location.href = 'xyne-spaces://...'), and
+ * its path is forwarded to the renderer's router via 'navigate-to'. Only allow
+ * plain in-app route paths — reject anything with an embedded scheme, a
+ * protocol-relative '//', backslashes, or path traversal (raw or percent-
+ * encoded), so an attacker cannot force an external-looking redirect or reach
+ * unexpected routes via traversal tricks.
+ */
+function isSafeDeepLinkPath(pathStr: string): boolean {
+  if (typeof pathStr !== 'string' || !pathStr.startsWith('/') || pathStr.startsWith('//')) {
+    return false;
+  }
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathStr);
+  } catch {
+    return false;
+  }
+  for (const c of [pathStr, decoded]) {
+    if (c.includes('\\')) return false;                        // backslash
+    if (c.includes('..')) return false;                        // path traversal
+    if (c.includes('//')) return false;                        // protocol-relative / external
+    if (/[\u0000-\u001F\u007F]/.test(c)) return false;     // control chars
+    if (/[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(c)) return false;     // embedded scheme (http:, javascript:, data:)
+  }
+  // Conservative in-app route charset (path + query only).
+  return /^\/[A-Za-z0-9\-._~/?=&%]*$/.test(pathStr);
+}
+
 /** Parse JSON body from an Electron IncomingMessage stream */
 function parseResponseBody(response: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -324,6 +354,12 @@ async function handleDeepLink(url: string): Promise<void> {
 
     if (!pathStr.startsWith('/')) {
       pathStr = '/' + pathStr;
+    }
+
+    // XYNE Issues 398/405: only forward validated in-app route paths.
+    if (!isSafeDeepLinkPath(pathStr)) {
+      log.warn('[DeepLinks] Rejected unsafe deep-link navigation path:', pathStr);
+      return;
     }
 
     log.info('Navigating to deep link route:', pathStr);
