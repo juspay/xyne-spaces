@@ -58,6 +58,8 @@ interface UseXyneAIStreamParams {
   activities?: UserActivity[]; // User activities to include as context
   /** Selected claw agent slug. If set, the query is routed to that agent instead of Ask AI. */
   agentSlug?: string | null;
+  /** Per-run model pin from the composer's model picker. Null = agent default. */
+  model?: string | null;
   setDebugEvents?: React.Dispatch<React.SetStateAction<DebugEventRecord[]>>;
   setDebugArtifactsReadyVersion?: React.Dispatch<React.SetStateAction<number>>;
 }
@@ -118,6 +120,7 @@ export const useXyneAIStream = ({
   attachedContext,
   activities,
   agentSlug,
+  model,
   setDebugEvents,
   setDebugArtifactsReadyVersion,
 }: UseXyneAIStreamParams) => {
@@ -406,6 +409,9 @@ export const useXyneAIStream = ({
           callIds: eCallIds,
           attachedContext: combinedAttachedContext,
           agentSlug: agentSlug ?? undefined,
+          // v1 resolves its model from env and ignores the pin, so only send it
+          // on v2 rather than letting a stale pick ride along invisibly.
+          ...(isV2 && model ? { model } : {}),
           version: isV2 ? 'v2' : 'v1',
         },
         allMessages,
@@ -435,6 +441,7 @@ export const useXyneAIStream = ({
       activities,
       streamSessionKey,
       agentSlug,
+      model,
     ],
   );
 

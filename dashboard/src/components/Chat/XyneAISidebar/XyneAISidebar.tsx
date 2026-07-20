@@ -89,6 +89,7 @@ import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useSelectedAgent } from '../../../hooks/useSelectedAgent';
 import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
+import { fetchClawAgentModels } from '../../../services/clawAgentModelsService';
 import {
   xyneAIActor,
   type ThreadInfo,
@@ -582,6 +583,22 @@ const XyneAISidebar = ({
 
   const isV2 = askAIVersion === 'v2';
   const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
+
+  // Per-run model pin. The model list is scoped to the AGENT's LiteLLM key, so
+  // it refetches per agent and the pin resets on agent change — a model from
+  // the previous agent's key may not exist on the new one.
+  const modelAgentSlug = effectiveAgentSlug ?? 'ask-ai';
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const { data: agentModelsData } = useQuery({
+    queryKey: ['claw-agent-models', modelAgentSlug],
+    queryFn: () => fetchClawAgentModels(modelAgentSlug),
+    staleTime: 60_000,
+    enabled: isV2,
+  });
+  useEffect(() => {
+    setSelectedModel(null);
+  }, [modelAgentSlug]);
+
   useEffect(() => {
     onDebuggerOpenChange?.(showDebugger && isV2);
   }, [showDebugger, isV2, onDebuggerOpenChange]);
@@ -666,6 +683,7 @@ const XyneAISidebar = ({
       recordings: selectedRecordings,
     }),
     agentSlug: effectiveAgentSlug,
+    model: selectedModel,
   });
 
   // Start fresh chat when startFreshChat flag is set
@@ -1856,6 +1874,12 @@ const XyneAISidebar = ({
   };
 
   const sharedInputSectionProps = {
+    // Model picker. Empty list (agent has no litellm credential) ⇒ the picker
+    // hides itself, so no extra gating is needed here beyond the v2 check.
+    models: isV2 ? (agentModelsData?.models ?? []) : [],
+    defaultModel: agentModelsData?.defaultModel ?? null,
+    selectedModel,
+    onSelectModel: setSelectedModel,
     showContextModal,
     onCloseContextModal: handleCloseContextModal,
     onConfirmContext: handleConfirmContext,

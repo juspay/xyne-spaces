@@ -216,6 +216,13 @@ router.get(
   xyneAIControllerFactory.listAccessibleAgents,
 );
 
+// GET /api/xyne-ai/agents/:slug/models - Models the agent's LiteLLM key can serve
+router.get(
+  '/agents/:slug/models',
+  authMiddleware.authenticate,
+  xyneAIControllerFactory.listAgentModels,
+);
+
 // GET /api/xyne-ai/channel-agents/:channelId - List claw agents in a channel
 router.get(
   '/channel-agents/:channelId',

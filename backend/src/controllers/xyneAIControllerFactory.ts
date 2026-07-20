@@ -271,6 +271,15 @@ export class XyneAIControllerFactory {
   };
 
   /**
+   * GET /api/xyne-ai/agents/:slug/models
+   * Models the agent's LiteLLM credential can serve. v2-only: v1 resolves its
+   * model from env and ignores any pin, so there is nothing to list.
+   */
+  listAgentModels = async (req: Request, res: Response): Promise<void> => {
+    return xyneAIControllerV2.listAgentModels(req, res);
+  };
+
+  /**
    * POST /api/xyne-ai/v2/cancel/:sessionId
    * Cancel an in-flight v2 (claw) run; partial state is persisted via the
    * cancelled `done` frame on the upstream stream. Sessions are always claw
