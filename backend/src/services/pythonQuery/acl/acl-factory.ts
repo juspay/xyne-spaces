@@ -10,6 +10,8 @@ import {
   BoardComplexityScoresACL,
   BoardsACL,
   BookmarksACL,
+  SavedUserConfigurationsACL,
+  SavedUserConfigurationValuesACL,
   CallParticipantsACL,
   CallsACL,
   CanvasParticipantsACL,
@@ -254,6 +256,12 @@ export class ACLFactory {
 
       case 'invitation':
         return new InvitationsACL(ctx, prisma)
+
+      case 'savedUserConfiguration':
+        return new SavedUserConfigurationsACL(ctx, prisma)
+
+      case 'savedUserConfigurationValue':
+        return new SavedUserConfigurationValuesACL(ctx, prisma)
 
       // Default: no ACL restriction (pass-through)
       default:
