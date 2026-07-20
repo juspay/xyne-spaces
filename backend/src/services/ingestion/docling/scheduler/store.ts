@@ -36,6 +36,7 @@ const numberValue = (value: unknown, fallback = 0): number => {
 
 const fileFromRow = (row: RawRow): DoclingFile => ({
   fileId: String(row.file_id),
+  workspaceId: row.workspace_id ? String(row.workspace_id) : null,
   collectionId: String(row.collection_id),
   sourcePath: String(row.source_path),
   sourceStorageKey: row.source_storage_key ? String(row.source_storage_key) : null,

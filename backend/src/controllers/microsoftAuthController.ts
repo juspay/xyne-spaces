@@ -398,7 +398,7 @@ export class MicrosoftAuthController {
         }, workspaces[0]?.id ?? '');
 
         // Ensure user presence entry exists
-        await this.userService.ensureUserPresence(user.id);
+        await this.userService.ensureUserPresence(user.id, user.workspaceId);
 
         logger.info(
           `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
@@ -809,7 +809,7 @@ export class MicrosoftAuthController {
           picture: undefined,
         }, workspaceId);
 
-        await this.userService.ensureUserPresence(user.id);
+        await this.userService.ensureUserPresence(user.id, user.workspaceId);
 
         logger.info(
           `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
@@ -943,7 +943,7 @@ export class MicrosoftAuthController {
         picture: undefined,
       }, workspaces[0]?.id ?? '');
 
-      await this.userService.ensureUserPresence(user.id);
+      await this.userService.ensureUserPresence(user.id, user.workspaceId);
 
       logger.info(
         `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser}, workspaces: ${workspaces.length})`
@@ -1178,7 +1178,7 @@ export class MicrosoftAuthController {
         picture: undefined,
       }, workspaces[0]?.id ?? '');
 
-      await this.userService.ensureUserPresence(user.id);
+      await this.userService.ensureUserPresence(user.id, user.workspaceId);
 
       logger.info(
         `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`

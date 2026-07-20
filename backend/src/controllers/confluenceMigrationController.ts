@@ -10,6 +10,7 @@ import {
   type ConfluenceSectionMapping,
 } from '@/services/confluence/confluenceImportService';
 import { confluenceMigrationProgressService } from '@/services/confluenceMigrationProgressService';
+import { runWithContext } from '@/database/tenant/context';
 
 const db = DatabaseClient.getInstance();
 export class ConfluenceMigrationController {
@@ -174,52 +175,74 @@ export class ConfluenceMigrationController {
   };
 
   private async runMigrationJob(jobId: string, input: ConfluenceImportConfig): Promise<void> {
-    try {
-      await confluenceMigrationProgressService.patchJob(jobId, {
-        status: 'running',
-        currentStep: 'starting',
-        currentPageTitle: null,
-      });
+    // Fire-and-forget background job detached from the HTTP request (no req.user), so open an
+    // explicit tenant scope from the import's TARGET workspace so the workspaceId stamper fills
+    // the canvases (and other rows) this job writes downstream. Resolve the workspaceId the same
+    // way importSpace does: prefer the config's workspaceId, else the actor user's workspace.
+    const resolvedWorkspaceId =
+      input.workspaceId ||
+      (await db.user.findUnique({
+        where: { id: input.actorUserId },
+        select: { workspaceId: true },
+      }))?.workspaceId ||
+      undefined;
 
-      const result = await new ConfluenceImportService().importSpace(
-        input,
-        async (update: ConfluenceImportProgressUpdate) => {
-          await this.handleProgressUpdate(jobId, update);
-        },
-      );
+    const job = async (): Promise<void> => {
+      try {
+        await confluenceMigrationProgressService.patchJob(jobId, {
+          status: 'running',
+          currentStep: 'starting',
+          currentPageTitle: null,
+        });
 
-      await confluenceMigrationProgressService.patchJob(jobId, {
-        status: 'completed',
-        currentStep: 'completed',
-        currentPageTitle: null,
-        completedAt: new Date().toISOString(),
-        result,
-        targetProjectId: result.projectId,
-        ...(result.defaultChannelId ? { targetChannelId: result.defaultChannelId } : {}),
-        warnings: result.warnings,
-        unresolvedUsers: result.unresolvedUsers,
-        pageResults: result.pageResults,
-        totalPages: result.totalPages,
-        processedPages: result.pageResults.length,
-        createdCanvases: result.createdCanvases,
-        updatedCanvases: result.updatedCanvases,
-        createdFolders: result.createdFolders,
-        reusedFolders: result.reusedFolders,
-        migratedAttachments: result.migratedAttachments,
-        reusedAttachments: result.reusedAttachments,
-        failedAttachments: result.failedAttachments,
-        containerPagesWithContent: result.containerPagesWithContent,
-        containerCanvasesCreated: result.containerCanvasesCreated,
-        containerCanvasesUpdated: result.containerCanvasesUpdated,
-      });
-    } catch (error) {
-      logger.error('[ConfluenceMigration] Background migration job failed', error, { jobId });
-      await confluenceMigrationProgressService.patchJob(jobId, {
-        status: 'failed',
-        currentStep: 'failed',
-        completedAt: new Date().toISOString(),
-        errorMessage: error instanceof Error ? error.message : 'Unknown migration error',
-      });
+        const result = await new ConfluenceImportService().importSpace(
+          input,
+          async (update: ConfluenceImportProgressUpdate) => {
+            await this.handleProgressUpdate(jobId, update);
+          },
+        );
+
+        await confluenceMigrationProgressService.patchJob(jobId, {
+          status: 'completed',
+          currentStep: 'completed',
+          currentPageTitle: null,
+          completedAt: new Date().toISOString(),
+          result,
+          targetProjectId: result.projectId,
+          ...(result.defaultChannelId ? { targetChannelId: result.defaultChannelId } : {}),
+          warnings: result.warnings,
+          unresolvedUsers: result.unresolvedUsers,
+          pageResults: result.pageResults,
+          totalPages: result.totalPages,
+          processedPages: result.pageResults.length,
+          createdCanvases: result.createdCanvases,
+          updatedCanvases: result.updatedCanvases,
+          createdFolders: result.createdFolders,
+          reusedFolders: result.reusedFolders,
+          migratedAttachments: result.migratedAttachments,
+          reusedAttachments: result.reusedAttachments,
+          failedAttachments: result.failedAttachments,
+          containerPagesWithContent: result.containerPagesWithContent,
+          containerCanvasesCreated: result.containerCanvasesCreated,
+          containerCanvasesUpdated: result.containerCanvasesUpdated,
+        });
+      } catch (error) {
+        logger.error('[ConfluenceMigration] Background migration job failed', error, { jobId });
+        await confluenceMigrationProgressService.patchJob(jobId, {
+          status: 'failed',
+          currentStep: 'failed',
+          completedAt: new Date().toISOString(),
+          errorMessage: error instanceof Error ? error.message : 'Unknown migration error',
+        });
+      }
+    };
+
+    if (resolvedWorkspaceId) {
+      await runWithContext({ userId: input.actorUserId, workspaceId: resolvedWorkspaceId }, job);
+    } else {
+      // No workspace resolvable (importSpace will throw its own "could not resolve workspace"
+      // error): run unwrapped rather than stamping an empty/placeholder workspaceId.
+      await job();
     }
   }
 

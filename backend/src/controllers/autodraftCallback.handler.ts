@@ -1,6 +1,8 @@
 import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { emailService } from '@/services/emailService';
+import { db } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 
 export async function handleAutoDraftCallback(
   req: Request<{ conversationId: string; channelId: string }>,
@@ -26,6 +28,27 @@ export async function handleAutoDraftCallback(
   });
 
   try {
+    // Webhook callback → no HTTP tenant scope. Resolve the channel's workspace and run the writes
+    // (email_drafts create in persistAutoDraft) inside a tenant context so workspaceId is stamped.
+    // The channel MUST exist for this callback to be meaningful — fail loud (alertable error log +
+    // throw, caught below as 500) rather than silently persist an untenanted draft.
+    const channel = await db.channel.findUnique({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
+    if (!channel?.workspaceId) {
+      logger.error('[AutoDraft] callback: channel not found or missing workspaceId — cannot scope draft write', {
+        mode: 'autodraft',
+        conversationId,
+        channelId,
+        sessionId,
+        channelFound: !!channel,
+      });
+      throw new Error(`AutoDraft callback: channel ${channelId} not found or has no workspaceId`);
+    }
+    const runScoped = <T>(fn: () => Promise<T>): Promise<T> =>
+      runWithContext({ userId: 'autodraft-callback', workspaceId: channel.workspaceId }, fn);
+
     if (status !== 'completed' || !result || !result.trim()) {
       logger.warn('[AutoDraft] callback skip: non-success or empty result', {
         mode: 'autodraft',
@@ -35,17 +58,19 @@ export async function handleAutoDraftCallback(
         status,
         error,
       });
-      await emailService.clearAutoDraftGenerating(conversationId);
+      await runScoped(() => emailService.clearAutoDraftGenerating(conversationId));
       res.json({ success: true, persisted: false });
       return;
     }
 
-    await emailService.persistAutoDraft({
-      conversationId,
-      channelId,
-      summary: result,
-      sessionId,
-    });
+    await runScoped(() =>
+      emailService.persistAutoDraft({
+        conversationId,
+        channelId,
+        summary: result,
+        sessionId,
+      }),
+    );
 
     res.json({ success: true, persisted: true });
   } catch (err) {

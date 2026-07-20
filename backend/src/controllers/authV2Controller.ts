@@ -1344,7 +1344,7 @@ export class AuthV2Controller {
       }
 
       // Ensure user presence for workspace-scoped user
-      await this.userService.ensureUserPresence(workspaceUser.id);
+      await this.userService.ensureUserPresence(workspaceUser.id, workspaceId);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspaceId);
 
       let sessionId = null;
@@ -1535,7 +1535,7 @@ export class AuthV2Controller {
       }
 
       // Ensure user presence for workspace-scoped user
-      await this.userService.ensureUserPresence(workspaceUser.id);
+      await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
       let sessionId = null;
@@ -1693,7 +1693,7 @@ export class AuthV2Controller {
         return;
       }
 
-      await this.userService.ensureUserPresence(targetUser.id);
+      await this.userService.ensureUserPresence(targetUser.id, workspaceId);
       const selfDmChannelId = await this.ensureSelfDmForUser(targetUser.id, workspaceId);
 
       // Get existing session from global session cookie
@@ -1782,7 +1782,7 @@ export class AuthV2Controller {
         workspaceName,
       );
 
-      await this.userService.ensureUserPresence(workspaceUser.id);
+      await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
       // Reuse refresh token from current session

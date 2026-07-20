@@ -2,6 +2,7 @@ import type Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 import { automationQueue, type AutomationJobData } from './automation.queue';
 import { automationScheduleQueue } from './automation-schedule.queue';
 import { stepRegistry } from '../steps/step-registry';
@@ -65,6 +66,35 @@ class AutomationWorker {
       );
       return;
     }
+
+    // Open a tenant scope so every Prisma write in this job (and the executor's
+    // step writes) gets stamped with the owning workspaceId. Background jobs have
+    // no HTTP request, so without this the stamp would leave workspaceId NULL.
+    const scopeWorkflow = await db.workflow.findUnique({
+      where: { id: execution.workflowId },
+      select: { workspaceId: true },
+    });
+    const workspaceId = scopeWorkflow?.workspaceId ?? execution.workspaceId ?? undefined;
+    if (!workspaceId) {
+      logger.warn(
+        `[AUTOMATION-WORKER] execution=${executionId} — could not resolve workspaceId, dropping`,
+      );
+      return;
+    }
+
+    await runWithContext({ userId: 'automation', workspaceId }, () =>
+      this.runJob(job, execution),
+    );
+  }
+
+  private async runJob(
+    job: Bull.Job<AutomationJobData>,
+    execution: NonNullable<Awaited<ReturnType<typeof db.workflowExecution.findUnique>>>,
+  ): Promise<void> {
+    if (!this.executor) {
+      throw new Error('[AUTOMATION-WORKER] Executor not initialized');
+    }
+    const { executionId } = job.data;
 
     if (execution.status === 'EXTERNAL_WAIT') {
       await this.executor.runExecution(executionId);

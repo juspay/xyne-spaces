@@ -1,6 +1,8 @@
 import { BaseRepository } from './base';
 import { Conversation } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
+import { getContextOrNull, runWithContext } from '@/database/tenant/context';
+import { logger } from '@/utils/logger';
 
 export interface CreateConversationInput {
   conversationId?: string; // Optional - for custom IDs (e.g., showInChannel child conversations)
@@ -43,7 +45,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     await this.validateString(data.createdBy, 'createdBy');
     await this.validateString(data.initialMessageId, 'initialMessageId');
 
-    return await this.db.conversation.create({
+    const doCreate = (): Promise<Conversation> => this.db.conversation.create({
       data: {
         ...(data.conversationId && { conversationId: data.conversationId }),
         channelId: data.channelId,
@@ -58,6 +60,24 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         ...(data.createdAt && { createdAt: data.createdAt }),
       }
     });
+
+    const ctx = getContextOrNull();
+    if (ctx && !ctx.system && ctx.workspaceId) {
+      return doCreate();
+    }
+    const channel = await this.db.channel.findUnique({
+      where: { id: data.channelId },
+      select: { workspaceId: true },
+    });
+    if (!channel?.workspaceId) {
+      logger.error('[ConversationRepo] cannot resolve workspaceId — channel missing or untenanted', {
+        channelId: data.channelId,
+        channelFound: !!channel,
+        createdBy: data.createdBy,
+      });
+      throw new Error(`ConversationRepository.create: channel ${data.channelId} not found or has no workspaceId`);
+    }
+    return runWithContext({ userId: 'conversation-repo', workspaceId: channel.workspaceId }, doCreate);
   }
 
   async findById(id: string): Promise<Conversation | null> {

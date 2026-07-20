@@ -26,6 +26,7 @@ export const DOCLING_PART_STATUS = {
 
 export interface DoclingFile {
   fileId: string
+  workspaceId: string | null
   collectionId: string
   sourcePath: string
   sourceStorageKey: string | null

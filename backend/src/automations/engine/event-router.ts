@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 import { currentUpstreamChain } from './automation-context-storage';
 import {
   AUTOMATION_WORKFLOW_TYPE,
@@ -48,23 +49,28 @@ class EventRouter {
           __meta: { error: null, chain },
         };
 
-        const execution = await db.$transaction(async tx => {
-          const created = await tx.workflowExecution.create({
-            data: {
-              workflowId: workflow.id,
-              workflowType: AUTOMATION_WORKFLOW_TYPE,
-              status: AutomationRunStatus.PENDING,
-              tag: 'root',
-            },
-          });
-          await tx.workflowExecutionState.create({
-            data: {
-              workflowExecutionId: created.id,
-              context: JSON.stringify(initialContext),
-            },
-          });
-          return created;
-        });
+        const execution = await runWithContext(
+          { userId: 'automation', workspaceId },
+          () =>
+            db.$transaction(async tx => {
+              const created = await tx.workflowExecution.create({
+                data: {
+                  workflowId: workflow.id,
+                  workflowType: AUTOMATION_WORKFLOW_TYPE,
+                  status: AutomationRunStatus.PENDING,
+                  tag: 'root',
+                  workspaceId,
+                },
+              });
+              await tx.workflowExecutionState.create({
+                data: {
+                  workflowExecutionId: created.id,
+                  context: JSON.stringify(initialContext),
+                },
+              });
+              return created;
+            }),
+        );
 
         await automationQueue.enqueueRun({ executionId: execution.id });
         enqueued += 1;

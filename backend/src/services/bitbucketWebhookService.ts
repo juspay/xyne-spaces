@@ -12,6 +12,7 @@ import { config } from '@/config/env';
 import { PRStatusEvent } from '@prisma/client';
 import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
+import { runWithContext } from '@/database/tenant/context';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -57,51 +58,56 @@ export class BitbucketWebhookService {
     payload: BitbucketWebhookEnvelope,
     workspaceId: string,
   ): Promise<{ success: boolean; message: string }> {
-    try {
-      logger.info(`[Bitbucket-Webhook] Received event: ${eventKey} for workspace: ${workspaceId}`);
+    // Unauthenticated webhook (no req.user): open an explicit tenant scope from the
+    // internal workspaceId in the request URL so the workspaceId stamper fills the
+    // ticket_assignments / user_workload_mappings writes this event triggers downstream.
+    return runWithContext({ userId: 'bitbucket-webhook', workspaceId }, async () => {
+      try {
+        logger.info(`[Bitbucket-Webhook] Received event: ${eventKey} for workspace: ${workspaceId}`);
 
-      // Check if this is a PR event
-      if (!this.isPullRequestEvent(eventKey)) {
-        return { success: true, message: `Event ${eventKey} acknowledged but not processed` };
-      }
-
-      // Handle comment events separately
-      if (this.isCommentEvent(eventKey)) {
-        return await this.handleCommentEvent(eventKey as BitbucketPREventType, payload, workspaceId);
-      }
-
-      // Validate PR data exists (Bitbucket Server uses 'pullRequest' with capital R)
-      if (!payload.pullRequest) {
-        logger.warn(
-          `[Bitbucket-Webhook] PR event ${eventKey} received but pullRequest data missing`
-        );
-        return { success: true, message: 'No pullRequest data in payload' };
-      }
-
-      // Extract PR context
-      const context = this.extractPRContext(payload, workspaceId);
-      let validationResult: { isValid: boolean; ticketId?: string };
-
-        // PR doesn't exist or wasn't created by workflow - run full validation
-        validationResult = await this.validatePRTitle(context);
-
-        if (!validationResult.isValid) {
-          // Validation failed, already posted failed build status, skip further processing
-          logger.warn(
-            `[Bitbucket-Webhook] PR validation failed for PR ${context.prId}, skipping event processing`
-          );
-          return { success: true, message: 'PR validation failed, event skipped' };
+        // Check if this is a PR event
+        if (!this.isPullRequestEvent(eventKey)) {
+          return { success: true, message: `Event ${eventKey} acknowledged but not processed` };
         }
 
-      // Route to appropriate handler based on event type, passing validation result
-      await this.routePREvent(eventKey as BitbucketPREventType, context, validationResult);
+        // Handle comment events separately
+        if (this.isCommentEvent(eventKey)) {
+          return await this.handleCommentEvent(eventKey as BitbucketPREventType, payload, workspaceId);
+        }
 
-      return { success: true, message: `Event ${eventKey} processed successfully` };
-    } catch (error) {
-      logger.error(`[Bitbucket-Webhook] Error processing event ${eventKey}:`, error);
-      // Return success to prevent Bitbucket retries
-      return { success: true, message: 'Error acknowledged' };
-    }
+        // Validate PR data exists (Bitbucket Server uses 'pullRequest' with capital R)
+        if (!payload.pullRequest) {
+          logger.warn(
+            `[Bitbucket-Webhook] PR event ${eventKey} received but pullRequest data missing`
+          );
+          return { success: true, message: 'No pullRequest data in payload' };
+        }
+
+        // Extract PR context
+        const context = this.extractPRContext(payload, workspaceId);
+        let validationResult: { isValid: boolean; ticketId?: string };
+
+          // PR doesn't exist or wasn't created by workflow - run full validation
+          validationResult = await this.validatePRTitle(context);
+
+          if (!validationResult.isValid) {
+            // Validation failed, already posted failed build status, skip further processing
+            logger.warn(
+              `[Bitbucket-Webhook] PR validation failed for PR ${context.prId}, skipping event processing`
+            );
+            return { success: true, message: 'PR validation failed, event skipped' };
+          }
+
+        // Route to appropriate handler based on event type, passing validation result
+        await this.routePREvent(eventKey as BitbucketPREventType, context, validationResult);
+
+        return { success: true, message: `Event ${eventKey} processed successfully` };
+      } catch (error) {
+        logger.error(`[Bitbucket-Webhook] Error processing event ${eventKey}:`, error);
+        // Return success to prevent Bitbucket retries
+        return { success: true, message: 'Error acknowledged' };
+      }
+    });
   }
 
   /**

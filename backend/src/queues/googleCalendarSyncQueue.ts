@@ -15,6 +15,7 @@ import { logger } from '@/utils/logger';
 import { AuthProvider } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { getCalendarCredentialsBySourceId } from '@/services/calendarTokenRefresh';
+import { runWithContext } from '@/database/tenant/context';
 import {
   fetchGoogleEventsInRange,
   fetchGoogleIncrementalChanges,
@@ -84,11 +85,13 @@ async function performManualSync(sourceId: string): Promise<void> {
       MAX_CALENDAR_EVENTS_PER_SYNC,
     );
 
-    await storeGCalEventsAsCallsForUser(events, userId, user.email, {
-      isFullSync: true,
-      timeRange: { startsAfter: now, startsBefore: future },
-      skipCancelRemoved: truncated,
-    });
+    await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+      storeGCalEventsAsCallsForUser(events, userId, user.email, {
+        isFullSync: true,
+        timeRange: { startsAfter: now, startsBefore: future },
+        skipCancelRemoved: truncated,
+      }),
+    );
 
     await GoogleCalendarWatchService.updateSyncStateBySourceId(sourceId, undefined, true);
 
@@ -134,10 +137,12 @@ async function performIncrementalSync(
       MAX_CALENDAR_EVENTS_PER_SYNC,
     );
 
-    await storeGCalEventsAsCallsForUser(events, userId, user.email, {
-      isFullSync: true,
-      skipCancelRemoved: truncated,
-    });
+    await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+      storeGCalEventsAsCallsForUser(events, userId, user.email, {
+        isFullSync: true,
+        skipCancelRemoved: truncated,
+      }),
+    );
     await GoogleCalendarWatchService.updateSyncStateBySourceId(sourceId, nextSyncToken, true);
 
     logger.info(`[GOOGLE_CALENDAR] Baseline established for user ${user.email}: ${events.length} event(s)`);
@@ -164,10 +169,12 @@ async function performIncrementalSync(
         MAX_CALENDAR_EVENTS_PER_SYNC,
       );
 
-      await storeGCalEventsAsCallsForUser(events, userId, user.email, {
-        isFullSync: true,
-        skipCancelRemoved: truncated,
-      });
+      await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+        storeGCalEventsAsCallsForUser(events, userId, user.email, {
+          isFullSync: true,
+          skipCancelRemoved: truncated,
+        }),
+      );
       await GoogleCalendarWatchService.updateSyncStateBySourceId(sourceId, nextSyncToken, true);
 
       logger.info(`[GOOGLE_CALENDAR] Baseline re-established for user ${user.email}: ${events.length} event(s)`);
@@ -177,7 +184,9 @@ async function performIncrementalSync(
       return null;
     }
 
-    await storeGCalEventsAsCallsForUser(result.events, userId, user.email, { isFullSync: false });
+    await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+      storeGCalEventsAsCallsForUser(result.events, userId, user.email, { isFullSync: false }),
+    );
 
     if (result.nextPageToken) {
       logger.warn(`[GOOGLE_CALENDAR] Incremental sync hit event cap, scheduling continuation`, {

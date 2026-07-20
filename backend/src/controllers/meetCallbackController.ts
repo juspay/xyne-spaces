@@ -15,6 +15,7 @@ import { MessageType } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { meetLinkService } from '@/services/meetLinkService';
 import { db } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 
 /**
  * Zod schema for validating SAM Meet callback payloads
@@ -158,7 +159,11 @@ export class MeetCallbackController {
       const senderId = botUser.id;
 
       const now = new Date();
-      const message = await db.$transaction(async (tx) => {
+      // SAM webhook → no HTTP tenant context. Open one from the resolved workspace so the system
+      // message insert gets workspaceId stamped instead of leaking NULL.
+      const message = await runWithContext(
+        { userId: 'meet-callback', workspaceId: targetWorkspaceId },
+        () => db.$transaction(async (tx) => {
         const createdMessage = await tx.message.create({
           data: {
             conversationId: targetConversationId,
@@ -188,7 +193,7 @@ export class MeetCallbackController {
         });
 
         return createdMessage;
-      });
+      }));
 
       logger.info('[MeetCallbackController] Successfully posted SAM response to thread', {
         xyneTicketId,

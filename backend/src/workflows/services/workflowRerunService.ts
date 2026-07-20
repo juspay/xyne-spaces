@@ -70,6 +70,7 @@ export class WorkflowRerunService {
     const rerunExecution = await this.db.workflowExecution.create({
       data: {
         workflow: { connect: { id: workflow.id } },
+        workspaceId: workflow.workspaceId,
         workflowType: rootExecution.workflowType,
         status: WorkflowExecutionStatus.PENDING,
         tag: 'rerun',

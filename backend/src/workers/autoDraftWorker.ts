@@ -2,6 +2,8 @@ import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { autoDraftQueue, type AutoDraftJobData } from '@/queues/autoDraftQueue';
 import { emailService } from '@/services/emailService';
+import { db } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 
 class AutoDraftWorker {
   private isInitialized = false;
@@ -29,10 +31,24 @@ class AutoDraftWorker {
   }
 
   private async processJob(job: Bull.Job<AutoDraftJobData>): Promise<void> {
-    const { ticketId } = job.data;
+    const { ticketId, channelId } = job.data;
     logger.info(`[AUTO-DRAFT-WORKER] Processing job ${job.id} — ticket ${ticketId}`);
 
-    const dispatched = await emailService.retriggerAutoDraftForTicket(ticketId);
+    // Background job → no HTTP tenant scope. Open one from the channel's
+    // workspace so every Prisma write in the draft flow gets workspaceId stamped.
+    const channel = await db.channel.findUnique({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
+    if (!channel?.workspaceId) {
+      logger.error('[AUTO-DRAFT-WORKER] Channel not found or has no workspaceId', { channelId, ticketId });
+      throw new Error(`AutoDraftWorker: channel ${channelId} not found or has no workspaceId`);
+    }
+
+    const dispatched = await runWithContext(
+      { userId: 'auto-draft-worker', workspaceId: channel.workspaceId },
+      () => emailService.retriggerAutoDraftForTicket(ticketId),
+    );
 
     if (dispatched) {
       logger.info(`[AUTO-DRAFT-WORKER] Draft triggered for ticket ${ticketId}`);
