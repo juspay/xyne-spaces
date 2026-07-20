@@ -234,7 +234,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
     const startIndex = allRefs.findIndex(ref => ref.attachmentId === attachment.id);
 
     attachmentViewerActor.send({
-      type: 'OPEN',
+      type: attachmentViewerActor.getSnapshot().value === 'closed' ? 'OPEN' : 'UPDATE',
       attachments: allRefs,
       startIndex: startIndex >= 0 ? startIndex : 0,
     });
